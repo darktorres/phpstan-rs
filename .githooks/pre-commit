@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Pre-commit check: formatting + lints must be clean before a commit lands.
+# Installed via `git config core.hooksPath .githooks` (see README/setup note).
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: cargo fmt --check"
+if ! cargo fmt --check; then
+    echo
+    echo "error: formatting issues found. Run 'cargo fmt' and re-commit." >&2
+    exit 1
+fi
+
+echo "pre-commit: cargo clippy"
+# dead_code is allowed for now: AST/token variants are constructed by the
+# parser well before anything downstream (type checker, etc.) consumes them.
+# Revisit once later stages start reading these fields.
+if ! cargo clippy --all-targets --quiet -- -D warnings -A dead_code; then
+    echo
+    echo "error: clippy found issues. Fix them (or 'cargo clippy --fix') and re-commit." >&2
+    exit 1
+fi
+
+echo "pre-commit: ok"
