@@ -194,6 +194,21 @@ impl Parser {
                 self.expect_semicolon();
                 Stmt::Use(name)
             }
+            Token::Keyword(Keyword::Const) => {
+                self.advance();
+                let mut consts = Vec::new();
+                loop {
+                    let name = self.expect_ident();
+                    self.expect(&Token::Equals);
+                    let value = self.parse_expression();
+                    consts.push(ClassConst { name, value });
+                    if !self.eat(&Token::Comma) {
+                        break;
+                    }
+                }
+                self.expect_semicolon();
+                Stmt::GlobalConst(consts)
+            }
             Token::Keyword(Keyword::Try) => self.parse_try(),
             Token::Keyword(Keyword::Throw) => {
                 self.advance();
@@ -556,6 +571,8 @@ impl Parser {
                 | Token::Keyword(Keyword::Array)
                 | Token::Keyword(Keyword::Static)
                 | Token::Keyword(Keyword::Null)
+                | Token::Keyword(Keyword::True)
+                | Token::Keyword(Keyword::False)
         )
     }
 
@@ -582,6 +599,16 @@ impl Parser {
                 }
                 Token::Keyword(Keyword::Null) => {
                     s.push_str("null");
+                    self.advance();
+                }
+                // PHP 8.2+ stand-alone `true`/`false` types, e.g.
+                // `function f(): string|false {}`.
+                Token::Keyword(Keyword::True) => {
+                    s.push_str("true");
+                    self.advance();
+                }
+                Token::Keyword(Keyword::False) => {
+                    s.push_str("false");
                     self.advance();
                 }
                 _ => break,
@@ -1586,5 +1613,27 @@ mod tests {
             panic!("expected FunctionDecl");
         };
         assert!(f.doc_comment.is_none());
+    }
+
+    #[test]
+    fn top_level_const_declaration_parses() {
+        let program = parse("<?php const FOO = 1, BAR = 2;");
+        let Stmt::GlobalConst(consts) = &program[0] else {
+            panic!("expected GlobalConst");
+        };
+        assert_eq!(consts.len(), 2);
+        assert_eq!(consts[0].name, "FOO");
+        assert_eq!(consts[1].name, "BAR");
+    }
+
+    #[test]
+    fn true_and_false_are_valid_return_types() {
+        // PHP 8.2+ stand-alone true/false types, as used throughout
+        // php-src's own stub files (e.g. `string|false`).
+        let program = parse("<?php function f(): string|false { return false; }");
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        assert_eq!(f.return_type.as_deref(), Some("string|false"));
     }
 }

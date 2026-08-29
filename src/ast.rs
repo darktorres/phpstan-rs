@@ -38,6 +38,9 @@ pub enum Stmt {
     ClassDecl(ClassDecl),
     Namespace(String),
     Use(String),
+    // Top-level `const NAME = value, ...;`, distinct from a class's own
+    // consts (ClassConst is reused for the shape, since it's identical).
+    GlobalConst(Vec<ClassConst>),
     Switch {
         subject: Expr,
         cases: Vec<SwitchCase>,

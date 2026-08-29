@@ -3,6 +3,7 @@ mod checker;
 mod docblock;
 mod lexer;
 mod parser;
+mod php_stubs;
 mod registry;
 mod stubs;
 mod token;
@@ -78,6 +79,9 @@ fn main() {
     }
 
     let mut registry = Registry::build(&program);
+    // Generated (real php-src source) takes priority over the hand-curated
+    // approximations - merge_stubs only fills in names not already present.
+    registry.merge_stubs(php_stubs::generated_stubs());
     registry.merge_stubs(stubs::builtin_stubs());
 
     println!("\n-- resolved signatures (from source) --");

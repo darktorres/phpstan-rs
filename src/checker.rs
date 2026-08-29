@@ -1085,6 +1085,7 @@ mod tests {
         let tokens = Lexer::new(src).tokenize();
         let program = Parser::new(tokens).parse_program();
         let mut registry = Registry::build(&program);
+        registry.merge_stubs(crate::php_stubs::generated_stubs());
         registry.merge_stubs(crate::stubs::builtin_stubs());
         let mut checker = Checker::new(&registry);
         checker.check_program(&program);
@@ -1813,6 +1814,38 @@ mod tests {
                     $x = 10;
                 }
                 return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn generated_stub_return_type_catches_a_real_bug() {
+        // json_encode() can return false on failure - a well-known real PHP
+        // gotcha - so passing it straight to a plain-string param is a
+        // genuine bug this real (not hand-approximated) signature catches.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): string { return $s; }
+            needsString(json_encode(["a" => 1]));
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsString"));
+    }
+
+    #[test]
+    fn narrowing_a_generated_stub_union_return_type_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): string { return $s; }
+            function f() {
+                $encoded = json_encode(["a" => 1]);
+                if ($encoded !== false) {
+                    return needsString($encoded);
+                }
+                return "";
             }
         "#,
         );

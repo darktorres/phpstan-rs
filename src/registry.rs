@@ -262,9 +262,9 @@ impl Registry {
 
     /// User-defined symbols always win: a stub only fills in a name that
     /// isn't already declared in the indexed source.
-    pub fn merge_stubs(&mut self, stubs: Vec<(&str, FunctionSig)>) {
+    pub fn merge_stubs<S: Into<String>>(&mut self, stubs: Vec<(S, FunctionSig)>) {
         for (name, sig) in stubs {
-            self.functions.entry(name.to_string()).or_insert(sig);
+            self.functions.entry(name.into()).or_insert(sig);
         }
     }
 
