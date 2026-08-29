@@ -311,6 +311,32 @@ impl Parser {
                     self.advance();
                 }
                 let name = self.parse_qualified_name();
+                // Group use: `use Foo\{const BAR, function baz, Qux as
+                // Quux};`, with an optional trailing comma before the
+                // closing brace. Nothing downstream reads Stmt::Use at
+                // all (confirmed: not referenced in registry.rs or
+                // checker.rs), so each member is just consumed rather
+                // than threaded into its own Stmt::Use.
+                if self.eat(&Token::LBrace) {
+                    while !self.check(&Token::RBrace) {
+                        if matches!(
+                            self.peek(),
+                            Token::Keyword(Keyword::Function) | Token::Keyword(Keyword::Const)
+                        ) {
+                            self.advance();
+                        }
+                        self.parse_qualified_name();
+                        if self.eat(&Token::Keyword(Keyword::As)) {
+                            self.expect_ident();
+                        }
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&Token::RBrace);
+                    self.expect_semicolon();
+                    return Stmt::Use(name, None);
+                }
                 let alias = if self.eat(&Token::Keyword(Keyword::As)) {
                     Some(self.expect_ident())
                 } else {
@@ -342,6 +368,32 @@ impl Parser {
                 Stmt::Throw(e)
             }
             Token::Keyword(Keyword::Switch) => self.parse_switch(),
+            // `declare(strict_types=1);` / `declare(ticks=1) { ... }` -
+            // `declare` isn't a reserved word (a real PHP file can have a
+            // function or constant named `declare`), so it's only treated
+            // specially when immediately followed by `(`. The directives
+            // themselves (`name = value` pairs) aren't modeled - just
+            // consumed as generic expressions - and the optional
+            // block-scoped form's body is a plain nested block, unlike
+            // `namespace { ... }`, since declare directives don't carry
+            // any declarations that a registry needs to see spliced out.
+            Token::Identifier(s) if s == "declare" && matches!(self.peek_at(1), Token::LParen) => {
+                self.advance();
+                self.expect(&Token::LParen);
+                while !self.check(&Token::RParen) {
+                    self.parse_expression();
+                    if !self.eat(&Token::Comma) {
+                        break;
+                    }
+                }
+                self.expect(&Token::RParen);
+                if self.check(&Token::LBrace) {
+                    self.parse_block()
+                } else {
+                    self.expect_semicolon();
+                    Stmt::Block(Vec::new())
+                }
+            }
             Token::Keyword(Keyword::Goto) => {
                 self.advance();
                 let name = self.expect_ident();
@@ -3020,6 +3072,33 @@ mod tests {
         );
         assert!(matches!(&program[0], Stmt::Goto(n) if n == "label"));
         assert!(matches!(&program[2], Stmt::Label(n) if n == "label"));
+    }
+
+    #[test]
+    fn declare_simple_and_block_forms_parse() {
+        let program = parse(
+            r#"<?php
+            declare(strict_types=1);
+            declare(ticks=1) {
+                echo "in block";
+            }
+        "#,
+        );
+        assert!(matches!(&program[0], Stmt::Block(stmts) if stmts.is_empty()));
+        assert!(matches!(&program[1], Stmt::Block(stmts) if !stmts.is_empty()));
+    }
+
+    #[test]
+    fn group_use_with_trailing_comma_parses() {
+        parse(
+            r#"<?php
+            use Foo\{
+                const FOO_CONST,
+                function foo_func,
+                FooClass as BarClass,
+            };
+        "#,
+        );
     }
 
     #[test]
