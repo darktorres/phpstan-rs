@@ -1,4 +1,5 @@
 mod ast;
+mod checker;
 mod lexer;
 mod parser;
 mod registry;
@@ -9,6 +10,7 @@ mod types;
 use std::env;
 use std::fs;
 
+use checker::Checker;
 use lexer::Lexer;
 use parser::Parser;
 use registry::{FunctionSig, Registry};
@@ -118,15 +120,28 @@ fn main() {
         println!("\n-- built-in stub example --");
         println!("{}", format_signature("strlen", sig));
     }
+
+    let mut checker = Checker::new(&registry);
+    checker.check_program(&program);
+    let diagnostics = checker.into_diagnostics();
+
+    println!("\n-- diagnostics --");
+    if diagnostics.is_empty() {
+        println!("(none)");
+    } else {
+        for d in &diagnostics {
+            println!("{}: {}", d.location, d.message);
+        }
+    }
 }
 
 fn format_signature(name: &str, sig: &FunctionSig) -> String {
     let params: Vec<String> = sig
         .params
         .iter()
-        .map(|(name, ty, variadic)| {
-            let dots = if *variadic { "..." } else { "" };
-            format!("{ty} {dots}${name}")
+        .map(|p| {
+            let dots = if p.variadic { "..." } else { "" };
+            format!("{} {dots}${}", p.ty, p.name)
         })
         .collect();
     format!("{name}({}): {}", params.join(", "), sig.return_type)

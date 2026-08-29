@@ -5,7 +5,7 @@
 // variadic with much richer conditional return types - good enough to prove
 // the merge-into-the-registry mechanism, not meant to be exhaustive.
 
-use crate::registry::FunctionSig;
+use crate::registry::{FunctionSig, ParamSig};
 use crate::types::Type;
 
 pub fn builtin_stubs() -> Vec<(&'static str, FunctionSig)> {
@@ -123,7 +123,14 @@ fn sig(params: &[(&str, Type, bool)], return_type: Type) -> FunctionSig {
     FunctionSig {
         params: params
             .iter()
-            .map(|(name, ty, variadic)| (name.to_string(), ty.clone(), *variadic))
+            .map(|(name, ty, variadic)| ParamSig {
+                name: name.to_string(),
+                ty: ty.clone(),
+                variadic: *variadic,
+                // None of these curated stubs model optional args; every
+                // listed param is treated as required.
+                has_default: false,
+            })
             .collect(),
         return_type,
     }

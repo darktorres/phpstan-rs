@@ -4,9 +4,16 @@ use crate::ast::{ClassDecl, FunctionDecl, Stmt};
 use crate::types::{self, Type};
 
 #[derive(Debug, Clone)]
+pub struct ParamSig {
+    pub name: String,
+    pub ty: Type,
+    pub variadic: bool,
+    pub has_default: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct FunctionSig {
-    // (name, type, variadic)
-    pub params: Vec<(String, Type, bool)>,
+    pub params: Vec<ParamSig>,
     pub return_type: Type,
 }
 
@@ -21,7 +28,12 @@ impl FunctionSig {
                     .as_deref()
                     .map(types::parse_type_string)
                     .unwrap_or(Type::Mixed);
-                (p.name.clone(), ty, p.variadic)
+                ParamSig {
+                    name: p.name.clone(),
+                    ty,
+                    variadic: p.variadic,
+                    has_default: p.default.is_some(),
+                }
             })
             .collect();
         let return_type = f
