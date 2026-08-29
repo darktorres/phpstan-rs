@@ -213,11 +213,38 @@ impl Parser {
         }
     }
 
+    /// A loop/if body, accepting either `{ ... }` / a bare statement, or
+    /// PHP's alternative colon syntax (`: ... endwhile;` etc, common in
+    /// templates that interleave HTML and PHP).
+    fn parse_body(&mut self, alt_end: Keyword) -> Box<Stmt> {
+        if self.check(&Token::Colon) {
+            Box::new(Stmt::Block(self.parse_alt_block(alt_end)))
+        } else {
+            Box::new(self.parse_braced_or_single())
+        }
+    }
+
+    fn parse_alt_block(&mut self, end_kw: Keyword) -> Vec<Stmt> {
+        self.expect(&Token::Colon);
+        let mut stmts = Vec::new();
+        while !self.check(&Token::Keyword(end_kw.clone())) && !self.at_eof() {
+            stmts.push(self.parse_statement());
+        }
+        self.expect(&Token::Keyword(end_kw));
+        self.expect_semicolon();
+        stmts
+    }
+
     fn parse_if(&mut self) -> Stmt {
         self.advance(); // if
         self.expect(&Token::LParen);
         let cond = self.parse_expression();
         self.expect(&Token::RParen);
+
+        if self.check(&Token::Colon) {
+            return self.parse_if_alt(cond);
+        }
+
         let then_branch = Box::new(self.parse_braced_or_single());
 
         let else_branch = if self.eat(&Token::Keyword(Keyword::ElseIf)) {
@@ -237,12 +264,67 @@ impl Parser {
         }
     }
 
+    // `if (c1): ... elseif (c2): ... else: ... endif;` - only one `endif;`
+    // terminates the whole chain, so branches are collected flat and then
+    // folded (innermost-out) into the same nested Stmt::If shape the brace
+    // syntax produces.
+    fn parse_if_alt(&mut self, first_cond: Expr) -> Stmt {
+        let mut branches: Vec<(Expr, Vec<Stmt>)> = Vec::new();
+        let mut cond = first_cond;
+        self.expect(&Token::Colon);
+        loop {
+            let mut stmts = Vec::new();
+            while !matches!(
+                self.peek(),
+                Token::Keyword(Keyword::ElseIf)
+                    | Token::Keyword(Keyword::Else)
+                    | Token::Keyword(Keyword::EndIf)
+            ) && !self.at_eof()
+            {
+                stmts.push(self.parse_statement());
+            }
+            branches.push((cond.clone(), stmts));
+            if self.eat(&Token::Keyword(Keyword::ElseIf)) {
+                self.expect(&Token::LParen);
+                cond = self.parse_expression();
+                self.expect(&Token::RParen);
+                self.expect(&Token::Colon);
+                continue;
+            }
+            break;
+        }
+
+        let else_stmts = if self.eat(&Token::Keyword(Keyword::Else)) {
+            self.expect(&Token::Colon);
+            let mut stmts = Vec::new();
+            while !self.check(&Token::Keyword(Keyword::EndIf)) && !self.at_eof() {
+                stmts.push(self.parse_statement());
+            }
+            Some(stmts)
+        } else {
+            None
+        };
+
+        self.expect(&Token::Keyword(Keyword::EndIf));
+        self.expect_semicolon();
+
+        let mut result = else_stmts.map(Stmt::Block);
+        for (c, stmts) in branches.into_iter().rev() {
+            result = Some(Stmt::If {
+                cond: c,
+                then_branch: Box::new(Stmt::Block(stmts)),
+                else_branch: result.map(Box::new),
+            });
+        }
+        result.unwrap()
+    }
+
     fn parse_while(&mut self) -> Stmt {
         self.advance();
         self.expect(&Token::LParen);
         let cond = self.parse_expression();
         self.expect(&Token::RParen);
-        let body = Box::new(self.parse_braced_or_single());
+        let body = self.parse_body(Keyword::EndWhile);
         Stmt::While { cond, body }
     }
 
@@ -266,7 +348,7 @@ impl Parser {
         self.expect(&Token::Semicolon);
         let step = self.parse_expr_list_until(&Token::RParen);
         self.expect(&Token::RParen);
-        let body = Box::new(self.parse_braced_or_single());
+        let body = self.parse_body(Keyword::EndFor);
         Stmt::For {
             init,
             cond,
@@ -304,7 +386,7 @@ impl Parser {
         };
 
         self.expect(&Token::RParen);
-        let body = Box::new(self.parse_braced_or_single());
+        let body = self.parse_body(Keyword::EndForeach);
         Stmt::Foreach {
             subject,
             key,
@@ -361,10 +443,17 @@ impl Parser {
         self.expect(&Token::LParen);
         let subject = self.parse_expression();
         self.expect(&Token::RParen);
-        self.expect(&Token::LBrace);
+
+        let alt = self.check(&Token::Colon);
+        if alt {
+            self.advance();
+        } else {
+            self.expect(&Token::LBrace);
+        }
 
         let mut cases: Vec<SwitchCase> = Vec::new();
-        while !self.check(&Token::RBrace) && !self.at_eof() {
+        let closer = Token::Keyword(Keyword::EndSwitch);
+        while !self.at_eof() && !self.check(if alt { &closer } else { &Token::RBrace }) {
             if self.eat(&Token::Keyword(Keyword::Case)) {
                 let test = self.parse_expression();
                 if !self.eat(&Token::Colon) {
@@ -391,7 +480,13 @@ impl Parser {
                 }
             }
         }
-        self.expect(&Token::RBrace);
+
+        if alt {
+            self.expect(&closer);
+            self.expect_semicolon();
+        } else {
+            self.expect(&Token::RBrace);
+        }
 
         Stmt::Switch { subject, cases }
     }
@@ -1108,7 +1203,7 @@ impl Parser {
             Token::Keyword(Keyword::Clone) => {
                 self.advance();
                 let e = self.parse_unary();
-                Expr::Unary(UnaryOp::Not, Box::new(e)) // placeholder: clone-as-unary, refine later
+                Expr::Clone(Box::new(e))
             }
             Token::Keyword(Keyword::Print) => {
                 self.advance();

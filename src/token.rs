@@ -47,6 +47,11 @@ pub enum Keyword {
     List,
     Fn,
     Match,
+    EndIf,
+    EndWhile,
+    EndFor,
+    EndForeach,
+    EndSwitch,
 }
 
 impl Keyword {
@@ -100,6 +105,11 @@ impl Keyword {
             "list" => List,
             "fn" => Fn,
             "match" => Match,
+            "endif" => EndIf,
+            "endwhile" => EndWhile,
+            "endfor" => EndFor,
+            "endforeach" => EndForeach,
+            "endswitch" => EndSwitch,
             _ => return None,
         })
     }

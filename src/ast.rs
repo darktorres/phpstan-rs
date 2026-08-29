@@ -197,6 +197,7 @@ pub enum Expr {
     Name(String),
     Instanceof(Box<Expr>, String),
     Grouping(Box<Expr>),
+    Clone(Box<Expr>),
     Interpolated(Vec<Expr>),
     Closure {
         params: Vec<Param>,
