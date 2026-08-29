@@ -694,6 +694,7 @@ impl Parser {
             Token::Question
                 | Token::Identifier(_)
                 | Token::Backslash
+                | Token::LParen
                 | Token::Keyword(Keyword::Array)
                 | Token::Keyword(Keyword::Static)
                 | Token::Keyword(Keyword::Null)
@@ -702,8 +703,22 @@ impl Parser {
         )
     }
 
-    // Consumes one qualified type name, e.g. `int`, `array`, `\App\Foo`.
+    // Consumes one qualified type name, e.g. `int`, `array`, `\App\Foo`, or
+    // a PHP 8.2 DNF (disjunctive normal form) parenthesized intersection
+    // group, e.g. `(Countable&Iterator)` as one term of a union type like
+    // `(Countable&Iterator)|null`. Real PHP only allows one level of
+    // parens here (no `((A&B)|C)&D`), so this doesn't need to recurse into
+    // a further union inside the parens - just a run of `&`-joined atoms.
     fn parse_type_atom(&mut self) -> String {
+        if self.eat(&Token::LParen) {
+            let mut inner = self.parse_type_atom();
+            while self.eat(&Token::Amp) {
+                inner.push('&');
+                inner.push_str(&self.parse_type_atom());
+            }
+            self.expect(&Token::RParen);
+            return format!("({inner})");
+        }
         // These are single keyword tokens - namespaced forms like
         // `array\Foo` don't exist, so each just consumes itself and stops,
         // rather than looping on to swallow whatever bare identifier
@@ -1705,6 +1720,11 @@ impl Parser {
         }
         let name = match self.peek_at(1) {
             Token::Identifier(s) => s.to_ascii_lowercase(),
+            // `array` is the one cast name that's also a language keyword
+            // (`array(...)`, type hints) rather than a plain identifier -
+            // every other cast name (int, string, object, unset, ...)
+            // isn't reserved at all.
+            Token::Keyword(Keyword::Array) => "array".to_string(),
             _ => return None,
         };
         let normalized = match name.as_str() {
@@ -2792,5 +2812,29 @@ mod tests {
         };
         assert_eq!(class, "Foo");
         assert_eq!(member, "{dynamic}");
+    }
+
+    #[test]
+    fn dnf_type_hint_parses() {
+        let program = parse(
+            r#"<?php
+            class Test {
+                public (A&B)|X $prop;
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.properties[0].type_hint.as_deref(), Some("(A&B)|X"));
+    }
+
+    #[test]
+    fn array_cast_parses() {
+        let program = parse(r#"<?php $tmp = (array)$var;"#);
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::Cast(ty, _) if ty == "array"));
     }
 }

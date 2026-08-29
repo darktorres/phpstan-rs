@@ -204,6 +204,16 @@ fn parse_type_atom(s: &str) -> Type {
     if let Some(shape) = try_parse_array_shape(s) {
         return shape;
     }
+    // PHP 8.2 DNF (disjunctive normal form) group: `(Countable&Iterator)`
+    // as one term of a union like `(Countable&Iterator)|null`. Only one
+    // level of parens is legal in real PHP here, so this doesn't need to
+    // recurse through parse_type_string - split_top_level's own `(`/`)`
+    // depth tracking already kept this whole parenthesized chunk together
+    // as a single union member; just strip the parens and parse what's
+    // inside as the intersection it has to be.
+    if let Some(inner) = s.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+        return parse_type_string(inner);
+    }
 
     // PHPDoc's `Type[]` array shorthand (`int[]`, even `string[][]`) has no
     // native-hint equivalent, but reusing this parser for doc-comment types
@@ -531,5 +541,16 @@ mod tests {
         assert_eq!(parse_type_string("?string").to_string(), "string|null");
         assert_eq!(parse_type_string("int|string").to_string(), "int|string");
         assert_eq!(parse_type_string("array").to_string(), "array");
+    }
+
+    #[test]
+    fn dnf_type_group_resolves_to_a_real_intersection_inside_the_union() {
+        let ty = parse_type_string("(Countable&Iterator)|null");
+        let Type::Union(members) = ty else {
+            panic!("expected a top-level union");
+        };
+        assert_eq!(members.len(), 2);
+        assert!(matches!(&members[0], Type::Intersection(parts) if parts.len() == 2));
+        assert_eq!(members[1], Type::Null);
     }
 }
