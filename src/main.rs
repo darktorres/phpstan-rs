@@ -11,6 +11,7 @@ mod types;
 
 use std::env;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use checker::Checker;
 use lexer::Lexer;
@@ -57,8 +58,92 @@ foreach ($names as $i => $name) {
 echo sum([1, 2, 3]) ?? 0;
 "#;
 
+/// `phpstan-rs --check <file-or-dir>...` - lex+parse every .php file under
+/// the given paths in a single process (no per-file fork/exec), split
+/// across worker threads, report a pass/fail summary. Panics are the
+/// parser's only error-reporting mechanism today, so each file's lex+parse
+/// runs under catch_unwind with the default panic hook silenced for the
+/// batch, to avoid both a crashed whole run and thousands of lines of
+/// unwind noise (the hook is process-global, so this also covers panics
+/// from the worker threads, not just the main one).
+fn run_check(paths: &[String]) {
+    let mut files = Vec::new();
+    for p in paths {
+        collect_php_files(Path::new(p), &mut files);
+    }
+
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+
+    let num_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let chunk_size = files.len().div_ceil(num_threads).max(1);
+    let failures: Vec<(PathBuf, String)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = files
+            .chunks(chunk_size)
+            .map(|chunk| scope.spawn(|| check_chunk(chunk)))
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
+
+    std::panic::set_hook(default_hook);
+
+    println!("{} files checked, {} failed", files.len(), failures.len());
+    for (path, msg) in &failures {
+        println!("{}: {}", path.display(), msg);
+    }
+}
+
+fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
+    let mut failures = Vec::new();
+    for path in chunk {
+        let source = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                failures.push((path.clone(), format!("read error: {e}")));
+                continue;
+            }
+        };
+        let result = std::panic::catch_unwind(|| {
+            let tokens = Lexer::new(&source).tokenize();
+            Parser::new(tokens).parse_program();
+        });
+        if let Err(payload) = result {
+            let msg = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown panic".to_string());
+            failures.push((path.clone(), msg));
+        }
+    }
+    failures
+}
+
+fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
+    if path.is_dir() {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            collect_php_files(&entry.path(), out);
+        }
+    } else if path.extension().is_some_and(|e| e == "php") {
+        out.push(path.to_path_buf());
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
+
+    if args.get(1).map(String::as_str) == Some("--check") {
+        run_check(&args[2..]);
+        return;
+    }
 
     let source = if let Some(path) = args.get(1) {
         fs::read_to_string(path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"))
