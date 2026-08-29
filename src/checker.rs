@@ -23,6 +23,9 @@ pub struct Diagnostic {
 pub struct Checker<'a> {
     registry: &'a Registry,
     diagnostics: Vec<Diagnostic>,
+    // The class whose method body is currently being checked, if any -
+    // needed to resolve self/parent/static to a concrete class name.
+    current_class: Option<String>,
 }
 
 impl<'a> Checker<'a> {
@@ -30,6 +33,7 @@ impl<'a> Checker<'a> {
         Checker {
             registry,
             diagnostics: Vec::new(),
+            current_class: None,
         }
     }
 
@@ -72,8 +76,35 @@ impl<'a> Checker<'a> {
             None => f.name.clone(),
         };
 
+        let previous_class = self.current_class.take();
+        self.current_class = class_name.map(|s| s.to_string());
+
         for stmt in &f.body {
             self.check_stmt(stmt, &mut locals, declared_return.as_ref(), &label);
+        }
+
+        self.current_class = previous_class;
+    }
+
+    /// Resolves `self`/`static`/`parent` to a concrete `Object` relative to
+    /// `defining_class` - the class whose signature this type came from.
+    /// `self`/`static` both collapse to the same class here since we don't
+    /// track late static binding through actual runtime dispatch; `parent`
+    /// resolves via the registry's extends chain, falling back to leaving
+    /// it unresolved if the class has no declared parent (so it still hits
+    /// the permissive Object fallback in `is_subtype`/`is_assignable`
+    /// rather than being wrongly flagged).
+    fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
+        match ty {
+            Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string()),
+            Type::ParentRef => self
+                .registry
+                .classes
+                .get(defining_class)
+                .and_then(|info| info.extends.first())
+                .map(|p| Type::Object(p.clone()))
+                .unwrap_or_else(|| ty.clone()),
+            _ => ty.clone(),
         }
     }
 
@@ -105,7 +136,11 @@ impl<'a> Checker<'a> {
                 self.check_expr(e, locals, label);
                 if let Some(expected) = declared_return {
                     let actual = self.infer_expr(e, locals);
-                    if actual != Type::Mixed && !self.registry.is_assignable(&actual, expected) {
+                    let expected = match &self.current_class {
+                        Some(c) => self.resolve_pseudo(expected, c),
+                        None => expected.clone(),
+                    };
+                    if actual != Type::Mixed && !self.registry.is_assignable(&actual, &expected) {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!(
@@ -215,7 +250,7 @@ impl<'a> Checker<'a> {
                 if let Expr::Name(name) = callee.as_ref()
                     && let Some(sig) = self.registry.lookup_function(name)
                 {
-                    self.check_args(name, sig, args, locals, label);
+                    self.check_args(name, sig, args, locals, label, None);
                 }
             }
             Expr::MethodCall(recv, method, args) => {
@@ -227,7 +262,7 @@ impl<'a> Checker<'a> {
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                 {
                     let qualified = format!("{class}::{method}");
-                    self.check_args(&qualified, sig, args, locals, label);
+                    self.check_args(&qualified, sig, args, locals, label, Some(&class));
                 }
             }
             Expr::Binary(_, l, r) => {
@@ -287,6 +322,7 @@ impl<'a> Checker<'a> {
         args: &[Expr],
         locals: &HashMap<String, Type>,
         label: &str,
+        defining_class: Option<&str>,
     ) {
         let required = sig
             .params
@@ -315,14 +351,18 @@ impl<'a> Checker<'a> {
             if arg_ty == Type::Mixed {
                 continue;
             }
-            if !self.registry.is_assignable(&arg_ty, &param.ty) {
+            let param_ty = match defining_class {
+                Some(c) => self.resolve_pseudo(&param.ty, c),
+                None => param.ty.clone(),
+            };
+            if !self.registry.is_assignable(&arg_ty, &param_ty) {
                 self.diagnostics.push(Diagnostic {
                     location: label.to_string(),
                     message: format!(
                         "{callee_label}() argument #{} (${}) expects {}, {} given",
                         i + 1,
                         param.name,
-                        param.ty,
+                        param_ty,
                         arg_ty
                     ),
                 });
@@ -362,9 +402,17 @@ impl<'a> Checker<'a> {
             // here rather than showing up as an Object of that name.
             Expr::New(class_expr, _) => match class_expr.as_ref() {
                 Expr::Name(name) => match name.as_str() {
-                    "self" => Type::SelfRef,
-                    "parent" => Type::ParentRef,
-                    "static" => Type::StaticRef,
+                    "self" | "parent" | "static" => {
+                        let raw = match name.as_str() {
+                            "self" => Type::SelfRef,
+                            "parent" => Type::ParentRef,
+                            _ => Type::StaticRef,
+                        };
+                        match &self.current_class {
+                            Some(c) => self.resolve_pseudo(&raw, c),
+                            None => raw,
+                        }
+                    }
                     _ => Type::Object(name.clone()),
                 },
                 _ => Type::Mixed,
@@ -381,7 +429,7 @@ impl<'a> Checker<'a> {
                 Type::Object(class) => self
                     .registry
                     .lookup_method(&class, method)
-                    .map(|s| s.return_type.clone())
+                    .map(|s| self.resolve_pseudo(&s.return_type, &class))
                     .unwrap_or(Type::Mixed),
                 _ => Type::Mixed,
             },
@@ -446,5 +494,112 @@ impl<'a> Checker<'a> {
             BinOp::Div => Type::Mixed,
             BinOp::Coalesce => self.infer_expr(r, locals),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
+    use crate::registry::Registry;
+
+    fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
+        let tokens = Lexer::new(src).tokenize();
+        let program = Parser::new(tokens).parse_program();
+        let mut registry = Registry::build(&program);
+        registry.merge_stubs(crate::stubs::builtin_stubs());
+        let mut checker = Checker::new(&registry);
+        checker.check_program(&program);
+        checker.into_diagnostics()
+    }
+
+    #[test]
+    fn flags_wrong_argument_type() {
+        let d = diagnostics_for(r#"<?php strlen(42);"#);
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("expects string"));
+    }
+
+    #[test]
+    fn flags_too_few_arguments() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsTwo(int $a, int $b): int { return $a + $b; }
+            needsTwo(1);
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("expects at least 2"));
+    }
+
+    #[test]
+    fn flags_wrong_return_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function addOne(int $x): int { return $x . "1"; }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("return type mismatch"));
+    }
+
+    #[test]
+    fn optional_and_variadic_params_do_not_trigger_arity_errors() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int $a, int $b = 1, string ...$rest): int { return $a + $b; }
+            f(1);
+            f(1, 2, "x", "y");
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn concrete_class_name_satisfies_self_return_type() {
+        // Regression test: `new UserRepository()` and `new self()` are
+        // equally valid ways to satisfy a `: self` return type declared on
+        // UserRepository itself - this used to be a false positive.
+        let d = diagnostics_for(
+            r#"<?php
+            class UserRepository {
+                public static function make(): self {
+                    return new UserRepository();
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn wrong_class_returned_from_self_typed_method_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                public static function make(): self { return new Bar(); }
+            }
+            class Bar {}
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("expected Foo"));
+        assert!(d[0].message.contains("got Bar"));
+    }
+
+    #[test]
+    fn fluent_method_chain_through_self_return_type_infers_concretely() {
+        let d = diagnostics_for(
+            r#"<?php
+            class QueryBuilder {
+                public function where(): self { return $this; }
+            }
+            function needsQueryBuilder(QueryBuilder $q): void {}
+            $qb = new QueryBuilder();
+            needsQueryBuilder($qb->where());
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 }
