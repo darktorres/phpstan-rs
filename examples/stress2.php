@@ -16,6 +16,8 @@ $box = new Box();
 $box->value = 41;
 
 $greeting = "Hello, {$box->value}! Next is " . ($box->value + 1) . ".\n";
+$items = [1, 2, 3];
+$name = "Ada";
 $simple = "value=$box->value items=$items[0] plain $name end";
 
 $double = fn(int $x): int => $x * 2;

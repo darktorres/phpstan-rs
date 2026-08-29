@@ -32,6 +32,13 @@ pub struct Checker<'a> {
     // The class whose method body is currently being checked, if any -
     // needed to resolve self/parent/static to a concrete class name.
     current_class: Option<String>,
+    // Set for the duration of one function/method (or the top-level script)
+    // body when it calls extract()/eval() - both can define variables this
+    // checker has no way to see, so undefined-variable detection would be
+    // pure noise for the rest of that body. Rather than track precisely
+    // which diagnostics came from that check, the whole body's diagnostics
+    // are discarded if this ends up true (see check_function).
+    saw_dynamic_var_construct: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -40,6 +47,7 @@ impl<'a> Checker<'a> {
             registry,
             diagnostics: Vec::new(),
             current_class: None,
+            saw_dynamic_var_construct: false,
         }
     }
 
@@ -49,6 +57,7 @@ impl<'a> Checker<'a> {
 
     pub fn check_program(&mut self, program: &[Stmt]) {
         let mut top_locals: HashMap<String, Type> = HashMap::new();
+        let diagnostics_before = self.diagnostics.len();
         for stmt in program {
             match stmt {
                 Stmt::FunctionDecl(f) => self.check_function(f, None),
@@ -57,8 +66,15 @@ impl<'a> Checker<'a> {
                         self.check_function(&m.function, Some(&c.name));
                     }
                 }
+                // Top-level script statements share one scope across the
+                // whole file, so the extract()/eval() guard spans the
+                // entire loop rather than resetting per statement.
                 other => self.check_stmt(other, &mut top_locals, None, "<main>"),
             }
+        }
+        if self.saw_dynamic_var_construct {
+            self.diagnostics.truncate(diagnostics_before);
+            self.saw_dynamic_var_construct = false;
         }
     }
 
@@ -126,9 +142,18 @@ impl<'a> Checker<'a> {
         let previous_class = self.current_class.take();
         self.current_class = class_name.map(|s| s.to_string());
 
+        let diagnostics_before = self.diagnostics.len();
+        let previous_dynamic_flag = self.saw_dynamic_var_construct;
+        self.saw_dynamic_var_construct = false;
+
         for stmt in &f.body {
             self.check_stmt(stmt, &mut locals, declared_return.as_ref(), &label);
         }
+
+        if self.saw_dynamic_var_construct {
+            self.diagnostics.truncate(diagnostics_before);
+        }
+        self.saw_dynamic_var_construct = previous_dynamic_flag;
 
         self.current_class = previous_class;
     }
@@ -177,7 +202,6 @@ impl<'a> Checker<'a> {
         match stmt {
             Stmt::Expression(e) => {
                 self.check_expr(e, locals, label);
-                self.track_assignment(e, locals);
             }
             Stmt::Return(Some(e)) => {
                 self.check_expr(e, locals, label);
@@ -326,37 +350,44 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Throw(e) => self.check_expr(e, locals, label),
+            // `global $x;` binds $x to whatever the global scope holds,
+            // which this checker doesn't track - Mixed is the honest
+            // answer, but the important part is that it's bound at all, so
+            // using it afterward isn't flagged as undefined.
+            Stmt::Global(names) => {
+                for name in names {
+                    locals.entry(name.clone()).or_insert(Type::Mixed);
+                }
+            }
             _ => {}
         }
     }
 
-    fn track_assignment(&self, e: &Expr, locals: &mut HashMap<String, Type>) {
-        match e {
-            Expr::Assign(lhs, rhs) => match lhs.as_ref() {
-                Expr::Variable(name) => {
-                    let ty = self.infer_expr(rhs, locals);
-                    locals.insert(name.clone(), ty);
-                }
-                // Destructuring: `[$a, $b] = $arr;` and `list($a, $b) =
-                // $arr;` both parse as an ArrayLiteral target. Per-key
-                // precision (`['name' => $n] = $shapedArray`) isn't
-                // resolved - every target gets the source's homogeneous
-                // element type, or Mixed for anything else.
-                Expr::ArrayLiteral(items) => {
-                    let element_ty = match self.infer_expr(rhs, locals) {
-                        Type::Array(inner) => *inner,
-                        _ => Type::Mixed,
-                    };
-                    for (_, item) in items {
-                        self.bind_simple_target(item, element_ty.clone(), locals);
-                    }
-                }
-                _ => {}
-            },
-            Expr::CompoundAssign(op, lhs, rhs) => {
-                if let Expr::Variable(name) = lhs.as_ref() {
-                    let ty = self.infer_binary(op, lhs, rhs, locals);
-                    locals.insert(name.clone(), ty);
+    /// The actual variable-binding side effect of an assignment - lives in
+    /// `check_expr` (called from *every* place an assignment expression can
+    /// appear: a bare expression statement, a `for` init/step, a `while`
+    /// condition, ...) rather than a separate pass triggered only for
+    /// top-level expression statements, which is exactly what let `for ($j
+    /// = 0; ...)`'s `$j` go unbound (and then misfire as "undefined") until
+    /// this was caught.
+    fn bind_assignment_target(&self, lhs: &Expr, rhs: &Expr, locals: &mut HashMap<String, Type>) {
+        match lhs {
+            Expr::Variable(name) => {
+                let ty = self.infer_expr(rhs, locals);
+                locals.insert(name.clone(), ty);
+            }
+            // Destructuring: `[$a, $b] = $arr;` and `list($a, $b) = $arr;`
+            // both parse as an ArrayLiteral target. Per-key precision
+            // (`['name' => $n] = $shapedArray`) isn't resolved - every
+            // target gets the source's homogeneous element type, or Mixed
+            // for anything else.
+            Expr::ArrayLiteral(items) => {
+                let element_ty = match self.infer_expr(rhs, locals) {
+                    Type::Array(inner) => *inner,
+                    _ => Type::Mixed,
+                };
+                for (_, item) in items {
+                    self.bind_simple_target(item, element_ty.clone(), locals);
                 }
             }
             _ => {}
@@ -440,20 +471,35 @@ impl<'a> Checker<'a> {
         locals.insert(var_name, narrowed);
     }
 
-    fn check_expr(&mut self, e: &Expr, locals: &HashMap<String, Type>, label: &str) {
+    fn check_expr(&mut self, e: &Expr, locals: &mut HashMap<String, Type>, label: &str) {
         match e {
             Expr::Call(callee, args) => {
+                if let Expr::Name(name) = callee.as_ref()
+                    && (name == "extract" || name == "eval")
+                {
+                    self.saw_dynamic_var_construct = true;
+                }
+                let sig = match callee.as_ref() {
+                    Expr::Name(name) => self.registry.lookup_function(name),
+                    _ => None,
+                };
+                self.predefine_byref_or_unknown_args(sig, args, locals);
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
                 if let Expr::Name(name) = callee.as_ref()
-                    && let Some(sig) = self.registry.lookup_function(name)
+                    && let Some(sig) = sig
                 {
                     self.check_args(name, sig, args, locals, label, None);
                 }
             }
             Expr::MethodCall(recv, method, args) => {
                 self.check_expr(recv, locals, label);
+                let sig = match self.infer_expr(recv, locals) {
+                    Type::Object(class) => self.registry.lookup_method(&class, &method.clone()),
+                    _ => None,
+                };
+                self.predefine_byref_or_unknown_args(sig, args, locals);
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
@@ -468,6 +514,14 @@ impl<'a> Checker<'a> {
                 self.check_expr(l, locals, label);
                 self.check_expr(r, locals, label);
             }
+            Expr::Variable(name) => {
+                if !locals.contains_key(name) && !is_superglobal(name) {
+                    self.diagnostics.push(Diagnostic {
+                        location: label.to_string(),
+                        message: format!("undefined variable ${name}"),
+                    });
+                }
+            }
             Expr::Unary(_, inner)
             | Expr::Grouping(inner)
             | Expr::Clone(inner)
@@ -475,13 +529,35 @@ impl<'a> Checker<'a> {
                 self.check_expr(inner, locals, label);
             }
             Expr::Assign(lhs, rhs) => {
-                self.check_expr(lhs, locals, label);
                 self.check_expr(rhs, locals, label);
+                // A bare variable (or a destructuring target inside one)
+                // on the left is a definition site, not a read - checking
+                // it here, before it's bound below, would make undefined-
+                // variable detection flag every variable on the very
+                // statement that defines it. PropertyAccess/Index targets
+                // still need their *base* checked (`$obj->prop = ...`
+                // reads $obj).
+                match lhs.as_ref() {
+                    Expr::Variable(_) => {}
+                    Expr::ArrayLiteral(items) => {
+                        for (_, item) in items {
+                            if !matches!(item, Expr::Variable(_)) {
+                                self.check_expr(item, locals, label);
+                            }
+                        }
+                    }
+                    other => self.check_expr(other, locals, label),
+                }
                 self.check_property_assignment(lhs, rhs, locals, label);
+                self.bind_assignment_target(lhs, rhs, locals);
             }
-            Expr::CompoundAssign(_, lhs, rhs) => {
+            Expr::CompoundAssign(op, lhs, rhs) => {
                 self.check_expr(lhs, locals, label);
                 self.check_expr(rhs, locals, label);
+                if let Expr::Variable(name) = lhs.as_ref() {
+                    let ty = self.infer_binary(op, lhs, rhs, locals);
+                    locals.insert(name.clone(), ty);
+                }
             }
             Expr::Ternary(cond, then_, else_) => {
                 self.check_expr(cond, locals, label);
@@ -517,6 +593,43 @@ impl<'a> Checker<'a> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// A bare-variable argument that isn't defined yet is either a real bug
+    /// or PHP's by-reference "output parameter" idiom
+    /// (`preg_match($pattern, $subject, $matches)` defines `$matches` as a
+    /// side effect). Without tracking every stdlib function's exact
+    /// by-ref positions, the safe default for a call to an *unknown*
+    /// function is to assume it might be exactly that and define the
+    /// variable (as Mixed) rather than flag it; a *known* function only
+    /// gets this leniency for the specific parameter position actually
+    /// marked by-ref.
+    fn predefine_byref_or_unknown_args(
+        &self,
+        sig: Option<&FunctionSig>,
+        args: &[Expr],
+        locals: &mut HashMap<String, Type>,
+    ) {
+        for (i, arg) in args.iter().enumerate() {
+            let Expr::Variable(name) = arg else {
+                continue;
+            };
+            if locals.contains_key(name) {
+                continue;
+            }
+            let treat_as_defining = match sig {
+                None => true,
+                Some(sig) => sig
+                    .params
+                    .get(i)
+                    .map(|p| p.by_ref)
+                    .or_else(|| sig.params.last().filter(|p| p.variadic).map(|p| p.by_ref))
+                    .unwrap_or(false),
+            };
+            if treat_as_defining {
+                locals.insert(name.clone(), Type::Mixed);
+            }
         }
     }
 
@@ -803,6 +916,26 @@ impl<'a> Checker<'a> {
             BinOp::Coalesce => self.infer_expr(r, locals),
         }
     }
+}
+
+/// PHP superglobals are implicitly defined in every scope without any
+/// assignment ever appearing in source - undefined-variable detection must
+/// never flag these.
+fn is_superglobal(name: &str) -> bool {
+    matches!(
+        name,
+        "GLOBALS"
+            | "_GET"
+            | "_POST"
+            | "_REQUEST"
+            | "_SERVER"
+            | "_SESSION"
+            | "_COOKIE"
+            | "_FILES"
+            | "_ENV"
+            | "argv"
+            | "argc"
+    )
 }
 
 /// Extracts a shape-lookup key from a literal index expression - `'name'`
@@ -1499,5 +1632,190 @@ mod tests {
         );
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn flags_a_genuinely_undefined_variable() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f() {
+                return $neverDefined;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("$neverDefined"));
+    }
+
+    #[test]
+    fn superglobals_are_never_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f() {
+                return $_GET['id'] . $_SERVER['REQUEST_METHOD'] . $GLOBALS['x'];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn for_loop_init_binds_its_variable() {
+        // Regression test: the actual assignment-binding side effect used
+        // to live only in a separate pass triggered from bare expression
+        // statements, so `for ($j = 0; ...)`'s own $j was never bound and
+        // would have misfired as undefined the moment this check existed.
+        let d = diagnostics_for(
+            r#"<?php
+            function f() {
+                for ($j = 0; $j < 3; $j++) {
+                    echo $j;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn global_statement_binds_its_names() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f() {
+                global $config;
+                return $config;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn chained_assignment_binds_both_targets() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f() {
+                $a = $b = 5;
+                return $a + $b;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn known_by_ref_output_param_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(string $text) {
+                if (preg_match('/(\d+)/', $text, $matches)) {
+                    return $matches[1];
+                }
+                return null;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn unknown_function_argument_is_leniently_defined_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f() {
+                some_undeclared_function($result);
+                return $result;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn known_function_non_by_ref_argument_is_still_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function f() {
+                return needsInt($neverDefined);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("$neverDefined"));
+    }
+
+    #[test]
+    fn extract_suppresses_undefined_variable_checking_for_the_whole_function() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $data) {
+                extract($data);
+                return $definitelyNotDefinedAnywhere;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn closure_bodies_are_not_checked_so_captures_are_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int $base) {
+                $fn = function (int $x) use ($base) {
+                    return $base + $x;
+                };
+                return $fn(5);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn keyed_destructuring_binds_its_target() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $data) {
+                ['name' => $n] = $data;
+                return $n;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn variable_defined_in_only_one_if_branch_is_flagged_after_the_if() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $cond) {
+                if ($cond) {
+                    $x = 5;
+                }
+                return $x;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("$x"));
+    }
+
+    #[test]
+    fn variable_defined_in_both_if_and_else_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $cond) {
+                if ($cond) {
+                    $x = 5;
+                } else {
+                    $x = 10;
+                }
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 }

@@ -10,6 +10,7 @@ pub struct ParamSig {
     pub ty: Type,
     pub variadic: bool,
     pub has_default: bool,
+    pub by_ref: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +81,7 @@ impl FunctionSig {
                     ty,
                     variadic: p.variadic,
                     has_default: p.default.is_some(),
+                    by_ref: p.by_ref,
                 }
             })
             .collect();
