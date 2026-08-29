@@ -355,6 +355,17 @@ impl Parser {
                 } else {
                     None
                 };
+                // `use foo\bar\baz, foo\bar\qux;` - a plain comma-separated
+                // list, distinct from the `use Foo\{...}` group form above.
+                // Only the first import is kept in a real Stmt::Use, same
+                // simplification as the group form (nothing downstream
+                // reads it).
+                while self.eat(&Token::Comma) {
+                    self.parse_qualified_name();
+                    if self.eat(&Token::Keyword(Keyword::As)) {
+                        self.expect_ident();
+                    }
+                }
                 self.expect_semicolon();
                 Stmt::Use(name, alias)
             }
@@ -956,6 +967,15 @@ impl Parser {
             } else {
                 None
             };
+            // A promoted property can carry its own hooks directly in the
+            // constructor's parameter list (`public $prop { get { ... }
+            // set { ... } }`), same shape as a hooked property declared
+            // the ordinary way.
+            let hooks = if self.check(&Token::LBrace) {
+                Some(Box::new(self.parse_property_hooks()))
+            } else {
+                None
+            };
             params.push(Param {
                 name,
                 type_hint,
@@ -963,6 +983,7 @@ impl Parser {
                 by_ref,
                 variadic,
                 promoted_visibility,
+                hooks,
             });
             if !self.eat(&Token::Comma) {
                 break;
@@ -1306,6 +1327,7 @@ impl Parser {
                     by_ref,
                     variadic: false,
                     promoted_visibility: None,
+                    hooks: None,
                 })
             } else {
                 None
@@ -3196,6 +3218,35 @@ mod tests {
     fn global_with_dynamic_target_parses() {
         let program = parse(r#"<?php global ${sf("a")};"#);
         assert!(matches!(&program[0], Stmt::Global(names) if names == &["{dynamic}"]));
+    }
+
+    #[test]
+    fn use_with_comma_separated_list_parses() {
+        let program = parse(r#"<?php use function foo\bar\baz, foo\bar\qux;"#);
+        assert!(matches!(&program[0], Stmt::Use(n, None) if n == "foo\\bar\\baz"));
+    }
+
+    #[test]
+    fn hooks_on_promoted_constructor_property_parse() {
+        let program = parse(
+            r#"<?php
+            class Test {
+                public function __construct(
+                    public $prop {
+                        get { echo "get\n"; }
+                        set { echo "set($value)\n"; }
+                    },
+                ) {}
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        let ctor = &c.methods[0].function;
+        let hooks = ctor.params[0].hooks.as_ref().expect("expected hooks");
+        assert!(matches!(hooks.get, Some(PropertyHookBody::Block(_))));
+        assert!(hooks.set.is_some());
     }
 
     #[test]

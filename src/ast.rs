@@ -88,6 +88,11 @@ pub struct Param {
     // Some(visibility) for constructor property promotion, e.g.
     // `public function __construct(private int $id) {}`.
     pub promoted_visibility: Option<Visibility>,
+    // A promoted property's own hooks, defined inline in the constructor's
+    // parameter list rather than on an ordinary property declaration.
+    // Boxed because PropertyHooks::set itself embeds a Param - unboxed,
+    // Param would have infinite size.
+    pub hooks: Option<Box<PropertyHooks>>,
 }
 
 #[derive(Debug, Clone)]
