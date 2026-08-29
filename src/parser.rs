@@ -105,9 +105,14 @@ impl Parser {
         self.expect(&Token::Semicolon);
     }
 
+    /// Used for every "name in declaration position" (function/class/
+    /// const/case names, ...). Keyword-tolerant for the same reason
+    /// take_name_segment is: PHP reserves most keywords only in specific
+    /// declaration positions, not universally - `const DEFAULT = 1;` is
+    /// valid PHP even though `default` is a keyword.
     fn expect_ident(&mut self) -> String {
-        match self.advance() {
-            Token::Identifier(s) => s,
+        match self.peek().clone() {
+            Token::Identifier(_) | Token::Keyword(_) => self.take_name_segment().unwrap(),
             other => panic!("parse error: expected identifier, found {:?}", other),
         }
     }
@@ -171,6 +176,28 @@ impl Parser {
                 self.expect_semicolon();
                 Stmt::Global(names)
             }
+            // `static $x = 1, $y;` - guarded on the next token being a
+            // Variable so this doesn't shadow `static::`/`static function`/
+            // `static fn`, all of which are expressions, not statements,
+            // and stay handled in parse_primary.
+            Token::Keyword(Keyword::Static) if matches!(self.peek_at(1), Token::Variable(_)) => {
+                self.advance();
+                let mut vars = Vec::new();
+                loop {
+                    let name = self.expect_variable();
+                    let default = if self.eat(&Token::Equals) {
+                        Some(self.parse_expression())
+                    } else {
+                        None
+                    };
+                    vars.push((name, default));
+                    if !self.eat(&Token::Comma) {
+                        break;
+                    }
+                }
+                self.expect_semicolon();
+                Stmt::StaticVar(vars)
+            }
             Token::Keyword(Keyword::Function) => {
                 let doc = self.take_doc_comment();
                 let mut f = self.parse_function_decl();
@@ -180,6 +207,7 @@ impl Parser {
             Token::Keyword(Keyword::Class)
             | Token::Keyword(Keyword::Abstract)
             | Token::Keyword(Keyword::Final)
+            | Token::Keyword(Keyword::Readonly)
             | Token::Keyword(Keyword::Interface)
             | Token::Keyword(Keyword::Trait) => Stmt::ClassDecl(self.parse_class_decl()),
             Token::Keyword(Keyword::Enum) => Stmt::EnumDecl(self.parse_enum_decl()),
@@ -191,9 +219,22 @@ impl Parser {
             }
             Token::Keyword(Keyword::Use) => {
                 self.advance();
+                // `use function foo;` / `use const BAR;` - the marker
+                // doesn't change anything tracked here, just skip past it.
+                if matches!(
+                    self.peek(),
+                    Token::Keyword(Keyword::Function) | Token::Keyword(Keyword::Const)
+                ) {
+                    self.advance();
+                }
                 let name = self.parse_qualified_name();
+                let alias = if self.eat(&Token::Keyword(Keyword::As)) {
+                    Some(self.expect_ident())
+                } else {
+                    None
+                };
                 self.expect_semicolon();
-                Stmt::Use(name)
+                Stmt::Use(name, alias)
             }
             Token::Keyword(Keyword::Const) => {
                 self.advance();
@@ -539,19 +580,45 @@ impl Parser {
         Stmt::Switch { subject, cases }
     }
 
+    // A qualified name is one identifier, optionally namespaced by
+    // backslash-separated segments (`Foo`, `\App\Foo`, `App\Foo\Bar`).
+    // Consecutive bare identifiers with no backslash between them are two
+    // separate tokens, not one name - `array BASE_SECTIONS` must not
+    // collapse into "arrayBASE_SECTIONS", which silently swallowed a
+    // constant's own name until this was fixed.
+    /// Consumes one identifier *or* keyword token as a name segment - most
+    /// keywords are only reserved in declaration position in real PHP
+    /// ("semi-reserved words"), so `Enum`/`Match`/`New`/... are all valid
+    /// namespace segments (`Piwigo\Common\Enum\Foo`).
+    fn take_name_segment(&mut self) -> Option<String> {
+        match self.peek().clone() {
+            Token::Identifier(part) => {
+                self.advance();
+                Some(part)
+            }
+            Token::Keyword(kw) => {
+                self.advance();
+                Some(kw.as_str().to_string())
+            }
+            _ => None,
+        }
+    }
+
     fn parse_qualified_name(&mut self) -> String {
         let mut s = String::new();
-        loop {
-            match self.peek().clone() {
-                Token::Identifier(part) => {
-                    s.push_str(&part);
-                    self.advance();
-                }
-                Token::Backslash => {
-                    s.push('\\');
-                    self.advance();
-                }
-                _ => break,
+        if self.eat(&Token::Backslash) {
+            s.push('\\');
+        }
+        match self.take_name_segment() {
+            Some(part) => s.push_str(&part),
+            None => return s,
+        }
+        while matches!(self.peek(), Token::Backslash) {
+            self.advance();
+            s.push('\\');
+            match self.take_name_segment() {
+                Some(part) => s.push_str(&part),
+                None => break,
             }
         }
         s
@@ -579,43 +646,40 @@ impl Parser {
 
     // Consumes one qualified type name, e.g. `int`, `array`, `\App\Foo`.
     fn parse_type_atom(&mut self) -> String {
-        let mut s = String::new();
-        loop {
-            match self.peek().clone() {
-                Token::Identifier(part) => {
-                    s.push_str(&part);
-                    self.advance();
-                }
-                Token::Backslash => {
-                    s.push('\\');
-                    self.advance();
-                }
-                Token::Keyword(Keyword::Array) => {
-                    s.push_str("array");
-                    self.advance();
-                }
-                Token::Keyword(Keyword::Static) => {
-                    s.push_str("static");
-                    self.advance();
-                }
-                Token::Keyword(Keyword::Null) => {
-                    s.push_str("null");
-                    self.advance();
-                }
-                // PHP 8.2+ stand-alone `true`/`false` types, e.g.
-                // `function f(): string|false {}`.
-                Token::Keyword(Keyword::True) => {
-                    s.push_str("true");
-                    self.advance();
-                }
-                Token::Keyword(Keyword::False) => {
-                    s.push_str("false");
-                    self.advance();
-                }
-                _ => break,
+        // These are single keyword tokens - namespaced forms like
+        // `array\Foo` don't exist, so each just consumes itself and stops,
+        // rather than looping on to swallow whatever bare identifier
+        // happens to follow (e.g. `array $items`'s `$items`, or
+        // `const array NAME`'s own `NAME`).
+        match self.peek().clone() {
+            Token::Keyword(Keyword::Array) => {
+                self.advance();
+                return "array".to_string();
             }
+            Token::Keyword(Keyword::Static) => {
+                self.advance();
+                return "static".to_string();
+            }
+            Token::Keyword(Keyword::Null) => {
+                self.advance();
+                return "null".to_string();
+            }
+            // PHP 8.2+ stand-alone `true`/`false` types, e.g.
+            // `function f(): string|false {}`.
+            Token::Keyword(Keyword::True) => {
+                self.advance();
+                return "true".to_string();
+            }
+            Token::Keyword(Keyword::False) => {
+                self.advance();
+                return "false".to_string();
+            }
+            _ => {}
         }
-        s
+        // Otherwise it's a (possibly namespaced) identifier: `int`, `Foo`,
+        // `\App\Foo`, `App\Foo\Bar` - never two unrelated identifiers
+        // glued together with no backslash between them.
+        self.parse_qualified_name()
     }
 
     fn parse_type_hint(&mut self) -> Option<String> {
@@ -733,37 +797,42 @@ impl Parser {
 
     // ---- classes ----
 
-    fn parse_class_decl(&mut self) -> ClassDecl {
-        let mut is_abstract = false;
-        let mut is_final = false;
+    /// True when, starting right after `new`, the upcoming tokens are
+    /// `[readonly|final|abstract]* class` - an anonymous class, as opposed
+    /// to `new SomeExistingClass(...)`.
+    fn at_anonymous_class_start(&self) -> bool {
+        let mut offset = 0;
         loop {
-            match self.peek() {
-                Token::Keyword(Keyword::Abstract) => {
-                    is_abstract = true;
-                    self.advance();
-                }
-                Token::Keyword(Keyword::Final) => {
-                    is_final = true;
-                    self.advance();
-                }
-                _ => break,
+            match self.peek_at(offset) {
+                Token::Keyword(Keyword::Readonly)
+                | Token::Keyword(Keyword::Final)
+                | Token::Keyword(Keyword::Abstract) => offset += 1,
+                Token::Keyword(Keyword::Class) => return true,
+                _ => return false,
             }
         }
-        match self.advance() {
-            Token::Keyword(Keyword::Class)
-            | Token::Keyword(Keyword::Interface)
-            | Token::Keyword(Keyword::Trait) => {}
-            other => panic!(
-                "parse error: expected class/interface/trait, found {:?}",
-                other
-            ),
-        }
-        let name = self.expect_ident();
+    }
 
-        // A class extends at most one class, but an interface can extend
-        // several other interfaces (`interface C extends A, B {}`) - both
-        // are accepted here since the parser doesn't distinguish the two
-        // declaration kinds structurally.
+    /// `new [readonly] class(args) [extends X] [implements Y, ...] { ... }`.
+    /// Reuses parse_class_body for the `{ ... }` part, the same as a named
+    /// class/interface/trait declaration.
+    fn parse_anonymous_class_new(&mut self) -> Expr {
+        while matches!(
+            self.peek(),
+            Token::Keyword(Keyword::Readonly)
+                | Token::Keyword(Keyword::Final)
+                | Token::Keyword(Keyword::Abstract)
+        ) {
+            self.advance();
+        }
+        self.expect(&Token::Keyword(Keyword::Class));
+
+        let args = if self.check(&Token::LParen) {
+            self.parse_args().0
+        } else {
+            Vec::new()
+        };
+
         let mut extends = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
             extends.push(self.parse_qualified_name());
@@ -771,7 +840,6 @@ impl Parser {
                 extends.push(self.parse_qualified_name());
             }
         }
-
         let mut implements = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
             implements.push(self.parse_qualified_name());
@@ -780,6 +848,38 @@ impl Parser {
             }
         }
 
+        let (properties, methods, consts, uses) = self.parse_class_body();
+
+        let decl = ClassDecl {
+            // No name multiple anonymous classes in the same file could
+            // share safely - never indexed into the registry by this name,
+            // only used structurally within this one expression.
+            name: "class@anonymous".to_string(),
+            extends,
+            implements,
+            is_abstract: false,
+            is_final: false,
+            properties,
+            methods,
+            consts,
+            uses,
+        };
+
+        Expr::NewAnonymousClass(Box::new(decl), args)
+    }
+
+    /// The `{ ... }` body shared by class/interface/trait declarations and
+    /// anonymous classes (`new class { ... }`) - extracted so the two
+    /// don't duplicate this (fairly large) member-parsing loop.
+    #[allow(clippy::type_complexity)]
+    fn parse_class_body(
+        &mut self,
+    ) -> (
+        Vec<PropertyDecl>,
+        Vec<MethodDecl>,
+        Vec<ClassConst>,
+        Vec<String>,
+    ) {
         self.expect(&Token::LBrace);
         let mut properties = Vec::new();
         let mut methods = Vec::new();
@@ -816,6 +916,30 @@ impl Parser {
             let mut is_abstract_member = false;
             loop {
                 match self.peek() {
+                    // PHP 8.4 asymmetric visibility: `private(set)` /
+                    // `protected(set)` as a *second* visibility modifier
+                    // narrowing writes only (e.g. `public private(set)
+                    // string $x`, or standalone `private(set) string $x`
+                    // for public-read/private-write). Not modeled as its
+                    // own concept - just consumed so the read-side
+                    // `visibility` above (already set, or defaulted to
+                    // Public) is left alone.
+                    Token::Keyword(Keyword::Private)
+                        if matches!(self.peek_at(1), Token::LParen) =>
+                    {
+                        self.advance();
+                        self.advance();
+                        self.expect_ident();
+                        self.expect(&Token::RParen);
+                    }
+                    Token::Keyword(Keyword::Protected)
+                        if matches!(self.peek_at(1), Token::LParen) =>
+                    {
+                        self.advance();
+                        self.advance();
+                        self.expect_ident();
+                        self.expect(&Token::RParen);
+                    }
                     Token::Keyword(Keyword::Public) => {
                         visibility = Visibility::Public;
                         self.advance();
@@ -844,6 +968,14 @@ impl Parser {
             }
 
             if self.eat(&Token::Keyword(Keyword::Const)) {
+                // PHP 8.3 typed class constants: `const TYPE NAME = value;`.
+                // A type is present exactly when the name-like token here
+                // is followed by *another* identifier (the real name)
+                // rather than `=` - `const FOO = 1;`'s `FOO` is followed
+                // directly by `=`, so nothing is consumed as a type there.
+                if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals) {
+                    self.parse_type_hint();
+                }
                 loop {
                     let cname = self.expect_ident();
                     self.expect(&Token::Equals);
@@ -878,6 +1010,23 @@ impl Parser {
                 } else {
                     None
                 };
+                // PHP 8.4 property hooks (`{ get => ...; set(Type $value)
+                // { ... } }`) replace the trailing `;` on a *single*
+                // property - no comma-list, no default-then-hooks. Ends
+                // its own `}`, so no expect_semicolon() afterwards.
+                if self.check(&Token::LBrace) {
+                    let hooks = self.parse_property_hooks();
+                    properties.push(PropertyDecl {
+                        name,
+                        visibility: visibility.clone(),
+                        is_static,
+                        type_hint: type_hint.clone(),
+                        default,
+                        doc_comment: doc.clone(),
+                        hooks: Some(hooks),
+                    });
+                    break;
+                }
                 properties.push(PropertyDecl {
                     name,
                     visibility: visibility.clone(),
@@ -885,14 +1034,139 @@ impl Parser {
                     type_hint: type_hint.clone(),
                     default,
                     doc_comment: doc.clone(),
+                    hooks: None,
                 });
                 if !self.eat(&Token::Comma) {
+                    self.expect_semicolon();
                     break;
                 }
             }
-            self.expect_semicolon();
         }
         self.expect(&Token::RBrace);
+
+        (properties, methods, consts, uses)
+    }
+
+    /// PHP 8.4 property hooks body: `{ get => expr; set(Type $value) { .. }
+    /// }`, or the abstract/interface form (`{ get; set; }`) with no bodies
+    /// at all. `get`/`set` aren't keywords (they're semi-reserved words
+    /// used only in this position), so they arrive as plain identifiers.
+    fn parse_property_hooks(&mut self) -> PropertyHooks {
+        self.expect(&Token::LBrace);
+        let mut get = None;
+        let mut set = None;
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            // A hook can itself carry `final`/visibility modifiers ahead
+            // of `get`/`set` - not modeled, just consumed.
+            while matches!(
+                self.peek(),
+                Token::Keyword(Keyword::Final)
+                    | Token::Keyword(Keyword::Public)
+                    | Token::Keyword(Keyword::Private)
+                    | Token::Keyword(Keyword::Protected)
+            ) {
+                self.advance();
+            }
+            let is_set = matches!(self.peek(), Token::Identifier(s) if s == "set");
+            self.advance(); // `get` or `set`
+
+            let param = if is_set && self.eat(&Token::LParen) {
+                let type_hint = self.parse_type_hint();
+                let by_ref = self.eat(&Token::Amp);
+                let name = self.expect_variable();
+                self.expect(&Token::RParen);
+                Some(Param {
+                    name,
+                    type_hint,
+                    default: None,
+                    by_ref,
+                    variadic: false,
+                    promoted_visibility: None,
+                })
+            } else {
+                None
+            };
+
+            let body = if self.eat(&Token::FatArrow) {
+                let e = self.parse_expression();
+                self.expect_semicolon();
+                Some(PropertyHookBody::Arrow(e))
+            } else if self.check(&Token::LBrace) {
+                Some(PropertyHookBody::Block(self.parse_stmt_list_block()))
+            } else {
+                // Abstract form: `get;` / `set;`, no body at all.
+                self.expect_semicolon();
+                None
+            };
+
+            if is_set {
+                set = body.map(|b| (param, b));
+            } else {
+                get = body;
+            }
+        }
+        self.expect(&Token::RBrace);
+        PropertyHooks { get, set }
+    }
+
+    fn parse_class_decl(&mut self) -> ClassDecl {
+        let mut is_abstract = false;
+        let mut is_final = false;
+        loop {
+            match self.peek() {
+                Token::Keyword(Keyword::Abstract) => {
+                    is_abstract = true;
+                    self.advance();
+                }
+                Token::Keyword(Keyword::Final) => {
+                    is_final = true;
+                    self.advance();
+                }
+                // PHP 8.2 `readonly class Foo {}` (shorthand for every
+                // property being readonly) - accepted in any order with
+                // abstract/final, same as real PHP's grammar, but not
+                // modeled as its own flag (ClassDecl doesn't track
+                // per-property readonly-ness at all yet, the same way the
+                // class body's own `readonly` property modifier is already
+                // just consumed and dropped).
+                Token::Keyword(Keyword::Readonly) => {
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+        match self.advance() {
+            Token::Keyword(Keyword::Class)
+            | Token::Keyword(Keyword::Interface)
+            | Token::Keyword(Keyword::Trait) => {}
+            other => panic!(
+                "parse error: expected class/interface/trait, found {:?}",
+                other
+            ),
+        }
+        let name = self.expect_ident();
+
+        // A class extends at most one class, but an interface can extend
+        // several other interfaces (`interface C extends A, B {}`) - both
+        // are accepted here since the parser doesn't distinguish the two
+        // declaration kinds structurally.
+        let mut extends = Vec::new();
+        if self.eat(&Token::Keyword(Keyword::Extends)) {
+            extends.push(self.parse_qualified_name());
+            while self.eat(&Token::Comma) {
+                extends.push(self.parse_qualified_name());
+            }
+        }
+
+        let mut implements = Vec::new();
+        if self.eat(&Token::Keyword(Keyword::Implements)) {
+            implements.push(self.parse_qualified_name());
+            while self.eat(&Token::Comma) {
+                implements.push(self.parse_qualified_name());
+            }
+        }
+
+        let (properties, methods, consts, uses) = self.parse_class_body();
 
         ClassDecl {
             name,
@@ -1007,6 +1281,14 @@ impl Parser {
             }
 
             if self.eat(&Token::Keyword(Keyword::Const)) {
+                // PHP 8.3 typed class constants: `const TYPE NAME = value;`.
+                // A type is present exactly when the name-like token here
+                // is followed by *another* identifier (the real name)
+                // rather than `=` - `const FOO = 1;`'s `FOO` is followed
+                // directly by `=`, so nothing is consumed as a type there.
+                if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals) {
+                    self.parse_type_hint();
+                }
                 loop {
                     let cname = self.expect_ident();
                     self.expect(&Token::Equals);
@@ -1053,7 +1335,40 @@ impl Parser {
     // ---- expressions (precedence climbing) ----
 
     pub fn parse_expression(&mut self) -> Expr {
-        self.parse_assignment()
+        self.parse_low_precedence_or()
+    }
+
+    // `and`/`or`/`xor` bind looser than assignment - the classic PHP
+    // gotcha where `$a = $b or $c;` parses as `($a = $b) or $c;`, not
+    // `$a = ($b or $c);`, unlike `&&`/`||`. Each tier only recurses into
+    // the next-tighter one, bottoming out at parse_assignment (the
+    // existing top of the &&/||/ternary/etc chain), so the classic form
+    // is unaffected and only these three keywords get the looser binding.
+    fn parse_low_precedence_or(&mut self) -> Expr {
+        let mut lhs = self.parse_low_precedence_xor();
+        while self.eat(&Token::Keyword(Keyword::Or)) {
+            let rhs = self.parse_low_precedence_xor();
+            lhs = Expr::Binary(BinOp::Or, Box::new(lhs), Box::new(rhs));
+        }
+        lhs
+    }
+
+    fn parse_low_precedence_xor(&mut self) -> Expr {
+        let mut lhs = self.parse_low_precedence_and();
+        while self.eat(&Token::Keyword(Keyword::Xor)) {
+            let rhs = self.parse_low_precedence_and();
+            lhs = Expr::Binary(BinOp::LogicalXor, Box::new(lhs), Box::new(rhs));
+        }
+        lhs
+    }
+
+    fn parse_low_precedence_and(&mut self) -> Expr {
+        let mut lhs = self.parse_assignment();
+        while self.eat(&Token::Keyword(Keyword::And)) {
+            let rhs = self.parse_assignment();
+            lhs = Expr::Binary(BinOp::And, Box::new(lhs), Box::new(rhs));
+        }
+        lhs
     }
 
     fn parse_assignment(&mut self) -> Expr {
@@ -1067,6 +1382,11 @@ impl Parser {
             Token::PercentEquals => Some(BinOp::Mod),
             Token::DotEquals => Some(BinOp::Concat),
             Token::QuestionQuestionEquals => Some(BinOp::Coalesce),
+            Token::AmpEquals => Some(BinOp::BitAnd),
+            Token::PipeEquals => Some(BinOp::BitOr),
+            Token::CaretEquals => Some(BinOp::BitXor),
+            Token::LtLtEquals => Some(BinOp::Shl),
+            Token::GtGtEquals => Some(BinOp::Shr),
             _ => return lhs,
         };
         self.advance();
@@ -1317,17 +1637,30 @@ impl Parser {
             match self.peek() {
                 Token::Arrow | Token::NullsafeArrow => {
                     self.advance();
-                    let name = match self.advance() {
-                        Token::Identifier(s) => s,
-                        Token::Variable(s) => s, // $obj->$prop dynamic access, best-effort
+                    // A method/property name accepts any keyword too
+                    // (`$obj->match()`, `$obj->new`) - PHP only reserves
+                    // these in declaration position, not here.
+                    let name = match self.peek().clone() {
+                        Token::Identifier(_) | Token::Keyword(_) => {
+                            self.take_name_segment().unwrap()
+                        }
+                        Token::Variable(s) => {
+                            self.advance();
+                            s // $obj->$prop dynamic access, best-effort
+                        }
                         other => panic!(
                             "parse error: expected property/method name, found {:?}",
                             other
                         ),
                     };
                     if self.check(&Token::LParen) {
-                        let args = self.parse_args();
-                        expr = Expr::MethodCall(Box::new(expr), name, args);
+                        let (args, is_fcc) = self.parse_args();
+                        let call = Expr::MethodCall(Box::new(expr), name, args);
+                        expr = if is_fcc {
+                            Expr::FirstClassCallable(Box::new(call))
+                        } else {
+                            call
+                        };
                     } else {
                         expr = Expr::PropertyAccess(Box::new(expr), name);
                     }
@@ -1338,15 +1671,27 @@ impl Parser {
                         Expr::Name(n) => n.clone(),
                         _ => "?".to_string(),
                     };
-                    let member = match self.advance() {
-                        Token::Identifier(s) => s,
-                        Token::Variable(s) => format!("${s}"),
-                        Token::Keyword(Keyword::Class) => "class".to_string(),
+                    // `class` (`Foo::class`) already worked as a special
+                    // case; any other keyword is just as valid here
+                    // (`Foo::new()`, `Foo::default()`, `Foo::list()`).
+                    let member = match self.peek().clone() {
+                        Token::Identifier(_) | Token::Keyword(_) => {
+                            self.take_name_segment().unwrap()
+                        }
+                        Token::Variable(s) => {
+                            self.advance();
+                            format!("${s}")
+                        }
                         other => panic!("parse error: expected static member, found {:?}", other),
                     };
                     if self.check(&Token::LParen) {
-                        let args = self.parse_args();
-                        expr = Expr::StaticCall(class_name, member, args);
+                        let (args, is_fcc) = self.parse_args();
+                        let call = Expr::StaticCall(class_name, member, args);
+                        expr = if is_fcc {
+                            Expr::FirstClassCallable(Box::new(call))
+                        } else {
+                            call
+                        };
                     } else {
                         expr = Expr::StaticAccess(class_name, member);
                     }
@@ -1362,8 +1707,13 @@ impl Parser {
                     expr = Expr::Index(Box::new(expr), index);
                 }
                 Token::LParen => {
-                    let args = self.parse_args();
-                    expr = Expr::Call(Box::new(expr), args);
+                    let (args, is_fcc) = self.parse_args();
+                    let call = Expr::Call(Box::new(expr), args);
+                    expr = if is_fcc {
+                        Expr::FirstClassCallable(Box::new(call))
+                    } else {
+                        call
+                    };
                 }
                 Token::Increment => {
                     self.advance();
@@ -1379,13 +1729,25 @@ impl Parser {
         expr
     }
 
-    fn parse_args(&mut self) -> Vec<Expr> {
+    /// Returns the parsed arguments plus whether this was a first-class
+    /// callable reference (`foo(...)` - literally `...` then nothing else,
+    /// as opposed to a real spread argument like `foo(...$rest)`, which is
+    /// followed by an expression, not directly by `)`).
+    fn parse_args(&mut self) -> (Vec<Expr>, bool) {
         self.expect(&Token::LParen);
+        if matches!(self.peek(), Token::Ellipsis) && matches!(self.peek_at(1), Token::RParen) {
+            self.advance();
+            self.advance();
+            return (Vec::new(), true);
+        }
+
         let mut args = Vec::new();
         while !self.check(&Token::RParen) {
             self.eat(&Token::Ellipsis); // spread: argument still parsed normally
-            // named arguments (`name: expr`) - accept and discard the name
-            if let Token::Identifier(_) = self.peek()
+            // named arguments (`name: expr`) - accept and discard the
+            // name. The name is just a label, so any keyword is valid
+            // here too (`create(namespace: 'x')`), not just Identifier.
+            if matches!(self.peek(), Token::Identifier(_) | Token::Keyword(_))
                 && self.peek_at(1) == &Token::Colon
             {
                 self.advance();
@@ -1397,7 +1759,7 @@ impl Parser {
             }
         }
         self.expect(&Token::RParen);
-        args
+        (args, false)
     }
 
     fn parse_array_items(&mut self, close: &Token) -> Vec<(Option<Expr>, Expr)> {
@@ -1473,6 +1835,9 @@ impl Parser {
             }
             Token::Keyword(Keyword::New) => {
                 self.advance();
+                if self.at_anonymous_class_start() {
+                    return self.parse_anonymous_class_new();
+                }
                 let class_expr = match self.peek().clone() {
                     Token::Variable(name) => {
                         self.advance();
@@ -1480,8 +1845,11 @@ impl Parser {
                     }
                     _ => Expr::Name(self.parse_qualified_name()),
                 };
+                // `new Foo(...)` first-class-callable syntax doesn't exist
+                // in PHP - a constructor can't be referenced that way - so
+                // the flag is simply dropped here rather than handled.
                 let args = if self.check(&Token::LParen) {
-                    self.parse_args()
+                    self.parse_args().0
                 } else {
                     Vec::new()
                 };
@@ -1496,6 +1864,66 @@ impl Parser {
                 self.advance();
                 let e = self.parse_assignment();
                 Expr::Call(Box::new(Expr::Name("print".to_string())), vec![e])
+            }
+            // `throw` as an expression (`default => throw new X()`, `$x ??
+            // throw new X()`, an arrow function body, ...) - a bare `throw
+            // expr;` statement is intercepted earlier, in parse_statement,
+            // so this is only reached when throw appears nested inside
+            // another expression. Handled here in parse_primary, the
+            // lowest level, rather than parse_assignment, because `??`'s
+            // RHS (and others) recurse directly into a tighter tier and
+            // never pass back through parse_assignment on the way down.
+            Token::Keyword(Keyword::Throw) => {
+                self.advance();
+                let inner = self.parse_assignment();
+                Expr::Throw(Box::new(inner))
+            }
+            // `yield`/`yield from` - makes the enclosing function a
+            // generator, which isn't modeled, but the yielded key/value
+            // expression(s) are still worth parsing and checking.
+            Token::Keyword(Keyword::Yield) => {
+                self.advance();
+                if let Token::Identifier(name) = self.peek().clone()
+                    && name.eq_ignore_ascii_case("from")
+                {
+                    self.advance();
+                    let inner = self.parse_assignment();
+                    return Expr::YieldFrom(Box::new(inner));
+                }
+                // A bare `yield;` (no value) - whatever follows can't
+                // start an expression, so don't try to parse one.
+                if matches!(
+                    self.peek(),
+                    Token::Semicolon
+                        | Token::RParen
+                        | Token::RBracket
+                        | Token::RBrace
+                        | Token::Comma
+                ) {
+                    return Expr::Yield(None, None);
+                }
+                let first = self.parse_ternary();
+                if self.eat(&Token::FatArrow) {
+                    let value = self.parse_ternary();
+                    Expr::Yield(Some(Box::new(first)), Some(Box::new(value)))
+                } else {
+                    Expr::Yield(None, Some(Box::new(first)))
+                }
+            }
+            // include/require/*_once are language constructs, not function
+            // calls (no parens required: `include $file;`), but modeling
+            // them as a call to a synthetic name works fine here - an
+            // unregistered function name is already just unchecked, not a
+            // parse failure.
+            Token::Keyword(
+                kw @ (Keyword::Include
+                | Keyword::IncludeOnce
+                | Keyword::Require
+                | Keyword::RequireOnce),
+            ) => {
+                self.advance();
+                let e = self.parse_assignment();
+                Expr::Call(Box::new(Expr::Name(kw.as_str().to_string())), vec![e])
             }
             Token::Keyword(Keyword::Static)
                 if matches!(
@@ -1826,5 +2254,212 @@ mod tests {
         assert!(matches!(e.cases[0].value, Some(Expr::Literal(_))));
         assert_eq!(e.methods.len(), 1);
         assert_eq!(e.methods[0].function.name, "label");
+    }
+
+    #[test]
+    fn word_operators_bind_looser_than_assignment() {
+        // The classic PHP gotcha: `$a = $b or $c;` is `($a = $b) or $c;`,
+        // not `$a = ($b or $c);` - unlike &&/||.
+        let program = parse("<?php $x = 5 or die();");
+        let Stmt::Expression(Expr::Binary(BinOp::Or, lhs, _)) = &program[0] else {
+            panic!("expected a top-level Or binary expression");
+        };
+        assert!(matches!(lhs.as_ref(), Expr::Assign(..)));
+    }
+
+    #[test]
+    fn readonly_class_parses() {
+        let program = parse("<?php readonly class Point { public int $x; }");
+        assert!(matches!(program[0], Stmt::ClassDecl(_)));
+    }
+
+    #[test]
+    fn qualified_name_with_keyword_segment_parses() {
+        // `Enum` here is a namespace segment, not the `enum` declaration
+        // keyword - PHP's keywords are mostly "semi-reserved". The main
+        // assertion is just that this doesn't panic (it used to). Known,
+        // low-impact precision loss: Keyword::as_str() only has the
+        // canonical lowercase spelling, not this source's original
+        // capitalization, so the reconstructed segment comes back as
+        // "enum" - inert for a `use` target specifically, since nothing
+        // in the registry/checker consumes Stmt::Use at all yet, and for
+        // symbols that *are* looked up (extends/implements/new Foo()),
+        // both the declaration site and every usage site lowercase the
+        // same way, so registry lookups on a keyword-named symbol still
+        // match each other consistently.
+        let program = parse("<?php use Piwigo\\Common\\Enum\\AlbumSortOrder;");
+        let Stmt::Use(name, _) = &program[0] else {
+            panic!("expected Use");
+        };
+        assert_eq!(name, "Piwigo\\Common\\enum\\AlbumSortOrder");
+    }
+
+    #[test]
+    fn keyword_as_method_and_static_member_name_parses() {
+        let program = parse(
+            r#"<?php
+            $x = $obj->match();
+            $y = Foo::new();
+            $z = Foo::list();
+        "#,
+        );
+        assert_eq!(program.len(), 3);
+    }
+
+    #[test]
+    fn keyword_as_named_argument_name_parses() {
+        let program = parse("<?php f(namespace: 'x', default: 1);");
+        assert!(matches!(program[0], Stmt::Expression(_)));
+    }
+
+    #[test]
+    fn first_class_callable_parses_distinctly_from_a_real_call() {
+        let program = parse("<?php $f = strlen(...);");
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected an assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::FirstClassCallable(_)));
+    }
+
+    #[test]
+    fn include_and_require_parse_without_parens() {
+        let program = parse("<?php include $file; require_once $other;");
+        assert_eq!(program.len(), 2);
+    }
+
+    #[test]
+    fn static_local_variable_declaration_parses() {
+        let program = parse("<?php function f() { static $count = 0; return $count; } ");
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        assert!(matches!(f.body[0], Stmt::StaticVar(_)));
+    }
+
+    #[test]
+    fn bitwise_compound_assignment_operators_parse() {
+        let program = parse(
+            r#"<?php
+            function f(int $v) {
+                $v |= 1;
+                $v &= 2;
+                $v ^= 3;
+                $v <<= 1;
+                $v >>= 1;
+            }
+        "#,
+        );
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        assert_eq!(f.body.len(), 5);
+        for stmt in &f.body {
+            assert!(matches!(stmt, Stmt::Expression(Expr::CompoundAssign(..))));
+        }
+    }
+
+    #[test]
+    fn anonymous_class_parses_with_interface_and_constructor_args() {
+        let program = parse(
+            r#"<?php
+            $x = new readonly class(1) implements Countable {
+                public function __construct(private int $n) {}
+                public function count(): int { return $this->n; }
+            };
+        "#,
+        );
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected an assignment");
+        };
+        let Expr::NewAnonymousClass(decl, args) = rhs.as_ref() else {
+            panic!("expected NewAnonymousClass");
+        };
+        assert_eq!(args.len(), 1);
+        assert_eq!(decl.implements, vec!["Countable".to_string()]);
+        assert_eq!(decl.methods.len(), 2);
+    }
+
+    #[test]
+    fn yield_forms_all_parse() {
+        let program = parse(
+            r#"<?php
+            function gen() {
+                yield 1;
+                yield 'key' => 2;
+                yield from [3, 4];
+                yield;
+            }
+        "#,
+        );
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        assert_eq!(f.body.len(), 4);
+
+        let Stmt::Expression(Expr::Yield(None, Some(_))) = &f.body[0] else {
+            panic!("expected bare-value yield");
+        };
+        let Stmt::Expression(Expr::Yield(Some(_), Some(_))) = &f.body[1] else {
+            panic!("expected key => value yield");
+        };
+        assert!(matches!(f.body[2], Stmt::Expression(Expr::YieldFrom(_))));
+        assert!(matches!(
+            f.body[3],
+            Stmt::Expression(Expr::Yield(None, None))
+        ));
+    }
+
+    #[test]
+    fn asymmetric_visibility_property_parses() {
+        let program = parse(
+            r#"<?php
+            class Foo {
+                public private(set) string $name = 'a';
+                private(set) int $count = 0;
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.properties.len(), 2);
+        assert_eq!(c.properties[0].name, "name");
+        assert_eq!(c.properties[0].visibility, Visibility::Public);
+        assert_eq!(c.properties[1].name, "count");
+        assert_eq!(c.properties[1].visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn property_hooks_parse() {
+        let program = parse(
+            r#"<?php
+            class Foo {
+                public string $upper {
+                    get => strtoupper($this->raw);
+                    set(string $value) {
+                        $this->raw = strtolower($value);
+                    }
+                }
+                public int $bare {
+                    get;
+                    set;
+                }
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.properties.len(), 2);
+
+        let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
+        assert!(matches!(hooks.get, Some(PropertyHookBody::Arrow(_))));
+        let (param, body) = hooks.set.as_ref().expect("expected set hook");
+        assert_eq!(param.as_ref().unwrap().name, "value");
+        assert!(matches!(body, PropertyHookBody::Block(_)));
+
+        let bare_hooks = c.properties[1].hooks.as_ref().expect("expected hooks");
+        assert!(bare_hooks.get.is_none());
+        assert!(bare_hooks.set.is_none());
     }
 }

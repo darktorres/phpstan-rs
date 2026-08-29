@@ -37,10 +37,16 @@ pub enum Stmt {
     FunctionDecl(FunctionDecl),
     ClassDecl(ClassDecl),
     Namespace(String),
-    Use(String),
+    // (imported path, optional `as Alias`)
+    Use(String, Option<String>),
     // Top-level `const NAME = value, ...;`, distinct from a class's own
     // consts (ClassConst is reused for the shape, since it's identical).
     GlobalConst(Vec<ClassConst>),
+    // `static $x = 1, $y;` - a function-local static variable declaration
+    // (name, optional initializer). Persistence across calls isn't
+    // modeled - only its scoping (the variable is defined from here on)
+    // matters for a single-call static analysis pass.
+    StaticVar(Vec<(String, Option<Expr>)>),
     EnumDecl(EnumDecl),
     Switch {
         subject: Expr,
@@ -104,6 +110,29 @@ pub struct PropertyDecl {
     pub type_hint: Option<String>,
     pub default: Option<Expr>,
     pub doc_comment: Option<String>,
+    // PHP 8.4 property hooks (`{ get => ...; set(Type $value) { ... } }`).
+    // Parsed so the file doesn't fail to parse at all, but the hook bodies
+    // aren't type-checked (they're arbitrary code referencing $this/$value
+    // with no function-like registry entry to check them against) - out of
+    // scope for now, same as FirstClassCallable's args.
+    pub hooks: Option<PropertyHooks>,
+}
+
+#[derive(Debug, Clone)]
+pub enum PropertyHookBody {
+    // `get => expr;` / `set(...) => expr;`
+    Arrow(Expr),
+    // `get { ... }` / `set(...) { ... }`
+    Block(Vec<Stmt>),
+}
+
+#[derive(Debug, Clone)]
+pub struct PropertyHooks {
+    pub get: Option<PropertyHookBody>,
+    // The optional `(Type $value)` parameter list is just the one param
+    // PHP allows there; None when the hook omits it (`set { ... }` uses an
+    // implicit $value).
+    pub set: Option<(Option<Param>, PropertyHookBody)>,
 }
 
 #[derive(Debug, Clone)]
@@ -184,6 +213,12 @@ pub enum BinOp {
     Spaceship,
     And,
     Or,
+    // The `xor` keyword operator - logical, not `^`'s bitwise BitXor. The
+    // word forms of &&/|| (`and`/`or`) reuse And/Or directly since they're
+    // the same operation at runtime, only their *precedence* differs,
+    // which is purely a parse-time concern already resolved by the time
+    // this tree exists.
+    LogicalXor,
     BitAnd,
     BitOr,
     BitXor,
@@ -234,6 +269,29 @@ pub enum Expr {
     Cast(String, Box<Expr>),
     Grouping(Box<Expr>),
     Clone(Box<Expr>),
+    // `foo(...)` / `$obj->method(...)` (PHP 8.1): a reference to the
+    // callable itself, not a call - wraps a Call/MethodCall/StaticCall
+    // that was parsed with an empty argument list specifically because of
+    // this syntax, so it's never mistaken for (and argument-count-checked
+    // as) a real zero-argument call.
+    FirstClassCallable(Box<Expr>),
+    // `throw` as an expression (PHP 8.0+): valid in match arms, ternary
+    // branches, ??'s right side, arrow function bodies, etc - as opposed
+    // to Stmt::Throw, a bare `throw expr;` statement, which is still
+    // dispatched separately and takes priority at statement position.
+    Throw(Box<Expr>),
+    // `new class(...) [extends X] [implements Y] { ... }` - the anonymous
+    // class's own declaration, inline, plus its constructor arguments.
+    // Never given a stable name multiple such expressions could share, so
+    // it isn't indexed into the registry the way a normal class is; its
+    // methods are still type-checked (see checker::check_expr).
+    NewAnonymousClass(Box<ClassDecl>, Vec<Expr>),
+    // `yield;` / `yield $v;` / `yield $k => $v;` - (key, value). Makes the
+    // enclosing function a generator; that broader semantic isn't modeled,
+    // only enough structure to parse and check the yielded expression(s).
+    Yield(Option<Box<Expr>>, Option<Box<Expr>>),
+    // `yield from $generator;`
+    YieldFrom(Box<Expr>),
     Interpolated(Vec<Expr>),
     Closure {
         params: Vec<Param>,

@@ -415,6 +415,12 @@ impl<'a> Lexer<'a> {
         if self.starts_with("...") {
             op!(3, Token::Ellipsis);
         }
+        if self.starts_with("<<=") {
+            op!(3, Token::LtLtEquals);
+        }
+        if self.starts_with(">>=") {
+            op!(3, Token::GtGtEquals);
+        }
 
         if self.starts_with("->") {
             op!(2, Token::Arrow);
@@ -448,6 +454,15 @@ impl<'a> Lexer<'a> {
         }
         if self.starts_with("%=") {
             op!(2, Token::PercentEquals);
+        }
+        if self.starts_with("&=") {
+            op!(2, Token::AmpEquals);
+        }
+        if self.starts_with("|=") {
+            op!(2, Token::PipeEquals);
+        }
+        if self.starts_with("^=") {
+            op!(2, Token::CaretEquals);
         }
         if self.starts_with("==") {
             op!(2, Token::EqualsEquals);

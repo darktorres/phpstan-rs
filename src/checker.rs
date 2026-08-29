@@ -364,6 +364,18 @@ impl<'a> Checker<'a> {
                     locals.entry(name.clone()).or_insert(Type::Mixed);
                 }
             }
+            Stmt::StaticVar(vars) => {
+                for (name, default) in vars {
+                    if let Some(e) = default {
+                        self.check_expr(e, locals, label);
+                    }
+                    let ty = default
+                        .as_ref()
+                        .map(|e| self.infer_expr(e, locals))
+                        .unwrap_or(Type::Mixed);
+                    locals.insert(name.clone(), ty);
+                }
+            }
             _ => {}
         }
     }
@@ -530,8 +542,18 @@ impl<'a> Checker<'a> {
             Expr::Unary(_, inner)
             | Expr::Grouping(inner)
             | Expr::Clone(inner)
-            | Expr::Cast(_, inner) => {
+            | Expr::Cast(_, inner)
+            | Expr::Throw(inner)
+            | Expr::YieldFrom(inner) => {
                 self.check_expr(inner, locals, label);
+            }
+            Expr::Yield(key, value) => {
+                if let Some(k) = key {
+                    self.check_expr(k, locals, label);
+                }
+                if let Some(v) = value {
+                    self.check_expr(v, locals, label);
+                }
             }
             Expr::Assign(lhs, rhs) => {
                 self.check_expr(rhs, locals, label);
@@ -589,6 +611,18 @@ impl<'a> Checker<'a> {
             Expr::New(_, args) => {
                 for a in args {
                     self.check_expr(a, locals, label);
+                }
+            }
+            Expr::NewAnonymousClass(decl, args) => {
+                for a in args {
+                    self.check_expr(a, locals, label);
+                }
+                // The anonymous class's own methods are still worth
+                // checking, even though the class itself isn't indexed
+                // into the registry under any stable name - check_function
+                // only needs a FunctionDecl and a label to check against.
+                for m in &decl.methods {
+                    self.check_function(&m.function, Some(&decl.name));
                 }
             }
             Expr::PropertyAccess(base, _) => self.check_expr(base, locals, label),
@@ -764,6 +798,15 @@ impl<'a> Checker<'a> {
             },
             Expr::Variable(name) => locals.get(name).cloned().unwrap_or(Type::Mixed),
             Expr::Grouping(inner) | Expr::Clone(inner) => self.infer_expr(inner, locals),
+            Expr::FirstClassCallable(_) => Type::Callable,
+            // A throw expression never actually produces a value - Never
+            // is exactly the right type for it, the same way it's used for
+            // a function that always throws or exits.
+            Expr::Throw(_) => Type::Never,
+            // Never given a stable nominal type, since multiple such
+            // expressions in the same file could share the placeholder
+            // name - Mixed is the honest answer, not an oversight.
+            Expr::NewAnonymousClass(..) => Type::Mixed,
             Expr::Cast(ty, _) => match ty.as_str() {
                 "int" => Type::Int,
                 "float" => Type::Float,
@@ -896,6 +939,7 @@ impl<'a> Checker<'a> {
             | BinOp::GtEq
             | BinOp::And
             | BinOp::Or
+            | BinOp::LogicalXor
             | BinOp::Spaceship => Type::Bool,
             BinOp::Add
             | BinOp::Sub
@@ -1883,6 +1927,41 @@ mod tests {
                 public function good(): int {
                     return needsInt(5);
                 }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn anonymous_class_method_body_is_type_checked() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            interface Greeter { public function greet(): string; }
+            function make() {
+                return new class implements Greeter {
+                    public function greet(): string {
+                        return needsInt("wrong");
+                    }
+                };
+            }
+        "#,
+        );
+        assert!(d.iter().any(|d| d.message.contains("needsInt")));
+    }
+
+    #[test]
+    fn anonymous_class_with_correct_usage_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function make() {
+                return new class {
+                    public function value(): int {
+                        return needsInt(5);
+                    }
+                };
             }
         "#,
         );
