@@ -49,10 +49,17 @@ impl FunctionSig {
 }
 
 #[derive(Debug, Clone)]
+pub struct PropertySig {
+    pub ty: Type,
+    pub is_static: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct ClassInfo {
     pub extends: Vec<String>,
     pub implements: Vec<String>,
     pub methods: HashMap<String, FunctionSig>,
+    pub properties: HashMap<String, PropertySig>,
 }
 
 impl ClassInfo {
@@ -62,10 +69,54 @@ impl ClassInfo {
             .iter()
             .map(|m| (m.function.name.clone(), FunctionSig::from_decl(&m.function)))
             .collect();
+
+        let mut properties: HashMap<String, PropertySig> = c
+            .properties
+            .iter()
+            .map(|p| {
+                let ty = p
+                    .type_hint
+                    .as_deref()
+                    .map(types::parse_type_string)
+                    .unwrap_or(Type::Mixed);
+                (
+                    p.name.clone(),
+                    PropertySig {
+                        ty,
+                        is_static: p.is_static,
+                    },
+                )
+            })
+            .collect();
+
+        // Constructor property promotion: `public function __construct(
+        // private int $id) {}` declares `$id` as a property, not just a
+        // parameter - the parser records this via Param::promoted_visibility.
+        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+            for p in &ctor.function.params {
+                if p.promoted_visibility.is_none() {
+                    continue;
+                }
+                let ty = p
+                    .type_hint
+                    .as_deref()
+                    .map(types::parse_type_string)
+                    .unwrap_or(Type::Mixed);
+                properties.insert(
+                    p.name.clone(),
+                    PropertySig {
+                        ty,
+                        is_static: false,
+                    },
+                );
+            }
+        }
+
         ClassInfo {
             extends: c.extends.clone(),
             implements: c.implements.clone(),
             methods,
+            properties,
         }
     }
 }
@@ -150,6 +201,24 @@ impl Registry {
             }
             let info = self.classes.get(current)?;
             if let Some(sig) = info.methods.get(method) {
+                return Some(sig);
+            }
+            current = info.extends.first()?;
+        }
+    }
+
+    /// Looks up a property, walking up the extends chain if not declared
+    /// directly on `class` (covers inherited properties, including ones
+    /// introduced via constructor promotion).
+    pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertySig> {
+        let mut current = class;
+        let mut seen = HashSet::new();
+        loop {
+            if !seen.insert(current.to_string()) {
+                return None;
+            }
+            let info = self.classes.get(current)?;
+            if let Some(sig) = info.properties.get(prop) {
                 return Some(sig);
             }
             current = info.extends.first()?;
@@ -261,5 +330,42 @@ mod tests {
             &Type::Object("Shape".to_string()),
             &Type::Object("Circle".to_string())
         ));
+    }
+
+    #[test]
+    fn declared_property_type_is_tracked() {
+        let r = build_registry(
+            r#"<?php
+            class Box { public int $value = 0; }
+        "#,
+        );
+        assert_eq!(r.lookup_property("Box", "value").unwrap().ty, Type::Int);
+    }
+
+    #[test]
+    fn constructor_promotion_registers_a_property() {
+        let r = build_registry(
+            r#"<?php
+            class Point {
+                public function __construct(private int $x, public string $label) {}
+            }
+        "#,
+        );
+        assert_eq!(r.lookup_property("Point", "x").unwrap().ty, Type::Int);
+        assert_eq!(
+            r.lookup_property("Point", "label").unwrap().ty,
+            Type::String
+        );
+    }
+
+    #[test]
+    fn property_lookup_walks_up_extends_chain() {
+        let r = build_registry(
+            r#"<?php
+            class Base { public string $name = ""; }
+            class Sub extends Base {}
+        "#,
+        );
+        assert_eq!(r.lookup_property("Sub", "name").unwrap().ty, Type::String);
     }
 }

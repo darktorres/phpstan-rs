@@ -70,6 +70,9 @@ pub struct Param {
     pub default: Option<Expr>,
     pub by_ref: bool,
     pub variadic: bool,
+    // Some(visibility) for constructor property promotion, e.g.
+    // `public function __construct(private int $id) {}`.
+    pub promoted_visibility: Option<Visibility>,
 }
 
 #[derive(Debug, Clone)]

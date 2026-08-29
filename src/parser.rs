@@ -594,16 +594,25 @@ impl Parser {
         self.expect(&Token::LParen);
         let mut params = Vec::new();
         while !self.check(&Token::RParen) {
-            // constructor-promotion / visibility modifiers: recorded on the
-            // class via the property list would be more accurate, but for
-            // this prototype we just consume and drop them.
-            while matches!(
-                self.peek(),
-                Token::Keyword(Keyword::Public)
-                    | Token::Keyword(Keyword::Private)
-                    | Token::Keyword(Keyword::Protected)
-                    | Token::Keyword(Keyword::Readonly)
-            ) {
+            // A visibility modifier here means constructor property
+            // promotion (`public function __construct(private int $id) {}`)
+            // - `readonly` can appear alongside it but doesn't itself imply
+            // promotion, so it's still just consumed and dropped.
+            let mut promoted_visibility = None;
+            loop {
+                match self.peek() {
+                    Token::Keyword(Keyword::Public) => {
+                        promoted_visibility = Some(Visibility::Public)
+                    }
+                    Token::Keyword(Keyword::Private) => {
+                        promoted_visibility = Some(Visibility::Private)
+                    }
+                    Token::Keyword(Keyword::Protected) => {
+                        promoted_visibility = Some(Visibility::Protected)
+                    }
+                    Token::Keyword(Keyword::Readonly) => {}
+                    _ => break,
+                }
                 self.advance();
             }
 
@@ -622,6 +631,7 @@ impl Parser {
                 default,
                 by_ref,
                 variadic,
+                promoted_visibility,
             });
             if !self.eat(&Token::Comma) {
                 break;
