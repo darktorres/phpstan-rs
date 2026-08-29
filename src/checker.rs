@@ -16,10 +16,16 @@ pub struct Diagnostic {
 /// mean both PHP's real `mixed` type AND "we don't know" for anything this
 /// prototype can't infer (property access, closures, dynamic calls, ...) -
 /// so every check below treats an inferred `Mixed` as inconclusive and
-/// skips reporting, rather than risk false positives. This is flow-
-/// insensitive: a variable's tracked type is simply overwritten on each
-/// assignment seen, with no control-flow merging (no narrowing on `if`,
-/// no re-widening after a loop, etc).
+/// skips reporting, rather than risk false positives.
+///
+/// `if`/`while` fork `locals` into per-branch copies (narrowed via
+/// `apply_narrowing` on the condition) and merge them back at the join
+/// point (`merge_scopes`), accounting for a branch that unconditionally
+/// terminates (`always_terminates`) so a guard clause's narrowing survives
+/// past the `if`. Everything else (`for`/`foreach`/`switch`/`try`) still
+/// shares one mutable scope with no forking or narrowing - a real but
+/// bounded gap, not a soundness issue, since no narrowing ever happens
+/// there rather than an incorrect one.
 pub struct Checker<'a> {
     registry: &'a Registry,
     diagnostics: Vec<Diagnostic>,
@@ -162,14 +168,49 @@ impl<'a> Checker<'a> {
                 else_branch,
             } => {
                 self.check_expr(cond, locals, label);
-                self.check_stmt(then_branch, locals, declared_return, label);
+
+                let mut then_locals = locals.clone();
+                self.apply_narrowing(cond, &mut then_locals, true);
+                self.check_stmt(then_branch, &mut then_locals, declared_return, label);
+
+                let mut else_locals = locals.clone();
+                self.apply_narrowing(cond, &mut else_locals, false);
                 if let Some(e) = else_branch {
-                    self.check_stmt(e, locals, declared_return, label);
+                    self.check_stmt(e, &mut else_locals, declared_return, label);
                 }
+
+                // The classic guard clause - `if ($x === null) { return; }`
+                // - depends on this: a branch that unconditionally
+                // returns/throws/breaks/continues never reaches the merge
+                // point, so only the surviving branch's (narrowed) scope
+                // should propagate past the if. Without this, the
+                // terminated branch's narrowing (here, "$x is null")
+                // would incorrectly leak into the code after the guard.
+                let then_terminates = always_terminates(then_branch);
+                let else_terminates = else_branch.as_deref().is_some_and(always_terminates);
+
+                *locals = match (then_terminates, else_terminates) {
+                    (true, false) => else_locals,
+                    (false, true) => then_locals,
+                    _ => merge_scopes(&then_locals, &else_locals),
+                };
             }
-            Stmt::While { cond, body } | Stmt::DoWhile { body, cond } => {
+            Stmt::While { cond, body } => {
                 self.check_expr(cond, locals, label);
+                let mut body_locals = locals.clone();
+                self.apply_narrowing(cond, &mut body_locals, true);
+                self.check_stmt(body, &mut body_locals, declared_return, label);
+                // The loop may run zero times, so what's true after it is
+                // "either the pre-loop state, or whatever one narrowed
+                // iteration produces" - not a real fixed point, but sound
+                // enough to avoid claiming more precision than we have.
+                *locals = merge_scopes(locals, &body_locals);
+            }
+            Stmt::DoWhile { body, cond } => {
+                // The condition is only evaluated after the body has
+                // already run once, so there's nothing to narrow going in.
                 self.check_stmt(body, locals, declared_return, label);
+                self.check_expr(cond, locals, label);
             }
             Stmt::For {
                 init,
@@ -239,6 +280,77 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
+    }
+
+    /// Narrows `locals` in place based on `cond` being true (`branch_true`)
+    /// or false, along one branch of an `if`/`while`. Only handles the
+    /// common, safe patterns - equality against a known-type value
+    /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
+    /// anything else leaves `locals` untouched rather than guess.
+    fn apply_narrowing(&self, cond: &Expr, locals: &mut HashMap<String, Type>, branch_true: bool) {
+        match cond {
+            Expr::Binary(op, l, r) => {
+                let is_eq = matches!(op, BinOp::Identical | BinOp::Eq);
+                let is_neq = matches!(op, BinOp::NotIdentical | BinOp::NotEq);
+                if is_eq || is_neq {
+                    let matches_when_true = if is_eq { branch_true } else { !branch_true };
+                    self.apply_equality_narrowing(l, r, locals, matches_when_true);
+                }
+            }
+            Expr::Unary(UnaryOp::Not, inner) => {
+                self.apply_narrowing(inner, locals, !branch_true);
+            }
+            Expr::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
+            Expr::Call(callee, args) => {
+                if let (Expr::Name(name), [Expr::Variable(var_name)]) =
+                    (callee.as_ref(), args.as_slice())
+                    && let Some(target_ty) = narrowing_type_for_predicate(name)
+                {
+                    let current = locals.get(var_name).cloned().unwrap_or(Type::Mixed);
+                    let narrowed = if branch_true {
+                        narrow_type_to(&current, &target_ty)
+                    } else {
+                        narrow_type_excluding(&current, &target_ty)
+                    };
+                    locals.insert(var_name.clone(), narrowed);
+                }
+            }
+            Expr::Instanceof(inner, class_name) => {
+                // The false branch would need a "not this class" type we
+                // don't have a representation for, so it's left alone.
+                if branch_true && let Expr::Variable(var_name) = inner.as_ref() {
+                    locals.insert(var_name.clone(), Type::Object(class_name.clone()));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_equality_narrowing(
+        &self,
+        l: &Expr,
+        r: &Expr,
+        locals: &mut HashMap<String, Type>,
+        matches_when_true: bool,
+    ) {
+        let pair = match (l, r) {
+            (Expr::Variable(name), other) => Some((name.clone(), self.infer_expr(other, locals))),
+            (other, Expr::Variable(name)) => Some((name.clone(), self.infer_expr(other, locals))),
+            _ => None,
+        };
+        let Some((var_name, target_ty)) = pair else {
+            return;
+        };
+        if target_ty == Type::Mixed {
+            return;
+        }
+        let current = locals.get(&var_name).cloned().unwrap_or(Type::Mixed);
+        let narrowed = if matches_when_true {
+            narrow_type_to(&current, &target_ty)
+        } else {
+            narrow_type_excluding(&current, &target_ty)
+        };
+        locals.insert(var_name, narrowed);
     }
 
     fn check_expr(&mut self, e: &Expr, locals: &HashMap<String, Type>, label: &str) {
@@ -540,6 +652,129 @@ impl<'a> Checker<'a> {
     }
 }
 
+fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
+    match name {
+        "is_string" => Some(Type::String),
+        "is_int" | "is_integer" | "is_long" => Some(Type::Int),
+        "is_float" | "is_double" => Some(Type::Float),
+        "is_bool" | "is_boolean" => Some(Type::Bool),
+        "is_array" => Some(Type::Array(Box::new(Type::Mixed))),
+        "is_null" => Some(Type::Null),
+        "is_object" => Some(Type::Object("object".to_string())),
+        _ => None,
+    }
+}
+
+/// Narrows `original` to `target` along the branch where a check for
+/// `target` succeeded: if `original` is a union, keep only the member(s)
+/// that match; otherwise just trust the more specific `target`.
+fn narrow_type_to(original: &Type, target: &Type) -> Type {
+    match original {
+        Type::Union(members) => {
+            let kept: Vec<Type> = members.iter().filter(|m| *m == target).cloned().collect();
+            match kept.len() {
+                0 => target.clone(),
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        _ => target.clone(),
+    }
+}
+
+/// Narrows `original` by removing `excluded` along the branch where a check
+/// for it failed - the "not null" half of a `=== null` guard clause, the
+/// most common narrowing pattern in real code.
+fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
+    match original {
+        Type::Union(members) => {
+            let kept: Vec<Type> = members.iter().filter(|m| *m != excluded).cloned().collect();
+            match kept.len() {
+                0 => Type::Never,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        other if other == excluded => Type::Never,
+        other => other.clone(),
+    }
+}
+
+/// Union of two types for a scope-merge join point - flattens nested
+/// unions and keeps `Mixed` "unknown" rather than let it compose into a
+/// falsely-precise-looking Union (same principle as the ternary inference).
+fn union_types(a: Type, b: Type) -> Type {
+    if a == b {
+        return a;
+    }
+    if a == Type::Mixed || b == Type::Mixed {
+        return Type::Mixed;
+    }
+    let mut members = Vec::new();
+    match a {
+        Type::Union(m) => members.extend(m),
+        other => members.push(other),
+    }
+    match b {
+        Type::Union(m) => {
+            for x in m {
+                if !members.contains(&x) {
+                    members.push(x);
+                }
+            }
+        }
+        other => {
+            if !members.contains(&other) {
+                members.push(other);
+            }
+        }
+    }
+    if members.len() == 1 {
+        members.into_iter().next().unwrap()
+    } else {
+        Type::Union(members)
+    }
+}
+
+/// Conservatively recognizes a statement that unconditionally leaves the
+/// current block (return/throw/break/continue, or a block/if where every
+/// path does). Only used to decide whether a branch's locals should
+/// propagate past an `if` - false negatives here (missing a case that
+/// really does always terminate) just mean less narrowing, never a wrong
+/// answer, so loops/switch/try are deliberately not analyzed and just
+/// treated as "might fall through".
+fn always_terminates(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
+        Stmt::Block(stmts) => stmts.last().is_some_and(always_terminates),
+        Stmt::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            always_terminates(then_branch) && else_branch.as_deref().is_some_and(always_terminates)
+        }
+        _ => false,
+    }
+}
+
+/// Joins two branch-local scopes back into one after an `if`/`while`. A
+/// variable present in both branches gets the union of its two types; one
+/// present in only one branch was introduced there and can't be assumed to
+/// exist afterward, so it's dropped rather than carried forward unsoundly.
+fn merge_scopes(
+    then_locals: &HashMap<String, Type>,
+    else_locals: &HashMap<String, Type>,
+) -> HashMap<String, Type> {
+    let mut merged = HashMap::new();
+    for (name, then_ty) in then_locals {
+        if let Some(else_ty) = else_locals.get(name) {
+            merged.insert(name.clone(), union_types(then_ty.clone(), else_ty.clone()));
+        }
+    }
+    merged
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -708,6 +943,117 @@ mod tests {
             function needsInt(int $x): int { return $x; }
             $box = new Box();
             needsInt($box->label);
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn guard_clause_narrows_nullable_param_after_early_return() {
+        // The single most common narrowing idiom in real PHP: without
+        // recognizing that the `if` branch terminates, the narrowed-to-null
+        // state from that branch would incorrectly leak past the guard.
+        let d = diagnostics_for(
+            r#"<?php
+            function greet(?string $name): string {
+                if ($name === null) {
+                    return "stranger";
+                }
+                return $name;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn guard_clause_narrows_in_else_branch_too() {
+        let d = diagnostics_for(
+            r#"<?php
+            function greet(?string $name): string {
+                if ($name === null) {
+                    $name = "stranger";
+                } else {
+                    // $name narrowed to string here already, this is a no-op
+                }
+                return $name;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn is_string_narrowing_catches_misuse_inside_the_guarded_branch() {
+        // Before narrowing, an untyped param stays Mixed forever and this
+        // bug would have been silently skipped rather than caught.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function process($value) {
+                if (is_string($value)) {
+                    return needsInt($value);
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn instanceof_narrows_to_the_checked_class() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Cat { public function meow(): string { return "meow"; } }
+            function useCat(Cat $c): string { return $c->meow(); }
+            function handle($animal) {
+                if ($animal instanceof Cat) {
+                    return useCat($animal);
+                }
+                return "";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn scope_fork_does_not_leak_then_branch_assignment_into_else() {
+        // Before real forking, then/else shared one mutable scope
+        // sequentially, so an assignment in the then-branch could leak into
+        // what the else-branch (wrongly) saw.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function f(bool $cond) {
+                if ($cond) {
+                    $x = "a string";
+                } else {
+                    $x = 5;
+                    needsInt($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn merged_type_after_non_terminating_if_else_is_a_union() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function f(bool $cond) {
+                if ($cond) {
+                    $x = "a string";
+                } else {
+                    $x = 5;
+                }
+                needsInt($x);
+            }
         "#,
         );
         assert_eq!(d.len(), 1);
