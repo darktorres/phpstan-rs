@@ -81,6 +81,8 @@ pub struct FunctionDecl {
     pub params: Vec<Param>,
     pub return_type: Option<String>,
     pub body: Vec<Stmt>,
+    // Raw `/** ... */` text immediately preceding this declaration, if any.
+    pub doc_comment: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,6 +99,7 @@ pub struct PropertyDecl {
     pub is_static: bool,
     pub type_hint: Option<String>,
     pub default: Option<Expr>,
+    pub doc_comment: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -129,6 +129,11 @@ pub enum StringPart {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     InlineHtml(String),
+    // Raw `/** ... */` text, including the delimiters. Regular `/* */` and
+    // `//` comments are still discarded as whitespace - only doc comments
+    // are worth carrying through, so the parser can pair one with the
+    // declaration it precedes.
+    DocComment(String),
 
     Variable(String),
     Integer(i64),

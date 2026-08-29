@@ -5,11 +5,41 @@ use crate::token::{Keyword, StringPart, Token};
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    // A doc comment's raw text, keyed by the index (in `tokens`, after
+    // filtering) of the token it immediately precedes. Built once up front
+    // so the rest of the parser never has to know DocComment tokens
+    // existed - only the specific call sites that attach one to a
+    // declaration look here.
+    doc_comments: std::collections::HashMap<usize, String>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        let mut filtered = Vec::with_capacity(tokens.len());
+        let mut doc_comments = std::collections::HashMap::new();
+        let mut pending: Option<String> = None;
+        for tok in tokens {
+            match tok {
+                Token::DocComment(s) => pending = Some(s),
+                other => {
+                    if let Some(doc) = pending.take() {
+                        doc_comments.insert(filtered.len(), doc);
+                    }
+                    filtered.push(other);
+                }
+            }
+        }
+        Parser {
+            tokens: filtered,
+            pos: 0,
+            doc_comments,
+        }
+    }
+
+    /// Consumes any doc comment immediately preceding the current position -
+    /// call this before advancing past the first token of a declaration.
+    fn take_doc_comment(&mut self) -> Option<String> {
+        self.doc_comments.remove(&self.pos)
     }
 
     pub fn parse_program(&mut self) -> Vec<Stmt> {
@@ -142,7 +172,9 @@ impl Parser {
                 Stmt::Global(names)
             }
             Token::Keyword(Keyword::Function) => {
-                let f = self.parse_function_decl();
+                let doc = self.take_doc_comment();
+                let mut f = self.parse_function_decl();
+                f.doc_comment = doc;
                 Stmt::FunctionDecl(f)
             }
             Token::Keyword(Keyword::Class)
@@ -663,6 +695,11 @@ impl Parser {
             params,
             return_type,
             body,
+            // Callers that saw a preceding doc comment overwrite this -
+            // parse_function_decl itself is entered after any modifiers
+            // (and thus after the doc comment's position) have already
+            // been consumed.
+            doc_comment: None,
         }
     }
 
@@ -722,6 +759,8 @@ impl Parser {
         let mut uses = Vec::new();
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
+            let doc = self.take_doc_comment();
+
             if self.eat(&Token::Keyword(Keyword::Use)) {
                 uses.push(self.parse_qualified_name());
                 while self.eat(&Token::Comma) {
@@ -791,7 +830,8 @@ impl Parser {
             }
 
             if self.check(&Token::Keyword(Keyword::Function)) {
-                let function = self.parse_function_decl();
+                let mut function = self.parse_function_decl();
+                function.doc_comment = doc;
                 methods.push(MethodDecl {
                     visibility,
                     is_static,
@@ -816,6 +856,7 @@ impl Parser {
                     is_static,
                     type_hint: type_hint.clone(),
                     default,
+                    doc_comment: doc.clone(),
                 });
                 if !self.eat(&Token::Comma) {
                     break;
@@ -1447,5 +1488,103 @@ impl Parser {
             return exprs.into_iter().next().unwrap();
         }
         Expr::Interpolated(exprs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+
+    fn parse(src: &str) -> Vec<Stmt> {
+        Parser::new(Lexer::new(src).tokenize()).parse_program()
+    }
+
+    #[test]
+    fn doc_comment_attaches_to_top_level_function() {
+        let program = parse(
+            r#"<?php
+            /**
+             * @param int $x
+             * @return int
+             */
+            function double(int $x): int { return $x * 2; }
+        "#,
+        );
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        assert!(f.doc_comment.as_ref().unwrap().contains("@return int"));
+    }
+
+    #[test]
+    fn doc_comment_attaches_to_method_not_the_previous_one() {
+        let program = parse(
+            r#"<?php
+            class Box {
+                /** @return int */
+                public function a(): int { return 1; }
+
+                public function b(): int { return 2; }
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        assert!(c.methods[0].function.doc_comment.is_some());
+        assert!(c.methods[1].function.doc_comment.is_none());
+    }
+
+    #[test]
+    fn doc_comment_attaches_to_property() {
+        let program = parse(
+            r#"<?php
+            class Box {
+                /** @var int */
+                public $value;
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        assert!(
+            c.properties[0]
+                .doc_comment
+                .as_ref()
+                .unwrap()
+                .contains("@var int")
+        );
+    }
+
+    #[test]
+    fn empty_slash_star_star_slash_is_not_treated_as_a_doc_comment() {
+        // `/**/` is the classic ambiguous case: it looks like the start of
+        // a doc comment but is conventionally just an empty regular one.
+        let program = parse(
+            r#"<?php
+            /**/
+            function f(): int { return 1; }
+        "#,
+        );
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        assert!(f.doc_comment.is_none());
+    }
+
+    #[test]
+    fn regular_comment_is_not_captured_as_a_doc_comment() {
+        let program = parse(
+            r#"<?php
+            // just a regular comment
+            function f(): int { return 1; }
+        "#,
+        );
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        assert!(f.doc_comment.is_none());
     }
 }

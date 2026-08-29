@@ -1,5 +1,6 @@
 mod ast;
 mod checker;
+mod docblock;
 mod lexer;
 mod parser;
 mod registry;

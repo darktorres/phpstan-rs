@@ -105,6 +105,9 @@ impl<'a> Lexer<'a> {
         if self.starts_with("<<<") {
             return self.lex_heredoc();
         }
+        if self.starts_with("/**") {
+            return self.lex_doc_comment();
+        }
 
         self.lex_operator()
     }
@@ -175,6 +178,12 @@ impl<'a> Lexer<'a> {
                         self.pos += 1;
                     }
                 }
+                // `/**/` (empty) is conventionally just a regular comment,
+                // not a doc comment - PHP's own tokenizer draws the line the
+                // same way. Check that case first since it shares its
+                // middle `*` between the `/**`-looking open and the `*/`
+                // close.
+                b'/' if self.starts_with("/**") && self.peek_at(3) != b'/' => break,
                 b'/' if self.peek_at(1) == b'*' => {
                     self.pos += 2;
                     while self.pos < self.src.len() && !self.starts_with("*/") {
@@ -271,6 +280,16 @@ impl<'a> Lexer<'a> {
         let parts = scan_interpolated(raw);
         self.pos = (self.pos + 1).min(self.src.len()); // closing "
         Token::InterpString(parts)
+    }
+
+    fn lex_doc_comment(&mut self) -> Token {
+        let start = self.pos;
+        self.pos += 3; // consume '/**'
+        while self.pos < self.src.len() && !self.starts_with("*/") {
+            self.pos += 1;
+        }
+        self.pos = (self.pos + 2).min(self.src.len());
+        Token::DocComment(String::from_utf8_lossy(&self.src[start..self.pos]).into_owned())
     }
 
     fn lex_heredoc(&mut self) -> Token {

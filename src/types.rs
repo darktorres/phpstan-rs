@@ -93,8 +93,19 @@ pub fn parse_type_string(raw: &str) -> Type {
 }
 
 fn parse_type_atom(s: &str) -> Type {
-    let bare = s.trim().trim_start_matches('\\');
-    match bare.to_ascii_lowercase().as_str() {
+    // PHPDoc's `Type[]` array shorthand (`int[]`, even `string[][]`) has no
+    // native-hint equivalent, but reusing this parser for doc-comment types
+    // makes it worth handling here rather than in a separate PHPDoc-only
+    // parser.
+    let mut s = s.trim();
+    let mut array_depth = 0;
+    while let Some(stripped) = s.strip_suffix("[]") {
+        s = stripped.trim();
+        array_depth += 1;
+    }
+
+    let bare = s.trim_start_matches('\\');
+    let mut ty = match bare.to_ascii_lowercase().as_str() {
         "int" | "integer" => Type::Int,
         "float" | "double" => Type::Float,
         "string" => Type::String,
@@ -112,7 +123,11 @@ fn parse_type_atom(s: &str) -> Type {
         "static" => Type::StaticRef,
         "object" => Type::Object("object".to_string()),
         _ => Type::Object(bare.to_string()),
+    };
+    for _ in 0..array_depth {
+        ty = Type::Array(Box::new(ty));
     }
+    ty
 }
 
 /// Is every value described by `sub` also described by `sup`? This is the
@@ -181,6 +196,15 @@ mod tests {
         assert_eq!(
             parse_type_string("\\App\\Foo"),
             Type::Object("App\\Foo".to_string())
+        );
+    }
+
+    #[test]
+    fn phpdoc_array_shorthand_parses() {
+        assert_eq!(parse_type_string("int[]"), Type::Array(Box::new(Type::Int)));
+        assert_eq!(
+            parse_type_string("string[][]"),
+            Type::Array(Box::new(Type::Array(Box::new(Type::String))))
         );
     }
 
