@@ -7,12 +7,12 @@ use std::collections::HashMap;
 /// on `types` at all, so it can't unintentionally do (or fail to do) any
 /// resolution work of its own.
 ///
-/// Deliberately does not parse generics, array shapes, conditional return
-/// types, or `@template` - those need a real second type-string grammar,
-/// not this line-oriented tag scanner. `@param`/`@return`/`@var` cover
-/// PHPDoc's single biggest practical win with the least machinery: adding a
-/// type to something a native hint can't express (an untyped param/property,
-/// or PHP versions without union types).
+/// Deliberately does not parse conditional return types or `@template` -
+/// those need real per-call-site type parameter binding, not just parsing.
+/// `@param`/`@return`/`@var` cover PHPDoc's single biggest practical win
+/// with the least machinery: adding a type to something a native hint can't
+/// express (an untyped param/property, a native `array` refined to a shape
+/// or generic, or PHP versions without union types).
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DocBlock {
     pub params: HashMap<String, String>,
@@ -38,9 +38,8 @@ pub fn parse(raw: &str) -> DocBlock {
         match tag {
             "param" => {
                 // Convention is `Type $name description...`.
-                let mut rp = rest.splitn(2, char::is_whitespace);
-                let ty = rp.next().unwrap_or("");
-                let remainder = rp.next().unwrap_or("").trim();
+                let ty = take_type_token(rest);
+                let remainder = rest[ty.len()..].trim_start();
                 let var_token = remainder.split_whitespace().next().unwrap_or("");
                 if let Some(name) = var_token.strip_prefix('$')
                     && !ty.is_empty()
@@ -49,12 +48,14 @@ pub fn parse(raw: &str) -> DocBlock {
                 }
             }
             "return" => {
-                if let Some(ty) = rest.split_whitespace().next() {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
                     block.return_type = Some(ty.to_string());
                 }
             }
             "var" => {
-                if let Some(ty) = rest.split_whitespace().next() {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
                     block.var_type = Some(ty.to_string());
                 }
             }
@@ -63,6 +64,23 @@ pub fn parse(raw: &str) -> DocBlock {
     }
 
     block
+}
+
+/// Takes the leading type expression off `s`, stopping at the first
+/// whitespace that occurs outside any `<>`/`{}`/`()`/`[]` nesting - a plain
+/// `split_whitespace().next()` would wrongly cut an array shape or generic
+/// off at its first internal space (`array{count: int, ...}`).
+fn take_type_token(s: &str) -> &str {
+    let mut depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' | '{' | '(' | '[' => depth += 1,
+            '>' | '}' | ')' | ']' => depth -= 1,
+            c if c.is_whitespace() && depth == 0 => return &s[..i],
+            _ => {}
+        }
+    }
+    s
 }
 
 #[cfg(test)]
@@ -120,5 +138,32 @@ mod tests {
     fn single_line_doc_comment() {
         let block = parse("/** @return bool */");
         assert_eq!(block.return_type, Some("bool".to_string()));
+    }
+
+    #[test]
+    fn return_type_with_internal_spaces_is_not_truncated() {
+        let block = parse("/** @return array{count: int, first: string} */");
+        assert_eq!(
+            block.return_type,
+            Some("array{count: int, first: string}".to_string())
+        );
+    }
+
+    #[test]
+    fn param_type_with_internal_spaces_still_finds_the_variable_name() {
+        let block = parse("/** @param array{count: int, first: string} $x the input */");
+        assert_eq!(
+            block.params.get("x"),
+            Some(&"array{count: int, first: string}".to_string())
+        );
+    }
+
+    #[test]
+    fn generic_type_with_comma_and_space_is_not_truncated() {
+        let block = parse("/** @param array<int, User> $users */");
+        assert_eq!(
+            block.params.get("users"),
+            Some(&"array<int, User>".to_string())
+        );
     }
 }

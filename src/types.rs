@@ -3,8 +3,9 @@ use std::fmt;
 // A deliberately small slice of PHPStan's type system: enough to represent
 // what our parser already captures as raw type-hint strings, plus the
 // handful of pseudo-types (self/parent/static) that need special handling
-// once a class-context resolver exists. No generics, no conditional return
-// types, no array shapes yet - those need the stub/reflection layer first.
+// once a class-context resolver exists. Still no conditional return types
+// or @template generic substitution - those need real per-call-site type
+// parameter binding, not just parsing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Mixed,
@@ -20,6 +21,9 @@ pub enum Type {
     String,
     StringLiteral(String),
     Array(Box<Type>),
+    // `array{name: string, age?: int}` - PHPDoc's structural array type.
+    // (field name, field type, optional)
+    ArrayShape(Vec<(String, Type, bool)>),
     Object(String),
     Callable,
     SelfRef,
@@ -48,6 +52,16 @@ impl fmt::Display for Type {
                 Type::Mixed => write!(f, "array"),
                 other => write!(f, "array<{other}>"),
             },
+            Type::ArrayShape(fields) => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(name, ty, optional)| {
+                        let q = if *optional { "?" } else { "" };
+                        format!("{name}{q}: {ty}")
+                    })
+                    .collect();
+                write!(f, "array{{{}}}", parts.join(", "))
+            }
             Type::Object(name) => write!(f, "{name}"),
             Type::Callable => write!(f, "callable"),
             Type::SelfRef => write!(f, "self"),
@@ -66,10 +80,11 @@ impl fmt::Display for Type {
 }
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,
-/// `"int|string"`, `"\App\Foo"`, `"Countable&Iterator"`) into a `Type`.
-/// Does not handle mixed union+intersection (DNF types) or parentheses -
-/// PHPStan's own stub/native syntax rarely needs them outside advanced
-/// generic bounds.
+/// `"int|string"`, `"\App\Foo"`, `"Countable&Iterator"`, or a PHPDoc type
+/// like `"array<int, User>"` / `"array{name: string, age?: int}"`) into a
+/// `Type`. Does not handle mixed union+intersection (DNF types) or
+/// parentheses - PHPStan's own stub/native syntax rarely needs them outside
+/// advanced generic bounds.
 pub fn parse_type_string(raw: &str) -> Type {
     let mut s = raw.trim();
     let nullable = s.starts_with('?');
@@ -77,10 +92,15 @@ pub fn parse_type_string(raw: &str) -> Type {
         s = &s[1..];
     }
 
-    let ty = if s.contains('|') {
-        Type::Union(s.split('|').map(parse_type_atom).collect())
-    } else if s.contains('&') {
-        Type::Intersection(s.split('&').map(parse_type_atom).collect())
+    // Splitting must respect <>/{} nesting - `Collection<int|string>` has
+    // no top-level union, but a naive `s.contains('|')` would still split
+    // on the one hiding inside the angle brackets.
+    let pipe_parts = split_top_level(s, '|');
+    let amp_parts = split_top_level(s, '&');
+    let ty = if pipe_parts.len() > 1 {
+        Type::Union(pipe_parts.into_iter().map(parse_type_atom).collect())
+    } else if amp_parts.len() > 1 {
+        Type::Intersection(amp_parts.into_iter().map(parse_type_atom).collect())
     } else {
         parse_type_atom(s)
     };
@@ -92,19 +112,102 @@ pub fn parse_type_string(raw: &str) -> Type {
     }
 }
 
+/// Splits `s` on `sep`, but only where `sep` appears outside any
+/// `<>`/`{}`/`()`/`[]` nesting. Always returns at least one part, mirroring
+/// `str::split` - callers check `.len() > 1` to know whether a real
+/// top-level separator was found at all.
+fn split_top_level(s: &str, sep: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' | '{' | '(' | '[' => depth += 1,
+            '>' | '}' | ')' | ']' => depth -= 1,
+            c if c == sep && depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+/// `array{name: string, age?: int}` - PHPDoc's structural array shape.
+/// Field values can themselves be full type strings (unions, generics,
+/// nested shapes), so each is re-run through `parse_type_string`.
+fn try_parse_array_shape(s: &str) -> Option<Type> {
+    let lower = s.to_ascii_lowercase();
+    if !lower.starts_with("array") {
+        return None;
+    }
+    let rest = s[5..].trim_start();
+    if !rest.starts_with('{') || !rest.ends_with('}') {
+        return None;
+    }
+    let inner = &rest[1..rest.len() - 1];
+
+    let mut fields = Vec::new();
+    for field_str in split_top_level(inner, ',') {
+        let field_str = field_str.trim();
+        if field_str.is_empty() {
+            continue;
+        }
+        let (key_part, type_part) = field_str.split_once(':')?;
+        let key_part = key_part.trim();
+        let (key, optional) = match key_part.strip_suffix('?') {
+            Some(k) => (k.trim(), true),
+            None => (key_part, false),
+        };
+        fields.push((
+            key.to_string(),
+            parse_type_string(type_part.trim()),
+            optional,
+        ));
+    }
+    Some(Type::ArrayShape(fields))
+}
+
+/// Splits a trailing `<...>` generic argument list off a type atom, e.g.
+/// `"array<int, User>"` -> `("array", ["int", "User"])`. No arguments (or a
+/// malformed/unclosed `<`) just returns the whole string with an empty list.
+fn split_generic_args(s: &str) -> (&str, Vec<&str>) {
+    let Some(open) = s.find('<') else {
+        return (s, Vec::new());
+    };
+    if !s.ends_with('>') {
+        return (s, Vec::new());
+    }
+    let base = &s[..open];
+    let inner = &s[open + 1..s.len() - 1];
+    let args = split_top_level(inner, ',')
+        .into_iter()
+        .map(str::trim)
+        .collect();
+    (base, args)
+}
+
 fn parse_type_atom(s: &str) -> Type {
+    let s = s.trim();
+    if let Some(shape) = try_parse_array_shape(s) {
+        return shape;
+    }
+
     // PHPDoc's `Type[]` array shorthand (`int[]`, even `string[][]`) has no
     // native-hint equivalent, but reusing this parser for doc-comment types
     // makes it worth handling here rather than in a separate PHPDoc-only
     // parser.
-    let mut s = s.trim();
+    let mut s = s;
     let mut array_depth = 0;
     while let Some(stripped) = s.strip_suffix("[]") {
         s = stripped.trim();
         array_depth += 1;
     }
 
-    let bare = s.trim_start_matches('\\');
+    let (base, generic_args) = split_generic_args(s);
+    let bare = base.trim().trim_start_matches('\\');
     let mut ty = match bare.to_ascii_lowercase().as_str() {
         "int" | "integer" => Type::Int,
         "float" | "double" => Type::Float,
@@ -116,12 +219,25 @@ fn parse_type_atom(s: &str) -> Type {
         "void" => Type::Void,
         "mixed" => Type::Mixed,
         "never" | "noreturn" => Type::Never,
-        "array" | "iterable" => Type::Array(Box::new(Type::Mixed)),
+        // `array<V>` / `iterable<V>` and `array<K, V>` (key type discarded -
+        // keyed array subtyping isn't modeled) both resolve to our existing
+        // homogeneous Array(value) representation; no args is bare `array`.
+        "array" | "iterable" => match generic_args.len() {
+            0 => Type::Array(Box::new(Type::Mixed)),
+            1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
+            _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
+        },
         "callable" | "closure" => Type::Callable,
         "self" => Type::SelfRef,
         "parent" => Type::ParentRef,
         "static" => Type::StaticRef,
         "object" => Type::Object("object".to_string()),
+        // A user-defined generic class (`Collection<User>`): the type
+        // arguments are parsed (so they don't corrupt the surrounding
+        // string) but not modeled - only the base class name survives,
+        // which is still a strict improvement over the pre-generics
+        // fallback of treating the whole "Collection<User>" string as an
+        // unresolvable class name.
         _ => Type::Object(bare.to_string()),
     };
     for _ in 0..array_depth {
@@ -153,6 +269,14 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (_, Type::Intersection(members)) => members.iter().all(|m| is_subtype(sub, m)),
 
         (Type::Array(a), Type::Array(b)) => is_subtype(a, b),
+
+        // A shape is structurally an array, so it satisfies the bare
+        // `array` hint; the reverse (does some homogeneous array actually
+        // have these exact keys?) isn't verifiable without shape-aware
+        // literal inference, so it's left unrelated rather than guessed.
+        // Two shapes are only related via the general `a == b` case above -
+        // no shape subtyping (e.g. "has at least these keys") is modeled.
+        (Type::ArrayShape(_), Type::Array(b)) => matches!(**b, Type::Mixed),
 
         (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(_)) => true,
 
@@ -206,6 +330,86 @@ mod tests {
             parse_type_string("string[][]"),
             Type::Array(Box::new(Type::Array(Box::new(Type::String))))
         );
+    }
+
+    #[test]
+    fn generic_array_with_one_type_arg_parses_as_value_type() {
+        assert_eq!(
+            parse_type_string("array<int>"),
+            Type::Array(Box::new(Type::Int))
+        );
+    }
+
+    #[test]
+    fn generic_array_with_key_and_value_uses_value_type() {
+        assert_eq!(
+            parse_type_string("array<string, int>"),
+            Type::Array(Box::new(Type::Int))
+        );
+    }
+
+    #[test]
+    fn generic_user_class_keeps_base_name_and_drops_type_args() {
+        assert_eq!(
+            parse_type_string("Collection<User>"),
+            Type::Object("Collection".to_string())
+        );
+    }
+
+    #[test]
+    fn union_inside_generic_args_is_not_a_top_level_union() {
+        // Without depth-aware splitting, the `|` inside `<>` would be
+        // wrongly treated as splitting the whole string.
+        assert_eq!(
+            parse_type_string("Collection<int|string>"),
+            Type::Object("Collection".to_string())
+        );
+    }
+
+    #[test]
+    fn top_level_union_around_a_generic_still_splits_correctly() {
+        assert_eq!(
+            parse_type_string("Collection<int>|null"),
+            Type::Union(vec![Type::Object("Collection".to_string()), Type::Null])
+        );
+    }
+
+    #[test]
+    fn array_shape_parses_required_and_optional_fields() {
+        let shape = parse_type_string("array{name: string, age?: int}");
+        assert_eq!(
+            shape,
+            Type::ArrayShape(vec![
+                ("name".to_string(), Type::String, false),
+                ("age".to_string(), Type::Int, true),
+            ])
+        );
+    }
+
+    #[test]
+    fn array_shape_field_can_itself_be_a_union() {
+        let shape = parse_type_string("array{value: int|string}");
+        assert_eq!(
+            shape,
+            Type::ArrayShape(vec![(
+                "value".to_string(),
+                Type::Union(vec![Type::Int, Type::String]),
+                false
+            )])
+        );
+    }
+
+    #[test]
+    fn array_shape_display_round_trips_readably() {
+        let shape = parse_type_string("array{name: string, age?: int}");
+        assert_eq!(shape.to_string(), "array{name: string, age?: int}");
+    }
+
+    #[test]
+    fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
+        let shape = parse_type_string("array{name: string}");
+        assert!(is_subtype(&shape, &Type::Array(Box::new(Type::Mixed))));
+        assert!(!is_subtype(&Type::Array(Box::new(Type::Mixed)), &shape));
     }
 
     #[test]
