@@ -167,8 +167,9 @@ impl Parser {
                 self.advance();
                 let e = self.parse_expression();
                 self.expect_semicolon();
-                Stmt::Expression(e)
+                Stmt::Throw(e)
             }
+            Token::Keyword(Keyword::Switch) => self.parse_switch(),
             _ => {
                 let e = self.parse_expression();
                 self.expect_semicolon();
@@ -314,30 +315,85 @@ impl Parser {
     }
 
     fn parse_try(&mut self) -> Stmt {
-        // Prototype: catch/finally bodies are parsed (so the token stream
-        // stays in sync) but folded into a single block, since exception
-        // flow isn't modeled in the AST yet.
-        self.advance();
-        let mut stmts = Vec::new();
-        if let Stmt::Block(inner) = self.parse_block() {
-            stmts.extend(inner);
-        }
+        self.advance(); // try
+        let body = self.parse_stmt_list_block();
+
+        let mut catches = Vec::new();
         while self.eat(&Token::Keyword(Keyword::Catch)) {
             self.expect(&Token::LParen);
-            while !self.check(&Token::RParen) && !self.at_eof() {
-                self.advance();
+            let mut types = vec![self.parse_qualified_name()];
+            while self.eat(&Token::Pipe) {
+                types.push(self.parse_qualified_name());
             }
+            let var = if matches!(self.peek(), Token::Variable(_)) {
+                Some(self.expect_variable())
+            } else {
+                None
+            };
             self.expect(&Token::RParen);
-            if let Stmt::Block(inner) = self.parse_block() {
-                stmts.extend(inner);
+            let body = self.parse_stmt_list_block();
+            catches.push(CatchClause { types, var, body });
+        }
+
+        let finally = if self.eat(&Token::Keyword(Keyword::Finally)) {
+            Some(self.parse_stmt_list_block())
+        } else {
+            None
+        };
+
+        Stmt::Try {
+            body,
+            catches,
+            finally,
+        }
+    }
+
+    fn parse_stmt_list_block(&mut self) -> Vec<Stmt> {
+        if let Stmt::Block(stmts) = self.parse_block() {
+            stmts
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn parse_switch(&mut self) -> Stmt {
+        self.advance(); // switch
+        self.expect(&Token::LParen);
+        let subject = self.parse_expression();
+        self.expect(&Token::RParen);
+        self.expect(&Token::LBrace);
+
+        let mut cases: Vec<SwitchCase> = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            if self.eat(&Token::Keyword(Keyword::Case)) {
+                let test = self.parse_expression();
+                if !self.eat(&Token::Colon) {
+                    self.eat(&Token::Semicolon);
+                }
+                cases.push(SwitchCase {
+                    test: Some(test),
+                    body: Vec::new(),
+                });
+            } else if self.eat(&Token::Keyword(Keyword::Default)) {
+                if !self.eat(&Token::Colon) {
+                    self.eat(&Token::Semicolon);
+                }
+                cases.push(SwitchCase {
+                    test: None,
+                    body: Vec::new(),
+                });
+            } else {
+                let stmt = self.parse_statement();
+                // A statement before any `case`/`default` label is malformed
+                // PHP; dropping it here just keeps the parser in sync.
+                if let Some(case) = cases.last_mut() {
+                    case.body.push(stmt);
+                }
             }
         }
-        if self.eat(&Token::Keyword(Keyword::Finally))
-            && let Stmt::Block(inner) = self.parse_block()
-        {
-            stmts.extend(inner);
-        }
-        Stmt::Block(stmts)
+        self.expect(&Token::RBrace);
+
+        Stmt::Switch { subject, cases }
     }
 
     fn parse_qualified_name(&mut self) -> String {

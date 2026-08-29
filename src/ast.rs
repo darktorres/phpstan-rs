@@ -38,6 +38,29 @@ pub enum Stmt {
     ClassDecl(ClassDecl),
     Namespace(String),
     Use(String),
+    Switch {
+        subject: Expr,
+        cases: Vec<SwitchCase>,
+    },
+    Try {
+        body: Vec<Stmt>,
+        catches: Vec<CatchClause>,
+        finally: Option<Vec<Stmt>>,
+    },
+    Throw(Expr),
+}
+
+#[derive(Debug, Clone)]
+pub struct SwitchCase {
+    pub test: Option<Expr>, // None = `default:`
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CatchClause {
+    pub types: Vec<String>,
+    pub var: Option<String>,
+    pub body: Vec<Stmt>,
 }
 
 #[derive(Debug, Clone)]

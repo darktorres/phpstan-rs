@@ -102,6 +102,9 @@ impl<'a> Lexer<'a> {
         if c == b'"' {
             return self.lex_double_quoted();
         }
+        if self.starts_with("<<<") {
+            return self.lex_heredoc();
+        }
 
         self.lex_operator()
     }
@@ -256,99 +259,113 @@ impl<'a> Lexer<'a> {
 
     fn lex_double_quoted(&mut self) -> Token {
         self.pos += 1; // opening "
-        let mut parts: Vec<StringPart> = Vec::new();
-        let mut literal = String::new();
-
-        macro_rules! flush {
-            () => {
-                if !literal.is_empty() {
-                    parts.push(StringPart::Literal(std::mem::take(&mut literal)));
-                }
-            };
-        }
-
+        let start = self.pos;
         while self.pos < self.src.len() && self.peek() != b'"' {
             if self.peek() == b'\\' {
-                let esc = self.peek_at(1);
-                match esc {
-                    b'n' => literal.push('\n'),
-                    b't' => literal.push('\t'),
-                    b'r' => literal.push('\r'),
-                    b'"' => literal.push('"'),
-                    b'\\' => literal.push('\\'),
-                    b'$' => literal.push('$'),
-                    other => {
-                        literal.push('\\');
-                        literal.push(other as char);
-                    }
-                }
-                self.pos += 2;
-                continue;
-            }
-
-            if self.peek() == b'{' && self.peek_at(1) == b'$' {
-                flush!();
-                self.pos += 1; // consume '{'
-                let start = self.pos;
-                let mut depth = 1;
-                while self.pos < self.src.len() && depth > 0 {
-                    match self.peek() {
-                        b'{' => depth += 1,
-                        b'}' => depth -= 1,
-                        _ => {}
-                    }
-                    if depth > 0 {
-                        self.pos += 1;
-                    }
-                }
-                let inner = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
-                self.pos += 1; // consume '}'
-                parts.push(StringPart::ComplexExpr(inner));
-                continue;
-            }
-
-            if self.peek() == b'$' && is_ident_start(self.peek_at(1)) {
-                flush!();
+                self.pos = (self.pos + 2).min(self.src.len());
+            } else {
                 self.pos += 1;
-                let name = self.lex_ident_raw();
-
-                if self.peek() == b'-' && self.peek_at(1) == b'>' && is_ident_start(self.peek_at(2))
-                {
-                    self.pos += 2;
-                    let prop = self.lex_ident_raw();
-                    parts.push(StringPart::ComplexExpr(format!("${name}->{prop}")));
-                } else if self.peek() == b'[' {
-                    self.pos += 1;
-                    let key_start = self.pos;
-                    while self.pos < self.src.len() && self.peek() != b']' {
-                        self.pos += 1;
-                    }
-                    let key = String::from_utf8_lossy(&self.src[key_start..self.pos]).into_owned();
-                    self.pos = (self.pos + 1).min(self.src.len()); // consume ']'
-                    // PHP's "simple syntax" treats a bare word key as a
-                    // string literal and a numeric key as an int; only a
-                    // leading `$` makes it a variable lookup.
-                    let key_expr = if key.starts_with('$') || key.parse::<i64>().is_ok() {
-                        key
-                    } else {
-                        format!("'{key}'")
-                    };
-                    parts.push(StringPart::ComplexExpr(format!("${name}[{key_expr}]")));
-                } else {
-                    parts.push(StringPart::SimpleVar(name));
-                }
-                continue;
             }
-
-            literal.push(self.bump() as char);
         }
-        flush!();
-        self.pos += 1; // closing "
-
-        if parts.is_empty() {
-            parts.push(StringPart::Literal(String::new()));
-        }
+        let raw = &self.src[start..self.pos];
+        let parts = scan_interpolated(raw);
+        self.pos = (self.pos + 1).min(self.src.len()); // closing "
         Token::InterpString(parts)
+    }
+
+    fn lex_heredoc(&mut self) -> Token {
+        self.pos += 3; // consume '<<<'
+        while matches!(self.peek(), b' ' | b'\t') {
+            self.pos += 1;
+        }
+
+        let nowdoc;
+        let label;
+        match self.peek() {
+            b'\'' => {
+                self.pos += 1;
+                let start = self.pos;
+                while self.pos < self.src.len() && self.peek() != b'\'' {
+                    self.pos += 1;
+                }
+                label = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+                self.pos = (self.pos + 1).min(self.src.len());
+                nowdoc = true;
+            }
+            b'"' => {
+                self.pos += 1;
+                let start = self.pos;
+                while self.pos < self.src.len() && self.peek() != b'"' {
+                    self.pos += 1;
+                }
+                label = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+                self.pos = (self.pos + 1).min(self.src.len());
+                nowdoc = false;
+            }
+            _ => {
+                let start = self.pos;
+                while is_ident_continue(self.peek()) {
+                    self.pos += 1;
+                }
+                label = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+                nowdoc = false;
+            }
+        }
+
+        if self.peek() == b'\r' {
+            self.pos += 1;
+        }
+        if self.peek() == b'\n' {
+            self.pos += 1;
+        }
+
+        let body_start = self.pos;
+        let mut closing_indent = 0usize;
+        let body_end;
+        loop {
+            let line_start = self.pos;
+            let mut indent = 0usize;
+            while matches!(self.peek(), b' ' | b'\t') {
+                self.pos += 1;
+                indent += 1;
+            }
+            if self.starts_with(&label) {
+                let after = self.pos + label.len();
+                let next_byte = *self.src.get(after).unwrap_or(&0);
+                if !is_ident_continue(next_byte) {
+                    closing_indent = indent;
+                    body_end = line_start;
+                    self.pos = after;
+                    break;
+                }
+            }
+            self.pos = line_start;
+            while self.pos < self.src.len() && self.peek() != b'\n' {
+                self.pos += 1;
+            }
+            if self.pos >= self.src.len() {
+                // Unterminated heredoc/nowdoc: treat rest of file as body
+                // rather than looping forever.
+                body_end = self.pos;
+                break;
+            }
+            self.pos += 1; // consume '\n'
+        }
+
+        let mut raw_body = &self.src[body_start..body_end];
+        if raw_body.last() == Some(&b'\n') {
+            raw_body = &raw_body[..raw_body.len() - 1];
+        }
+        if raw_body.last() == Some(&b'\r') {
+            raw_body = &raw_body[..raw_body.len() - 1];
+        }
+        let content = strip_heredoc_indent(&String::from_utf8_lossy(raw_body), closing_indent);
+
+        if nowdoc {
+            Token::StringLit(content)
+        } else {
+            Token::InterpString(scan_interpolated(content.as_bytes()))
+        }
     }
 
     fn lex_operator(&mut self) -> Token {
@@ -496,4 +513,135 @@ fn is_ident_start(c: u8) -> bool {
 
 fn is_ident_continue(c: u8) -> bool {
     is_ident_start(c) || c.is_ascii_digit()
+}
+
+/// Shared body of double-quoted-string and heredoc interpolation: escapes,
+/// `$var` / `$var->prop` / `$var[key]` simple syntax, and `{$expr}` complex
+/// syntax. Operates on an already-delimited byte slice (quotes/markers
+/// already stripped by the caller).
+fn scan_interpolated(bytes: &[u8]) -> Vec<StringPart> {
+    let mut parts = Vec::new();
+    let mut literal = String::new();
+    let mut i = 0;
+
+    macro_rules! flush {
+        () => {
+            if !literal.is_empty() {
+                parts.push(StringPart::Literal(std::mem::take(&mut literal)));
+            }
+        };
+    }
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if b == b'\\' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'n' => literal.push('\n'),
+                b't' => literal.push('\t'),
+                b'r' => literal.push('\r'),
+                b'"' => literal.push('"'),
+                b'\\' => literal.push('\\'),
+                b'$' => literal.push('$'),
+                other => {
+                    literal.push('\\');
+                    literal.push(other as char);
+                }
+            }
+            i += 2;
+            continue;
+        }
+
+        if b == b'{' && bytes.get(i + 1) == Some(&b'$') {
+            flush!();
+            i += 1;
+            let start = i;
+            let mut depth = 1;
+            while i < bytes.len() && depth > 0 {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => depth -= 1,
+                    _ => {}
+                }
+                if depth > 0 {
+                    i += 1;
+                }
+            }
+            let inner = String::from_utf8_lossy(&bytes[start..i]).into_owned();
+            i = (i + 1).min(bytes.len());
+            parts.push(StringPart::ComplexExpr(inner));
+            continue;
+        }
+
+        if b == b'$' && bytes.get(i + 1).is_some_and(|&c| is_ident_start(c)) {
+            flush!();
+            i += 1;
+            let name_start = i;
+            while i < bytes.len() && is_ident_continue(bytes[i]) {
+                i += 1;
+            }
+            let name = String::from_utf8_lossy(&bytes[name_start..i]).into_owned();
+
+            if bytes.get(i) == Some(&b'-')
+                && bytes.get(i + 1) == Some(&b'>')
+                && bytes.get(i + 2).is_some_and(|&c| is_ident_start(c))
+            {
+                i += 2;
+                let prop_start = i;
+                while i < bytes.len() && is_ident_continue(bytes[i]) {
+                    i += 1;
+                }
+                let prop = String::from_utf8_lossy(&bytes[prop_start..i]).into_owned();
+                parts.push(StringPart::ComplexExpr(format!("${name}->{prop}")));
+            } else if bytes.get(i) == Some(&b'[') {
+                i += 1;
+                let key_start = i;
+                while i < bytes.len() && bytes[i] != b']' {
+                    i += 1;
+                }
+                let key = String::from_utf8_lossy(&bytes[key_start..i]).into_owned();
+                i = (i + 1).min(bytes.len());
+                let key_expr = if key.starts_with('$') || key.parse::<i64>().is_ok() {
+                    key
+                } else {
+                    format!("'{key}'")
+                };
+                parts.push(StringPart::ComplexExpr(format!("${name}[{key_expr}]")));
+            } else {
+                parts.push(StringPart::SimpleVar(name));
+            }
+            continue;
+        }
+
+        literal.push(b as char);
+        i += 1;
+    }
+    flush!();
+
+    if parts.is_empty() {
+        parts.push(StringPart::Literal(String::new()));
+    }
+    parts
+}
+
+/// Flexible heredoc (PHP 7.3+): every content line has up to `indent`
+/// leading space/tab characters stripped, matching the closing marker's
+/// own indentation.
+fn strip_heredoc_indent(text: &str, indent: usize) -> String {
+    if indent == 0 {
+        return text.to_string();
+    }
+    text.split('\n')
+        .map(|line| {
+            let mut cut = 0;
+            for (i, c) in line.chars().enumerate() {
+                if i >= indent || !(c == ' ' || c == '\t') {
+                    break;
+                }
+                cut += c.len_utf8();
+            }
+            &line[cut..]
+        })
+        .collect::<Vec<&str>>()
+        .join("\n")
 }
