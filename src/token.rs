@@ -296,6 +296,8 @@ pub enum Token {
     Ellipsis,
     // PHP 8.5's pipe operator (`|>`).
     PipeGt,
+    // `${` - starts the older "variable variable" syntax `${expr}`.
+    DollarBrace,
 
     Eof,
 }

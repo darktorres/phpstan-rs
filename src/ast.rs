@@ -263,6 +263,10 @@ pub enum InstanceofTarget {
 pub enum Expr {
     Literal(Literal),
     Variable(String),
+    // `${expr}` - the older "variable variable" syntax: the variable's own
+    // name is computed at runtime by evaluating expr, so unlike Variable
+    // there's no fixed name here to look up or bind in `locals`.
+    DynamicVariable(Box<Expr>),
     ArrayLiteral(Vec<(Option<Expr>, Expr)>),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),

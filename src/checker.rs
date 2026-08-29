@@ -636,6 +636,7 @@ impl<'a> Checker<'a> {
                     self.check_function(&m.function, Some(&decl.name));
                 }
             }
+            Expr::DynamicVariable(name_expr) => self.check_expr(name_expr, locals, label),
             Expr::PropertyAccess(base, _) => self.check_expr(base, locals, label),
             Expr::DynamicPropertyAccess(base, name_expr) => {
                 self.check_expr(base, locals, label);

@@ -695,6 +695,7 @@ impl Parser {
                 | Token::Identifier(_)
                 | Token::Backslash
                 | Token::LParen
+                | Token::Keyword(Keyword::Namespace)
                 | Token::Keyword(Keyword::Array)
                 | Token::Keyword(Keyword::Static)
                 | Token::Keyword(Keyword::Null)
@@ -1140,6 +1141,10 @@ impl Parser {
             ) {
                 self.advance();
             }
+            // `&get => ...` - the hook returns its value by reference.
+            // Aliasing isn't modeled anywhere in this checker, so it's
+            // just consumed.
+            self.eat(&Token::Amp);
             let is_set = matches!(self.peek(), Token::Identifier(s) if s == "set");
             self.advance(); // `get` or `set`
 
@@ -1767,8 +1772,14 @@ impl Parser {
                     self.advance();
                     // `$obj->{expr}` - a fully dynamic property/method
                     // name, computed from an arbitrary expression rather
-                    // than a fixed identifier or `$var`.
-                    if self.eat(&Token::LBrace) {
+                    // than a fixed identifier or `$var`. `$obj->${expr}`
+                    // (the name comes from a variable-variable instead of
+                    // a plain `$var`) is treated the same way - the exact
+                    // double-indirection isn't modeled, matching how the
+                    // plain `$obj->$prop` case above already just uses
+                    // the variable's own name rather than its value.
+                    if self.check(&Token::LBrace) || self.check(&Token::DollarBrace) {
+                        self.advance();
                         let name_expr = self.parse_expression();
                         self.expect(&Token::RBrace);
                         expr = if self.check(&Token::LParen) {
@@ -1830,13 +1841,14 @@ impl Parser {
                             self.advance();
                             format!("${s}")
                         }
-                        // `Foo::{$name}` - a fully dynamic static member
-                        // name. StaticAccess/StaticCall aren't given any
-                        // deeper type-checking today regardless of whether
-                        // the name is static or dynamic, so this is just
-                        // parsed (consuming the name expression correctly)
-                        // rather than threading a real Expr through here.
-                        Token::LBrace => {
+                        // `Foo::{$name}` / `Foo::${$name}` - a fully
+                        // dynamic static member name. StaticAccess/
+                        // StaticCall aren't given any deeper type-checking
+                        // today regardless of whether the name is static
+                        // or dynamic, so this is just parsed (consuming
+                        // the name expression correctly) rather than
+                        // threading a real Expr through here.
+                        Token::LBrace | Token::DollarBrace => {
                             self.advance();
                             self.parse_expression();
                             self.expect(&Token::RBrace);
@@ -1984,6 +1996,12 @@ impl Parser {
                 self.advance();
                 Expr::Variable(name)
             }
+            Token::DollarBrace => {
+                self.advance();
+                let name_expr = self.parse_expression();
+                self.expect(&Token::RBrace);
+                Expr::DynamicVariable(Box::new(name_expr))
+            }
             Token::LParen => {
                 self.advance();
                 let inner = self.parse_expression();
@@ -2117,7 +2135,12 @@ impl Parser {
                 self.advance();
                 self.build_interpolated(parts)
             }
-            Token::Identifier(_) | Token::Backslash => {
+            // `namespace\Foo` - a name explicitly relative to the current
+            // namespace. Only ever appears as a value in expression
+            // position (the bare `namespace` statement/block forms are
+            // handled separately in parse_statement/parse_program), so
+            // it's unambiguous here.
+            Token::Identifier(_) | Token::Backslash | Token::Keyword(Keyword::Namespace) => {
                 let name = self.parse_qualified_name();
                 Expr::Name(name)
             }
@@ -2827,6 +2850,69 @@ mod tests {
             panic!("expected ClassDecl");
         };
         assert_eq!(c.properties[0].type_hint.as_deref(), Some("(A&B)|X"));
+    }
+
+    #[test]
+    fn namespace_relative_name_parses_as_expression_and_as_type() {
+        let program = parse(
+            r#"<?php
+            function f($a = namespace\unknown) {}
+            function g(namespace\integer $x) {}
+        "#,
+        );
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        assert!(matches!(
+            &f.params[0].default,
+            Some(Expr::Name(n)) if n == "namespace\\unknown"
+        ));
+
+        let Stmt::FunctionDecl(g) = &program[1] else {
+            panic!("expected FunctionDecl");
+        };
+        assert_eq!(g.params[0].type_hint.as_deref(), Some("namespace\\integer"));
+    }
+
+    #[test]
+    fn dollar_brace_variable_variable_forms_parse() {
+        let program = parse(
+            r#"<?php
+            ${f()} = g();
+            $oa->${f()} = g();
+            C::${f()} = g();
+        "#,
+        );
+        assert!(matches!(
+            &program[0],
+            Stmt::Expression(Expr::Assign(lhs, _)) if matches!(lhs.as_ref(), Expr::DynamicVariable(_))
+        ));
+        assert!(matches!(
+            &program[1],
+            Stmt::Expression(Expr::Assign(lhs, _)) if matches!(lhs.as_ref(), Expr::DynamicPropertyAccess(_, _))
+        ));
+        assert!(matches!(
+            &program[2],
+            Stmt::Expression(Expr::Assign(lhs, _)) if matches!(lhs.as_ref(), Expr::StaticAccess(c, m) if c == "C" && m == "{dynamic}")
+        ));
+    }
+
+    #[test]
+    fn by_reference_property_hook_parses() {
+        let program = parse(
+            r#"<?php
+            class Foo {
+                public $prop {
+                    &get => $this->_prop;
+                }
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
+        assert!(matches!(hooks.get, Some(PropertyHookBody::Arrow(_))));
     }
 
     #[test]

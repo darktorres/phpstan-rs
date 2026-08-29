@@ -84,6 +84,14 @@ impl<'a> Lexer<'a> {
             return Token::Variable(s);
         }
 
+        // `${expr}` - the older "variable variable" syntax, where the
+        // variable's own name is computed at runtime by evaluating expr
+        // (most commonly just `${$name}`, but any expression is legal).
+        if c == b'$' && self.peek_at(1) == b'{' {
+            self.pos += 2;
+            return Token::DollarBrace;
+        }
+
         if is_ident_start(c) {
             let s = self.lex_ident_raw();
             if let Some(kw) = Keyword::from_str(&s) {
