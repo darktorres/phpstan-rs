@@ -113,7 +113,7 @@ pub struct ClassConst {
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
     pub name: String,
-    pub extends: Option<String>,
+    pub extends: Vec<String>,
     pub implements: Vec<String>,
     pub is_abstract: bool,
     pub is_final: bool,

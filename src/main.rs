@@ -1,15 +1,17 @@
 mod ast;
 mod lexer;
 mod parser;
+mod registry;
+mod stubs;
 mod token;
 mod types;
 
 use std::env;
 use std::fs;
 
-use ast::{FunctionDecl, Param, Stmt};
 use lexer::Lexer;
 use parser::Parser;
+use registry::{FunctionSig, Registry};
 
 const SAMPLE: &str = r#"<?php
 
@@ -72,46 +74,60 @@ fn main() {
         println!("{:#?}", stmt);
     }
 
-    println!("\n-- resolved signatures --");
-    for stmt in &program {
-        print_signatures_in_stmt(stmt, None);
-    }
-}
+    let mut registry = Registry::build(&program);
+    registry.merge_stubs(stubs::builtin_stubs());
 
-fn print_signatures_in_stmt(stmt: &Stmt, class_name: Option<&str>) {
-    match stmt {
-        Stmt::FunctionDecl(f) => print_signature(class_name, &f.name, f),
-        Stmt::ClassDecl(c) => {
-            for method in &c.methods {
-                print_signature(Some(&c.name), &method.function.name, &method.function);
-            }
+    println!("\n-- resolved signatures (from source) --");
+    let mut fn_names: Vec<&String> = registry.functions.keys().collect();
+    fn_names.sort();
+    for name in &fn_names {
+        println!("{}", format_signature(name, &registry.functions[*name]));
+    }
+
+    let mut class_names: Vec<&String> = registry.classes.keys().collect();
+    class_names.sort();
+    for class_name in &class_names {
+        let info = &registry.classes[*class_name];
+        let mut method_names: Vec<&String> = info.methods.keys().collect();
+        method_names.sort();
+        for method_name in method_names {
+            let qualified = format!("{class_name}::{method_name}");
+            println!(
+                "{}",
+                format_signature(&qualified, &info.methods[method_name])
+            );
         }
-        Stmt::Namespace(_) | Stmt::Use(_) => {}
-        _ => {}
+    }
+
+    println!("\n-- class hierarchy --");
+    for class_name in &class_names {
+        let ancestors: Vec<&String> = class_names
+            .iter()
+            .filter(|other| *other != class_name && registry.is_subclass_of(class_name, other))
+            .copied()
+            .collect();
+        if ancestors.is_empty() {
+            println!("{class_name}: (no declared ancestors in this file)");
+        } else {
+            let joined: Vec<&str> = ancestors.iter().map(|s| s.as_str()).collect();
+            println!("{class_name} <: {}", joined.join(", "));
+        }
+    }
+
+    if let Some(sig) = registry.lookup_function("strlen") {
+        println!("\n-- built-in stub example --");
+        println!("{}", format_signature("strlen", sig));
     }
 }
 
-fn print_signature(class_name: Option<&str>, name: &str, f: &FunctionDecl) {
-    let params: Vec<String> = f.params.iter().map(format_param).collect();
-    let return_ty = f
-        .return_type
-        .as_deref()
-        .map(types::parse_type_string)
-        .unwrap_or(types::Type::Mixed);
-
-    let qualified = match class_name {
-        Some(c) => format!("{c}::{name}"),
-        None => name.to_string(),
-    };
-    println!("{qualified}({}): {return_ty}", params.join(", "));
-}
-
-fn format_param(p: &Param) -> String {
-    let ty = p
-        .type_hint
-        .as_deref()
-        .map(types::parse_type_string)
-        .unwrap_or(types::Type::Mixed);
-    let variadic = if p.variadic { "..." } else { "" };
-    format!("{ty} {variadic}${}", p.name)
+fn format_signature(name: &str, sig: &FunctionSig) -> String {
+    let params: Vec<String> = sig
+        .params
+        .iter()
+        .map(|(name, ty, variadic)| {
+            let dots = if *variadic { "..." } else { "" };
+            format!("{ty} {dots}${name}")
+        })
+        .collect();
+    format!("{name}({}): {}", params.join(", "), sig.return_type)
 }

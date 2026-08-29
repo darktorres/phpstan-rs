@@ -685,11 +685,17 @@ impl Parser {
         }
         let name = self.expect_ident();
 
-        let extends = if self.eat(&Token::Keyword(Keyword::Extends)) {
-            Some(self.parse_qualified_name())
-        } else {
-            None
-        };
+        // A class extends at most one class, but an interface can extend
+        // several other interfaces (`interface C extends A, B {}`) - both
+        // are accepted here since the parser doesn't distinguish the two
+        // declaration kinds structurally.
+        let mut extends = Vec::new();
+        if self.eat(&Token::Keyword(Keyword::Extends)) {
+            extends.push(self.parse_qualified_name());
+            while self.eat(&Token::Comma) {
+                extends.push(self.parse_qualified_name());
+            }
+        }
 
         let mut implements = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
