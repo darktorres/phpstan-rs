@@ -456,6 +456,7 @@ impl<'a> Checker<'a> {
                 self.check_expr(base, locals, label);
                 if let Some(i) = idx {
                     self.check_expr(i, locals, label);
+                    self.check_shape_key_access(base, i, locals, label);
                 }
             }
             Expr::New(_, args) => {
@@ -500,6 +501,35 @@ impl<'a> Checker<'a> {
         self.diagnostics.push(Diagnostic {
             location: label.to_string(),
             message: format!("{class}::${prop} expects {expected}, {actual} given"),
+        });
+    }
+
+    /// Flags `$x['key']` when `$x`'s type is a known `ArrayShape` and 'key'
+    /// isn't one of its declared fields - a real typo-catcher, not a guess:
+    /// only fires when the shape is fully known and the key is a literal,
+    /// so a dynamic key or an unknown array type is never flagged. Reading
+    /// a genuinely *optional* field is not flagged either - that's a
+    /// possibly-undefined-index warning, a different (and noisier) check
+    /// this prototype doesn't attempt.
+    fn check_shape_key_access(
+        &mut self,
+        base: &Expr,
+        idx: &Expr,
+        locals: &HashMap<String, Type>,
+        label: &str,
+    ) {
+        let Type::ArrayShape(fields) = self.infer_expr(base, locals) else {
+            return;
+        };
+        let Some(key) = literal_string_key(idx) else {
+            return;
+        };
+        if fields.iter().any(|(name, _, _)| *name == key) {
+            return;
+        }
+        self.diagnostics.push(Diagnostic {
+            location: label.to_string(),
+            message: format!("array{{...}} has no key '{key}'"),
         });
     }
 
@@ -652,6 +682,20 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::Mixed),
                 _ => Type::Mixed,
             },
+            // A homogeneous array's element type applies regardless of
+            // which key is accessed; optimistically assumes the access is
+            // in bounds/present rather than widening to `V|null` for a
+            // possibly-missing element - consistent with this checker's
+            // general preference for fewer false positives over catching
+            // every possible runtime-undefined access.
+            Expr::Index(base, Some(idx)) => match self.infer_expr(base, locals) {
+                Type::Array(inner) => *inner,
+                Type::ArrayShape(fields) => literal_string_key(idx)
+                    .and_then(|key| fields.into_iter().find(|(name, _, _)| *name == key))
+                    .map(|(_, ty, _)| ty)
+                    .unwrap_or(Type::Mixed),
+                _ => Type::Mixed,
+            },
             _ => Type::Mixed,
         }
     }
@@ -712,6 +756,19 @@ impl<'a> Checker<'a> {
             BinOp::Div => Type::Mixed,
             BinOp::Coalesce => self.infer_expr(r, locals),
         }
+    }
+}
+
+/// Extracts a shape-lookup key from a literal index expression - `'name'`
+/// or a bare int (PHP array keys are always stringified/int-normalized
+/// internally, so both forms are compared the same way here). A
+/// non-literal index (a variable, a call, ...) returns `None`, since it
+/// can't be resolved against a shape's field names statically.
+fn literal_string_key(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Literal(Literal::String(s)) => Some(s.clone()),
+        Expr::Literal(Literal::Int(n)) => Some(n.to_string()),
+        _ => None,
     }
 }
 
@@ -1229,5 +1286,88 @@ mod tests {
         );
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn homogeneous_array_index_infers_the_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            /** @param string[] $words */
+            function f(array $words) {
+                return needsInt($words[0]);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn homogeneous_array_index_of_matching_type_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            /** @param int[] $nums */
+            function f(array $nums) {
+                return needsInt($nums[0]);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn shape_key_access_infers_the_field_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            /** @param array{name: string, age: int} $p */
+            function f(array $p) {
+                return needsInt($p['age']);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn shape_key_typo_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{name: string, age: int} $p */
+            function f(array $p) {
+                return $p['agee'];
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("'agee'"));
+    }
+
+    #[test]
+    fn shape_key_access_with_dynamic_index_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{name: string, age: int} $p */
+            function f(array $p, string $key) {
+                return $p[$key];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn shape_optional_field_access_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{name: string, age?: int} $p */
+            function f(array $p) {
+                return $p['age'];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 }
