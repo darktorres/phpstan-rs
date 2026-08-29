@@ -92,6 +92,20 @@ impl<'a> Lexer<'a> {
             return Token::DollarBrace;
         }
 
+        // `b'...'` / `b"..."` / `b<<<...` - the legacy byte-string prefix
+        // (a no-op today; PHP 6's binary-vs-unicode string split never
+        // shipped, but the lexical grammar still accepts the prefix).
+        // Checked ahead of the generic identifier branch below, since a
+        // bare `b` would otherwise be lexed as its own single-letter
+        // identifier/constant reference, leaving the string dangling.
+        if (c == b'b' || c == b'B')
+            && (matches!(self.peek_at(1), b'\'' | b'"')
+                || self.src[self.pos + 1..].starts_with(b"<<<"))
+        {
+            self.pos += 1;
+            return self.next_token();
+        }
+
         if is_ident_start(c) {
             let s = self.lex_ident_raw();
             if let Some(kw) = Keyword::from_str(&s) {

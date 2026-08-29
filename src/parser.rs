@@ -118,6 +118,22 @@ impl Parser {
         self.tokens.get(self.pos + offset).unwrap_or(&Token::Eof)
     }
 
+    /// Scans forward (without consuming) through any of `abstract`/
+    /// `final`/`readonly` to see if a `class` keyword eventually follows -
+    /// the only thing that actually confirms a class declaration is
+    /// starting, since all three are also legal as ordinary
+    /// function/method/constant names.
+    fn looks_like_class_decl(&self) -> bool {
+        let mut offset = 0;
+        while matches!(
+            self.peek_at(offset),
+            Token::Keyword(Keyword::Abstract | Keyword::Final | Keyword::Readonly)
+        ) {
+            offset += 1;
+        }
+        matches!(self.peek_at(offset), Token::Keyword(Keyword::Class))
+    }
+
     /// Is the current position a `(set)` asymmetric-visibility marker
     /// (`private(set)`, `public(set)`, `protected(set)`)? Checked at the
     /// visibility keyword itself, i.e. this looks 3 tokens ahead for the
@@ -301,11 +317,21 @@ impl Parser {
                 Stmt::FunctionDecl(f)
             }
             Token::Keyword(Keyword::Class)
-            | Token::Keyword(Keyword::Abstract)
-            | Token::Keyword(Keyword::Final)
-            | Token::Keyword(Keyword::Readonly)
             | Token::Keyword(Keyword::Interface)
             | Token::Keyword(Keyword::Trait) => Stmt::ClassDecl(self.parse_class_decl()),
+            // `abstract`/`final`/`readonly` are only reserved as class
+            // *modifiers* - each is also legal as an ordinary
+            // function/method/constant name elsewhere (`function
+            // readonly() {}`, then a plain `readonly();` call at
+            // statement position) since they were reserved well after
+            // `class`/`interface`/`trait` themselves. A lookahead confirms
+            // a `class` keyword genuinely follows before committing to a
+            // class declaration.
+            Token::Keyword(Keyword::Abstract | Keyword::Final | Keyword::Readonly)
+                if self.looks_like_class_decl() =>
+            {
+                Stmt::ClassDecl(self.parse_class_decl())
+            }
             Token::Keyword(Keyword::Enum) => Stmt::EnumDecl(self.parse_enum_decl()),
             Token::Keyword(Keyword::Namespace) => {
                 self.advance();
@@ -417,6 +443,19 @@ impl Parser {
                     self.expect_semicolon();
                     Stmt::Block(Vec::new())
                 }
+            }
+            // `__halt_compiler();` - tells the *real* compiler to stop
+            // parsing right here; everything after it (often binary PHAR
+            // data) isn't valid PHP syntax at all, so instead of trying to
+            // parse whatever comes next, just jump straight to EOF.
+            // Case-insensitive and not a reserved word, like every other
+            // magic constant/function.
+            Token::Identifier(s)
+                if s.eq_ignore_ascii_case("__halt_compiler")
+                    && matches!(self.peek_at(1), Token::LParen) =>
+            {
+                self.pos = self.tokens.len();
+                Stmt::Block(Vec::new())
             }
             Token::Keyword(Keyword::Goto) => {
                 self.advance();
@@ -1903,11 +1942,15 @@ impl Parser {
         let normalized = match name.as_str() {
             "int" | "integer" => "int",
             "float" | "double" | "real" => "float",
-            "string" => "string",
+            "string" | "binary" => "string",
             "bool" | "boolean" => "bool",
             "array" => "array",
             "object" => "object",
             "unset" => "unset",
+            // `(void)` - a real, legal cast (discards the value; unlike
+            // every other cast here it doesn't even change the type),
+            // distinct from `void` the return-type keyword.
+            "void" => "void",
             _ => return None,
         };
         if !matches!(self.peek_at(2), Token::RParen) {
@@ -2264,8 +2307,16 @@ impl Parser {
                     let inner = self.parse_assignment();
                     return Expr::YieldFrom(Box::new(inner));
                 }
-                // A bare `yield;` (no value) - whatever follows can't
-                // start an expression, so don't try to parse one.
+                // A bare `yield` (no value) - whatever follows can't start
+                // an expression, so don't try to parse one; the caller
+                // (already unwinding back up the precedence chain from
+                // this primary position) picks up a token like `*` as an
+                // ordinary binary operator applied to the bare yield, e.g.
+                // `yield * -1` parses as `(yield) * (-1)`. `+`/`-` are
+                // deliberately not listed here - unlike `*`, they *can*
+                // start an expression (a unary-prefixed value), so
+                // `yield +1` is `yield` of `+1`, not a bare yield followed
+                // by unary `+1`.
                 if matches!(
                     self.peek(),
                     Token::Semicolon
@@ -2273,6 +2324,7 @@ impl Parser {
                         | Token::RBracket
                         | Token::RBrace
                         | Token::Comma
+                        | Token::Star
                 ) {
                     return Expr::Yield(None, None);
                 }
@@ -2324,8 +2376,18 @@ impl Parser {
             // namespace. Only ever appears as a value in expression
             // position (the bare `namespace` statement/block forms are
             // handled separately in parse_statement/parse_program), so
-            // it's unambiguous here.
-            Token::Identifier(_) | Token::Backslash | Token::Keyword(Keyword::Namespace) => {
+            // it's unambiguous here. `abstract`/`final`/`readonly` reach
+            // here as a bare function/constant reference (`readonly()`,
+            // `A::readonly`) only when parse_statement's own lookahead
+            // already ruled out a class declaration - every other keyword
+            // with a real expression meaning (new/match/static/...) has
+            // its own dedicated arm earlier in this match, so this is
+            // unambiguous too.
+            Token::Identifier(_)
+            | Token::Backslash
+            | Token::Keyword(
+                Keyword::Namespace | Keyword::Abstract | Keyword::Final | Keyword::Readonly,
+            ) => {
                 let name = self.parse_qualified_name();
                 Expr::Name(name)
             }
@@ -2420,6 +2482,9 @@ impl Parser {
         let mut default = None;
         while !self.check(&Token::RBrace) && !self.at_eof() {
             if self.eat(&Token::Keyword(Keyword::Default)) {
+                // `default` also tolerates a trailing comma before `=>`,
+                // same as an ordinary arm's condition list.
+                self.eat(&Token::Comma);
                 self.expect(&Token::FatArrow);
                 default = Some(Box::new(self.parse_expression()));
             } else {
@@ -3247,6 +3312,78 @@ mod tests {
         let hooks = ctor.params[0].hooks.as_ref().expect("expected hooks");
         assert!(matches!(hooks.get, Some(PropertyHookBody::Block(_))));
         assert!(hooks.set.is_some());
+    }
+
+    #[test]
+    fn halt_compiler_stops_parsing_cleanly() {
+        let program = parse(
+            r#"<?php
+            print "yo!\n";
+            __HALT_COMPILER();
+            none of this should be parsed at all! {{{ ???
+        "#,
+        );
+        assert_eq!(program.len(), 2);
+    }
+
+    #[test]
+    fn void_and_binary_casts_parse() {
+        let program = parse(r#"<?php (void) foo(); $x = (binary) 42;"#);
+        assert!(matches!(&program[0], Stmt::Expression(Expr::Cast(ty, _)) if ty == "void"));
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[1] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::Cast(ty, _) if ty == "string"));
+    }
+
+    #[test]
+    fn match_default_arm_tolerates_trailing_comma() {
+        parse(
+            r#"<?php
+            $x = match (1) {
+                default,
+                    => "x",
+            };
+        "#,
+        );
+    }
+
+    #[test]
+    fn readonly_abstract_final_usable_as_plain_names() {
+        let program = parse(
+            r#"<?php
+            function readonly() {}
+            readonly();
+            abstract();
+            final();
+        "#,
+        );
+        assert!(matches!(&program[0], Stmt::FunctionDecl(f) if f.name == "readonly"));
+        for stmt in &program[1..] {
+            assert!(matches!(stmt, Stmt::Expression(Expr::Call(_, _))));
+        }
+    }
+
+    #[test]
+    fn readonly_class_still_parses_as_a_class() {
+        let program = parse(r#"<?php readonly class Foo {}"#);
+        assert!(matches!(&program[0], Stmt::ClassDecl(c) if c.name == "Foo"));
+    }
+
+    #[test]
+    fn yield_followed_by_pure_binary_operator_is_bare() {
+        let program = parse(r#"<?php function gen() { var_dump(yield * -1); }"#);
+        let Stmt::FunctionDecl(f) = &program[0] else {
+            panic!("expected FunctionDecl");
+        };
+        let Stmt::Expression(Expr::Call(_, args)) = &f.body[0] else {
+            panic!("expected var_dump() call");
+        };
+        // (yield) * (-1), not yield applied to some malformed operand.
+        let Expr::Binary(BinOp::Mul, lhs, _) = &args[0] else {
+            panic!("expected a multiplication at the top");
+        };
+        assert!(matches!(lhs.as_ref(), Expr::Yield(None, None)));
     }
 
     #[test]
