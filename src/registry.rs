@@ -60,6 +60,7 @@ pub struct ClassInfo {
     pub implements: Vec<String>,
     pub methods: HashMap<String, FunctionSig>,
     pub properties: HashMap<String, PropertySig>,
+    pub uses: Vec<String>,
 }
 
 impl ClassInfo {
@@ -117,6 +118,7 @@ impl ClassInfo {
             implements: c.implements.clone(),
             methods,
             properties,
+            uses: c.uses.clone(),
         }
     }
 }
@@ -138,7 +140,60 @@ impl Registry {
     pub fn build(program: &[Stmt]) -> Registry {
         let mut registry = Registry::default();
         registry.index(program);
+        registry.flatten_traits();
         registry
+    }
+
+    /// A `use TraitName;` can reference a trait declared later in the same
+    /// file (PHP resolves this at compile time, not top-to-bottom), so
+    /// flattening has to be a second pass over the fully-indexed classes -
+    /// a using class's own methods/properties win over a trait's.
+    fn flatten_traits(&mut self) {
+        type TraitAddition = (
+            String,
+            Vec<(String, FunctionSig)>,
+            Vec<(String, PropertySig)>,
+        );
+
+        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let mut additions: Vec<TraitAddition> = Vec::new();
+
+        for class_name in &class_names {
+            let uses = self.classes[class_name].uses.clone();
+            if uses.is_empty() {
+                continue;
+            }
+            let mut methods = Vec::new();
+            let mut properties = Vec::new();
+            for trait_name in &uses {
+                if let Some(trait_info) = self.classes.get(trait_name) {
+                    methods.extend(
+                        trait_info
+                            .methods
+                            .iter()
+                            .map(|(n, s)| (n.clone(), s.clone())),
+                    );
+                    properties.extend(
+                        trait_info
+                            .properties
+                            .iter()
+                            .map(|(n, s)| (n.clone(), s.clone())),
+                    );
+                }
+            }
+            additions.push((class_name.clone(), methods, properties));
+        }
+
+        for (class_name, methods, properties) in additions {
+            if let Some(info) = self.classes.get_mut(&class_name) {
+                for (name, sig) in methods {
+                    info.methods.entry(name).or_insert(sig);
+                }
+                for (name, sig) in properties {
+                    info.properties.entry(name).or_insert(sig);
+                }
+            }
+        }
     }
 
     fn index(&mut self, stmts: &[Stmt]) {
@@ -355,6 +410,65 @@ mod tests {
         assert_eq!(
             r.lookup_property("Point", "label").unwrap().ty,
             Type::String
+        );
+    }
+
+    #[test]
+    fn trait_methods_and_properties_are_flattened_in() {
+        let r = build_registry(
+            r#"<?php
+            trait Greets {
+                public string $greeting = "hi";
+                public function greet(): string { return "hi"; }
+            }
+            class Person {
+                use Greets;
+            }
+        "#,
+        );
+        assert_eq!(
+            r.lookup_method("Person", "greet").unwrap().return_type,
+            Type::String
+        );
+        assert_eq!(
+            r.lookup_property("Person", "greeting").unwrap().ty,
+            Type::String
+        );
+    }
+
+    #[test]
+    fn trait_used_before_its_declaration_still_resolves() {
+        // PHP resolves `use` at compile time, not top-to-bottom - a trait
+        // declared later in the file must still flatten in correctly.
+        let r = build_registry(
+            r#"<?php
+            class Person {
+                use Greets;
+            }
+            trait Greets {
+                public function greet(): string { return "hi"; }
+            }
+        "#,
+        );
+        assert!(r.lookup_method("Person", "greet").is_some());
+    }
+
+    #[test]
+    fn class_method_overrides_trait_method_of_same_name() {
+        let r = build_registry(
+            r#"<?php
+            trait Greets {
+                public function greet(): string { return "generic"; }
+            }
+            class Person {
+                use Greets;
+                public function greet(): int { return 1; }
+            }
+        "#,
+        );
+        assert_eq!(
+            r.lookup_method("Person", "greet").unwrap().return_type,
+            Type::Int
         );
     }
 

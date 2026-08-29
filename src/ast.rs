@@ -123,6 +123,8 @@ pub struct ClassDecl {
     pub properties: Vec<PropertyDecl>,
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
+    // `use TraitA, TraitB;` inside the class body.
+    pub uses: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +201,9 @@ pub enum Expr {
     Index(Box<Expr>, Option<Box<Expr>>),
     Name(String),
     Instanceof(Box<Expr>, String),
+    // Cast target is normalized to one of: int, float, string, bool,
+    // array, object, unset.
+    Cast(String, Box<Expr>),
     Grouping(Box<Expr>),
     Clone(Box<Expr>),
     Interpolated(Vec<Expr>),

@@ -234,7 +234,10 @@ impl<'a> Checker<'a> {
                 self.check_expr(l, locals, label);
                 self.check_expr(r, locals, label);
             }
-            Expr::Unary(_, inner) | Expr::Grouping(inner) | Expr::Clone(inner) => {
+            Expr::Unary(_, inner)
+            | Expr::Grouping(inner)
+            | Expr::Clone(inner)
+            | Expr::Cast(_, inner) => {
                 self.check_expr(inner, locals, label);
             }
             Expr::Assign(lhs, rhs) | Expr::CompoundAssign(_, lhs, rhs) => {
@@ -339,6 +342,16 @@ impl<'a> Checker<'a> {
             },
             Expr::Variable(name) => locals.get(name).cloned().unwrap_or(Type::Mixed),
             Expr::Grouping(inner) | Expr::Clone(inner) => self.infer_expr(inner, locals),
+            Expr::Cast(ty, _) => match ty.as_str() {
+                "int" => Type::Int,
+                "float" => Type::Float,
+                "string" => Type::String,
+                "bool" => Type::Bool,
+                "array" => Type::Array(Box::new(Type::Mixed)),
+                "object" => Type::Object("object".to_string()),
+                "unset" => Type::Null,
+                _ => Type::Mixed,
+            },
             Expr::Unary(UnaryOp::Not, _) => Type::Bool,
             Expr::Unary(_, inner) => self.infer_expr(inner, locals),
             Expr::Binary(op, l, r) => self.infer_binary(op, l, r, locals),

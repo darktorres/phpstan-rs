@@ -719,8 +719,31 @@ impl Parser {
         let mut properties = Vec::new();
         let mut methods = Vec::new();
         let mut consts = Vec::new();
+        let mut uses = Vec::new();
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
+            if self.eat(&Token::Keyword(Keyword::Use)) {
+                uses.push(self.parse_qualified_name());
+                while self.eat(&Token::Comma) {
+                    uses.push(self.parse_qualified_name());
+                }
+                if self.eat(&Token::LBrace) {
+                    // Trait adaptations (`insteadof`/`as`) aren't modeled;
+                    // skip to the matching closing brace.
+                    let mut depth = 1;
+                    while depth > 0 && !self.at_eof() {
+                        match self.advance() {
+                            Token::LBrace => depth += 1,
+                            Token::RBrace => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                } else {
+                    self.expect_semicolon();
+                }
+                continue;
+            }
+
             let mut visibility = Visibility::Public;
             let mut is_static = false;
             let mut is_abstract_member = false;
@@ -811,6 +834,7 @@ impl Parser {
             properties,
             methods,
             consts,
+            uses,
         }
     }
 
@@ -1006,6 +1030,11 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Expr {
+        if let Some(cast_ty) = self.try_parse_cast() {
+            let operand = self.parse_unary();
+            return Expr::Cast(cast_ty, Box::new(operand));
+        }
+
         let op = match self.peek() {
             Token::Bang => Some(UnaryOp::Not),
             Token::Minus => Some(UnaryOp::Neg),
@@ -1025,6 +1054,36 @@ impl Parser {
             return self.parse_unary();
         }
         self.parse_pow()
+    }
+
+    /// `(int)`, `(string)`, etc: a cast is only distinguishable from a
+    /// parenthesized expression by 3-token lookahead - `(`, a known cast
+    /// keyword, `)` - with nothing else it could be.
+    fn try_parse_cast(&mut self) -> Option<String> {
+        if !matches!(self.peek(), Token::LParen) {
+            return None;
+        }
+        let name = match self.peek_at(1) {
+            Token::Identifier(s) => s.to_ascii_lowercase(),
+            _ => return None,
+        };
+        let normalized = match name.as_str() {
+            "int" | "integer" => "int",
+            "float" | "double" | "real" => "float",
+            "string" => "string",
+            "bool" | "boolean" => "bool",
+            "array" => "array",
+            "object" => "object",
+            "unset" => "unset",
+            _ => return None,
+        };
+        if !matches!(self.peek_at(2), Token::RParen) {
+            return None;
+        }
+        self.advance(); // (
+        self.advance(); // type identifier
+        self.advance(); // )
+        Some(normalized.to_string())
     }
 
     fn parse_pow(&mut self) -> Expr {
