@@ -153,6 +153,20 @@ impl Parser {
     /// apart from a plain `clone(expr)` (the classic unary form, spelled
     /// with parens around its operand).
     fn clone_call_has_top_level_comma(&self) -> bool {
+        // A named argument (`clone(object: $x)`) or a leading spread
+        // (`clone(...$args)`, as opposed to the bare `clone(...)`
+        // first-class-callable shape already ruled out by the caller)
+        // also commits to the call-args form even with no comma anywhere -
+        // both checked first since they're fixed-width lookaheads right
+        // after the `(`.
+        if matches!(self.peek_at(1), Token::Identifier(_) | Token::Keyword(_))
+            && matches!(self.peek_at(2), Token::Colon)
+        {
+            return true;
+        }
+        if matches!(self.peek_at(1), Token::Ellipsis) {
+            return true;
+        }
         let mut depth = 0i32;
         let mut offset = 0usize;
         loop {
@@ -332,7 +346,15 @@ impl Parser {
             {
                 Stmt::ClassDecl(self.parse_class_decl())
             }
-            Token::Keyword(Keyword::Enum) => Stmt::EnumDecl(self.parse_enum_decl()),
+            // Like abstract/final/readonly above, `enum` is only reserved
+            // as a declaration keyword - `function enum() {}` and a bare
+            // `enum();` call are both legal PHP. A real enum declaration
+            // is always followed by its name.
+            Token::Keyword(Keyword::Enum)
+                if matches!(self.peek_at(1), Token::Identifier(_) | Token::Keyword(_)) =>
+            {
+                Stmt::EnumDecl(self.parse_enum_decl())
+            }
             Token::Keyword(Keyword::Namespace) => {
                 self.advance();
                 let name = self.parse_qualified_name();
@@ -2257,22 +2279,45 @@ impl Parser {
             }
             Token::Keyword(Keyword::Clone) => {
                 self.advance();
+                // `clone(...)` - the PHP 8.1 first-class-callable syntax
+                // applies to `clone` too (`$f = clone(...); $f($obj);`),
+                // even though it isn't parsed via the general call/args
+                // path every other first-class-callable goes through.
+                if matches!(self.peek(), Token::LParen)
+                    && matches!(self.peek_at(1), Token::Ellipsis)
+                    && matches!(self.peek_at(2), Token::RParen)
+                {
+                    self.advance();
+                    self.advance();
+                    self.advance();
+                    return Expr::FirstClassCallable(Box::new(Expr::Name("clone".to_string())));
+                }
                 // PHP 8.5's `clone($obj, $overrides)` - a distinct grammar
                 // production (verified against a real PHP 8.5 build: it
                 // does NOT allow a postfix chain right after it, unlike
-                // the classic form) from plain `clone <expr>`, only when a
-                // comma actually appears at the top level of the parens.
-                // `clone($x)` with no comma is just the classic unary form
-                // spelled with parens, and still binds through the full
-                // postfix chain as its operand - e.g. `clone($a)->b`
-                // clones `$a->b`, not `$a`.
+                // the classic form) from plain `clone <expr>`, chosen
+                // whenever what's in the parens can't be a single bare
+                // expression (a comma, named argument, or spread appears).
+                // `clone($x)` alone is just the classic unary form spelled
+                // with parens, and still binds through the full postfix
+                // chain as its operand - e.g. `clone($a)->b` clones
+                // `$a->b`, not `$a`. Parsed with the same general
+                // parse_args() every ordinary call uses (named args,
+                // spread, trailing commas and all) - only the first two
+                // resulting args are kept, matching how the RFC only ever
+                // gives this two real parameters.
                 if matches!(self.peek(), Token::LParen) && self.clone_call_has_top_level_comma() {
-                    self.advance(); // (
-                    let obj = self.parse_expression();
-                    self.expect(&Token::Comma);
-                    let overrides = self.parse_expression();
-                    self.expect(&Token::RParen);
-                    return Expr::Clone(Box::new(obj), Some(Box::new(overrides)));
+                    let (mut args, _) = self.parse_args();
+                    let overrides = if args.len() > 1 {
+                        Some(Box::new(args.remove(1)))
+                    } else {
+                        None
+                    };
+                    let obj = args
+                        .into_iter()
+                        .next()
+                        .unwrap_or(Expr::Literal(Literal::Null));
+                    return Expr::Clone(Box::new(obj), overrides);
                 }
                 let e = self.parse_unary();
                 Expr::Clone(Box::new(e), None)
@@ -2364,8 +2409,23 @@ impl Parser {
                 self.advance();
                 Expr::Name("static".to_string())
             }
-            Token::Keyword(Keyword::Function) | Token::Keyword(Keyword::Fn) => {
+            Token::Keyword(Keyword::Function) => self.parse_closure_like(false),
+            // `fn` is only reserved as the arrow-function keyword when
+            // it's actually followed by its param list, optionally after
+            // a by-reference-return `&` (`fn&(...) => ...`) - `function`
+            // is fully reserved (an arrow function's own inner `function`
+            // keyword doesn't exist, so no ambiguity there), but `fn`
+            // alone is legal as a name/namespace segment (`fn\test()`).
+            Token::Keyword(Keyword::Fn)
+                if matches!(self.peek_at(1), Token::LParen)
+                    || (matches!(self.peek_at(1), Token::Amp)
+                        && matches!(self.peek_at(2), Token::LParen)) =>
+            {
                 self.parse_closure_like(false)
+            }
+            Token::Keyword(Keyword::Fn) => {
+                let name = self.parse_qualified_name();
+                Expr::Name(name)
             }
             Token::Keyword(Keyword::Match) => self.parse_match_expr(),
             Token::InterpString(parts) => {
@@ -2376,17 +2436,22 @@ impl Parser {
             // namespace. Only ever appears as a value in expression
             // position (the bare `namespace` statement/block forms are
             // handled separately in parse_statement/parse_program), so
-            // it's unambiguous here. `abstract`/`final`/`readonly` reach
-            // here as a bare function/constant reference (`readonly()`,
-            // `A::readonly`) only when parse_statement's own lookahead
-            // already ruled out a class declaration - every other keyword
-            // with a real expression meaning (new/match/static/...) has
-            // its own dedicated arm earlier in this match, so this is
-            // unambiguous too.
+            // it's unambiguous here. `abstract`/`final`/`readonly`/`enum`
+            // reach here as a bare function/constant reference
+            // (`readonly()`, `enum()`, `A::readonly`) only when
+            // parse_statement's own lookahead already ruled out a class/
+            // enum declaration - every other keyword with a real
+            // expression meaning (new/match/static/...) has its own
+            // dedicated arm earlier in this match, so this is unambiguous
+            // too.
             Token::Identifier(_)
             | Token::Backslash
             | Token::Keyword(
-                Keyword::Namespace | Keyword::Abstract | Keyword::Final | Keyword::Readonly,
+                Keyword::Namespace
+                | Keyword::Abstract
+                | Keyword::Final
+                | Keyword::Readonly
+                | Keyword::Enum,
             ) => {
                 let name = self.parse_qualified_name();
                 Expr::Name(name)
@@ -3384,6 +3449,60 @@ mod tests {
             panic!("expected a multiplication at the top");
         };
         assert!(matches!(lhs.as_ref(), Expr::Yield(None, None)));
+    }
+
+    #[test]
+    fn clone_call_form_variants_parse() {
+        parse(
+            r#"<?php
+            $a = clone($x, );
+            $b = clone($x, $y, $z, $w, );
+            $c = clone(object: $x, withProperties: []);
+            $d = clone($x, withProperties: []);
+            $e = clone(...["object" => $x]);
+        "#,
+        );
+    }
+
+    #[test]
+    fn clone_as_first_class_callable_parses() {
+        let program = parse(r#"<?php $f = clone(...);"#);
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::FirstClassCallable(_)));
+    }
+
+    #[test]
+    fn enum_usable_as_plain_function_and_constant_name() {
+        let program = parse(
+            r#"<?php
+            function enum() { return 1; }
+            var_dump(enum());
+            var_dump(enum);
+            enum Suit { case Hearts; }
+        "#,
+        );
+        assert!(matches!(&program[0], Stmt::FunctionDecl(f) if f.name == "enum"));
+        assert!(matches!(&program[3], Stmt::EnumDecl(e) if e.name == "Suit"));
+    }
+
+    #[test]
+    fn fn_usable_as_namespace_segment_when_not_a_signature() {
+        let program = parse(r#"<?php fn\test();"#);
+        assert!(
+            matches!(&program[0], Stmt::Expression(Expr::Call(callee, _))
+            if matches!(callee.as_ref(), Expr::Name(n) if n == "fn\\test"))
+        );
+    }
+
+    #[test]
+    fn by_reference_arrow_function_still_parses_as_arrow_fn() {
+        let program = parse(r#"<?php $id = fn&(&$x) => $x;"#);
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::ArrowFn { .. }));
     }
 
     #[test]
