@@ -18,6 +18,9 @@ pub struct DocBlock {
     pub params: HashMap<String, String>,
     pub return_type: Option<String>,
     pub var_type: Option<String>,
+    // `@template T` names (a bound, `@template T of SomeClass`, is parsed
+    // past but not recorded - nothing consumes it yet).
+    pub templates: Vec<String>,
 }
 
 pub fn parse(raw: &str) -> DocBlock {
@@ -57,6 +60,11 @@ pub fn parse(raw: &str) -> DocBlock {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
                     block.var_type = Some(ty.to_string());
+                }
+            }
+            "template" => {
+                if let Some(name) = rest.split_whitespace().next() {
+                    block.templates.push(name.to_string());
                 }
             }
             _ => {}
@@ -165,5 +173,25 @@ mod tests {
             block.params.get("users"),
             Some(&"array<int, User>".to_string())
         );
+    }
+
+    #[test]
+    fn parses_template_name() {
+        let block = parse(
+            r#"/**
+             * @template T
+             * @param T $value
+             * @return T
+             */"#,
+        );
+        assert_eq!(block.templates, vec!["T".to_string()]);
+        assert_eq!(block.params.get("value"), Some(&"T".to_string()));
+        assert_eq!(block.return_type, Some("T".to_string()));
+    }
+
+    #[test]
+    fn parses_bounded_template_name_ignoring_the_bound() {
+        let block = parse("/** @template T of \\Countable */");
+        assert_eq!(block.templates, vec!["T".to_string()]);
     }
 }

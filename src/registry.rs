@@ -29,9 +29,44 @@ fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
         .unwrap_or(Type::Mixed)
 }
 
+/// Rewrites every `Object(name)` in a type tree whose name is one of this
+/// function's own declared `@template` parameters into `TemplateParam(name)`.
+/// `parse_type_string` has no way to know "T" is a template rather than an
+/// ordinary (if oddly-named) class, so that reclassification happens here,
+/// where the declaring function's `@template` list is known.
+fn mark_template_params(ty: Type, template_names: &HashSet<String>) -> Type {
+    match ty {
+        Type::Object(name) if template_names.contains(&name) => Type::TemplateParam(name),
+        Type::Array(inner) => Type::Array(Box::new(mark_template_params(*inner, template_names))),
+        Type::Union(members) => Type::Union(
+            members
+                .into_iter()
+                .map(|m| mark_template_params(m, template_names))
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .into_iter()
+                .map(|m| mark_template_params(m, template_names))
+                .collect(),
+        ),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, mark_template_params(t, template_names), opt))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 impl FunctionSig {
     fn from_decl(f: &FunctionDecl) -> FunctionSig {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
+        let template_names: HashSet<String> = doc
+            .as_ref()
+            .map(|d| d.templates.iter().cloned().collect())
+            .unwrap_or_default();
 
         let params = f
             .params
@@ -39,6 +74,7 @@ impl FunctionSig {
             .map(|p| {
                 let doc_ty = doc.as_ref().and_then(|d| d.params.get(&p.name));
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
+                let ty = mark_template_params(ty, &template_names);
                 ParamSig {
                     name: p.name.clone(),
                     ty,
@@ -50,6 +86,7 @@ impl FunctionSig {
 
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
         let return_type = resolve_type(doc_return, f.return_type.as_deref());
+        let return_type = mark_template_params(return_type, &template_names);
 
         FunctionSig {
             params,
@@ -314,6 +351,14 @@ impl Registry {
             (Type::Array(a), Type::Array(b)) => {
                 matches!(**a, Type::Mixed) || self.is_assignable(a, b)
             }
+            // Same leniency, same reason, for an array of unknown structure
+            // (an array literal, most commonly) checked against a specific
+            // expected shape: e.g. `return ["count" => ..., "first" => ...]`
+            // against `@return array{count: int, first: string}` shouldn't
+            // false-positive just because literal keys/values aren't
+            // inferred. A genuinely known, homogeneous Array(V) still
+            // correctly fails to satisfy an arbitrary shape.
+            (Type::Array(a), Type::ArrayShape(_)) => matches!(**a, Type::Mixed),
             _ => types::is_subtype(sub, sup),
         }
     }
@@ -419,6 +464,18 @@ mod tests {
         // A genuinely known, different element type is still caught.
         let strings = Type::Array(Box::new(Type::String));
         assert!(!r.is_assignable(&strings, &ints));
+    }
+
+    #[test]
+    fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
+        let r = Registry::default();
+        let unknown = Type::Array(Box::new(Type::Mixed));
+        let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+        assert!(r.is_assignable(&unknown, &shape));
+        // A genuinely known, homogeneous array still doesn't satisfy an
+        // arbitrary shape.
+        let ints = Type::Array(Box::new(Type::Int));
+        assert!(!r.is_assignable(&ints, &shape));
     }
 
     #[test]

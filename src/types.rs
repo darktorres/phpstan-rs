@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 
 // A deliberately small slice of PHPStan's type system: enough to represent
@@ -29,6 +30,14 @@ pub enum Type {
     SelfRef,
     ParentRef,
     StaticRef,
+    // An unbound `@template T` name. Only produced for a function/method's
+    // own declared template parameters (registry::mark_template_params) -
+    // resolving one against an actual argument at a call site is
+    // checker::bind_template_param / substitute_template's job. Class-level
+    // generics (`Collection<T>` with the binding tracked across statements)
+    // aren't modeled - that needs Object to carry type arguments, a bigger
+    // change than this slice attempts.
+    TemplateParam(String),
     Union(Vec<Type>),
     Intersection(Vec<Type>),
 }
@@ -67,6 +76,7 @@ impl fmt::Display for Type {
             Type::SelfRef => write!(f, "self"),
             Type::ParentRef => write!(f, "parent"),
             Type::StaticRef => write!(f, "static"),
+            Type::TemplateParam(name) => write!(f, "{name}"),
             Type::Union(members) => {
                 let parts: Vec<String> = members.iter().map(Type::to_string).collect();
                 write!(f, "{}", parts.join("|"))
@@ -280,7 +290,68 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
 
         (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(_)) => true,
 
+        // An unbound template parameter is a placeholder, not a real type -
+        // treat it as compatible with anything on either side rather than
+        // ever read as a confident mismatch. Call sites should have already
+        // substituted it away (checker::infer_call_return_type); this is
+        // the safety net for wherever that doesn't happen.
+        (Type::TemplateParam(_), _) | (_, Type::TemplateParam(_)) => true,
+
         _ => false,
+    }
+}
+
+/// Unifies a template-bearing param type against an actual argument type,
+/// recording the binding it implies. Only the two shapes that come up in
+/// practice are handled: a bare `T` param, and `T[]`/`array<T>` unifying
+/// against an array argument's element type. Anything else (a template
+/// buried in a union, an array shape, etc) just isn't bound, which is safe
+/// since `substitute_template` falls back to `Mixed` for anything left
+/// unbound. First binding for a given name wins; conflicting uses of the
+/// same `T` across multiple params aren't reconciled (no union-widening).
+pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMap<String, Type>) {
+    match param_ty {
+        Type::TemplateParam(name) => {
+            if *arg_ty != Type::Mixed {
+                bindings
+                    .entry(name.clone())
+                    .or_insert_with(|| arg_ty.clone());
+            }
+        }
+        Type::Array(inner) => {
+            if let Type::Array(arg_inner) = arg_ty {
+                bind_template_param(inner, arg_inner, bindings);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Applies a set of template bindings through a type tree, replacing every
+/// `TemplateParam` with its bound type (or `Mixed` if it was never bound).
+pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
+    match ty {
+        Type::TemplateParam(name) => bindings.get(name).cloned().unwrap_or(Type::Mixed),
+        Type::Array(inner) => Type::Array(Box::new(substitute_template(inner, bindings))),
+        Type::Union(members) => Type::Union(
+            members
+                .iter()
+                .map(|m| substitute_template(m, bindings))
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .iter()
+                .map(|m| substitute_template(m, bindings))
+                .collect(),
+        ),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .iter()
+                .map(|(k, t, opt)| (k.clone(), substitute_template(t, bindings), *opt))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }
 

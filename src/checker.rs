@@ -62,21 +62,62 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Looks up this exact declaration's own resolved signature in the
+    /// registry (a free function by name, or a method by class+name).
+    /// Returns a reference tied to the registry's lifetime, not `&self`'s,
+    /// so holding it doesn't conflict with the `&mut self` calls that
+    /// follow once its params/return type have been copied into `locals`.
+    fn lookup_own_signature(
+        &self,
+        f: &FunctionDecl,
+        class_name: Option<&str>,
+    ) -> Option<&'a FunctionSig> {
+        match class_name {
+            Some(c) => self.registry.classes.get(c)?.methods.get(&f.name),
+            None => self.registry.functions.get(&f.name),
+        }
+    }
+
     fn check_function(&mut self, f: &FunctionDecl, class_name: Option<&str>) {
+        let sig = self.lookup_own_signature(f, class_name);
+
         let mut locals: HashMap<String, Type> = HashMap::new();
-        for p in &f.params {
-            let ty = p
-                .type_hint
-                .as_deref()
-                .map(types::parse_type_string)
-                .unwrap_or(Type::Mixed);
-            locals.insert(p.name.clone(), ty);
+        match sig {
+            // The registry's FunctionSig already has PHPDoc types merged in
+            // (Phase 2) - using it here, instead of re-deriving from the
+            // raw AST's native hints, is what makes an untyped-but-
+            // doc-commented parameter usable inside its own function body,
+            // not just checkable from the outside at call sites.
+            Some(sig) => {
+                for param in &sig.params {
+                    locals.insert(param.name.clone(), param.ty.clone());
+                }
+            }
+            // Shouldn't happen (this function had to be indexed to be
+            // reachable here at all), but degrade rather than panic.
+            None => {
+                for p in &f.params {
+                    let ty = p
+                        .type_hint
+                        .as_deref()
+                        .map(types::parse_type_string)
+                        .unwrap_or(Type::Mixed);
+                    locals.insert(p.name.clone(), ty);
+                }
+            }
         }
         if let Some(c) = class_name {
             locals.insert("this".to_string(), Type::Object(c.to_string()));
         }
 
-        let declared_return = f.return_type.as_deref().map(types::parse_type_string);
+        // A signature's return type already defaults to Mixed when nothing
+        // was declared, and checking a return statement against Mixed
+        // never flags anything - so this doesn't need to distinguish "no
+        // return type" from "declared mixed" the way the fallback below
+        // does with an Option.
+        let declared_return = sig
+            .map(|s| s.return_type.clone())
+            .or_else(|| f.return_type.as_deref().map(types::parse_type_string));
         let label = match class_name {
             Some(c) => format!("{c}::{}", f.name),
             None => f.name.clone(),
@@ -564,19 +605,22 @@ impl<'a> Checker<'a> {
                 },
                 _ => Type::Mixed,
             },
-            Expr::Call(callee, _) => match callee.as_ref() {
+            Expr::Call(callee, args) => match callee.as_ref() {
                 Expr::Name(name) => self
                     .registry
                     .lookup_function(name)
-                    .map(|s| s.return_type.clone())
+                    .map(|sig| self.infer_call_return_type(sig, args, locals))
                     .unwrap_or(Type::Mixed),
                 _ => Type::Mixed,
             },
-            Expr::MethodCall(recv, method, _) => match self.infer_expr(recv, locals) {
+            Expr::MethodCall(recv, method, args) => match self.infer_expr(recv, locals) {
                 Type::Object(class) => self
                     .registry
                     .lookup_method(&class, method)
-                    .map(|s| self.resolve_pseudo(&s.return_type, &class))
+                    .map(|sig| {
+                        let resolved = self.infer_call_return_type(sig, args, locals);
+                        self.resolve_pseudo(&resolved, &class)
+                    })
                     .unwrap_or(Type::Mixed),
                 _ => Type::Mixed,
             },
@@ -610,6 +654,25 @@ impl<'a> Checker<'a> {
             },
             _ => Type::Mixed,
         }
+    }
+
+    /// A generic function's return type may mention its own `@template`
+    /// parameters (`TemplateParam`) - this binds each one against the
+    /// actual argument at this call site (`identity(5)` binds `T` to
+    /// `int`) and substitutes the result into the return type. A signature
+    /// with no templates at all is untouched (the common case, cheap).
+    fn infer_call_return_type(
+        &self,
+        sig: &FunctionSig,
+        args: &[Expr],
+        locals: &HashMap<String, Type>,
+    ) -> Type {
+        let mut bindings: HashMap<String, Type> = HashMap::new();
+        for (param, arg) in sig.params.iter().zip(args.iter()) {
+            let arg_ty = self.infer_expr(arg, locals);
+            types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
+        }
+        types::substitute_template(&sig.return_type, &bindings)
     }
 
     fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &HashMap<String, Type>) -> Type {
@@ -1091,5 +1154,80 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn template_binds_from_argument_and_flags_downstream_misuse() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             * @param T $value
+             * @return T
+             */
+            function identity($value) { return $value; }
+            function needsInt(int $x): int { return $x; }
+            needsInt(identity("wrong"));
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn template_binding_accepts_correctly_typed_usage() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             * @param T $value
+             * @return T
+             */
+            function identity($value) { return $value; }
+            function needsInt(int $x): int { return $x; }
+            needsInt(identity(5));
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_template_binds_element_type_from_a_precisely_typed_argument() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             * @param T[] $items
+             * @return T
+             */
+            function firstOf(array $items) { return $items[0]; }
+            function needsInt(int $x): int { return $x; }
+            /** @param string[] $words */
+            function process(array $words) {
+                return needsInt(firstOf($words));
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn phpdoc_param_type_is_usable_inside_the_function_own_body() {
+        // Regression test for a real bug: check_function used to seed
+        // parameter locals from the raw AST's native hint only, so a
+        // PHPDoc-only type worked for callers but not for the function's
+        // own body analyzing its own parameter.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            /** @param string $s */
+            function f($s) {
+                return needsInt($s);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
     }
 }
