@@ -118,6 +118,19 @@ impl Parser {
         self.tokens.get(self.pos + offset).unwrap_or(&Token::Eof)
     }
 
+    /// Is the current position a `(set)` asymmetric-visibility marker
+    /// (`private(set)`, `public(set)`, `protected(set)`)? Checked at the
+    /// visibility keyword itself, i.e. this looks 3 tokens ahead for the
+    /// literal `( set )`. Needed to tell it apart from a visibility
+    /// keyword immediately followed by an unrelated `(` for some other
+    /// reason - most notably `public (A&B)|X $prop;`, a DNF type hint
+    /// that also happens to start with `(`.
+    fn peek_is_set_visibility_marker(&self) -> bool {
+        matches!(self.peek_at(1), Token::LParen)
+            && matches!(self.peek_at(2), Token::Identifier(s) if s == "set")
+            && matches!(self.peek_at(3), Token::RParen)
+    }
+
     /// Scans forward from the current `(` (without consuming anything) for
     /// a comma at that paren's own nesting level before its matching `)` -
     /// used to tell PHP 8.5's two-argument `clone(obj, overrides)` form
@@ -252,9 +265,9 @@ impl Parser {
             }
             Token::Keyword(Keyword::Global) => {
                 self.advance();
-                let mut names = vec![self.expect_variable()];
+                let mut names = vec![self.parse_global_target()];
                 while self.eat(&Token::Comma) {
-                    names.push(self.expect_variable());
+                    names.push(self.parse_global_target());
                 }
                 self.expect_semicolon();
                 Stmt::Global(names)
@@ -432,6 +445,20 @@ impl Parser {
             Token::Variable(s) => s,
             other => panic!("parse error: expected variable, found {:?}", other),
         }
+    }
+
+    /// A `global` statement's target - almost always a plain `$name`, but
+    /// PHP also allows `${expr}` there (`global ${sf("a")};`) for a
+    /// runtime-computed variable name. Not modeled beyond parsing past it
+    /// (the checker just gets a placeholder "always defined" entry, which
+    /// is harmless since nothing else can reference this exact name).
+    fn parse_global_target(&mut self) -> String {
+        if self.eat(&Token::DollarBrace) {
+            self.parse_expression();
+            self.expect(&Token::RBrace);
+            return "{dynamic}".to_string();
+        }
+        self.expect_variable()
     }
 
     fn parse_block(&mut self) -> Stmt {
@@ -890,6 +917,20 @@ impl Parser {
             // promotion, so it's still just consumed and dropped.
             let mut promoted_visibility = None;
             loop {
+                // PHP 8.4 asymmetric visibility on a promoted property
+                // (`public public(set) string $a`) - see the identical
+                // case in parse_class_body's property-modifier loop.
+                if matches!(
+                    self.peek(),
+                    Token::Keyword(Keyword::Public | Keyword::Private | Keyword::Protected)
+                ) && self.peek_is_set_visibility_marker()
+                {
+                    self.advance();
+                    self.advance();
+                    self.expect_ident();
+                    self.expect(&Token::RParen);
+                    continue;
+                }
                 match self.peek() {
                     Token::Keyword(Keyword::Public) => {
                         promoted_visibility = Some(Visibility::Public)
@@ -900,7 +941,7 @@ impl Parser {
                     Token::Keyword(Keyword::Protected) => {
                         promoted_visibility = Some(Visibility::Protected)
                     }
-                    Token::Keyword(Keyword::Readonly) => {}
+                    Token::Keyword(Keyword::Readonly) | Token::Keyword(Keyword::Final) => {}
                     _ => break,
                 }
                 self.advance();
@@ -1090,17 +1131,22 @@ impl Parser {
                     // own concept - just consumed so the read-side
                     // `visibility` above (already set, or defaulted to
                     // Public) is left alone.
-                    Token::Keyword(Keyword::Private)
-                        if matches!(self.peek_at(1), Token::LParen) =>
-                    {
+                    Token::Keyword(Keyword::Private) if self.peek_is_set_visibility_marker() => {
                         self.advance();
                         self.advance();
                         self.expect_ident();
                         self.expect(&Token::RParen);
                     }
-                    Token::Keyword(Keyword::Protected)
-                        if matches!(self.peek_at(1), Token::LParen) =>
-                    {
+                    Token::Keyword(Keyword::Protected) if self.peek_is_set_visibility_marker() => {
+                        self.advance();
+                        self.advance();
+                        self.expect_ident();
+                        self.expect(&Token::RParen);
+                    }
+                    // `public(set)` - same idea, redundantly naming the
+                    // write-visibility as public too (e.g. `public
+                    // public(set) string $x`).
+                    Token::Keyword(Keyword::Public) if self.peek_is_set_visibility_marker() => {
                         self.advance();
                         self.advance();
                         self.expect_ident();
@@ -1127,6 +1173,14 @@ impl Parser {
                         self.advance();
                     }
                     Token::Keyword(Keyword::Final) | Token::Keyword(Keyword::Readonly) => {
+                        self.advance();
+                    }
+                    // The legacy PHP 4 `var $x;` property declaration -
+                    // equivalent to `public $x;`. `var` isn't a reserved
+                    // word (unlike every other modifier here), so it only
+                    // arrives as a plain Identifier.
+                    Token::Identifier(s) if s == "var" => {
+                        visibility = Visibility::Public;
                         self.advance();
                     }
                     _ => break,
@@ -3099,6 +3153,49 @@ mod tests {
             };
         "#,
         );
+    }
+
+    #[test]
+    fn public_set_and_final_promoted_params_parse() {
+        let program = parse(
+            r#"<?php
+            class Foo {
+                public function __construct(
+                    public public(set) string $a,
+                    final $b,
+                ) {}
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        let ctor = &c.methods[0].function;
+        assert_eq!(ctor.params[0].promoted_visibility, Some(Visibility::Public));
+        assert_eq!(ctor.params[1].name, "b");
+    }
+
+    #[test]
+    fn legacy_var_property_declaration_parses() {
+        let program = parse(
+            r#"<?php
+            class Dnf {
+                var A|(B&C) $a;
+            }
+        "#,
+        );
+        let Stmt::ClassDecl(c) = &program[0] else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.properties[0].name, "a");
+        assert_eq!(c.properties[0].visibility, Visibility::Public);
+        assert_eq!(c.properties[0].type_hint.as_deref(), Some("A|(B&C)"));
+    }
+
+    #[test]
+    fn global_with_dynamic_target_parses() {
+        let program = parse(r#"<?php global ${sf("a")};"#);
+        assert!(matches!(&program[0], Stmt::Global(names) if names == &["{dynamic}"]));
     }
 
     #[test]
