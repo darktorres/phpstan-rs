@@ -272,9 +272,19 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 self.check_expr(subject, locals, label);
+                // The loop variable(s) are a definition site, not a read -
+                // bind them (to the subject's known element type, when
+                // it's a homogeneous array) before checking anything that
+                // could reference them.
+                let element_ty = match self.infer_expr(subject, locals) {
+                    Type::Array(inner) => *inner,
+                    _ => Type::Mixed,
+                };
                 if let Some(k) = key {
+                    self.bind_simple_target(k, Type::Mixed, locals);
                     self.check_expr(k, locals, label);
                 }
+                self.bind_simple_target(value, element_ty, locals);
                 self.check_expr(value, locals, label);
                 self.check_stmt(body, locals, declared_return, label);
             }
@@ -294,7 +304,22 @@ impl<'a> Checker<'a> {
             } => {
                 self.check_block(body, locals, declared_return, label);
                 for c in catches {
-                    self.check_block(&c.body, locals, declared_return, label);
+                    // Scoped to this catch block only, in its own clone
+                    // rather than the shared `locals` - matches real PHP
+                    // semantics (the caught variable is unset at the end of
+                    // its catch block) and keeps one catch's binding from
+                    // leaking into a sibling catch or the code after the
+                    // whole try.
+                    let mut catch_locals = locals.clone();
+                    if let Some(var) = &c.var {
+                        let ty = c
+                            .types
+                            .first()
+                            .map(|t| Type::Object(t.clone()))
+                            .unwrap_or(Type::Mixed);
+                        catch_locals.insert(var.clone(), ty);
+                    }
+                    self.check_block(&c.body, &mut catch_locals, declared_return, label);
                 }
                 if let Some(f) = finally {
                     self.check_block(f, locals, declared_return, label);
@@ -307,12 +332,27 @@ impl<'a> Checker<'a> {
 
     fn track_assignment(&self, e: &Expr, locals: &mut HashMap<String, Type>) {
         match e {
-            Expr::Assign(lhs, rhs) => {
-                if let Expr::Variable(name) = lhs.as_ref() {
+            Expr::Assign(lhs, rhs) => match lhs.as_ref() {
+                Expr::Variable(name) => {
                     let ty = self.infer_expr(rhs, locals);
                     locals.insert(name.clone(), ty);
                 }
-            }
+                // Destructuring: `[$a, $b] = $arr;` and `list($a, $b) =
+                // $arr;` both parse as an ArrayLiteral target. Per-key
+                // precision (`['name' => $n] = $shapedArray`) isn't
+                // resolved - every target gets the source's homogeneous
+                // element type, or Mixed for anything else.
+                Expr::ArrayLiteral(items) => {
+                    let element_ty = match self.infer_expr(rhs, locals) {
+                        Type::Array(inner) => *inner,
+                        _ => Type::Mixed,
+                    };
+                    for (_, item) in items {
+                        self.bind_simple_target(item, element_ty.clone(), locals);
+                    }
+                }
+                _ => {}
+            },
             Expr::CompoundAssign(op, lhs, rhs) => {
                 if let Expr::Variable(name) = lhs.as_ref() {
                     let ty = self.infer_binary(op, lhs, rhs, locals);
@@ -320,6 +360,12 @@ impl<'a> Checker<'a> {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut HashMap<String, Type>) {
+        if let Expr::Variable(name) = target {
+            locals.insert(name.clone(), ty);
         }
     }
 
@@ -1369,5 +1415,89 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn foreach_binds_the_value_variable_to_the_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            /** @param string[] $words */
+            function f(array $words) {
+                foreach ($words as $w) {
+                    needsInt($w);
+                }
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn foreach_over_correctly_typed_array_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            /** @param int[] $nums */
+            function f(array $nums) {
+                foreach ($nums as $n) {
+                    needsInt($n);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn catch_binds_the_exception_variable_to_its_class() {
+        let d = diagnostics_for(
+            r#"<?php
+            class MyError extends \Exception {
+                public function detail(): string { return "detail"; }
+            }
+            function f() {
+                try {
+                    throw new MyError();
+                } catch (MyError $e) {
+                    return $e->detail();
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn destructuring_assignment_binds_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            /** @param string[] $pair */
+            function f(array $pair) {
+                [$a, $b] = $pair;
+                return needsInt($a);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn list_style_destructuring_also_binds_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            /** @param string[] $pair */
+            function f(array $pair) {
+                list($a, $b) = $pair;
+                return needsInt($a);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
     }
 }
