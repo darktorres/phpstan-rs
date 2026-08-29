@@ -225,6 +225,11 @@ pub enum BinOp {
     Shl,
     Shr,
     Coalesce,
+    // PHP 8.5's `|>` pipe operator: `$value |> callable` is sugar for
+    // `callable($value)`. Left-associative, and sits (empirically checked
+    // against a real PHP 8.5 build) between concat/shift and the
+    // relational operators - tighter than `<`, looser than `.`/`<<`.
+    Pipe,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -268,6 +273,14 @@ pub enum Expr {
     New(Box<Expr>, Vec<Expr>),
     PropertyAccess(Box<Expr>, String),
     MethodCall(Box<Expr>, String, Vec<Expr>),
+    // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
+    // itself computed from an expression, not statically known, so it
+    // can't share PropertyAccess/MethodCall's plain-String name. Still
+    // worth its own base+name-expr(+args) checking (undefined variables
+    // inside the {} can still be caught), even though the accessed
+    // member's own type never can be.
+    DynamicPropertyAccess(Box<Expr>, Box<Expr>),
+    DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Expr>),
     StaticAccess(String, String),
     StaticCall(String, String, Vec<Expr>),
     Index(Box<Expr>, Option<Box<Expr>>),

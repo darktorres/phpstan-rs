@@ -2,6 +2,16 @@ use crate::ast::*;
 use crate::lexer::Lexer;
 use crate::token::{Keyword, StringPart, Token};
 
+// Real PHP's own engine imposes a call-stack-depth guard specifically so
+// pathologically nested input (`~~~~~~...~~~~~1`, deeply chained `??`,
+// deeply nested parens/arrays) produces a normal fatal error instead of
+// crashing the process - php-src's own Zend/tests/stack_limit/*.phpt exist
+// to test exactly that. This parser's few genuinely self-recursive (not
+// while-loop) productions need the same guard: a stack overflow is a hard
+// fault, not a panic, so it can't be caught by anything upstream (a batch
+// checker's catch_unwind included) and takes the whole process down.
+const MAX_EXPR_DEPTH: usize = 1000;
+
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -11,6 +21,10 @@ pub struct Parser {
     // existed - only the specific call sites that attach one to a
     // declaration look here.
     doc_comments: std::collections::HashMap<usize, String>,
+    // Incremented/decremented around the parser's self-recursive
+    // expression productions (parse_unary, parse_assignment,
+    // parse_coalesce) - see MAX_EXPR_DEPTH.
+    expr_depth: usize,
 }
 
 impl Parser {
@@ -33,6 +47,7 @@ impl Parser {
             tokens: filtered,
             pos: 0,
             doc_comments,
+            expr_depth: 0,
         }
     }
 
@@ -42,12 +57,55 @@ impl Parser {
         self.doc_comments.remove(&self.pos)
     }
 
+    /// Bumps the expression-recursion depth counter, panicking (a normal,
+    /// catchable error) once it passes MAX_EXPR_DEPTH instead of letting
+    /// the recursion keep going until it segfaults. Callers must pair this
+    /// with a matching decrement once their own recursive call returns -
+    /// see the three call sites for the exact pattern.
+    fn enter_expr(&mut self) {
+        self.expr_depth += 1;
+        if self.expr_depth > MAX_EXPR_DEPTH {
+            panic!("parse error: expression nested too deeply (over {MAX_EXPR_DEPTH} levels)");
+        }
+    }
+
+    fn leave_expr(&mut self) {
+        self.expr_depth -= 1;
+    }
+
     pub fn parse_program(&mut self) -> Vec<Stmt> {
         let mut stmts = Vec::new();
         while !self.at_eof() {
-            stmts.push(self.parse_statement());
+            if matches!(self.peek(), Token::Keyword(Keyword::Namespace)) {
+                stmts.extend(self.parse_namespace_stmt());
+            } else {
+                stmts.push(self.parse_statement());
+            }
         }
         stmts
+    }
+
+    /// The older, braced namespace form - `namespace Foo\Bar { ... }`, or
+    /// bare `namespace { ... }` for the global namespace - as opposed to
+    /// the common `namespace Foo\Bar;` statement form (still handled
+    /// generically in parse_statement). Only legal at the top level of a
+    /// file, so this is special-cased in parse_program rather than making
+    /// every parse_statement caller handle getting more than one Stmt
+    /// back. Namespaces aren't modeled beyond the Stmt::Namespace marker,
+    /// so the block's body is spliced into the surrounding statement list
+    /// instead of nested - that's also what keeps its declarations visible
+    /// to Registry::index, which only scans the top-level Vec<Stmt>.
+    fn parse_namespace_stmt(&mut self) -> Vec<Stmt> {
+        self.advance(); // `namespace`
+        let name = self.parse_qualified_name();
+        if self.check(&Token::LBrace) {
+            let mut stmts = vec![Stmt::Namespace(name)];
+            stmts.extend(self.parse_stmt_list_block());
+            stmts
+        } else {
+            self.expect_semicolon();
+            vec![Stmt::Namespace(name)]
+        }
     }
 
     // ---- token stream helpers ----
@@ -1372,6 +1430,13 @@ impl Parser {
     }
 
     fn parse_assignment(&mut self) -> Expr {
+        self.enter_expr();
+        let result = self.parse_assignment_inner();
+        self.leave_expr();
+        result
+    }
+
+    fn parse_assignment_inner(&mut self) -> Expr {
         let lhs = self.parse_ternary();
         let op = match self.peek() {
             Token::Equals => None,
@@ -1424,6 +1489,13 @@ impl Parser {
     }
 
     fn parse_coalesce(&mut self) -> Expr {
+        self.enter_expr();
+        let result = self.parse_coalesce_inner();
+        self.leave_expr();
+        result
+    }
+
+    fn parse_coalesce_inner(&mut self) -> Expr {
         let lhs = self.parse_logical_or();
         if self.eat(&Token::QuestionQuestion) {
             let rhs = self.parse_coalesce();
@@ -1496,7 +1568,7 @@ impl Parser {
     }
 
     fn parse_relational(&mut self) -> Expr {
-        let mut lhs = self.parse_shift();
+        let mut lhs = self.parse_pipe();
         loop {
             let op = match self.peek() {
                 Token::Lt => BinOp::Lt,
@@ -1506,8 +1578,23 @@ impl Parser {
                 _ => break,
             };
             self.advance();
-            let rhs = self.parse_shift();
+            let rhs = self.parse_pipe();
             lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs));
+        }
+        lhs
+    }
+
+    /// PHP 8.5's `|> ` pipe operator: `$value |> callable` desugars to
+    /// `callable($value)`. Left-associative (a while-loop, not
+    /// self-recursion, so it's already immune to the stack-depth issue
+    /// MAX_EXPR_DEPTH guards against). Precedence empirically checked
+    /// against a real PHP 8.5 build: tighter than relational (`<`), looser
+    /// than shift/concat/additive.
+    fn parse_pipe(&mut self) -> Expr {
+        let mut lhs = self.parse_shift();
+        while self.eat(&Token::PipeGt) {
+            let rhs = self.parse_shift();
+            lhs = Expr::Binary(BinOp::Pipe, Box::new(lhs), Box::new(rhs));
         }
         lhs
     }
@@ -1576,6 +1663,13 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Expr {
+        self.enter_expr();
+        let result = self.parse_unary_inner();
+        self.leave_expr();
+        result
+    }
+
+    fn parse_unary_inner(&mut self) -> Expr {
         if let Some(cast_ty) = self.try_parse_cast() {
             let operand = self.parse_unary();
             return Expr::Cast(cast_ty, Box::new(operand));
@@ -1651,6 +1745,26 @@ impl Parser {
             match self.peek() {
                 Token::Arrow | Token::NullsafeArrow => {
                     self.advance();
+                    // `$obj->{expr}` - a fully dynamic property/method
+                    // name, computed from an arbitrary expression rather
+                    // than a fixed identifier or `$var`.
+                    if self.eat(&Token::LBrace) {
+                        let name_expr = self.parse_expression();
+                        self.expect(&Token::RBrace);
+                        expr = if self.check(&Token::LParen) {
+                            let (args, is_fcc) = self.parse_args();
+                            let call =
+                                Expr::DynamicMethodCall(Box::new(expr), Box::new(name_expr), args);
+                            if is_fcc {
+                                Expr::FirstClassCallable(Box::new(call))
+                            } else {
+                                call
+                            }
+                        } else {
+                            Expr::DynamicPropertyAccess(Box::new(expr), Box::new(name_expr))
+                        };
+                        continue;
+                    }
                     // A method/property name accepts any keyword too
                     // (`$obj->match()`, `$obj->new`) - PHP only reserves
                     // these in declaration position, not here.
@@ -1695,6 +1809,18 @@ impl Parser {
                         Token::Variable(s) => {
                             self.advance();
                             format!("${s}")
+                        }
+                        // `Foo::{$name}` - a fully dynamic static member
+                        // name. StaticAccess/StaticCall aren't given any
+                        // deeper type-checking today regardless of whether
+                        // the name is static or dynamic, so this is just
+                        // parsed (consuming the name expression correctly)
+                        // rather than threading a real Expr through here.
+                        Token::LBrace => {
+                            self.advance();
+                            self.parse_expression();
+                            self.expect(&Token::RBrace);
+                            "{dynamic}".to_string()
                         }
                         other => panic!("parse error: expected static member, found {:?}", other),
                     };
@@ -2574,5 +2700,97 @@ mod tests {
         };
         assert_eq!(items.len(), 3);
         assert!(matches!(items[1].1, Expr::Literal(Literal::Null)));
+    }
+
+    #[test]
+    fn moderately_nested_unary_still_parses() {
+        let nested = "~".repeat(500);
+        parse(&format!("<?php $x = {nested}1;"));
+    }
+
+    #[test]
+    #[should_panic(expected = "expression nested too deeply")]
+    fn pathologically_nested_unary_fails_cleanly_instead_of_overflowing_the_stack() {
+        // php-src's Zend/tests/stack_limit/stack_limit_013.phpt is exactly
+        // this shape (~7700 levels) - it's designed to test the real
+        // engine's own stack-depth guard, and used to take this parser's
+        // process down with an uncatchable stack overflow instead of a
+        // normal parse error.
+        let nested = "~".repeat(8000);
+        parse(&format!("<?php $x = {nested}1;"));
+    }
+
+    #[test]
+    fn braced_namespace_declarations_splice_their_body_in() {
+        let program = parse(
+            r#"<?php
+            namespace Foo\Bar {
+                class A {}
+                function f() {}
+            }
+            namespace {
+                class B {}
+            }
+        "#,
+        );
+        let class_names: Vec<&str> = program
+            .iter()
+            .filter_map(|s| match s {
+                Stmt::ClassDecl(c) => Some(c.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(class_names, vec!["A", "B"]);
+        assert!(
+            program
+                .iter()
+                .any(|s| matches!(s, Stmt::FunctionDecl(f) if f.name == "f"))
+        );
+        assert!(matches!(&program[0], Stmt::Namespace(n) if n == "Foo\\Bar"));
+    }
+
+    #[test]
+    fn pipe_operator_parses_left_associative_and_at_the_right_precedence() {
+        // Precedence checked empirically against a real PHP 8.5 build:
+        // tighter than relational, looser than additive/concat.
+        let program = parse(r#"<?php $r = 1 |> 'inc' |> 'dbl' < 3;"#);
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        // `<` is outermost: (1 |> 'inc' |> 'dbl') < 3
+        let Expr::Binary(BinOp::Lt, lhs, _) = rhs.as_ref() else {
+            panic!("expected relational at the top");
+        };
+        // pipe is left-associative: (1 |> 'inc') |> 'dbl'
+        let Expr::Binary(BinOp::Pipe, inner, _) = lhs.as_ref() else {
+            panic!("expected Pipe");
+        };
+        assert!(matches!(inner.as_ref(), Expr::Binary(BinOp::Pipe, _, _)));
+    }
+
+    #[test]
+    fn dynamic_property_and_method_access_parse() {
+        let program = parse(
+            r#"<?php
+            $x = $obj->{'RealVar' . '4'};
+            $obj->{$name}('a');
+            Foo::{$name}();
+        "#,
+        );
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::DynamicPropertyAccess(_, _)));
+
+        assert!(matches!(
+            &program[1],
+            Stmt::Expression(Expr::DynamicMethodCall(_, _, _))
+        ));
+
+        let Stmt::Expression(Expr::StaticCall(class, member, _)) = &program[2] else {
+            panic!("expected StaticCall");
+        };
+        assert_eq!(class, "Foo");
+        assert_eq!(member, "{dynamic}");
     }
 }

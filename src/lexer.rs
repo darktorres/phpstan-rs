@@ -513,6 +513,9 @@ impl<'a> Lexer<'a> {
         if self.starts_with("||") {
             op!(2, Token::PipePipe);
         }
+        if self.starts_with("|>") {
+            op!(2, Token::PipeGt);
+        }
         if self.starts_with("++") {
             op!(2, Token::Increment);
         }

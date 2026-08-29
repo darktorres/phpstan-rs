@@ -294,6 +294,8 @@ pub enum Token {
     At,
     Backslash,
     Ellipsis,
+    // PHP 8.5's pipe operator (`|>`).
+    PipeGt,
 
     Eof,
 }

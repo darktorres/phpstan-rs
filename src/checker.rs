@@ -637,6 +637,17 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::PropertyAccess(base, _) => self.check_expr(base, locals, label),
+            Expr::DynamicPropertyAccess(base, name_expr) => {
+                self.check_expr(base, locals, label);
+                self.check_expr(name_expr, locals, label);
+            }
+            Expr::DynamicMethodCall(recv, name_expr, args) => {
+                self.check_expr(recv, locals, label);
+                self.check_expr(name_expr, locals, label);
+                for a in args {
+                    self.check_expr(a, locals, label);
+                }
+            }
             Expr::Interpolated(parts) => {
                 for p in parts {
                     self.check_expr(p, locals, label);
@@ -974,6 +985,11 @@ impl<'a> Checker<'a> {
             // runtime values, not just their static types - not modeled.
             BinOp::Div => Type::Mixed,
             BinOp::Coalesce => self.infer_expr(r, locals),
+            // `$value |> callable` calls callable($value) - its return
+            // type depends on resolving whatever expression `callable` is
+            // (a string, a closure, a first-class callable reference...)
+            // to a real signature, which this checker doesn't attempt.
+            BinOp::Pipe => Type::Mixed,
         }
     }
 }
