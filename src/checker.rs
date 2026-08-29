@@ -1059,4 +1059,37 @@ mod tests {
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("needsInt"));
     }
+
+    #[test]
+    fn phpdoc_only_param_type_catches_a_bug_previously_invisible_as_mixed() {
+        // Before PHPDoc types, an untyped native param stayed Mixed forever
+        // and this call would have been silently skipped.
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param int $x
+             * @return int
+             */
+            function double($x) { return $x * 2; }
+            double("not an int");
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("double"));
+    }
+
+    #[test]
+    fn phpdoc_only_param_type_does_not_flag_correct_usage() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param int $x
+             * @return int
+             */
+            function double($x) { return $x * 2; }
+            double(5);
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
 }

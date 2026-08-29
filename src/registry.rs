@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{ClassDecl, FunctionDecl, Stmt};
+use crate::docblock::{self, DocBlock};
 use crate::types::{self, Type};
 
 #[derive(Debug, Clone)]
@@ -17,17 +18,27 @@ pub struct FunctionSig {
     pub return_type: Type,
 }
 
+/// Resolves a param's/property's type: a PHPDoc type (when present) wins
+/// over the native hint, since it's usually the more precise of the two
+/// (an untyped native param described only in `@param`, or a native `array`
+/// refined to `User[]`) - falls back to the native hint, then `Mixed`.
+fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
+    doc_type
+        .or(native_hint)
+        .map(types::parse_type_string)
+        .unwrap_or(Type::Mixed)
+}
+
 impl FunctionSig {
     fn from_decl(f: &FunctionDecl) -> FunctionSig {
+        let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
+
         let params = f
             .params
             .iter()
             .map(|p| {
-                let ty = p
-                    .type_hint
-                    .as_deref()
-                    .map(types::parse_type_string)
-                    .unwrap_or(Type::Mixed);
+                let doc_ty = doc.as_ref().and_then(|d| d.params.get(&p.name));
+                let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                 ParamSig {
                     name: p.name.clone(),
                     ty,
@@ -36,11 +47,10 @@ impl FunctionSig {
                 }
             })
             .collect();
-        let return_type = f
-            .return_type
-            .as_deref()
-            .map(types::parse_type_string)
-            .unwrap_or(Type::Mixed);
+
+        let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
+        let return_type = resolve_type(doc_return, f.return_type.as_deref());
+
         FunctionSig {
             params,
             return_type,
@@ -75,11 +85,11 @@ impl ClassInfo {
             .properties
             .iter()
             .map(|p| {
-                let ty = p
-                    .type_hint
-                    .as_deref()
-                    .map(types::parse_type_string)
-                    .unwrap_or(Type::Mixed);
+                let doc_ty = p.doc_comment.as_deref().map(docblock::parse);
+                let ty = resolve_type(
+                    doc_ty.as_ref().and_then(|d| d.var_type.as_deref()),
+                    p.type_hint.as_deref(),
+                );
                 (
                     p.name.clone(),
                     PropertySig {
@@ -93,16 +103,16 @@ impl ClassInfo {
         // Constructor property promotion: `public function __construct(
         // private int $id) {}` declares `$id` as a property, not just a
         // parameter - the parser records this via Param::promoted_visibility.
+        // A `@param` on the constructor's own docblock describes the same
+        // promoted property, so it gets the same PHPDoc-wins treatment.
         if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+            let ctor_doc = ctor.function.doc_comment.as_deref().map(docblock::parse);
             for p in &ctor.function.params {
                 if p.promoted_visibility.is_none() {
                     continue;
                 }
-                let ty = p
-                    .type_hint
-                    .as_deref()
-                    .map(types::parse_type_string)
-                    .unwrap_or(Type::Mixed);
+                let doc_ty = ctor_doc.as_ref().and_then(|d| d.params.get(&p.name));
+                let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                 properties.insert(
                     p.name.clone(),
                     PropertySig {
@@ -294,7 +304,16 @@ impl Registry {
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
             (Type::Intersection(members), _) => members.iter().any(|m| self.is_assignable(m, sup)),
             (_, Type::Intersection(members)) => members.iter().all(|m| self.is_assignable(sub, m)),
-            (Type::Array(a), Type::Array(b)) => self.is_assignable(a, b),
+            // Deliberately more lenient here than types::is_subtype's pure
+            // structural relation (which correctly treats Array(Mixed) as
+            // NOT a subtype of Array(Int)): an array literal's element type
+            // is never inferred precisely by this checker, so it always
+            // shows up as Array(Mixed) meaning "unknown", not "really can
+            // hold anything" - without this, e.g. a PHPDoc `int[]` param
+            // would false-positive against every `[1, 2, 3]` literal.
+            (Type::Array(a), Type::Array(b)) => {
+                matches!(**a, Type::Mixed) || self.is_assignable(a, b)
+            }
             _ => types::is_subtype(sub, sup),
         }
     }
@@ -385,6 +404,21 @@ mod tests {
             &Type::Object("Shape".to_string()),
             &Type::Object("Circle".to_string())
         ));
+    }
+
+    #[test]
+    fn is_assignable_treats_unknown_array_element_type_as_compatible() {
+        let r = Registry::default();
+        let unknown_elements = Type::Array(Box::new(Type::Mixed));
+        let ints = Type::Array(Box::new(Type::Int));
+        // The lenient direction that types::is_subtype deliberately does
+        // NOT take (see its own array-covariance test) - is_assignable is
+        // the practical, checker-facing layer where "we don't know" must
+        // not read as "definitely incompatible".
+        assert!(r.is_assignable(&unknown_elements, &ints));
+        // A genuinely known, different element type is still caught.
+        let strings = Type::Array(Box::new(Type::String));
+        assert!(!r.is_assignable(&strings, &ints));
     }
 
     #[test]
@@ -481,5 +515,75 @@ mod tests {
         "#,
         );
         assert_eq!(r.lookup_property("Sub", "name").unwrap().ty, Type::String);
+    }
+
+    #[test]
+    fn phpdoc_types_an_otherwise_untyped_function() {
+        let r = build_registry(
+            r#"<?php
+            /**
+             * @param int $x
+             * @return int
+             */
+            function double($x) { return $x * 2; }
+        "#,
+        );
+        let sig = &r.functions["double"];
+        assert_eq!(sig.params[0].ty, Type::Int);
+        assert_eq!(sig.return_type, Type::Int);
+    }
+
+    #[test]
+    fn phpdoc_wins_over_a_conflicting_native_hint() {
+        let r = build_registry(
+            r#"<?php
+            /**
+             * @param int[] $items
+             */
+            function f(array $items) {}
+        "#,
+        );
+        assert_eq!(
+            r.functions["f"].params[0].ty,
+            Type::Array(Box::new(Type::Int))
+        );
+    }
+
+    #[test]
+    fn phpdoc_types_an_otherwise_untyped_property() {
+        let r = build_registry(
+            r#"<?php
+            class Box {
+                /** @var int */
+                public $value;
+            }
+        "#,
+        );
+        assert_eq!(r.lookup_property("Box", "value").unwrap().ty, Type::Int);
+    }
+
+    #[test]
+    fn phpdoc_types_a_promoted_constructor_property_via_param_tag() {
+        let r = build_registry(
+            r#"<?php
+            class Point {
+                /**
+                 * @param int[] $coords
+                 */
+                public function __construct(public $coords) {}
+            }
+        "#,
+        );
+        assert_eq!(
+            r.lookup_property("Point", "coords").unwrap().ty,
+            Type::Array(Box::new(Type::Int))
+        );
+    }
+
+    #[test]
+    fn missing_doc_comment_falls_back_to_native_hint() {
+        let r = build_registry(r#"<?php function f(string $s): string { return $s; }"#);
+        assert_eq!(r.functions["f"].params[0].ty, Type::String);
+        assert_eq!(r.functions["f"].return_type, Type::String);
     }
 }
