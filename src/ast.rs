@@ -245,6 +245,15 @@ pub struct ClosureUse {
     pub by_ref: bool,
 }
 
+// The right-hand side of `instanceof`: almost always a static class name,
+// but PHP also allows an arbitrary expression there (`$x instanceof
+// $className`, `$x instanceof $obj`) for a runtime-determined class.
+#[derive(Debug, Clone)]
+pub enum InstanceofTarget {
+    Name(String),
+    Expr(Box<Expr>),
+}
+
 #[derive(Debug, Clone)]
 pub enum Expr {
     Literal(Literal),
@@ -263,7 +272,7 @@ pub enum Expr {
     StaticCall(String, String, Vec<Expr>),
     Index(Box<Expr>, Option<Box<Expr>>),
     Name(String),
-    Instanceof(Box<Expr>, String),
+    Instanceof(Box<Expr>, InstanceofTarget),
     // Cast target is normalized to one of: int, float, string, bool,
     // array, object, unset.
     Cast(String, Box<Expr>),

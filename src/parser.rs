@@ -1390,6 +1390,13 @@ impl Parser {
             _ => return lhs,
         };
         self.advance();
+        // Reference assignment (`$a = &$b;`) - only valid on a plain `=`,
+        // never a compound one. Aliasing itself isn't modeled (nothing
+        // here tracks that two variables now share storage), so this is
+        // just consumed and the RHS's type still flows through normally.
+        if op.is_none() {
+            self.eat(&Token::Amp);
+        }
         let rhs = self.parse_assignment();
         match op {
             None => Expr::Assign(Box::new(lhs), Box::new(rhs)),
@@ -1555,8 +1562,15 @@ impl Parser {
     fn parse_instanceof(&mut self) -> Expr {
         let lhs = self.parse_unary();
         if self.eat(&Token::Keyword(Keyword::Instanceof)) {
-            let class_name = self.parse_qualified_name();
-            return Expr::Instanceof(Box::new(lhs), class_name);
+            // The right-hand side is usually a static class name, but PHP
+            // also allows an arbitrary expression there (`$x instanceof
+            // $className`) for a runtime-determined class.
+            let target = if matches!(self.peek(), Token::Variable(_)) {
+                InstanceofTarget::Expr(Box::new(self.parse_unary()))
+            } else {
+                InstanceofTarget::Name(self.parse_qualified_name())
+            };
+            return Expr::Instanceof(Box::new(lhs), target);
         }
         lhs
     }
@@ -1765,6 +1779,17 @@ impl Parser {
     fn parse_array_items(&mut self, close: &Token) -> Vec<(Option<Expr>, Expr)> {
         let mut items = Vec::new();
         while !self.check(close) {
+            // A skipped destructuring slot (`[, $b] = $arr;`, `[$a, , $c] =
+            // ...`) - only legal on a list-assignment target, but this
+            // parser doesn't distinguish that context from a real array
+            // literal here, so it's accepted generically. Null stands in
+            // as "nothing to bind"; the checker's destructuring/element
+            // walks below already skip anything that isn't a Variable.
+            if self.check(&Token::Comma) {
+                items.push((None, Expr::Literal(Literal::Null)));
+                self.advance();
+                continue;
+            }
             self.eat(&Token::Ellipsis);
             self.eat(&Token::Amp); // by-ref element, not modeled
             let first = self.parse_expression();
@@ -2461,5 +2486,93 @@ mod tests {
         let bare_hooks = c.properties[1].hooks.as_ref().expect("expected hooks");
         assert!(bare_hooks.get.is_none());
         assert!(bare_hooks.set.is_none());
+    }
+
+    #[test]
+    fn binary_and_explicit_octal_literals_parse() {
+        let program = parse(
+            r#"<?php
+            $a = 0b101;
+            $b = 0o775;
+            $c = 0x1F;
+        "#,
+        );
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::Literal(Literal::Int(5))));
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[1] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::Literal(Literal::Int(509))));
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[2] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::Literal(Literal::Int(31))));
+    }
+
+    #[test]
+    fn instanceof_with_dynamic_class_name_parses() {
+        let program = parse(
+            r#"<?php
+            assert($repository instanceof $repositoryClass);
+            $ok = $x instanceof Foo;
+        "#,
+        );
+        let Stmt::Expression(Expr::Call(_, args)) = &program[0] else {
+            panic!("expected assert() call");
+        };
+        let Expr::Instanceof(_, target) = &args[0] else {
+            panic!("expected Instanceof");
+        };
+        assert!(matches!(target, InstanceofTarget::Expr(_)));
+
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[1] else {
+            panic!("expected assignment");
+        };
+        let Expr::Instanceof(_, target) = rhs.as_ref() else {
+            panic!("expected Instanceof");
+        };
+        assert!(matches!(target, InstanceofTarget::Name(n) if n == "Foo"));
+    }
+
+    #[test]
+    fn reference_assignment_parses() {
+        let program = parse(
+            r#"<?php
+            $a = &$b;
+            $c =& $d;
+        "#,
+        );
+        assert!(matches!(&program[0], Stmt::Expression(Expr::Assign(_, _))));
+        assert!(matches!(&program[1], Stmt::Expression(Expr::Assign(_, _))));
+    }
+
+    #[test]
+    fn destructuring_with_skipped_slot_parses() {
+        let program = parse(
+            r#"<?php
+            [, $extension] = explode('-', $s);
+            [$a, , $c] = $t;
+        "#,
+        );
+        let Stmt::Expression(Expr::Assign(lhs, _)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        let Expr::ArrayLiteral(items) = lhs.as_ref() else {
+            panic!("expected ArrayLiteral target");
+        };
+        assert_eq!(items.len(), 2);
+        assert!(matches!(items[0].1, Expr::Literal(Literal::Null)));
+        assert!(matches!(items[1].1, Expr::Variable(_)));
+
+        let Stmt::Expression(Expr::Assign(lhs, _)) = &program[1] else {
+            panic!("expected assignment");
+        };
+        let Expr::ArrayLiteral(items) = lhs.as_ref() else {
+            panic!("expected ArrayLiteral target");
+        };
+        assert_eq!(items.len(), 3);
+        assert!(matches!(items[1].1, Expr::Literal(Literal::Null)));
     }
 }

@@ -219,6 +219,34 @@ impl<'a> Lexer<'a> {
             return Token::Integer(value);
         }
 
+        if self.peek() == b'0' && (self.peek_at(1) == b'b' || self.peek_at(1) == b'B') {
+            self.pos += 2;
+            while self.peek() == b'0' || self.peek() == b'1' || self.peek() == b'_' {
+                self.pos += 1;
+            }
+            let text: String =
+                String::from_utf8_lossy(&self.src[start + 2..self.pos]).replace('_', "");
+            let value = i64::from_str_radix(&text, 2).unwrap_or(0);
+            return Token::Integer(value);
+        }
+
+        // PHP 8.1's explicit octal notation (`0o775`), distinct from the
+        // legacy leading-zero form (`0775`) the generic digit loop below
+        // already parses (as decimal, which happens to not crash even
+        // though the *value* comes out wrong for a real octal literal -
+        // not worth a special case since this prototype cares about types,
+        // not runtime values).
+        if self.peek() == b'0' && (self.peek_at(1) == b'o' || self.peek_at(1) == b'O') {
+            self.pos += 2;
+            while (b'0'..=b'7').contains(&self.peek()) || self.peek() == b'_' {
+                self.pos += 1;
+            }
+            let text: String =
+                String::from_utf8_lossy(&self.src[start + 2..self.pos]).replace('_', "");
+            let value = i64::from_str_radix(&text, 8).unwrap_or(0);
+            return Token::Integer(value);
+        }
+
         while self.peek().is_ascii_digit() || self.peek() == b'_' {
             self.pos += 1;
         }

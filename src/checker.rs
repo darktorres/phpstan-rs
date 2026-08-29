@@ -450,10 +450,15 @@ impl<'a> Checker<'a> {
                     locals.insert(var_name.clone(), narrowed);
                 }
             }
-            Expr::Instanceof(inner, class_name) => {
+            Expr::Instanceof(inner, target) => {
                 // The false branch would need a "not this class" type we
-                // don't have a representation for, so it's left alone.
-                if branch_true && let Expr::Variable(var_name) = inner.as_ref() {
+                // don't have a representation for, so it's left alone. A
+                // dynamic target (`$x instanceof $className`) doesn't name
+                // a concrete class to narrow to either.
+                if branch_true
+                    && let Expr::Variable(var_name) = inner.as_ref()
+                    && let InstanceofTarget::Name(class_name) = target
+                {
                     locals.insert(var_name.clone(), Type::Object(class_name.clone()));
                 }
             }
@@ -553,6 +558,12 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(v) = value {
                     self.check_expr(v, locals, label);
+                }
+            }
+            Expr::Instanceof(inner, target) => {
+                self.check_expr(inner, locals, label);
+                if let InstanceofTarget::Expr(e) = target {
+                    self.check_expr(e, locals, label);
                 }
             }
             Expr::Assign(lhs, rhs) => {
