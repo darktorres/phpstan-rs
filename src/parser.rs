@@ -118,6 +118,31 @@ impl Parser {
         self.tokens.get(self.pos + offset).unwrap_or(&Token::Eof)
     }
 
+    /// Scans forward from the current `(` (without consuming anything) for
+    /// a comma at that paren's own nesting level before its matching `)` -
+    /// used to tell PHP 8.5's two-argument `clone(obj, overrides)` form
+    /// apart from a plain `clone(expr)` (the classic unary form, spelled
+    /// with parens around its operand).
+    fn clone_call_has_top_level_comma(&self) -> bool {
+        let mut depth = 0i32;
+        let mut offset = 0usize;
+        loop {
+            match self.peek_at(offset) {
+                Token::LParen => depth += 1,
+                Token::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return false;
+                    }
+                }
+                Token::Comma if depth == 1 => return true,
+                Token::Eof => return false,
+                _ => {}
+            }
+            offset += 1;
+        }
+    }
+
     fn at_eof(&self) -> bool {
         matches!(self.peek(), Token::Eof)
     }
@@ -317,6 +342,21 @@ impl Parser {
                 Stmt::Throw(e)
             }
             Token::Keyword(Keyword::Switch) => self.parse_switch(),
+            Token::Keyword(Keyword::Goto) => {
+                self.advance();
+                let name = self.expect_ident();
+                self.expect_semicolon();
+                Stmt::Goto(name)
+            }
+            // `label:` - a goto target. Unambiguous at statement position:
+            // nothing else in PHP's grammar puts a bare `identifier:` here
+            // (ternary's `:` always follows a `?`, and array/match arms
+            // use `=>`, not `:`).
+            Token::Identifier(name) if matches!(self.peek_at(1), Token::Colon) => {
+                self.advance();
+                self.advance();
+                Stmt::Label(name)
+            }
             _ => {
                 let e = self.parse_expression();
                 self.expect_semicolon();
@@ -2046,8 +2086,25 @@ impl Parser {
             }
             Token::Keyword(Keyword::Clone) => {
                 self.advance();
+                // PHP 8.5's `clone($obj, $overrides)` - a distinct grammar
+                // production (verified against a real PHP 8.5 build: it
+                // does NOT allow a postfix chain right after it, unlike
+                // the classic form) from plain `clone <expr>`, only when a
+                // comma actually appears at the top level of the parens.
+                // `clone($x)` with no comma is just the classic unary form
+                // spelled with parens, and still binds through the full
+                // postfix chain as its operand - e.g. `clone($a)->b`
+                // clones `$a->b`, not `$a`.
+                if matches!(self.peek(), Token::LParen) && self.clone_call_has_top_level_comma() {
+                    self.advance(); // (
+                    let obj = self.parse_expression();
+                    self.expect(&Token::Comma);
+                    let overrides = self.parse_expression();
+                    self.expect(&Token::RParen);
+                    return Expr::Clone(Box::new(obj), Some(Box::new(overrides)));
+                }
                 let e = self.parse_unary();
-                Expr::Clone(Box::new(e))
+                Expr::Clone(Box::new(e), None)
             }
             Token::Keyword(Keyword::Print) => {
                 self.advance();
@@ -2913,6 +2970,56 @@ mod tests {
         };
         let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
         assert!(matches!(hooks.get, Some(PropertyHookBody::Arrow(_))));
+    }
+
+    #[test]
+    fn clone_with_overrides_and_classic_forms_both_parse() {
+        let program = parse(
+            r#"<?php
+            $x = clone($a, ['x' => 1]);
+            $y = clone $a->b;
+            $z = clone($a)->b;
+        "#,
+        );
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        assert!(matches!(rhs.as_ref(), Expr::Clone(_, Some(_))));
+
+        // `clone $a->b` clones the *result* of `$a->b`, not `$a` itself -
+        // postfix binds inside clone's operand (verified against a real
+        // PHP 8.5 build).
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[1] else {
+            panic!("expected assignment");
+        };
+        let Expr::Clone(inner, None) = rhs.as_ref() else {
+            panic!("expected Clone with no overrides");
+        };
+        assert!(matches!(inner.as_ref(), Expr::PropertyAccess(_, _)));
+
+        // Same rule applies even with explicit parens and no comma:
+        // `clone($a)->b` clones `$a->b`, not `$a`.
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[2] else {
+            panic!("expected assignment");
+        };
+        let Expr::Clone(inner, None) = rhs.as_ref() else {
+            panic!("expected Clone with no overrides");
+        };
+        assert!(matches!(inner.as_ref(), Expr::PropertyAccess(_, _)));
+    }
+
+    #[test]
+    fn goto_and_labels_parse() {
+        let program = parse(
+            r#"<?php
+            goto label;
+            echo "skipped";
+            label:
+            echo "here";
+        "#,
+        );
+        assert!(matches!(&program[0], Stmt::Goto(n) if n == "label"));
+        assert!(matches!(&program[2], Stmt::Label(n) if n == "label"));
     }
 
     #[test]

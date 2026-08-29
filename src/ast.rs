@@ -58,6 +58,11 @@ pub enum Stmt {
         finally: Option<Vec<Stmt>>,
     },
     Throw(Expr),
+    Goto(String),
+    // `label:` - a goto target. Control flow through goto/labels isn't
+    // modeled (no effect on narrowing, terminal-statement detection,
+    // etc.) - only enough structure to parse past them.
+    Label(String),
 }
 
 #[derive(Debug, Clone)]
@@ -294,7 +299,11 @@ pub enum Expr {
     // array, object, unset.
     Cast(String, Box<Expr>),
     Grouping(Box<Expr>),
-    Clone(Box<Expr>),
+    // `clone $x` / PHP 8.5's `clone($x, $overrides)` (the second field is
+    // the property-overrides array, when present). Both produce an object
+    // of the same type as the first operand, so infer_expr treats them
+    // identically - the overrides themselves aren't otherwise modeled.
+    Clone(Box<Expr>, Option<Box<Expr>>),
     // `foo(...)` / `$obj->method(...)` (PHP 8.1): a reference to the
     // callable itself, not a call - wraps a Call/MethodCall/StaticCall
     // that was parsed with an empty argument list specifically because of

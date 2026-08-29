@@ -56,6 +56,7 @@ pub enum Keyword {
     Require,
     RequireOnce,
     Yield,
+    Goto,
     EndIf,
     EndWhile,
     EndFor,
@@ -128,6 +129,7 @@ impl Keyword {
             "endfor" => EndFor,
             "endforeach" => EndForeach,
             "endswitch" => EndSwitch,
+            "goto" => Goto,
             _ => return None,
         })
     }
@@ -203,6 +205,7 @@ impl Keyword {
             EndFor => "endfor",
             EndForeach => "endforeach",
             EndSwitch => "endswitch",
+            Goto => "goto",
         }
     }
 }

@@ -546,11 +546,16 @@ impl<'a> Checker<'a> {
             }
             Expr::Unary(_, inner)
             | Expr::Grouping(inner)
-            | Expr::Clone(inner)
             | Expr::Cast(_, inner)
             | Expr::Throw(inner)
             | Expr::YieldFrom(inner) => {
                 self.check_expr(inner, locals, label);
+            }
+            Expr::Clone(inner, overrides) => {
+                self.check_expr(inner, locals, label);
+                if let Some(o) = overrides {
+                    self.check_expr(o, locals, label);
+                }
             }
             Expr::Yield(key, value) => {
                 if let Some(k) = key {
@@ -820,7 +825,7 @@ impl<'a> Checker<'a> {
                 Literal::Null => Type::Null,
             },
             Expr::Variable(name) => locals.get(name).cloned().unwrap_or(Type::Mixed),
-            Expr::Grouping(inner) | Expr::Clone(inner) => self.infer_expr(inner, locals),
+            Expr::Grouping(inner) | Expr::Clone(inner, _) => self.infer_expr(inner, locals),
             Expr::FirstClassCallable(_) => Type::Callable,
             // A throw expression never actually produces a value - Never
             // is exactly the right type for it, the same way it's used for
