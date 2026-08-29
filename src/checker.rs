@@ -275,7 +275,12 @@ impl<'a> Checker<'a> {
             | Expr::Cast(_, inner) => {
                 self.check_expr(inner, locals, label);
             }
-            Expr::Assign(lhs, rhs) | Expr::CompoundAssign(_, lhs, rhs) => {
+            Expr::Assign(lhs, rhs) => {
+                self.check_expr(lhs, locals, label);
+                self.check_expr(rhs, locals, label);
+                self.check_property_assignment(lhs, rhs, locals, label);
+            }
+            Expr::CompoundAssign(_, lhs, rhs) => {
                 self.check_expr(lhs, locals, label);
                 self.check_expr(rhs, locals, label);
             }
@@ -313,6 +318,36 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
+    }
+
+    fn check_property_assignment(
+        &mut self,
+        lhs: &Expr,
+        rhs: &Expr,
+        locals: &HashMap<String, Type>,
+        label: &str,
+    ) {
+        let Expr::PropertyAccess(base, prop) = lhs else {
+            return;
+        };
+        let Type::Object(class) = self.infer_expr(base, locals) else {
+            return;
+        };
+        let Some(prop_sig) = self.registry.lookup_property(&class, prop) else {
+            // Not a declared property: could be a dynamic property, which
+            // is legal (if deprecated) PHP - not flagged here, only wrong
+            // types on properties we do know about.
+            return;
+        };
+        let expected = self.resolve_pseudo(&prop_sig.ty, &class);
+        let actual = self.infer_expr(rhs, locals);
+        if actual == Type::Mixed || self.registry.is_assignable(&actual, &expected) {
+            return;
+        }
+        self.diagnostics.push(Diagnostic {
+            location: label.to_string(),
+            message: format!("{class}::${prop} expects {expected}, {actual} given"),
+        });
     }
 
     fn check_args(
@@ -453,6 +488,14 @@ impl<'a> Checker<'a> {
             }
             Expr::ArrayLiteral(_) => Type::Array(Box::new(Type::Mixed)),
             Expr::Interpolated(_) => Type::String,
+            Expr::PropertyAccess(base, prop) => match self.infer_expr(base, locals) {
+                Type::Object(class) => self
+                    .registry
+                    .lookup_property(&class, prop)
+                    .map(|p| self.resolve_pseudo(&p.ty, &class))
+                    .unwrap_or(Type::Mixed),
+                _ => Type::Mixed,
+            },
             _ => Type::Mixed,
         }
     }
@@ -601,5 +644,73 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn flags_wrong_type_assigned_to_typed_property() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Box { public int $value = 0; }
+            $box = new Box();
+            $box->value = "not a number";
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("Box::$value"));
+    }
+
+    #[test]
+    fn correct_property_assignment_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Box { public int $value = 0; }
+            $box = new Box();
+            $box->value = 5;
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn promoted_property_assignment_is_type_checked() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point {
+                public function __construct(public int $x) {}
+            }
+            $p = new Point(1);
+            $p->x = "nope";
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("Point::$x"));
+    }
+
+    #[test]
+    fn dynamic_property_not_declared_on_class_is_not_flagged() {
+        // Undeclared/dynamic properties are legal (if deprecated) PHP -
+        // this prototype only checks types on properties it knows about.
+        let d = diagnostics_for(
+            r#"<?php
+            class Box {}
+            $box = new Box();
+            $box->anything = "fine, not tracked";
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn property_read_flows_into_argument_type_check() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Box { public string $label = ""; }
+            function needsInt(int $x): int { return $x; }
+            $box = new Box();
+            needsInt($box->label);
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
     }
 }
