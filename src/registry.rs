@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ClassDecl, FunctionDecl, Stmt};
+use crate::ast::{ClassDecl, EnumDecl, FunctionDecl, Stmt};
 use crate::docblock::{self, DocBlock};
 use crate::types::{self, Type};
 
@@ -170,6 +170,28 @@ impl ClassInfo {
             uses: c.uses.clone(),
         }
     }
+
+    /// An enum participates in the class hierarchy the same way a class
+    /// does (methods, `implements`, `use`) - it just can't extend anything
+    /// or declare instance properties. Cases aren't registered as anything
+    /// yet: resolving `Suit::Hearts`'s type would need static-access type
+    /// inference, which nothing in the checker does for *any* class today,
+    /// not just enums - a separate, pre-existing gap this doesn't attempt
+    /// to close.
+    fn from_enum_decl(e: &EnumDecl) -> ClassInfo {
+        let methods = e
+            .methods
+            .iter()
+            .map(|m| (m.function.name.clone(), FunctionSig::from_decl(&m.function)))
+            .collect();
+        ClassInfo {
+            extends: Vec::new(),
+            implements: e.implements.clone(),
+            methods,
+            properties: HashMap::new(),
+            uses: e.uses.clone(),
+        }
+    }
 }
 
 /// A symbol table built by indexing already-parsed source, standing in for
@@ -250,6 +272,10 @@ impl Registry {
             match stmt {
                 Stmt::ClassDecl(c) => {
                     self.classes.insert(c.name.clone(), ClassInfo::from_decl(c));
+                }
+                Stmt::EnumDecl(e) => {
+                    self.classes
+                        .insert(e.name.clone(), ClassInfo::from_enum_decl(e));
                 }
                 Stmt::FunctionDecl(f) => {
                     self.functions
@@ -644,5 +670,23 @@ mod tests {
         let r = build_registry(r#"<?php function f(string $s): string { return $s; }"#);
         assert_eq!(r.functions["f"].params[0].ty, Type::String);
         assert_eq!(r.functions["f"].return_type, Type::String);
+    }
+
+    #[test]
+    fn enum_is_registered_with_its_methods_and_implements() {
+        let r = build_registry(
+            r#"<?php
+            interface HasLabel {}
+            enum Suit: string implements HasLabel {
+                case Hearts = 'H';
+                public function label(): string { return "Hearts"; }
+            }
+        "#,
+        );
+        assert!(r.is_subclass_of("Suit", "HasLabel"));
+        assert_eq!(
+            r.lookup_method("Suit", "label").unwrap().return_type,
+            Type::String
+        );
     }
 }

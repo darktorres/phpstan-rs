@@ -66,6 +66,11 @@ impl<'a> Checker<'a> {
                         self.check_function(&m.function, Some(&c.name));
                     }
                 }
+                Stmt::EnumDecl(e) => {
+                    for m in &e.methods {
+                        self.check_function(&m.function, Some(&e.name));
+                    }
+                }
                 // Top-level script statements share one scope across the
                 // whole file, so the extract()/eval() guard spans the
                 // entire loop rather than resetting per statement.
@@ -1846,6 +1851,38 @@ mod tests {
                     return needsString($encoded);
                 }
                 return "";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn enum_method_body_is_type_checked() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            enum Suit: string {
+                case Hearts = 'H';
+                public function bad(): string {
+                    return needsInt("not an int");
+                }
+            }
+        "#,
+        );
+        assert!(d.iter().any(|d| d.message.contains("needsInt")));
+    }
+
+    #[test]
+    fn enum_method_with_correct_usage_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            enum Suit: string {
+                case Hearts = 'H';
+                public function good(): int {
+                    return needsInt(5);
+                }
             }
         "#,
         );

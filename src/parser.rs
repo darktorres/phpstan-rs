@@ -182,6 +182,7 @@ impl Parser {
             | Token::Keyword(Keyword::Final)
             | Token::Keyword(Keyword::Interface)
             | Token::Keyword(Keyword::Trait) => Stmt::ClassDecl(self.parse_class_decl()),
+            Token::Keyword(Keyword::Enum) => Stmt::EnumDecl(self.parse_enum_decl()),
             Token::Keyword(Keyword::Namespace) => {
                 self.advance();
                 let name = self.parse_qualified_name();
@@ -900,6 +901,149 @@ impl Parser {
             is_abstract,
             is_final,
             properties,
+            methods,
+            consts,
+            uses,
+        }
+    }
+
+    // `enum Name [: BackingType] [implements Iface, ...] { ...members... }`.
+    // Structurally close to parse_class_decl's member loop (modifiers,
+    // `use`, `const`, methods are identical), except enums have `case
+    // Name [= value];` instead of properties - they can't declare instance
+    // properties or extend anything.
+    fn parse_enum_decl(&mut self) -> EnumDecl {
+        self.expect(&Token::Keyword(Keyword::Enum));
+        let name = self.expect_ident();
+
+        let backing_type = if self.eat(&Token::Colon) {
+            self.parse_type_hint()
+        } else {
+            None
+        };
+
+        let mut implements = Vec::new();
+        if self.eat(&Token::Keyword(Keyword::Implements)) {
+            implements.push(self.parse_qualified_name());
+            while self.eat(&Token::Comma) {
+                implements.push(self.parse_qualified_name());
+            }
+        }
+
+        self.expect(&Token::LBrace);
+        let mut cases = Vec::new();
+        let mut methods = Vec::new();
+        let mut consts = Vec::new();
+        let mut uses = Vec::new();
+
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            let doc = self.take_doc_comment();
+
+            if self.eat(&Token::Keyword(Keyword::Case)) {
+                let case_name = self.expect_ident();
+                let value = if self.eat(&Token::Equals) {
+                    Some(self.parse_expression())
+                } else {
+                    None
+                };
+                self.expect_semicolon();
+                cases.push(EnumCase {
+                    name: case_name,
+                    value,
+                });
+                continue;
+            }
+
+            if self.eat(&Token::Keyword(Keyword::Use)) {
+                uses.push(self.parse_qualified_name());
+                while self.eat(&Token::Comma) {
+                    uses.push(self.parse_qualified_name());
+                }
+                if self.eat(&Token::LBrace) {
+                    let mut depth = 1;
+                    while depth > 0 && !self.at_eof() {
+                        match self.advance() {
+                            Token::LBrace => depth += 1,
+                            Token::RBrace => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                } else {
+                    self.expect_semicolon();
+                }
+                continue;
+            }
+
+            let mut visibility = Visibility::Public;
+            let mut is_static = false;
+            let mut is_abstract_member = false;
+            loop {
+                match self.peek() {
+                    Token::Keyword(Keyword::Public) => {
+                        visibility = Visibility::Public;
+                        self.advance();
+                    }
+                    Token::Keyword(Keyword::Private) => {
+                        visibility = Visibility::Private;
+                        self.advance();
+                    }
+                    Token::Keyword(Keyword::Protected) => {
+                        visibility = Visibility::Protected;
+                        self.advance();
+                    }
+                    Token::Keyword(Keyword::Static) => {
+                        is_static = true;
+                        self.advance();
+                    }
+                    Token::Keyword(Keyword::Abstract) => {
+                        is_abstract_member = true;
+                        self.advance();
+                    }
+                    Token::Keyword(Keyword::Final) | Token::Keyword(Keyword::Readonly) => {
+                        self.advance();
+                    }
+                    _ => break,
+                }
+            }
+
+            if self.eat(&Token::Keyword(Keyword::Const)) {
+                loop {
+                    let cname = self.expect_ident();
+                    self.expect(&Token::Equals);
+                    let value = self.parse_expression();
+                    consts.push(ClassConst { name: cname, value });
+                    if !self.eat(&Token::Comma) {
+                        break;
+                    }
+                }
+                self.expect_semicolon();
+                continue;
+            }
+
+            if self.check(&Token::Keyword(Keyword::Function)) {
+                let mut function = self.parse_function_decl();
+                function.doc_comment = doc;
+                methods.push(MethodDecl {
+                    visibility,
+                    is_static,
+                    is_abstract: is_abstract_member,
+                    function,
+                });
+                continue;
+            }
+
+            // Not valid PHP (enums can't have properties), but consume one
+            // token and keep going rather than loop forever or panic on
+            // whatever unexpected thing is here.
+            self.advance();
+        }
+        self.expect(&Token::RBrace);
+
+        EnumDecl {
+            name,
+            backing_type,
+            implements,
+            cases,
             methods,
             consts,
             uses,
@@ -1635,5 +1779,52 @@ mod tests {
             panic!("expected FunctionDecl");
         };
         assert_eq!(f.return_type.as_deref(), Some("string|false"));
+    }
+
+    #[test]
+    fn pure_enum_parses_with_unbacked_cases() {
+        let program = parse(
+            r#"<?php
+            enum SortDirection {
+                case Ascending;
+                case Descending;
+            }
+        "#,
+        );
+        let Stmt::EnumDecl(e) = &program[0] else {
+            panic!("expected EnumDecl");
+        };
+        assert_eq!(e.name, "SortDirection");
+        assert!(e.backing_type.is_none());
+        assert_eq!(e.cases.len(), 2);
+        assert_eq!(e.cases[0].name, "Ascending");
+        assert!(e.cases[0].value.is_none());
+    }
+
+    #[test]
+    fn backed_enum_with_interface_and_method_parses() {
+        let program = parse(
+            r#"<?php
+            enum Suit: string implements \JsonSerializable
+            {
+                case Hearts = 'H';
+
+                public function label(): string
+                {
+                    return match ($this) {
+                        Suit::Hearts => 'Hearts',
+                    };
+                }
+            }
+        "#,
+        );
+        let Stmt::EnumDecl(e) = &program[0] else {
+            panic!("expected EnumDecl");
+        };
+        assert_eq!(e.backing_type.as_deref(), Some("string"));
+        assert_eq!(e.implements, vec!["\\JsonSerializable".to_string()]);
+        assert!(matches!(e.cases[0].value, Some(Expr::Literal(_))));
+        assert_eq!(e.methods.len(), 1);
+        assert_eq!(e.methods[0].function.name, "label");
     }
 }

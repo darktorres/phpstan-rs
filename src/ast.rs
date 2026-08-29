@@ -41,6 +41,7 @@ pub enum Stmt {
     // Top-level `const NAME = value, ...;`, distinct from a class's own
     // consts (ClassConst is reused for the shape, since it's identical).
     GlobalConst(Vec<ClassConst>),
+    EnumDecl(EnumDecl),
     Switch {
         subject: Expr,
         cases: Vec<SwitchCase>,
@@ -130,6 +131,27 @@ pub struct ClassDecl {
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
     // `use TraitA, TraitB;` inside the class body.
+    pub uses: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumCase {
+    pub name: String,
+    // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
+    // one (`case Hearts;`).
+    pub value: Option<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumDecl {
+    pub name: String,
+    // "int" | "string" for a backed enum, None for a pure one. Enums can't
+    // extend anything or declare instance properties, unlike ClassDecl.
+    pub backing_type: Option<String>,
+    pub implements: Vec<String>,
+    pub cases: Vec<EnumCase>,
+    pub methods: Vec<MethodDecl>,
+    pub consts: Vec<ClassConst>,
     pub uses: Vec<String>,
 }
 
