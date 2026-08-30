@@ -715,6 +715,56 @@ mod tests {
     }
 
     #[test]
+    fn intersection_subtype_rules() {
+        // Coverage measurement found both Intersection arms of is_subtype
+        // had zero executions (registry::is_assignable's own, separate
+        // Intersection handling was covered independently).
+        let both = Type::Intersection(vec![Type::Int, Type::String]);
+        // sub is the intersection: satisfies any one of its members.
+        assert!(is_subtype(&both, &Type::Int));
+        assert!(is_subtype(&both, &Type::String));
+        assert!(!is_subtype(&both, &Type::Bool));
+        // sup is the intersection: must satisfy every member at once - a
+        // plain Int alone doesn't also satisfy "and a String".
+        assert!(!is_subtype(&Type::Int, &both));
+    }
+
+    #[test]
+    fn true_and_false_literals_are_subtypes_of_bool() {
+        assert!(is_subtype(&Type::True, &Type::Bool));
+        assert!(is_subtype(&Type::False, &Type::Bool));
+    }
+
+    #[test]
+    fn substitute_template_recurses_into_array_and_intersection_types() {
+        // Coverage measurement found substitute_template's Array and
+        // Intersection arms had zero executions - every existing
+        // template-substitution test only substitutes a bare
+        // TemplateParam or one nested inside a Union, never `T[]`/
+        // `array<T>` or an intersection type mentioning T.
+        let mut bindings = HashMap::new();
+        bindings.insert("T".to_string(), Type::String);
+
+        let array_of_t = Type::Array(Box::new(Type::TemplateParam("T".to_string())));
+        assert_eq!(
+            substitute_template(&array_of_t, &bindings),
+            Type::Array(Box::new(Type::String))
+        );
+
+        let intersection_with_t = Type::Intersection(vec![
+            Type::TemplateParam("T".to_string()),
+            Type::Object("Countable".to_string(), Vec::new()),
+        ]);
+        assert_eq!(
+            substitute_template(&intersection_with_t, &bindings),
+            Type::Intersection(vec![
+                Type::String,
+                Type::Object("Countable".to_string(), Vec::new())
+            ])
+        );
+    }
+
+    #[test]
     fn nullable_string_accepts_null_and_string() {
         let nullable_string = parse_type_string("?string");
         assert!(is_subtype(&Type::Null, &nullable_string));

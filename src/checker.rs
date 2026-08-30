@@ -2173,6 +2173,109 @@ mod tests {
     }
 
     #[test]
+    fn nested_class_and_enum_declared_inside_an_if_get_their_bodies_checked_too() {
+        // Same fix as the FunctionDecl test above, but for the other two
+        // arms check_stmt gained at the same time - ClassDecl and
+        // EnumDecl nested inside a block (`if (!class_exists('Foo')) {
+        // class Foo {...} }`, a real BC-compat idiom). Coverage
+        // measurement found these two arms specifically still had zero
+        // executions even after that fix landed, since the earlier test
+        // only exercised the FunctionDecl arm.
+        let class_diagnostics = diagnostics_for(
+            r#"<?php
+            if (!class_exists('Foo')) {
+                class Foo {
+                    public function bar() {
+                        return $undefinedInNestedClass;
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(
+            class_diagnostics
+                .iter()
+                .any(|x| x.message.contains("undefined variable")),
+            "expected an undefined-variable diagnostic, got: {class_diagnostics:?}"
+        );
+
+        let enum_diagnostics = diagnostics_for(
+            r#"<?php
+            if (!enum_exists('Status')) {
+                enum Status {
+                    case Active;
+                    public function label(): string {
+                        return $undefinedInNestedEnum;
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(
+            enum_diagnostics
+                .iter()
+                .any(|x| x.message.contains("undefined variable")),
+            "expected an undefined-variable diagnostic, got: {enum_diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn do_while_switch_and_static_var_bodies_are_all_checked() {
+        // Coverage measurement found Stmt::DoWhile, Stmt::Switch, and
+        // Stmt::StaticVar all had zero executions anywhere in checker.rs's
+        // own test suite - manually verified correct via the CLI earlier
+        // in this audit; this locks all three in as permanent tests.
+        let do_while = diagnostics_for(
+            r#"<?php
+            function f() {
+                do {
+                    echo $undefinedInDoWhile;
+                } while (true);
+            }
+        "#,
+        );
+        assert!(
+            do_while
+                .iter()
+                .any(|x| x.message.contains("undefined variable")),
+            "expected an undefined-variable diagnostic, got: {do_while:?}"
+        );
+
+        let switch = diagnostics_for(
+            r#"<?php
+            function f($x) {
+                switch ($x) {
+                    case 1:
+                        echo $undefinedInSwitchCase;
+                        break;
+                }
+            }
+        "#,
+        );
+        assert!(
+            switch
+                .iter()
+                .any(|x| x.message.contains("undefined variable")),
+            "expected an undefined-variable diagnostic, got: {switch:?}"
+        );
+
+        let static_var = diagnostics_for(
+            r#"<?php
+            function f() {
+                static $count = 0;
+                return $undefinedInStaticVarBody;
+            }
+        "#,
+        );
+        assert!(
+            static_var
+                .iter()
+                .any(|x| x.message.contains("undefined variable")),
+            "expected an undefined-variable diagnostic, got: {static_var:?}"
+        );
+    }
+
+    #[test]
     fn parent_pseudo_type_resolves_to_the_real_parent_class() {
         // Coverage measurement (cargo llvm-cov) found resolve_pseudo's
         // Type::ParentRef branch had zero test coverage - the exact same

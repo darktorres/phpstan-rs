@@ -397,6 +397,33 @@ mod tests {
     }
 
     #[test]
+    fn check_all_covers_every_loaded_file_not_just_one() {
+        // check_all is a thin fold over the already-well-tested check_file
+        // (and is what --check-project actually calls), but had zero
+        // direct test executions per cargo llvm-cov - cheap to close.
+        let mut project = Project::new();
+        project.load_file(
+            PathBuf::from("good.php"),
+            "<?php function f(): int { return 1; }",
+        );
+        project.load_file(
+            PathBuf::from("bad.php"),
+            "<?php function g() { return $undefinedVar; }",
+        );
+        project.finish_loading();
+
+        let all = project.check_all();
+        assert_eq!(project.file_count(), 2);
+        assert_eq!(all.len(), 2);
+        assert!(all[&PathBuf::from("good.php")].is_empty());
+        assert!(
+            all[&PathBuf::from("bad.php")]
+                .iter()
+                .any(|d| d.message.contains("undefined variable"))
+        );
+    }
+
+    #[test]
     fn removing_a_declaration_on_update_drops_it_from_the_registry() {
         let mut project = Project::new();
         project.load_file(

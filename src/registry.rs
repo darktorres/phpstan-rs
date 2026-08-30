@@ -992,6 +992,48 @@ mod tests {
     }
 
     #[test]
+    fn is_assignable_accepts_a_value_matching_any_union_member_on_the_supertype_side() {
+        // Coverage measurement found this branch (sup is a Union - not to
+        // be confused with the sub-is-a-Union branch just above, which is
+        // well covered by ordinary nullable-param tests) had zero
+        // executions. Manually verified correct against real code first.
+        let r = Registry::default();
+        let int_or_string = Type::Union(vec![Type::Int, Type::String]);
+        assert!(r.is_assignable(&Type::Int, &int_or_string));
+        assert!(r.is_assignable(&Type::String, &int_or_string));
+        assert!(!r.is_assignable(&Type::Bool, &int_or_string));
+    }
+
+    #[test]
+    fn is_assignable_handles_intersection_types_on_either_side() {
+        // Coverage measurement found both Intersection branches had zero
+        // executions - PHP 8.1+ intersection types (`Countable&Iterator`)
+        // are real, if uncommon, syntax. Manually verified correct
+        // against real code (an intersection-typed value satisfies a
+        // supertype matching any one of its members; a plain single-
+        // interface value does NOT satisfy an intersection requiring
+        // more than it has) before locking in here.
+        let r = build_registry(
+            r#"<?php
+            interface Countable2 {}
+            interface Iterator2 {}
+        "#,
+        );
+        let both = Type::Intersection(vec![
+            Type::Object("Countable2".to_string(), Vec::new()),
+            Type::Object("Iterator2".to_string(), Vec::new()),
+        ]);
+        let countable_only = Type::Object("Countable2".to_string(), Vec::new());
+
+        // sub is the intersection: satisfies a supertype matching any one
+        // of its members.
+        assert!(r.is_assignable(&both, &countable_only));
+        // sup is the intersection: a value only known to be one of the
+        // two doesn't satisfy a requirement for both.
+        assert!(!r.is_assignable(&countable_only, &both));
+    }
+
+    #[test]
     fn declared_property_type_is_tracked() {
         let r = build_registry(
             r#"<?php
@@ -1068,6 +1110,31 @@ mod tests {
         );
         assert_eq!(
             r.lookup_property("App\\Person", "greeting").unwrap().ty,
+            Type::String
+        );
+    }
+
+    #[test]
+    fn trait_flattening_also_works_for_enums_not_just_classes() {
+        // Coverage measurement found ClassInfo::from_enum_decl's `uses`
+        // closure (resolving an enum's own `use SomeTrait;`) had zero
+        // test executions - enums can use traits in real PHP, and
+        // flatten_traits/lookup_method don't distinguish a class's
+        // ClassInfo from an enum's, but nothing had actually proven an
+        // enum's trait methods flatten in correctly until now.
+        let r = build_registry(
+            r#"<?php
+            trait Greets {
+                public function greet(): string { return "hi"; }
+            }
+            enum Status {
+                use Greets;
+                case Active;
+            }
+        "#,
+        );
+        assert_eq!(
+            r.lookup_method("Status", "greet").unwrap().return_type,
             Type::String
         );
     }
