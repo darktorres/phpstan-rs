@@ -3,6 +3,7 @@ mod checker;
 mod deps;
 mod docblock;
 mod lexer;
+mod lsp;
 mod parser;
 mod php_stubs;
 mod project;
@@ -240,6 +241,10 @@ fn main() {
     }
     if args.get(1).map(String::as_str) == Some("--incremental-bench") {
         run_incremental_bench(&args[2..]);
+        return;
+    }
+    if args.get(1).map(String::as_str) == Some("--lsp") {
+        lsp::run();
         return;
     }
 
