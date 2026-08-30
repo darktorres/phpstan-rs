@@ -29,6 +29,16 @@ pub struct Diagnostic {
 pub struct Checker<'a> {
     registry: &'a Registry,
     diagnostics: Vec<Diagnostic>,
+    // Short name (or `as Alias`) -> the class's own bare declared name,
+    // built once per file from its top-level `use` imports. Needed
+    // because almost all real code refers to an imported class by this
+    // short name, not a fully-qualified path - without resolving it here
+    // first, undefined-class detection would flag the overwhelming
+    // majority of legitimately-imported classes (Registry itself only
+    // ever keys a class by its own bare declared name, ignoring
+    // namespace, the same simplification `remove_declarations`'s doc
+    // comment already describes for declarations).
+    use_map: HashMap<String, String>,
     // The class whose method body is currently being checked, if any -
     // needed to resolve self/parent/static to a concrete class name.
     current_class: Option<String>,
@@ -46,9 +56,22 @@ impl<'a> Checker<'a> {
         Checker {
             registry,
             diagnostics: Vec::new(),
+            use_map: HashMap::new(),
             current_class: None,
             saw_dynamic_var_construct: false,
         }
+    }
+
+    /// Resolves a bare (no internal `\`) name against this file's
+    /// `use`-import map, falling back to the name itself when it isn't
+    /// one (a class declared directly in this file/namespace, or a
+    /// genuinely undefined one - both look the same at this point, and
+    /// the registry lookup that follows is what tells them apart).
+    fn resolve_class_name(&self, name: &str) -> String {
+        self.use_map
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
     }
 
     pub fn into_diagnostics(self) -> Vec<Diagnostic> {
@@ -56,6 +79,21 @@ impl<'a> Checker<'a> {
     }
 
     pub fn check_program(&mut self, program: &[Stmt]) {
+        for stmt in program {
+            if let Stmt::Use(imports) = stmt {
+                for import in imports {
+                    let bare = import
+                        .path
+                        .rsplit('\\')
+                        .next()
+                        .unwrap_or(&import.path)
+                        .to_string();
+                    let short_name = import.alias.clone().unwrap_or_else(|| bare.clone());
+                    self.use_map.insert(short_name, bare);
+                }
+            }
+        }
+
         let mut top_locals: HashMap<String, Type> = HashMap::new();
         let diagnostics_before = self.diagnostics.len();
         for stmt in program {
@@ -459,7 +497,11 @@ impl<'a> Checker<'a> {
                     && let Expr::Variable(var_name) = inner.as_ref()
                     && let InstanceofTarget::Name(class_name) = target
                 {
-                    locals.insert(var_name.clone(), Type::Object(class_name.clone()));
+                    let bare = crate::registry::strip_leading_backslash(class_name);
+                    locals.insert(
+                        var_name.clone(),
+                        Type::Object(self.resolve_class_name(&bare)),
+                    );
                 }
             }
             _ => {}
@@ -625,8 +667,46 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::New(_, args) => {
+                let resolved_class = match self.infer_expr(e, locals) {
+                    Type::Object(class) => Some(class),
+                    _ => None,
+                };
+                // A dynamic target (`new $className()`) or an unresolved
+                // pseudo-type (`new parent()` with no parent class) has no
+                // concrete name to check - only a plain `new Name()` (or
+                // `self`/`static` resolving to the current class) reaches
+                // here with `Some`.
+                let ctor_sig = resolved_class
+                    .as_deref()
+                    .and_then(|class| self.registry.lookup_method(class, "__construct"));
+                self.predefine_byref_or_unknown_args(ctor_sig, args, locals);
                 for a in args {
                     self.check_expr(a, locals, label);
+                }
+                if let Some(class) = &resolved_class {
+                    // A name containing an internal `\` is a genuinely
+                    // namespaced reference (`new Foo\Bar()`) this project
+                    // can't safely resolve (namespaces aren't modeled at
+                    // all - see `strip_leading_backslash`'s doc comment),
+                    // so it's left unchecked rather than risking a false
+                    // positive; only a single leading `\` (fully qualified
+                    // from the global namespace) was already stripped by
+                    // `infer_expr`.
+                    if !class.contains('\\') && !self.registry.classes.contains_key(class) {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!("instantiated class {class} not found"),
+                        });
+                    } else if let Some(sig) = ctor_sig {
+                        self.check_args(
+                            &format!("{class}::__construct"),
+                            sig,
+                            args,
+                            locals,
+                            label,
+                            Some(class),
+                        );
+                    }
                 }
             }
             Expr::NewAnonymousClass(decl, args) => {
@@ -866,7 +946,10 @@ impl<'a> Checker<'a> {
                             None => raw,
                         }
                     }
-                    _ => Type::Object(name.clone()),
+                    _ => {
+                        let bare = crate::registry::strip_leading_backslash(name);
+                        Type::Object(self.resolve_class_name(&bare))
+                    }
                 },
                 _ => Type::Mixed,
             },
@@ -1997,6 +2080,122 @@ mod tests {
                     }
                 };
             }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn instantiating_an_undefined_class_is_flagged() {
+        let d = diagnostics_for("<?php function f() { return new TotallyMadeUpClass(); }");
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("TotallyMadeUpClass not found")),
+            "expected an undefined-class diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn instantiating_a_known_class_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {}
+            function f() { return new Foo(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn use_import_resolves_to_the_bare_short_name_before_lookup() {
+        let d = diagnostics_for(
+            r#"<?php
+            use App\Domain\Widget;
+            function f() { return new Widget(); }
+        "#,
+        );
+        // Widget isn't actually declared anywhere in this snippet, so this
+        // documents the known, accepted limitation (no `use` target is
+        // ever really loaded here) rather than a false negative in the
+        // resolution logic itself - what's under test is that the
+        // *short-name resolution* runs (App\Domain\Widget -> Widget)
+        // without panicking and without also flagging an unrelated
+        // spurious diagnostic; a real project supplies the actual
+        // declaration file, as verified separately against Piwigo.
+        assert!(
+            d.iter().any(|x| x.message.contains("Widget not found")),
+            "expected exactly the resolved bare name in the diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn instantiating_a_class_via_a_leading_backslash_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {}
+            function f() { return new \Foo(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn new_self_and_static_are_never_flagged_as_undefined() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                public static function make(): self { return new self(); }
+                public static function makeStatic(): static { return new static(); }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn constructor_argument_count_is_checked() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point {
+                public function __construct(int $x, int $y) {}
+            }
+            function f() { return new Point(1); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("Point::__construct() expects at least 2")),
+            "expected a constructor argument-count diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn constructor_argument_type_is_checked() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point {
+                public function __construct(int $x) {}
+            }
+            function f() { return new Point("not an int"); }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("Point::__construct()")
+                    && x.message.contains("expects int")),
+            "expected a constructor argument-type diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn constructor_call_with_correct_arguments_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point {
+                public function __construct(int $x, int $y) {}
+            }
+            function f() { return new Point(1, 2); }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");

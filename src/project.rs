@@ -215,6 +215,19 @@ impl Project {
         &self.registry
     }
 
+    /// Runs the checker over every currently-loaded file, not just one -
+    /// the whole-project counterpart to `check_file`. Used by
+    /// `--check-project` and by tests/tooling that need to see every
+    /// diagnostic across a real corpus at once, rather than one file (and
+    /// its transitively-affected dependents) at a time the way
+    /// `update_file` does.
+    pub fn check_all(&self) -> HashMap<PathBuf, Vec<Diagnostic>> {
+        self.files
+            .keys()
+            .map(|path| (path.clone(), self.check_file(path)))
+            .collect()
+    }
+
     pub fn file_count(&self) -> usize {
         self.files.len()
     }

@@ -166,7 +166,7 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
         | Stmt::Break(_)
         | Stmt::Continue(_)
         | Stmt::Namespace(_)
-        | Stmt::Use(_, _)
+        | Stmt::Use(_)
         | Stmt::Global(_)
         | Stmt::Goto(_)
         | Stmt::Label(_) => {}

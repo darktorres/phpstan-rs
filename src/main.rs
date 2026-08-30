@@ -232,11 +232,66 @@ fn run_incremental_bench(args: &[String]) {
     }
 }
 
+/// `phpstan-rs --check-project <dir>` - loads every .php file under `dir`
+/// into a `Project` and runs the full checker over all of them at once
+/// (`Project::check_all`), printing every diagnostic. Unlike `--check`
+/// (parse-only, no semantic checking) or `--incremental-bench` (one file
+/// plus its dependents), this is the whole-corpus semantic-diagnostics
+/// view - the tool needed to spot-check new diagnostic rules for false
+/// positives against a real codebase before trusting them.
+fn run_check_project(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("usage: phpstan-rs --check-project <dir>...");
+        return;
+    }
+    let mut files = Vec::new();
+    for dir in args {
+        collect_php_files(Path::new(dir), &mut files);
+    }
+    if files.is_empty() {
+        eprintln!("no .php files found under {}", args.join(", "));
+        return;
+    }
+
+    let mut project = project::Project::new();
+    for path in &files {
+        let Ok(bytes) = fs::read(path) else {
+            continue;
+        };
+        let source = String::from_utf8_lossy(&bytes).into_owned();
+        project.load_file(path.clone(), &source);
+    }
+    project.finish_loading();
+
+    let results = project.check_all();
+    let mut paths: Vec<&PathBuf> = results.keys().collect();
+    paths.sort();
+
+    let mut total = 0usize;
+    for path in paths {
+        let diagnostics = &results[path];
+        for d in diagnostics {
+            println!("{}: {}: {}", path.display(), d.location, d.message);
+            total += 1;
+        }
+    }
+    println!(
+        "
+{} file(s) checked, {} diagnostic(s)",
+        project.file_count(),
+        total
+    );
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.get(1).map(String::as_str) == Some("--check") {
         run_check(&args[2..]);
+        return;
+    }
+    if args.get(1).map(String::as_str) == Some("--check-project") {
+        run_check_project(&args[2..]);
         return;
     }
     if args.get(1).map(String::as_str) == Some("--incremental-bench") {

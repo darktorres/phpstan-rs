@@ -37,8 +37,12 @@ pub enum Stmt {
     FunctionDecl(FunctionDecl),
     ClassDecl(ClassDecl),
     Namespace(String),
-    // (imported path, optional `as Alias`)
-    Use(String, Option<String>),
+    // Every import a `use` statement brings in - a plain `use A, B;` list
+    // and a group `use Foo\{A, B as C};` (each member's path prefixed
+    // with the group path) both expand to one `UseImport` per name here,
+    // rather than keeping only the first the way an earlier, unconsumed
+    // version of this variant did.
+    Use(Vec<UseImport>),
     // Top-level `const NAME = value, ...;`, distinct from a class's own
     // consts (ClassConst is reused for the shape, since it's identical).
     GlobalConst(Vec<ClassConst>),
@@ -151,6 +155,12 @@ pub struct MethodDecl {
     pub is_static: bool,
     pub is_abstract: bool,
     pub function: FunctionDecl,
+}
+
+#[derive(Debug, Clone)]
+pub struct UseImport {
+    pub path: String,
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone)]

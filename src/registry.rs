@@ -38,6 +38,19 @@ fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
 /// (an array, a concatenation, another constant) falls back to `Mixed` -
 /// undefined-constant detection only needs the name to be known, not a
 /// precise type.
+/// A single leading `\` marks "fully qualified from the global
+/// namespace" (`\Exception`) - since this project doesn't model
+/// namespaces at all (see `remove_declarations`'s own note: "namespaces
+/// aren't modeled anywhere in this project"), every class/function is
+/// already keyed by its bare name, so a fully-qualified reference to one
+/// only needs this stripped to match. Mirrors `types::parse_type_string`'s
+/// identical handling of type hints, just for `extends`/`implements`/
+/// `uses` and expression-level name references, which go through a
+/// separate code path (`parse_qualified_name`, not `parse_type_string`).
+pub(crate) fn strip_leading_backslash(name: &str) -> String {
+    name.trim_start_matches('\\').to_string()
+}
+
 fn infer_const_type(value: &crate::ast::Expr) -> Type {
     use crate::ast::{Expr, Literal};
     match value {
@@ -191,12 +204,20 @@ impl ClassInfo {
             .collect();
 
         ClassInfo {
-            extends: c.extends.clone(),
-            implements: c.implements.clone(),
+            extends: c
+                .extends
+                .iter()
+                .map(|s| strip_leading_backslash(s))
+                .collect(),
+            implements: c
+                .implements
+                .iter()
+                .map(|s| strip_leading_backslash(s))
+                .collect(),
             methods,
             properties,
             consts,
-            uses: c.uses.clone(),
+            uses: c.uses.iter().map(|s| strip_leading_backslash(s)).collect(),
         }
     }
 
@@ -221,11 +242,15 @@ impl ClassInfo {
 
         ClassInfo {
             extends: Vec::new(),
-            implements: e.implements.clone(),
+            implements: e
+                .implements
+                .iter()
+                .map(|s| strip_leading_backslash(s))
+                .collect(),
             methods,
             properties: HashMap::new(),
             consts,
-            uses: e.uses.clone(),
+            uses: e.uses.iter().map(|s| strip_leading_backslash(s)).collect(),
         }
     }
 }

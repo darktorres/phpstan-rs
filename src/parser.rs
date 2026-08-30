@@ -376,7 +376,9 @@ impl Parser {
             Token::Keyword(Keyword::Use) => {
                 self.advance();
                 // `use function foo;` / `use const BAR;` - the marker
-                // doesn't change anything tracked here, just skip past it.
+                // doesn't change what's tracked (undefined-class
+                // resolution only cares about class-shaped imports), just
+                // skip past it.
                 if matches!(
                     self.peek(),
                     Token::Keyword(Keyword::Function) | Token::Keyword(Keyword::Const)
@@ -386,11 +388,17 @@ impl Parser {
                 let name = self.parse_qualified_name();
                 // Group use: `use Foo\{const BAR, function baz, Qux as
                 // Quux};`, with an optional trailing comma before the
-                // closing brace. Nothing downstream reads Stmt::Use at
-                // all (confirmed: not referenced in registry.rs or
-                // checker.rs), so each member is just consumed rather
-                // than threaded into its own Stmt::Use.
+                // closing brace. Every member expands to its own
+                // `UseImport`, with the group path (`name`) prefixed onto
+                // it - `use Foo\{Bar};` imports `Foo\Bar` under the short
+                // name `Bar`, same as `use Foo\Bar;` would.
                 if self.eat(&Token::LBrace) {
+                    // `parse_qualified_name` greedily consumes the `\`
+                    // right before this `{` too (it doesn't know a group
+                    // follows), leaving `name` with a trailing separator
+                    // already - trimming it avoids doubling up below.
+                    let group_prefix = name.trim_end_matches('\\');
+                    let mut imports = Vec::new();
                     while !self.check(&Token::RBrace) {
                         if matches!(
                             self.peek(),
@@ -398,36 +406,45 @@ impl Parser {
                         ) {
                             self.advance();
                         }
-                        self.parse_qualified_name();
-                        if self.eat(&Token::Keyword(Keyword::As)) {
-                            self.expect_ident();
-                        }
+                        let member = self.parse_qualified_name();
+                        let alias = if self.eat(&Token::Keyword(Keyword::As)) {
+                            Some(self.expect_ident())
+                        } else {
+                            None
+                        };
+                        imports.push(UseImport {
+                            path: format!("{group_prefix}\\{member}"),
+                            alias,
+                        });
                         if !self.eat(&Token::Comma) {
                             break;
                         }
                     }
                     self.expect(&Token::RBrace);
                     self.expect_semicolon();
-                    return Stmt::Use(name, None);
+                    return Stmt::Use(imports);
                 }
                 let alias = if self.eat(&Token::Keyword(Keyword::As)) {
                     Some(self.expect_ident())
                 } else {
                     None
                 };
-                // `use foo\bar\baz, foo\bar\qux;` - a plain comma-separated
-                // list, distinct from the `use Foo\{...}` group form above.
-                // Only the first import is kept in a real Stmt::Use, same
-                // simplification as the group form (nothing downstream
-                // reads it).
+                let mut imports = vec![UseImport { path: name, alias }];
+                // `use foo\bar\baz, foo\bar\qux;` - a plain
+                // comma-separated list, distinct from the `use Foo\{...}`
+                // group form above (each member here is a full path of its
+                // own, not relative to a shared prefix).
                 while self.eat(&Token::Comma) {
-                    self.parse_qualified_name();
-                    if self.eat(&Token::Keyword(Keyword::As)) {
-                        self.expect_ident();
-                    }
+                    let path = self.parse_qualified_name();
+                    let alias = if self.eat(&Token::Keyword(Keyword::As)) {
+                        Some(self.expect_ident())
+                    } else {
+                        None
+                    };
+                    imports.push(UseImport { path, alias });
                 }
                 self.expect_semicolon();
-                Stmt::Use(name, alias)
+                Stmt::Use(imports)
             }
             Token::Keyword(Keyword::Const) => {
                 self.advance();
@@ -2852,17 +2869,16 @@ mod tests {
         // low-impact precision loss: Keyword::as_str() only has the
         // canonical lowercase spelling, not this source's original
         // capitalization, so the reconstructed segment comes back as
-        // "enum" - inert for a `use` target specifically, since nothing
-        // in the registry/checker consumes Stmt::Use at all yet, and for
-        // symbols that *are* looked up (extends/implements/new Foo()),
-        // both the declaration site and every usage site lowercase the
-        // same way, so registry lookups on a keyword-named symbol still
-        // match each other consistently.
+        // "enum" - inert for a `use` target specifically, since a bare
+        // class-name reference to it (the only thing checker.rs's use-map
+        // resolution consumes) is looked up by its final segment's short
+        // name, which PHP identifiers treat case-insensitively for this
+        // purpose anyway.
         let program = parse("<?php use Piwigo\\Common\\Enum\\AlbumSortOrder;");
-        let Stmt::Use(name, _) = &program[0] else {
+        let Stmt::Use(imports) = &program[0] else {
             panic!("expected Use");
         };
-        assert_eq!(name, "Piwigo\\Common\\enum\\AlbumSortOrder");
+        assert_eq!(imports[0].path, "Piwigo\\Common\\enum\\AlbumSortOrder");
     }
 
     #[test]
@@ -3415,7 +3431,25 @@ mod tests {
     #[test]
     fn use_with_comma_separated_list_parses() {
         let program = parse(r#"<?php use function foo\bar\baz, foo\bar\qux;"#);
-        assert!(matches!(&program[0], Stmt::Use(n, None) if n == "foo\\bar\\baz"));
+        let Stmt::Use(imports) = &program[0] else {
+            panic!("expected Use");
+        };
+        assert_eq!(imports.len(), 2);
+        assert_eq!(imports[0].path, "foo\\bar\\baz");
+        assert_eq!(imports[1].path, "foo\\bar\\qux");
+    }
+
+    #[test]
+    fn use_group_expands_each_member_with_the_shared_prefix() {
+        let program = parse(r#"<?php use Foo\Bar\{Baz, Qux as Quux};"#);
+        let Stmt::Use(imports) = &program[0] else {
+            panic!("expected Use");
+        };
+        assert_eq!(imports.len(), 2);
+        assert_eq!(imports[0].path, "Foo\\Bar\\Baz");
+        assert_eq!(imports[0].alias, None);
+        assert_eq!(imports[1].path, "Foo\\Bar\\Qux");
+        assert_eq!(imports[1].alias, Some("Quux".to_string()));
     }
 
     #[test]
