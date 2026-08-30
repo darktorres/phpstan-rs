@@ -1,5 +1,6 @@
 mod ast;
 mod checker;
+mod deps;
 mod docblock;
 mod lexer;
 mod parser;
@@ -198,8 +199,7 @@ fn run_incremental_bench(args: &[String]) {
         .unwrap();
 
     let incremental_start = std::time::Instant::now();
-    project.update_file(&target, &target_source);
-    let diagnostics = project.check_file(&target);
+    let results = project.update_file(&target, &target_source);
     let incremental = incremental_start.elapsed();
 
     println!(
@@ -208,8 +208,10 @@ fn run_incremental_bench(args: &[String]) {
         full_load
     );
     println!(
-        "incremental update: 1 file ({}) in {:?}",
+        "incremental update: {} file(s) re-checked ({}, plus {} dependent file(s)) in {:?}",
+        results.len(),
         target.display(),
+        results.len().saturating_sub(1),
         incremental
     );
     if incremental.as_nanos() > 0 {
@@ -218,13 +220,14 @@ fn run_incremental_bench(args: &[String]) {
             full_load.as_secs_f64() / incremental.as_secs_f64()
         );
     }
-    println!(
-        "diagnostics for {}: {}",
-        target.display(),
-        diagnostics.len()
-    );
-    for d in &diagnostics {
-        println!("  {}: {}", d.location, d.message);
+    let mut result_paths: Vec<&PathBuf> = results.keys().collect();
+    result_paths.sort();
+    for path in result_paths {
+        let diagnostics = &results[path];
+        println!("{}: {} diagnostic(s)", path.display(), diagnostics.len());
+        for d in diagnostics {
+            println!("  {}: {}", d.location, d.message);
+        }
     }
 }
 
