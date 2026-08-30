@@ -256,6 +256,31 @@ fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {
             Stmt::FunctionDecl(f) => functions.push(f.name.clone()),
             Stmt::ClassDecl(c) => classes.push(c.name.clone()),
             Stmt::EnumDecl(e) => classes.push(e.name.clone()),
+            // Must mirror Registry::index's recursion into `if`/block
+            // bodies (the `if (!function_exists(...)) { function foo()
+            // {} }` polyfill idiom) - otherwise an incremental update
+            // wouldn't know to remove a conditionally-declared symbol
+            // that index() itself did pick up, leaving a stale entry
+            // behind after the declaring file changes or is removed.
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                let (f, c) = declared_names(std::slice::from_ref(then_branch));
+                functions.extend(f);
+                classes.extend(c);
+                if let Some(else_branch) = else_branch {
+                    let (f, c) = declared_names(std::slice::from_ref(else_branch));
+                    functions.extend(f);
+                    classes.extend(c);
+                }
+            }
+            Stmt::Block(inner) => {
+                let (f, c) = declared_names(inner);
+                functions.extend(f);
+                classes.extend(c);
+            }
             _ => {}
         }
     }

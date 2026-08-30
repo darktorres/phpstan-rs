@@ -350,6 +350,28 @@ impl Registry {
                     self.functions
                         .insert(f.name.clone(), FunctionSig::from_decl(f));
                 }
+                // The real, common `if (!function_exists('foo')) { function
+                // foo() {} }` polyfill idiom (used throughout the PHP
+                // ecosystem, e.g. symfony/deprecation-contracts and every
+                // symfony/polyfill-* package) declares a genuinely global
+                // function/class from inside a conditional - recursing
+                // here is what makes those visible at all. This registry
+                // has no notion of "conditionally declared" in the first
+                // place (a symbol is either indexed or it isn't), so
+                // treating a branch's declarations the same as top-level
+                // ones is consistent with that existing coarseness, not a
+                // new kind of imprecision.
+                Stmt::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    self.index(std::slice::from_ref(then_branch));
+                    if let Some(else_branch) = else_branch {
+                        self.index(std::slice::from_ref(else_branch));
+                    }
+                }
+                Stmt::Block(inner) => self.index(inner),
                 _ => {}
             }
         }
@@ -514,6 +536,31 @@ mod tests {
         let tokens = Lexer::new(src).tokenize();
         let program = Parser::new(tokens).parse_program();
         Registry::build(&program)
+    }
+
+    #[test]
+    fn function_declared_inside_an_if_guard_is_still_indexed() {
+        let r = build_registry(
+            r#"<?php
+            if (!function_exists('polyfilled')) {
+                function polyfilled() {}
+            }"#,
+        );
+        assert!(r.lookup_function("polyfilled").is_some());
+    }
+
+    #[test]
+    fn class_declared_inside_an_if_else_guard_is_still_indexed() {
+        let r = build_registry(
+            r#"<?php
+            if (PHP_VERSION_ID >= 80100) {
+                class Widget {}
+            } else {
+                class OldWidget {}
+            }"#,
+        );
+        assert!(r.classes.contains_key("Widget"));
+        assert!(r.classes.contains_key("OldWidget"));
     }
 
     #[test]

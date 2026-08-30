@@ -63,11 +63,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Resolves a bare (no internal `\`) name against this file's
-    /// `use`-import map, falling back to the name itself when it isn't
-    /// one (a class declared directly in this file/namespace, or a
-    /// genuinely undefined one - both look the same at this point, and
-    /// the registry lookup that follows is what tells them apart).
-    fn resolve_class_name(&self, name: &str) -> String {
+    /// `use`-import map - covers both class-shaped (`use Foo\Bar;`) and
+    /// function-shaped (`use function foo\bar;`) imports, since both
+    /// resolve the exact same way (short name -> the last path segment) -
+    /// falling back to the name itself when it is not imported (a symbol
+    fn resolve_imported_name(&self, name: &str) -> String {
         self.use_map
             .get(name)
             .cloned()
@@ -500,7 +500,7 @@ impl<'a> Checker<'a> {
                     let bare = crate::registry::strip_leading_backslash(class_name);
                     locals.insert(
                         var_name.clone(),
-                        Type::Object(self.resolve_class_name(&bare)),
+                        Type::Object(self.resolve_imported_name(&bare)),
                     );
                 }
             }
@@ -543,18 +543,41 @@ impl<'a> Checker<'a> {
                 {
                     self.saw_dynamic_var_construct = true;
                 }
-                let sig = match callee.as_ref() {
-                    Expr::Name(name) => self.registry.lookup_function(name),
+                // Resolved once up front (leading-`\` stripped, then
+                // `use`/`use function` imports applied) so both the
+                // existing arg-checking path and the new undefined-call
+                // diagnostic below see the same name a real call to this
+                // function would actually resolve to - previously
+                // `lookup_function` used the raw, unnormalized name, so
+                // e.g. `\class_exists(...)` silently skipped arg-checking
+                // even when the plain name was a known signature.
+                let resolved_name = match callee.as_ref() {
+                    Expr::Name(name) => {
+                        let bare = crate::registry::strip_leading_backslash(name);
+                        Some(self.resolve_imported_name(&bare))
+                    }
                     _ => None,
                 };
+                let sig = resolved_name
+                    .as_deref()
+                    .and_then(|name| self.registry.lookup_function(name));
                 self.predefine_byref_or_unknown_args(sig, args, locals);
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
-                if let Expr::Name(name) = callee.as_ref()
-                    && let Some(sig) = sig
-                {
-                    self.check_args(name, sig, args, locals, label, None);
+                if let Some(name) = &resolved_name {
+                    if let Some(sig) = sig {
+                        self.check_args(name, sig, args, locals, label, None);
+                    } else if !name.contains('\\') && !is_language_construct(name) {
+                        // A genuinely namespaced name this project can't
+                        // resolve (see `resolve_imported_name`'s doc
+                        // comment) is left unchecked rather than risking a
+                        // false positive, same rule `Expr::New` follows.
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!("call to undefined function {name}()"),
+                        });
+                    }
                 }
             }
             Expr::MethodCall(recv, method, args) => {
@@ -948,7 +971,7 @@ impl<'a> Checker<'a> {
                     }
                     _ => {
                         let bare = crate::registry::strip_leading_backslash(name);
-                        Type::Object(self.resolve_class_name(&bare))
+                        Type::Object(self.resolve_imported_name(&bare))
                     }
                 },
                 _ => Type::Mixed,
@@ -1086,6 +1109,40 @@ impl<'a> Checker<'a> {
 /// PHP superglobals are implicitly defined in every scope without any
 /// assignment ever appearing in source - undefined-variable detection must
 /// never flag these.
+/// Real PHP language constructs that are syntactically indistinguishable
+/// from an ordinary function call in this parser (none of `isset`,
+/// `empty`, `unset`, `eval`, `exit`, `die` are lexed as keywords - see
+/// `token.rs` - so `isset($x)` parses as `Expr::Call(Name("isset"), ...)`
+/// exactly like a real call). None of them are declared in any stub
+/// source (they're compiler intrinsics, not functions - a real PHP
+/// function can be called through a variable, `$f = 'isset'; $f();` is a
+/// fatal error), so without this list every real codebase's constant use
+/// of `isset`/`empty`/`unset` would be flagged as calling an undefined
+/// function. Matched case-insensitively since PHP itself treats function
+/// (and construct) names case-insensitively.
+fn is_language_construct(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "isset"
+            | "empty"
+            | "unset"
+            | "eval"
+            | "exit"
+            | "die"
+            // The parser deliberately models these four as a call to a
+            // synthetic name (see parser.rs's own comment on that
+            // decision) rather than a dedicated AST node - real language
+            // constructs, not functions, so they belong on this list for
+            // exactly the same reason as isset/empty/unset above.
+            | "include"
+            | "include_once"
+            | "require"
+            | "require_once"
+            // Same synthetic-call modeling, for the same reason.
+            | "print"
+    )
+}
+
 fn is_superglobal(name: &str) -> bool {
     matches!(
         name,
@@ -1887,6 +1944,11 @@ mod tests {
 
     #[test]
     fn unknown_function_argument_is_leniently_defined_not_flagged() {
+        // Calling an undeclared function is itself now flagged (Phase 9),
+        // but the original point of this test still holds: $result isn't
+        // known to be by-ref (the callee's signature is itself unknown),
+        // so it's leniently treated as defined by the call rather than
+        // also producing a spurious "undefined variable" diagnostic.
         let d = diagnostics_for(
             r#"<?php
             function f() {
@@ -1895,7 +1957,16 @@ mod tests {
             }
         "#,
         );
-        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+        assert!(
+            !d.iter().any(|x| x.message.contains("undefined variable")),
+            "unexpected undefined-variable diagnostic: {d:?}"
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("undefined function some_undeclared_function")),
+            "expected an undefined-function diagnostic, got: {d:?}"
+        );
     }
 
     #[test]
@@ -2186,6 +2257,111 @@ mod tests {
                     && x.message.contains("expects int")),
             "expected a constructor argument-type diagnostic, got: {d:?}"
         );
+    }
+
+    #[test]
+    fn calling_an_undefined_function_is_flagged() {
+        let d = diagnostics_for("<?php totallyMadeUpFunction();");
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("undefined function totallyMadeUpFunction")),
+            "expected an undefined-function diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn calling_a_known_function_is_not_flagged() {
+        let d = diagnostics_for("<?php function greet() {} greet();");
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined() {
+        let d = diagnostics_for(
+            r#"<?php
+            $x = 1;
+            isset($x);
+            empty($x);
+            unset($x);
+            if (false) { exit(); }
+            if (false) { die(); }
+        "#,
+        );
+        assert!(
+            !d.iter().any(|x| x.message.contains("undefined function")),
+            "unexpected undefined-function diagnostic: {d:?}"
+        );
+    }
+
+    #[test]
+    fn require_include_and_print_are_never_flagged_as_undefined() {
+        // These parse as a synthetic Expr::Call (see parser.rs's own
+        // comment on that choice) - real language constructs, not
+        // functions, so they must be exempted the same way isset/empty
+        // are, or every real codebase would light up on every include.
+        let d = diagnostics_for(
+            r#"<?php
+            require 'a.php';
+            require_once 'b.php';
+            include 'c.php';
+            include_once 'd.php';
+            print 'hello';
+        "#,
+        );
+        assert!(
+            !d.iter().any(|x| x.message.contains("undefined function")),
+            "unexpected undefined-function diagnostic: {d:?}"
+        );
+    }
+
+    #[test]
+    fn calling_a_function_via_its_use_imported_short_name_resolves_before_lookup() {
+        // Mirrors the analogous `new` test: what's under test is that
+        // `use function` resolution runs (App\Helpers\format_date ->
+        // format_date) before the registry lookup, not that the target
+        // actually exists (it isn't declared in this snippet, so a real
+        // project supplying the real declaration is what makes this
+        // resolve cleanly - verified separately against Piwigo/vendor).
+        let d = diagnostics_for(
+            r#"<?php
+            use function App\Helpers\format_date;
+            function f() { return format_date(); }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("undefined function format_date")),
+            "expected the resolved bare name in the diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn calling_a_function_via_a_leading_backslash_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function greet() {}
+            function f() { return \greet(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn conditionally_declared_function_is_visible_to_undefined_function_checks() {
+        // The real, common `if (!function_exists('foo')) { function foo()
+        // {} }` polyfill idiom (symfony/deprecation-contracts and every
+        // symfony/polyfill-* package use exactly this) - Registry::index
+        // recurses into if-bodies specifically so this isn't flagged.
+        let d = diagnostics_for(
+            r#"<?php
+            if (!function_exists('polyfilled')) {
+                function polyfilled() {}
+            }
+            function f() { return polyfilled(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
