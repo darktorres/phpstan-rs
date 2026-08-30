@@ -2173,6 +2173,80 @@ mod tests {
     }
 
     #[test]
+    fn parent_pseudo_type_resolves_to_the_real_parent_class() {
+        // Coverage measurement (cargo llvm-cov) found resolve_pseudo's
+        // Type::ParentRef branch had zero test coverage - the exact same
+        // pseudo-type-resolution machinery that turned out buggy for
+        // self/static elsewhere in this audit. Manually verified this
+        // particular path is currently correct; this test locks that in
+        // rather than leaving it to keep passing by luck.
+        let d = diagnostics_for(
+            r#"<?php
+            class Animal {}
+            class Unrelated {}
+            class Dog extends Animal {
+                /** @return parent */
+                public function asAnimal() {
+                    return new Unrelated();
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("expected Animal, got Unrelated")),
+            "expected 'parent' to resolve to the real parent class Animal, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn while_loop_narrows_its_body_and_merges_types_correctly_after() {
+        // Same coverage-driven finding: Stmt::While had zero test coverage
+        // for both its instanceof-narrowing inside the body and its
+        // post-loop merge_scopes (the loop may run zero times, so a type
+        // reassigned only inside the body must come out as a union of the
+        // pre-loop and post-body types afterward, not just the body's).
+        let inside_narrowing = diagnostics_for(
+            r#"<?php
+            class Foo {
+                public function bar(): int { return 1; }
+            }
+            function f(?Foo $x) {
+                while ($x instanceof Foo) {
+                    $x->bar();
+                    $x->totallyMadeUp();
+                }
+            }
+        "#,
+        );
+        assert!(
+            inside_narrowing
+                .iter()
+                .any(|x| x.message.contains("Foo::totallyMadeUp")),
+            "expected instanceof narrowing to apply inside a while body, got: {inside_narrowing:?}"
+        );
+
+        let post_loop_merge = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function f() {
+                $x = 5;
+                while (rand(0, 1)) {
+                    $x = "hello";
+                }
+                needsInt($x);
+            }
+        "#,
+        );
+        assert!(
+            post_loop_merge
+                .iter()
+                .any(|x| x.message.contains("expects int")),
+            "expected the post-loop type to be a union of both possible types, got: {post_loop_merge:?}"
+        );
+    }
+
+    #[test]
     fn destructuring_assignment_binds_element_type() {
         let d = diagnostics_for(
             r#"<?php
