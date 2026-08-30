@@ -248,6 +248,20 @@ fn parse_type_atom(s: &str) -> Type {
         return parse_type_string(inner);
     }
 
+    // A real, documented PHPStan/Psalm convention: a quoted literal
+    // (`'ASC'|'DESC'`, `"foo"`) as one member of a union means "exactly
+    // this string value," not a class reference - without this, real
+    // code in this project's own corpus (`@param 'ASC'|'DESC' $dir`)
+    // fell through to the generic-class branch below and got the quotes
+    // themselves treated as part of a literal class name, then
+    // nonsensically namespace-qualified into e.g. `Piwigo\Db\'ASC'`.
+    if let Some(inner) = s.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+        return Type::StringLiteral(inner.to_string());
+    }
+    if let Some(inner) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+        return Type::StringLiteral(inner.to_string());
+    }
+
     // PHPDoc's `Type[]` array shorthand (`int[]`, even `string[][]`) has no
     // native-hint equivalent, but reusing this parser for doc-comment types
     // makes it worth handling here rather than in a separate PHPDoc-only
@@ -497,6 +511,28 @@ mod tests {
         assert_eq!(
             parse_type_string("int|string"),
             Type::Union(vec![Type::Int, Type::String])
+        );
+    }
+
+    #[test]
+    fn quoted_literal_string_union_members_are_string_literals_not_class_names() {
+        // Real, previously-live bug found via real code in this
+        // project's own verification corpus (`@param 'ASC'|'DESC' $dir`,
+        // a real, documented PHPStan/Psalm literal-string-union
+        // convention): without recognizing the quotes, `'ASC'` fell
+        // through to the generic-class branch and became a literal
+        // class named `'ASC'` (quotes included), then got nonsensically
+        // namespace-qualified once that machinery ran (`Piwigo\Db\'ASC'`).
+        assert_eq!(
+            parse_type_string("'ASC'|'DESC'"),
+            Type::Union(vec![
+                Type::StringLiteral("ASC".to_string()),
+                Type::StringLiteral("DESC".to_string()),
+            ])
+        );
+        assert_eq!(
+            parse_type_string("\"foo\""),
+            Type::StringLiteral("foo".to_string())
         );
     }
 
