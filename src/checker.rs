@@ -925,6 +925,18 @@ impl<'a> Checker<'a> {
                     self.check_function(&m.function, Some(&decl.name));
                 }
             }
+            Expr::StaticCall(_, _, args) => {
+                // No existence/arg-type checking here yet (see the
+                // module doc comment - StaticCall has no registry lookup
+                // at all today), but its argument expressions are real
+                // code that can contain their own bugs (most simply: an
+                // undefined variable) and were previously invisible to
+                // every check_expr-driven diagnostic because this arm
+                // didn't exist, silently falling into the catch-all.
+                for a in args {
+                    self.check_expr(a, locals, label);
+                }
+            }
             Expr::DynamicVariable(name_expr) => self.check_expr(name_expr, locals, label),
             Expr::PropertyAccess(base, _) => self.check_expr(base, locals, label),
             Expr::DynamicPropertyAccess(base, name_expr) => {
@@ -2084,6 +2096,30 @@ mod tests {
             d.iter()
                 .any(|x| x.message.contains("App\\MyError::totallyMadeUp")),
             "expected the resolved fully-qualified class in the diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn static_call_arguments_are_still_checked_for_undefined_variables() {
+        // Expr::StaticCall had no arm in check_expr's match at all - it
+        // fell into the wildcard `_ => {}`, so its argument expressions
+        // were never visited by any diagnostic. This doesn't need
+        // StaticCall's own existence checking (still out of scope, see
+        // the module doc comment) - just proves its args are real code
+        // that gets checked like any other call's.
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                public static function bar($x) {}
+            }
+            function f() {
+                Foo::bar($undefinedVar);
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("undefined variable")),
+            "expected an undefined-variable diagnostic, got: {d:?}"
         );
     }
 
