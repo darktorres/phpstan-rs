@@ -145,6 +145,42 @@ than `instanceof`, backwards from real PHP, silently breaking the
 Psalm pseudo-type name collisions (`list`, `object`) that fell through
 to being treated as literal class names.
 
+**Re-audited 2026-08-30** with fresh namespaced adversarial tests
+(existing tests for trait flattening, `@template` substitution, and
+`instanceof` narrowing all happen to use non-namespaced PHP - the exact
+blind spot that let the Phase 7 regression through). Trait flattening
+and function-level `@template` substitution both check out fine. Found
+and fixed 4 more real bugs, all variations on the same theme -
+something that used to be a harmless bare name became visibly wrong
+once namespace-qualification existed to mangle it:
+
+- `lookup_own_signature`'s top-level-function branch looked functions
+  up by their raw AST name, not their FQN (`Registry::index`'s actual
+  key since Phase 9.5) - silently found nothing for any namespaced
+  function, breaking type-checking accuracy inside its own body. Found
+  via a new cross-file test combining a namespace + `use` import +
+  method-call checking - a combination no existing test exercised.
+- `apply_narrowing`'s `instanceof` handling treated `self`/`parent`/
+  `static` as ordinary bare class names instead of resolving them
+  against the enclosing class like every other such site already did
+  (real code: amphp/amp's `if ($future instanceof self)` narrowed to a
+  nonsensical `Amp\self`). This one looked like *silence*, not a wrong
+  diagnostic, which is why nothing caught it before.
+- `@return $this` (a real, PHPStan-documented convention identical to
+  `@return static`) and class-constant-reference types like `self::RFC_*`
+  (PHPStan's wildcard-constant convention) both weren't recognized as
+  non-class pseudo-types at all, and got nonsensically
+  namespace-qualified once that machinery existed.
+- `catch (SomeException $e) { ... }`'s type binding built its
+  `Type::Object` straight from the raw AST class name with zero
+  resolution applied - not even leading-backslash stripping, the one
+  normalization almost every other site in the codebase already had.
+  Same silent-not-wrong symptom as the `instanceof self` bug above,
+  caught the same way: a namespaced test asserting a positive
+  diagnostic, not `d.is_empty()`. Found by a systematic sweep of every
+  remaining `Type::Object(` construction site in `checker.rs` once the
+  other four bugs above made the pattern obvious to look for.
+
 ## Phase 10: Class-level generics - DONE
 
 `Type::Object` now carries real type arguments (`Collection<User>`
