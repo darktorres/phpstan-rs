@@ -4,6 +4,7 @@ mod docblock;
 mod lexer;
 mod parser;
 mod php_stubs;
+mod project;
 mod registry;
 mod stubs;
 mod token;
@@ -145,11 +146,97 @@ fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// `phpstan-rs --incremental-bench <dir> [<file-to-touch>]` - loads every
+/// .php file under `dir` into a `Project` (a full load, timed), then
+/// re-parses and re-checks just one file via `Project::update_file` (the
+/// incremental path, also timed) and reports both, to make the whole
+/// point of Phase 7's incremental-analysis work concrete: an edit to one
+/// file costs O(that file), not O(the project). Picks the first file in
+/// directory-walk order when none is named explicitly.
+fn run_incremental_bench(args: &[String]) {
+    let Some(dir) = args.first() else {
+        eprintln!("usage: phpstan-rs --incremental-bench <dir> [<file-to-touch>]");
+        return;
+    };
+    let mut files = Vec::new();
+    collect_php_files(Path::new(dir), &mut files);
+    if files.is_empty() {
+        eprintln!("no .php files found under {dir}");
+        return;
+    }
+    files.sort();
+
+    let target = match args.get(1) {
+        Some(f) => PathBuf::from(f),
+        None => files[0].clone(),
+    };
+    if !files.contains(&target) {
+        eprintln!("{} is not among the files under {dir}", target.display());
+        return;
+    }
+
+    let sources: Vec<(PathBuf, String)> = files
+        .iter()
+        .map(|p| {
+            let bytes = fs::read(p).unwrap_or_else(|e| panic!("failed to read {p:?}: {e}"));
+            (p.clone(), String::from_utf8_lossy(&bytes).into_owned())
+        })
+        .collect();
+
+    let full_load_start = std::time::Instant::now();
+    let mut project = project::Project::new();
+    for (path, source) in &sources {
+        project.load_file(path.clone(), source);
+    }
+    project.finish_loading();
+    let full_load = full_load_start.elapsed();
+
+    let target_source = sources
+        .iter()
+        .find(|(p, _)| p == &target)
+        .map(|(_, s)| s.clone())
+        .unwrap();
+
+    let incremental_start = std::time::Instant::now();
+    project.update_file(&target, &target_source);
+    let diagnostics = project.check_file(&target);
+    let incremental = incremental_start.elapsed();
+
+    println!(
+        "full load:         {} files in {:?}",
+        project.file_count(),
+        full_load
+    );
+    println!(
+        "incremental update: 1 file ({}) in {:?}",
+        target.display(),
+        incremental
+    );
+    if incremental.as_nanos() > 0 {
+        println!(
+            "speedup:            {:.0}x",
+            full_load.as_secs_f64() / incremental.as_secs_f64()
+        );
+    }
+    println!(
+        "diagnostics for {}: {}",
+        target.display(),
+        diagnostics.len()
+    );
+    for d in &diagnostics {
+        println!("  {}: {}", d.location, d.message);
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.get(1).map(String::as_str) == Some("--check") {
         run_check(&args[2..]);
+        return;
+    }
+    if args.get(1).map(String::as_str) == Some("--incremental-bench") {
+        run_incremental_bench(&args[2..]);
         return;
     }
 

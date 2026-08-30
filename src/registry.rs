@@ -219,7 +219,11 @@ impl Registry {
     /// file (PHP resolves this at compile time, not top-to-bottom), so
     /// flattening has to be a second pass over the fully-indexed classes -
     /// a using class's own methods/properties win over a trait's.
-    fn flatten_traits(&mut self) {
+    ///
+    /// `pub(crate)` (not private) so `Project::update_file` can re-run
+    /// just this pass after patching one file's contributions in place,
+    /// without needing to go through `build`'s full from-scratch `index`.
+    pub(crate) fn flatten_traits(&mut self) {
         type TraitAddition = (
             String,
             Vec<(String, FunctionSig)>,
@@ -267,7 +271,11 @@ impl Registry {
         }
     }
 
-    fn index(&mut self, stmts: &[Stmt]) {
+    /// `pub(crate)` for the same reason as `flatten_traits` - lets
+    /// `Project` index one file's statements into an already-built
+    /// registry (initial load, or after a re-parse) without re-running
+    /// `build`'s from-scratch pass over every other file.
+    pub(crate) fn index(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             match stmt {
                 Stmt::ClassDecl(c) => {
@@ -283,6 +291,22 @@ impl Registry {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// Surgically removes one file's prior contributions before
+    /// re-indexing its new parse - `Project::update_file`'s whole reason
+    /// for existing. Names are the only identity a registry entry has
+    /// (namespaces aren't modeled anywhere in this project), so two files
+    /// declaring the same top-level name would collide here exactly as
+    /// they would everywhere else in this registry - a pre-existing,
+    /// accepted simplification, not something incrementality introduces.
+    pub(crate) fn remove_declarations(&mut self, functions: &[String], classes: &[String]) {
+        for name in functions {
+            self.functions.remove(name);
+        }
+        for name in classes {
+            self.classes.remove(name);
         }
     }
 
