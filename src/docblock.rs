@@ -28,9 +28,28 @@ pub fn parse(raw: &str) -> DocBlock {
 
     let inner = raw.trim().trim_start_matches("/**").trim_end_matches("*/");
 
+    // A tag's own text can legitimately wrap onto following `*`-prefixed
+    // lines - most commonly a long array-shape type too wide for one
+    // line (`@return array{id: int, name: string,\n *   ...}`, a real,
+    // common style for documenting large DTOs). Every line joins onto
+    // the most recent `@tag` line until the next one starts, rather than
+    // being parsed as its own (tagless, ignored) line - take_type_token
+    // below still correctly stops at the type's own closing bracket
+    // followed by whitespace, discarding any joined-on description text
+    // that follows it on the same logical line.
+    let mut tag_lines: Vec<String> = Vec::new();
     for raw_line in inner.lines() {
         let line = raw_line.trim();
         let line = line.strip_prefix('*').map(str::trim).unwrap_or(line);
+        if line.starts_with('@') || tag_lines.is_empty() {
+            tag_lines.push(line.to_string());
+        } else if let Some(last) = tag_lines.last_mut() {
+            last.push(' ');
+            last.push_str(line);
+        }
+    }
+
+    for line in &tag_lines {
         let Some(tag_body) = line.strip_prefix('@') else {
             continue;
         };
@@ -193,5 +212,43 @@ mod tests {
     fn parses_bounded_template_name_ignoring_the_bound() {
         let block = parse("/** @template T of \\Countable */");
         assert_eq!(block.templates, vec!["T".to_string()]);
+    }
+
+    #[test]
+    fn a_return_type_wrapped_across_multiple_lines_is_not_truncated() {
+        // Real, common style for documenting a large DTO's shape (found
+        // via a genuine false-positive return-type mismatch this exact
+        // bug caused on real code): line-by-line parsing used to hand
+        // take_type_token only the first physical line's text, silently
+        // truncating at the line break with an unclosed `{` - producing
+        // a malformed type string that then got treated as a bogus class
+        // name and namespace-mangled downstream.
+        let block = parse(
+            r#"/**
+             * @return array{id: int, file: string, date_available: ?string,
+             *   name: ?string, comment: ?string, hit: int}
+             */"#,
+        );
+        assert_eq!(
+            block.return_type,
+            Some(
+                "array{id: int, file: string, date_available: ?string, name: ?string, comment: ?string, hit: int}"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_param_type_wrapped_across_multiple_lines_still_finds_the_variable_name() {
+        let block = parse(
+            r#"/**
+             * @param array{id: int,
+             *   name: string} $row the input row
+             */"#,
+        );
+        assert_eq!(
+            block.params.get("row"),
+            Some(&"array{id: int, name: string}".to_string())
+        );
     }
 }
