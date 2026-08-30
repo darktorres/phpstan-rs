@@ -814,8 +814,8 @@ output against the real 18923-file Piwigo+vendor corpus at some point
 in this project's history - real signal for priority order, not a
 guess from PHPStan's own list:
 
-1. **`array_map`/`array_filter` - DONE** (`array_reduce`/`array_walk`
-   remain open, see below). Shipped as bespoke special cases in
+1. **`array_map`/`array_filter`/`array_reduce` - DONE** (`array_walk`
+   remains open, see below). Shipped as bespoke special cases in
    `checker::infer_expr`'s `ExprKind::Call` handling
    (`infer_builtin_call_return_type`), mirroring real PHPStan's own
    `src/Type/Php/` architecture directly - **not** the generic
@@ -830,24 +830,34 @@ guess from PHPStan's own list:
    *other* argument's binding (the array's element type) to flow
    *into* the closure's own body-inference before computing its
    return type - a genuinely two-pass, per-function mechanism
-   (`infer_closure_return_with_param_override`), not something
+   (`infer_closure_return_with_param_overrides`, generalized from
+   singular to plural once `array_reduce`'s two-param callback
+   `($carry, $item)` needed binding both at once), not something
    generic template unification does in one pass. `array_filter`
    needs no closure introspection at all: filtering never transforms
    elements, so its return is simply whatever the input array's own
-   type already is. `array_map` is scoped to its common 2-arg
-   single-array form; the real function's multi-array variadic form
-   and `array_reduce`/`array_walk` (a fold and a by-ref-mutation
-   function respectively - both a different, harder mechanism than
-   return-type inference) remain unshipped. A real, pre-existing bug
-   was found and fixed while wiring this up: for an unqualified
-   builtin call inside a namespaced file (this project's own corpus
-   is entirely namespaced), the bespoke dispatch was checking the
-   wrong name - the failed namespace-qualified attempt, not the bare
-   name that actually resolved via the global-namespace fallback.
-   Verified against the real Piwigo corpus: default-mode diagnostic
-   count unchanged (2327), and the optional `--strict-mixed-arrays`
-   mode's noise dropped (4141 → 4102), consistent with genuine
-   precision reducing false positives.
+   type already is. `array_reduce`'s result is ultimately whatever the
+   callback's own return type is (a fold's return becomes the next
+   call's `$carry`) - `$carry` binds to `$initial`'s own type (`Null`
+   when the optional 3rd argument is omitted, matching real PHP's own
+   default), `$item` binds to the array's element type, same as
+   `array_map`. `array_map` is scoped to its common 2-arg single-array
+   form; the real function's multi-array variadic form and
+   `array_walk` (a by-ref-mutation function - a different, harder
+   mechanism than return-type inference, since it needs checking the
+   callback's own parameter types against the array rather than
+   deriving a return type at all) remain unshipped. A real,
+   pre-existing bug was found and fixed while wiring this up: for an
+   unqualified builtin call inside a namespaced file (this project's
+   own corpus is entirely namespaced), the bespoke dispatch was
+   checking the wrong name - the failed namespace-qualified attempt,
+   not the bare name that actually resolved via the global-namespace
+   fallback. Verified against the real Piwigo corpus: default-mode
+   diagnostic count unchanged (2327) throughout both commits, and the
+   optional `--strict-mixed-arrays` mode's noise dropped (4141 → 4102)
+   once `array_map`/`array_filter` shipped, unchanged again once
+   `array_reduce` followed - consistent with genuine precision
+   reducing false positives, not corpus noise.
 2. **`preg_match`/`preg_match_all`** - by-ref `$matches` shape
    inference from the pattern's own capture groups (named + numbered).
    The one extension here that's genuinely hard to approximate - needs
