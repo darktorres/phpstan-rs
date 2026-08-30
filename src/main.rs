@@ -14,9 +14,10 @@ mod token;
 mod types;
 
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use clap::{Parser as ClapParser, Subcommand};
 
 use checker::Checker;
 use lexer::Lexer;
@@ -63,7 +64,7 @@ foreach ($names as $i => $name) {
 echo sum([1, 2, 3]) ?? 0;
 "#;
 
-/// `phpstan-rs --check <file-or-dir>...` - lex+parse every .php file under
+/// `phpstan-rs check <file-or-dir>...` - lex+parse every .php file under
 /// the given paths in a single process (no per-file fork/exec), split
 /// across worker threads, report a pass/fail summary. Panics are the
 /// parser's only error-reporting mechanism today, so each file's lex+parse
@@ -71,10 +72,10 @@ echo sum([1, 2, 3]) ?? 0;
 /// batch, to avoid both a crashed whole run and thousands of lines of
 /// unwind noise (the hook is process-global, so this also covers panics
 /// from the worker threads, not just the main one).
-fn run_check(paths: &[String]) {
+fn run_check(paths: &[PathBuf]) {
     let mut files = Vec::new();
     for p in paths {
-        collect_php_files(Path::new(p), &mut files);
+        collect_php_files(p, &mut files);
     }
 
     let default_hook = std::panic::take_hook();
@@ -150,32 +151,32 @@ fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// `phpstan-rs --incremental-bench <dir> [<file-to-touch>]` - loads every
+/// `phpstan-rs incremental-bench <dir> [<file-to-touch>]` - loads every
 /// .php file under `dir` into a `Project` (a full load, timed), then
 /// re-parses and re-checks just one file via `Project::update_file` (the
 /// incremental path, also timed) and reports both, to make the whole
 /// point of Phase 7's incremental-analysis work concrete: an edit to one
 /// file costs O(that file), not O(the project). Picks the first file in
 /// directory-walk order when none is named explicitly.
-fn run_incremental_bench(args: &[String]) {
-    let Some(dir) = args.first() else {
-        eprintln!("usage: phpstan-rs --incremental-bench <dir> [<file-to-touch>]");
-        return;
-    };
+fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
     let mut files = Vec::new();
-    collect_php_files(Path::new(dir), &mut files);
+    collect_php_files(dir, &mut files);
     if files.is_empty() {
-        eprintln!("no .php files found under {dir}");
+        eprintln!("no .php files found under {}", dir.display());
         return;
     }
     files.sort();
 
-    let target = match args.get(1) {
-        Some(f) => PathBuf::from(f),
+    let target = match file_to_touch {
+        Some(f) => f.to_path_buf(),
         None => files[0].clone(),
     };
     if !files.contains(&target) {
-        eprintln!("{} is not among the files under {dir}", target.display());
+        eprintln!(
+            "{} is not among the files under {}",
+            target.display(),
+            dir.display()
+        );
         return;
     }
 
@@ -237,81 +238,19 @@ fn run_incremental_bench(args: &[String]) {
     }
 }
 
-/// `phpstan-rs --check-project <dir>` - loads every .php file under `dir`
+/// `phpstan-rs check-project <dir>` - loads every .php file under `dir`
 /// into a `Project` and runs the full checker over all of them at once
-/// (`Project::check_all`), printing every diagnostic. Unlike `--check`
-/// (parse-only, no semantic checking) or `--incremental-bench` (one file
+/// (`Project::check_all`), printing every diagnostic. Unlike `check`
+/// (parse-only, no semantic checking) or `incremental-bench` (one file
 /// plus its dependents), this is the whole-corpus semantic-diagnostics
 /// view - the tool needed to spot-check new diagnostic rules for false
 /// positives against a real codebase before trusting them.
-/// The highest level this project's own `Diagnostic::level` tagging
-/// uses (see `checker::Diagnostic`'s own doc comment) - `--level` with no
-/// flag at all means "report everything up to and including this",
-/// preserving this tool's original always-report-everything behavior
-/// rather than silently adopting real PHPStan's own stricter level-0
-/// default.
+/// The highest level this project's own `Diagnostic::level` tagging uses
+/// (see `checker::Diagnostic`'s own doc comment) - `--level` left unset
+/// means "report everything up to and including this", preserving this
+/// tool's original always-report-everything behavior rather than
+/// silently adopting real PHPStan's own stricter level-0 default.
 const MAX_LEVEL: u8 = 6;
-
-/// Pulls a `--level N` option out of `args` wherever it appears (not just
-/// a fixed position - this hand-rolled parser predates a real argument-
-/// parsing crate, see Stage 6's own `clap` note), returning the level to
-/// report up to (defaulting to `MAX_LEVEL`, i.e. unfiltered) and the
-/// remaining args with both tokens removed.
-fn extract_level(args: &[String]) -> (u8, Vec<String>) {
-    let mut level = MAX_LEVEL;
-    let mut rest = Vec::with_capacity(args.len());
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == "--level"
-            && let Some(n) = args.get(i + 1).and_then(|s| s.parse::<u8>().ok())
-        {
-            level = n;
-            i += 2;
-            continue;
-        }
-        rest.push(args[i].clone());
-        i += 1;
-    }
-    (level, rest)
-}
-
-/// Pulls a presence-only boolean flag (e.g. `--strict-mixed-arrays`) out
-/// of `args` wherever it appears - same hand-rolled-parser shape as
-/// `extract_level`, just for a flag with no value of its own.
-fn extract_bool_flag(args: &[String], flag: &str) -> (bool, Vec<String>) {
-    let mut present = false;
-    let mut rest = Vec::with_capacity(args.len());
-    for arg in args {
-        if arg == flag {
-            present = true;
-        } else {
-            rest.push(arg.clone());
-        }
-    }
-    (present, rest)
-}
-
-/// Pulls a `--flag value` option out of `args` wherever it appears - same
-/// hand-rolled-parser shape as `extract_level`/`extract_bool_flag`, for a
-/// flag whose value is an arbitrary string (a file path here) rather than
-/// a number.
-fn extract_value_flag(args: &[String], flag: &str) -> (Option<String>, Vec<String>) {
-    let mut value = None;
-    let mut rest = Vec::with_capacity(args.len());
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == flag
-            && let Some(v) = args.get(i + 1)
-        {
-            value = Some(v.clone());
-            i += 2;
-            continue;
-        }
-        rest.push(args[i].clone());
-        i += 1;
-    }
-    (value, rest)
-}
 
 /// Filters every file's diagnostics down to `level` and below, in place -
 /// shared by both the normal report path and `--generate-baseline` (a
@@ -327,29 +266,20 @@ fn apply_level_filter(
     results
 }
 
-const USAGE_CHECK_PROJECT: &str = "usage: phpstan-rs --check-project [--level N] \
-    [--strict-mixed-arrays] [--baseline <file>] [--generate-baseline <file>] <dir>...";
-
-fn run_check_project(args: &[String]) {
-    if args.is_empty() {
-        eprintln!("{USAGE_CHECK_PROJECT}");
-        return;
-    }
-    let (level, args) = extract_level(args);
-    let (strict_mixed_arrays, args) = extract_bool_flag(&args, "--strict-mixed-arrays");
-    let (generate_baseline_path, args) = extract_value_flag(&args, "--generate-baseline");
-    let (baseline_path, args) = extract_value_flag(&args, "--baseline");
-    let args = &args[..];
-    if args.is_empty() {
-        eprintln!("{USAGE_CHECK_PROJECT}");
-        return;
-    }
+fn run_check_project(
+    dirs: &[PathBuf],
+    level: u8,
+    strict_mixed_arrays: bool,
+    generate_baseline_path: Option<&Path>,
+    baseline_path: Option<&Path>,
+) {
     let mut files = Vec::new();
-    for dir in args {
-        collect_php_files(Path::new(dir), &mut files);
+    for dir in dirs {
+        collect_php_files(dir, &mut files);
     }
     if files.is_empty() {
-        eprintln!("no .php files found under {}", args.join(", "));
+        let dirs: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+        eprintln!("no .php files found under {}", dirs.join(", "));
         return;
     }
     // Deterministic load order matters now in a way it didn't for
@@ -376,23 +306,21 @@ fn run_check_project(args: &[String]) {
 
     let mut results = apply_level_filter(project.check_all(), level);
 
-    if let Some(baseline_path) = generate_baseline_path {
-        let baseline_path = Path::new(&baseline_path);
-        match baseline::generate(baseline_path, &results) {
+    if let Some(generate_baseline_path) = generate_baseline_path {
+        match baseline::generate(generate_baseline_path, &results) {
             Ok(count) => println!(
                 "baseline written to {}: {count} entry(s)",
-                baseline_path.display()
+                generate_baseline_path.display()
             ),
             Err(e) => eprintln!(
                 "failed to write baseline to {}: {e}",
-                baseline_path.display()
+                generate_baseline_path.display()
             ),
         }
         return;
     }
 
     if let Some(baseline_path) = baseline_path {
-        let baseline_path = Path::new(&baseline_path);
         match baseline::Baseline::load(baseline_path) {
             Ok(baseline) => baseline::filter(&mut results, &baseline),
             Err(e) => eprintln!("failed to load baseline {}: {e}", baseline_path.display()),
@@ -424,30 +352,81 @@ fn run_check_project(args: &[String]) {
     );
 }
 
+#[derive(ClapParser)]
+#[command(subcommand_required = true, arg_required_else_help = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Lex+parse every .php file under the given paths, reporting a
+    /// pass/fail summary.
+    Check { paths: Vec<PathBuf> },
+    /// Load every .php file under the given paths and run the full
+    /// checker over all of them, reporting every diagnostic.
+    CheckProject {
+        #[arg(required = true)]
+        dirs: Vec<PathBuf>,
+        /// Report up to and including this level (see
+        /// checker::Diagnostic's own doc comment) - unset means
+        /// "report everything".
+        #[arg(long)]
+        level: Option<u8>,
+        #[arg(long)]
+        strict_mixed_arrays: bool,
+        #[arg(long)]
+        generate_baseline: Option<PathBuf>,
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+    },
+    /// Loads every .php file under `dir` into a Project (timed), then
+    /// re-parses/re-checks just one file via the incremental path (also
+    /// timed), reporting both.
+    IncrementalBench {
+        dir: PathBuf,
+        file_to_touch: Option<PathBuf>,
+    },
+    /// Runs the LSP server over stdio.
+    Lsp,
+    /// Parses the given file (or a built-in sample with none given) and
+    /// dumps tokens/AST/resolved signatures/diagnostics - a debug tool,
+    /// not the normal way to use this checker.
+    Demo { file: Option<PathBuf> },
+}
+
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Check { paths } => run_check(&paths),
+        Command::CheckProject {
+            dirs,
+            level,
+            strict_mixed_arrays,
+            generate_baseline,
+            baseline,
+        } => run_check_project(
+            &dirs,
+            level.unwrap_or(MAX_LEVEL),
+            strict_mixed_arrays,
+            generate_baseline.as_deref(),
+            baseline.as_deref(),
+        ),
+        Command::IncrementalBench { dir, file_to_touch } => {
+            run_incremental_bench(&dir, file_to_touch.as_deref())
+        }
+        Command::Lsp => lsp::run(),
+        Command::Demo { file } => run_demo(file.as_deref()),
+    }
+}
 
-    if args.get(1).map(String::as_str) == Some("--check") {
-        run_check(&args[2..]);
-        return;
-    }
-    if args.get(1).map(String::as_str) == Some("--check-project") {
-        run_check_project(&args[2..]);
-        return;
-    }
-    if args.get(1).map(String::as_str) == Some("--incremental-bench") {
-        run_incremental_bench(&args[2..]);
-        return;
-    }
-    if args.get(1).map(String::as_str) == Some("--lsp") {
-        lsp::run();
-        return;
-    }
-
-    let source = if let Some(path) = args.get(1) {
+fn run_demo(file: Option<&Path>) {
+    let source = if let Some(path) = file {
         // See check_chunk's comment on why this is a lossy conversion, not
         // a strict one.
-        let bytes = fs::read(path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"));
+        let bytes =
+            fs::read(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
         String::from_utf8_lossy(&bytes).into_owned()
     } else {
         println!("(no file given, parsing built-in sample)\n");

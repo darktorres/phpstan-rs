@@ -1,12 +1,13 @@
 //! End-to-end tests of the actual `phpstan-rs` binary's CLI surface
-//! (`--check`, `--check-project`, `--incremental-bench`, and the
-//! default no-args/one-file mode). main.rs's run_check/run_check_project/
-//! run_incremental_bench all print straight to stdout instead of
-//! returning anything testable in-process - rather than refactor
-//! working CLI-glue code just to make it unit-testable, this spawns the
-//! real compiled binary (via Cargo's CARGO_BIN_EXE_<name>, no extra
-//! dependency needed) and asserts on its actual stdout/stderr, the same
-//! way a user would actually observe it.
+//! (`check`, `check-project`, `incremental-bench`, and `demo`, the
+//! explicit subcommand for what used to be the silent default with no
+//! arguments at all - see Phase 11 Stage 6's clap migration).
+//! main.rs's run_check/run_check_project/run_incremental_bench/run_demo
+//! all print straight to stdout instead of returning anything testable
+//! in-process - rather than refactor working CLI-glue code just to make
+//! it unit-testable, this spawns the real compiled binary (via Cargo's
+//! CARGO_BIN_EXE_<name>, no extra dependency needed) and asserts on its
+//! actual stdout/stderr, the same way a user would actually observe it.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -54,7 +55,7 @@ fn check_reports_every_file_parsed_with_zero_failures() {
     dir.write("a.php", "<?php function f(): int { return 1; }");
     dir.write("b.php", "<?php function g(): int { return 2; }");
 
-    let output = bin().arg("--check").arg(dir.path()).output().unwrap();
+    let output = bin().arg("check").arg(dir.path()).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -68,11 +69,7 @@ fn check_project_reports_real_diagnostics_and_a_summary_line() {
     let dir = TempDir::new("check_project");
     dir.write("bad.php", "<?php function f() { return $undefinedVar; }");
 
-    let output = bin()
-        .arg("--check-project")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("undefined variable"), "got: {stdout}");
@@ -106,11 +103,7 @@ fn check_project_reports_diagnostics_in_source_order_across_files() {
         "<?php\nfunction g() {\n    return $alsoBogus;\n}\n",
     );
 
-    let output = bin()
-        .arg("--check-project")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let a_pos = stdout.find("a_second.php:3:12:").unwrap_or_else(|| {
@@ -136,11 +129,7 @@ fn check_project_level_flag_filters_out_higher_level_diagnostics() {
         "#,
     );
 
-    let unfiltered = bin()
-        .arg("--check-project")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let unfiltered = bin().arg("check-project").arg(dir.path()).output().unwrap();
     let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
     assert!(
         unfiltered_stdout.contains("2 diagnostic(s)"),
@@ -151,7 +140,7 @@ fn check_project_level_flag_filters_out_higher_level_diagnostics() {
     // mismatch (level 3) should be filtered out, leaving only the
     // undefined variable.
     let filtered = bin()
-        .arg("--check-project")
+        .arg("check-project")
         .arg("--level")
         .arg("0")
         .arg(dir.path())
@@ -184,11 +173,7 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
         "#,
     );
 
-    let unfiltered = bin()
-        .arg("--check-project")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let unfiltered = bin().arg("check-project").arg(dir.path()).output().unwrap();
     let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
     assert!(
         unfiltered_stdout.contains("0 diagnostic(s)"),
@@ -196,7 +181,7 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
     );
 
     let strict = bin()
-        .arg("--check-project")
+        .arg("check-project")
         .arg("--strict-mixed-arrays")
         .arg(dir.path())
         .output()
@@ -219,7 +204,7 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
     let baseline_path = dir.path().join("baseline.json");
 
     let generate = bin()
-        .arg("--check-project")
+        .arg("check-project")
         .arg("--generate-baseline")
         .arg(&baseline_path)
         .arg(dir.path())
@@ -236,7 +221,7 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
     // A run with the baseline applied reports nothing for the
     // already-recorded diagnostic.
     let filtered = bin()
-        .arg("--check-project")
+        .arg("check-project")
         .arg("--baseline")
         .arg(&baseline_path)
         .arg(dir.path())
@@ -250,11 +235,7 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
 
     // A run without --baseline still reports it - the baseline only
     // suppresses when explicitly opted into.
-    let unfiltered = bin()
-        .arg("--check-project")
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let unfiltered = bin().arg("check-project").arg(dir.path()).output().unwrap();
     let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
     assert!(
         unfiltered_stdout.contains("existingBug"),
@@ -268,7 +249,7 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
         "<?php function f() { return $existingBug; } function g() { return $newBug; }\n",
     );
     let with_new_bug = bin()
-        .arg("--check-project")
+        .arg("check-project")
         .arg("--baseline")
         .arg(&baseline_path)
         .arg(dir.path())
@@ -291,9 +272,12 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
 
 #[test]
 fn check_project_with_no_args_prints_usage_to_stderr() {
-    let output = bin().arg("--check-project").output().unwrap();
+    let output = bin().arg("check-project").output().unwrap();
+    assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("usage:"), "got: {stderr}");
+    // clap's own generated error, replacing the old hand-rolled
+    // "usage: ..." message - capitalized, hence case-insensitive here.
+    assert!(stderr.to_lowercase().contains("usage:"), "got: {stderr}");
 }
 
 #[test]
@@ -303,7 +287,7 @@ fn incremental_bench_reports_full_load_and_incremental_timings() {
     dir.write("b.php", "<?php function g(): int { return f(); }");
 
     let output = bin()
-        .arg("--incremental-bench")
+        .arg("incremental-bench")
         .arg(dir.path())
         .output()
         .unwrap();
@@ -315,14 +299,27 @@ fn incremental_bench_reports_full_load_and_incremental_timings() {
 
 #[test]
 fn incremental_bench_with_no_args_prints_usage_to_stderr() {
-    let output = bin().arg("--incremental-bench").output().unwrap();
+    let output = bin().arg("incremental-bench").output().unwrap();
+    assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("usage:"), "got: {stderr}");
+    assert!(stderr.to_lowercase().contains("usage:"), "got: {stderr}");
 }
 
 #[test]
-fn no_arguments_parses_the_built_in_sample_and_reports_no_diagnostics() {
+fn bare_invocation_with_no_subcommand_prints_help_and_exits_nonzero() {
+    // Real, idiomatic clap behavior (`arg_required_else_help`) -
+    // replaces the old silent default of running the demo/sample mode
+    // with zero arguments at all.
     let output = bin().output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage:"), "got: {stderr}");
+    assert!(stderr.contains("demo"), "got: {stderr}");
+}
+
+#[test]
+fn demo_with_no_file_parses_the_built_in_sample_and_reports_no_diagnostics() {
+    let output = bin().arg("demo").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -334,11 +331,11 @@ fn no_arguments_parses_the_built_in_sample_and_reports_no_diagnostics() {
 }
 
 #[test]
-fn a_single_file_argument_parses_and_checks_that_file() {
+fn demo_with_a_file_argument_parses_and_checks_that_file() {
     let dir = TempDir::new("single_file");
     let path = dir.write("sample.php", "<?php function f() { return $undefinedVar; }");
 
-    let output = bin().arg(&path).output().unwrap();
+    let output = bin().arg("demo").arg(&path).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("-- diagnostics --"), "got: {stdout}");
