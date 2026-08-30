@@ -622,6 +622,65 @@ mod tests {
     }
 
     #[test]
+    fn a_class_referenced_only_inside_a_property_hook_body_is_a_real_dependency() {
+        // Coverage measurement found deps.rs's collect_property_hooks/
+        // collect_hook_body had zero test executions - PHP 8.4 property
+        // hooks are real, newer syntax, and a class mentioned only inside
+        // a get/set hook body (not a plain method) is exactly the kind of
+        // reference the earlier Phase 7 regression already proved this
+        // codebase can silently miss.
+        let mut project = Project::new();
+        project.load_file(
+            PathBuf::from("dep.php"),
+            "<?php class Dep { public static function make(): Dep { return new Dep(); } }",
+        );
+        project.load_file(
+            PathBuf::from("holder.php"),
+            r#"<?php class Holder {
+                public $prop {
+                    get => Dep::make();
+                }
+            }"#,
+        );
+        project.finish_loading();
+
+        let result = project.update_file(
+            &PathBuf::from("dep.php"),
+            "<?php class Dep { public static function make(): int { return 1; } }",
+        );
+        assert!(
+            result.contains_key(&PathBuf::from("holder.php")),
+            "holder.php (references Dep only inside a property hook body) should have been re-checked, got: {:?}",
+            result.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_class_referenced_only_via_an_enum_is_a_real_dependency() {
+        // Same coverage finding for collect_enum: an enum's `implements`
+        // and its methods' bodies are real references that must feed the
+        // same invalidation graph a class's `implements`/methods already
+        // do - untested before this.
+        let mut project = Project::new();
+        project.load_file(PathBuf::from("dep.php"), "<?php interface Dep {}");
+        project.load_file(
+            PathBuf::from("status.php"),
+            "<?php enum Status implements Dep { case Active; }",
+        );
+        project.finish_loading();
+
+        let result = project.update_file(
+            &PathBuf::from("dep.php"),
+            "<?php interface Dep { public function f(): void; }",
+        );
+        assert!(
+            result.contains_key(&PathBuf::from("status.php")),
+            "status.php (enum implements Dep) should have been re-checked, got: {:?}",
+            result.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn unrelated_files_are_not_swept_into_transitive_invalidation() {
         let mut project = Project::new();
         project.load_file(
