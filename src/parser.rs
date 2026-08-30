@@ -3752,4 +3752,130 @@ mod tests {
         };
         assert!(matches!(rhs.as_ref(), Expr::Cast(ty, _) if ty == "array"));
     }
+
+    // Coverage measurement (cargo llvm-cov) found parse_switch,
+    // parse_do_while, parse_if_alt, parse_alt_block, and
+    // parse_optional_level all had zero test executions - real,
+    // reachable parser functions for common PHP syntax (switch, do-while,
+    // the `if (...): ... endif;` alternative syntax used throughout
+    // template-heavy code, and `break N;`/`continue N;`) that happened to
+    // never come up in any existing test's PHP source. Manually verified
+    // via the full pipeline that all five currently produce correct
+    // results; these lock that in at the AST level.
+
+    #[test]
+    fn switch_with_brace_syntax_parses_cases_default_and_fallthrough() {
+        let program = parse(
+            r#"<?php
+            switch ($x) {
+                case 1:
+                case 2:
+                    doA();
+                    break;
+                default:
+                    doB();
+            }
+        "#,
+        );
+        let Stmt::Switch { cases, .. } = &program[0] else {
+            panic!("expected Switch");
+        };
+        assert_eq!(cases.len(), 3);
+        // `case 1:` falls through with no statements of its own - they
+        // all attach to the following `case 2:` label, matching real
+        // PHP's fallthrough semantics.
+        assert!(cases[0].body.is_empty());
+        assert_eq!(cases[1].body.len(), 2);
+        assert!(cases[2].test.is_none(), "expected the default case");
+        assert_eq!(cases[2].body.len(), 1);
+    }
+
+    #[test]
+    fn switch_alt_syntax_parses_the_same_shape_as_brace_syntax() {
+        let program = parse(
+            r#"<?php
+            switch ($x):
+                case 1:
+                    doA();
+            endswitch;
+        "#,
+        );
+        let Stmt::Switch { cases, .. } = &program[0] else {
+            panic!("expected Switch");
+        };
+        assert_eq!(cases.len(), 1);
+        assert_eq!(cases[0].body.len(), 1);
+    }
+
+    #[test]
+    fn do_while_parses_its_body_and_trailing_condition() {
+        let program = parse(
+            r#"<?php
+            do {
+                doSomething();
+            } while ($i < 10);
+        "#,
+        );
+        let Stmt::DoWhile { body, cond } = &program[0] else {
+            panic!("expected DoWhile");
+        };
+        assert!(matches!(body.as_ref(), Stmt::Block(stmts) if stmts.len() == 1));
+        assert!(matches!(cond, Expr::Binary(BinOp::Lt, ..)));
+    }
+
+    #[test]
+    fn if_alt_syntax_with_elseif_and_else_folds_into_nested_if() {
+        let program = parse(
+            r#"<?php
+            if ($a):
+                doA();
+            elseif ($b):
+                doB();
+            else:
+                doC();
+            endif;
+        "#,
+        );
+        let Stmt::If {
+            then_branch,
+            else_branch,
+            ..
+        } = &program[0]
+        else {
+            panic!("expected If");
+        };
+        assert!(matches!(then_branch.as_ref(), Stmt::Block(s) if s.len() == 1));
+        let Some(else_branch) = else_branch else {
+            panic!("expected an elseif chain, got no else branch at all");
+        };
+        // The `elseif` re-dispatches as a nested `if`, exactly like the
+        // brace syntax's own elseif handling - one `endif;` still closes
+        // the whole chain, not just the innermost `if`.
+        let Stmt::If {
+            then_branch: elseif_then,
+            else_branch: elseif_else,
+            ..
+        } = else_branch.as_ref()
+        else {
+            panic!("expected a nested If for the elseif branch");
+        };
+        assert!(matches!(elseif_then.as_ref(), Stmt::Block(s) if s.len() == 1));
+        assert!(matches!(elseif_else.as_deref(), Some(Stmt::Block(s)) if s.len() == 1));
+    }
+
+    #[test]
+    fn break_and_continue_parse_their_optional_numeric_level() {
+        let program = parse(
+            r#"<?php
+            break;
+            break 2;
+            continue;
+            continue 3;
+        "#,
+        );
+        assert!(matches!(&program[0], Stmt::Break(None)));
+        assert!(matches!(&program[1], Stmt::Break(Some(2))));
+        assert!(matches!(&program[2], Stmt::Continue(None)));
+        assert!(matches!(&program[3], Stmt::Continue(Some(3))));
+    }
 }
