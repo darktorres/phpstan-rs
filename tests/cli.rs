@@ -173,6 +173,46 @@ fn check_project_level_flag_filters_out_higher_level_diagnostics() {
 }
 
 #[test]
+fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
+    let dir = TempDir::new("check_project_strict");
+    dir.write(
+        "arr.php",
+        r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            needsInts([1, "two", 3]);
+        "#,
+    );
+
+    let unfiltered = bin()
+        .arg("--check-project")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
+    assert!(
+        unfiltered_stdout.contains("0 diagnostic(s)"),
+        "expected the untyped array literal to be let through by default, got: {unfiltered_stdout}"
+    );
+
+    let strict = bin()
+        .arg("--check-project")
+        .arg("--strict-mixed-arrays")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let strict_stdout = String::from_utf8_lossy(&strict.stdout);
+    assert!(
+        strict_stdout.contains("expects array<int>"),
+        "got: {strict_stdout}"
+    );
+    assert!(
+        strict_stdout.contains("1 file(s) checked, 1 diagnostic(s)"),
+        "got: {strict_stdout}"
+    );
+}
+
+#[test]
 fn check_project_with_no_args_prints_usage_to_stderr() {
     let output = bin().arg("--check-project").output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);

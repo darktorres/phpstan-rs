@@ -60,6 +60,16 @@ impl Project {
         }
     }
 
+    /// Opts the whole project's checking into Phase 11 Stage 5's
+    /// strictness parameter (`registry::Registry::strict_mixed_arrays`) -
+    /// a narrow, purpose-built setter rather than exposing a general
+    /// `&mut Registry` accessor, which would let a caller bypass
+    /// `load_file`/`update_file`'s own bookkeeping around what's
+    /// currently indexed.
+    pub fn set_strict_mixed_arrays(&mut self, strict: bool) {
+        self.registry.strict_mixed_arrays = strict;
+    }
+
     /// Parses one file and indexes its declarations into the shared
     /// registry. Call `finish_loading` once after the initial batch of
     /// `load_file` calls - trait flattening is a global pass over every

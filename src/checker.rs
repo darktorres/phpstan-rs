@@ -2312,12 +2312,17 @@ mod tests {
     use crate::token::Position;
 
     fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
+        diagnostics_for_with(src, |_| {})
+    }
+
+    fn diagnostics_for_with(src: &str, configure: impl FnOnce(&mut Registry)) -> Vec<Diagnostic> {
         let tokens = Lexer::new(src).tokenize_with_spans();
         let program = Parser::new(tokens).parse_program();
         let mut registry = Registry::build(&program);
         registry.merge_stubs(crate::php_stubs::generated_stubs());
         registry.merge_stub_classes(crate::php_stubs::generated_stub_classes());
         registry.merge_stubs(crate::stubs::builtin_stubs());
+        configure(&mut registry);
         let mut checker = Checker::new(&registry);
         checker.check_program(&program);
         checker.into_diagnostics()
@@ -2378,6 +2383,26 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn strict_mixed_arrays_flags_an_untyped_array_literal_argument() {
+        // Same code diagnostics_for's default (permissive) registry lets
+        // through - an array literal argument's element type is never
+        // inferred precisely, so it always presents as Array(Mixed).
+        // Opting into strict_mixed_arrays (Phase 11 Stage 5) removes that
+        // "we don't know, so don't guess" leniency end-to-end, through
+        // the real checker, not just registry::is_assignable in
+        // isolation.
+        let src = r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            needsInts([1, "two", 3]);
+        "#;
+        assert!(diagnostics_for(src).is_empty());
+        let d = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true);
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("expects array<int>"), "got: {d:?}");
     }
 
     #[test]

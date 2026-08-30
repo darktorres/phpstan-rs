@@ -273,15 +273,35 @@ fn extract_level(args: &[String]) -> (u8, Vec<String>) {
     (level, rest)
 }
 
+/// Pulls a presence-only boolean flag (e.g. `--strict-mixed-arrays`) out
+/// of `args` wherever it appears - same hand-rolled-parser shape as
+/// `extract_level`, just for a flag with no value of its own.
+fn extract_bool_flag(args: &[String], flag: &str) -> (bool, Vec<String>) {
+    let mut present = false;
+    let mut rest = Vec::with_capacity(args.len());
+    for arg in args {
+        if arg == flag {
+            present = true;
+        } else {
+            rest.push(arg.clone());
+        }
+    }
+    (present, rest)
+}
+
+const USAGE_CHECK_PROJECT: &str =
+    "usage: phpstan-rs --check-project [--level N] [--strict-mixed-arrays] <dir>...";
+
 fn run_check_project(args: &[String]) {
     if args.is_empty() {
-        eprintln!("usage: phpstan-rs --check-project [--level N] <dir>...");
+        eprintln!("{USAGE_CHECK_PROJECT}");
         return;
     }
     let (level, args) = extract_level(args);
+    let (strict_mixed_arrays, args) = extract_bool_flag(&args, "--strict-mixed-arrays");
     let args = &args[..];
     if args.is_empty() {
-        eprintln!("usage: phpstan-rs --check-project [--level N] <dir>...");
+        eprintln!("{USAGE_CHECK_PROJECT}");
         return;
     }
     let mut files = Vec::new();
@@ -304,6 +324,7 @@ fn run_check_project(args: &[String]) {
     files.sort();
 
     let mut project = project::Project::new();
+    project.set_strict_mixed_arrays(strict_mixed_arrays);
     for path in &files {
         let Ok(bytes) = fs::read(path) else {
             continue;

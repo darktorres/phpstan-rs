@@ -650,6 +650,17 @@ impl ClassInfo {
 pub struct Registry {
     pub classes: HashMap<String, ClassInfo>,
     pub functions: HashMap<String, FunctionSig>,
+    // Phase 11 Stage 5's strictness-parameter half (real PHPStan's own
+    // 7-10-style progressively-stricter handling, here narrowed to the
+    // one real leniency `is_assignable` has purely on its own: an
+    // unknown array literal's type, `Array(Mixed)`, freely satisfying any
+    // specific array/shape type it's checked against). Defaults to
+    // `false` (today's existing permissive behavior, unchanged) via
+    // `#[derive(Default)]` - a plain `pub` field rather than a
+    // constructor parameter, since every one of this struct's 10
+    // existing construction sites already goes through `build`/
+    // `default()` and none of them need to change to keep compiling.
+    pub strict_mixed_arrays: bool,
 }
 
 impl Registry {
@@ -1007,8 +1018,12 @@ impl Registry {
             // shows up as Array(Mixed) meaning "unknown", not "really can
             // hold anything" - without this, e.g. a PHPDoc `int[]` param
             // would false-positive against every `[1, 2, 3]` literal.
+            // `strict_mixed_arrays` (Phase 11 Stage 5) opts out of this
+            // leniency, matching real PHPStan's own level-9-style "be
+            // strict about values with mixed type" philosophy.
             (Type::Array(a), Type::Array(b)) => {
-                matches!(**a, Type::Mixed) || self.is_assignable(a, b)
+                (!self.strict_mixed_arrays && matches!(**a, Type::Mixed))
+                    || self.is_assignable(a, b)
             }
             // Same leniency, same reason, for an array of unknown structure
             // (an array literal, most commonly) checked against a specific
@@ -1017,7 +1032,9 @@ impl Registry {
             // false-positive just because literal keys/values aren't
             // inferred. A genuinely known, homogeneous Array(V) still
             // correctly fails to satisfy an arbitrary shape.
-            (Type::Array(a), Type::ArrayShape(_)) => matches!(**a, Type::Mixed),
+            (Type::Array(a), Type::ArrayShape(_)) => {
+                !self.strict_mixed_arrays && matches!(**a, Type::Mixed)
+            }
             _ => types::is_subtype(sub, sup),
         }
     }
@@ -1242,6 +1259,35 @@ mod tests {
         // arbitrary shape.
         let ints = Type::Array(Box::new(Type::Int));
         assert!(!r.is_assignable(&ints, &shape));
+    }
+
+    #[test]
+    fn strict_mixed_arrays_opts_out_of_the_unknown_array_element_leniency() {
+        let mut r = Registry {
+            strict_mixed_arrays: true,
+            ..Registry::default()
+        };
+        let unknown_elements = Type::Array(Box::new(Type::Mixed));
+        let ints = Type::Array(Box::new(Type::Int));
+        assert!(!r.is_assignable(&unknown_elements, &ints));
+        // Still correctly permissive when the element types genuinely
+        // match - strictness only removes the "we don't know" free pass,
+        // it doesn't break real assignability.
+        assert!(r.is_assignable(&Type::Array(Box::new(Type::Int)), &ints));
+
+        r.strict_mixed_arrays = false;
+        assert!(r.is_assignable(&unknown_elements, &ints));
+    }
+
+    #[test]
+    fn strict_mixed_arrays_opts_out_of_the_unknown_array_shape_leniency() {
+        let r = Registry {
+            strict_mixed_arrays: true,
+            ..Registry::default()
+        };
+        let unknown = Type::Array(Box::new(Type::Mixed));
+        let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+        assert!(!r.is_assignable(&unknown, &shape));
     }
 
     #[test]
