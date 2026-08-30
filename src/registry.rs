@@ -225,7 +225,7 @@ impl NameContext {
 /// `Type`, applied right after `parse_type_string` produces it), applied
 /// second since a name that turned out to be a `@template` parameter
 /// isn't a real class reference to resolve at all.
-fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
+pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
     match ty {
         // `object` (the native type-hint keyword, not a real class) is
         // represented as `Type::Object("object")` - `parse_type_string`'s

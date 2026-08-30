@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::registry::{FunctionSig, NameContext, ParamSig, Registry};
+use crate::registry::{self, FunctionSig, NameContext, ParamSig, Registry};
 use crate::types::{self, Type};
 
 #[derive(Debug, Clone)]
@@ -100,7 +100,7 @@ impl<'a> Checker<'a> {
         let diagnostics_before = self.diagnostics.len();
         for stmt in program {
             match stmt {
-                Stmt::FunctionDecl(f) => self.check_function(f, None),
+                Stmt::FunctionDecl(f) => self.check_function(f, None, false),
                 Stmt::ClassDecl(c) => {
                     // `current_class` must be the fully-qualified name -
                     // it's looked up directly against
@@ -110,13 +110,13 @@ impl<'a> Checker<'a> {
                     // FQN-keyed.
                     let fqn = self.name_ctx.declared_name(&c.name);
                     for m in &c.methods {
-                        self.check_function(&m.function, Some(&fqn));
+                        self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
                 }
                 Stmt::EnumDecl(e) => {
                     let fqn = self.name_ctx.declared_name(&e.name);
                     for m in &e.methods {
-                        self.check_function(&m.function, Some(&fqn));
+                        self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
                 }
                 // Top-level script statements share one scope across the
@@ -162,7 +162,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_function(&mut self, f: &FunctionDecl, class_name: Option<&str>) {
+    fn check_function(&mut self, f: &FunctionDecl, class_name: Option<&str>, is_static: bool) {
         let sig = self.lookup_own_signature(f, class_name);
 
         let mut locals: HashMap<String, Type> = HashMap::new();
@@ -190,7 +190,14 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        if let Some(c) = class_name {
+        // A static method has no $this at all in real PHP (calling one
+        // outside object context is a fatal error) - only bind it for a
+        // genuinely non-static method, so a static method's own body
+        // referencing $this correctly reads as an undefined variable
+        // rather than silently resolving to the enclosing class.
+        if let Some(c) = class_name
+            && !is_static
+        {
             locals.insert("this".to_string(), Type::Object(c.to_string(), Vec::new()));
         }
 
@@ -260,6 +267,23 @@ impl<'a> Checker<'a> {
                 }
             }
             _ => Type::Object(self.name_ctx.resolve(name), Vec::new()),
+        }
+    }
+
+    /// Parses a raw native type-hint string (a closure/arrow-fn param or
+    /// return type - the one place in this checker that builds a `Type`
+    /// straight from source without going through the registry's own
+    /// `FunctionSig::from_decl`, which already resolves names as part of
+    /// its pipeline) and resolves any class name in it against this
+    /// file's `NameContext`, exactly like a real declaration would. Found
+    /// necessary the hard way: an unresolved bare name here compared as a
+    /// real mismatch against the correctly-resolved FQN the closure body
+    /// itself infers, on real code (a `static fn(array $row): ActionCount
+    /// => new ActionCount(...)` where `ActionCount` is `use`-imported).
+    fn resolve_type_hint(&self, hint: Option<&str>) -> Type {
+        match hint {
+            Some(h) => registry::resolve_names_in_type(types::parse_type_string(h), &self.name_ctx),
+            None => Type::Mixed,
         }
     }
 
@@ -557,17 +581,17 @@ impl<'a> Checker<'a> {
             // indexed into the registry (so calls to it resolve), but
             // silently exempt from every diagnostic, undefined-variable
             // detection included. Mirrors check_program's handling.
-            Stmt::FunctionDecl(f) => self.check_function(f, None),
+            Stmt::FunctionDecl(f) => self.check_function(f, None, false),
             Stmt::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 for m in &c.methods {
-                    self.check_function(&m.function, Some(&fqn));
+                    self.check_function(&m.function, Some(&fqn), m.is_static);
                 }
             }
             Stmt::EnumDecl(e) => {
                 let fqn = self.name_ctx.declared_name(&e.name);
                 for m in &e.methods {
-                    self.check_function(&m.function, Some(&fqn));
+                    self.check_function(&m.function, Some(&fqn), m.is_static);
                 }
             }
             _ => {}
@@ -945,7 +969,7 @@ impl<'a> Checker<'a> {
                 // into the registry under any stable name - check_function
                 // only needs a FunctionDecl and a label to check against.
                 for m in &decl.methods {
-                    self.check_function(&m.function, Some(&decl.name));
+                    self.check_function(&m.function, Some(&decl.name), m.is_static);
                 }
             }
             Expr::StaticCall(_, _, args) => {
@@ -976,6 +1000,91 @@ impl<'a> Checker<'a> {
             Expr::Interpolated(parts) => {
                 for p in parts {
                     self.check_expr(p, locals, label);
+                }
+            }
+            Expr::Match {
+                subject,
+                arms,
+                default,
+            } => {
+                self.check_expr(subject, locals, label);
+                for (conds, result) in arms {
+                    for c in conds {
+                        self.check_expr(c, locals, label);
+                    }
+                    self.check_expr(result, locals, label);
+                }
+                if let Some(d) = default {
+                    self.check_expr(d, locals, label);
+                }
+            }
+            Expr::Closure {
+                params,
+                uses,
+                body,
+                is_static,
+                return_type,
+                ..
+            } => {
+                // Unlike an arrow function, a plain closure does NOT
+                // automatically see the enclosing scope - only variables
+                // explicitly named in `use (...)` are captured (by value
+                // or by reference; either way, the type it starts with is
+                // whatever the outer scope currently has it as). `$this`
+                // is the one implicit exception: a non-static closure
+                // declared inside a method still auto-binds it, the same
+                // as real PHP.
+                let mut closure_locals: HashMap<String, Type> = HashMap::new();
+                for u in uses {
+                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    closure_locals.insert(u.name.clone(), ty);
+                }
+                if !is_static && let Some(this_ty) = locals.get("this") {
+                    closure_locals.insert("this".to_string(), this_ty.clone());
+                }
+                for p in params {
+                    let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    closure_locals.insert(p.name.clone(), ty);
+                }
+                let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
+                let closure_label = format!("{label} (closure)");
+                self.check_block(
+                    body,
+                    &mut closure_locals,
+                    declared_return.as_ref(),
+                    &closure_label,
+                );
+            }
+            Expr::ArrowFn {
+                params,
+                body,
+                return_type,
+                ..
+            } => {
+                // An arrow function DOES automatically capture the whole
+                // enclosing scope by value (implicit, no `use (...)`
+                // needed) - a plain clone of `locals` is exactly that.
+                let mut arrow_locals = locals.clone();
+                for p in params {
+                    let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    arrow_locals.insert(p.name.clone(), ty);
+                }
+                self.check_expr(body, &mut arrow_locals, label);
+                // Its body is a single implicit-return expression, not a
+                // Stmt::Return - the equivalent of check_stmt's own
+                // Return-vs-declared_return check, kept here since
+                // there's no Stmt::Return for it to share.
+                if return_type.is_some() {
+                    let expected = self.resolve_type_hint(return_type.as_deref());
+                    let actual = self.infer_expr(body, &arrow_locals);
+                    if actual != Type::Mixed && !self.registry.is_assignable(&actual, &expected) {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!(
+                                "return type mismatch: expected {expected}, got {actual}"
+                            ),
+                        });
+                    }
                 }
             }
             _ => {}
@@ -1148,6 +1257,39 @@ impl<'a> Checker<'a> {
             Expr::Variable(name) => locals.get(name).cloned().unwrap_or(Type::Mixed),
             Expr::Grouping(inner) | Expr::Clone(inner, _) => self.infer_expr(inner, locals),
             Expr::FirstClassCallable(_) => Type::Callable,
+            Expr::Closure { .. } | Expr::ArrowFn { .. } => Type::Callable,
+            Expr::Match {
+                subject: _,
+                arms,
+                default,
+            } => {
+                // Same "don't let an unknown branch compose into a
+                // partial Union that looks more precise than it is" rule
+                // Ternary already applies, generalized to N arms plus an
+                // optional default.
+                let mut result_types: Vec<Type> = arms
+                    .iter()
+                    .map(|(_, result)| self.infer_expr(result, locals))
+                    .collect();
+                if let Some(d) = default {
+                    result_types.push(self.infer_expr(d, locals));
+                }
+                if result_types.contains(&Type::Mixed) {
+                    Type::Mixed
+                } else {
+                    let mut deduped: Vec<Type> = Vec::new();
+                    for t in result_types {
+                        if !deduped.contains(&t) {
+                            deduped.push(t);
+                        }
+                    }
+                    match deduped.len() {
+                        0 => Type::Never,
+                        1 => deduped.into_iter().next().unwrap(),
+                        _ => Type::Union(deduped),
+                    }
+                }
+            }
             // A throw expression never actually produces a value - Never
             // is exactly the right type for it, the same way it's used for
             // a function that always throws or exits.
@@ -2272,6 +2414,73 @@ mod tests {
                 .iter()
                 .any(|x| x.message.contains("undefined variable")),
             "expected an undefined-variable diagnostic, got: {static_var:?}"
+        );
+    }
+
+    #[test]
+    fn check_expr_recurses_into_every_simple_wrapper_expression() {
+        // Coverage measurement found none of these check_expr arms had
+        // ever run in the test suite - Grouping, Clone, (expression-
+        // position) Throw, Yield, DynamicVariable, string interpolation,
+        // and Cast. Given that the exact same "the wildcard arm never
+        // recurses into this" failure mode was a real bug for StaticCall
+        // earlier in this audit, each is independently verified here
+        // rather than assumed correct from reading the source.
+        let d = diagnostics_for(
+            r#"<?php
+            function f() {
+                ($undefinedInGrouping);
+                clone $undefinedInClone;
+                $x = fn() => throw $undefinedInThrowExpr;
+                $y = (int)$undefinedInCast;
+                $$undefinedDynVarName;
+                "interpolated $undefinedInInterp";
+            }
+        "#,
+        );
+        for name in [
+            "undefinedInGrouping",
+            "undefinedInClone",
+            "undefinedInThrowExpr",
+            "undefinedInCast",
+            "undefinedDynVarName",
+            "undefinedInInterp",
+        ] {
+            assert!(
+                d.iter()
+                    .any(|x| x.message.contains(&format!("undefined variable ${name}"))),
+                "expected ${name} to be flagged as undefined, got: {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn check_expr_recurses_into_dynamic_property_and_method_name_expressions() {
+        // $obj->$prop (a single plain variable) is deliberately treated
+        // as a literal property name, not the variable's value (see the
+        // parser's own "best-effort" comment on that arm) - it does NOT
+        // produce a DynamicPropertyAccess/DynamicMethodCall, so it can't
+        // exercise this. The brace and double-dollar forms are the ones
+        // that actually do, and those are what this checks.
+        let d = diagnostics_for(
+            r#"<?php
+            function f($obj) {
+                $obj->{$undefinedInDynPropBrace};
+                $obj->$$undefinedInDynMethodDollarDollar();
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("undefined variable $undefinedInDynPropBrace")),
+            "got: {d:?}"
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("undefined variable $undefinedInDynMethodDollarDollar")),
+            "got: {d:?}"
         );
     }
 
