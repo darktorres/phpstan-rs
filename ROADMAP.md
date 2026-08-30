@@ -440,24 +440,60 @@ PHPStan/Psalm string and array refinement family (`non-empty-string` -
 2263 real occurrences in one corpus alone - `class-string`, and
 others).
 
-## Phase 10.5 (unplanned): Generic variance and inheritance chains - PLANNED
+## Phase 10.5 (unplanned): Generic variance and inheritance chains - PARTIAL
 
 Phase 10 deliberately scoped itself to call-site generic substitution
 only. Real PHPStan's own `Generic/` (36 files in `src/Type/Generic/`)
-is the fuller class-generics engine this phase would grow toward:
-variance (`@template-covariant`/`@template-contravariant`), template
-bound enforcement (`@template T of Foo` actually checked at bind time,
-not just parsed past), and inheritance-chain substitution via
-`@extends`/`@implements` generic arguments (a subclass fixing a
-parent's template parameter, e.g. `class IntCollection extends
-Collection<int> {}`, currently invisible to this project's parser -
-neither tag is parsed at all today).
+is the fuller class-generics engine this phase grows toward: variance
+(`@template-covariant`/`@template-contravariant`), template bound
+enforcement (`@template T of Foo` actually checked at bind time, not
+just parsed past), and inheritance-chain substitution via
+`@extends`/`@implements` generic arguments.
 
-Natural follow-on to Phase 10 rather than urgent on its own: real-world
-impact is unverified (unlike Phase 8.5's confirmed-live false
-positives), so this stays behind Phases 11-12 in priority until a real
-corpus check shows it causing genuine false positives/negatives worth
-chasing.
+**Shipped: inheritance-chain substitution.** `docblock.rs` now parses
+`@extends Parent<Arg, ...>` and `@implements Iface<Arg, ...>` (neither
+was parsed at all before); `ClassInfo` gained `extends_args`/
+`implements_args` (`registry.rs`) carrying each tag's resolved
+arguments, run through the same mark-template-then-resolve-names
+pipeline every other member type gets, so an argument can itself
+reference *this* class's own `@template` name (`class Box<T> extends
+Collection<T> {}`, forwarding rather than fixing). A concrete subclass
+fixing its parent's template param (`class IntCollection extends
+Collection<int> {}`, itself not generic at all) now resolves
+`Collection`'s own `T` to `int` for every inherited method/property.
+
+**A real, non-hypothetical bug found and fixed while verifying this
+against the real Piwigo corpus**: `checker::class_template_bindings`'s
+first implementation walked the *entire* `extends`/`implements` chain
+into one flat-merged `HashMap<String, Type>`, silently letting an
+ancestor's own template name overwrite an unrelated same-named one
+further down the chain - `T` is by far the most common single-letter
+generic name in real PHPStan code, so two unrelated classes in one
+chain both using it is common, not a corner case. Caught live:
+`symfony/type-info`'s real `NullableType<T of Type> extends
+UnionType<T|BuiltinType<...>>` (`UnionType` has its own, unrelated
+`T`) produced a wrong-but-plausible-looking return-type mismatch on
+`NullableType::getWrappedType()`, a method declared directly on
+`NullableType` with nothing to do with `UnionType` at all. Fixed by
+scoping every lookup to a specific *target* ancestor: `lookup_method`/
+`lookup_property` gained `_with_owner` variants returning which class
+actually declares the found member, and `class_template_bindings`
+takes that owner as its `target`, walking the chain hop-by-hop and
+returning bindings for *exactly* that one level - never a flat merge
+across levels that don't share a template namespace. Verified: the
+real corpus's diagnostic count is byte-for-byte identical before this
+whole sub-feature and after (42192 both times) - the fix didn't just
+suppress the one bug found, it structurally can't reintroduce it, and
+the new capability itself hasn't yet been caught mattering on this
+corpus (most real inherited-generic-config patterns route through
+trait flattening instead of `@implements`, which resolves the member
+directly on the receiver's own class before this mechanism's chain-walk
+would ever trigger).
+
+**Not yet shipped**: variance (`@template-covariant`/
+`@template-contravariant`) and template bound enforcement (`@template
+T of Foo` actually checked, not just parsed past) - both still
+unbuilt, no design work done yet.
 
 ## Phase 11: Source positions, levels, config - NOT STARTED
 
@@ -699,7 +735,7 @@ confused with each other.
 
 | Limitation | Phase |
 | --- | --- |
-| No generic variance, template-bound enforcement, or `@extends`/`@implements` inheritance-chain substitution | 10.5 |
+| No generic variance or template-bound enforcement (`@template-covariant`/`@template-contravariant`, `@template T of Foo` actually checked) | 10.5 |
 | No real source positions, level system, or config/baseline | 11 |
 | No bespoke per-function/method type extensions (`array_map`/`preg_match`/`sprintf`/condition-narrowing, ...) | 12 |
 | A handful of stubs (`pg_query_params`, `pg_query`, ...) interleave multiple full parameter lists under duplicate parameter names across version eras rather than Phase 8.5's clean superseded-param-plus-variadic shape, and still miscount arity | 12 |

@@ -339,14 +339,31 @@ pub struct ClassInfo {
     // type arguments to these positionally (`checker::
     // class_template_bindings`). Empty for a non-generic class.
     pub templates: Vec<String>,
+    // `@extends Parent<Arg, ...>`'s own argument list (Phase 10.5) - fixes
+    // `extends.first()`'s own `@template` names for every instance of
+    // this class, independent of whether this class is itself generic
+    // (e.g. `class IntCollection extends Collection<int> {}`, which isn't
+    // generic itself but permanently binds `Collection`'s own `T` to
+    // `int`). An argument can itself reference *this* class's own
+    // `@template` name (`class Box<T> extends Collection<T> {}`) - such
+    // an argument is `Type::TemplateParam(name)`, substituted using
+    // whatever this class's own templates are bound to at each use, not
+    // a fixed value. Empty when there's no `@extends` tag, or no native
+    // `extends` for it to apply to.
+    pub extends_args: Vec<Type>,
+    // Same idea as `extends_args`, but keyed by which interface each
+    // `@implements Iface<Arg, ...>` tag applies to (a class can implement
+    // more than one at once) - the key is resolved to the same
+    // fully-qualified name `implements` itself uses, so the two agree.
+    pub implements_args: HashMap<String, Vec<Type>>,
 }
 
 impl ClassInfo {
     fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassInfo {
-        let templates: Vec<String> = c
-            .doc_comment
-            .as_deref()
-            .map(|d| docblock::parse(d).templates)
+        let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
+        let templates: Vec<String> = class_doc
+            .as_ref()
+            .map(|d| d.templates.clone())
             .unwrap_or_default();
         let template_set: HashSet<String> = templates.iter().cloned().collect();
 
@@ -413,6 +430,33 @@ impl ClassInfo {
             .map(|cc| (cc.name.clone(), infer_const_type(&cc.value)))
             .collect();
 
+        // `@extends`/`@implements` generic args (Phase 10.5) - an
+        // argument can reference *this* class's own `@template` name
+        // (`class Box<T> extends Collection<T> {}`), so it goes through
+        // the same mark-then-resolve pipeline as every other member type
+        // above, not just a bare `types::parse_type_string`.
+        let resolve_generic_tag = |raw: &str| -> Type {
+            let ty = types::parse_type_string(raw);
+            let ty = mark_template_params(ty, &template_set);
+            resolve_names_in_type(ty, ctx)
+        };
+        let extends_args: Vec<Type> = class_doc
+            .as_ref()
+            .and_then(|d| d.extends.as_deref())
+            .map(|raw| match resolve_generic_tag(raw) {
+                Type::Object(_, args) => args,
+                _ => Vec::new(),
+            })
+            .unwrap_or_default();
+        let implements_args: HashMap<String, Vec<Type>> = class_doc
+            .iter()
+            .flat_map(|d| &d.implements)
+            .filter_map(|raw| match resolve_generic_tag(raw) {
+                Type::Object(name, args) => Some((name, args)),
+                _ => None,
+            })
+            .collect();
+
         ClassInfo {
             extends: c.extends.iter().map(|s| ctx.resolve(s)).collect(),
             implements: c.implements.iter().map(|s| ctx.resolve(s)).collect(),
@@ -421,6 +465,8 @@ impl ClassInfo {
             consts,
             uses: c.uses.iter().map(|s| ctx.resolve(s)).collect(),
             templates,
+            extends_args,
+            implements_args,
         }
     }
 
@@ -538,6 +584,8 @@ impl ClassInfo {
             consts,
             uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
             templates: Vec::new(),
+            extends_args: Vec::new(),
+            implements_args: HashMap::new(),
         }
     }
 }
@@ -787,6 +835,24 @@ impl Registry {
         class: &str,
         get: impl Fn(&'r ClassInfo) -> Option<T>,
     ) -> Option<T> {
+        self.lookup_in_hierarchy_with_owner(class, get)
+            .map(|(_, found)| found)
+    }
+
+    /// Same walk as `lookup_in_hierarchy`, but also returns *which*
+    /// ancestor (closest first, `class` itself included) actually
+    /// satisfied `get` - needed wherever a caller goes on to do
+    /// class-level generic substitution (Phase 10.5's `checker::
+    /// class_template_bindings`), since a `@template` name is scoped to
+    /// the class that declares it, not globally unique - substituting an
+    /// inherited method/property's `TemplateParam`s correctly requires
+    /// knowing which ancestor's own template scope they belong to, not
+    /// just the value found.
+    fn lookup_in_hierarchy_with_owner<'r, T>(
+        &'r self,
+        class: &str,
+        get: impl Fn(&'r ClassInfo) -> Option<T>,
+    ) -> Option<(String, T)> {
         let mut seen = HashSet::new();
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(class.to_string());
@@ -798,7 +864,7 @@ impl Registry {
                 continue;
             };
             if let Some(found) = get(info) {
-                return Some(found);
+                return Some((current, found));
             }
             for parent in info.extends.iter().chain(info.implements.iter()) {
                 queue.push_back(parent.clone());
@@ -816,11 +882,32 @@ impl Registry {
         self.lookup_in_hierarchy(class, |info| info.methods.get(method))
     }
 
+    /// Same as `lookup_method`, but also returns the declaring ancestor's
+    /// name - see `lookup_in_hierarchy_with_owner`'s doc comment for why.
+    pub fn lookup_method_with_owner(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<(String, &FunctionSig)> {
+        self.lookup_in_hierarchy_with_owner(class, |info| info.methods.get(method))
+    }
+
     /// Looks up a property, walking the ancestor graph if not declared
     /// directly on `class` (covers inherited properties, including ones
     /// introduced via constructor promotion).
     pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertySig> {
         self.lookup_in_hierarchy(class, |info| info.properties.get(prop))
+    }
+
+    /// Same as `lookup_property`, but also returns the declaring
+    /// ancestor's name - see `lookup_in_hierarchy_with_owner`'s doc
+    /// comment for why.
+    pub fn lookup_property_with_owner(
+        &self,
+        class: &str,
+        prop: &str,
+    ) -> Option<(String, &PropertySig)> {
+        self.lookup_in_hierarchy_with_owner(class, |info| info.properties.get(prop))
     }
 
     /// Looks up a class constant, walking the ancestor graph if not

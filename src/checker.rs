@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::registry::{self, FunctionSig, NameContext, ParamSig, Registry};
@@ -350,40 +350,123 @@ impl<'a> Checker<'a> {
     }
 
     /// Binds a generic-typed receiver's own carried type arguments
-    /// (`Collection<User>` -> `{"T": Object("User", [])}`) against the
-    /// class's own declared `@template` parameter names, in order. A
-    /// non-generic class (empty `templates`) or a bare, unspecified-generic
-    /// reference (empty `type_args`) both just produce an empty binding
-    /// map - `substitute_template` already treats an unbound `TemplateParam`
-    /// as `Mixed`, which is exactly the right conservative fallback here
-    /// too (an "erased" generic shouldn't read as a concrete, checkable
-    /// type). Deliberately invariant, call-site-only - no inheritance-chain
-    /// substitution (a class using its parent's own template param isn't
-    /// resolved through this).
-    fn class_template_bindings(&self, class: &str, type_args: &[Type]) -> HashMap<String, Type> {
-        match self.registry.classes.get(class) {
-            Some(info) => info
-                .templates
-                .iter()
-                .cloned()
-                .zip(type_args.iter().cloned())
-                .collect(),
-            None => HashMap::new(),
+    /// (`Collection<User>` -> `{"T": Object("User", [])}`) against
+    /// `target`'s own declared `@template` parameter names, walking up
+    /// `class`'s `extends`/`implements` chain to reach it if `target`
+    /// isn't `class` itself (Phase 10.5) - so a concrete subclass that
+    /// fixes its parent's template param (`class IntCollection extends
+    /// Collection<int> {}`) resolves `Collection`'s own `T` to `int` even
+    /// though `IntCollection` isn't generic itself, and a generic
+    /// subclass that passes its own template through (`class Box<T>
+    /// extends Collection<T> {}`) resolves it to whatever `Box`'s own `T`
+    /// is bound to at each use, not a fixed value.
+    ///
+    /// `target` matters because template names are scoped to the class
+    /// that declares them, not globally unique - two unrelated classes in
+    /// the same chain commonly both use `T` (confirmed the hard way on a
+    /// real corpus: `symfony/type-info`'s `NullableType<T of Type>
+    /// extends UnionType<T|BuiltinType<...>>`, where `UnionType` has its
+    /// *own*, unrelated `T`). Returning bindings scoped to exactly
+    /// `target`'s own level - not a single flat map merged across the
+    /// whole chain - is what keeps those two `T`s from colliding into
+    /// whichever one happened to be computed last.
+    ///
+    /// A non-generic class (empty `templates`), a bare unspecified-generic
+    /// reference (empty `type_args`), or a chain with no matching
+    /// `@extends`/`@implements` tag along the way to `target` all just
+    /// leave that level's names unbound - `substitute_template` already
+    /// treats an unbound `TemplateParam` as `Mixed`, the right
+    /// conservative fallback for an "erased" generic.
+    fn class_template_bindings(
+        &self,
+        class: &str,
+        type_args: &[Type],
+        target: &str,
+    ) -> HashMap<String, Type> {
+        let mut seen = HashSet::new();
+        self.class_template_bindings_rec(class, type_args, target, &mut seen)
+            .unwrap_or_default()
+    }
+
+    /// `None` means `target` isn't reachable along this path at all (so
+    /// the caller should treat every one of its templates as unbound,
+    /// same as `Some` with an empty map) - the distinction only matters
+    /// internally, to know when to keep searching sibling branches below.
+    /// `seen` guards against a cyclic `extends`/`implements` graph
+    /// (invalid PHP, but a malformed/partially-loaded real corpus could
+    /// still produce one) - cloned per branch, not threaded through by
+    /// mutable reference, so two independent ancestors (e.g. two
+    /// interfaces that both eventually reach a common shared parent, a
+    /// real "diamond" shape) can each still be searched.
+    fn class_template_bindings_rec(
+        &self,
+        class: &str,
+        type_args: &[Type],
+        target: &str,
+        seen: &mut HashSet<String>,
+    ) -> Option<HashMap<String, Type>> {
+        if !seen.insert(class.to_string()) {
+            return None;
         }
+        let info = self.registry.classes.get(class)?;
+        let own_bindings: HashMap<String, Type> = info
+            .templates
+            .iter()
+            .cloned()
+            .zip(type_args.iter().cloned())
+            .collect();
+
+        if class == target {
+            return Some(own_bindings);
+        }
+
+        if let Some(parent) = info.extends.first() {
+            let parent_args: Vec<Type> = info
+                .extends_args
+                .iter()
+                .map(|t| types::substitute_template(t, &own_bindings))
+                .collect();
+            if let Some(found) =
+                self.class_template_bindings_rec(parent, &parent_args, target, &mut seen.clone())
+            {
+                return Some(found);
+            }
+        }
+        for iface in &info.implements {
+            let iface_args: Vec<Type> = info
+                .implements_args
+                .get(iface)
+                .map(|args| {
+                    args.iter()
+                        .map(|t| types::substitute_template(t, &own_bindings))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Some(found) =
+                self.class_template_bindings_rec(iface, &iface_args, target, &mut seen.clone())
+            {
+                return Some(found);
+            }
+        }
+        None
     }
 
     /// Applies `class_template_bindings`' substitution to every param and
     /// the return type of a method signature - the class-level counterpart
     /// to `infer_call_return_type`'s existing per-call-argument template
     /// binding (which only ever sees a method's *own* `@template`, not one
-    /// declared on the enclosing class).
+    /// declared on the enclosing class). `owner` is whichever ancestor of
+    /// `class` actually declares `sig` (from `lookup_method_with_owner`/
+    /// `lookup_property_with_owner`) - `class` itself when it's not
+    /// inherited.
     fn substitute_class_templates(
         &self,
         sig: &FunctionSig,
         class: &str,
         type_args: &[Type],
+        owner: &str,
     ) -> FunctionSig {
-        let bindings = self.class_template_bindings(class, type_args);
+        let bindings = self.class_template_bindings(class, type_args, owner);
         FunctionSig {
             params: sig
                 .params
@@ -820,13 +903,18 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 // Substituted through the receiver's own carried type
-                // arguments (Phase 10) - a method declared `add(T $item)`
-                // on `Collection<User>` gets checked against `User`, not
-                // an unbound `T`/`Mixed`.
+                // arguments (Phase 10), walking up to whichever ancestor
+                // actually declares the method if it's inherited (Phase
+                // 10.5) - a method declared `add(T $item)` on
+                // `Collection<User>`, or inherited from `Collection` by a
+                // concrete `IntCollection extends Collection<int>`, gets
+                // checked against `User`/`int`, not an unbound `T`/`Mixed`.
                 let sig = recv_class.as_ref().and_then(|(class, type_args)| {
                     self.registry
-                        .lookup_method(class, method)
-                        .map(|sig| self.substitute_class_templates(sig, class, type_args))
+                        .lookup_method_with_owner(class, method)
+                        .map(|(owner, sig)| {
+                            self.substitute_class_templates(sig, class, type_args, &owner)
+                        })
                 });
                 self.predefine_byref_or_unknown_args(sig.as_ref(), args, locals);
                 for a in args {
@@ -1285,13 +1373,13 @@ impl<'a> Checker<'a> {
         let Type::Object(class, type_args) = self.infer_expr(base, locals) else {
             return;
         };
-        let Some(prop_sig) = self.registry.lookup_property(&class, prop) else {
+        let Some((owner, prop_sig)) = self.registry.lookup_property_with_owner(&class, prop) else {
             // Not a declared property: could be a dynamic property, which
             // is legal (if deprecated) PHP - not flagged here, only wrong
             // types on properties we do know about.
             return;
         };
-        let bindings = self.class_template_bindings(&class, &type_args);
+        let bindings = self.class_template_bindings(&class, &type_args, &owner);
         let expected = types::substitute_template(&prop_sig.ty, &bindings);
         let expected = self.resolve_pseudo(&expected, &class);
         let actual = self.infer_expr(rhs, locals);
@@ -1495,15 +1583,17 @@ impl<'a> Checker<'a> {
             Expr::MethodCall(recv, method, args) => match self.infer_expr(recv, locals) {
                 Type::Object(class, type_args) => self
                     .registry
-                    .lookup_method(&class, method)
-                    .map(|sig| {
+                    .lookup_method_with_owner(&class, method)
+                    .map(|(owner, sig)| {
                         // Class-level substitution (Collection<User>'s own
-                        // `T`) runs first, then infer_call_return_type's
-                        // existing per-call-argument binding handles any
-                        // template the *method itself* separately declares
-                        // - the two are independent parameter scopes that
-                        // can both appear on the same signature.
-                        let sig = self.substitute_class_templates(sig, &class, &type_args);
+                        // `T`, or an inherited method's owner-level `T`
+                        // via Phase 10.5) runs first, then
+                        // infer_call_return_type's existing per-call-
+                        // argument binding handles any template the
+                        // *method itself* separately declares - the two
+                        // are independent parameter scopes that can both
+                        // appear on the same signature.
+                        let sig = self.substitute_class_templates(sig, &class, &type_args, &owner);
                         let resolved = self.infer_call_return_type(&sig, args, locals);
                         self.resolve_pseudo(&resolved, &class)
                     })
@@ -1565,9 +1655,9 @@ impl<'a> Checker<'a> {
                 match self.infer_expr(base, locals) {
                     Type::Object(class, type_args) => self
                         .registry
-                        .lookup_property(&class, prop)
-                        .map(|p| {
-                            let bindings = self.class_template_bindings(&class, &type_args);
+                        .lookup_property_with_owner(&class, prop)
+                        .map(|(owner, p)| {
+                            let bindings = self.class_template_bindings(&class, &type_args, &owner);
                             let resolved = types::substitute_template(&p.ty, &bindings);
                             self.resolve_pseudo(&resolved, &class)
                         })
@@ -3790,5 +3880,229 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn extends_tag_fixes_a_non_generic_subclass_s_inherited_template_param() {
+        // IntCollection isn't generic itself, but its own `@extends
+        // Collection<int>` permanently binds Collection's own T to int
+        // (Phase 10.5) - proven the same way the class-level tests above
+        // do, via a return-type mismatch that only fires if T really did
+        // resolve to int rather than staying unbound (Mixed).
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @return T */
+                public function first() { return null; }
+            }
+            /** @extends Collection<int> */
+            class IntCollection extends Collection {}
+            /**
+             * @param IntCollection $c
+             * @return string
+             */
+            function f($c): string {
+                return $c->first();
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("return type mismatch") && x.message.contains("int")),
+            "expected a return-type mismatch naming int, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn extends_tag_argument_matching_the_fixed_type_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @param T $item */
+                public function add($item): void {}
+            }
+            /** @extends Collection<int> */
+            class IntCollection extends Collection {}
+            function f(IntCollection $c) {
+                $c->add(1);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn extends_tag_argument_of_the_wrong_type_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @param T $item */
+                public function add($item): void {}
+            }
+            /** @extends Collection<int> */
+            class IntCollection extends Collection {}
+            function f(IntCollection $c) {
+                $c->add("not an int");
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("expects int")),
+            "expected an argument-type mismatch naming int, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn extends_tag_passes_a_generic_subclass_s_own_template_through() {
+        // Box<T> extends Collection<T> - Box doesn't fix T to a concrete
+        // type, it just forwards its own T - so Box<User>'s inherited
+        // first() should resolve to User, not stay unbound.
+        let d = diagnostics_for(
+            r#"<?php
+            class User {}
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @return T */
+                public function first() { return null; }
+            }
+            /**
+             * @template T
+             * @extends Collection<T>
+             */
+            class Box extends Collection {}
+            /**
+             * @param Box<User> $b
+             * @return int
+             */
+            function f($b): int {
+                return $b->first();
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("return type mismatch") && x.message.contains("User")),
+            "expected a return-type mismatch naming User, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn implements_tag_fixes_an_interface_s_own_template_param() {
+        let d = diagnostics_for(
+            r#"<?php
+            class User {}
+            class Post {}
+            /**
+             * @template T
+             */
+            interface Comparator {
+                /** @param T $other */
+                public function compareTo($other): int;
+            }
+            // Deliberately doesn't redeclare compareTo - this checker
+            // doesn't enforce interface completeness (a separate,
+            // untracked gap), and the point here is exercising
+            // lookup_method's fall-through to the interface's own
+            // declaration, not a concrete override's.
+            /** @implements Comparator<User> */
+            class UserComparator implements Comparator {}
+            function f(UserComparator $c) {
+                $c->compareTo(new Post());
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("expects User")),
+            "expected an argument-type mismatch naming User, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_subclass_with_no_extends_tag_leaves_the_inherited_template_unbound() {
+        // Plain native `extends` with no `@extends` generic-fixing tag at
+        // all - T should stay unbound (Mixed), the same conservative
+        // fallback as a bare `new Collection()` reference, not an
+        // accidental false positive from treating "extends something
+        // generic" alone as enough to bind anything.
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @return T */
+                public function first() { return null; }
+            }
+            class PlainCollection extends Collection {}
+            /** @return string */
+            function f(PlainCollection $c): string {
+                return $c->first();
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_subclass_s_own_template_name_is_not_shadowed_by_an_unrelated_ancestor_s_same_name() {
+        // Real bug this reproduces (found verifying Phase 10.5 against
+        // symfony/type-info's real NullableType<T of Type> extends
+        // UnionType<T|BuiltinType<...>>, where UnionType has its own,
+        // unrelated T): binding a whole flat map across the entire
+        // extends chain lets an ancestor's own template name silently
+        // overwrite an unrelated same-named one further down the chain,
+        // since `T` is by far the most common single-letter generic name
+        // in real PHPStan code and nothing stops two unrelated classes
+        // from both using it. Child's own `ownValue()` must resolve
+        // Child's own `T` (bound to Money at the call site) - not
+        // ParentGeneric's unrelated `T` (fixed to Whatever via Child's
+        // own `@extends` tag).
+        let d = diagnostics_for(
+            r#"<?php
+            class Money {}
+            class Whatever {}
+            /**
+             * @template T
+             */
+            class ParentGeneric {
+                /** @return T */
+                public function parentValue() { return null; }
+            }
+            /**
+             * @template T
+             * @extends ParentGeneric<Whatever>
+             */
+            class Child extends ParentGeneric {
+                /** @param T $value */
+                public function __construct(private $value) {}
+                /** @return T */
+                public function ownValue() { return $this->value; }
+            }
+            /**
+             * @param Child<Money> $c
+             * @return string
+             */
+            function f($c): string {
+                return $c->ownValue();
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("return type mismatch")
+                && x.message.contains("Money")
+                && !x.message.contains("Whatever")),
+            "expected a return-type mismatch naming Money (not Whatever), got: {d:?}"
+        );
     }
 }

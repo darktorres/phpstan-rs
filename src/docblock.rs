@@ -28,6 +28,17 @@ pub struct DocBlock {
     // `$max` and `array_keys`'s `$filter_value`, only as their
     // highest-arity overload this way).
     pub optional_params: HashSet<String>,
+    // `@extends Parent<Arg, ...>` - fixes (some of) the parent class's own
+    // `@template` names for every instance of this class, regardless of
+    // whether this class is itself generic (Phase 10.5). At most one is
+    // meaningful (a class has a single native `extends`), so the last one
+    // seen wins, matching every other single-valued tag here.
+    pub extends: Option<String>,
+    // `@implements Iface<Arg, ...>` - same idea as `extends`, but a class
+    // can `implements` more than one interface at once, so every tag is
+    // kept (each one names which interface it applies to via its own
+    // leading type name).
+    pub implements: Vec<String>,
 }
 
 pub fn parse(raw: &str) -> DocBlock {
@@ -103,6 +114,18 @@ pub fn parse(raw: &str) -> DocBlock {
                     block.templates.push(name.to_string());
                 }
             }
+            "extends" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    block.extends = Some(ty.to_string());
+                }
+            }
+            "implements" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    block.implements.push(ty.to_string());
+                }
+            }
             _ => {}
         }
     }
@@ -167,6 +190,29 @@ mod tests {
         );
         assert_eq!(block.params.get("matches"), Some(&"string[]".to_string()));
         assert!(block.optional_params.contains("matches"));
+    }
+
+    #[test]
+    fn parses_extends_with_generic_args() {
+        let block = parse("/** @extends Collection<int> */");
+        assert_eq!(block.extends, Some("Collection<int>".to_string()));
+    }
+
+    #[test]
+    fn parses_multiple_implements_tags() {
+        let block = parse(
+            r#"/**
+             * @implements Iterator<int, string>
+             * @implements Countable<int>
+             */"#,
+        );
+        assert_eq!(
+            block.implements,
+            vec![
+                "Iterator<int, string>".to_string(),
+                "Countable<int>".to_string()
+            ]
+        );
     }
 
     #[test]
