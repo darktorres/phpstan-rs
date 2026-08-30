@@ -876,10 +876,30 @@ guess from PHPStan's own list:
    item after all: both were confirmed-live false positives from a
    stub-generation gap, not functions actually needing a bespoke
    extension.
-5. **`array_column`/`array_combine`/`array_flip`/`array_fill*`/
-   `array_chunk`/`compact`/`get_defined_vars`** - shape-aware return
-   types (mirrors this project's own existing `ArrayShape` inference,
-   just applied to more built-ins).
+5. **`array_column`/`array_combine`/`array_fill`/`array_fill_keys`/
+   `array_chunk` - DONE**. Each a small, targeted addition to
+   `infer_builtin_call_return_type`, reusing the existing
+   `Type::Array`/`Type::ArrayShape` machinery - none needed new
+   type-system features. `array_combine`: no transformation happens to
+   the values, so the result is simply `$values`'s own type verbatim
+   (mirrors `array_filter`). `array_fill`/`array_fill_keys`: every slot
+   holds the same, already-known `$value`. `array_chunk`: wraps the
+   original element type in one more array layer (`array<T>` in,
+   `array<array<T>>` out). `array_column`: extracts one named field's
+   type from an array of known `ArrayShape`s, only when the column key
+   is a compile-time-known literal (mirrors `check_shape_key_access`'s
+   own "only a literal, never a dynamic value" precedent). `array_flip`
+   (would need tracking array *key* types, not modeled by this
+   project's `Type::Array` at all) and `compact`/`get_defined_vars`
+   (build their result from a string-named/whole-scope variable lookup,
+   a different and much more dynamic mechanism than anything shipped so
+   far) are deliberately **not attempted** - real, permanent model
+   limitations, not a "not yet" gap. Verified against the real corpus:
+   default-mode diagnostic count unchanged (2327); under
+   `--strict-mixed-arrays`, the noise dropped slightly further
+   (4102 → 4100), confirmed via a before/after diff to be almost
+   entirely the same real findings gaining more precise "got" type
+   wording, not findings silently disappearing.
 6. **`is_array`/`is_string`/`is_int`/`is_callable`/`class_exists`/
    `function_exists`/`in_array`/`array_key_exists`/`method_exists`/
    `property_exists`** - `FunctionTypeSpecifyingExtension`-style
