@@ -515,7 +515,7 @@ impl<'a> Checker<'a> {
                         let ty = c
                             .types
                             .first()
-                            .map(|t| Type::Object(t.clone(), Vec::new()))
+                            .map(|t| self.resolve_name_expr(t))
                             .unwrap_or(Type::Mixed);
                         catch_locals.insert(var.clone(), ty);
                     }
@@ -2052,6 +2052,39 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn catch_binds_the_exception_variable_to_its_class_in_a_namespaced_file() {
+        // The bare-name twin above passes trivially even with zero
+        // namespace resolution, since an empty namespace makes FQN ==
+        // bare name - it can't tell "resolved correctly" apart from
+        // "resolution never ran at all". This is the version that
+        // actually distinguishes them: asserting a diagnostic *does*
+        // appear on an undefined method call is what proves $e's type
+        // resolved to the real "App\MyError", not an unresolved bare
+        // "MyError" (which the undefined-method check's own leniency
+        // guard would have silently suppressed, since a bogus class
+        // isn't in the registry - the exact same "looks like silence"
+        // failure mode the instanceof/self bug had).
+        let d = diagnostics_for(
+            r#"<?php
+            namespace App;
+            class MyError extends \Exception {}
+            function f() {
+                try {
+                    throw new MyError();
+                } catch (MyError $e) {
+                    return $e->totallyMadeUp();
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("App\\MyError::totallyMadeUp")),
+            "expected the resolved fully-qualified class in the diagnostic, got: {d:?}"
+        );
     }
 
     #[test]
