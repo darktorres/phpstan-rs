@@ -41,11 +41,13 @@ pub struct Diagnostic {
 /// with the same short name in different namespaces now get distinct
 /// keys, the same way real PHP tells them apart. Undefined-method
 /// detection on `Expr::MethodCall` is safe again as of this fix.
-/// `Expr::PropertyAccess` still doesn't flag undefined properties on
-/// read (the existing write-side check already made that call, for
-/// dynamic-property reasons - unrelated to namespaces), and
-/// `Expr::StaticAccess`/`StaticCall` still have no existence checks at
-/// all (unstarted, not blocked).
+///
+/// Phase 9 completed since: `Expr::PropertyAccess` now flags undefined
+/// properties on read (`__get`-exempt; the existing write-side check
+/// stays lenient, since a write can legitimately create a real, if
+/// deprecated, dynamic property - a read never does), and
+/// `Expr::StaticAccess`/`StaticCall` now check constants, static
+/// properties, and static methods (`__callStatic`-exempt) the same way.
 pub struct Checker<'a> {
     registry: &'a Registry,
     diagnostics: Vec<Diagnostic>,
@@ -2689,12 +2691,13 @@ mod tests {
 
     #[test]
     fn static_call_arguments_are_still_checked_for_undefined_variables() {
-        // Expr::StaticCall had no arm in check_expr's match at all - it
-        // fell into the wildcard `_ => {}`, so its argument expressions
-        // were never visited by any diagnostic. This doesn't need
-        // StaticCall's own existence checking (still out of scope, see
-        // the module doc comment) - just proves its args are real code
-        // that gets checked like any other call's.
+        // Expr::StaticCall had no arm in check_expr's match at all at the
+        // time this was written - it fell into the wildcard `_ => {}`,
+        // so its argument expressions were never visited by any
+        // diagnostic. StaticCall gained its own existence checking later
+        // (Phase 9); this test predates that and still just proves the
+        // narrower claim - its args are real code checked like any other
+        // call's - independent of whichever existence check runs later.
         let d = diagnostics_for(
             r#"<?php
             class Foo {
