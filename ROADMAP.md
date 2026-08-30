@@ -872,6 +872,38 @@ own built-in rules and type extensions (Phases 12-15) that a real
 third-party author would want to add to them, rather than just use
 them - premature before that.
 
+## Phase 19: Fuzz testing - NOT STARTED
+
+Complements, not replaces, the real-corpus testing this project relies
+on throughout: corpus testing finds bugs by construction (real code
+humans wrote), fuzzing finds a different class of bug (adversarial,
+byte-level malformed input) - the lexer/parser's own panic-based error
+handling makes a malformed-input crash a real, if narrow, risk
+category the corpus alone can't rule out. `arbitrary` + `cargo-fuzz`
+for the lexer/parser specifically; `proptest` for `types.rs`'s
+subtyping logic (reflexivity, transitivity) as Phase 10/10.5's
+generics and Phase 11's stricter union/nullable handling make that
+logic more complex. Both dev-only, never shipped in the release
+binary. Not yet designed in any real detail - name and rough intent
+only, deliberately deferred while positions/levels/config (Phase 11)
+and the type-extension/rule-catalog phases (12-15) are still open.
+
+## Phase 20: Performance - NOT STARTED
+
+Not yet a real, detailed plan - just a named placeholder, motivated by
+a real incident: Phase 11's own lexer-span work shipped a genuine
+O(line length x tokens on it) blowup that hung for minutes on a real
+file already in this project's test corpus (a single 1.25-million-
+character generated line), caught only because every phase's own
+verification step includes a real-corpus check - not by any dedicated
+performance-regression tooling, which doesn't exist yet. Candidate
+scope once this gets real design attention: a small benchmark suite
+(current parse/check throughput on the standing Piwigo+vendor corpus,
+so a future regression like Phase 11's is caught by CI rather than by
+chance) and profiling on pathological inputs (extremely long lines,
+deeply nested expressions, very large single files) rather than only
+"many ordinary files," which the existing corpus already covers well.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
