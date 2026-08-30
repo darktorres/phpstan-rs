@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::registry::{FunctionSig, NameContext, Registry};
+use crate::registry::{FunctionSig, NameContext, ParamSig, Registry};
 use crate::types::{self, Type};
 
 #[derive(Debug, Clone)]
@@ -176,7 +176,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(c) = class_name {
-            locals.insert("this".to_string(), Type::Object(c.to_string()));
+            locals.insert("this".to_string(), Type::Object(c.to_string(), Vec::new()));
         }
 
         // A signature's return type already defaults to Mixed when nothing
@@ -221,13 +221,13 @@ impl<'a> Checker<'a> {
     /// rather than being wrongly flagged).
     fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
         match ty {
-            Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string()),
+            Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string(), Vec::new()),
             Type::ParentRef => self
                 .registry
                 .classes
                 .get(defining_class)
                 .and_then(|info| info.extends.first())
-                .map(|p| Type::Object(p.clone()))
+                .map(|p| Type::Object(p.clone(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
             _ => ty.clone(),
         }
@@ -259,6 +259,54 @@ impl<'a> Checker<'a> {
                         .is_some_and(|e| self.always_terminates(e, locals))
             }
             _ => false,
+        }
+    }
+
+    /// Binds a generic-typed receiver's own carried type arguments
+    /// (`Collection<User>` -> `{"T": Object("User", [])}`) against the
+    /// class's own declared `@template` parameter names, in order. A
+    /// non-generic class (empty `templates`) or a bare, unspecified-generic
+    /// reference (empty `type_args`) both just produce an empty binding
+    /// map - `substitute_template` already treats an unbound `TemplateParam`
+    /// as `Mixed`, which is exactly the right conservative fallback here
+    /// too (an "erased" generic shouldn't read as a concrete, checkable
+    /// type). Deliberately invariant, call-site-only - no inheritance-chain
+    /// substitution (a class using its parent's own template param isn't
+    /// resolved through this).
+    fn class_template_bindings(&self, class: &str, type_args: &[Type]) -> HashMap<String, Type> {
+        match self.registry.classes.get(class) {
+            Some(info) => info
+                .templates
+                .iter()
+                .cloned()
+                .zip(type_args.iter().cloned())
+                .collect(),
+            None => HashMap::new(),
+        }
+    }
+
+    /// Applies `class_template_bindings`' substitution to every param and
+    /// the return type of a method signature - the class-level counterpart
+    /// to `infer_call_return_type`'s existing per-call-argument template
+    /// binding (which only ever sees a method's *own* `@template`, not one
+    /// declared on the enclosing class).
+    fn substitute_class_templates(
+        &self,
+        sig: &FunctionSig,
+        class: &str,
+        type_args: &[Type],
+    ) -> FunctionSig {
+        let bindings = self.class_template_bindings(class, type_args);
+        FunctionSig {
+            params: sig
+                .params
+                .iter()
+                .map(|p| ParamSig {
+                    ty: types::substitute_template(&p.ty, &bindings),
+                    ..p.clone()
+                })
+                .collect(),
+            return_type: types::substitute_template(&sig.return_type, &bindings),
         }
     }
 
@@ -423,7 +471,7 @@ impl<'a> Checker<'a> {
                         let ty = c
                             .types
                             .first()
-                            .map(|t| Type::Object(t.clone()))
+                            .map(|t| Type::Object(t.clone(), Vec::new()))
                             .unwrap_or(Type::Mixed);
                         catch_locals.insert(var.clone(), ty);
                     }
@@ -540,7 +588,7 @@ impl<'a> Checker<'a> {
                 {
                     locals.insert(
                         var_name.clone(),
-                        Type::Object(self.name_ctx.resolve(class_name)),
+                        Type::Object(self.name_ctx.resolve(class_name), Vec::new()),
                     );
                 }
             }
@@ -646,18 +694,24 @@ impl<'a> Checker<'a> {
                 // the module-level doc comment's "Known limitation" note,
                 // now resolved, for the full history.
                 let recv_class = match self.infer_expr(recv, locals) {
-                    Type::Object(class) => Some(class),
+                    Type::Object(class, type_args) => Some((class, type_args)),
                     _ => None,
                 };
-                let sig = recv_class
-                    .as_deref()
-                    .and_then(|class| self.registry.lookup_method(class, method));
-                self.predefine_byref_or_unknown_args(sig, args, locals);
+                // Substituted through the receiver's own carried type
+                // arguments (Phase 10) - a method declared `add(T $item)`
+                // on `Collection<User>` gets checked against `User`, not
+                // an unbound `T`/`Mixed`.
+                let sig = recv_class.as_ref().and_then(|(class, type_args)| {
+                    self.registry
+                        .lookup_method(class, method)
+                        .map(|sig| self.substitute_class_templates(sig, class, type_args))
+                });
+                self.predefine_byref_or_unknown_args(sig.as_ref(), args, locals);
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
-                if let Some(class) = &recv_class {
-                    if let Some(sig) = sig {
+                if let Some((class, _)) = &recv_class {
+                    if let Some(sig) = &sig {
                         let qualified = format!("{class}::{method}");
                         self.check_args(&qualified, sig, args, locals, label, Some(class));
                     } else if self.registry.classes.contains_key(class)
@@ -772,8 +826,14 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::New(_, args) => {
+                // `new Foo()` never carries known type arguments itself -
+                // real PHP's constructor syntax has no way to write
+                // `new Foo<Bar>()` at all, and inferring them from the
+                // constructor's own arguments (the way real PHPStan often
+                // does) isn't attempted here, so this is always `Object`
+                // with an empty arg list.
                 let resolved_class = match self.infer_expr(e, locals) {
-                    Type::Object(class) => Some(class),
+                    Type::Object(class, _) => Some(class),
                     _ => None,
                 };
                 // A dynamic target (`new $className()`) or an unresolved
@@ -893,7 +953,7 @@ impl<'a> Checker<'a> {
         let Expr::PropertyAccess(base, prop) = lhs else {
             return;
         };
-        let Type::Object(class) = self.infer_expr(base, locals) else {
+        let Type::Object(class, type_args) = self.infer_expr(base, locals) else {
             return;
         };
         let Some(prop_sig) = self.registry.lookup_property(&class, prop) else {
@@ -902,7 +962,9 @@ impl<'a> Checker<'a> {
             // types on properties we do know about.
             return;
         };
-        let expected = self.resolve_pseudo(&prop_sig.ty, &class);
+        let bindings = self.class_template_bindings(&class, &type_args);
+        let expected = types::substitute_template(&prop_sig.ty, &bindings);
+        let expected = self.resolve_pseudo(&expected, &class);
         let actual = self.infer_expr(rhs, locals);
         if actual == Type::Mixed || self.registry.is_assignable(&actual, &expected) {
             return;
@@ -1024,7 +1086,7 @@ impl<'a> Checker<'a> {
                 "string" => Type::String,
                 "bool" => Type::Bool,
                 "array" => Type::Array(Box::new(Type::Mixed)),
-                "object" => Type::Object("object".to_string()),
+                "object" => Type::Object("object".to_string(), Vec::new()),
                 "unset" => Type::Null,
                 _ => Type::Mixed,
             },
@@ -1049,7 +1111,7 @@ impl<'a> Checker<'a> {
                             None => raw,
                         }
                     }
-                    _ => Type::Object(self.name_ctx.resolve(name)),
+                    _ => Type::Object(self.name_ctx.resolve(name), Vec::new()),
                 },
                 _ => Type::Mixed,
             },
@@ -1069,11 +1131,18 @@ impl<'a> Checker<'a> {
                 _ => Type::Mixed,
             },
             Expr::MethodCall(recv, method, args) => match self.infer_expr(recv, locals) {
-                Type::Object(class) => self
+                Type::Object(class, type_args) => self
                     .registry
                     .lookup_method(&class, method)
                     .map(|sig| {
-                        let resolved = self.infer_call_return_type(sig, args, locals);
+                        // Class-level substitution (Collection<User>'s own
+                        // `T`) runs first, then infer_call_return_type's
+                        // existing per-call-argument binding handles any
+                        // template the *method itself* separately declares
+                        // - the two are independent parameter scopes that
+                        // can both appear on the same signature.
+                        let sig = self.substitute_class_templates(sig, &class, &type_args);
+                        let resolved = self.infer_call_return_type(&sig, args, locals);
                         self.resolve_pseudo(&resolved, &class)
                     })
                     .unwrap_or(Type::Mixed),
@@ -1100,10 +1169,14 @@ impl<'a> Checker<'a> {
             Expr::ArrayLiteral(_) => Type::Array(Box::new(Type::Mixed)),
             Expr::Interpolated(_) => Type::String,
             Expr::PropertyAccess(base, prop) => match self.infer_expr(base, locals) {
-                Type::Object(class) => self
+                Type::Object(class, type_args) => self
                     .registry
                     .lookup_property(&class, prop)
-                    .map(|p| self.resolve_pseudo(&p.ty, &class))
+                    .map(|p| {
+                        let bindings = self.class_template_bindings(&class, &type_args);
+                        let resolved = types::substitute_template(&p.ty, &bindings);
+                        self.resolve_pseudo(&resolved, &class)
+                    })
                     .unwrap_or(Type::Mixed),
                 _ => Type::Mixed,
             },
@@ -1265,7 +1338,7 @@ fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         "is_bool" | "is_boolean" => Some(Type::Bool),
         "is_array" => Some(Type::Array(Box::new(Type::Mixed))),
         "is_null" => Some(Type::Null),
-        "is_object" => Some(Type::Object("object".to_string())),
+        "is_object" => Some(Type::Object("object".to_string(), Vec::new())),
         _ => None,
     }
 }
@@ -2465,6 +2538,140 @@ mod tests {
                 public function __construct(int $x, int $y) {}
             }
             function f() { return new Point(1, 2); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn class_level_template_substitutes_a_method_return_type() {
+        // Collection<User>::first(): T resolves to User, not an unbound T
+        // (which would otherwise read as Mixed and never mismatch
+        // anything) - proven here by returning it from a function
+        // declared to return `int`, which only fails if the inferred type
+        // really is User. $c's own generic type comes from a `@param`
+        // annotation - this checker has no notion of an inline `@var`
+        // annotation on an arbitrary local-variable assignment, only on
+        // an actual property/param/return declaration.
+        let d = diagnostics_for(
+            r#"<?php
+            class User {}
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @return T */
+                public function first() { return null; }
+            }
+            /**
+             * @param Collection<User> $c
+             * @return int
+             */
+            function f($c): int {
+                return $c->first();
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("return type mismatch") && x.message.contains("User")),
+            "expected a return-type mismatch naming User, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn class_level_template_substitutes_a_property_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            class User {}
+            /**
+             * @template T
+             */
+            class Box {
+                /** @var T */
+                public $value;
+            }
+            /**
+             * @param Box<User> $b
+             * @return int
+             */
+            function f($b): int {
+                return $b->value;
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("return type mismatch") && x.message.contains("User")),
+            "expected a return-type mismatch naming User, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn class_level_template_substitutes_a_method_argument_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            class User {}
+            class Post {}
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @param T $item */
+                public function add($item): void {}
+            }
+            /** @param Collection<User> $c */
+            function f($c) {
+                $c->add(new Post());
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("expects User")),
+            "expected an argument-type mismatch naming User, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn class_level_template_argument_matching_the_bound_type_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class User {}
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @param T $item */
+                public function add($item): void {}
+            }
+            /** @param Collection<User> $c */
+            function f($c) {
+                $c->add(new User());
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn bare_reference_to_a_generic_class_treats_template_as_mixed() {
+        // No `<...>` at all - an "erased"/unspecified generic - so T stays
+        // unbound and reads as Mixed, matching this checker's general
+        // "don't know, don't flag" policy rather than guessing.
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             */
+            class Collection {
+                /** @return T */
+                public function first() { return null; }
+            }
+            /** @return int */
+            function f(): int {
+                $c = new Collection();
+                return $c->first();
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");

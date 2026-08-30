@@ -68,10 +68,19 @@ fn infer_const_type(value: &crate::ast::Expr) -> Type {
 /// function's own declared `@template` parameters into `TemplateParam(name)`.
 /// `parse_type_string` has no way to know "T" is a template rather than an
 /// ordinary (if oddly-named) class, so that reclassification happens here,
-/// where the declaring function's `@template` list is known.
+/// where the declaring function's `@template` list is known. A name that
+/// doesn't itself match still needs its own type arguments walked (e.g.
+/// `Collection<T>`'s `T` needs marking even though `Collection` doesn't
+/// match anything).
 fn mark_template_params(ty: Type, template_names: &HashSet<String>) -> Type {
     match ty {
-        Type::Object(name) if template_names.contains(&name) => Type::TemplateParam(name),
+        Type::Object(name, _) if template_names.contains(&name) => Type::TemplateParam(name),
+        Type::Object(name, args) => Type::Object(
+            name,
+            args.into_iter()
+                .map(|a| mark_template_params(a, template_names))
+                .collect(),
+        ),
         Type::Array(inner) => Type::Array(Box::new(mark_template_params(*inner, template_names))),
         Type::Union(members) => Type::Union(
             members
@@ -225,8 +234,13 @@ fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // a PHP-reserved word, so no real class can ever be named that.
         // Without this, a plain `object` type hint got namespace-qualified
         // into nonsense like `App\Some\Namespace\object`.
-        Type::Object(name) if name == "object" => Type::Object(name),
-        Type::Object(name) => Type::Object(ctx.resolve(&name)),
+        Type::Object(name, args) if name == "object" => Type::Object(name, args),
+        Type::Object(name, args) => Type::Object(
+            ctx.resolve(&name),
+            args.into_iter()
+                .map(|a| resolve_names_in_type(a, ctx))
+                .collect(),
+        ),
         Type::Array(inner) => Type::Array(Box::new(resolve_names_in_type(*inner, ctx))),
         Type::Union(members) => Type::Union(
             members
@@ -251,12 +265,19 @@ fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
 }
 
 impl FunctionSig {
-    fn from_decl(f: &FunctionDecl, ctx: &NameContext) -> FunctionSig {
+    /// `class_templates` are the enclosing class's own `@template` names
+    /// (empty for a plain function, or a method on a non-generic class) -
+    /// merged in alongside the function/method's own, so a method body
+    /// referencing a template its *class* declares (not itself) still
+    /// gets it correctly recognized as `TemplateParam` rather than an
+    /// ordinary (nonexistent) class name.
+    fn from_decl(f: &FunctionDecl, ctx: &NameContext, class_templates: &[String]) -> FunctionSig {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
-        let template_names: HashSet<String> = doc
+        let mut template_names: HashSet<String> = doc
             .as_ref()
             .map(|d| d.templates.iter().cloned().collect())
             .unwrap_or_default();
+        template_names.extend(class_templates.iter().cloned());
 
         let params = f
             .params
@@ -302,17 +323,29 @@ pub struct ClassInfo {
     pub properties: HashMap<String, PropertySig>,
     pub consts: HashMap<String, Type>,
     pub uses: Vec<String>,
+    // This class's own `@template T` names, in declaration order - order
+    // matters, since a generic reference (`Collection<User>`) binds its
+    // type arguments to these positionally (`checker::
+    // class_template_bindings`). Empty for a non-generic class.
+    pub templates: Vec<String>,
 }
 
 impl ClassInfo {
     fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassInfo {
+        let templates: Vec<String> = c
+            .doc_comment
+            .as_deref()
+            .map(|d| docblock::parse(d).templates)
+            .unwrap_or_default();
+        let template_set: HashSet<String> = templates.iter().cloned().collect();
+
         let methods = c
             .methods
             .iter()
             .map(|m| {
                 (
                     m.function.name.clone(),
-                    FunctionSig::from_decl(&m.function, ctx),
+                    FunctionSig::from_decl(&m.function, ctx, &templates),
                 )
             })
             .collect();
@@ -326,6 +359,7 @@ impl ClassInfo {
                     doc_ty.as_ref().and_then(|d| d.var_type.as_deref()),
                     p.type_hint.as_deref(),
                 );
+                let ty = mark_template_params(ty, &template_set);
                 let ty = resolve_names_in_type(ty, ctx);
                 (
                     p.name.clone(),
@@ -350,6 +384,7 @@ impl ClassInfo {
                 }
                 let doc_ty = ctor_doc.as_ref().and_then(|d| d.params.get(&p.name));
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
+                let ty = mark_template_params(ty, &template_set);
                 let ty = resolve_names_in_type(ty, ctx);
                 properties.insert(
                     p.name.clone(),
@@ -374,6 +409,7 @@ impl ClassInfo {
             properties,
             consts,
             uses: c.uses.iter().map(|s| ctx.resolve(s)).collect(),
+            templates,
         }
     }
 
@@ -385,13 +421,16 @@ impl ClassInfo {
     /// not just enums - a separate, pre-existing gap this doesn't attempt
     /// to close.
     fn from_enum_decl(e: &EnumDecl, ctx: &NameContext) -> ClassInfo {
+        // Enums can't be generic in real PHP (no `@template` on an enum
+        // means anything), so there's no enclosing-class template list to
+        // pass down here, unlike ClassInfo::from_decl.
         let methods = e
             .methods
             .iter()
             .map(|m| {
                 (
                     m.function.name.clone(),
-                    FunctionSig::from_decl(&m.function, ctx),
+                    FunctionSig::from_decl(&m.function, ctx, &[]),
                 )
             })
             .collect();
@@ -408,6 +447,7 @@ impl ClassInfo {
             properties: HashMap::new(),
             consts,
             uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
+            templates: Vec::new(),
         }
     }
 }
@@ -528,8 +568,10 @@ impl Registry {
                     );
                 }
                 Stmt::FunctionDecl(f) => {
-                    self.functions
-                        .insert(ctx.declared_name(&f.name), FunctionSig::from_decl(f, ctx));
+                    self.functions.insert(
+                        ctx.declared_name(&f.name),
+                        FunctionSig::from_decl(f, ctx, &[]),
+                    );
                 }
                 // The real, common `if (!function_exists('foo')) { function
                 // foo() {} }` polyfill idiom (used throughout the PHP
@@ -706,7 +748,16 @@ impl Registry {
     /// which has no notion of class context.
     pub fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
-            (Type::Object(a), Type::Object(b)) => a == b || self.is_subclass_of(a, b),
+            // Type arguments are deliberately ignored here (not checked
+            // for equality/variance) - this project doesn't model
+            // variance at all (see `Type::Object`'s own doc comment), and
+            // guessing wrong in either direction is worse than just not
+            // checking: too strict flags real code passing a subtype's
+            // narrower generic argument, too loose silently accepts a
+            // genuine mismatch either way once real variance rules would
+            // matter. Matches this checker's general preference for fewer
+            // false positives over catching everything.
+            (Type::Object(a, _), Type::Object(b, _)) => a == b || self.is_subclass_of(a, b),
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
             (Type::Intersection(members), _) => members.iter().any(|m| self.is_assignable(m, sup)),
@@ -787,7 +838,10 @@ mod tests {
         let sig = r
             .lookup_method("App\\Some\\Deep\\Namespace_\\Foo", "bar")
             .unwrap();
-        assert_eq!(sig.return_type, Type::Object("object".to_string()));
+        assert_eq!(
+            sig.return_type,
+            Type::Object("object".to_string(), Vec::new())
+        );
     }
 
     #[test]
@@ -901,12 +955,12 @@ mod tests {
         "#,
         );
         assert!(r.is_assignable(
-            &Type::Object("Circle".to_string()),
-            &Type::Object("Shape".to_string())
+            &Type::Object("Circle".to_string(), Vec::new()),
+            &Type::Object("Shape".to_string(), Vec::new())
         ));
         assert!(!r.is_assignable(
-            &Type::Object("Shape".to_string()),
-            &Type::Object("Circle".to_string())
+            &Type::Object("Shape".to_string(), Vec::new()),
+            &Type::Object("Circle".to_string(), Vec::new())
         ));
     }
 

@@ -1185,6 +1185,7 @@ impl Parser {
             methods,
             consts,
             uses,
+            doc_comment: None,
         };
 
         Expr::NewAnonymousClass(Box::new(decl), args)
@@ -1450,6 +1451,14 @@ impl Parser {
     }
 
     fn parse_class_decl(&mut self) -> ClassDecl {
+        // Captured here, at the very first token of the whole declaration
+        // (whichever of `abstract`/`final`/`readonly`/`class`/`interface`/
+        // `trait` a caller's dispatch matched on) rather than by a caller
+        // - both of this function's call sites in parse_statement would
+        // otherwise need their own, easy-to-forget take_doc_comment call,
+        // and it needs the enclosing class's own `@template` (Phase 10 -
+        // class-level generics), which was never captured at all before.
+        let doc_comment = self.take_doc_comment();
         let mut is_abstract = false;
         let mut is_final = false;
         loop {
@@ -1518,6 +1527,7 @@ impl Parser {
             methods,
             consts,
             uses,
+            doc_comment,
         }
     }
 

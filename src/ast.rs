@@ -181,6 +181,12 @@ pub struct ClassDecl {
     pub consts: Vec<ClassConst>,
     // `use TraitA, TraitB;` inside the class body.
     pub uses: Vec<String>,
+    // The class's own `/** ... */` doc comment, if any - needed for its
+    // own `@template T` declarations (class-level generics). Previously
+    // never captured at all: the parser only called `take_doc_comment`
+    // before a `function`/property declaration, never before
+    // `class`/`interface`/`trait`.
+    pub doc_comment: Option<String>,
 }
 
 #[derive(Debug, Clone)]

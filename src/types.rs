@@ -4,9 +4,11 @@ use std::fmt;
 // A deliberately small slice of PHPStan's type system: enough to represent
 // what our parser already captures as raw type-hint strings, plus the
 // handful of pseudo-types (self/parent/static) that need special handling
-// once a class-context resolver exists. Still no conditional return types
-// or @template generic substitution - those need real per-call-site type
-// parameter binding, not just parsing.
+// once a class-context resolver exists. `@template` generics (both a
+// function/method's own and a class's - registry::mark_template_params /
+// checker::class_template_bindings) are parsed and substituted at each
+// call site; still no conditional return types, variance checking, or
+// inheritance-chain substitution.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Mixed,
@@ -25,18 +27,29 @@ pub enum Type {
     // `array{name: string, age?: int}` - PHPDoc's structural array type.
     // (field name, field type, optional)
     ArrayShape(Vec<(String, Type, bool)>),
-    Object(String),
+    // A class name plus its resolved `@template` type arguments, if any
+    // (`Collection<User>` -> `Object("Collection", [Object("User", [])])`)
+    // - empty for a non-generic class, or a generic one referenced bare
+    // (`Collection` alone, with no `<...>`, is `Object("Collection", [])`
+    // too; a bare reference to a generic class isn't an error here, just
+    // an unspecified/erased one, the same way real PHPStan treats it).
+    // Deliberately invariant, call-site-only substitution - no variance
+    // checking, template bound enforcement, or inheritance-chain
+    // substitution (a subclass fixing its parent's own type parameter via
+    // `@extends Base<Concrete>` isn't modeled).
+    Object(String, Vec<Type>),
     Callable,
     SelfRef,
     ParentRef,
     StaticRef,
-    // An unbound `@template T` name. Only produced for a function/method's
-    // own declared template parameters (registry::mark_template_params) -
-    // resolving one against an actual argument at a call site is
-    // checker::bind_template_param / substitute_template's job. Class-level
-    // generics (`Collection<T>` with the binding tracked across statements)
-    // aren't modeled - that needs Object to carry type arguments, a bigger
-    // change than this slice attempts.
+    // An unbound `@template T` name - a placeholder for a type parameter
+    // that hasn't been bound to a concrete type yet. Produced both for a
+    // function/method's own declared template parameters and for a
+    // class's own `@template` (registry::mark_template_params applies to
+    // both, given the enclosing class's own template names alongside the
+    // function's) - resolving one against an actual argument or an
+    // instance's own carried type arguments is
+    // checker::bind_template_param / substitute_template's job.
     TemplateParam(String),
     Union(Vec<Type>),
     Intersection(Vec<Type>),
@@ -71,7 +84,14 @@ impl fmt::Display for Type {
                     .collect();
                 write!(f, "array{{{}}}", parts.join(", "))
             }
-            Type::Object(name) => write!(f, "{name}"),
+            Type::Object(name, args) => {
+                write!(f, "{name}")?;
+                if !args.is_empty() {
+                    let parts: Vec<String> = args.iter().map(Type::to_string).collect();
+                    write!(f, "<{}>", parts.join(", "))?;
+                }
+                Ok(())
+            }
             Type::Callable => write!(f, "callable"),
             Type::SelfRef => write!(f, "self"),
             Type::ParentRef => write!(f, "parent"),
@@ -229,9 +249,26 @@ fn parse_type_atom(s: &str) -> Type {
     let (base, generic_args) = split_generic_args(s);
     let bare = base.trim().trim_start_matches('\\');
     let mut ty = match bare.to_ascii_lowercase().as_str() {
-        "int" | "integer" => Type::Int,
+        // `positive-int`/`negative-int`/`non-zero-int` are real,
+        // widely-used PHPStan-ecosystem refinement pseudo-types (a
+        // constrained subset of `int`, the same relationship `list` has
+        // to `array`) - without this they fell through to the
+        // generic-user-class branch below and got treated as a literal
+        // class reference, then (once namespace resolution existed)
+        // nonsensically namespace-qualified.
+        "int" | "integer" | "positive-int" | "negative-int" | "non-zero-int" => Type::Int,
         "float" | "double" => Type::Float,
-        "string" => Type::String,
+        // Same story as the int refinements above, for string: real,
+        // common PHPStan/Psalm-ecosystem refinement pseudo-types (real
+        // volume seen in a live corpus: 2263 `non-empty-string`
+        // occurrences alone across Piwigo's own vendor/ tree), not
+        // separately modeled here beyond falling back to plain `string` -
+        // `class-string`'s own optional `<Foo>` generic argument (`a
+        // string holding Foo's fully-qualified name`) is similarly just
+        // dropped rather than tracked.
+        "string" | "non-empty-string" | "non-falsy-string" | "truthy-string" | "literal-string"
+        | "numeric-string" | "callable-string" | "class-string" | "trait-string"
+        | "interface-string" | "enum-string" => Type::String,
         "bool" | "boolean" => Type::Bool,
         "true" => Type::True,
         "false" => Type::False,
@@ -242,13 +279,18 @@ fn parse_type_atom(s: &str) -> Type {
         // `array<V>` / `iterable<V>` / `list<V>` and `array<K, V>` (key
         // type discarded - keyed array subtyping isn't modeled) all
         // resolve to our existing homogeneous Array(value) representation;
-        // no args is bare `array`. `list` specifically is a real,
-        // widely-used PHPStan-ecosystem pseudo-type (a refined array with
-        // sequential int keys) - without this case it fell through to the
+        // no args is bare `array`. `list`/`non-empty-array`/`non-empty-list`
+        // are real, widely-used PHPStan-ecosystem refinement pseudo-types
+        // (arrays with extra guarantees this project doesn't separately
+        // track) - without these cases they fell through to the
         // generic-user-class branch below and got treated as a literal
-        // class reference named "list", including getting
-        // namespace-qualified into nonsense like `Some\Namespace\list`.
-        "array" | "iterable" | "list" => match generic_args.len() {
+        // class reference, then nonsensically namespace-qualified.
+        // `class-string-map<TKey, TValue>` (Doctrine's own refinement of
+        // `array<class-string<TKey>, TValue>`) fits the same "2-arg
+        // generic, key discarded, value survives" shape the rest of this
+        // arm already handles.
+        "array" | "iterable" | "list" | "non-empty-array" | "non-empty-list"
+        | "class-string-map" => match generic_args.len() {
             0 => Type::Array(Box::new(Type::Mixed)),
             1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
             _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
@@ -257,14 +299,19 @@ fn parse_type_atom(s: &str) -> Type {
         "self" => Type::SelfRef,
         "parent" => Type::ParentRef,
         "static" => Type::StaticRef,
-        "object" => Type::Object("object".to_string()),
-        // A user-defined generic class (`Collection<User>`): the type
-        // arguments are parsed (so they don't corrupt the surrounding
-        // string) but not modeled - only the base class name survives,
-        // which is still a strict improvement over the pre-generics
-        // fallback of treating the whole "Collection<User>" string as an
-        // unresolvable class name.
-        _ => Type::Object(bare.to_string()),
+        "object" => Type::Object("object".to_string(), Vec::new()),
+        // A user-defined generic class (`Collection<User>`): each type
+        // argument is itself a full type string (could be a union, a
+        // nested generic, ...), so it's re-run through `parse_type_string`
+        // - the same recursive-field pattern `try_parse_array_shape`
+        // already uses. A bare (non-generic) reference just gets an empty
+        // arg list, indistinguishable from "erased"/unspecified generics
+        // on a class that does declare `@template` - `TemplateParam`
+        // substitution treats an unbound parameter as `Mixed` either way.
+        _ => Type::Object(
+            bare.to_string(),
+            generic_args.into_iter().map(parse_type_string).collect(),
+        ),
     };
     for _ in 0..array_depth {
         ty = Type::Array(Box::new(ty));
@@ -304,7 +351,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // no shape subtyping (e.g. "has at least these keys") is modeled.
         (Type::ArrayShape(_), Type::Array(b)) => matches!(**b, Type::Mixed),
 
-        (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(_)) => true,
+        (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(..)) => true,
 
         // An unbound template parameter is a placeholder, not a real type -
         // treat it as compatible with anything on either side rather than
@@ -396,8 +443,8 @@ mod tests {
         assert_eq!(
             parse_type_string("Countable&Iterator"),
             Type::Intersection(vec![
-                Type::Object("Countable".to_string()),
-                Type::Object("Iterator".to_string())
+                Type::Object("Countable".to_string(), Vec::new()),
+                Type::Object("Iterator".to_string(), Vec::new())
             ])
         );
     }
@@ -406,7 +453,7 @@ mod tests {
     fn leading_backslash_is_stripped() {
         assert_eq!(
             parse_type_string("\\App\\Foo"),
-            Type::Object("App\\Foo".to_string())
+            Type::Object("App\\Foo".to_string(), Vec::new())
         );
     }
 
@@ -436,6 +483,58 @@ mod tests {
     }
 
     #[test]
+    fn string_refinement_pseudo_types_are_treated_as_plain_string() {
+        // Real, common PHPStan/Psalm-ecosystem refinement types (real
+        // volume seen in a live corpus: 2263 non-empty-string occurrences
+        // alone) - without this they fell through to the generic-user-class
+        // branch and got treated as literal class references.
+        for name in [
+            "non-empty-string",
+            "non-falsy-string",
+            "truthy-string",
+            "literal-string",
+            "numeric-string",
+            "callable-string",
+            "class-string",
+            "trait-string",
+            "interface-string",
+            "enum-string",
+        ] {
+            assert_eq!(parse_type_string(name), Type::String, "for {name}");
+        }
+        // class-string's own optional generic argument is dropped, not
+        // tracked as "a string naming a Foo subclass" - just treated as
+        // plain string, same as the bare form.
+        assert_eq!(parse_type_string("class-string<Foo>"), Type::String);
+    }
+
+    #[test]
+    fn int_refinement_pseudo_types_are_treated_as_plain_int() {
+        for name in ["positive-int", "negative-int", "non-zero-int"] {
+            assert_eq!(parse_type_string(name), Type::Int, "for {name}");
+        }
+    }
+
+    #[test]
+    fn array_refinement_pseudo_types_are_treated_as_plain_array() {
+        assert_eq!(
+            parse_type_string("non-empty-array<int>"),
+            Type::Array(Box::new(Type::Int))
+        );
+        assert_eq!(
+            parse_type_string("non-empty-list<string>"),
+            Type::Array(Box::new(Type::String))
+        );
+        // Doctrine's own refinement of `array<class-string<TKey>, TValue>`
+        // - the key type (including its own nested generic) is discarded,
+        // same as a plain `array<K, V>`'s key already is.
+        assert_eq!(
+            parse_type_string("class-string-map<Foo, int>"),
+            Type::Array(Box::new(Type::Int))
+        );
+    }
+
+    #[test]
     fn generic_array_with_one_type_arg_parses_as_value_type() {
         assert_eq!(
             parse_type_string("array<int>"),
@@ -452,10 +551,13 @@ mod tests {
     }
 
     #[test]
-    fn generic_user_class_keeps_base_name_and_drops_type_args() {
+    fn generic_user_class_keeps_base_name_and_type_args() {
         assert_eq!(
             parse_type_string("Collection<User>"),
-            Type::Object("Collection".to_string())
+            Type::Object(
+                "Collection".to_string(),
+                vec![Type::Object("User".to_string(), Vec::new())]
+            )
         );
     }
 
@@ -465,7 +567,10 @@ mod tests {
         // wrongly treated as splitting the whole string.
         assert_eq!(
             parse_type_string("Collection<int|string>"),
-            Type::Object("Collection".to_string())
+            Type::Object(
+                "Collection".to_string(),
+                vec![Type::Union(vec![Type::Int, Type::String])]
+            )
         );
     }
 
@@ -473,7 +578,10 @@ mod tests {
     fn top_level_union_around_a_generic_still_splits_correctly() {
         assert_eq!(
             parse_type_string("Collection<int>|null"),
-            Type::Union(vec![Type::Object("Collection".to_string()), Type::Null])
+            Type::Union(vec![
+                Type::Object("Collection".to_string(), vec![Type::Int]),
+                Type::Null
+            ])
         );
     }
 
@@ -524,7 +632,10 @@ mod tests {
     #[test]
     fn everything_is_subtype_of_mixed() {
         assert!(is_subtype(&Type::String, &Type::Mixed));
-        assert!(is_subtype(&Type::Object("Foo".to_string()), &Type::Mixed));
+        assert!(is_subtype(
+            &Type::Object("Foo".to_string(), Vec::new()),
+            &Type::Mixed
+        ));
     }
 
     #[test]
