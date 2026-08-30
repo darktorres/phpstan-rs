@@ -143,7 +143,7 @@ suite, plus a handful of non-stub housekeeping files), generated via
 changes - it now resolves 1000+ real function signatures instead of
 two hand-picked extensions (`ctype`, `json`).
 
-## Phase 9: Undefined-symbol rule family - PARTIAL
+## Phase 9: Undefined-symbol rule family - DONE
 
 **Shipped:**
 - `ClassInfo::consts` and `Registry::lookup_const` (were entirely
@@ -156,11 +156,20 @@ two hand-picked extensions (`ctype`, `json`).
   global-namespace fallback for an unqualified call.
 - Undefined-method detection on `Expr::MethodCall` (with a `__call`
   magic-method exemption, matching real PHPStan).
-
-**Not started:** undefined-*property*-on-read detection, and
-`Expr::StaticAccess`/`StaticCall` existence checks (static
-methods/properties/constants). Not blocked on anything architectural -
-just not yet built.
+- **Undefined-property-on-read** detection (`Expr::PropertyAccess`),
+  with a `__get` exemption. Deliberately asymmetric with the existing
+  write-side check (a write can legitimately create a real, if
+  deprecated, dynamic property; a read of one never declared or
+  dynamically assigned just returns null with a warning in real PHP,
+  so there's no case to stay lenient for).
+- **`Expr::StaticAccess`/`StaticCall` existence checks** - class
+  constants, static properties, and static methods (with a
+  `__callStatic` exemption), self/parent/static-aware, mirroring
+  `MethodCall`'s own structure and leniency. `Foo::class` and a fully
+  dynamic member (`Foo::{$e}`/`Foo::$$e`) are both skipped, matching
+  the parser's own documented encoding of those two cases; a dynamic
+  class target (`$obj::method()`) is skipped too, matching `Expr::New`'s
+  existing precedent for the same situation.
 
 Along the way this phase found and fixed several real, independent
 bugs (not hypothetical - each confirmed via a minimal repro against
@@ -170,6 +179,49 @@ never read, and only the *first* import in a group/comma-list `use`
 was even kept; `Registry::index` never recursed into `if`/block bodies,
 missing the extremely common `if (!function_exists(...)) { function
 foo() {} }` polyfill idiom used throughout the ecosystem.
+
+**Finishing this phase (2026-08-30) found 3 more real, substantial
+gaps**, each surfacing as a wave of false positives on the very first
+real-corpus check after shipping the new rule, each fixed before the
+rule could be considered done:
+- Backed enums' built-in `->value` (and every enum's `->name`) weren't
+  registered as properties at all - provided by the language itself
+  (`UnitEnum`/`BackedEnum`), not declared in source. ~2800 false
+  positives, one per real `$case->value`/`$case->name` access, before
+  synthesizing both onto `ClassInfo::from_enum_decl`.
+- `&&`/`||` short-circuit narrowing wasn't modeled at all - neither for
+  checking the right operand, nor for composing the enclosing `if`/
+  `while` body's narrowing from a multi-part condition. `if ($x !==
+  null && $x->prop)` (an extremely common guard idiom) checked its
+  right side against the un-narrowed left-hand type. Fixed in both
+  `check_expr` (short-circuit-aware traversal) and `apply_narrowing`
+  (composes `&&`'s operands on its true branch, `||`'s on its false
+  branch - the unrepresentable opposite branch is left alone for both,
+  the same conservative choice used elsewhere).
+- `apply_narrowing`'s `instanceof` handling only ever narrowed a bare
+  variable, never a property-access chain (`$arg->value instanceof
+  Variable && $arg->value->name` - a real, common AST-visitor idiom,
+  caught on this project's own `tools/` directory). Fixed with a new
+  `narrowing_key` helper extending the existing `locals` map (keyed by
+  bare variable name today) to also carry narrowed property-chain
+  types, via a collision-free `base->prop` key format.
+- An enum's built-in `cases()` (`UnitEnum`) and a backed enum's
+  `from()`/`tryFrom()` (`BackedEnum`) weren't registered as methods
+  either, the exact same gap as the properties above - every real
+  `Enum::cases()`/`::tryFrom()` call in the corpus was a false positive
+  until fixed the same way.
+
+Verified against the real 18923-file Piwigo+vendor corpus throughout:
+first-party (`src/`+`tools/`) false positives from every one of these
+new rules are 0, and the stable 3 undefined-symbol findings held
+unchanged across all of it. Remaining vendor/-only noise traces to
+distinct, understood, out-of-scope-for-now root causes: narrowing
+mechanisms not modeled (equality/type-check narrowing on a property
+chain, not just `instanceof`), `self::`/`static::` forwarding calls to
+a method inherited from an ancestor a particular `vendor/` snapshot
+doesn't fully resolve, traits referencing a constant/property/method
+their eventual host class provides, and `@property` PHPDoc tags (not
+parsed at all).
 
 ## Phase 9.5 (unplanned): Namespace-aware registry - DONE
 
