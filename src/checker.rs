@@ -136,6 +136,18 @@ impl<'a> Checker<'a> {
     /// Returns a reference tied to the registry's lifetime, not `&self`'s,
     /// so holding it doesn't conflict with the `&mut self` calls that
     /// follow once its params/return type have been copied into `locals`.
+    /// A real bug this found: for a top-level function, `Registry::index`
+    /// keys `self.registry.functions` by the function's fully-qualified
+    /// name (Phase 9.5), but a bare `self.registry.functions.get(&f.name)`
+    /// here would look it up by its raw, unqualified AST name - a
+    /// namespaced function's own signature (with correctly-resolved
+    /// param/return types) was silently never found, falling through to
+    /// `check_function`'s `None` branch, which re-derives types straight
+    /// from native hints with *no* namespace resolution applied at all.
+    /// Methods don't share this bug: `class_name` is already the FQN by
+    /// the time it gets here (`check_program`'s own `Stmt::ClassDecl`
+    /// handling resolves it), and a method's own name is never namespace-
+    /// qualified in the first place - only the class it's declared in is.
     fn lookup_own_signature(
         &self,
         f: &FunctionDecl,
@@ -143,7 +155,10 @@ impl<'a> Checker<'a> {
     ) -> Option<&'a FunctionSig> {
         match class_name {
             Some(c) => self.registry.classes.get(c)?.methods.get(&f.name),
-            None => self.registry.functions.get(&f.name),
+            None => self
+                .registry
+                .functions
+                .get(&self.name_ctx.declared_name(&f.name)),
         }
     }
 
@@ -219,6 +234,35 @@ impl<'a> Checker<'a> {
     /// it unresolved if the class has no declared parent (so it still hits
     /// the permissive Object fallback in `is_subtype`/`is_assignable`
     /// rather than being wrongly flagged).
+    /// Resolves a bare name exactly as it appears at an expression site
+    /// (`new Foo()`, `$x instanceof Foo`, ...) to the concrete `Type` it
+    /// refers to - `self`/`parent`/`static` need `resolve_pseudo` against
+    /// the class currently being checked, everything else goes through
+    /// `name_ctx.resolve` (namespace/`use`-import resolution) as an
+    /// ordinary class reference. A real bug this fixed: `apply_narrowing`'s
+    /// `instanceof` handling used to treat `self`/`parent`/`static` as
+    /// literal class names to look up via `name_ctx.resolve` directly
+    /// (`$future instanceof self` in real code became a nonsensical
+    /// `Amp\self` "class" once namespace-qualification existed to make
+    /// the mistake visible) - `infer_expr`'s `Expr::New` arm already got
+    /// this right; `apply_narrowing` never shared that logic.
+    fn resolve_name_expr(&self, name: &str) -> Type {
+        match name {
+            "self" | "parent" | "static" => {
+                let raw = match name {
+                    "self" => Type::SelfRef,
+                    "parent" => Type::ParentRef,
+                    _ => Type::StaticRef,
+                };
+                match &self.current_class {
+                    Some(c) => self.resolve_pseudo(&raw, c),
+                    None => raw,
+                }
+            }
+            _ => Type::Object(self.name_ctx.resolve(name), Vec::new()),
+        }
+    }
+
     fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
         match ty {
             Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string(), Vec::new()),
@@ -586,10 +630,7 @@ impl<'a> Checker<'a> {
                     && let Expr::Variable(var_name) = inner.as_ref()
                     && let InstanceofTarget::Name(class_name) = target
                 {
-                    locals.insert(
-                        var_name.clone(),
-                        Type::Object(self.name_ctx.resolve(class_name), Vec::new()),
-                    );
+                    locals.insert(var_name.clone(), self.resolve_name_expr(class_name));
                 }
             }
             _ => {}
@@ -1679,6 +1720,33 @@ mod tests {
     }
 
     #[test]
+    fn instanceof_narrows_to_the_checked_class_in_a_namespaced_file() {
+        // The bare-name twin above passes trivially even if namespace
+        // resolution were completely broken, since an empty namespace
+        // makes FQN == bare name. This is the version that actually
+        // exercises it: `useCat(Cat $c)`'s param type is resolved to an
+        // FQN at *registry-build* time (resolve_names_in_type), while the
+        // `instanceof Cat` narrowing resolves it separately at *check*
+        // time (name_ctx.resolve) - both need to land on the exact same
+        // string for is_assignable's `a == b` class-name comparison to
+        // ever succeed.
+        let d = diagnostics_for(
+            r#"<?php
+            namespace App;
+            class Cat { public function meow(): string { return "meow"; } }
+            function useCat(Cat $c): string { return $c->meow(); }
+            function handle($animal) {
+                if ($animal instanceof Cat) {
+                    return useCat($animal);
+                }
+                return "";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn scope_fork_does_not_leak_then_branch_assignment_into_else() {
         // Before real forking, then/else shared one mutable scope
         // sequentially, so an assignment in the then-branch could leak into
@@ -1766,6 +1834,31 @@ mod tests {
         "#,
         );
         assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn template_binds_from_argument_in_a_namespaced_file() {
+        // The non-namespaced twin above already covers the substitution
+        // logic itself - what's specifically under test here is that
+        // resolving `identity` as a call target (through
+        // resolve_function_candidates, since Phase 9.5) doesn't disturb
+        // the separate template-binding step that runs afterward on
+        // whatever signature that resolution finds.
+        let d = diagnostics_for(
+            r#"<?php
+            namespace App;
+            /**
+             * @template T
+             * @param T $value
+             * @return T
+             */
+            function identity($value) { return $value; }
+            function needsInt(int $x): int { return $x; }
+            needsInt(identity("wrong"));
+        "#,
+        );
+        assert_eq!(d.len(), 1, "unexpected diagnostics: {d:?}");
         assert!(d[0].message.contains("needsInt"));
     }
 
@@ -2345,6 +2438,41 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn instanceof_self_narrows_to_the_real_enclosing_class_not_a_literal_self() {
+        // Real, common pattern (amphp/amp's Future::iterate does exactly
+        // this: `if ($future instanceof self)`) - apply_narrowing's
+        // instanceof handling used to treat "self"/"parent"/"static" as
+        // ordinary bare class names to resolve via name_ctx.resolve
+        // directly, instead of through resolve_pseudo against the
+        // enclosing class the way every other self/parent/static site
+        // already does. In a namespaced file this narrowed to a
+        // nonsensical class name ("App\self") instead of the real one
+        // ("App\Box") - which would have looked like *no* diagnostics at
+        // all below (a bogus, not-in-the-registry class silently
+        // suppresses the undefined-method check), not a wrong one, so
+        // this asserts a diagnostic *does* appear, to actually
+        // distinguish correct narrowing from the old silent failure.
+        let d = diagnostics_for(
+            r#"<?php
+            namespace App;
+            class Box {
+                public function useSame($other): string {
+                    if ($other instanceof self) {
+                        return $other->totallyMadeUp();
+                    }
+                    return "";
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("App\\Box::totallyMadeUp")),
+            "expected narrowing to resolve to the real class App\\Box, got: {d:?}"
+        );
     }
 
     #[test]

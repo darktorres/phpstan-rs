@@ -1041,6 +1041,38 @@ mod tests {
     }
 
     #[test]
+    fn trait_flattening_works_across_namespaced_classes() {
+        // Every existing trait-flattening test uses bare (non-namespaced)
+        // PHP - exactly the blind spot that let a real Phase 7
+        // invalidation regression through undetected (a bare-name lookup
+        // silently found nothing once real code's names became FQNs).
+        // flatten_traits iterates self.classes (FQN-keyed) and resolves
+        // each class's own `uses` list (also FQN, via ClassInfo::from_decl's
+        // ctx.resolve) to look trait method/property tables up by - both
+        // sides need to actually agree for this to find anything at all.
+        let r = build_registry(
+            r#"<?php
+            namespace App;
+            trait Greets {
+                public string $greeting = "hi";
+                public function greet(): string { return "hi"; }
+            }
+            class Person {
+                use Greets;
+            }
+        "#,
+        );
+        assert_eq!(
+            r.lookup_method("App\\Person", "greet").unwrap().return_type,
+            Type::String
+        );
+        assert_eq!(
+            r.lookup_property("App\\Person", "greeting").unwrap().ty,
+            Type::String
+        );
+    }
+
+    #[test]
     fn trait_used_before_its_declaration_still_resolves() {
         // PHP resolves `use` at compile time, not top-to-bottom - a trait
         // declared later in the file must still flatten in correctly.

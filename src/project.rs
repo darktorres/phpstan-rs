@@ -439,6 +439,55 @@ mod tests {
     }
 
     #[test]
+    fn cross_file_use_import_and_method_calls_resolve_correctly() {
+        // Every other cross-file test in this module uses bare,
+        // non-namespaced classes with no `use` import at all - the exact
+        // combination (separate namespaces + a `use` import + a method
+        // call checked against the imported class, all across a real
+        // multi-file Project rather than a single Checker) that a
+        // regression in NameContext resolution, FQN-keyed lookups, or
+        // undefined-method detection could plausibly break without any
+        // existing test noticing.
+        let mut project = Project::new();
+        project.load_file(
+            PathBuf::from("user.php"),
+            "<?php namespace App\\Models; class User { public function getName(): string { return 'x'; } }",
+        );
+        project.load_file(
+            PathBuf::from("greeter.php"),
+            "<?php namespace App\\Services;\nuse App\\Models\\User;\nfunction greet(User $u): string { return $u->getName(); }",
+        );
+        project.finish_loading();
+
+        let diagnostics = project.check_file(&PathBuf::from("greeter.php"));
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics for a real cross-namespace method call: {diagnostics:?}"
+        );
+
+        // Same setup, but calling a method User genuinely doesn't have -
+        // proves undefined-method detection also works through this same
+        // cross-file, use-imported path, not just same-file/same-namespace.
+        let mut bad_project = Project::new();
+        bad_project.load_file(
+            PathBuf::from("user.php"),
+            "<?php namespace App\\Models; class User { public function getName(): string { return 'x'; } }",
+        );
+        bad_project.load_file(
+            PathBuf::from("greeter.php"),
+            "<?php namespace App\\Services;\nuse App\\Models\\User;\nfunction greet(User $u): string { return $u->totallyMadeUp(); }",
+        );
+        bad_project.finish_loading();
+        let bad_diagnostics = bad_project.check_file(&PathBuf::from("greeter.php"));
+        assert!(
+            bad_diagnostics
+                .iter()
+                .any(|d| d.message.contains("totallyMadeUp")),
+            "expected an undefined-method diagnostic, got: {bad_diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn changing_a_declaration_re_checks_files_that_reference_it() {
         let mut project = Project::new();
         project.load_file(

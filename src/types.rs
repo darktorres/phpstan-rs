@@ -248,7 +248,31 @@ fn parse_type_atom(s: &str) -> Type {
 
     let (base, generic_args) = split_generic_args(s);
     let bare = base.trim().trim_start_matches('\\');
-    let mut ty = match bare.to_ascii_lowercase().as_str() {
+    let mut ty = if bare.contains("::") {
+        // A class-constant-reference type (`self::RFC_*`, `Foo::BAR`,
+        // PHPStan's own wildcard-constant convention) isn't a class name
+        // at all, even though it's shaped like one syntactically -
+        // resolving it for real would mean looking up the named
+        // constant('s value) on the referenced class, which this project
+        // doesn't model. Left as `Mixed` (never flagged) rather than
+        // falling through to the generic-class branch below, which used
+        // to treat the whole string - including the "self"/class part -
+        // as a literal class name, then (once namespace resolution
+        // existed) nonsensically namespace-qualified it: real example,
+        // monolog/monolog's own `@param self::RFC_* $rfc` became
+        // `Monolog\Handler\self::RFC*`.
+        Type::Mixed
+    } else {
+        parse_type_keyword_or_class(bare, &generic_args)
+    };
+    for _ in 0..array_depth {
+        ty = Type::Array(Box::new(ty));
+    }
+    ty
+}
+
+fn parse_type_keyword_or_class(bare: &str, generic_args: &[&str]) -> Type {
+    match bare.to_ascii_lowercase().as_str() {
         // `positive-int`/`negative-int`/`non-zero-int` are real,
         // widely-used PHPStan-ecosystem refinement pseudo-types (a
         // constrained subset of `int`, the same relationship `list` has
@@ -298,7 +322,15 @@ fn parse_type_atom(s: &str) -> Type {
         "callable" | "closure" => Type::Callable,
         "self" => Type::SelfRef,
         "parent" => Type::ParentRef,
-        "static" => Type::StaticRef,
+        // `@return $this` is a real, PHPStan-documented PHPDoc convention -
+        // identical in meaning to `@return static` (the calling instance's
+        // own type) - not a variable reference despite the `$` sigil.
+        // Without this it fell through to the generic-user-class branch
+        // and became a literal "class" literally named "$this", then got
+        // nonsensically namespace-qualified once that existed (real
+        // example: amphp/amp's `@return $this` on several fluent methods
+        // became `Amp\$this`).
+        "static" | "$this" => Type::StaticRef,
         "object" => Type::Object("object".to_string(), Vec::new()),
         // A user-defined generic class (`Collection<User>`): each type
         // argument is itself a full type string (could be a union, a
@@ -310,13 +342,9 @@ fn parse_type_atom(s: &str) -> Type {
         // substitution treats an unbound parameter as `Mixed` either way.
         _ => Type::Object(
             bare.to_string(),
-            generic_args.into_iter().map(parse_type_string).collect(),
+            generic_args.iter().map(|a| parse_type_string(a)).collect(),
         ),
-    };
-    for _ in 0..array_depth {
-        ty = Type::Array(Box::new(ty));
     }
-    ty
 }
 
 /// Is every value described by `sub` also described by `sup`? This is the
@@ -513,6 +541,39 @@ mod tests {
         for name in ["positive-int", "negative-int", "non-zero-int"] {
             assert_eq!(parse_type_string(name), Type::Int, "for {name}");
         }
+    }
+
+    #[test]
+    fn dollar_this_phpdoc_pseudo_type_is_treated_as_static() {
+        // `@return $this` is a real, documented PHPStan/Psalm convention
+        // (real example: amphp/amp's Interval::disable() and others use
+        // exactly this) - identical in meaning to `@return static`, not a
+        // variable reference. Without this it fell through to the
+        // generic-user-class branch and became a literal class named
+        // "$this", then got nonsensically namespace-qualified once that
+        // existed (`Amp\$this`).
+        assert_eq!(parse_type_string("$this"), Type::StaticRef);
+    }
+
+    #[test]
+    fn class_constant_reference_types_degrade_to_mixed() {
+        // `self::RFC_*` / `Foo::BAR` (PHPStan's wildcard-constant
+        // convention, real example: monolog/monolog's own
+        // `@param self::RFC_* $rfc`) look like a class name syntactically
+        // but aren't one - resolving them for real would mean looking up
+        // the referenced constant('s value), which this project doesn't
+        // model. Without this check they fell through to the
+        // generic-class branch and became a literal class literally
+        // named "self::RFC_*", then got nonsensically namespace-qualified
+        // once that existed (`Monolog\Handler\self::RFC*`).
+        assert_eq!(parse_type_string("self::RFC_*"), Type::Mixed);
+        assert_eq!(parse_type_string("Foo::BAR"), Type::Mixed);
+        // The array-wrapping/nullable machinery around parse_type_atom
+        // still has to apply correctly around this degraded case.
+        assert_eq!(
+            parse_type_string("self::RFC_*[]"),
+            Type::Array(Box::new(Type::Mixed))
+        );
     }
 
     #[test]
