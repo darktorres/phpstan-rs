@@ -647,12 +647,28 @@ checks in ~0.3s; the full 18923-file corpus's parse pass rate and
 additive infrastructure, zero behavior change yet since nothing
 downstream consumes spans until the next sub-stage.
 
-**Not yet shipped**: threading spans through the AST (`Stmt`/`Expr`
-and the declaration structs), `checker::Diagnostic` gaining a real
-span, and CLI/LSP output actually using them - the bulk of the
-phase's engineering, and its whole user-visible payoff (real editor
-positions instead of everything anchored at line 1) - plus the level
-system and config/baseline, both independent of positions.
+**Shipped - spans threaded through the AST.** `Stmt`/`Expr` wrapped as
+`{kind, span}` structs (`StmtKind`/`ExprKind` hold the original
+variants unchanged), plus a `span` field added directly to
+`FunctionDecl`/`ClassDecl`/`PropertyDecl`/`MethodDecl`/`ClassConst`/
+`EnumDecl`/`EnumCase`/`Param`/`SwitchCase`/`CatchClause`. The wrapper
+made the ~450-site migration across `parser.rs`/`checker.rs`/
+`deps.rs`/`registry.rs`/`project.rs` safe by construction - Rust's
+exhaustiveness checking turned every missed construction or match site
+into a compile error, not a silent bug, exactly as the plan predicted.
+Re-verified against the real corpus: the 1492-file `src/` subset still
+parses 1492/1492 with the identical 2327-diagnostic count, and the
+full 20286-file corpus (including vendor) still checks in ~1.7s with
+no reappearance of the O(n²) bug found in the lexer stage - purely
+additive, zero behavior change, since nothing downstream reads the new
+spans yet.
+
+**Not yet shipped**: `checker::Diagnostic` gaining a real span (and
+the ~16 diagnostic-construction sites picking the most specific span
+available), and CLI/LSP output actually using them - the phase's whole
+user-visible payoff (real editor positions instead of everything
+anchored at line 1) - plus the level system and config/baseline, both
+independent of positions.
 
 ## Phase 12: Bespoke per-function/method type extensions - PLANNED
 
