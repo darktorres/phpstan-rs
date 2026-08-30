@@ -286,14 +286,21 @@ fn parse_type_atom(s: &str) -> Type {
 
 fn parse_type_keyword_or_class(bare: &str, generic_args: &[&str]) -> Type {
     match bare.to_ascii_lowercase().as_str() {
-        // `positive-int`/`negative-int`/`non-zero-int` are real,
-        // widely-used PHPStan-ecosystem refinement pseudo-types (a
-        // constrained subset of `int`, the same relationship `list` has
-        // to `array`) - without this they fell through to the
-        // generic-user-class branch below and got treated as a literal
-        // class reference, then (once namespace resolution existed)
-        // nonsensically namespace-qualified.
-        "int" | "integer" | "positive-int" | "negative-int" | "non-zero-int" => Type::Int,
+        // `positive-int`/`negative-int`/`non-zero-int`/`non-negative-int`/
+        // `non-positive-int` are real, widely-used PHPStan-ecosystem
+        // refinement pseudo-types (a constrained subset of `int`, the
+        // same relationship `list` has to `array`) - without this they
+        // fell through to the generic-user-class branch below and got
+        // treated as a literal class reference, then (once namespace
+        // resolution existed) nonsensically namespace-qualified.
+        // `non-negative-int` specifically was a real, previously-missed
+        // gap here: confirmed live via real code in this project's own
+        // vendor/ corpus (`sebastianbergmann/php-code-coverage`), found
+        // only once Phase 12's sprintf() format-string check started
+        // comparing its resolved type against `%d` and got a bogus
+        // `Vendor\Namespace\non-negative-int` object instead of `Int`.
+        "int" | "integer" | "positive-int" | "negative-int" | "non-zero-int"
+        | "non-negative-int" | "non-positive-int" => Type::Int,
         "float" | "double" => Type::Float,
         // Same story as the int refinements above, for string: real,
         // common PHPStan/Psalm-ecosystem refinement pseudo-types (real
@@ -551,7 +558,13 @@ mod tests {
 
     #[test]
     fn int_refinement_pseudo_types_are_treated_as_plain_int() {
-        for name in ["positive-int", "negative-int", "non-zero-int"] {
+        for name in [
+            "positive-int",
+            "negative-int",
+            "non-zero-int",
+            "non-negative-int",
+            "non-positive-int",
+        ] {
             assert_eq!(parse_type_string(name), Type::Int, "for {name}");
         }
     }

@@ -1173,6 +1173,9 @@ impl<'a> Checker<'a> {
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
                         self.check_args(name, sig, args, locals, label, None, e.span);
+                        if matches!(name.as_str(), "sprintf" | "printf") {
+                            self.check_format_string_call(name, args, locals, label);
+                        }
                     } else {
                         // Since resolve_function_candidates always
                         // produces a definite name (there's no "can't
@@ -1803,6 +1806,62 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 12 item 3: validates a `sprintf`/`printf` call's format
+    /// string against the arguments actually passed - only when the
+    /// format string is a literal (mirrors `check_shape_key_access`'s
+    /// own "only a literal, never a dynamic value" precedent) and
+    /// `parse_format_specifiers` confidently understood every specifier
+    /// in it (bails silently on anything it doesn't, e.g. a positional
+    /// `%1$s` specifier). Two checks, both deliberately narrow to avoid
+    /// false positives: too few arguments for the placeholders present
+    /// (real PHP throws `ValueError` for this - unambiguously a bug,
+    /// never intentional) - checked instead of "too many," since passing
+    /// extra arguments is valid, unremarkable PHP that real `sprintf`
+    /// just ignores; and an argument whose type couldn't possibly satisfy
+    /// its specifier (an array, or an object for a numeric specifier).
+    fn check_format_string_call(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+        locals: &HashMap<String, Type>,
+        label: &str,
+    ) {
+        let Some(fmt_expr) = args.first() else {
+            return;
+        };
+        let Some(fmt) = literal_string_value(fmt_expr) else {
+            return;
+        };
+        let Some(specs) = parse_format_specifiers(fmt) else {
+            return;
+        };
+        let provided = &args[1..];
+        if specs.len() > provided.len() {
+            self.diagnostics.push(Diagnostic {
+                location: label.to_string(),
+                message: format!(
+                    "{name}() format string expects {} argument(s), {} given",
+                    specs.len(),
+                    provided.len()
+                ),
+                span: fmt_expr.span,
+                level: 0,
+            });
+            return;
+        }
+        for (spec, arg) in specs.iter().zip(provided) {
+            let arg_ty = self.infer_expr(arg, locals);
+            if !format_specifier_accepts(*spec, &arg_ty) {
+                self.diagnostics.push(Diagnostic {
+                    location: label.to_string(),
+                    message: format!("{name}() format specifier %{spec} does not accept {arg_ty}"),
+                    span: arg.span,
+                    level: 5,
+                });
+            }
+        }
+    }
+
     fn infer_expr(&self, e: &Expr, locals: &HashMap<String, Type>) -> Type {
         match &e.kind {
             ExprKind::Literal(lit) => match lit {
@@ -2066,8 +2125,14 @@ impl<'a> Checker<'a> {
             }
             // Filtering never transforms elements, so the result is
             // simply whatever the input array's own type already is - no
-            // closure introspection needed at all.
-            "array_filter" => {
+            // closure introspection needed at all. Real PHP requires at
+            // least 1 argument, but a syntactically-valid call passing
+            // zero (invalid at runtime, real code in the vendor/ corpus
+            // this project verifies against - a genuine, previously
+            // unguarded panic here, found via --check-project against
+            // the *full* corpus, not just first-party src/) still parses
+            // fine and must not be indexed into blindly.
+            "array_filter" if !args.is_empty() => {
                 let arr_ty = self.infer_expr(&args[0], locals);
                 if matches!(arr_ty, Type::Array(_)) {
                     return arr_ty;
@@ -2340,6 +2405,100 @@ fn literal_string_key(e: &Expr) -> Option<String> {
         ExprKind::Literal(Literal::String(s)) => Some(s.clone()),
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
         _ => None,
+    }
+}
+
+/// A literal string's own text, or `None` for anything else (a variable,
+/// a concatenation, ...) - unlike `literal_string_key`, this doesn't also
+/// accept/stringify an int literal, since a format string is never
+/// legitimately written as a bare number.
+fn literal_string_value(e: &Expr) -> Option<&str> {
+    match &e.kind {
+        ExprKind::Literal(Literal::String(s)) => Some(s.as_str()),
+        _ => None,
+    }
+}
+
+/// Parses a `sprintf`/`printf`-style format string into its ordered list
+/// of conversion specifiers (`%d`, `%s`, ...), skipping `%%` (a literal
+/// percent, not a placeholder). Returns `None` - "don't know, don't
+/// guess" - for anything this doesn't confidently understand: a
+/// positional specifier (`%1$s`, real and common but out of scope for
+/// this pass, since a lone specifier count no longer maps 1:1 to argument
+/// count once positions can repeat or skip), an unknown specifier
+/// character, or a malformed/truncated `%` sequence. `%b`/`%c`/`%d`/`%e`/
+/// `%E`/`%f`/`%F`/`%g`/`%G`/`%o`/`%s`/`%u`/`%x`/`%X` are real PHP
+/// specifier characters (confirmed against the language's own
+/// documented format).
+fn parse_format_specifiers(fmt: &str) -> Option<Vec<char>> {
+    let bytes = fmt.as_bytes();
+    let mut specs = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'%' {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let &next = bytes.get(i)?;
+        if next == b'%' {
+            i += 1;
+            continue;
+        }
+        // A positional prefix (`%1$s`) is digits immediately followed by
+        // `$` - checked before flags/width, since a bare width (`%5d`)
+        // is also just digits and must NOT be mistaken for one.
+        let digits_start = i;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if bytes.get(i) == Some(&b'$') {
+            return None;
+        }
+        i = digits_start;
+        while bytes
+            .get(i)
+            .is_some_and(|b| matches!(b, b'-' | b'+' | b' ' | b'0'))
+        {
+            i += 1;
+        }
+        if bytes.get(i) == Some(&b'\'') {
+            i += 2; // custom padding char: the quote plus the pad character itself
+        }
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if bytes.get(i) == Some(&b'.') {
+            i += 1;
+            while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+                i += 1;
+            }
+        }
+        let &spec = bytes.get(i)?;
+        if !b"bcdeEfFgGosuxX".contains(&spec) {
+            return None;
+        }
+        specs.push(spec as char);
+        i += 1;
+    }
+    Some(specs)
+}
+
+/// Whether a real PHP conversion specifier could plausibly accept
+/// `arg_ty` - deliberately lenient (PHP casts numeric strings and floats
+/// for `%d`, and almost anything with a `__toString` for `%s`), so this
+/// only flags the unambiguous cases: an array (or a known array shape)
+/// for any specifier, or an object for a numeric one - both produce
+/// either a fatal error or the literal, useless string `"Array"` in real
+/// PHP, never a legitimate value.
+fn format_specifier_accepts(spec: char, arg_ty: &Type) -> bool {
+    match spec {
+        'b' | 'c' | 'd' | 'e' | 'E' | 'f' | 'F' | 'g' | 'G' | 'o' | 'u' | 'x' | 'X' => !matches!(
+            arg_ty,
+            Type::Array(_) | Type::ArrayShape(_) | Type::Object(_, _)
+        ),
+        's' => !matches!(arg_ty, Type::Array(_) | Type::ArrayShape(_)),
+        _ => true,
     }
 }
 
@@ -2881,6 +3040,97 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn sprintf_flags_too_few_arguments_for_its_own_placeholders() {
+        let d = diagnostics_for(r#"<?php sprintf("%s and %s", "only one");"#);
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(
+            d[0].message.contains("expects 2 argument(s), 1 given"),
+            "got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn sprintf_does_not_flag_extra_arguments_real_php_just_ignores() {
+        let d = diagnostics_for(r#"<?php sprintf("%s", "a", "b", "c");"#);
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn sprintf_flags_an_array_passed_for_any_specifier() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $arr) {
+                sprintf("%d", $arr);
+                sprintf("%s", $arr);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 2, "got: {d:?}");
+        assert!(d.iter().all(|x| x.message.contains("does not accept")));
+    }
+
+    #[test]
+    fn sprintf_flags_an_object_for_a_numeric_specifier_but_not_a_string_one() {
+        // Real PHP's %s accepts anything with __toString (extremely
+        // common), so objects are only flagged against a numeric
+        // specifier, which no object can legitimately satisfy.
+        let d = diagnostics_for(
+            r#"<?php
+            class Money {}
+            function f(Money $m) {
+                sprintf("%d", $m);
+                sprintf("%s", $m);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("%d"), "got: {d:?}");
+    }
+
+    #[test]
+    fn sprintf_and_printf_accept_ordinary_scalar_arguments() {
+        let d = diagnostics_for(
+            r#"<?php
+            sprintf("%s is %d years old, %.2f%% sure", "Bob", 30, 99.5);
+            printf("%x", 255);
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn sprintf_skips_the_check_entirely_for_shapes_it_does_not_confidently_understand() {
+        // A positional specifier (%1$s), a dynamic (non-literal) format
+        // string, and an unrecognized specifier character all safely
+        // fall back to no check at all - "don't know, don't guess" - even
+        // though the positional-args call below is actually missing an
+        // argument in spirit (it repeats the same one), and the
+        // unknown-specifier call is arguably malformed PHP.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(string $fmt) {
+                sprintf('%1$s %2$s', "only one");
+                sprintf($fmt, "whatever");
+                sprintf("%v", "x");
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_filter_called_with_zero_arguments_does_not_panic() {
+        // Real, previously-unguarded panic (index out of bounds) found
+        // via --check-project against the *full* real corpus (including
+        // vendor/, not just first-party src/) - a syntactically valid
+        // but semantically invalid 0-arg array_filter() call parses fine
+        // and must not be blindly indexed into.
+        let d = diagnostics_for(r#"<?php array_filter();"#);
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("expects at least 1"), "got: {d:?}");
     }
 
     #[test]
