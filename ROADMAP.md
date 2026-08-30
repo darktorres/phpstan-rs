@@ -143,6 +143,54 @@ suite, plus a handful of non-stub housekeeping files), generated via
 changes - it now resolves 1000+ real function signatures instead of
 two hand-picked extensions (`ctype`, `json`).
 
+## Phase 8.5 (unplanned): Stub version-attribute handling - SKETCHED, NOT STARTED
+
+Found while researching Phase 12's real-world priority list (2026-08-30),
+not hypothetical - reproduced live against this project's own binary.
+phpstorm-stubs represents "this parameter only existed in PHP versions
+X-Y" with a `#[PhpStormStubsElementAvailable(from: ..., to: ...)]`
+attribute on individual parameters, rather than maintaining separate
+per-version function signatures - real example, `array_map`'s actual
+stub declares four parameters: `?callable $callback`, an `8.0`-only
+`array $array`, a `5.3`-`7.4`-only untyped `$arrays`, and a variadic
+`array ...$arrays`, with the middle two representing the *same*
+conceptual parameter across two PHP-version eras, never meant to
+both apply on one real PHP install. This attribute isn't recognized
+anywhere in this project's parser or `php_stubs.rs` - every
+version-gated parameter is counted as an ordinary, permanently-required
+one, so `array_map`'s generated signature ends up requiring 3
+non-variadic arguments before its real variadic tail.
+
+The result: the single most basic, canonical call to one of PHP's most
+common functions - `array_map($callback, $array)`, 2 arguments - is
+flagged as `array_map() expects at least 3 argument(s), 2 given`, a
+false positive on real code (confirmed live). This isn't an isolated
+case: 65 of the 558 vendored stub files (664 occurrences total) use
+this attribute, covering other extremely common functions the exact
+same way. This single fix is very likely responsible for a real,
+measurable share of the "expects at least N argument(s), M given"
+diagnostics already observed as recurring noise throughout every
+corpus check this project has ever run, on functions like `array_map`/
+`array_filter`/`array_keys`/`str_replace`/`version_compare`/`mt_rand`
+- confirmed present in the very first grep of Piwigo's own diagnostic
+output back in Phase 9's audit, unrecognized as a stub bug until now.
+
+**The fix**: when generating a function/method signature from stub
+source, recognize `#[PhpStormStubsElementAvailable(...)]` on a
+parameter and keep only the *last* declared parameter of that name
+(phpstorm-stubs' own convention: later-declared version ranges are
+newer PHP - the last one describes the current, still-supported
+behavior), dropping the earlier, superseded declaration(s) entirely
+rather than counting them as real, separate required parameters.
+
+**Why before Phase 12, not folded into it**: this is a correctness fix
+to a real, already-shipped pipeline (Phase 8), not a new capability -
+it belongs in the same category as Phase 9.5's retroactive fix to
+Phase 9's own registry, not alongside brand-new bespoke type
+extensions. Fixing it first means Phase 12's own before/after
+diagnostic-count comparisons won't be muddied by noise this bug alone
+already causes.
+
 ## Phase 9: Undefined-symbol rule family - DONE
 
 **Shipped:**
@@ -311,21 +359,75 @@ PHPStan/Psalm string and int refinement family (`non-empty-string` -
   `is_assignable` (7-10 equivalent).
 - A minimal config file and baseline mechanism.
 
-## Phase 12+: Sketched, not detailed - NOT STARTED
+## Phase 12: Bespoke per-function/method type extensions - SKETCHED, NOT STARTED
 
-- Bespoke per-function/method type extensions (`array_map`/
-  `array_filter`/`preg_match`/`sprintf` - real PHPStan's largest single
-  `Type/` subdirectory, `Php/`, is exactly this).
-- Refinement/accessory types (`non-empty-string`, `literal-string`,
-  ...) as a distinct precision layer beyond union/intersection - today
-  these are only aliased to their base type (Phase 9.5/10's fix),
-  not tracked with any real refinement.
-- Broader rule catalog (`DeadCode`, `Comparison`, `Exceptions`,
-  visibility enforcement, abstract-method completeness, enum
-  exhaustiveness).
-- CI-friendly output formats (JSON/table).
-- LSP hover/go-to-definition (needs Phase 11's positions first).
-- An extension/plugin API.
+Real PHPStan's `src/Type/Php/` is 190 files - its single largest `Type/`
+subdirectory, confirmed via a fresh clone of `phpstan/phpstan-src`
+(2026-08-30, commit `4f80a48`) rather than recalled from the earlier
+planning session. Real extension-point interfaces found, by real
+current count: 106 `DynamicFunctionReturnTypeExtension`, 21
+`FunctionTypeSpecifyingExtension` (condition-narrowing, e.g. after
+`is_array()`) + 22 `TypeSpecifierAwareExtension` (its companion, wires
+the narrowing extension into the specifier registry), 12
+`DynamicMethodReturnTypeExtension`, 9/8/6/4 `Dynamic{Static,}Method/
+FunctionThrowTypeExtension` (a call's real throw-type, not just its
+return type), 5 `FunctionParameterClosureTypeExtension` (types a
+callback parameter using the *other* arguments already passed - what
+`array_map($cb, $items)` needs to type `$cb`'s own parameter from
+`$items`'s element type), 3 `FunctionParameterOutTypeExtension`
+(by-ref output parameters, e.g. `preg_match`'s `$matches`).
+
+Full parity with 190 files isn't the goal - a prioritized subset is.
+Real signal for the priority order, not a guess: every function named
+below has already produced imprecise or wrong output (`Type::Mixed`,
+or - pending Phase 8.5's fix - an outright false positive) against the
+real 18923-file Piwigo+vendor corpus at some point this project's
+history, confirmed by grepping this project's own accumulated
+diagnostic-output snapshots rather than assumed from PHPStan's list
+alone:
+
+1. **`array_map`/`array_filter`/`array_reduce`/`array_walk`** - the
+   closure-parameter-typing family (`FunctionParameterClosureTypeExtension`
+   in real PHPStan) plus each one's own return-type extension. The
+   single highest-value target: these four appear constantly in real
+   code, and `checker::infer_call_return_type`'s existing template-
+   binding machinery (built for Phase 2's `@template`, reused by Phase
+   10's generics) is very likely already *shaped* right for this - a
+   real function whose param type is expressed as `callable(T): U` and
+   return type as `array<U>` would let ordinary template substitution
+   do the real work, once these specific stub signatures are written
+   that way and array_map's own multi-array/multi-arg overload forms
+   are modeled.
+2. **`preg_match`/`preg_match_all`** - by-ref `$matches` shape
+   inference from the pattern's own capture groups (named + numbered).
+   The one extension here that's genuinely hard to approximate (needs
+   real PCRE-aware parsing of the pattern string, not just the type
+   system - see the original plan's own dependency note on this: no
+   suitable Rust PCRE crate was found without pulling in a C
+   dependency).
+3. **`sprintf`/`printf`/`vsprintf`** - validate placeholder count/type
+   against the format string's own literal content when it's a
+   compile-time-known string literal (mirrors this project's own
+   `check_shape_key_access`'s "only fires on a literal, never a
+   dynamic value" precedent).
+4. **`str_replace`/`str_ireplace`/`version_compare`/`mt_rand`/
+   `array_keys`/`dirname`/`file_put_contents`/`rename`** - lower-effort
+   wins once Phase 8.5 lands: these are current false-positive sources
+   from the *same* stub-attribute bug, not functions actually needing
+   bespoke extensions - re-verify each against the real corpus after
+   8.5 ships before deciding any of them still needs one.
+5. **`array_column`/`array_combine`/`array_flip`/`array_fill*`/
+   `array_chunk`/`compact`/`get_defined_vars`** - shape-aware return
+   types (mirrors this project's own existing `ArrayShape` inference,
+   just applied to more built-ins).
+6. **`is_array`/`is_string`/`is_int`/`is_callable`/`class_exists`/
+   `function_exists`/`in_array`/`array_key_exists`/`method_exists`/
+   `property_exists`** - `FunctionTypeSpecifyingExtension`-style
+   condition-narrowing. This project's own `apply_narrowing` already
+   has a `narrowing_type_for_predicate` table for a handful of these
+   (`is_int`/`is_string`/etc.) - this item is about widening that same,
+   already-proven mechanism to the rest of the list, not inventing a
+   new one.
 
 ## Phase 13: Narrowing precision and Phase 9's remaining false-positive causes - SKETCHED, NOT STARTED
 
@@ -365,6 +467,114 @@ in ways that either produce a real false positive on real code
   whatever expression sits on its right as a callable, neither
   attempted today.
 
+## Phase 14: Refinement/accessory types - SKETCHED, NOT STARTED
+
+Real PHPStan's `src/Type/Accessory/` is exactly 15 files (confirmed
+2026-08-30 against the same fresh clone): `AccessoryNonEmptyStringType`,
+`AccessoryNonFalsyStringType`, `AccessoryLiteralStringType`,
+`AccessoryNumericStringType`, `AccessoryLowercaseStringType`,
+`AccessoryUppercaseStringType`, `AccessoryDecimalIntegerStringType`,
+`NonEmptyArrayType`, `OversizedArrayType`, `AccessoryArrayListType`,
+plus four "shape marker" types (`HasMethodType`/`HasOffsetType`/
+`HasOffsetValueType`/`HasPropertyType` - used internally to represent
+"this generic template type is known to have at least this member",
+not really a user-facing refinement) and the shared `AccessoryType`
+base. Today, Phase 9.5/10 alias every one of the string/int/array
+refinement *names* (`non-empty-string`, `positive-int`, ...) straight
+to their unrefined base type (`string`/`int`/`array`) - correct as a
+fallback, but a `non-empty-string`-typed value flowing back out of a
+function is then indistinguishable from a plain `string`, so e.g.
+passing it somewhere that specifically demands non-empty content
+isn't checked.
+
+This is real PHPStan's own `Intersection`-with-an-accessory-marker
+design (a `non-empty-string` is modeled as `string&AccessoryNonEmptyStringType`
+internally) - this project already has a real `Type::Intersection`
+(shipped, tested, this session) that the same pattern could reuse
+directly: add `Type::Refined(Box<Type>, RefinementKind)` (or reuse
+`Intersection` with a small new marker variant) alongside the existing
+base-type aliasing, threaded through `is_subtype`/`is_assignable` so a
+refined type is still assignable to its own bare base type (one-way),
+plus a small number of real narrowing sources that actually produce
+one (a non-empty string literal, `trim()`'s known-safe cases, a
+`!empty($x)` guard on a string).
+
+## Phase 15: Broader rule catalog - SKETCHED, NOT STARTED
+
+Real, current per-category rule-class counts (2026-08-30, same fresh
+clone - noticeably higher than the original plan's 8-months-earlier
+snapshot in every category, real project growth, not a discrepancy):
+Functions 46, Classes 45, Methods 39, Properties 38, PhpDoc 31,
+Comparison 31, Generics 21, Exceptions 20, RestrictedUsage 19,
+DeadCode 17, Api 17, Arrays 15, Variables 14, Constants 14, Playground
+10, TooWideTypehints 9, Operators 7, Cast 7, Traits 6 (plus a 129-file
+`RuleErrors/` that's shared error-message plumbing, not one rule per
+file, so not a category to chase file-for-file).
+
+The categories this project has nothing in yet, checked against real
+file names rather than assumed from the category label alone:
+- **DeadCode** (17 files) - unreachable code after an always-terminating
+  statement (this project's own `always_terminates` from Phase 3 is a
+  real, direct prerequisite already built), always-true/false
+  conditions, unused private methods/constants (`UnusedPrivateMethodRule`,
+  `UnusedPrivateConstantRule` - both real files in this category).
+- **Comparison** (31 files) - `match`/`switch` exhaustiveness
+  (`MatchExpressionRule`), strict-comparison-of-incompatible-types
+  (`StrictComparisonOfDifferentTypesRule`), always-true/false `in_array`/
+  `array_key_exists` checks against a finite-valued haystack.
+- **Exceptions** (20 files) - uncaught/unthrown-type checks; needs a
+  real throw-type model this project doesn't have at all yet (not even
+  a `FunctionSig`-level "what can this throw" field).
+- **Visibility enforcement / abstract-method completeness** - not
+  their own top-level category in real PHPStan (a wrong assumption in
+  the original Phase 12+ bullet, corrected here): they live inside
+  `Rules/Classes/` (`AbstractMethodInNonAbstractClassRule`,
+  `MissingMethodImplementationRule`) and `Rules/Methods/`+
+  `Rules/Properties/` (`MethodVisibilityInInterfaceRule`,
+  `AccessPrivatePropertyThroughStaticRule`) alongside those
+  categories' other rules, not a separate bucket.
+
+## Phase 16: CI-friendly output formats - SKETCHED, NOT STARTED
+
+Real PHPStan ships 11 formatters under `src/Command/ErrorFormatter/`
+(confirmed 2026-08-30): `Table` (its own default), `Json`, `Raw`,
+`Checkstyle`, `Junit`, `Github`, `Gitlab`, `Teamcity`, `CiDetected`
+(auto-picks Github/Gitlab/Teamcity from environment variables), plus
+two baseline-*writers* (`BaselineNeon`/`BaselinePhp`) that aren't
+really output formats at all - they generate a suppression file, a
+different feature (Phase 11's own baseline-mechanism bullet already
+names this). Realistic starting subset for this project: `json` (the
+most universally consumable) and `checkstyle` or `junit` (the two real
+CI systems most commonly wire up directly) - needs Phase 11's real
+source positions to be genuinely useful, since every format beyond
+plain text expects a real line/column, not today's line-1 placeholder.
+
+## Phase 17: LSP hover/go-to-definition - SKETCHED, NOT STARTED
+
+Needs Phase 11's real source positions first (today's LSP diagnostics
+work despite the line-1 placeholder only because a diagnostic doesn't
+need to point at anything more precise than "this file"; hover and
+go-to-definition inherently do). Real PHPStan itself ships no LSP
+server - this is squarely this project's own `src/lsp.rs` extending
+its existing hand-rolled JSON-RPC loop (`run_loop`, gained real test
+coverage this session) with two more real LSP methods
+(`textDocument/hover`, `textDocument/definition`), each needing a
+"what declaration is at this exact position" lookup this project's
+`Registry`/`Project` don't have any index for yet (today's lookups are
+all name-keyed, never position-keyed).
+
+## Phase 18: Extension/plugin API - SKETCHED, NOT STARTED
+
+The least concrete of all of these, deliberately last - real PHPStan's
+own extension points (`DynamicFunctionReturnTypeExtension` and its
+siblings from Phase 12, `Rule` from Phase 15, all wired together via
+`phpstan/extension-installer`, already a real, vendored dependency in
+the Piwigo corpus this project tests against) only make sense to
+formalize into a stable public API once this project has enough of its
+own built-in rules and type extensions (Phases 12-15) that a real
+third-party author would want to add to them, rather than just use
+them - premature before that.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary found in the
@@ -378,10 +588,10 @@ close - the two are labeled separately below so "not done yet" and
 
 | Limitation | Phase |
 |---|---|
+| `#[PhpStormStubsElementAvailable(...)]`-gated stub parameters counted as permanently required, causing real false positives (e.g. `array_map($cb, $arr)` itself) | 8.5 |
 | No generic variance, template-bound enforcement, or `@extends`/`@implements` inheritance-chain substitution | 10 |
-| Refinement/accessory types (`non-empty-string`, `positive-int`, ...) aliased to their base type, not tracked precisely | 12+ |
 | No real source positions, level system, or config/baseline | 11 |
-| No bespoke per-function type extensions, broader rule catalog, CI output formats, LSP hover/goto-def, plugin API | 12+ |
+| No bespoke per-function/method type extensions (`array_map`/`preg_match`/`sprintf`/condition-narrowing, ...) | 12 |
 | Property-chain narrowing beyond `instanceof` (equality/predicate narrowing on `$a->b`) | 13 |
 | Traits checked standalone, without their eventual host class's shape | 13 |
 | `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed | 13 |
@@ -389,6 +599,11 @@ close - the two are labeled separately below so "not done yet" and
 | `for`/`foreach`/`switch`/`try` share one unforked, unnarrowed scope | 13 |
 | Array-literal element types not tracked (`Array(Mixed)` always) | 13 |
 | Integer division and PHP 8.5's pipe operator (`BinOp::Div`/`Pipe`) always infer `Mixed` | 13 |
+| Refinement/accessory types (`non-empty-string`, `positive-int`, ...) aliased to their base type, not tracked precisely | 14 |
+| Broader rule catalog (`DeadCode`, `Comparison`/exhaustiveness, `Exceptions`, visibility/abstract-method completeness) | 15 |
+| No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
+| No LSP hover/go-to-definition | 17 |
+| No extension/plugin API | 18 |
 
 **Permanent design boundaries (not phase-tracked - not planned, by choice):**
 
