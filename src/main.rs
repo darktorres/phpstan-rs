@@ -120,7 +120,7 @@ fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
         };
         let source = String::from_utf8_lossy(&bytes).into_owned();
         let result = std::panic::catch_unwind(|| {
-            let tokens = Lexer::new(&source).tokenize();
+            let tokens = Lexer::new(&source).tokenize_with_spans();
             Parser::new(tokens).parse_program();
         });
         if let Err(payload) = result {
@@ -323,7 +323,7 @@ fn main() {
         SAMPLE.to_string()
     };
 
-    let tokens = Lexer::new(&source).tokenize();
+    let tokens = Lexer::new(&source).tokenize_with_spans();
     println!("-- {} tokens --", tokens.len());
 
     let mut parser = Parser::new(tokens);

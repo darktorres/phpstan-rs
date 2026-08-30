@@ -1,5 +1,16 @@
+use crate::token::Span;
+
+/// A statement, plus the real source span it occupies - `kind` carries the
+/// actual variant data (renamed from the old bare `Stmt` enum so the two
+/// concerns - "what kind of statement" and "where it is" - stay separate).
 #[derive(Debug, Clone)]
-pub enum Stmt {
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtKind {
     InlineHtml(String),
     Expression(Expr),
     Echo(Vec<Expr>),
@@ -73,6 +84,7 @@ pub enum Stmt {
 pub struct SwitchCase {
     pub test: Option<Expr>, // None = `default:`
     pub body: Vec<Stmt>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +92,7 @@ pub struct CatchClause {
     pub types: Vec<String>,
     pub var: Option<String>,
     pub body: Vec<Stmt>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +110,7 @@ pub struct Param {
     // Boxed because PropertyHooks::set itself embeds a Param - unboxed,
     // Param would have infinite size.
     pub hooks: Option<Box<PropertyHooks>>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +121,7 @@ pub struct FunctionDecl {
     pub body: Vec<Stmt>,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
     pub doc_comment: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,6 +145,7 @@ pub struct PropertyDecl {
     // with no function-like registry entry to check them against) - out of
     // scope for now, same as FirstClassCallable's args.
     pub hooks: Option<PropertyHooks>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +171,7 @@ pub struct MethodDecl {
     pub is_static: bool,
     pub is_abstract: bool,
     pub function: FunctionDecl,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +184,7 @@ pub struct UseImport {
 pub struct ClassConst {
     pub name: String,
     pub value: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +205,7 @@ pub struct ClassDecl {
     // before a `function`/property declaration, never before
     // `class`/`interface`/`trait`.
     pub doc_comment: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -195,6 +214,7 @@ pub struct EnumCase {
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
     // one (`case Hearts;`).
     pub value: Option<Expr>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -208,6 +228,7 @@ pub struct EnumDecl {
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
     pub uses: Vec<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -285,8 +306,16 @@ pub enum InstanceofTarget {
     Expr(Box<Expr>),
 }
 
+/// An expression, plus the real source span it occupies - see `Stmt`'s
+/// equivalent doc comment.
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ExprKind {
     Literal(Literal),
     Variable(String),
     // `${expr}` - the older "variable variable" syntax: the variable's own
@@ -333,7 +362,7 @@ pub enum Expr {
     FirstClassCallable(Box<Expr>),
     // `throw` as an expression (PHP 8.0+): valid in match arms, ternary
     // branches, ??'s right side, arrow function bodies, etc - as opposed
-    // to Stmt::Throw, a bare `throw expr;` statement, which is still
+    // to StmtKind::Throw, a bare `throw expr;` statement, which is still
     // dispatched separately and takes priority at statement position.
     Throw(Box<Expr>),
     // `new class(...) [extends X] [implements Y] { ... }` - the anonymous

@@ -39,7 +39,7 @@ include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 /// stub files are just PHP with empty function bodies, so nothing new was
 /// needed to read them.
 pub fn generate_from_source(source: &str) -> Vec<(String, FunctionSig)> {
-    let tokens = Lexer::new(source).tokenize();
+    let tokens = Lexer::new(source).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program();
     let registry = Registry::build(&program);
     registry.functions.into_iter().collect()
@@ -71,7 +71,7 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
 /// known; without this, every reference to a built-in like `Exception` or
 /// `ArrayObject` would look undefined.
 pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
-    let tokens = Lexer::new(source).tokenize();
+    let tokens = Lexer::new(source).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program();
     let registry = Registry::build(&program);
     registry.classes.into_iter().collect()

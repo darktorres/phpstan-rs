@@ -165,32 +165,32 @@ fn collect_enum(e: &EnumDecl, names: &mut HashSet<String>) {
 }
 
 fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
-    match stmt {
-        Stmt::InlineHtml(_)
-        | Stmt::Break(_)
-        | Stmt::Continue(_)
-        | Stmt::Namespace(_)
-        | Stmt::Use(_)
-        | Stmt::Global(_)
-        | Stmt::Goto(_)
-        | Stmt::Label(_) => {}
-        Stmt::Expression(e) | Stmt::Throw(e) => collect_expr(e, names),
-        Stmt::Return(e) => {
+    match &stmt.kind {
+        StmtKind::InlineHtml(_)
+        | StmtKind::Break(_)
+        | StmtKind::Continue(_)
+        | StmtKind::Namespace(_)
+        | StmtKind::Use(_)
+        | StmtKind::Global(_)
+        | StmtKind::Goto(_)
+        | StmtKind::Label(_) => {}
+        StmtKind::Expression(e) | StmtKind::Throw(e) => collect_expr(e, names),
+        StmtKind::Return(e) => {
             if let Some(e) = e {
                 collect_expr(e, names);
             }
         }
-        Stmt::Echo(exprs) => {
+        StmtKind::Echo(exprs) => {
             for e in exprs {
                 collect_expr(e, names);
             }
         }
-        Stmt::Block(stmts) => {
+        StmtKind::Block(stmts) => {
             for s in stmts {
                 collect_stmt(s, names);
             }
         }
-        Stmt::If {
+        StmtKind::If {
             cond,
             then_branch,
             else_branch,
@@ -201,15 +201,15 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
                 collect_stmt(e, names);
             }
         }
-        Stmt::While { cond, body } => {
+        StmtKind::While { cond, body } => {
             collect_expr(cond, names);
             collect_stmt(body, names);
         }
-        Stmt::DoWhile { body, cond } => {
+        StmtKind::DoWhile { body, cond } => {
             collect_stmt(body, names);
             collect_expr(cond, names);
         }
-        Stmt::For {
+        StmtKind::For {
             init,
             cond,
             step,
@@ -220,7 +220,7 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
             }
             collect_stmt(body, names);
         }
-        Stmt::Foreach {
+        StmtKind::Foreach {
             subject,
             key,
             value,
@@ -234,22 +234,22 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
             collect_expr(value, names);
             collect_stmt(body, names);
         }
-        Stmt::FunctionDecl(f) => collect_function(f, names),
-        Stmt::ClassDecl(c) => collect_class(c, names),
-        Stmt::EnumDecl(e) => collect_enum(e, names),
-        Stmt::GlobalConst(consts) => {
+        StmtKind::FunctionDecl(f) => collect_function(f, names),
+        StmtKind::ClassDecl(c) => collect_class(c, names),
+        StmtKind::EnumDecl(e) => collect_enum(e, names),
+        StmtKind::GlobalConst(consts) => {
             for c in consts {
                 collect_expr(&c.value, names);
             }
         }
-        Stmt::StaticVar(vars) => {
+        StmtKind::StaticVar(vars) => {
             for (_, d) in vars {
                 if let Some(e) = d {
                     collect_expr(e, names);
                 }
             }
         }
-        Stmt::Switch { subject, cases } => {
+        StmtKind::Switch { subject, cases } => {
             collect_expr(subject, names);
             for case in cases {
                 if let Some(t) = &case.test {
@@ -260,7 +260,7 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
                 }
             }
         }
-        Stmt::Try {
+        StmtKind::Try {
             body,
             catches,
             finally,
@@ -284,10 +284,10 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
 }
 
 fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
-    match expr {
-        Expr::Literal(_) | Expr::Variable(_) => {}
-        Expr::DynamicVariable(e) => collect_expr(e, names),
-        Expr::ArrayLiteral(items) => {
+    match &expr.kind {
+        ExprKind::Literal(_) | ExprKind::Variable(_) => {}
+        ExprKind::DynamicVariable(e) => collect_expr(e, names),
+        ExprKind::ArrayLiteral(items) => {
             for (k, v) in items {
                 if let Some(k) = k {
                     collect_expr(k, names);
@@ -295,72 +295,72 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_expr(v, names);
             }
         }
-        Expr::Unary(_, e)
-        | Expr::Grouping(e)
-        | Expr::Cast(_, e)
-        | Expr::Throw(e)
-        | Expr::YieldFrom(e)
-        | Expr::FirstClassCallable(e) => collect_expr(e, names),
-        Expr::Binary(_, l, r) | Expr::Assign(l, r) | Expr::CompoundAssign(_, l, r) => {
+        ExprKind::Unary(_, e)
+        | ExprKind::Grouping(e)
+        | ExprKind::Cast(_, e)
+        | ExprKind::Throw(e)
+        | ExprKind::YieldFrom(e)
+        | ExprKind::FirstClassCallable(e) => collect_expr(e, names),
+        ExprKind::Binary(_, l, r) | ExprKind::Assign(l, r) | ExprKind::CompoundAssign(_, l, r) => {
             collect_expr(l, names);
             collect_expr(r, names);
         }
-        Expr::Ternary(c, t, e) => {
+        ExprKind::Ternary(c, t, e) => {
             collect_expr(c, names);
             if let Some(t) = t {
                 collect_expr(t, names);
             }
             collect_expr(e, names);
         }
-        Expr::Call(callee, args) => {
+        ExprKind::Call(callee, args) => {
             collect_expr(callee, names);
             for a in args {
                 collect_expr(a, names);
             }
         }
-        Expr::New(target, args) => {
+        ExprKind::New(target, args) => {
             collect_expr(target, names);
             for a in args {
                 collect_expr(a, names);
             }
         }
-        Expr::PropertyAccess(base, _) => collect_expr(base, names),
-        Expr::MethodCall(recv, _, args) => {
+        ExprKind::PropertyAccess(base, _) => collect_expr(base, names),
+        ExprKind::MethodCall(recv, _, args) => {
             collect_expr(recv, names);
             for a in args {
                 collect_expr(a, names);
             }
         }
-        Expr::DynamicPropertyAccess(base, name_expr) => {
+        ExprKind::DynamicPropertyAccess(base, name_expr) => {
             collect_expr(base, names);
             collect_expr(name_expr, names);
         }
-        Expr::DynamicMethodCall(recv, name_expr, args) => {
+        ExprKind::DynamicMethodCall(recv, name_expr, args) => {
             collect_expr(recv, names);
             collect_expr(name_expr, names);
             for a in args {
                 collect_expr(a, names);
             }
         }
-        Expr::StaticAccess(class, _) => {
+        ExprKind::StaticAccess(class, _) => {
             names.insert(class.clone());
         }
-        Expr::StaticCall(class, _, args) => {
+        ExprKind::StaticCall(class, _, args) => {
             names.insert(class.clone());
             for a in args {
                 collect_expr(a, names);
             }
         }
-        Expr::Index(base, idx) => {
+        ExprKind::Index(base, idx) => {
             collect_expr(base, names);
             if let Some(i) = idx {
                 collect_expr(i, names);
             }
         }
-        Expr::Name(n) => {
+        ExprKind::Name(n) => {
             names.insert(n.clone());
         }
-        Expr::Instanceof(inner, target) => {
+        ExprKind::Instanceof(inner, target) => {
             collect_expr(inner, names);
             match target {
                 InstanceofTarget::Name(n) => {
@@ -369,19 +369,19 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
                 InstanceofTarget::Expr(e) => collect_expr(e, names),
             }
         }
-        Expr::Clone(inner, overrides) => {
+        ExprKind::Clone(inner, overrides) => {
             collect_expr(inner, names);
             if let Some(o) = overrides {
                 collect_expr(o, names);
             }
         }
-        Expr::NewAnonymousClass(decl, args) => {
+        ExprKind::NewAnonymousClass(decl, args) => {
             collect_class(decl, names);
             for a in args {
                 collect_expr(a, names);
             }
         }
-        Expr::Yield(k, v) => {
+        ExprKind::Yield(k, v) => {
             if let Some(k) = k {
                 collect_expr(k, names);
             }
@@ -389,12 +389,12 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_expr(v, names);
             }
         }
-        Expr::Interpolated(parts) => {
+        ExprKind::Interpolated(parts) => {
             for p in parts {
                 collect_expr(p, names);
             }
         }
-        Expr::Closure {
+        ExprKind::Closure {
             params,
             body,
             return_type,
@@ -410,7 +410,7 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_stmt(s, names);
             }
         }
-        Expr::ArrowFn {
+        ExprKind::ArrowFn {
             params,
             body,
             return_type,
@@ -424,7 +424,7 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
             collect_expr(body, names);
         }
-        Expr::Match {
+        ExprKind::Match {
             subject,
             arms,
             default,
@@ -450,7 +450,7 @@ mod tests {
     use crate::parser::Parser;
 
     fn refs(src: &str) -> HashSet<String> {
-        let tokens = Lexer::new(src).tokenize();
+        let tokens = Lexer::new(src).tokenize_with_spans();
         let ast = Parser::new(tokens).parse_program();
         referenced_names(&ast)
     }

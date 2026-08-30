@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::ast::Stmt;
+use crate::ast::{Stmt, StmtKind};
 use crate::checker::{Checker, Diagnostic};
 use crate::deps;
 use crate::lexer::Lexer;
@@ -254,7 +254,7 @@ impl Default for Project {
 }
 
 fn parse(source: &str) -> Vec<Stmt> {
-    let tokens = Lexer::new(source).tokenize();
+    let tokens = Lexer::new(source).tokenize_with_spans();
     Parser::new(tokens).parse_program()
 }
 
@@ -292,19 +292,19 @@ fn declared_names_with_context(
     let mut functions = Vec::new();
     let mut classes = Vec::new();
     for stmt in stmts {
-        match stmt {
-            Stmt::Namespace(name) => ctx.set_namespace(name),
-            Stmt::Use(imports) => ctx.add_uses(imports),
-            Stmt::FunctionDecl(f) => functions.push(ctx.declared_name(&f.name)),
-            Stmt::ClassDecl(c) => classes.push(ctx.declared_name(&c.name)),
-            Stmt::EnumDecl(e) => classes.push(ctx.declared_name(&e.name)),
+        match &stmt.kind {
+            StmtKind::Namespace(name) => ctx.set_namespace(name),
+            StmtKind::Use(imports) => ctx.add_uses(imports),
+            StmtKind::FunctionDecl(f) => functions.push(ctx.declared_name(&f.name)),
+            StmtKind::ClassDecl(c) => classes.push(ctx.declared_name(&c.name)),
+            StmtKind::EnumDecl(e) => classes.push(ctx.declared_name(&e.name)),
             // Must mirror Registry::index's recursion into `if`/block
             // bodies (the `if (!function_exists(...)) { function foo()
             // {} }` polyfill idiom) - otherwise an incremental update
             // wouldn't know to remove a conditionally-declared symbol
             // that index() itself did pick up, leaving a stale entry
             // behind after the declaring file changes or is removed.
-            Stmt::If {
+            StmtKind::If {
                 then_branch,
                 else_branch,
                 ..
@@ -324,7 +324,7 @@ fn declared_names_with_context(
                     classes.extend(c);
                 }
             }
-            Stmt::Block(inner) => {
+            StmtKind::Block(inner) => {
                 let (f, c) = declared_names_with_context(inner, ctx);
                 functions.extend(f);
                 classes.extend(c);

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ClassDecl, EnumDecl, FunctionDecl, Stmt, UseImport};
+use crate::ast::{ClassDecl, EnumDecl, ExprKind, FunctionDecl, Stmt, StmtKind, UseImport};
 use crate::docblock::{self, DocBlock};
 use crate::types::{self, Type};
 
@@ -52,14 +52,14 @@ pub(crate) fn strip_leading_backslash(name: &str) -> String {
 /// undefined-constant detection only needs the name to be known, not a
 /// precise type.
 fn infer_const_type(value: &crate::ast::Expr) -> Type {
-    use crate::ast::{Expr, Literal};
-    match value {
-        Expr::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
-        Expr::Literal(Literal::Float(_)) => Type::Float,
-        Expr::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
-        Expr::Literal(Literal::Bool(true)) => Type::True,
-        Expr::Literal(Literal::Bool(false)) => Type::False,
-        Expr::Literal(Literal::Null) => Type::Null,
+    use crate::ast::Literal;
+    match &value.kind {
+        ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
+        ExprKind::Literal(Literal::Float(_)) => Type::Float,
+        ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
+        ExprKind::Literal(Literal::Bool(true)) => Type::True,
+        ExprKind::Literal(Literal::Bool(false)) => Type::False,
+        ExprKind::Literal(Literal::Null) => Type::Null,
         _ => Type::Mixed,
     }
 }
@@ -126,15 +126,15 @@ impl NameContext {
     /// Scans a file's top-level statements for `namespace`/`use`
     /// declarations. PHP only allows one semicolon-style `namespace Foo;`
     /// per file (the brace-delimited multi-namespace-per-file form is
-    /// rare enough, and unsupported by the parser's own Stmt::Namespace
+    /// rare enough, and unsupported by the parser's own StmtKind::Namespace
     /// handling already, to not be worth modeling here) - once found, it
     /// applies to the rest of the file, so a single linear scan suffices.
     pub(crate) fn build(stmts: &[Stmt]) -> NameContext {
         let mut ctx = NameContext::default();
         for stmt in stmts {
-            match stmt {
-                Stmt::Namespace(name) => ctx.set_namespace(name),
-                Stmt::Use(imports) => ctx.add_uses(imports),
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
                 _ => {}
             }
         }
@@ -181,7 +181,7 @@ impl NameContext {
     /// unqualified class-shaped names). `self`/`parent`/`static` and
     /// primitive type keywords never reach here - `parse_type_string`
     /// already turns those into a different `Type` variant before this
-    /// runs, and `Expr::New`'s self/parent/static branch never calls this
+    /// runs, and `ExprKind::New`'s self/parent/static branch never calls this
     /// either.
     pub(crate) fn resolve(&self, name: &str) -> String {
         if let Some(fq) = name.strip_prefix('\\') {
@@ -725,9 +725,9 @@ impl Registry {
     /// changes it for everything from that point on, exactly like real
     /// PHP, rather than computing one static context up front for the
     /// whole file. This matters concretely: the parser has no real model
-    /// of brace-delimited `namespace X { ... }` (see `Stmt::Namespace`'s
-    /// own parsing comment), so it falls out as a `Stmt::Namespace(name)`
-    /// immediately followed by a sibling `Stmt::Block` holding what was
+    /// of brace-delimited `namespace X { ... }` (see `StmtKind::Namespace`'s
+    /// own parsing comment), so it falls out as a `StmtKind::Namespace(name)`
+    /// immediately followed by a sibling `StmtKind::Block` holding what was
     /// inside the braces - and real vendored stub files (phpstorm-stubs'
     /// own `PDO/PDO.php`) really do have *two* such blocks in one file
     /// (`namespace { ... }` for the global `PDO` class, then a later
@@ -741,20 +741,20 @@ impl Registry {
 
     fn index_with_context(&mut self, stmts: &[Stmt], ctx: &mut NameContext) {
         for stmt in stmts {
-            match stmt {
-                Stmt::Namespace(name) => ctx.set_namespace(name),
-                Stmt::Use(imports) => ctx.add_uses(imports),
-                Stmt::ClassDecl(c) => {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::ClassDecl(c) => {
                     self.classes
                         .insert(ctx.declared_name(&c.name), ClassInfo::from_decl(c, ctx));
                 }
-                Stmt::EnumDecl(e) => {
+                StmtKind::EnumDecl(e) => {
                     self.classes.insert(
                         ctx.declared_name(&e.name),
                         ClassInfo::from_enum_decl(e, ctx),
                     );
                 }
-                Stmt::FunctionDecl(f) => {
+                StmtKind::FunctionDecl(f) => {
                     self.functions.insert(
                         ctx.declared_name(&f.name),
                         FunctionSig::from_decl(f, ctx, &[]),
@@ -775,7 +775,7 @@ impl Registry {
                 // into the other or past the `if` - conservative, and
                 // irrelevant in practice (real code doesn't declare
                 // namespaces inside an `if`).
-                Stmt::If {
+                StmtKind::If {
                     then_branch,
                     else_branch,
                     ..
@@ -794,9 +794,9 @@ impl Registry {
                 // visible to the declarations that follow it in the very
                 // same block - it's the statement *after* the block ends
                 // that must not see it, which cloning at the point the
-                // *next* `Stmt::Namespace` resets `ctx.use_map` already
+                // *next* `StmtKind::Namespace` resets `ctx.use_map` already
                 // ensures (see `set_namespace`).
-                Stmt::Block(inner) => self.index_with_context(inner, ctx),
+                StmtKind::Block(inner) => self.index_with_context(inner, ctx),
                 _ => {}
             }
         }
@@ -1030,7 +1030,7 @@ mod tests {
     use crate::parser::Parser;
 
     fn build_registry(src: &str) -> Registry {
-        let tokens = Lexer::new(src).tokenize();
+        let tokens = Lexer::new(src).tokenize_with_spans();
         let program = Parser::new(tokens).parse_program();
         Registry::build(&program)
     }

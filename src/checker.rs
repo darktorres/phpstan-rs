@@ -40,13 +40,13 @@ pub struct Diagnostic {
 /// statements) before any registry key is read or written - two classes
 /// with the same short name in different namespaces now get distinct
 /// keys, the same way real PHP tells them apart. Undefined-method
-/// detection on `Expr::MethodCall` is safe again as of this fix.
+/// detection on `ExprKind::MethodCall` is safe again as of this fix.
 ///
-/// Phase 9 completed since: `Expr::PropertyAccess` now flags undefined
+/// Phase 9 completed since: `ExprKind::PropertyAccess` now flags undefined
 /// properties on read (`__get`-exempt; the existing write-side check
 /// stays lenient, since a write can legitimately create a real, if
 /// deprecated, dynamic property - a read never does), and
-/// `Expr::StaticAccess`/`StaticCall` now check constants, static
+/// `ExprKind::StaticAccess`/`StaticCall` now check constants, static
 /// properties, and static methods (`__callStatic`-exempt) the same way.
 pub struct Checker<'a> {
     registry: &'a Registry,
@@ -101,9 +101,9 @@ impl<'a> Checker<'a> {
         let mut top_locals: HashMap<String, Type> = HashMap::new();
         let diagnostics_before = self.diagnostics.len();
         for stmt in program {
-            match stmt {
-                Stmt::FunctionDecl(f) => self.check_function(f, None, false),
-                Stmt::ClassDecl(c) => {
+            match &stmt.kind {
+                StmtKind::FunctionDecl(f) => self.check_function(f, None, false),
+                StmtKind::ClassDecl(c) => {
                     // `current_class` must be the fully-qualified name -
                     // it's looked up directly against
                     // `self.registry.classes` (via `resolve_pseudo` for
@@ -116,7 +116,7 @@ impl<'a> Checker<'a> {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
                 }
-                Stmt::EnumDecl(e) => {
+                StmtKind::EnumDecl(e) => {
                     let fqn = self.name_ctx.declared_name(&e.name);
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
@@ -125,7 +125,7 @@ impl<'a> Checker<'a> {
                 // Top-level script statements share one scope across the
                 // whole file, so the extract()/eval() guard spans the
                 // entire loop rather than resetting per statement.
-                other => self.check_stmt(other, &mut top_locals, None, "<main>"),
+                _ => self.check_stmt(stmt, &mut top_locals, None, "<main>"),
             }
         }
         if self.saw_dynamic_var_construct {
@@ -148,7 +148,7 @@ impl<'a> Checker<'a> {
     /// `check_function`'s `None` branch, which re-derives types straight
     /// from native hints with *no* namespace resolution applied at all.
     /// Methods don't share this bug: `class_name` is already the FQN by
-    /// the time it gets here (`check_program`'s own `Stmt::ClassDecl`
+    /// the time it gets here (`check_program`'s own `StmtKind::ClassDecl`
     /// handling resolves it), and a method's own name is never namespace-
     /// qualified in the first place - only the class it's declared in is.
     fn lookup_own_signature(
@@ -287,7 +287,7 @@ impl<'a> Checker<'a> {
     /// literal class names to look up via `name_ctx.resolve` directly
     /// (`$future instanceof self` in real code became a nonsensical
     /// `Amp\self` "class" once namespace-qualification existed to make
-    /// the mistake visible) - `infer_expr`'s `Expr::New` arm already got
+    /// the mistake visible) - `infer_expr`'s `ExprKind::New` arm already got
     /// this right; `apply_narrowing` never shared that logic.
     fn resolve_name_expr(&self, name: &str) -> Type {
         match name {
@@ -363,13 +363,16 @@ impl<'a> Checker<'a> {
     /// pattern (`private function fatalError(string $msg): never`) that a
     /// purely syntactic check would miss entirely.
     fn always_terminates(&self, stmt: &Stmt, locals: &HashMap<String, Type>) -> bool {
-        match stmt {
-            Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
-            Stmt::Expression(e) => self.infer_expr(e, locals) == Type::Never,
-            Stmt::Block(stmts) => stmts
+        match &stmt.kind {
+            StmtKind::Return(_)
+            | StmtKind::Throw(_)
+            | StmtKind::Break(_)
+            | StmtKind::Continue(_) => true,
+            StmtKind::Expression(e) => self.infer_expr(e, locals) == Type::Never,
+            StmtKind::Block(stmts) => stmts
                 .last()
                 .is_some_and(|s| self.always_terminates(s, locals)),
-            Stmt::If {
+            StmtKind::If {
                 then_branch,
                 else_branch,
                 ..
@@ -750,11 +753,11 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        match stmt {
-            Stmt::Expression(e) => {
+        match &stmt.kind {
+            StmtKind::Expression(e) => {
                 self.check_expr(e, locals, label);
             }
-            Stmt::Return(Some(e)) => {
+            StmtKind::Return(Some(e)) => {
                 self.check_expr(e, locals, label);
                 if let Some(expected) = declared_return {
                     let actual = self.infer_expr(e, locals);
@@ -772,13 +775,13 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Stmt::Echo(exprs) => {
+            StmtKind::Echo(exprs) => {
                 for e in exprs {
                     self.check_expr(e, locals, label);
                 }
             }
-            Stmt::Block(stmts) => self.check_block(stmts, locals, declared_return, label),
-            Stmt::If {
+            StmtKind::Block(stmts) => self.check_block(stmts, locals, declared_return, label),
+            StmtKind::If {
                 cond,
                 then_branch,
                 else_branch,
@@ -813,7 +816,7 @@ impl<'a> Checker<'a> {
                     _ => merge_scopes(&then_locals, &else_locals),
                 };
             }
-            Stmt::While { cond, body } => {
+            StmtKind::While { cond, body } => {
                 self.check_expr(cond, locals, label);
                 let mut body_locals = locals.clone();
                 self.apply_narrowing(cond, &mut body_locals, true);
@@ -824,13 +827,13 @@ impl<'a> Checker<'a> {
                 // enough to avoid claiming more precision than we have.
                 *locals = merge_scopes(locals, &body_locals);
             }
-            Stmt::DoWhile { body, cond } => {
+            StmtKind::DoWhile { body, cond } => {
                 // The condition is only evaluated after the body has
                 // already run once, so there's nothing to narrow going in.
                 self.check_stmt(body, locals, declared_return, label);
                 self.check_expr(cond, locals, label);
             }
-            Stmt::For {
+            StmtKind::For {
                 init,
                 cond,
                 step,
@@ -841,7 +844,7 @@ impl<'a> Checker<'a> {
                 }
                 self.check_stmt(body, locals, declared_return, label);
             }
-            Stmt::Foreach {
+            StmtKind::Foreach {
                 subject,
                 key,
                 value,
@@ -865,7 +868,7 @@ impl<'a> Checker<'a> {
                 self.check_expr(value, locals, label);
                 self.check_stmt(body, locals, declared_return, label);
             }
-            Stmt::Switch { subject, cases } => {
+            StmtKind::Switch { subject, cases } => {
                 self.check_expr(subject, locals, label);
                 for case in cases {
                     if let Some(t) = &case.test {
@@ -874,7 +877,7 @@ impl<'a> Checker<'a> {
                     self.check_block(&case.body, locals, declared_return, label);
                 }
             }
-            Stmt::Try {
+            StmtKind::Try {
                 body,
                 catches,
                 finally,
@@ -902,17 +905,17 @@ impl<'a> Checker<'a> {
                     self.check_block(f, locals, declared_return, label);
                 }
             }
-            Stmt::Throw(e) => self.check_expr(e, locals, label),
+            StmtKind::Throw(e) => self.check_expr(e, locals, label),
             // `global $x;` binds $x to whatever the global scope holds,
             // which this checker doesn't track - Mixed is the honest
             // answer, but the important part is that it's bound at all, so
             // using it afterward isn't flagged as undefined.
-            Stmt::Global(names) => {
+            StmtKind::Global(names) => {
                 for name in names {
                     locals.entry(name.clone()).or_insert(Type::Mixed);
                 }
             }
-            Stmt::StaticVar(vars) => {
+            StmtKind::StaticVar(vars) => {
                 for (name, default) in vars {
                     if let Some(e) = default {
                         self.check_expr(e, locals, label);
@@ -934,14 +937,14 @@ impl<'a> Checker<'a> {
             // indexed into the registry (so calls to it resolve), but
             // silently exempt from every diagnostic, undefined-variable
             // detection included. Mirrors check_program's handling.
-            Stmt::FunctionDecl(f) => self.check_function(f, None, false),
-            Stmt::ClassDecl(c) => {
+            StmtKind::FunctionDecl(f) => self.check_function(f, None, false),
+            StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 for m in &c.methods {
                     self.check_function(&m.function, Some(&fqn), m.is_static);
                 }
             }
-            Stmt::EnumDecl(e) => {
+            StmtKind::EnumDecl(e) => {
                 let fqn = self.name_ctx.declared_name(&e.name);
                 for m in &e.methods {
                     self.check_function(&m.function, Some(&fqn), m.is_static);
@@ -959,8 +962,8 @@ impl<'a> Checker<'a> {
     /// = 0; ...)`'s `$j` go unbound (and then misfire as "undefined") until
     /// this was caught.
     fn bind_assignment_target(&self, lhs: &Expr, rhs: &Expr, locals: &mut HashMap<String, Type>) {
-        match lhs {
-            Expr::Variable(name) => {
+        match &lhs.kind {
+            ExprKind::Variable(name) => {
                 let ty = self.infer_expr(rhs, locals);
                 locals.insert(name.clone(), ty);
             }
@@ -969,7 +972,7 @@ impl<'a> Checker<'a> {
             // (`['name' => $n] = $shapedArray`) isn't resolved - every
             // target gets the source's homogeneous element type, or Mixed
             // for anything else.
-            Expr::ArrayLiteral(items) => {
+            ExprKind::ArrayLiteral(items) => {
                 let element_ty = match self.infer_expr(rhs, locals) {
                     Type::Array(inner) => *inner,
                     _ => Type::Mixed,
@@ -983,7 +986,7 @@ impl<'a> Checker<'a> {
     }
 
     fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut HashMap<String, Type>) {
-        if let Expr::Variable(name) = target {
+        if let ExprKind::Variable(name) = &target.kind {
             locals.insert(name.clone(), ty);
         }
     }
@@ -994,7 +997,7 @@ impl<'a> Checker<'a> {
     /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
     /// anything else leaves `locals` untouched rather than guess.
     fn apply_narrowing(&self, cond: &Expr, locals: &mut HashMap<String, Type>, branch_true: bool) {
-        match cond {
+        match &cond.kind {
             // `&&` narrows the "both true" branch by composing each side
             // in order (the right operand's own narrowing can rely on the
             // left's, same as check_expr's short-circuit-aware handling)
@@ -1002,15 +1005,15 @@ impl<'a> Checker<'a> {
             // not sure which", which isn't a narrowing this can express,
             // so it's left alone, same conservative choice `||` mirrors
             // for its own unrepresentable branch below.
-            Expr::Binary(BinOp::And, l, r) if branch_true => {
+            ExprKind::Binary(BinOp::And, l, r) if branch_true => {
                 self.apply_narrowing(l, locals, true);
                 self.apply_narrowing(r, locals, true);
             }
-            Expr::Binary(BinOp::Or, l, r) if !branch_true => {
+            ExprKind::Binary(BinOp::Or, l, r) if !branch_true => {
                 self.apply_narrowing(l, locals, false);
                 self.apply_narrowing(r, locals, false);
             }
-            Expr::Binary(op, l, r) => {
+            ExprKind::Binary(op, l, r) => {
                 let is_eq = matches!(op, BinOp::Identical | BinOp::Eq);
                 let is_neq = matches!(op, BinOp::NotIdentical | BinOp::NotEq);
                 if is_eq || is_neq {
@@ -1018,13 +1021,13 @@ impl<'a> Checker<'a> {
                     self.apply_equality_narrowing(l, r, locals, matches_when_true);
                 }
             }
-            Expr::Unary(UnaryOp::Not, inner) => {
+            ExprKind::Unary(UnaryOp::Not, inner) => {
                 self.apply_narrowing(inner, locals, !branch_true);
             }
-            Expr::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
-            Expr::Call(callee, args) => {
-                if let (Expr::Name(name), [Expr::Variable(var_name)]) =
-                    (callee.as_ref(), args.as_slice())
+            ExprKind::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
+            ExprKind::Call(callee, args) => {
+                if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
+                    && let ExprKind::Variable(var_name) = &single_arg.kind
                     && let Some(target_ty) = narrowing_type_for_predicate(name)
                 {
                     let current = locals.get(var_name).cloned().unwrap_or(Type::Mixed);
@@ -1036,7 +1039,7 @@ impl<'a> Checker<'a> {
                     locals.insert(var_name.clone(), narrowed);
                 }
             }
-            Expr::Instanceof(inner, target) => {
+            ExprKind::Instanceof(inner, target) => {
                 // The false branch would need a "not this class" type we
                 // don't have a representation for, so it's left alone. A
                 // dynamic target (`$x instanceof $className`) doesn't name
@@ -1059,9 +1062,9 @@ impl<'a> Checker<'a> {
         locals: &mut HashMap<String, Type>,
         matches_when_true: bool,
     ) {
-        let pair = match (l, r) {
-            (Expr::Variable(name), other) => Some((name.clone(), self.infer_expr(other, locals))),
-            (other, Expr::Variable(name)) => Some((name.clone(), self.infer_expr(other, locals))),
+        let pair = match (&l.kind, &r.kind) {
+            (ExprKind::Variable(name), _) => Some((name.clone(), self.infer_expr(r, locals))),
+            (_, ExprKind::Variable(name)) => Some((name.clone(), self.infer_expr(l, locals))),
             _ => None,
         };
         let Some((var_name, target_ty)) = pair else {
@@ -1080,9 +1083,9 @@ impl<'a> Checker<'a> {
     }
 
     fn check_expr(&mut self, e: &Expr, locals: &mut HashMap<String, Type>, label: &str) {
-        match e {
-            Expr::Call(callee, args) => {
-                if let Expr::Name(name) = callee.as_ref()
+        match &e.kind {
+            ExprKind::Call(callee, args) => {
+                if let ExprKind::Name(name) = &callee.kind
                     && (name == "extract" || name == "eval")
                 {
                     self.saw_dynamic_var_construct = true;
@@ -1100,9 +1103,9 @@ impl<'a> Checker<'a> {
                 // namespace-qualification - `isset`/`empty`/etc. are
                 // never real namespaced symbols, unlike an actual function
                 // call, even though the parser models both the same way.
-                let resolved_name = match callee.as_ref() {
-                    Expr::Name(name) if is_language_construct(name) => None,
-                    Expr::Name(name) => {
+                let resolved_name = match &callee.kind {
+                    ExprKind::Name(name) if is_language_construct(name) => None,
+                    ExprKind::Name(name) => {
                         let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
                         if self.registry.lookup_function(&primary).is_some() {
                             Some(primary)
@@ -1130,7 +1133,7 @@ impl<'a> Checker<'a> {
                         // Since resolve_function_candidates always
                         // produces a definite name (there's no "can't
                         // resolve" case left for functions the way
-                        // `Expr::New`'s class resolution still has for a
+                        // `ExprKind::New`'s class resolution still has for a
                         // multi-segment name with no matching import),
                         // every miss here is a real undefined-function
                         // finding.
@@ -1141,7 +1144,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Expr::MethodCall(recv, method, args) => {
+            ExprKind::MethodCall(recv, method, args) => {
                 self.check_expr(recv, locals, label);
                 // Re-enabled (Phase 9.5): the registry is now
                 // namespace-aware, so a method lookup trusts the specific
@@ -1180,7 +1183,7 @@ impl<'a> Checker<'a> {
                     {
                         // A class not known to the registry at all (an
                         // unresolvable/uninstalled dependency, the same
-                        // gap `Expr::New`'s check documents) is left
+                        // gap `ExprKind::New`'s check documents) is left
                         // unchecked rather than risking a false positive -
                         // only fires once the class itself is confirmed
                         // known. `__call` anywhere in the chain means any
@@ -1202,23 +1205,23 @@ impl<'a> Checker<'a> {
             // right side against the un-narrowed left-hand type produced
             // real false positives once undefined-property detection
             // started exercising exactly this idiom on real code.
-            Expr::Binary(BinOp::And, l, r) => {
+            ExprKind::Binary(BinOp::And, l, r) => {
                 self.check_expr(l, locals, label);
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
                 self.check_expr(r, &mut narrowed, label);
             }
-            Expr::Binary(BinOp::Or, l, r) => {
+            ExprKind::Binary(BinOp::Or, l, r) => {
                 self.check_expr(l, locals, label);
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
                 self.check_expr(r, &mut narrowed, label);
             }
-            Expr::Binary(_, l, r) => {
+            ExprKind::Binary(_, l, r) => {
                 self.check_expr(l, locals, label);
                 self.check_expr(r, locals, label);
             }
-            Expr::Variable(name) => {
+            ExprKind::Variable(name) => {
                 if !locals.contains_key(name) && !is_superglobal(name) {
                     self.diagnostics.push(Diagnostic {
                         location: label.to_string(),
@@ -1226,20 +1229,20 @@ impl<'a> Checker<'a> {
                     });
                 }
             }
-            Expr::Unary(_, inner)
-            | Expr::Grouping(inner)
-            | Expr::Cast(_, inner)
-            | Expr::Throw(inner)
-            | Expr::YieldFrom(inner) => {
+            ExprKind::Unary(_, inner)
+            | ExprKind::Grouping(inner)
+            | ExprKind::Cast(_, inner)
+            | ExprKind::Throw(inner)
+            | ExprKind::YieldFrom(inner) => {
                 self.check_expr(inner, locals, label);
             }
-            Expr::Clone(inner, overrides) => {
+            ExprKind::Clone(inner, overrides) => {
                 self.check_expr(inner, locals, label);
                 if let Some(o) = overrides {
                     self.check_expr(o, locals, label);
                 }
             }
-            Expr::Yield(key, value) => {
+            ExprKind::Yield(key, value) => {
                 if let Some(k) = key {
                     self.check_expr(k, locals, label);
                 }
@@ -1247,13 +1250,13 @@ impl<'a> Checker<'a> {
                     self.check_expr(v, locals, label);
                 }
             }
-            Expr::Instanceof(inner, target) => {
+            ExprKind::Instanceof(inner, target) => {
                 self.check_expr(inner, locals, label);
                 if let InstanceofTarget::Expr(e) = target {
                     self.check_expr(e, locals, label);
                 }
             }
-            Expr::Assign(lhs, rhs) => {
+            ExprKind::Assign(lhs, rhs) => {
                 self.check_expr(rhs, locals, label);
                 // A bare variable (or a destructuring target inside one)
                 // on the left is a definition site, not a read - checking
@@ -1262,19 +1265,19 @@ impl<'a> Checker<'a> {
                 // statement that defines it. PropertyAccess/Index targets
                 // still need their *base* checked (`$obj->prop = ...`
                 // reads $obj).
-                match lhs.as_ref() {
-                    Expr::Variable(_) => {}
-                    Expr::ArrayLiteral(items) => {
+                match &lhs.kind {
+                    ExprKind::Variable(_) => {}
+                    ExprKind::ArrayLiteral(items) => {
                         for (_, item) in items {
-                            match item {
-                                Expr::Variable(_) => {}
+                            match &item.kind {
+                                ExprKind::Variable(_) => {}
                                 // Same "definition site, not a read" logic
                                 // as the PropertyAccess arm just below -
                                 // only the base is a real read here.
-                                Expr::PropertyAccess(base, _) => {
+                                ExprKind::PropertyAccess(base, _) => {
                                     self.check_expr(base, locals, label);
                                 }
-                                other => self.check_expr(other, locals, label),
+                                _ => self.check_expr(item, locals, label),
                             }
                         }
                     }
@@ -1283,28 +1286,28 @@ impl<'a> Checker<'a> {
                     // reads $obj). Routing the full PropertyAccess through
                     // check_expr here would wrongly flag legitimate
                     // dynamic-property creation as "undefined property".
-                    Expr::PropertyAccess(base, _) => self.check_expr(base, locals, label),
-                    other => self.check_expr(other, locals, label),
+                    ExprKind::PropertyAccess(base, _) => self.check_expr(base, locals, label),
+                    _ => self.check_expr(lhs, locals, label),
                 }
                 self.check_property_assignment(lhs, rhs, locals, label);
                 self.bind_assignment_target(lhs, rhs, locals);
             }
-            Expr::CompoundAssign(op, lhs, rhs) => {
+            ExprKind::CompoundAssign(op, lhs, rhs) => {
                 self.check_expr(lhs, locals, label);
                 self.check_expr(rhs, locals, label);
-                if let Expr::Variable(name) = lhs.as_ref() {
+                if let ExprKind::Variable(name) = &lhs.kind {
                     let ty = self.infer_binary(op, lhs, rhs, locals);
                     locals.insert(name.clone(), ty);
                 }
             }
-            Expr::Ternary(cond, then_, else_) => {
+            ExprKind::Ternary(cond, then_, else_) => {
                 self.check_expr(cond, locals, label);
                 if let Some(t) = then_ {
                     self.check_expr(t, locals, label);
                 }
                 self.check_expr(else_, locals, label);
             }
-            Expr::ArrayLiteral(items) => {
+            ExprKind::ArrayLiteral(items) => {
                 for (k, v) in items {
                     if let Some(k) = k {
                         self.check_expr(k, locals, label);
@@ -1312,14 +1315,14 @@ impl<'a> Checker<'a> {
                     self.check_expr(v, locals, label);
                 }
             }
-            Expr::Index(base, idx) => {
+            ExprKind::Index(base, idx) => {
                 self.check_expr(base, locals, label);
                 if let Some(i) = idx {
                     self.check_expr(i, locals, label);
                     self.check_shape_key_access(base, i, locals, label);
                 }
             }
-            Expr::New(_, args) => {
+            ExprKind::New(_, args) => {
                 // `new Foo()` never carries known type arguments itself -
                 // real PHP's constructor syntax has no way to write
                 // `new Foo<Bar>()` at all, and inferring them from the
@@ -1366,7 +1369,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Expr::NewAnonymousClass(decl, args) => {
+            ExprKind::NewAnonymousClass(decl, args) => {
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
@@ -1378,8 +1381,8 @@ impl<'a> Checker<'a> {
                     self.check_function(&m.function, Some(&decl.name), m.is_static);
                 }
             }
-            Expr::StaticCall(class_name, method, args) => {
-                // Mirrors Expr::MethodCall's own structure exactly -
+            ExprKind::StaticCall(class_name, method, args) => {
+                // Mirrors ExprKind::MethodCall's own structure exactly -
                 // resolve first (self/parent/static-aware), predefine
                 // byref/unknown args using the real signature before
                 // checking them, then the existence/arg-type check.
@@ -1410,7 +1413,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Expr::StaticAccess(class_name, member) => {
+            ExprKind::StaticAccess(class_name, member) => {
                 // `Foo::class` (member == "class") always resolves to a
                 // real string constant, not an actual member of the
                 // class - and a fully dynamic member name (`Foo::{$e}`/
@@ -1447,8 +1450,8 @@ impl<'a> Checker<'a> {
                     });
                 }
             }
-            Expr::DynamicVariable(name_expr) => self.check_expr(name_expr, locals, label),
-            Expr::PropertyAccess(base, prop) => {
+            ExprKind::DynamicVariable(name_expr) => self.check_expr(name_expr, locals, label),
+            ExprKind::PropertyAccess(base, prop) => {
                 self.check_expr(base, locals, label);
                 // Unlike a *write* (check_property_assignment, and the
                 // Assign/ArrayLiteral-destructuring arms below that
@@ -1469,23 +1472,23 @@ impl<'a> Checker<'a> {
                     });
                 }
             }
-            Expr::DynamicPropertyAccess(base, name_expr) => {
+            ExprKind::DynamicPropertyAccess(base, name_expr) => {
                 self.check_expr(base, locals, label);
                 self.check_expr(name_expr, locals, label);
             }
-            Expr::DynamicMethodCall(recv, name_expr, args) => {
+            ExprKind::DynamicMethodCall(recv, name_expr, args) => {
                 self.check_expr(recv, locals, label);
                 self.check_expr(name_expr, locals, label);
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
             }
-            Expr::Interpolated(parts) => {
+            ExprKind::Interpolated(parts) => {
                 for p in parts {
                     self.check_expr(p, locals, label);
                 }
             }
-            Expr::Match {
+            ExprKind::Match {
                 subject,
                 arms,
                 default,
@@ -1501,7 +1504,7 @@ impl<'a> Checker<'a> {
                     self.check_expr(d, locals, label);
                 }
             }
-            Expr::Closure {
+            ExprKind::Closure {
                 params,
                 uses,
                 body,
@@ -1538,7 +1541,7 @@ impl<'a> Checker<'a> {
                     &closure_label,
                 );
             }
-            Expr::ArrowFn {
+            ExprKind::ArrowFn {
                 params,
                 body,
                 return_type,
@@ -1554,9 +1557,9 @@ impl<'a> Checker<'a> {
                 }
                 self.check_expr(body, &mut arrow_locals, label);
                 // Its body is a single implicit-return expression, not a
-                // Stmt::Return - the equivalent of check_stmt's own
+                // StmtKind::Return - the equivalent of check_stmt's own
                 // Return-vs-declared_return check, kept here since
-                // there's no Stmt::Return for it to share.
+                // there's no StmtKind::Return for it to share.
                 if return_type.is_some() {
                     let expected = self.resolve_type_hint(return_type.as_deref());
                     let actual = self.infer_expr(body, &arrow_locals);
@@ -1590,7 +1593,7 @@ impl<'a> Checker<'a> {
         locals: &mut HashMap<String, Type>,
     ) {
         for (i, arg) in args.iter().enumerate() {
-            let Expr::Variable(name) = arg else {
+            let ExprKind::Variable(name) = &arg.kind else {
                 continue;
             };
             if locals.contains_key(name) {
@@ -1618,7 +1621,7 @@ impl<'a> Checker<'a> {
         locals: &HashMap<String, Type>,
         label: &str,
     ) {
-        let Expr::PropertyAccess(base, prop) = lhs else {
+        let ExprKind::PropertyAccess(base, prop) = &lhs.kind else {
             return;
         };
         let Type::Object(class, type_args) = self.infer_expr(base, locals) else {
@@ -1728,8 +1731,8 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_expr(&self, e: &Expr, locals: &HashMap<String, Type>) -> Type {
-        match e {
-            Expr::Literal(lit) => match lit {
+        match &e.kind {
+            ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::IntLiteral(*n),
                 Literal::Float(_) => Type::Float,
                 Literal::String(s) => Type::StringLiteral(s.clone()),
@@ -1737,11 +1740,11 @@ impl<'a> Checker<'a> {
                 Literal::Bool(false) => Type::False,
                 Literal::Null => Type::Null,
             },
-            Expr::Variable(name) => locals.get(name).cloned().unwrap_or(Type::Mixed),
-            Expr::Grouping(inner) | Expr::Clone(inner, _) => self.infer_expr(inner, locals),
-            Expr::FirstClassCallable(_) => Type::Callable,
-            Expr::Closure { .. } | Expr::ArrowFn { .. } => Type::Callable,
-            Expr::Match {
+            ExprKind::Variable(name) => locals.get(name).cloned().unwrap_or(Type::Mixed),
+            ExprKind::Grouping(inner) | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
+            ExprKind::FirstClassCallable(_) => Type::Callable,
+            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => Type::Callable,
+            ExprKind::Match {
                 subject: _,
                 arms,
                 default,
@@ -1776,12 +1779,12 @@ impl<'a> Checker<'a> {
             // A throw expression never actually produces a value - Never
             // is exactly the right type for it, the same way it's used for
             // a function that always throws or exits.
-            Expr::Throw(_) => Type::Never,
+            ExprKind::Throw(_) => Type::Never,
             // Never given a stable nominal type, since multiple such
             // expressions in the same file could share the placeholder
             // name - Mixed is the honest answer, not an oversight.
-            Expr::NewAnonymousClass(..) => Type::Mixed,
-            Expr::Cast(ty, _) => match ty.as_str() {
+            ExprKind::NewAnonymousClass(..) => Type::Mixed,
+            ExprKind::Cast(ty, _) => match ty.as_str() {
                 "int" => Type::Int,
                 "float" => Type::Float,
                 "string" => Type::String,
@@ -1791,16 +1794,16 @@ impl<'a> Checker<'a> {
                 "unset" => Type::Null,
                 _ => Type::Mixed,
             },
-            Expr::Unary(UnaryOp::Not, _) => Type::Bool,
-            Expr::Unary(_, inner) => self.infer_expr(inner, locals),
-            Expr::Binary(op, l, r) => self.infer_binary(op, l, r, locals),
-            Expr::Assign(_, rhs) => self.infer_expr(rhs, locals),
+            ExprKind::Unary(UnaryOp::Not, _) => Type::Bool,
+            ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
+            ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),
+            ExprKind::Assign(_, rhs) => self.infer_expr(rhs, locals),
             // `self`/`parent`/`static` aren't lexed as keywords (see the
             // parser: they're indistinguishable from any other identifier),
-            // so a literal `Expr::Name("self")` has to be special-cased
+            // so a literal `ExprKind::Name("self")` has to be special-cased
             // here rather than showing up as an Object of that name.
-            Expr::New(class_expr, _) => match class_expr.as_ref() {
-                Expr::Name(name) => match name.as_str() {
+            ExprKind::New(class_expr, _) => match &class_expr.kind {
+                ExprKind::Name(name) => match name.as_str() {
                     "self" | "parent" | "static" => {
                         let raw = match name.as_str() {
                             "self" => Type::SelfRef,
@@ -1816,8 +1819,8 @@ impl<'a> Checker<'a> {
                 },
                 _ => Type::Mixed,
             },
-            Expr::Call(callee, args) => match callee.as_ref() {
-                Expr::Name(name) if !is_language_construct(name) => {
+            ExprKind::Call(callee, args) => match &callee.kind {
+                ExprKind::Name(name) if !is_language_construct(name) => {
                     let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
                     self.registry
                         .lookup_function(&primary)
@@ -1831,7 +1834,7 @@ impl<'a> Checker<'a> {
                 }
                 _ => Type::Mixed,
             },
-            Expr::MethodCall(recv, method, args) => match self.infer_expr(recv, locals) {
+            ExprKind::MethodCall(recv, method, args) => match self.infer_expr(recv, locals) {
                 Type::Object(class, type_args) => self
                     .registry
                     .lookup_method_with_owner(&class, method)
@@ -1851,7 +1854,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::Mixed),
                 _ => Type::Mixed,
             },
-            Expr::StaticCall(class_name, method, args) => self
+            ExprKind::StaticCall(class_name, method, args) => self
                 .resolve_static_class_name(class_name)
                 .and_then(|class| {
                     self.registry.lookup_method(&class, method).map(|sig| {
@@ -1860,7 +1863,7 @@ impl<'a> Checker<'a> {
                     })
                 })
                 .unwrap_or(Type::Mixed),
-            Expr::StaticAccess(class_name, member) => {
+            ExprKind::StaticAccess(class_name, member) => {
                 if member == "class" {
                     return Type::String;
                 }
@@ -1877,7 +1880,7 @@ impl<'a> Checker<'a> {
                     })
                     .unwrap_or(Type::Mixed)
             }
-            Expr::Ternary(_, then_, else_) => {
+            ExprKind::Ternary(_, then_, else_) => {
                 let else_ty = self.infer_expr(else_, locals);
                 match then_ {
                     Some(t) => {
@@ -1895,9 +1898,9 @@ impl<'a> Checker<'a> {
                     None => Type::Mixed,
                 }
             }
-            Expr::ArrayLiteral(_) => Type::Array(Box::new(Type::Mixed)),
-            Expr::Interpolated(_) => Type::String,
-            Expr::PropertyAccess(base, prop) => {
+            ExprKind::ArrayLiteral(_) => Type::Array(Box::new(Type::Mixed)),
+            ExprKind::Interpolated(_) => Type::String,
+            ExprKind::PropertyAccess(base, prop) => {
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
                 {
@@ -1922,7 +1925,7 @@ impl<'a> Checker<'a> {
             // possibly-missing element - consistent with this checker's
             // general preference for fewer false positives over catching
             // every possible runtime-undefined access.
-            Expr::Index(base, Some(idx)) => match self.infer_expr(base, locals) {
+            ExprKind::Index(base, Some(idx)) => match self.infer_expr(base, locals) {
                 Type::Array(inner) => *inner,
                 Type::ArrayShape(fields) => literal_string_key(idx)
                     .and_then(|key| fields.into_iter().find(|(name, _, _)| *name == key))
@@ -2005,7 +2008,7 @@ impl<'a> Checker<'a> {
 /// Real PHP language constructs that are syntactically indistinguishable
 /// from an ordinary function call in this parser (none of `isset`,
 /// `empty`, `unset`, `eval`, `exit`, `die` are lexed as keywords - see
-/// `token.rs` - so `isset($x)` parses as `Expr::Call(Name("isset"), ...)`
+/// `token.rs` - so `isset($x)` parses as `ExprKind::Call(Name("isset"), ...)`
 /// exactly like a real call). None of them are declared in any stub
 /// source (they're compiler intrinsics, not functions - a real PHP
 /// function can be called through a variable, `$f = 'isset'; $f();` is a
@@ -2059,9 +2062,9 @@ fn is_superglobal(name: &str) -> bool {
 /// non-literal index (a variable, a call, ...) returns `None`, since it
 /// can't be resolved against a shape's field names statically.
 fn literal_string_key(e: &Expr) -> Option<String> {
-    match e {
-        Expr::Literal(Literal::String(s)) => Some(s.clone()),
-        Expr::Literal(Literal::Int(n)) => Some(n.to_string()),
+    match &e.kind {
+        ExprKind::Literal(Literal::String(s)) => Some(s.clone()),
+        ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
         _ => None,
     }
 }
@@ -2110,16 +2113,16 @@ fn collect_template_params(ty: &Type, found: &mut HashSet<String>) {
 /// started actually exercising this: nikic/php-parser AST-visitor code
 /// in this project's own `tools/` does exactly this pattern.
 fn narrowing_key(e: &Expr) -> Option<String> {
-    match e {
+    match &e.kind {
         // No prefix - `locals` is keyed by bare variable name everywhere
-        // else in this checker (`Expr::Variable(name) => locals.get(name)`),
+        // else in this checker (`ExprKind::Variable(name) => locals.get(name)`),
         // and this has to produce the exact same key for a bare variable
         // to stay a drop-in replacement at the Instanceof-narrowing call
         // site. Collision-free anyway: only the PropertyAccess case below
         // ever produces a key containing `->`, which can't appear in a
         // real PHP variable name.
-        Expr::Variable(name) => Some(name.clone()),
-        Expr::PropertyAccess(base, prop) => {
+        ExprKind::Variable(name) => Some(name.clone()),
+        ExprKind::PropertyAccess(base, prop) => {
             narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
         }
         _ => None,
@@ -2235,7 +2238,7 @@ mod tests {
     use crate::registry::Registry;
 
     fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
-        let tokens = Lexer::new(src).tokenize();
+        let tokens = Lexer::new(src).tokenize_with_spans();
         let program = Parser::new(tokens).parse_program();
         let mut registry = Registry::build(&program);
         registry.merge_stubs(crate::php_stubs::generated_stubs());
@@ -3058,7 +3061,7 @@ mod tests {
 
     #[test]
     fn static_call_arguments_are_still_checked_for_undefined_variables() {
-        // Expr::StaticCall had no arm in check_expr's match at all at the
+        // ExprKind::StaticCall had no arm in check_expr's match at all at the
         // time this was written - it fell into the wildcard `_ => {}`,
         // so its argument expressions were never visited by any
         // diagnostic. StaticCall gained its own existence checking later
@@ -3156,8 +3159,8 @@ mod tests {
 
     #[test]
     fn do_while_switch_and_static_var_bodies_are_all_checked() {
-        // Coverage measurement found Stmt::DoWhile, Stmt::Switch, and
-        // Stmt::StaticVar all had zero executions anywhere in checker.rs's
+        // Coverage measurement found StmtKind::DoWhile, StmtKind::Switch, and
+        // StmtKind::StaticVar all had zero executions anywhere in checker.rs's
         // own test suite - manually verified correct via the CLI earlier
         // in this audit; this locks all three in as permanent tests.
         let do_while = diagnostics_for(
@@ -3306,7 +3309,7 @@ mod tests {
 
     #[test]
     fn while_loop_narrows_its_body_and_merges_types_correctly_after() {
-        // Same coverage-driven finding: Stmt::While had zero test coverage
+        // Same coverage-driven finding: StmtKind::While had zero test coverage
         // for both its instanceof-narrowing inside the body and its
         // post-loop merge_scopes (the loop may run zero times, so a type
         // reassigned only inside the body must come out as a union of the
@@ -3943,7 +3946,7 @@ mod tests {
 
     #[test]
     fn require_include_and_print_are_never_flagged_as_undefined() {
-        // These parse as a synthetic Expr::Call (see parser.rs's own
+        // These parse as a synthetic ExprKind::Call (see parser.rs's own
         // comment on that choice) - real language constructs, not
         // functions, so they must be exempted the same way isset/empty
         // are, or every real codebase would light up on every include.
