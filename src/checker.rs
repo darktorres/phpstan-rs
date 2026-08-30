@@ -2055,8 +2055,11 @@ impl<'a> Checker<'a> {
             // through to the generic path below, unchanged.
             "array_map" if args.len() == 2 => {
                 if let Type::Array(elem_ty) = self.infer_expr(&args[1], locals)
-                    && let Some(mapped) =
-                        self.infer_closure_return_with_param_override(&args[0], *elem_ty, locals)
+                    && let Some(mapped) = self.infer_closure_return_with_param_overrides(
+                        &args[0],
+                        &[*elem_ty],
+                        locals,
+                    )
                 {
                     return Type::Array(Box::new(mapped));
                 }
@@ -2070,27 +2073,52 @@ impl<'a> Checker<'a> {
                     return arr_ty;
                 }
             }
+            // array_reduce(array $array, callable $callback, mixed
+            // $initial = null): mixed - a fold, so the result is
+            // ultimately whatever the callback's own return type is
+            // (each call's return becomes the next call's $carry). Binds
+            // the callback's two params: $carry to $initial's own type
+            // (Null when omitted, matching real PHP's own default), $item
+            // to the array's element type.
+            "array_reduce" if args.len() == 2 || args.len() == 3 => {
+                if let Type::Array(item_ty) = self.infer_expr(&args[0], locals) {
+                    let carry_ty = args
+                        .get(2)
+                        .map(|initial| self.infer_expr(initial, locals))
+                        .unwrap_or(Type::Null);
+                    if let Some(reduced) = self.infer_closure_return_with_param_overrides(
+                        &args[1],
+                        &[carry_ty, *item_ty],
+                        locals,
+                    ) {
+                        return reduced;
+                    }
+                }
+            }
             _ => {}
         }
         self.infer_call_return_type(sig, args, locals)
     }
 
-    /// Infers a closure or arrow-fn's own return type *as if* its first
-    /// parameter were bound to `param_override`, instead of the `Mixed`
-    /// it would otherwise get standalone (a closure/arrow-fn's declared
-    /// param, with no further context, has no type unless natively
-    /// hinted) - this is what lets `array_map(fn($x) => $x * 2, $ints)`
-    /// infer a real `array<int>` return instead of `array<mixed>`. Only
-    /// the common single-non-variadic-non-by-ref-param shape is handled;
-    /// anything else safely returns `None`, falling back to the caller's
-    /// own generic (imprecise but correct) behavior. Mirrors the closure-
-    /// capture-scope construction `check_expr`'s own `ExprKind::Closure`/
+    /// Infers a closure or arrow-fn's own return type *as if* its
+    /// parameters were bound to `param_overrides` (positionally),
+    /// instead of the `Mixed` they'd otherwise get standalone (a
+    /// closure/arrow-fn's declared param, with no further context, has
+    /// no type unless natively hinted) - this is what lets
+    /// `array_map(fn($x) => $x * 2, $ints)` infer a real `array<int>`
+    /// return instead of `array<mixed>`, and `array_reduce` bind both its
+    /// callback's `$carry`/`$item` params at once. Only the common
+    /// exact-arity, non-variadic, non-by-ref shape is handled - a
+    /// mismatched param count, or any variadic/by-ref param, safely
+    /// returns `None`, falling back to the caller's own generic
+    /// (imprecise but correct) behavior. Mirrors the closure-capture-
+    /// scope construction `check_expr`'s own `ExprKind::Closure`/
     /// `ExprKind::ArrowFn` arms already do, but on this separate,
     /// read-only inference pass rather than the diagnostic-producing one.
-    fn infer_closure_return_with_param_override(
+    fn infer_closure_return_with_param_overrides(
         &self,
         callback: &Expr,
-        param_override: Type,
+        param_overrides: &[Type],
         locals: &HashMap<String, Type>,
     ) -> Option<Type> {
         match &callback.kind {
@@ -2103,14 +2131,15 @@ impl<'a> Checker<'a> {
                 if return_type.is_some() {
                     return Some(self.resolve_type_hint(return_type.as_deref()));
                 }
-                let [p] = params.as_slice() else {
-                    return None;
-                };
-                if p.variadic || p.by_ref {
+                if params.len() != param_overrides.len()
+                    || params.iter().any(|p| p.variadic || p.by_ref)
+                {
                     return None;
                 }
                 let mut arrow_locals = locals.clone();
-                arrow_locals.insert(p.name.clone(), param_override);
+                for (p, ty) in params.iter().zip(param_overrides) {
+                    arrow_locals.insert(p.name.clone(), ty.clone());
+                }
                 Some(self.infer_expr(body, &arrow_locals))
             }
             ExprKind::Closure {
@@ -2124,10 +2153,9 @@ impl<'a> Checker<'a> {
                 if return_type.is_some() {
                     return Some(self.resolve_type_hint(return_type.as_deref()));
                 }
-                let [p] = params.as_slice() else {
-                    return None;
-                };
-                if p.variadic || p.by_ref {
+                if params.len() != param_overrides.len()
+                    || params.iter().any(|p| p.variadic || p.by_ref)
+                {
                     return None;
                 }
                 let mut closure_locals: HashMap<String, Type> = HashMap::new();
@@ -2138,7 +2166,9 @@ impl<'a> Checker<'a> {
                 if !*is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
                 }
-                closure_locals.insert(p.name.clone(), param_override);
+                for (p, ty) in params.iter().zip(param_overrides) {
+                    closure_locals.insert(p.name.clone(), ty.clone());
+                }
                 // Only the common single-implicit-return-statement body
                 // shape is handled (mirrors check_shape_key_access's own
                 // "only handle the shape that actually comes up, don't
@@ -2624,23 +2654,86 @@ mod tests {
     }
 
     #[test]
-    fn array_map_and_array_filter_fall_back_safely_for_shapes_they_do_not_special_case() {
+    fn array_reduce_infers_the_callback_s_own_return_type() {
+        // The result of a fold is ultimately whatever the callback's own
+        // return type is (each call's return becomes the next call's
+        // $carry) - here that's Int, so passing it where a string is
+        // expected must be flagged, proving this isn't just Mixed.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function needsString(string $s): void {}
+            $sum = array_reduce([1, 2, 3], fn($carry, $item) => $carry + $item, 0);
+            needsInt($sum);
+            needsString($sum);
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsString"), "got: {d:?}");
+    }
+
+    #[test]
+    fn array_reduce_binds_item_to_the_array_s_own_element_type() {
+        // Returning $item directly (ignoring $carry) isolates the other
+        // half of the binding - the array's own element type, not just
+        // $initial's.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $xs */
+            function f(array $xs) {
+                $last = array_reduce($xs, fn($carry, $item) => $item, 0);
+                needsString($last);
+            }
+            function needsString(string $s): void {}
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsString"), "got: {d:?}");
+    }
+
+    #[test]
+    fn array_reduce_with_no_initial_value_binds_carry_to_null() {
+        // Real PHP defaults $initial to null when omitted - returning
+        // $carry directly (ignoring $item) isolates exactly what it was
+        // bound to; Null isn't assignable to string, so this must be
+        // flagged, proving it wasn't left as an unbound Mixed (which
+        // would silently pass any check).
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $xs */
+            function f(array $xs) {
+                $result = array_reduce($xs, fn($carry, $item) => $carry);
+                needsString($result);
+            }
+            function needsString(string $s): void {}
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsString"), "got: {d:?}");
+    }
+
+    #[test]
+    fn array_map_array_filter_and_array_reduce_fall_back_safely_for_shapes_they_do_not_special_case()
+     {
         // A non-closure callback (a variable, not introspectable), a
         // 3+-arg multi-array call, a callback with more than one param,
-        // and array_filter on an argument this checker has no specific
-        // type for (Mixed) all safely fall through to the existing,
-        // imprecise (but correct) generic behavior - no panic, no false
-        // positive. Untyped params (Mixed) throughout, deliberately, so
-        // this only exercises the fallback paths themselves, not
-        // check_args's own separate, unrelated argument-type checking.
+        // array_filter on an argument this checker has no specific type
+        // for (Mixed), and array_reduce with a callback whose arity
+        // doesn't match (carry, item) all safely fall through to the
+        // existing, imprecise (but correct) generic behavior - no panic,
+        // no false positive. Untyped params (Mixed) throughout,
+        // deliberately, so this only exercises the fallback paths
+        // themselves, not check_args's own separate, unrelated
+        // argument-type checking.
         let d = diagnostics_for(
             r#"<?php
             function f(callable $cb, array $a, array $b) {
                 $x = array_map($cb, $a);
                 $y = array_map(fn($p, $q) => $p + $q, $a, $b);
+                $z = array_reduce($a, fn($only_one_param) => $only_one_param);
             }
             function g($m) {
-                $z = array_filter($m);
+                $w = array_filter($m);
             }
         "#,
         );
