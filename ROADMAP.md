@@ -719,9 +719,25 @@ unless a user opts in. Verified against the real corpus: unfiltered
 diagnostic count unchanged (2327), with sensible progressive counts
 at each level threshold.
 
-**Not yet shipped**: strictness parameters (Stage 5's other,
-independent mechanism - PHPStan's 7-10-style progressively stricter
-union/nullable/mixed handling) and config/baseline (Stage 6).
+**Shipped - strictness parameters, completing Stage 5.**
+`registry::Registry` gained `strict_mixed_arrays: bool` (defaults to
+`false` via the existing `#[derive(Default)]`, so every one of its 10
+existing construction sites kept compiling unchanged - a plain `pub`
+field, not a constructor parameter, since it protects no invariant).
+When set, `is_assignable` stops treating an unknown array literal's
+type (`Array(Mixed)`) as freely compatible with any specific
+array/shape type - the one real "mixed handling" leniency
+`is_assignable` has purely on its own, matching real PHPStan's own
+level-9-style "be strict about values with mixed type" philosophy.
+`--check-project` gained a `--strict-mixed-arrays` flag, off by
+default. Verified end-to-end: default output is byte-identical (2327
+diagnostics), the flag surfaces 1814 additional real findings on the
+Piwigo corpus (spot-checked genuine: untyped runtime-built arrays
+returned where a specific element type or shape was declared).
+
+**Phase 11 Stage 5 is now fully DONE** (both discrete levels and
+strictness parameters shipped). **Not yet shipped**: Stage 6
+(config/baseline).
 
 ## Phase 12: Bespoke per-function/method type extensions - PLANNED
 
