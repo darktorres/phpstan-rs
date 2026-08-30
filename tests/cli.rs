@@ -126,6 +126,53 @@ fn check_project_reports_diagnostics_in_source_order_across_files() {
 }
 
 #[test]
+fn check_project_level_flag_filters_out_higher_level_diagnostics() {
+    let dir = TempDir::new("check_project_level");
+    dir.write(
+        "mixed.php",
+        r#"<?php
+            function addOne(int $x): int { return $x . "1"; }
+            function f() { return $undefinedVar; }
+        "#,
+    );
+
+    let unfiltered = bin()
+        .arg("--check-project")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
+    assert!(
+        unfiltered_stdout.contains("2 diagnostic(s)"),
+        "got: {unfiltered_stdout}"
+    );
+
+    // Level 0 is the undefined-symbol/arity family - the return-type
+    // mismatch (level 3) should be filtered out, leaving only the
+    // undefined variable.
+    let filtered = bin()
+        .arg("--check-project")
+        .arg("--level")
+        .arg("0")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let filtered_stdout = String::from_utf8_lossy(&filtered.stdout);
+    assert!(
+        filtered_stdout.contains("undefined variable"),
+        "got: {filtered_stdout}"
+    );
+    assert!(
+        !filtered_stdout.contains("return type mismatch"),
+        "got: {filtered_stdout}"
+    );
+    assert!(
+        filtered_stdout.contains("1 file(s) checked, 1 diagnostic(s)"),
+        "got: {filtered_stdout}"
+    );
+}
+
+#[test]
 fn check_project_with_no_args_prints_usage_to_stderr() {
     let output = bin().arg("--check-project").output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);

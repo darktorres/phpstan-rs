@@ -242,9 +242,46 @@ fn run_incremental_bench(args: &[String]) {
 /// plus its dependents), this is the whole-corpus semantic-diagnostics
 /// view - the tool needed to spot-check new diagnostic rules for false
 /// positives against a real codebase before trusting them.
+/// The highest level this project's own `Diagnostic::level` tagging
+/// uses (see `checker::Diagnostic`'s own doc comment) - `--level` with no
+/// flag at all means "report everything up to and including this",
+/// preserving this tool's original always-report-everything behavior
+/// rather than silently adopting real PHPStan's own stricter level-0
+/// default.
+const MAX_LEVEL: u8 = 6;
+
+/// Pulls a `--level N` option out of `args` wherever it appears (not just
+/// a fixed position - this hand-rolled parser predates a real argument-
+/// parsing crate, see Stage 6's own `clap` note), returning the level to
+/// report up to (defaulting to `MAX_LEVEL`, i.e. unfiltered) and the
+/// remaining args with both tokens removed.
+fn extract_level(args: &[String]) -> (u8, Vec<String>) {
+    let mut level = MAX_LEVEL;
+    let mut rest = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--level"
+            && let Some(n) = args.get(i + 1).and_then(|s| s.parse::<u8>().ok())
+        {
+            level = n;
+            i += 2;
+            continue;
+        }
+        rest.push(args[i].clone());
+        i += 1;
+    }
+    (level, rest)
+}
+
 fn run_check_project(args: &[String]) {
     if args.is_empty() {
-        eprintln!("usage: phpstan-rs --check-project <dir>...");
+        eprintln!("usage: phpstan-rs --check-project [--level N] <dir>...");
+        return;
+    }
+    let (level, args) = extract_level(args);
+    let args = &args[..];
+    if args.is_empty() {
+        eprintln!("usage: phpstan-rs --check-project [--level N] <dir>...");
         return;
     }
     let mut files = Vec::new();
@@ -282,7 +319,7 @@ fn run_check_project(args: &[String]) {
 
     let mut total = 0usize;
     for path in paths {
-        let diagnostics = &results[path];
+        let diagnostics = results[path].iter().filter(|d| d.level <= level);
         for d in diagnostics {
             println!(
                 "{}:{}:{}: {}: {}",

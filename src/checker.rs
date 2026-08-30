@@ -5,11 +5,31 @@ use crate::registry::{self, FunctionSig, NameContext, ParamSig, Registry};
 use crate::token::Span;
 use crate::types::{self, Type};
 
+/// Loosely mirrors real PHPStan's own rule-gating levels (0 lowest/laxest,
+/// verified against a fresh `phpstan/phpstan-src` clone's `conf/config.
+/// levelN.neon` files rather than recalled from memory): 0 for the
+/// "definitely broken" undefined-symbol/arity family (matches real
+/// PHPStan's own level-0 bucket - "unknown classes, unknown functions,
+/// unknown methods..., wrong number of arguments..., always undefined
+/// variables" - though this project doesn't implement PHPStan's own
+/// $this-only-vs-any-expression distinction for method/property checks,
+/// a real, documented simplification, not an oversight), 2 for undefined-
+/// property/array-shape-key (PHPDoc-derived structural checks, real
+/// PHPStan's `checkThisOnly: false`/`checkPhpDocMissingReturn` territory),
+/// 3 for return-type/property-type mismatches (real PHPStan's own
+/// `checkPhpDocMethodSignatures` level exactly), 5 for argument-type
+/// mismatches (real PHPStan's own `checkFunctionArgumentTypes` level
+/// exactly), and 6 for this project's own generic bound/variance checks
+/// (no direct real-PHPStan equivalent - generics are baked into its core
+/// type engine, not level-gated - placed here as this project's own
+/// "advanced, opt-in" tier, alongside real PHPStan's missing-typehints
+/// level).
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub location: String,
     pub message: String,
     pub span: Span,
+    pub level: u8,
 }
 
 /// Walks function/method bodies, inferring a best-effort type for each
@@ -465,6 +485,7 @@ impl<'a> Checker<'a> {
                                     "{class}'s @template {name} requires {bound}, got {arg}"
                                 ),
                                 span,
+                                level: 6,
                             });
                         }
                     }
@@ -619,6 +640,7 @@ impl<'a> Checker<'a> {
                 location: label.to_string(),
                 message,
                 span,
+                level: 6,
             });
         }
     }
@@ -792,6 +814,7 @@ impl<'a> Checker<'a> {
                                 "return type mismatch: expected {expected}, got {actual}"
                             ),
                             span: e.span,
+                            level: 3,
                         });
                     }
                 }
@@ -1162,6 +1185,7 @@ impl<'a> Checker<'a> {
                             location: label.to_string(),
                             message: format!("call to undefined function {name}()"),
                             span: e.span,
+                            level: 0,
                         });
                     }
                 }
@@ -1216,6 +1240,7 @@ impl<'a> Checker<'a> {
                             location: label.to_string(),
                             message: format!("call to undefined method {class}::{method}()"),
                             span: e.span,
+                            level: 0,
                         });
                     }
                 }
@@ -1250,6 +1275,7 @@ impl<'a> Checker<'a> {
                         location: label.to_string(),
                         message: format!("undefined variable ${name}"),
                         span: e.span,
+                        level: 0,
                     });
                 }
             }
@@ -1381,6 +1407,7 @@ impl<'a> Checker<'a> {
                             location: label.to_string(),
                             message: format!("instantiated class {class} not found"),
                             span: e.span,
+                            level: 0,
                         });
                     } else if let Some(sig) = ctor_sig {
                         self.check_args(
@@ -1436,6 +1463,7 @@ impl<'a> Checker<'a> {
                             location: label.to_string(),
                             message: format!("call to undefined static method {class}::{method}()"),
                             span: e.span,
+                            level: 0,
                         });
                     }
                 }
@@ -1469,6 +1497,7 @@ impl<'a> Checker<'a> {
                                 "access to undefined static property {class}::${prop_name}"
                             ),
                             span: e.span,
+                            level: 0,
                         });
                     }
                 } else if self.registry.lookup_const(&class, member).is_none() {
@@ -1476,6 +1505,7 @@ impl<'a> Checker<'a> {
                         location: label.to_string(),
                         message: format!("access to undefined constant {class}::{member}"),
                         span: e.span,
+                        level: 0,
                     });
                 }
             }
@@ -1499,6 +1529,7 @@ impl<'a> Checker<'a> {
                         location: label.to_string(),
                         message: format!("access to undefined property {class}::${prop}"),
                         span: e.span,
+                        level: 2,
                     });
                 }
             }
@@ -1600,6 +1631,7 @@ impl<'a> Checker<'a> {
                                 "return type mismatch: expected {expected}, got {actual}"
                             ),
                             span: body.span,
+                            level: 3,
                         });
                     }
                 }
@@ -1675,6 +1707,7 @@ impl<'a> Checker<'a> {
             location: label.to_string(),
             message: format!("{class}::${prop} expects {expected}, {actual} given"),
             span: rhs.span,
+            level: 3,
         });
     }
 
@@ -1705,6 +1738,7 @@ impl<'a> Checker<'a> {
             location: label.to_string(),
             message: format!("array{{...}} has no key '{key}'"),
             span: idx.span,
+            level: 2,
         });
     }
 
@@ -1732,6 +1766,7 @@ impl<'a> Checker<'a> {
                     args.len()
                 ),
                 span,
+                level: 0,
             });
         }
 
@@ -1762,6 +1797,7 @@ impl<'a> Checker<'a> {
                         arg_ty
                     ),
                     span: arg.span,
+                    level: 5,
                 });
             }
         }
@@ -2296,6 +2332,7 @@ mod tests {
         // call or the statement.
         assert_eq!(d[0].span.start, Position { line: 1, col: 14 });
         assert_eq!(d[0].span.end, Position { line: 1, col: 16 });
+        assert_eq!(d[0].level, 5);
     }
 
     #[test]
@@ -2312,6 +2349,7 @@ mod tests {
         // mismatch - points at the whole call expression instead.
         assert_eq!(d[0].span.start, Position { line: 3, col: 13 });
         assert_eq!(d[0].span.end, Position { line: 3, col: 24 });
+        assert_eq!(d[0].level, 0);
     }
 
     #[test]
@@ -2327,6 +2365,7 @@ mod tests {
         // the enclosing function declaration.
         assert_eq!(d[0].span.start, Position { line: 2, col: 51 });
         assert_eq!(d[0].span.end, Position { line: 2, col: 59 });
+        assert_eq!(d[0].level, 3);
     }
 
     #[test]
@@ -2996,6 +3035,7 @@ mod tests {
         );
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("'agee'"));
+        assert_eq!(d[0].level, 2);
     }
 
     #[test]
@@ -3450,6 +3490,7 @@ mod tests {
         // A real, non-line-1 position - the whole point of this phase.
         assert_eq!(d[0].span.start, Position { line: 3, col: 24 });
         assert_eq!(d[0].span.end, Position { line: 3, col: 37 });
+        assert_eq!(d[0].level, 0);
     }
 
     #[test]
