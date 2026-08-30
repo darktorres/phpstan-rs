@@ -1100,6 +1100,33 @@ mod tests {
     }
 
     #[test]
+    fn a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced() {
+        // Real, previously-live bug found via real code in this
+        // project's own verification corpus (a `Doctrine\ORM\QueryBuilder`
+        // union member written as `\Doctrine\ORM\QueryBuilder`, i.e.
+        // "absolute, from the global namespace" - real PHP syntax): the
+        // leading `\` used to be stripped before `resolve_names_in_type`
+        // ever saw it (inside `types::parse_type_atom`, purely as part of
+        // computing a bare name for keyword matching), losing the "already
+        // fully qualified, don't touch" signal - every absolute reference
+        // containing a `\` then got silently mis-qualified as if it were
+        // namespace-relative (`App\Doctrine\ORM\QueryBuilder` instead of
+        // the real `Doctrine\ORM\QueryBuilder`).
+        let r = build_registry(
+            r#"<?php
+            namespace App;
+            class Foo {
+                public function bar(\Doctrine\ORM\QueryBuilder $qb): void {}
+            }"#,
+        );
+        let sig = r.lookup_method("App\\Foo", "bar").unwrap();
+        assert_eq!(
+            sig.params[0].ty,
+            Type::Object("Doctrine\\ORM\\QueryBuilder".to_string(), Vec::new())
+        );
+    }
+
+    #[test]
     fn class_consts_are_registered_and_typed_from_their_literal_value() {
         let r = build_registry(
             r#"<?php

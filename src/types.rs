@@ -260,7 +260,8 @@ fn parse_type_atom(s: &str) -> Type {
     }
 
     let (base, generic_args) = split_generic_args(s);
-    let bare = base.trim().trim_start_matches('\\');
+    let original = base.trim();
+    let bare = original.trim_start_matches('\\');
     let mut ty = if bare.contains("::") {
         // A class-constant-reference type (`self::RFC_*`, `Foo::BAR`,
         // PHPStan's own wildcard-constant convention) isn't a class name
@@ -276,7 +277,7 @@ fn parse_type_atom(s: &str) -> Type {
         // `Monolog\Handler\self::RFC*`.
         Type::Mixed
     } else {
-        parse_type_keyword_or_class(bare, &generic_args)
+        parse_type_keyword_or_class(bare, original, &generic_args)
     };
     for _ in 0..array_depth {
         ty = Type::Array(Box::new(ty));
@@ -284,7 +285,20 @@ fn parse_type_atom(s: &str) -> Type {
     ty
 }
 
-fn parse_type_keyword_or_class(bare: &str, generic_args: &[&str]) -> Type {
+/// `bare` (backslash-stripped) drives keyword matching; `original`
+/// (backslash-preserved) is what the class-name fallback arm actually
+/// constructs its `Type::Object` from - a leading `\` means "already
+/// fully qualified from the global namespace," a real, meaningful
+/// distinction `registry::NameContext::resolve` needs to see later (its
+/// own first check is exactly `strip_prefix('\\')`) to know not to
+/// re-qualify it against the current file's namespace. A real bug this
+/// fixed: stripping the backslash *before* it ever reached `resolve`
+/// made every absolute native type hint containing a `\` (e.g.
+/// `QueryBuilder|\Doctrine\ORM\QueryBuilder`) look identical to a
+/// relative one, silently mis-qualifying it as
+/// `CurrentNamespace\Doctrine\ORM\QueryBuilder` - found via real code in
+/// this project's own verification corpus.
+fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]) -> Type {
     match bare.to_ascii_lowercase().as_str() {
         // `positive-int`/`negative-int`/`non-zero-int`/`non-negative-int`/
         // `non-positive-int` are real, widely-used PHPStan-ecosystem
@@ -361,7 +375,7 @@ fn parse_type_keyword_or_class(bare: &str, generic_args: &[&str]) -> Type {
         // on a class that does declare `@template` - `TemplateParam`
         // substitution treats an unbound parameter as `Mixed` either way.
         _ => Type::Object(
-            bare.to_string(),
+            original.to_string(),
             generic_args.iter().map(|a| parse_type_string(a)).collect(),
         ),
     }
@@ -498,10 +512,20 @@ mod tests {
     }
 
     #[test]
-    fn leading_backslash_is_stripped() {
+    fn a_leading_backslash_is_preserved_by_the_bare_parser() {
+        // parse_type_string alone has no namespace context - it's not
+        // this layer's job to decide what an absolute reference resolves
+        // to, only to preserve the fact that it *is* absolute for
+        // registry::resolve_names_in_type to act on later. Stripping the
+        // backslash here (the old, buggy behavior this test used to
+        // assert) permanently lost that distinction before namespace
+        // resolution ever ran, silently mis-qualifying every absolute
+        // reference as if it were relative - see
+        // registry.rs's own `a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced`
+        // for the real, end-to-end regression this caused.
         assert_eq!(
             parse_type_string("\\App\\Foo"),
-            Type::Object("App\\Foo".to_string(), Vec::new())
+            Type::Object("\\App\\Foo".to_string(), Vec::new())
         );
     }
 
