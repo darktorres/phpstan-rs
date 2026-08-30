@@ -508,13 +508,19 @@ plus four "shape marker" types (`HasMethodType`/`HasOffsetType`/
 `HasOffsetValueType`/`HasPropertyType` - used internally to represent
 "this generic template type is known to have at least this member",
 not really a user-facing refinement) and the shared `AccessoryType`
-base. Today, Phase 9.5/10 alias every one of the string/int/array
-refinement *names* (`non-empty-string`, `positive-int`, ...) straight
-to their unrefined base type (`string`/`int`/`array`) - correct as a
-fallback, but a `non-empty-string`-typed value flowing back out of a
-function is then indistinguishable from a plain `string`, so e.g.
-passing it somewhere that specifically demands non-empty content
-isn't checked.
+base. Today, Phase 9.5/10 alias every one of the string/array
+refinement *names* this `Accessory/` directory actually covers
+(`non-empty-string`, `non-empty-array`, ...) straight to their
+unrefined base type (`string`/`array`) - correct as a fallback, but a
+`non-empty-string`-typed value flowing back out of a function is then
+indistinguishable from a plain `string`, so e.g. passing it somewhere
+that specifically demands non-empty content isn't checked. (`positive-int`/
+`negative-int` are a different real PHPStan mechanism entirely -
+`Type/IntegerRangeType.php`, a real min/max-bounded type, not an
+`Accessory/` intersection marker - confirmed against the same clone;
+an earlier draft of this section conflated the two. Worth its own,
+separate future phase if this project ever wants real integer-range
+precision; out of scope for this one.)
 
 This is real PHPStan's own `Intersection`-with-an-accessory-marker
 design (a `non-empty-string` is modeled as `string&AccessoryNonEmptyStringType`
@@ -572,14 +578,15 @@ file names rather than assumed from the category label alone:
 
 ## Phase 16: CI-friendly output formats - SKETCHED, NOT STARTED
 
-Real PHPStan ships 11 formatters under `src/Command/ErrorFormatter/`
-(confirmed 2026-08-30): `Table` (its own default), `Json`, `Raw`,
-`Checkstyle`, `Junit`, `Github`, `Gitlab`, `Teamcity`, `CiDetected`
-(auto-picks Github/Gitlab/Teamcity from environment variables), plus
-two baseline-*writers* (`BaselineNeon`/`BaselinePhp`) that aren't
-really output formats at all - they generate a suppression file, a
-different feature (Phase 11's own baseline-mechanism bullet already
-names this). Realistic starting subset for this project: `json` (the
+Real PHPStan's `src/Command/ErrorFormatter/` holds 11 concrete classes
+(confirmed 2026-08-30) - 9 of them genuine output formats: `Table` (its
+own default), `Json`, `Raw`, `Checkstyle`, `Junit`, `Github`, `Gitlab`,
+`Teamcity`, `CiDetected` (auto-picks Github/Gitlab/Teamcity from
+environment variables). The other 2 (`BaselineNeon`/`BaselinePhp`)
+aren't output formats at all despite living in the same directory -
+they generate a suppression file, a different feature (Phase 11's own
+baseline-mechanism bullet already names this). Realistic starting
+subset for this project, from the 9: `json` (the
 most universally consumable) and `checkstyle` or `junit` (the two real
 CI systems most commonly wire up directly) - needs Phase 11's real
 source positions to be genuinely useful, since every format beyond
@@ -635,7 +642,7 @@ close - the two are labeled separately below so "not done yet" and
 | `for`/`foreach`/`switch`/`try` share one unforked, unnarrowed scope | 13 |
 | Array-literal element types not tracked (`Array(Mixed)` always) | 13 |
 | Integer division and PHP 8.5's pipe operator (`BinOp::Div`/`Pipe`) always infer `Mixed` | 13 |
-| Refinement/accessory types (`non-empty-string`, `positive-int`, ...) aliased to their base type, not tracked precisely | 14 |
+| Refinement/accessory types (`non-empty-string`, `non-empty-array`, ...) aliased to their base type, not tracked precisely | 14 |
 | Broader rule catalog (`DeadCode`, `Comparison`/exhaustiveness, `Exceptions`, visibility/abstract-method completeness) | 15 |
 | No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
 | No LSP hover/go-to-definition | 17 |
