@@ -30,6 +30,27 @@ fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
         .unwrap_or(Type::Mixed)
 }
 
+/// A class constant's value is almost always a literal in real code - this
+/// covers the common cases the same way `checker.rs`'s own literal
+/// inference does, without pulling in the full expression-inference engine
+/// (which lives in `checker.rs` and depends on `Registry` itself, so it
+/// can't be called from here). Anything more complex than a bare literal
+/// (an array, a concatenation, another constant) falls back to `Mixed` -
+/// undefined-constant detection only needs the name to be known, not a
+/// precise type.
+fn infer_const_type(value: &crate::ast::Expr) -> Type {
+    use crate::ast::{Expr, Literal};
+    match value {
+        Expr::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
+        Expr::Literal(Literal::Float(_)) => Type::Float,
+        Expr::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
+        Expr::Literal(Literal::Bool(true)) => Type::True,
+        Expr::Literal(Literal::Bool(false)) => Type::False,
+        Expr::Literal(Literal::Null) => Type::Null,
+        _ => Type::Mixed,
+    }
+}
+
 /// Rewrites every `Object(name)` in a type tree whose name is one of this
 /// function's own declared `@template` parameters into `TemplateParam(name)`.
 /// `parse_type_string` has no way to know "T" is a template rather than an
@@ -109,6 +130,7 @@ pub struct ClassInfo {
     pub implements: Vec<String>,
     pub methods: HashMap<String, FunctionSig>,
     pub properties: HashMap<String, PropertySig>,
+    pub consts: HashMap<String, Type>,
     pub uses: Vec<String>,
 }
 
@@ -162,11 +184,18 @@ impl ClassInfo {
             }
         }
 
+        let consts = c
+            .consts
+            .iter()
+            .map(|cc| (cc.name.clone(), infer_const_type(&cc.value)))
+            .collect();
+
         ClassInfo {
             extends: c.extends.clone(),
             implements: c.implements.clone(),
             methods,
             properties,
+            consts,
             uses: c.uses.clone(),
         }
     }
@@ -184,11 +213,18 @@ impl ClassInfo {
             .iter()
             .map(|m| (m.function.name.clone(), FunctionSig::from_decl(&m.function)))
             .collect();
+        let consts = e
+            .consts
+            .iter()
+            .map(|cc| (cc.name.clone(), infer_const_type(&cc.value)))
+            .collect();
+
         ClassInfo {
             extends: Vec::new(),
             implements: e.implements.clone(),
             methods,
             properties: HashMap::new(),
+            consts,
             uses: e.uses.clone(),
         }
     }
@@ -318,6 +354,16 @@ impl Registry {
         }
     }
 
+    /// Same "user-defined wins" rule as `merge_stubs`, for classes -
+    /// without this, built-in classes (`Exception`, `ArrayObject`, ...)
+    /// would never be known to the registry at all, since stub sources
+    /// were previously only mined for function signatures.
+    pub fn merge_stub_classes<S: Into<String>>(&mut self, stubs: Vec<(S, ClassInfo)>) {
+        for (name, info) in stubs {
+            self.classes.entry(name.into()).or_insert(info);
+        }
+    }
+
     /// Does `class` derive from or implement `of`, directly or transitively?
     /// Walks `extends` and `implements` together as one graph, which also
     /// covers an interface extending several other interfaces.
@@ -379,6 +425,23 @@ impl Registry {
         }
     }
 
+    /// Looks up a class constant, walking up the extends chain if not
+    /// declared directly on `class` - mirrors `lookup_property`.
+    pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&Type> {
+        let mut current = class;
+        let mut seen = HashSet::new();
+        loop {
+            if !seen.insert(current.to_string()) {
+                return None;
+            }
+            let info = self.classes.get(current)?;
+            if let Some(ty) = info.consts.get(const_name) {
+                return Some(ty);
+            }
+            current = info.extends.first()?;
+        }
+    }
+
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionSig> {
         self.functions.get(name)
     }
@@ -426,6 +489,51 @@ mod tests {
         let tokens = Lexer::new(src).tokenize();
         let program = Parser::new(tokens).parse_program();
         Registry::build(&program)
+    }
+
+    #[test]
+    fn class_consts_are_registered_and_typed_from_their_literal_value() {
+        let r = build_registry(
+            r#"<?php
+            class Config {
+                const NAME = "app";
+                const MAX = 10;
+            }"#,
+        );
+        assert_eq!(
+            r.lookup_const("Config", "NAME"),
+            Some(&Type::StringLiteral("app".to_string()))
+        );
+        assert_eq!(r.lookup_const("Config", "MAX"), Some(&Type::IntLiteral(10)));
+        assert_eq!(r.lookup_const("Config", "MISSING"), None);
+    }
+
+    #[test]
+    fn class_consts_are_inherited_through_extends() {
+        let r = build_registry(
+            r#"<?php
+            class Base { const KIND = "base"; }
+            class Derived extends Base {}"#,
+        );
+        assert_eq!(
+            r.lookup_const("Derived", "KIND"),
+            Some(&Type::StringLiteral("base".to_string()))
+        );
+    }
+
+    #[test]
+    fn enum_consts_are_registered_too() {
+        let r = build_registry(
+            r#"<?php
+            enum Suit {
+                case Hearts;
+                const KIND = "hearts";
+            }"#,
+        );
+        assert_eq!(
+            r.lookup_const("Suit", "KIND"),
+            Some(&Type::StringLiteral("hearts".to_string()))
+        );
     }
 
     #[test]

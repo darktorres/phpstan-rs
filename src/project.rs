@@ -51,6 +51,7 @@ impl Project {
     pub fn new() -> Self {
         let mut registry = Registry::default();
         registry.merge_stubs(php_stubs::generated_stubs());
+        registry.merge_stub_classes(php_stubs::generated_stub_classes());
         registry.merge_stubs(stubs::builtin_stubs());
         Project {
             files: HashMap::new(),

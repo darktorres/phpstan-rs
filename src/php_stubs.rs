@@ -30,7 +30,7 @@
 
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::registry::{FunctionSig, Registry};
+use crate::registry::{ClassInfo, FunctionSig, Registry};
 
 include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 
@@ -64,6 +64,34 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
     result
 }
 
+/// Parses one stub file's source into `(name, ClassInfo)` pairs for every
+/// class/interface/enum it declares - undefined-class detection (Phase 9)
+/// needs built-in classes to actually be known, the same way
+/// undefined-function detection needs `generated_stubs`' functions to be
+/// known; without this, every reference to a built-in like `Exception` or
+/// `ArrayObject` would look undefined.
+pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
+    let tokens = Lexer::new(source).tokenize();
+    let program = Parser::new(tokens).parse_program();
+    let registry = Registry::build(&program);
+    registry.classes.into_iter().collect()
+}
+
+/// All classes generated from the vendored phpstorm-stubs sources, merged
+/// (first occurrence wins - see `generated_stubs`' equivalent note).
+pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    for source in PHPSTORM_STUBS_SOURCES {
+        for (name, info) in generate_classes_from_source(source) {
+            if seen.insert(name.clone()) {
+                result.push((name, info));
+            }
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,6 +111,17 @@ mod tests {
         let stubs = generated_stubs();
         assert!(stubs.iter().any(|(name, _)| name == "json_encode"));
         assert!(stubs.iter().any(|(name, _)| name == "json_decode"));
+    }
+
+    #[test]
+    fn generated_stub_classes_cover_real_built_in_classes() {
+        let classes = generated_stub_classes();
+        let names: std::collections::HashSet<&str> =
+            classes.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains("Exception"));
+        assert!(names.contains("ArrayObject"));
+        assert!(names.contains("PDO"));
+        assert!(classes.len() > 100);
     }
 
     #[test]
