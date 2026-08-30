@@ -375,6 +375,20 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Resolves `self`/`static`/`parent` to a concrete class - recurses
+    /// into `Union`/`Intersection`/`Array`/`ArrayShape` the same way
+    /// `types::substitute_template` does, not just the bare top-level
+    /// case. A real, previously-live gap this found: the extremely
+    /// common nullable-self return type (`?self`/`self|null`, e.g.
+    /// `tryFromArray`-style factory methods) never resolved at all
+    /// before this - only a *bare* `self` return type ever reached the
+    /// `SelfRef` arm directly, so `self` wrapped in *any* union stayed
+    /// unresolved, and `is_assignable`/`is_subtype` have no arm at all
+    /// for a concrete class instance satisfying a still-unresolved
+    /// `SelfRef` (only the reverse direction, `self` satisfying a
+    /// concrete class, is handled) - a real return-type mismatch was
+    /// reported on entirely correct code returning `new self(...)` or
+    /// `null` from a `?self`-typed method.
     fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
         match ty {
             Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string(), Vec::new()),
@@ -385,6 +399,25 @@ impl<'a> Checker<'a> {
                 .and_then(|info| info.extends.first())
                 .map(|p| Type::Object(p.clone(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
+            Type::Array(inner) => Type::Array(Box::new(self.resolve_pseudo(inner, defining_class))),
+            Type::Union(members) => Type::Union(
+                members
+                    .iter()
+                    .map(|m| self.resolve_pseudo(m, defining_class))
+                    .collect(),
+            ),
+            Type::Intersection(members) => Type::Intersection(
+                members
+                    .iter()
+                    .map(|m| self.resolve_pseudo(m, defining_class))
+                    .collect(),
+            ),
+            Type::ArrayShape(fields) => Type::ArrayShape(
+                fields
+                    .iter()
+                    .map(|(k, t, opt)| (k.clone(), self.resolve_pseudo(t, defining_class), *opt))
+                    .collect(),
+            ),
             _ => ty.clone(),
         }
     }
@@ -3143,6 +3176,31 @@ mod tests {
             class UserRepository {
                 public static function make(): self {
                     return new UserRepository();
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn nullable_self_return_type_is_resolved_the_same_way_a_bare_self_is() {
+        // Real, previously-live bug found via real code in this
+        // project's own verification corpus: resolve_pseudo only ever
+        // handled a *bare* self/static/parent, never one wrapped in a
+        // Union - the extremely common `?self`/`self|null` factory-
+        // method return type (real example: a `tryFromArray`-style
+        // static constructor) stayed unresolved as a bare `SelfRef`,
+        // which is_assignable/is_subtype have no arm to accept a
+        // concrete class instance against.
+        let d = diagnostics_for(
+            r#"<?php
+            class Widget {
+                public static function tryFromArray(array $data): ?self {
+                    if (!isset($data['id'])) {
+                        return null;
+                    }
+                    return new self();
                 }
             }
         "#,
