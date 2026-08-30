@@ -941,6 +941,74 @@ guess from PHPStan's own list:
 
 ## Phase 13: Narrowing precision and remaining false-positive causes - PLANNED
 
+**Three real, independent bugs found and fixed via a direct audit,
+2026-08-30** (user question: "what is the current count of findings
+over the corpus?", followed by cross-checking `src/`-only findings
+against the full corpus for a codebase expected to read as clean).
+All three were namespace/pseudo-type resolution bugs that had been
+silently live for an unknown stretch of this project's history, each
+found by spot-checking one suspicious-looking diagnostic message
+rather than guessing:
+1. A native type hint's leading `\` (PHP's own "already fully
+   qualified" marker, e.g. `\Doctrine\ORM\QueryBuilder`) was stripped
+   by `types::parse_type_atom` before `registry::resolve_names_in_type`
+   ever saw it, silently re-qualifying every such reference against
+   the current file's own namespace. Full-corpus diagnostic count
+   dropped 48243 → 44716 fixing this alone. Commit `9a28d50`.
+2. A quoted PHPDoc literal-string type (`'ASC'|'DESC'`, a real,
+   documented PHPStan/Psalm convention) wasn't recognized at all -
+   the quotes became part of a literal "class name," then got
+   namespace-qualified into nonsense (`Piwigo\Db\'ASC'`). Dropped the
+   count a further 44716 → 44525. Commit `ba48ba8`.
+3. `checker::resolve_pseudo` only resolved a *bare* `self`/`static`/
+   `parent`, never one wrapped in a `Union` - the common
+   `?self`/`self|null` factory-method return type (e.g.
+   `tryFromArray`-style static constructors) never resolved `self` at
+   all, and `is_assignable`/`is_subtype` have no arm accepting a
+   concrete class instance against a still-unresolved `SelfRef`.
+   Dropped the count a further 44525 → 44353. Commit `c941d14`.
+
+Real Piwigo `src/`'s own diagnostic count dropped 2327 → 2270 across
+these three fixes. **Two more things surfaced by this same audit,
+tracked here rather than fixed on the spot:**
+
+- **Ternary conditions don't narrow their own branches.** `infer_expr`'s
+  `ExprKind::Ternary` arm infers `then_`/`else_` against the same,
+  un-narrowed `locals` the ternary itself sees - unlike `if`/`while`,
+  which fork narrowed scopes via `apply_narrowing`. Real, live
+  consequence: `is_string($x) ? $x : 'default'`'s `then` branch still
+  sees `$x`'s wider, un-narrowed type (confirmed via a real call site,
+  `BatchManagerUnitPageRenderer.php`'s `strip_tags(is_string(...) ? ...
+  : '')`), contributing to some of the remaining `string, null|...`
+  argument-type-mismatch noise. Fits this phase's existing
+  "property-chain narrowing" item conceptually (both are `apply_narrowing`
+  coverage gaps), but is a distinct code path (ternary *inference*, not
+  `if`/`while` condition narrowing) needing its own fix.
+- **A batch of `src/`-level findings audited only at the pattern level,
+  not individually verified yet**: `explode`/`substr`/`strtotime`/
+  `strip_tags`/`strrpos`-style `string, string|false` or `string,
+  string|null` mismatches (dozens of occurrences each - possibly more
+  stub-arity/version gaps in the Phase 8.5 family, possibly the
+  ternary-narrowing gap above, possibly genuine), `count()` argument
+  type mismatches against `array|Countable`, and several
+  `__construct()`/setter-style argument-type mismatches
+  (`CLASS::css()`, `CLASS::from()`) whose "expects X, got Y" shape
+  looks plausible but hasn't been traced to a specific root cause. Real
+  next step: sample and trace each pattern the same way the three
+  fixed bugs above were found, not guess at a fix.
+- **Separately, a real CLI/UX gap noticed during this same
+  conversation**: `check-project` has no way to load `vendor/` for
+  type-resolution context while only *reporting* diagnostics for
+  `src/` - passing both directories analyzes and reports on both,
+  producing tens of thousands of vendor-code diagnostics nobody wants.
+  Real PHPStan solves this via its own `paths:` config (what to
+  analyze) versus the Composer autoloader (used only for type
+  information, not analyzed itself) - this project would need an
+  equivalent "load for context, don't report" path split, not full
+  Composer-autoloader parsing. Not yet scoped into a specific stage;
+  candidate for Phase 16 (CI-friendly output) or its own small addition
+  to Stage 6-style CLI work.
+
 Grouped together because all of them are the same shape of problem:
 the checker's flow analysis and inference are coarser than they could
 be, in ways that either produce a real false positive on real code
