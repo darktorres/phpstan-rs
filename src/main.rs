@@ -101,13 +101,21 @@ fn run_check(paths: &[String]) {
 fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
     let mut failures = Vec::new();
     for path in chunk {
-        let source = match fs::read_to_string(path) {
-            Ok(s) => s,
+        // PHP source isn't required to be UTF-8 - identifiers and string
+        // literals are just opaque byte sequences to the real engine, so
+        // e.g. a class literally named a single Latin-1 byte (real,
+        // observed in the wild: symfony/cache's ValueWrapper.php) is valid
+        // PHP. read_to_string's strict UTF-8 requirement would reject such
+        // a file outright; a lossy conversion parses it instead, at the
+        // cost of that one identifier's exact byte content.
+        let bytes = match fs::read(path) {
+            Ok(b) => b,
             Err(e) => {
                 failures.push((path.clone(), format!("read error: {e}")));
                 continue;
             }
         };
+        let source = String::from_utf8_lossy(&bytes).into_owned();
         let result = std::panic::catch_unwind(|| {
             let tokens = Lexer::new(&source).tokenize();
             Parser::new(tokens).parse_program();
@@ -146,7 +154,10 @@ fn main() {
     }
 
     let source = if let Some(path) = args.get(1) {
-        fs::read_to_string(path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"))
+        // See check_chunk's comment on why this is a lossy conversion, not
+        // a strict one.
+        let bytes = fs::read(path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"));
+        String::from_utf8_lossy(&bytes).into_owned()
     } else {
         println!("(no file given, parsing built-in sample)\n");
         SAMPLE.to_string()
