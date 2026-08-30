@@ -663,9 +663,23 @@ no reappearance of the O(n²) bug found in the lexer stage - purely
 additive, zero behavior change, since nothing downstream reads the new
 spans yet.
 
-**Not yet shipped**: `checker::Diagnostic` gaining a real span (and
-the ~16 diagnostic-construction sites picking the most specific span
-available), and CLI/LSP output actually using them - the phase's whole
+**Shipped - diagnostics carry real spans.** `checker::Diagnostic`
+gained a `span: Span` field. Most of the 16 push sites got it for free
+from the `Expr`/`Stmt` already in scope - each pointing at the most
+specific offending sub-expression (e.g. the mismatched argument
+itself, not the whole call). `check_generic_bounds`/
+`check_class_generic_bounds`/`check_variance`/`check_args`'s
+arity-mismatch check each needed an explicit `span` parameter threaded
+in from their caller, since none of them has a single `Expr`/`Stmt`
+representing the construct being diagnosed. Verified with hand-checked
+span assertions on 4 existing checker tests (argument-type mismatch,
+arity mismatch, return-type mismatch, undefined variable) and against
+the real corpus: the 1492-file `src/` subset still parses 1492/1492
+with the identical 2327-diagnostic count, full 20286-file corpus
+unaffected.
+
+**Not yet shipped**: CLI/LSP output actually using the new spans (and
+sorting diagnostics by position before reporting) - the phase's whole
 user-visible payoff (real editor positions instead of everything
 anchored at line 1) - plus the level system and config/baseline, both
 independent of positions.
