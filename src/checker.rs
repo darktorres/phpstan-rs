@@ -547,6 +547,29 @@ impl<'a> Checker<'a> {
                     locals.insert(name.clone(), ty);
                 }
             }
+            // `check_program`'s own top-level loop already handles a
+            // top-level FunctionDecl/ClassDecl/EnumDecl by checking its
+            // body - but any of the same three declared *nested* inside a
+            // block (the extremely common `if (!function_exists('foo')) {
+            // function foo() {} }` polyfill idiom, or a class conditionally
+            // declared inside an if) used to fall into the wildcard arm
+            // below and never got its own body checked at all - it was
+            // indexed into the registry (so calls to it resolve), but
+            // silently exempt from every diagnostic, undefined-variable
+            // detection included. Mirrors check_program's handling.
+            Stmt::FunctionDecl(f) => self.check_function(f, None),
+            Stmt::ClassDecl(c) => {
+                let fqn = self.name_ctx.declared_name(&c.name);
+                for m in &c.methods {
+                    self.check_function(&m.function, Some(&fqn));
+                }
+            }
+            Stmt::EnumDecl(e) => {
+                let fqn = self.name_ctx.declared_name(&e.name);
+                for m in &e.methods {
+                    self.check_function(&m.function, Some(&fqn));
+                }
+            }
             _ => {}
         }
     }
@@ -2114,6 +2137,32 @@ mod tests {
             }
             function f() {
                 Foo::bar($undefinedVar);
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("undefined variable")),
+            "expected an undefined-variable diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn nested_function_declared_inside_an_if_still_gets_its_body_checked() {
+        // The extremely common `if (!function_exists('foo')) { function
+        // foo() {} }` polyfill idiom (every symfony/polyfill-* package)
+        // nests a real FunctionDecl inside a block. check_program's own
+        // top-level loop only handles FunctionDecl/ClassDecl/EnumDecl at
+        // strictly top-level - Registry::index already recurses into
+        // if-bodies to find and index these (so calls to them resolve),
+        // but check_stmt itself had no arm for the three declaration
+        // kinds at all, so a nested one's own body was invisible to every
+        // diagnostic, undefined-variable detection included.
+        let d = diagnostics_for(
+            r#"<?php
+            if (!function_exists('foo')) {
+                function foo() {
+                    return $undefinedVar;
+                }
             }
         "#,
         );
