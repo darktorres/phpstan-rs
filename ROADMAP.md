@@ -867,11 +867,41 @@ guess from PHPStan's own list:
    different flavor of regex (no backreferences, different syntax
    edge cases) that would silently produce wrong answers on real PCRE
    patterns.
-3. **`sprintf`/`printf`/`vsprintf`** - validate placeholder count/type
-   against the format string's own literal content when it's a
-   compile-time-known string literal (mirrors this project's own
-   `check_shape_key_access`'s "only fires on a literal, never a
-   dynamic value" precedent).
+3. **`sprintf`/`printf` - DONE** (`vsprintf`/`vprintf` remain out of
+   scope - their arguments come from a runtime array, not enumerable
+   variadic args, so there's nothing to statically compare against).
+   New `checker::check_format_string_call`, wired into `check_expr`'s
+   `Call` handling: validates a literal format string's placeholders
+   against the arguments actually passed, two deliberately narrow
+   checks to avoid false positives - too few arguments for the
+   placeholders present (real PHP throws `ValueError` for this,
+   unambiguous; "too many" is never flagged, since real `sprintf` just
+   ignores extras), and an argument whose type couldn't possibly
+   satisfy its specifier (an array for any specifier, or an object for
+   a numeric one - never an object against `%s`, since PHP casts via
+   `__toString`, extremely common and legitimate). `parse_format_specifiers`
+   bails safely (no check at all) on anything it doesn't confidently
+   understand: a positional specifier (`%1$s`), a dynamic (non-literal)
+   format string, or an unrecognized specifier character - mirrors
+   `check_shape_key_access`'s own "only a literal, never a dynamic
+   value" precedent. **Found and fixed two real, independent bugs**
+   verifying this against the *full* real corpus (`--check-project`
+   over the entire corpus including `vendor/`, not just first-party
+   `src/` - the first time this specific, expensive combination had
+   been run this session): a real, previously-unguarded panic in
+   `array_filter`'s own Phase 12 item 1 special case (indexed `args[0]`
+   without checking `args` wasn't empty - a syntactically valid but
+   semantically invalid 0-arg call parses fine and crashed the
+   checker), and `non-negative-int` (a real, common PHPStan-ecosystem
+   int-refinement pseudo-type, confirmed live in
+   `sebastianbergmann/php-code-coverage`) missing from
+   `types::parse_type_keyword_or_class`'s recognized list entirely,
+   resolving as a bogus namespace-qualified `Object` instead of `Int` -
+   invisible until this new check's `%d`-vs-argument-type comparison
+   surfaced it as ~19 false positives. Fixing the pseudo-type gap alone
+   dropped the full corpus's total diagnostic count 48496 → 48243,
+   since the bogus `Object` type was quietly causing other, unrelated
+   false positives too.
 4. ~~**`array_keys`/`mt_rand`**~~ - fixed by Phase 8.5, not a Phase 12
    item after all: both were confirmed-live false positives from a
    stub-generation gap, not functions actually needing a bespoke
