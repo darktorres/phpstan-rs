@@ -424,7 +424,8 @@ impl ClassInfo {
         // Enums can't be generic in real PHP (no `@template` on an enum
         // means anything), so there's no enclosing-class template list to
         // pass down here, unlike ClassInfo::from_decl.
-        let methods = e
+        let fqn = ctx.declared_name(&e.name);
+        let mut methods: HashMap<String, FunctionSig> = e
             .methods
             .iter()
             .map(|m| {
@@ -434,6 +435,46 @@ impl ClassInfo {
                 )
             })
             .collect();
+        // `cases(): array` is a real, built-in static method every enum
+        // gets from the language itself (`UnitEnum`), and a backed
+        // enum's `from(int|string $value): static` /
+        // `tryFrom(...): ?static` (`BackedEnum`) likewise - none
+        // declared in source. Found the hard way, same as the
+        // ->name/->value properties below: undefined-static-method
+        // detection immediately flagged every single real
+        // `Enum::cases()`/`::tryFrom()` call in the wild.
+        let self_ty = Type::Object(fqn.clone(), Vec::new());
+        methods.insert(
+            "cases".to_string(),
+            FunctionSig {
+                params: Vec::new(),
+                return_type: Type::Array(Box::new(self_ty.clone())),
+            },
+        );
+        if let Some(backing) = &e.backing_type {
+            let backing_ty = types::parse_type_string(backing);
+            let value_param = ParamSig {
+                name: "value".to_string(),
+                ty: backing_ty,
+                variadic: false,
+                has_default: false,
+                by_ref: false,
+            };
+            methods.insert(
+                "from".to_string(),
+                FunctionSig {
+                    params: vec![value_param.clone()],
+                    return_type: self_ty.clone(),
+                },
+            );
+            methods.insert(
+                "tryFrom".to_string(),
+                FunctionSig {
+                    params: vec![value_param],
+                    return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
+                },
+            );
+        }
         let mut consts: HashMap<String, Type> = e
             .consts
             .iter()
@@ -448,7 +489,6 @@ impl ClassInfo {
         // weren't registered as anything at all, so `Suit::Hearts`
         // always read as Mixed and a genuinely undefined case name was
         // never caught.
-        let fqn = ctx.declared_name(&e.name);
         for case in &e.cases {
             consts.insert(case.name.clone(), Type::Object(fqn.clone(), Vec::new()));
         }

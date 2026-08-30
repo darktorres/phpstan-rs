@@ -287,6 +287,23 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Resolves a `StaticAccess`/`StaticCall` target (`self`/`parent`/
+    /// `static`, or a plain/namespaced class name) to a concrete FQN.
+    /// `"?"` is the parser's own placeholder for a genuinely dynamic
+    /// class target (`$obj::method()`, `(new Foo())::CONST`) - there's no
+    /// name to resolve at all there, so it's `None`, same as any other
+    /// case `resolve_name_expr` can't turn into a concrete `Object`
+    /// (`self`/`parent`/`static` used outside any class context).
+    fn resolve_static_class_name(&self, class_name: &str) -> Option<String> {
+        if class_name == "?" {
+            return None;
+        }
+        match self.resolve_name_expr(class_name) {
+            Type::Object(class, _) => Some(class),
+            _ => None,
+        }
+    }
+
     fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
         match ty {
             Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string(), Vec::new()),
@@ -1020,16 +1037,73 @@ impl<'a> Checker<'a> {
                     self.check_function(&m.function, Some(&decl.name), m.is_static);
                 }
             }
-            Expr::StaticCall(_, _, args) => {
-                // No existence/arg-type checking here yet (see the
-                // module doc comment - StaticCall has no registry lookup
-                // at all today), but its argument expressions are real
-                // code that can contain their own bugs (most simply: an
-                // undefined variable) and were previously invisible to
-                // every check_expr-driven diagnostic because this arm
-                // didn't exist, silently falling into the catch-all.
+            Expr::StaticCall(class_name, method, args) => {
+                // Mirrors Expr::MethodCall's own structure exactly -
+                // resolve first (self/parent/static-aware), predefine
+                // byref/unknown args using the real signature before
+                // checking them, then the existence/arg-type check.
+                let resolved_class = self.resolve_static_class_name(class_name);
+                let sig = resolved_class
+                    .as_ref()
+                    .and_then(|class| self.registry.lookup_method(class, method));
+                self.predefine_byref_or_unknown_args(sig, args, locals);
                 for a in args {
                     self.check_expr(a, locals, label);
+                }
+                if let Some(class) = &resolved_class {
+                    if let Some(sig) = sig {
+                        let qualified = format!("{class}::{method}");
+                        self.check_args(&qualified, sig, args, locals, label, Some(class));
+                    } else if self.registry.classes.contains_key(class)
+                        && self.registry.lookup_method(class, "__callStatic").is_none()
+                    {
+                        // Same leniency as MethodCall's own undefined-
+                        // method check: only fires once the class itself
+                        // is confirmed known, and __callStatic (the
+                        // static equivalent of __call) suppresses it
+                        // entirely, matching real PHPStan.
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!("call to undefined static method {class}::{method}()"),
+                        });
+                    }
+                }
+            }
+            Expr::StaticAccess(class_name, member) => {
+                // `Foo::class` (member == "class") always resolves to a
+                // real string constant, not an actual member of the
+                // class - and a fully dynamic member name (`Foo::{$e}`/
+                // `Foo::$$e`) has no statically known name to check in
+                // the first place. Both are the parser's own documented
+                // encoding for these two cases, not something to check.
+                if member == "class" || member == "{dynamic}" {
+                    return;
+                }
+                let Some(class) = self.resolve_static_class_name(class_name) else {
+                    return;
+                };
+                if !self.registry.classes.contains_key(&class) {
+                    return;
+                }
+                if let Some(prop_name) = member.strip_prefix('$') {
+                    // Unlike an instance property, PHP has no legal way
+                    // to dynamically create a static property at all -
+                    // no "could be legitimate" case to stay lenient for
+                    // here, the way check_property_assignment's write
+                    // side has to for instance properties.
+                    if self.registry.lookup_property(&class, prop_name).is_none() {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!(
+                                "access to undefined static property {class}::${prop_name}"
+                            ),
+                        });
+                    }
+                } else if self.registry.lookup_const(&class, member).is_none() {
+                    self.diagnostics.push(Diagnostic {
+                        location: label.to_string(),
+                        message: format!("access to undefined constant {class}::{member}"),
+                    });
                 }
             }
             Expr::DynamicVariable(name_expr) => self.check_expr(name_expr, locals, label),
@@ -1434,6 +1508,32 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::Mixed),
                 _ => Type::Mixed,
             },
+            Expr::StaticCall(class_name, method, args) => self
+                .resolve_static_class_name(class_name)
+                .and_then(|class| {
+                    self.registry.lookup_method(&class, method).map(|sig| {
+                        let resolved = self.infer_call_return_type(sig, args, locals);
+                        self.resolve_pseudo(&resolved, &class)
+                    })
+                })
+                .unwrap_or(Type::Mixed),
+            Expr::StaticAccess(class_name, member) => {
+                if member == "class" {
+                    return Type::String;
+                }
+                self.resolve_static_class_name(class_name)
+                    .and_then(|class| match member.strip_prefix('$') {
+                        Some(prop_name) => self
+                            .registry
+                            .lookup_property(&class, prop_name)
+                            .map(|p| self.resolve_pseudo(&p.ty, &class)),
+                        None => self
+                            .registry
+                            .lookup_const(&class, member)
+                            .map(|ty| self.resolve_pseudo(ty, &class)),
+                    })
+                    .unwrap_or(Type::Mixed)
+            }
             Expr::Ternary(_, then_, else_) => {
                 let else_ty = self.infer_expr(else_, locals);
                 match then_ {
@@ -1915,6 +2015,160 @@ mod tests {
             class Box {}
             $box = new Box();
             $box->anything = "fine, not tracked";
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn static_access_flags_undefined_constants_properties_and_methods() {
+        // Phase 9's last remaining rule: existence checks for
+        // StaticAccess (constants, static properties) and StaticCall
+        // (static methods) - the same shape of check as MethodCall's,
+        // just for `Foo::` instead of `$foo->`.
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                const BAR = 1;
+                public static int $counter = 0;
+                public static function baz(): int { return 1; }
+            }
+            function f() {
+                echo Foo::BAR;
+                echo Foo::$counter;
+                echo Foo::baz();
+                echo Foo::class;
+                echo Foo::TOTALLY_MADE_UP;
+                echo Foo::$madeUpProp;
+                echo Foo::madeUpMethod();
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 3, "got: {d:?}");
+        assert!(d.iter().any(|x| {
+            x.message
+                .contains("undefined constant Foo::TOTALLY_MADE_UP")
+        }));
+        assert!(d.iter().any(|x| {
+            x.message
+                .contains("undefined static property Foo::$madeUpProp")
+        }));
+        assert!(d.iter().any(|x| {
+            x.message
+                .contains("undefined static method Foo::madeUpMethod()")
+        }));
+    }
+
+    #[test]
+    fn a_class_with_call_static_suppresses_undefined_static_method_calls() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Proxy {
+                public static function __callStatic($name, $args) { return null; }
+            }
+            function f() {
+                Proxy::anything();
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn enum_gets_its_built_in_cases_and_backed_enum_gets_from_and_try_from() {
+        // Real, built-in static methods every enum has from the language
+        // itself (UnitEnum::cases(); BackedEnum::from()/tryFrom() only on
+        // a backed one) - none declared in source. The very first
+        // real-corpus check after shipping undefined-static-method
+        // detection flagged every single real Enum::cases()/::tryFrom()
+        // call in the wild before this was added.
+        let d = diagnostics_for(
+            r#"<?php
+            enum Status: string {
+                case Active = 'active';
+            }
+            enum Pure {
+                case A;
+            }
+            function f() {
+                foreach (Status::cases() as $s) {
+                    echo $s->value;
+                }
+                Status::from('active');
+                Status::tryFrom('nope');
+                Pure::cases();
+                Pure::from('x');
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(
+            d[0].message
+                .contains("undefined static method Pure::from()"),
+            "a non-backed enum should not have from()/tryFrom(): {d:?}"
+        );
+    }
+
+    #[test]
+    fn enum_cases_are_recognized_by_static_access_and_a_bogus_case_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            enum Status {
+                case Active;
+                case Inactive;
+            }
+            function f() {
+                $s = Status::Active;
+                echo Status::MadeUpCase;
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("undefined constant Status::MadeUpCase")),
+            "got: {d:?}"
+        );
+        assert_eq!(d.len(), 1, "Status::Active should not be flagged: {d:?}");
+    }
+
+    #[test]
+    fn self_parent_and_static_resolve_to_the_real_class_for_static_access() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Base {
+                const SHARED = 1;
+                public static function helper(): int { return 1; }
+            }
+            class Child extends Base {
+                public function useParent(): int {
+                    return parent::helper() + self::SHARED + static::helper();
+                }
+                public function useMadeUp(): int {
+                    return parent::madeUpParentMethod();
+                }
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        // Proves parent:: resolved to the real class Base, not a literal
+        // "parent" - the same silent-vs-wrong distinction this whole
+        // audit has repeatedly had to design tests around.
+        assert!(
+            d[0].message
+                .contains("undefined static method Base::madeUpParentMethod()"),
+            "got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_dynamic_static_target_is_never_checked() {
+        // `$className::method()` has no statically known class - nothing
+        // to check, and definitely not something to guess at.
+        let d = diagnostics_for(
+            r#"<?php
+            function f($className) {
+                return $className::method();
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
