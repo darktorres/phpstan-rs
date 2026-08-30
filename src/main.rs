@@ -1,4 +1,5 @@
 mod ast;
+mod baseline;
 mod checker;
 mod deps;
 mod docblock;
@@ -12,6 +13,7 @@ mod stubs;
 mod token;
 mod types;
 
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -289,8 +291,44 @@ fn extract_bool_flag(args: &[String], flag: &str) -> (bool, Vec<String>) {
     (present, rest)
 }
 
-const USAGE_CHECK_PROJECT: &str =
-    "usage: phpstan-rs --check-project [--level N] [--strict-mixed-arrays] <dir>...";
+/// Pulls a `--flag value` option out of `args` wherever it appears - same
+/// hand-rolled-parser shape as `extract_level`/`extract_bool_flag`, for a
+/// flag whose value is an arbitrary string (a file path here) rather than
+/// a number.
+fn extract_value_flag(args: &[String], flag: &str) -> (Option<String>, Vec<String>) {
+    let mut value = None;
+    let mut rest = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == flag
+            && let Some(v) = args.get(i + 1)
+        {
+            value = Some(v.clone());
+            i += 2;
+            continue;
+        }
+        rest.push(args[i].clone());
+        i += 1;
+    }
+    (value, rest)
+}
+
+/// Filters every file's diagnostics down to `level` and below, in place -
+/// shared by both the normal report path and `--generate-baseline` (a
+/// baseline should record exactly what a normal run at this level would
+/// currently show, not every diagnostic regardless of level).
+fn apply_level_filter(
+    mut results: HashMap<PathBuf, Vec<checker::Diagnostic>>,
+    level: u8,
+) -> HashMap<PathBuf, Vec<checker::Diagnostic>> {
+    for diagnostics in results.values_mut() {
+        diagnostics.retain(|d| d.level <= level);
+    }
+    results
+}
+
+const USAGE_CHECK_PROJECT: &str = "usage: phpstan-rs --check-project [--level N] \
+    [--strict-mixed-arrays] [--baseline <file>] [--generate-baseline <file>] <dir>...";
 
 fn run_check_project(args: &[String]) {
     if args.is_empty() {
@@ -299,6 +337,8 @@ fn run_check_project(args: &[String]) {
     }
     let (level, args) = extract_level(args);
     let (strict_mixed_arrays, args) = extract_bool_flag(&args, "--strict-mixed-arrays");
+    let (generate_baseline_path, args) = extract_value_flag(&args, "--generate-baseline");
+    let (baseline_path, args) = extract_value_flag(&args, "--baseline");
     let args = &args[..];
     if args.is_empty() {
         eprintln!("{USAGE_CHECK_PROJECT}");
@@ -334,14 +374,37 @@ fn run_check_project(args: &[String]) {
     }
     project.finish_loading();
 
-    let results = project.check_all();
+    let mut results = apply_level_filter(project.check_all(), level);
+
+    if let Some(baseline_path) = generate_baseline_path {
+        let baseline_path = Path::new(&baseline_path);
+        match baseline::generate(baseline_path, &results) {
+            Ok(count) => println!(
+                "baseline written to {}: {count} entry(s)",
+                baseline_path.display()
+            ),
+            Err(e) => eprintln!(
+                "failed to write baseline to {}: {e}",
+                baseline_path.display()
+            ),
+        }
+        return;
+    }
+
+    if let Some(baseline_path) = baseline_path {
+        let baseline_path = Path::new(&baseline_path);
+        match baseline::Baseline::load(baseline_path) {
+            Ok(baseline) => baseline::filter(&mut results, &baseline),
+            Err(e) => eprintln!("failed to load baseline {}: {e}", baseline_path.display()),
+        }
+    }
+
     let mut paths: Vec<&PathBuf> = results.keys().collect();
     paths.sort();
 
     let mut total = 0usize;
     for path in paths {
-        let diagnostics = results[path].iter().filter(|d| d.level <= level);
-        for d in diagnostics {
+        for d in &results[path] {
             println!(
                 "{}:{}:{}: {}: {}",
                 path.display(),

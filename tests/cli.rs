@@ -213,6 +213,83 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
 }
 
 #[test]
+fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_diagnostics() {
+    let dir = TempDir::new("check_project_baseline");
+    dir.write("bad.php", "<?php function f() { return $existingBug; }\n");
+    let baseline_path = dir.path().join("baseline.json");
+
+    let generate = bin()
+        .arg("--check-project")
+        .arg("--generate-baseline")
+        .arg(&baseline_path)
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(generate.status.success());
+    let generate_stdout = String::from_utf8_lossy(&generate.stdout);
+    assert!(
+        generate_stdout.contains("baseline written to"),
+        "got: {generate_stdout}"
+    );
+    assert!(baseline_path.exists(), "expected a baseline file to exist");
+
+    // A run with the baseline applied reports nothing for the
+    // already-recorded diagnostic.
+    let filtered = bin()
+        .arg("--check-project")
+        .arg("--baseline")
+        .arg(&baseline_path)
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let filtered_stdout = String::from_utf8_lossy(&filtered.stdout);
+    assert!(
+        filtered_stdout.contains("1 file(s) checked, 0 diagnostic(s)"),
+        "got: {filtered_stdout}"
+    );
+
+    // A run without --baseline still reports it - the baseline only
+    // suppresses when explicitly opted into.
+    let unfiltered = bin()
+        .arg("--check-project")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
+    assert!(
+        unfiltered_stdout.contains("existingBug"),
+        "got: {unfiltered_stdout}"
+    );
+
+    // A genuinely new diagnostic still surfaces even with the baseline
+    // applied - only the pre-existing one is suppressed.
+    dir.write(
+        "bad.php",
+        "<?php function f() { return $existingBug; } function g() { return $newBug; }\n",
+    );
+    let with_new_bug = bin()
+        .arg("--check-project")
+        .arg("--baseline")
+        .arg(&baseline_path)
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let with_new_bug_stdout = String::from_utf8_lossy(&with_new_bug.stdout);
+    assert!(
+        with_new_bug_stdout.contains("newBug"),
+        "got: {with_new_bug_stdout}"
+    );
+    assert!(
+        !with_new_bug_stdout.contains("existingBug"),
+        "got: {with_new_bug_stdout}"
+    );
+    assert!(
+        with_new_bug_stdout.contains("1 file(s) checked, 1 diagnostic(s)"),
+        "got: {with_new_bug_stdout}"
+    );
+}
+
+#[test]
 fn check_project_with_no_args_prints_usage_to_stderr() {
     let output = bin().arg("--check-project").output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
