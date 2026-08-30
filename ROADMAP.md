@@ -327,6 +327,86 @@ PHPStan/Psalm string and int refinement family (`non-empty-string` -
 - LSP hover/go-to-definition (needs Phase 11's positions first).
 - An extension/plugin API.
 
+## Phase 13: Narrowing precision and Phase 9's remaining false-positive causes - SKETCHED, NOT STARTED
+
+A new phase, split out of the "Known Limitations" audit below (every
+item here previously had nowhere to live on this roadmap). Grouped
+together because all of them are the same shape of problem: the
+checker's flow analysis and inference are coarser than they could be,
+in ways that either produce a real false positive on real code
+(the first four) or just lose precision silently (the last three).
+
+- **Property-chain narrowing beyond `instanceof`.** Phase 9's own
+  narrowing fix (`narrowing_key`) only handles `$a->b instanceof X`;
+  equality narrowing (`$a->b === null`) and predicate-function
+  narrowing (`is_string($a->b)`) still only work on a bare variable.
+  Real vendor/ noise (`~2000` diagnostics) traces directly to this.
+- **Traits checked standalone.** A trait method referencing
+  `$this->propOnHostClass` (expecting whatever class eventually `use`s
+  it to provide that member - a common, legal pattern) gets flagged,
+  since the trait's own body is checked with no knowledge of any
+  future host class. Real PHPStan handles this via the trait's own
+  `@property`/abstract-method declarations; this project has neither.
+- **`@property`/`@property-read`/`@property-write` PHPDoc tags aren't
+  parsed at all** - `docblock.rs` only handles `@param`/`@return`/
+  `@var`/`@template`. A real, bounded, `@template`-sized addition.
+- **`always_terminates` doesn't recognize `switch`/`try`/`match`** as
+  terminating even when every one of their branches does - only
+  `if`/`else` gets that treatment today. A guard clause written as a
+  `switch` with no `default` fallthrough can have its narrowing
+  incorrectly leak past it.
+- **`for`/`foreach`/`switch`/`try` bodies share one unforked, unnarrowed
+  scope** - only `if`/`while` fork `locals` into per-branch copies today.
+- **Array-literal element types aren't tracked** - `[1, 2, 3]` always
+  infers as `Array(Mixed)`, never `Array(Int)`.
+- **`BinOp::Div` and PHP 8.5's `|>` pipe operator both always infer
+  `Mixed`** - real division returns `int` or `float` depending on
+  runtime values, and the pipe operator's result depends on resolving
+  whatever expression sits on its right as a callable, neither
+  attempted today.
+
+## Known limitations
+
+Every deliberate "this checker doesn't model X" boundary found in the
+code, gathered in one place so none of them are only discoverable by
+reading in-code comments. Each is either tracked under a phase above,
+or is a permanent design boundary this project doesn't intend to
+close - the two are labeled separately below so "not done yet" and
+"not going to happen" aren't confused with each other.
+
+**Tracked under a phase:**
+
+| Limitation | Phase |
+|---|---|
+| No generic variance, template-bound enforcement, or `@extends`/`@implements` inheritance-chain substitution | 10 |
+| Refinement/accessory types (`non-empty-string`, `positive-int`, ...) aliased to their base type, not tracked precisely | 12+ |
+| No real source positions, level system, or config/baseline | 11 |
+| No bespoke per-function type extensions, broader rule catalog, CI output formats, LSP hover/goto-def, plugin API | 12+ |
+| Property-chain narrowing beyond `instanceof` (equality/predicate narrowing on `$a->b`) | 13 |
+| Traits checked standalone, without their eventual host class's shape | 13 |
+| `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed | 13 |
+| `always_terminates` doesn't recognize a terminating `switch`/`try`/`match` | 13 |
+| `for`/`foreach`/`switch`/`try` share one unforked, unnarrowed scope | 13 |
+| Array-literal element types not tracked (`Array(Mixed)` always) | 13 |
+| Integer division and PHP 8.5's pipe operator (`BinOp::Div`/`Pipe`) always infer `Mixed` | 13 |
+
+**Permanent design boundaries (not phase-tracked - not planned, by choice):**
+
+- **Conditional PHPDoc return types** (`@return ($x is 'a' ? A : B)`) -
+  documented in `types.rs`'s own module comment since Phase 2; these
+  need real per-call-site type-parameter binding of a kind this
+  project's PHPDoc parser deliberately doesn't attempt, the same way
+  it deliberately doesn't parse `@template` bounds' enforcement.
+- **A dynamic class target** (`$obj::method()`, `(new Foo())::CONST`)
+  is never checked, by the same "don't guess" precedent `Expr::New`
+  already set for a dynamic class-name expression - there's no static
+  name to resolve at all, not a missing feature to build.
+- **Integer overflow/precision, floating-point rounding, and other
+  runtime-value-dependent behavior** - this checker only ever reasons
+  about static types, never concrete values (Phase 1's own founding
+  choice), so anything whose result depends on the actual runtime
+  value rather than its type is out of scope by construction.
+
 ## Verification approach (used for every phase above)
 
 - Unit tests for each new rule/type-system feature.
