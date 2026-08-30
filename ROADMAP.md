@@ -790,7 +790,7 @@ through AST through diagnostics through CLI/LSP output), the full
 two-part level system, and config/baseline (baseline mechanism, `clap`
 migration, and TOML config file all shipped).
 
-## Phase 12: Bespoke per-function/method type extensions - PLANNED
+## Phase 12: Bespoke per-function/method type extensions - PARTIAL
 
 Real PHPStan's `src/Type/Php/` is 190 files - its single largest
 `Type/` subdirectory (confirmed against a fresh clone of
@@ -814,18 +814,40 @@ output against the real 18923-file Piwigo+vendor corpus at some point
 in this project's history - real signal for priority order, not a
 guess from PHPStan's own list:
 
-1. **`array_map`/`array_filter`/`array_reduce`/`array_walk`** - the
-   closure-parameter-typing family (`FunctionParameterClosureTypeExtension`
-   in real PHPStan) plus each one's own return-type extension. The
-   single highest-value target: these four appear constantly in real
-   code, and `checker::infer_call_return_type`'s existing template-
-   binding machinery (built for Phase 2's `@template`, reused by Phase
-   10's generics) is very likely already shaped right for this - a
-   function whose param type is expressed as `callable(T): U` and
-   return type as `array<U>` would let ordinary template substitution
-   do the real work, once these stub signatures are written that way
-   and array_map's own multi-array/multi-arg overload forms are
-   modeled.
+1. **`array_map`/`array_filter` - DONE** (`array_reduce`/`array_walk`
+   remain open, see below). Shipped as bespoke special cases in
+   `checker::infer_expr`'s `ExprKind::Call` handling
+   (`infer_builtin_call_return_type`), mirroring real PHPStan's own
+   `src/Type/Php/` architecture directly - **not** the generic
+   `callable(T): U` + `infer_call_return_type` template-unification
+   design this section originally sketched. That design was tried
+   during planning and rejected: it works for a closure with an
+   *explicit* native param type hint, but for the far more common
+   untyped style (`fn($x) => ...`), the closure's own standalone
+   inferred return type has no way to know `$x`'s real type - it's
+   `Mixed` in isolation, so the templated `U` would just bind to
+   `Mixed` again, no real improvement. The actual fix needs the
+   *other* argument's binding (the array's element type) to flow
+   *into* the closure's own body-inference before computing its
+   return type - a genuinely two-pass, per-function mechanism
+   (`infer_closure_return_with_param_override`), not something
+   generic template unification does in one pass. `array_filter`
+   needs no closure introspection at all: filtering never transforms
+   elements, so its return is simply whatever the input array's own
+   type already is. `array_map` is scoped to its common 2-arg
+   single-array form; the real function's multi-array variadic form
+   and `array_reduce`/`array_walk` (a fold and a by-ref-mutation
+   function respectively - both a different, harder mechanism than
+   return-type inference) remain unshipped. A real, pre-existing bug
+   was found and fixed while wiring this up: for an unqualified
+   builtin call inside a namespaced file (this project's own corpus
+   is entirely namespaced), the bespoke dispatch was checking the
+   wrong name - the failed namespace-qualified attempt, not the bare
+   name that actually resolved via the global-namespace fallback.
+   Verified against the real Piwigo corpus: default-mode diagnostic
+   count unchanged (2327), and the optional `--strict-mixed-arrays`
+   mode's noise dropped (4141 → 4102), consistent with genuine
+   precision reducing false positives.
 2. **`preg_match`/`preg_match_all`** - by-ref `$matches` shape
    inference from the pattern's own capture groups (named + numbered).
    The one extension here that's genuinely hard to approximate - needs
