@@ -2691,7 +2691,11 @@ impl Parser {
             match part {
                 StringPart::Literal(s) => exprs.push(Expr::Literal(Literal::String(s))),
                 StringPart::SimpleVar(name) => exprs.push(Expr::Variable(name)),
-                StringPart::ComplexExpr(src) => {
+                // The base position isn't consumed yet - biasing the
+                // fragment's own spans back into real file coordinates
+                // needs Parser::new to accept spans at all, which lands
+                // together with the rest of the AST's span support.
+                StringPart::ComplexExpr(src, _base) => {
                     let tokens = Lexer::new_in_php(&src).tokenize();
                     let mut sub = Parser::new(tokens);
                     exprs.push(sub.parse_expression());

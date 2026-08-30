@@ -1,3 +1,24 @@
+/// A single point in a source file, 1-indexed (matching editor convention).
+/// `col` counts UTF-8 characters, not raw bytes - real PHP source can and
+/// does contain multi-byte content inside actual code (not just comments;
+/// found the hard way against the real Piwigo corpus this project verifies
+/// against - string literals with em-dashes/curly quotes/accented
+/// characters), and a byte-offset column would silently overshoot the true
+/// character position on every such line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Position {
+    pub line: u32,
+    pub col: u32,
+}
+
+/// A source range - real LSP `range`s and most compiler-style diagnostics
+/// want both a start and an end, not just a single anchor point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Span {
+    pub start: Position,
+    pub end: Position,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Keyword {
     Function,
@@ -218,7 +239,14 @@ impl Keyword {
 pub enum StringPart {
     Literal(String),
     SimpleVar(String),
-    ComplexExpr(String),
+    // The fragment's own source text, plus the real file position it
+    // starts at - `parser::build_interpolated` re-lexes the fragment in
+    // isolation (its own byte offsets have no connection to the real
+    // file), then biases the fragment-relative spans it gets back using
+    // this as the base, so an error inside `"{$obj->prop}"` still points
+    // at its real position instead of somewhere relative to a throwaway
+    // re-lex.
+    ComplexExpr(String, Position),
 }
 
 #[derive(Debug, Clone, PartialEq)]

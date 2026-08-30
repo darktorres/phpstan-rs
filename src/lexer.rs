@@ -1,17 +1,62 @@
-use crate::token::{Keyword, StringPart, Token};
+use crate::token::{Keyword, Position, Span, StringPart, Token};
 
 pub struct Lexer<'a> {
     src: &'a [u8],
     pos: usize,
     in_php: bool,
+    // Byte offsets where each line begins (`line_starts[0]` is always 0) -
+    // computed once up front so `line_col_at` is a binary search, not an
+    // O(n) rescan per token. The standard rustc-`SourceMap`-style
+    // technique - means none of the dozens of `self.pos += ...` sites
+    // throughout this file need to track line/col incrementally.
+    line_starts: Vec<usize>,
+    // The byte offset `next_token` most recently settled on as "this is
+    // where the token about to be lexed actually starts" (i.e. right
+    // after any leading whitespace/comments were skipped) - `tokenize_
+    // with_spans` reads this right after each `next_token()` call to
+    // know where that token's own span should start, since `next_token`
+    // itself skips whitespace *and* lexes in one call.
+    last_token_start: usize,
+    // `line_col_at`'s incremental cache: the last byte offset it was
+    // asked to convert, and the `Position` that came out. Real, not
+    // theoretical, motivation: a naive "recount every character from the
+    // line's own start" implementation is O(line length) *per call* -
+    // fine for ordinary code, but a real file in this project's own
+    // Piwigo/vendor test corpus (`amphp/hpack`'s generated Huffman lookup
+    // table) has a single line 1.25 million characters long. With
+    // thousands of tokens on that one line, the naive approach is a real
+    // O(line length x tokens on it) blowup - measured hanging for
+    // minutes on a file that used to check in well under a second.
+    // `tokenize_with_spans` calls `line_col_at` with strictly increasing
+    // byte offsets (its whole point is a linear scan forward), so caching
+    // the last conversion and only counting the *delta* since then turns
+    // the pathological line back into O(line length) total, not squared -
+    // and it's never wrong, only sometimes not the fast path: a request
+    // for an earlier byte offset, or one on a different line, still gets
+    // a fully correct (just not delta-accelerated) recomputation.
+    pos_cache: (usize, Position),
+}
+
+fn compute_line_starts(src: &[u8]) -> Vec<usize> {
+    let mut starts = vec![0];
+    for (i, &b) in src.iter().enumerate() {
+        if b == b'\n' {
+            starts.push(i + 1);
+        }
+    }
+    starts
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
+        let bytes = src.as_bytes();
         Lexer {
-            src: src.as_bytes(),
+            src: bytes,
             pos: 0,
             in_php: false,
+            line_starts: compute_line_starts(bytes),
+            last_token_start: 0,
+            pos_cache: (0, Position { line: 1, col: 1 }),
         }
     }
 
@@ -19,24 +64,94 @@ impl<'a> Lexer<'a> {
     /// e.g. the inside of a `{$...}` string interpolation. Skips inline-HTML
     /// mode entirely.
     pub fn new_in_php(src: &'a str) -> Self {
+        let bytes = src.as_bytes();
         Lexer {
-            src: src.as_bytes(),
+            src: bytes,
             pos: 0,
             in_php: true,
+            line_starts: compute_line_starts(bytes),
+            last_token_start: 0,
+            pos_cache: (0, Position { line: 1, col: 1 }),
         }
     }
 
-    pub fn tokenize(mut self) -> Vec<Token> {
+    /// Converts an absolute byte offset into a 1-indexed line/column -
+    /// `col` counts UTF-8 *characters* from the line's own start, not raw
+    /// bytes (a real, demonstrated need: real PHP source, including this
+    /// project's own real-corpus test fixtures, has multi-byte UTF-8
+    /// inside actual code, not just comments - a byte-offset column would
+    /// silently overshoot the true character position on every such
+    /// line). The extra decoding cost is bounded to one line's own
+    /// prefix, not the whole file.
+    fn line_idx_at(&self, byte_pos: usize) -> usize {
+        match self.line_starts.binary_search(&byte_pos) {
+            Ok(i) => i,
+            Err(i) => i - 1,
+        }
+    }
+
+    fn line_col_at(&mut self, byte_pos: usize) -> Position {
+        let byte_pos = byte_pos.min(self.src.len());
+        let (cached_pos, cached) = self.pos_cache;
+        if byte_pos == cached_pos {
+            return cached;
+        }
+        let line_idx = self.line_idx_at(byte_pos);
+        // The fast path: still on the same line as the last conversion,
+        // moving forward - only count the *new* characters since then,
+        // not the whole line from its own start again. Falls back to a
+        // full (still correct) recompute for a backward jump or a
+        // different line - both real but comparatively rare (the
+        // interpolation base-position bias below is the only caller that
+        // can jump backward at all).
+        let position = if byte_pos > cached_pos && line_idx == self.line_idx_at(cached_pos) {
+            let delta = String::from_utf8_lossy(&self.src[cached_pos..byte_pos])
+                .chars()
+                .count();
+            Position {
+                line: (line_idx + 1) as u32,
+                col: cached.col + delta as u32,
+            }
+        } else {
+            let line_start = self.line_starts[line_idx];
+            let col = String::from_utf8_lossy(&self.src[line_start..byte_pos])
+                .chars()
+                .count()
+                + 1;
+            Position {
+                line: (line_idx + 1) as u32,
+                col: col as u32,
+            }
+        };
+        self.pos_cache = (byte_pos, position);
+        position
+    }
+
+    /// The real, span-carrying tokenization entry point - `tokenize`
+    /// below is a thin adapter over this for the handful of tests that
+    /// want to compare bare tokens without spans getting in the way.
+    pub fn tokenize_with_spans(mut self) -> Vec<(Token, Span)> {
         let mut tokens = Vec::new();
         loop {
             let tok = self.next_token();
+            let span = Span {
+                start: self.line_col_at(self.last_token_start),
+                end: self.line_col_at(self.pos),
+            };
             let done = tok == Token::Eof;
-            tokens.push(tok);
+            tokens.push((tok, span));
             if done {
                 break;
             }
         }
         tokens
+    }
+
+    pub fn tokenize(self) -> Vec<Token> {
+        self.tokenize_with_spans()
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
     }
 
     fn peek(&self) -> u8 {
@@ -59,10 +174,12 @@ impl<'a> Lexer<'a> {
 
     fn next_token(&mut self) -> Token {
         if !self.in_php {
+            self.last_token_start = self.pos;
             return self.lex_inline_html();
         }
 
         self.skip_whitespace_and_comments();
+        self.last_token_start = self.pos;
 
         if self.pos >= self.src.len() {
             return Token::Eof;
@@ -468,7 +585,7 @@ impl<'a> Lexer<'a> {
             }
         }
         let raw = &self.src[start..self.pos];
-        let parts = scan_interpolated(raw);
+        let parts = self.scan_interpolated(raw, start);
         self.pos = (self.pos + 1).min(self.src.len()); // closing delimiter
         parts
     }
@@ -574,7 +691,15 @@ impl<'a> Lexer<'a> {
         if nowdoc {
             Token::StringLit(content)
         } else {
-            Token::InterpString(scan_interpolated(content.as_bytes()))
+            // `content` has already had its per-line indentation stripped
+            // (PHP 7.3+ flexible heredoc syntax), so a byte offset within
+            // it no longer maps 1:1 to a real offset in the original
+            // source the way the plain double-quoted-string case does -
+            // anchoring every `{$...}` in this heredoc at the body's own
+            // start is an honest, coarser approximation for this one
+            // case (still the right heredoc, not a precise per-occurrence
+            // position within it).
+            Token::InterpString(self.scan_interpolated(content.as_bytes(), body_start))
         }
     }
 
@@ -743,113 +868,130 @@ fn is_ident_continue(c: u8) -> bool {
     is_ident_start(c) || c.is_ascii_digit()
 }
 
-/// Shared body of double-quoted-string and heredoc interpolation: escapes,
-/// `$var` / `$var->prop` / `$var[key]` simple syntax, and `{$expr}` complex
-/// syntax. Operates on an already-delimited byte slice (quotes/markers
-/// already stripped by the caller).
-fn scan_interpolated(bytes: &[u8]) -> Vec<StringPart> {
-    let mut parts = Vec::new();
-    let mut literal = String::new();
-    let mut i = 0;
+impl<'a> Lexer<'a> {
+    /// Shared body of double-quoted-string and heredoc interpolation:
+    /// escapes, `$var` / `$var->prop` / `$var[key]` simple syntax, and
+    /// `{$expr}` complex syntax. Operates on an already-delimited byte
+    /// slice (quotes/markers already stripped by the caller) - `abs_base`
+    /// is that slice's own byte offset in the *original* source (or the
+    /// best available anchor - see the heredoc call site's own comment),
+    /// used to give each `ComplexExpr` a real file position via
+    /// `line_col_at`, not one relative to a throwaway fragment
+    /// `parser::build_interpolated` re-lexes in isolation.
+    fn scan_interpolated(&mut self, bytes: &[u8], abs_base: usize) -> Vec<StringPart> {
+        let mut parts = Vec::new();
+        let mut literal = String::new();
+        let mut i = 0;
 
-    macro_rules! flush {
-        () => {
-            if !literal.is_empty() {
-                parts.push(StringPart::Literal(std::mem::take(&mut literal)));
-            }
-        };
-    }
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if b == b'\\' && i + 1 < bytes.len() {
-            match bytes[i + 1] {
-                b'n' => literal.push('\n'),
-                b't' => literal.push('\t'),
-                b'r' => literal.push('\r'),
-                b'"' => literal.push('"'),
-                b'\\' => literal.push('\\'),
-                b'$' => literal.push('$'),
-                other => {
-                    literal.push('\\');
-                    literal.push(other as char);
+        macro_rules! flush {
+            () => {
+                if !literal.is_empty() {
+                    parts.push(StringPart::Literal(std::mem::take(&mut literal)));
                 }
-            }
-            i += 2;
-            continue;
+            };
         }
 
-        if b == b'{' && bytes.get(i + 1) == Some(&b'$') {
-            flush!();
-            i += 1;
-            let start = i;
-            let mut depth = 1;
-            while i < bytes.len() && depth > 0 {
-                match bytes[i] {
-                    b'{' => depth += 1,
-                    b'}' => depth -= 1,
-                    _ => {}
-                }
-                if depth > 0 {
-                    i += 1;
-                }
-            }
-            let inner = String::from_utf8_lossy(&bytes[start..i]).into_owned();
-            i = (i + 1).min(bytes.len());
-            parts.push(StringPart::ComplexExpr(inner));
-            continue;
-        }
+        while i < bytes.len() {
+            let b = bytes[i];
 
-        if b == b'$' && bytes.get(i + 1).is_some_and(|&c| is_ident_start(c)) {
-            flush!();
-            i += 1;
-            let name_start = i;
-            while i < bytes.len() && is_ident_continue(bytes[i]) {
-                i += 1;
-            }
-            let name = String::from_utf8_lossy(&bytes[name_start..i]).into_owned();
-
-            if bytes.get(i) == Some(&b'-')
-                && bytes.get(i + 1) == Some(&b'>')
-                && bytes.get(i + 2).is_some_and(|&c| is_ident_start(c))
-            {
+            if b == b'\\' && i + 1 < bytes.len() {
+                match bytes[i + 1] {
+                    b'n' => literal.push('\n'),
+                    b't' => literal.push('\t'),
+                    b'r' => literal.push('\r'),
+                    b'"' => literal.push('"'),
+                    b'\\' => literal.push('\\'),
+                    b'$' => literal.push('$'),
+                    other => {
+                        literal.push('\\');
+                        literal.push(other as char);
+                    }
+                }
                 i += 2;
-                let prop_start = i;
+                continue;
+            }
+
+            if b == b'{' && bytes.get(i + 1) == Some(&b'$') {
+                flush!();
+                i += 1;
+                let start = i;
+                let mut depth = 1;
+                while i < bytes.len() && depth > 0 {
+                    match bytes[i] {
+                        b'{' => depth += 1,
+                        b'}' => depth -= 1,
+                        _ => {}
+                    }
+                    if depth > 0 {
+                        i += 1;
+                    }
+                }
+                let inner = String::from_utf8_lossy(&bytes[start..i]).into_owned();
+                let base = self.line_col_at(abs_base + start);
+                i = (i + 1).min(bytes.len());
+                parts.push(StringPart::ComplexExpr(inner, base));
+                continue;
+            }
+
+            if b == b'$' && bytes.get(i + 1).is_some_and(|&c| is_ident_start(c)) {
+                flush!();
+                i += 1;
+                let name_start = i;
                 while i < bytes.len() && is_ident_continue(bytes[i]) {
                     i += 1;
                 }
-                let prop = String::from_utf8_lossy(&bytes[prop_start..i]).into_owned();
-                parts.push(StringPart::ComplexExpr(format!("${name}->{prop}")));
-            } else if bytes.get(i) == Some(&b'[') {
-                i += 1;
-                let key_start = i;
-                while i < bytes.len() && bytes[i] != b']' {
+                let name = String::from_utf8_lossy(&bytes[name_start..i]).into_owned();
+                // Points at the `$` itself (one byte before `name_start`),
+                // matching where the reconstructed `${name}...` string below
+                // begins - precision within the reconstruction (distinguishing
+                // `$name` from `->prop`/`[key]`) isn't attempted, only anchoring
+                // the whole thing at its real starting position.
+                let base = self.line_col_at(abs_base + name_start - 1);
+
+                if bytes.get(i) == Some(&b'-')
+                    && bytes.get(i + 1) == Some(&b'>')
+                    && bytes.get(i + 2).is_some_and(|&c| is_ident_start(c))
+                {
+                    i += 2;
+                    let prop_start = i;
+                    while i < bytes.len() && is_ident_continue(bytes[i]) {
+                        i += 1;
+                    }
+                    let prop = String::from_utf8_lossy(&bytes[prop_start..i]).into_owned();
+                    parts.push(StringPart::ComplexExpr(format!("${name}->{prop}"), base));
+                } else if bytes.get(i) == Some(&b'[') {
                     i += 1;
-                }
-                let key = String::from_utf8_lossy(&bytes[key_start..i]).into_owned();
-                i = (i + 1).min(bytes.len());
-                let key_expr = if key.starts_with('$') || key.parse::<i64>().is_ok() {
-                    key
+                    let key_start = i;
+                    while i < bytes.len() && bytes[i] != b']' {
+                        i += 1;
+                    }
+                    let key = String::from_utf8_lossy(&bytes[key_start..i]).into_owned();
+                    i = (i + 1).min(bytes.len());
+                    let key_expr = if key.starts_with('$') || key.parse::<i64>().is_ok() {
+                        key
+                    } else {
+                        format!("'{key}'")
+                    };
+                    parts.push(StringPart::ComplexExpr(
+                        format!("${name}[{key_expr}]"),
+                        base,
+                    ));
                 } else {
-                    format!("'{key}'")
-                };
-                parts.push(StringPart::ComplexExpr(format!("${name}[{key_expr}]")));
-            } else {
-                parts.push(StringPart::SimpleVar(name));
+                    parts.push(StringPart::SimpleVar(name));
+                }
+                continue;
             }
-            continue;
+
+            literal.push(b as char);
+            i += 1;
         }
+        flush!();
 
-        literal.push(b as char);
-        i += 1;
+        if parts.is_empty() {
+            parts.push(StringPart::Literal(String::new()));
+        }
+        parts
     }
-    flush!();
-
-    if parts.is_empty() {
-        parts.push(StringPart::Literal(String::new()));
-    }
-    parts
 }
 
 /// Flexible heredoc (PHP 7.3+): every content line has up to `indent`
@@ -964,5 +1106,137 @@ mod tests {
             Lexer::new("<?php class C { public function __construct($datetime = \"now\") {} }")
                 .tokenize();
         assert_eq!(with_attr, without_attr);
+    }
+
+    // `tokenize_with_spans` - Phase 11's source-position work.
+
+    #[test]
+    fn tokens_on_a_later_line_get_real_line_and_column_positions() {
+        let src = "<?php\n$x = 1;\n$y = 2;\n";
+        let toks = Lexer::new(src).tokenize_with_spans();
+        // toks: Variable(x), Equals, Integer(1), Semicolon, Variable(y), ...
+        let (tok, span) = &toks[4];
+        assert_eq!(*tok, Token::Variable("y".to_string()));
+        assert_eq!(span.start, Position { line: 3, col: 1 });
+        assert_eq!(span.end, Position { line: 3, col: 3 });
+    }
+
+    #[test]
+    fn a_token_spanning_multiple_lines_does_not_throw_off_the_next_token_s_position() {
+        let src = "<?php\n$x = <<<EOT\nhello\nworld\nEOT;\n$y = 1;\n";
+        let toks = Lexer::new(src).tokenize_with_spans();
+        let heredoc_end = toks
+            .iter()
+            .find(|(t, _)| matches!(t, Token::InterpString(_)))
+            .unwrap()
+            .1
+            .end;
+        // The heredoc body itself spans lines 3-4, but the token's own
+        // extent runs through its closing marker on line 5, not just the
+        // last content line.
+        assert_eq!(heredoc_end.line, 5);
+        let (next_tok, next_span) = toks
+            .iter()
+            .find(|(t, _)| *t == Token::Variable("y".to_string()))
+            .unwrap();
+        assert_eq!(*next_tok, Token::Variable("y".to_string()));
+        assert_eq!(next_span.start, Position { line: 6, col: 1 });
+    }
+
+    #[test]
+    fn a_multi_byte_character_earlier_on_a_line_does_not_shift_later_columns() {
+        // "é" is 2 bytes in UTF-8 but 1 character - a byte-offset column
+        // would report column 8 for $x below; the real (character) column
+        // is 7.
+        let src = "<?php\n'é'; $x;\n";
+        let toks = Lexer::new(src).tokenize_with_spans();
+        let (_, span) = toks
+            .iter()
+            .find(|(t, _)| *t == Token::Variable("x".to_string()))
+            .unwrap();
+        assert_eq!(span.start, Position { line: 2, col: 6 });
+    }
+
+    #[test]
+    fn complex_interpolation_gets_a_real_base_position_on_a_later_line() {
+        let src = "<?php\n$s = \"a\\n{$obj->prop}\";\n";
+        let toks = Lexer::new(src).tokenize_with_spans();
+        let (tok, _) = toks
+            .iter()
+            .find(|(t, _)| matches!(t, Token::InterpString(_)))
+            .unwrap();
+        let Token::InterpString(parts) = tok else {
+            unreachable!()
+        };
+        let (_, base) = parts
+            .iter()
+            .find_map(|p| match p {
+                StringPart::ComplexExpr(src, base) => Some((src.clone(), *base)),
+                _ => None,
+            })
+            .expect("expected a ComplexExpr part");
+        // The literal "a\n" inside the string doesn't introduce a real
+        // newline in the source - {$obj->prop} is still on line 2.
+        // `$s = "a\n{$obj->prop}";` - the `$` of `$obj` is the 11th
+        // character (right after `{`, the 10th).
+        assert_eq!(base, Position { line: 2, col: 11 });
+    }
+
+    #[test]
+    fn shorthand_property_interpolation_base_points_at_the_dollar_sign() {
+        let src = "<?php\n$s = \"x $obj->prop y\";\n";
+        let toks = Lexer::new(src).tokenize_with_spans();
+        let (tok, _) = toks
+            .iter()
+            .find(|(t, _)| matches!(t, Token::InterpString(_)))
+            .unwrap();
+        let Token::InterpString(parts) = tok else {
+            unreachable!()
+        };
+        let (src_text, base) = parts
+            .iter()
+            .find_map(|p| match p {
+                StringPart::ComplexExpr(src, base) => Some((src.clone(), *base)),
+                _ => None,
+            })
+            .expect("expected a ComplexExpr part");
+        assert_eq!(src_text, "$obj->prop");
+        // `$s = "x $obj->prop y";` - the `$` of `$obj` is the 9th
+        // character.
+        assert_eq!(base, Position { line: 2, col: 9 });
+    }
+
+    #[test]
+    fn many_tokens_on_one_extremely_long_line_does_not_blow_up_quadratically() {
+        // Real bug, not hypothetical: `line_col_at`'s first implementation
+        // recounted every character from the line's own start on *every*
+        // call, which is fine for ordinary code but a genuine O(line
+        // length x tokens on it) blowup on a real file in this project's
+        // own test corpus - `amphp/hpack`'s generated Huffman lookup
+        // table has a single line 1.25 million characters long, and hung
+        // for minutes (previously well under a second) before the
+        // incremental-cache fix. This is a smaller version of the same
+        // shape: one 200,000-character line with thousands of tokens on
+        // it - a quadratic implementation is easily slow enough here to
+        // fail this test's time budget; a linear one finishes instantly.
+        let mut src = "<?php $a = [".to_string();
+        for i in 0..40_000 {
+            if i > 0 {
+                src.push(',');
+            }
+            src.push_str(&i.to_string());
+        }
+        src.push_str("];\n");
+        assert!(src.len() > 200_000);
+
+        let start = std::time::Instant::now();
+        let toks = Lexer::new(&src).tokenize_with_spans();
+        let elapsed = start.elapsed();
+
+        assert!(toks.len() > 40_000);
+        assert!(
+            elapsed.as_secs() < 2,
+            "tokenizing one long line took {elapsed:?} - looks quadratic again"
+        );
     }
 }

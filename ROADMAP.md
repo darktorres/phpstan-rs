@@ -598,14 +598,61 @@ new, targeted unit tests exercise it directly).
 Verified against the 18923-file Piwigo corpus, deterministic across
 repeated runs, 318/318 tests passing.
 
-## Phase 11: Source positions, levels, config - NOT STARTED
+## Phase 11: Source positions, levels, config - PARTIAL
 
-- Thread real `(line, column)` spans through the lexer, parser, and
-  into `checker::Diagnostic`, replacing today's line-1 placeholder.
-- A two-part level system mirroring real PHPStan: discrete rule-gating
-  levels (0-6 equivalent) plus a separate strictness-parameter set for
-  `is_assignable` (7-10 equivalent).
-- A minimal config file and baseline mechanism.
+Full column-precise spans (not a coarser per-statement-line
+compromise) - real PHPStan's own precision. A large, multi-stage
+phase: source positions end-to-end (lexer through the AST through
+`Diagnostic` through CLI/LSP output), then a two-part level system,
+then config/baseline - tracked as six ordered sub-stages, each its own
+commit.
+
+**Shipped - lexer emits real spans.** `token::Position`/`Span` (a real
+`{start, end}` range, 1-indexed, columns counted in UTF-8 *characters*
+rather than raw bytes - a real, demonstrated need: the actual
+Piwigo/vendor corpus this project verifies against has first-party
+files with genuine multi-byte UTF-8 inside real code, not just
+comments). The
+lexer precomputes a line-start table once per file (the standard
+rustc-`SourceMap` technique) so converting a byte offset to a
+line/column is a binary search, not a per-token rescan of the whole
+file. `tokenize_with_spans()` is the new, real entry point;
+`tokenize()` stays as a thin adapter over it for the handful of tests
+that compare bare tokens. String interpolation (`"{$obj->prop}"`)
+gets a real base position too, biasing the isolated fragment re-lex
+back into true file coordinates instead of leaving it disconnected -
+precision is coarser for a heredoc's own interpolation specifically
+(its content has already had per-line indentation stripped, so an
+exact per-occurrence bias isn't attempted; anchored at the heredoc's
+own start instead) and for the two synthesized-string shorthand cases
+(`$name->prop`/`$name[key]`, which reconstruct a string with no exact
+sub-position mapping) - both honestly narrower, not blocking.
+
+**A real, severe performance bug found and fixed verifying this
+against the corpus, not hypothetical**: the first implementation of
+byte-to-line/column conversion recounted every character from a
+line's own start on every single call - fine for ordinary code, but a
+genuine O(line length x tokens on it) blowup on a real file already in
+this project's own test corpus (`amphp/hpack`'s generated Huffman
+lookup table, a single line 1.25 million characters long) - measured
+hanging for minutes on a file that used to check in well under a
+second. Fixed with an incremental cache: since real tokenization asks
+for strictly increasing byte offsets, caching the last conversion and
+counting only the *delta* since then turns the pathological line back
+into O(line length) total, not squared, while staying exactly correct
+(just not delta-accelerated) for the rare backward/cross-line asks the
+interpolation bias above can make. Re-verified: the same file now
+checks in ~0.3s; the full 18923-file corpus's parse pass rate and
+`--check-project` diagnostic count (41255) are both unchanged - purely
+additive infrastructure, zero behavior change yet since nothing
+downstream consumes spans until the next sub-stage.
+
+**Not yet shipped**: threading spans through the AST (`Stmt`/`Expr`
+and the declaration structs), `checker::Diagnostic` gaining a real
+span, and CLI/LSP output actually using them - the bulk of the
+phase's engineering, and its whole user-visible payoff (real editor
+positions instead of everything anchored at line 1) - plus the level
+system and config/baseline, both independent of positions.
 
 ## Phase 12: Bespoke per-function/method type extensions - PLANNED
 
