@@ -642,6 +642,21 @@ impl<'a> Checker<'a> {
     /// anything else leaves `locals` untouched rather than guess.
     fn apply_narrowing(&self, cond: &Expr, locals: &mut HashMap<String, Type>, branch_true: bool) {
         match cond {
+            // `&&` narrows the "both true" branch by composing each side
+            // in order (the right operand's own narrowing can rely on the
+            // left's, same as check_expr's short-circuit-aware handling)
+            // - the false branch would need "at least one is false, but
+            // not sure which", which isn't a narrowing this can express,
+            // so it's left alone, same conservative choice `||` mirrors
+            // for its own unrepresentable branch below.
+            Expr::Binary(BinOp::And, l, r) if branch_true => {
+                self.apply_narrowing(l, locals, true);
+                self.apply_narrowing(r, locals, true);
+            }
+            Expr::Binary(BinOp::Or, l, r) if !branch_true => {
+                self.apply_narrowing(l, locals, false);
+                self.apply_narrowing(r, locals, false);
+            }
             Expr::Binary(op, l, r) => {
                 let is_eq = matches!(op, BinOp::Identical | BinOp::Eq);
                 let is_neq = matches!(op, BinOp::NotIdentical | BinOp::NotEq);
@@ -674,10 +689,10 @@ impl<'a> Checker<'a> {
                 // dynamic target (`$x instanceof $className`) doesn't name
                 // a concrete class to narrow to either.
                 if branch_true
-                    && let Expr::Variable(var_name) = inner.as_ref()
+                    && let Some(key) = narrowing_key(inner)
                     && let InstanceofTarget::Name(class_name) = target
                 {
-                    locals.insert(var_name.clone(), self.resolve_name_expr(class_name));
+                    locals.insert(key, self.resolve_name_expr(class_name));
                 }
             }
             _ => {}
@@ -821,6 +836,26 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // `&&`/`||` short-circuit, so the right operand only ever runs
+            // once the left one's already settled the outcome - it needs
+            // to see whatever that implies (real code leans on this
+            // constantly: `$x instanceof Foo && $x->bar()`,
+            // `$x !== null && $x->prop`). Without this, checking the
+            // right side against the un-narrowed left-hand type produced
+            // real false positives once undefined-property detection
+            // started exercising exactly this idiom on real code.
+            Expr::Binary(BinOp::And, l, r) => {
+                self.check_expr(l, locals, label);
+                let mut narrowed = locals.clone();
+                self.apply_narrowing(l, &mut narrowed, true);
+                self.check_expr(r, &mut narrowed, label);
+            }
+            Expr::Binary(BinOp::Or, l, r) => {
+                self.check_expr(l, locals, label);
+                let mut narrowed = locals.clone();
+                self.apply_narrowing(l, &mut narrowed, false);
+                self.check_expr(r, &mut narrowed, label);
+            }
             Expr::Binary(_, l, r) => {
                 self.check_expr(l, locals, label);
                 self.check_expr(r, locals, label);
@@ -873,11 +908,24 @@ impl<'a> Checker<'a> {
                     Expr::Variable(_) => {}
                     Expr::ArrayLiteral(items) => {
                         for (_, item) in items {
-                            if !matches!(item, Expr::Variable(_)) {
-                                self.check_expr(item, locals, label);
+                            match item {
+                                Expr::Variable(_) => {}
+                                // Same "definition site, not a read" logic
+                                // as the PropertyAccess arm just below -
+                                // only the base is a real read here.
+                                Expr::PropertyAccess(base, _) => {
+                                    self.check_expr(base, locals, label);
+                                }
+                                other => self.check_expr(other, locals, label),
                             }
                         }
                     }
+                    // A property being *assigned* isn't a read of that
+                    // property - only its base is (`$obj->prop = ...`
+                    // reads $obj). Routing the full PropertyAccess through
+                    // check_expr here would wrongly flag legitimate
+                    // dynamic-property creation as "undefined property".
+                    Expr::PropertyAccess(base, _) => self.check_expr(base, locals, label),
                     other => self.check_expr(other, locals, label),
                 }
                 self.check_property_assignment(lhs, rhs, locals, label);
@@ -985,7 +1033,27 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::DynamicVariable(name_expr) => self.check_expr(name_expr, locals, label),
-            Expr::PropertyAccess(base, _) => self.check_expr(base, locals, label),
+            Expr::PropertyAccess(base, prop) => {
+                self.check_expr(base, locals, label);
+                // Unlike a *write* (check_property_assignment, and the
+                // Assign/ArrayLiteral-destructuring arms below that
+                // deliberately route a PropertyAccess target through only
+                // its base, not here) - a genuinely undeclared property
+                // creates nothing on read, it just returns null with a
+                // warning in real PHP (unless __get exists). So there's
+                // no "could be a legitimate dynamic property" case to
+                // stay lenient for here, the way there is on write.
+                if let Type::Object(class, _) = self.infer_expr(base, locals)
+                    && self.registry.classes.contains_key(&class)
+                    && self.registry.lookup_property(&class, prop).is_none()
+                    && self.registry.lookup_method(&class, "__get").is_none()
+                {
+                    self.diagnostics.push(Diagnostic {
+                        location: label.to_string(),
+                        message: format!("access to undefined property {class}::${prop}"),
+                    });
+                }
+            }
             Expr::DynamicPropertyAccess(base, name_expr) => {
                 self.check_expr(base, locals, label);
                 self.check_expr(name_expr, locals, label);
@@ -1386,18 +1454,25 @@ impl<'a> Checker<'a> {
             }
             Expr::ArrayLiteral(_) => Type::Array(Box::new(Type::Mixed)),
             Expr::Interpolated(_) => Type::String,
-            Expr::PropertyAccess(base, prop) => match self.infer_expr(base, locals) {
-                Type::Object(class, type_args) => self
-                    .registry
-                    .lookup_property(&class, prop)
-                    .map(|p| {
-                        let bindings = self.class_template_bindings(&class, &type_args);
-                        let resolved = types::substitute_template(&p.ty, &bindings);
-                        self.resolve_pseudo(&resolved, &class)
-                    })
-                    .unwrap_or(Type::Mixed),
-                _ => Type::Mixed,
-            },
+            Expr::PropertyAccess(base, prop) => {
+                if let Some(base_key) = narrowing_key(base)
+                    && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
+                {
+                    return narrowed.clone();
+                }
+                match self.infer_expr(base, locals) {
+                    Type::Object(class, type_args) => self
+                        .registry
+                        .lookup_property(&class, prop)
+                        .map(|p| {
+                            let bindings = self.class_template_bindings(&class, &type_args);
+                            let resolved = types::substitute_template(&p.ty, &bindings);
+                            self.resolve_pseudo(&resolved, &class)
+                        })
+                        .unwrap_or(Type::Mixed),
+                    _ => Type::Mixed,
+                }
+            }
             // A homogeneous array's element type applies regardless of
             // which key is accessed; optimistically assumes the access is
             // in bounds/present rather than widening to `V|null` for a
@@ -1544,6 +1619,40 @@ fn literal_string_key(e: &Expr) -> Option<String> {
     match e {
         Expr::Literal(Literal::String(s)) => Some(s.clone()),
         Expr::Literal(Literal::Int(n)) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// A stable string key for the small set of expressions this checker can
+/// narrow: a bare local variable, or a property-access chain rooted in
+/// one (`$a->b->c`). Lets `locals` (otherwise keyed by plain variable
+/// name) also carry narrowed property-chain types, reusing the exact
+/// same map rather than a second, parallel one - safe because a
+/// property-chain key always contains `->`, which can never appear in a
+/// real PHP variable name, so the two key spaces can't collide.
+///
+/// Without this, `apply_narrowing`'s `instanceof` handling could only
+/// ever narrow a bare variable - `$arg->value instanceof Variable &&
+/// $arg->value->name` (an extremely common AST-visitor idiom - narrow a
+/// property, then read a property only the narrowed-to subtype has) had
+/// no way to remember that narrowing at all, so the second half was
+/// checked against `$arg->value`'s un-narrowed declared type. Found via
+/// real false positives once undefined-property-on-read detection
+/// started actually exercising this: nikic/php-parser AST-visitor code
+/// in this project's own `tools/` does exactly this pattern.
+fn narrowing_key(e: &Expr) -> Option<String> {
+    match e {
+        // No prefix - `locals` is keyed by bare variable name everywhere
+        // else in this checker (`Expr::Variable(name) => locals.get(name)`),
+        // and this has to produce the exact same key for a bare variable
+        // to stay a drop-in replacement at the Instanceof-narrowing call
+        // site. Collision-free anyway: only the PropertyAccess case below
+        // ever produces a key containing `->`, which can't appear in a
+        // real PHP variable name.
+        Expr::Variable(name) => Some(name.clone()),
+        Expr::PropertyAccess(base, prop) => {
+            narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
+        }
         _ => None,
     }
 }
@@ -1809,6 +1918,66 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn reading_an_undefined_property_is_flagged_but_writing_one_is_not() {
+        // Phase 9's last remaining piece: undefined-property-on-*read*
+        // detection. Deliberately asymmetric with the write side just
+        // above - a write can legitimately create a real (if deprecated)
+        // dynamic property, but a read of one that was never declared
+        // and never dynamically assigned just returns null with a
+        // warning in real PHP, so there's no legitimate case to stay
+        // lenient for.
+        let d = diagnostics_for(
+            r#"<?php
+            class Box {
+                public int $known = 1;
+            }
+            function f(Box $box) {
+                echo $box->known;
+                echo $box->totallyMadeUp;
+                $box->dynamicWrite = 5;
+                [$box->a, $box->b] = [1, 2];
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("Box::$totallyMadeUp"), "got: {d:?}");
+    }
+
+    #[test]
+    fn a_class_with_a_magic_get_method_suppresses_undefined_property_reads() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Box {
+                public function __get($name) { return null; }
+            }
+            function f(Box $box) {
+                echo $box->anything;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn compound_assignment_to_an_undefined_property_is_flagged_as_a_read() {
+        // `+=` reads the current value before writing the new one, so
+        // (unlike a plain `=`) the property really does need to already
+        // exist - this should NOT get the write side's leniency.
+        let d = diagnostics_for(
+            r#"<?php
+            class Box {}
+            function f(Box $box) {
+                $box->counter += 1;
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("Box::$counter")),
+            "got: {d:?}"
+        );
     }
 
     #[test]
@@ -2939,6 +3108,63 @@ mod tests {
             r#"<?php
             class Foo {}
             function f() { return new \Foo(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn short_circuit_and_narrows_its_right_operand_and_the_enclosing_if_body() {
+        // A real, common AST-visitor idiom (found via a false positive on
+        // this project's own tools/ directory once undefined-property
+        // detection actually exercised it): narrow a property chain via
+        // `instanceof`, then read a property only the narrowed-to
+        // subtype has - both within the same `&&` (needs check_expr's
+        // short-circuit-aware traversal) and in the enclosing `if`'s body
+        // (needs apply_narrowing to compose `&&`'s operands, not just
+        // handle a single top-level condition shape).
+        let and_operand = diagnostics_for(
+            r#"<?php
+            class Base {}
+            class Variable extends Base { public string $name = ""; }
+            class Arg { public Base $value; }
+            function f(Arg $arg) {
+                return $arg->value instanceof Variable && $arg->value->name;
+            }
+        "#,
+        );
+        assert!(and_operand.is_empty(), "unexpected: {and_operand:?}");
+
+        let if_body = diagnostics_for(
+            r#"<?php
+            class Base {}
+            class Variable extends Base { public string $name = ""; }
+            class Arg { public Base $value; }
+            function f(Arg $arg) {
+                if ($arg->value instanceof Variable) {
+                    echo $arg->value->name;
+                    echo $arg->value->totallyMadeUp;
+                }
+            }
+        "#,
+        );
+        assert!(
+            if_body
+                .iter()
+                .any(|x| x.message.contains("Variable::$totallyMadeUp")),
+            "expected the genuinely-undefined property to still be caught: {if_body:?}"
+        );
+    }
+
+    #[test]
+    fn or_short_circuit_narrows_its_right_operand_on_the_false_branch() {
+        // `||`'s right side only runs when the left is false - the mirror
+        // image of `&&`'s "both true" composition.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x) {
+                return $x === null || strlen($x) > 0;
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");

@@ -434,17 +434,56 @@ impl ClassInfo {
                 )
             })
             .collect();
-        let consts = e
+        let mut consts: HashMap<String, Type> = e
             .consts
             .iter()
             .map(|cc| (cc.name.clone(), infer_const_type(&cc.value)))
             .collect();
+        // A case is accessed exactly like a constant (`Suit::Hearts`,
+        // same `ClassName::member` syntax as `Suit::SOME_CONST`) and has
+        // a real, useful static type: the enum itself. Folding it into
+        // `consts` (rather than a separate field) means the checker's
+        // static-access existence check and its type inference both
+        // just work, with no new lookup path needed - previously cases
+        // weren't registered as anything at all, so `Suit::Hearts`
+        // always read as Mixed and a genuinely undefined case name was
+        // never caught.
+        let fqn = ctx.declared_name(&e.name);
+        for case in &e.cases {
+            consts.insert(case.name.clone(), Type::Object(fqn.clone(), Vec::new()));
+        }
+
+        // Every enum case is a real object with a built-in `->name`
+        // (its case name, as a string) - and a backed enum's case
+        // additionally has a real `->value` typed to its backing type -
+        // neither declared in source, both provided by the language
+        // itself (`UnitEnum`/`BackedEnum`). Found the hard way: adding
+        // undefined-property-on-read detection immediately produced a
+        // false positive on every single real `$case->value` access in
+        // the wild, since nothing registered these as properties at all.
+        let mut properties = HashMap::new();
+        properties.insert(
+            "name".to_string(),
+            PropertySig {
+                ty: Type::String,
+                is_static: false,
+            },
+        );
+        if let Some(backing) = &e.backing_type {
+            properties.insert(
+                "value".to_string(),
+                PropertySig {
+                    ty: types::parse_type_string(backing),
+                    is_static: false,
+                },
+            );
+        }
 
         ClassInfo {
             extends: Vec::new(),
             implements: e.implements.iter().map(|s| ctx.resolve(s)).collect(),
             methods,
-            properties: HashMap::new(),
+            properties,
             consts,
             uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
             templates: Vec::new(),
