@@ -76,7 +76,12 @@ impl Parser {
     pub fn parse_program(&mut self) -> Vec<Stmt> {
         let mut stmts = Vec::new();
         while !self.at_eof() {
-            if matches!(self.peek(), Token::Keyword(Keyword::Namespace)) {
+            // See parse_statement's own Namespace arm for why the
+            // backslash check matters: `namespace\foo();` at the top
+            // level is a relative-name call, not a declaration.
+            if matches!(self.peek(), Token::Keyword(Keyword::Namespace))
+                && !matches!(self.peek_at(1), Token::Backslash)
+            {
                 stmts.extend(self.parse_namespace_stmt());
             } else {
                 stmts.push(self.parse_statement());
@@ -355,7 +360,14 @@ impl Parser {
             {
                 Stmt::EnumDecl(self.parse_enum_decl())
             }
-            Token::Keyword(Keyword::Namespace) => {
+            // `namespace\foo();` - a relative-name expression statement,
+            // not a declaration (a real namespace declaration never
+            // starts with a backslash right after the keyword - it's
+            // always `namespace Name;`, `namespace Name { ... }`, or bare
+            // `namespace;`/`namespace { ... }`). Falls through to the
+            // generic expression-statement path below, which already
+            // parses `namespace\foo` as a name expression.
+            Token::Keyword(Keyword::Namespace) if !matches!(self.peek_at(1), Token::Backslash) => {
                 self.advance();
                 let name = self.parse_qualified_name();
                 self.expect_semicolon();
@@ -528,6 +540,10 @@ impl Parser {
         if self.eat(&Token::DollarBrace) {
             self.parse_expression();
             self.expect(&Token::RBrace);
+            return "{dynamic}".to_string();
+        }
+        if self.eat(&Token::Dollar) {
+            self.parse_primary();
             return "{dynamic}".to_string();
         }
         self.expect_variable()
@@ -1900,8 +1916,9 @@ impl Parser {
         if self.eat(&Token::Keyword(Keyword::Instanceof)) {
             // The right-hand side is usually a static class name, but PHP
             // also allows an arbitrary expression there (`$x instanceof
-            // $className`) for a runtime-determined class.
-            let target = if matches!(self.peek(), Token::Variable(_)) {
+            // $className`, `$x instanceof ('std' . $class)`) for a
+            // runtime-determined class.
+            let target = if matches!(self.peek(), Token::Variable(_) | Token::LParen) {
                 InstanceofTarget::Expr(Box::new(self.parse_unary()))
             } else {
                 InstanceofTarget::Name(self.parse_qualified_name())
@@ -2006,15 +2023,25 @@ impl Parser {
                     // `$obj->{expr}` - a fully dynamic property/method
                     // name, computed from an arbitrary expression rather
                     // than a fixed identifier or `$var`. `$obj->${expr}`
-                    // (the name comes from a variable-variable instead of
-                    // a plain `$var`) is treated the same way - the exact
-                    // double-indirection isn't modeled, matching how the
-                    // plain `$obj->$prop` case above already just uses
-                    // the variable's own name rather than its value.
-                    if self.check(&Token::LBrace) || self.check(&Token::DollarBrace) {
-                        self.advance();
-                        let name_expr = self.parse_expression();
-                        self.expect(&Token::RBrace);
+                    // and `$obj->$$expr` (the name comes from a
+                    // variable-variable instead of a plain `$var`) are
+                    // treated the same way - the exact double-indirection
+                    // isn't modeled, matching how the plain `$obj->$prop`
+                    // case above already just uses the variable's own name
+                    // rather than its value.
+                    let dynamic_name =
+                        if self.check(&Token::LBrace) || self.check(&Token::DollarBrace) {
+                            self.advance();
+                            let e = self.parse_expression();
+                            self.expect(&Token::RBrace);
+                            Some(e)
+                        } else if self.check(&Token::Dollar) {
+                            self.advance();
+                            Some(self.parse_primary())
+                        } else {
+                            None
+                        };
+                    if let Some(name_expr) = dynamic_name {
                         expr = if self.check(&Token::LParen) {
                             let (args, is_fcc) = self.parse_args();
                             let call =
@@ -2074,17 +2101,22 @@ impl Parser {
                             self.advance();
                             format!("${s}")
                         }
-                        // `Foo::{$name}` / `Foo::${$name}` - a fully
-                        // dynamic static member name. StaticAccess/
-                        // StaticCall aren't given any deeper type-checking
-                        // today regardless of whether the name is static
-                        // or dynamic, so this is just parsed (consuming
-                        // the name expression correctly) rather than
-                        // threading a real Expr through here.
+                        // `Foo::{$name}` / `Foo::${$name}` / `Foo::$$name`
+                        // - a fully dynamic static member name.
+                        // StaticAccess/StaticCall aren't given any deeper
+                        // type-checking today regardless of whether the
+                        // name is static or dynamic, so this is just
+                        // parsed (consuming the name expression correctly)
+                        // rather than threading a real Expr through here.
                         Token::LBrace | Token::DollarBrace => {
                             self.advance();
                             self.parse_expression();
                             self.expect(&Token::RBrace);
+                            "{dynamic}".to_string()
+                        }
+                        Token::Dollar => {
+                            self.advance();
+                            self.parse_primary();
                             "{dynamic}".to_string()
                         }
                         other => panic!("parse error: expected static member, found {:?}", other),
@@ -2235,6 +2267,14 @@ impl Parser {
                 self.expect(&Token::RBrace);
                 Expr::DynamicVariable(Box::new(name_expr))
             }
+            // `$$name` (equivalent to `${$name}`) - recurses to allow
+            // `$$$name` chains, though that's vanishingly rare in
+            // practice.
+            Token::Dollar => {
+                self.advance();
+                let name_expr = self.parse_primary();
+                Expr::DynamicVariable(Box::new(name_expr))
+            }
             Token::LParen => {
                 self.advance();
                 let inner = self.parse_expression();
@@ -2264,6 +2304,19 @@ impl Parser {
                     Token::Variable(name) => {
                         self.advance();
                         Expr::Variable(name)
+                    }
+                    // `new ('std' . $class)` - a fully dynamic class
+                    // reference. Parsed as exactly one grouped expression
+                    // (not the general postfix-chaining primary parse),
+                    // so a constructor call's own `(...)` right after it
+                    // (`new ('std'.$class)()`) is left for the args check
+                    // below, not folded into this expression's postfix
+                    // chain.
+                    Token::LParen => {
+                        self.advance();
+                        let e = self.parse_expression();
+                        self.expect(&Token::RParen);
+                        Expr::Grouping(Box::new(e))
                     }
                     _ => Expr::Name(self.parse_qualified_name()),
                 };
@@ -2431,6 +2484,15 @@ impl Parser {
             Token::InterpString(parts) => {
                 self.advance();
                 self.build_interpolated(parts)
+            }
+            // `` `cmd $interpolated` `` - shell-exec shorthand. Modeled as
+            // a call to shell_exec() on the same interpolated-string value
+            // a double-quoted string with identical content would build,
+            // rather than adding a dedicated AST node for it.
+            Token::ShellExec(parts) => {
+                self.advance();
+                let cmd = self.build_interpolated(parts);
+                Expr::Call(Box::new(Expr::Name("shell_exec".to_string())), vec![cmd])
             }
             // `namespace\Foo` - a name explicitly relative to the current
             // namespace. Only ever appears as a value in expression
@@ -3503,6 +3565,102 @@ mod tests {
             panic!("expected assignment");
         };
         assert!(matches!(rhs.as_ref(), Expr::ArrowFn { .. }));
+    }
+
+    #[test]
+    fn trailing_dot_float_literal_parses() {
+        let program = parse(r#"<?php $x = [5., 6.];"#);
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        let Expr::ArrayLiteral(items) = rhs.as_ref() else {
+            panic!("expected array literal");
+        };
+        assert!(matches!(items[0].1, Expr::Literal(Literal::Float(f)) if f == 5.0));
+    }
+
+    #[test]
+    fn dynamic_class_expr_after_new_and_instanceof_parses() {
+        let program = parse(
+            r#"<?php
+            $class = 'class';
+            var_dump(new ('std'.$class));
+            var_dump(new ('std'.$class)());
+            var_dump($obj instanceof ('std'.$class));
+        "#,
+        );
+        let Stmt::Expression(Expr::Call(_, args)) = &program[1] else {
+            panic!("expected var_dump() call");
+        };
+        let Expr::New(class_expr, _) = &args[0] else {
+            panic!("expected New");
+        };
+        assert!(matches!(class_expr.as_ref(), Expr::Grouping(_)));
+
+        let Stmt::Expression(Expr::Call(_, args)) = &program[2] else {
+            panic!("expected var_dump() call");
+        };
+        let Expr::New(_, ctor_args) = &args[0] else {
+            panic!("expected New");
+        };
+        assert_eq!(ctor_args.len(), 0);
+    }
+
+    #[test]
+    fn brace_less_double_dollar_variable_variable_parses() {
+        let program = parse(r#"<?php global $a, $$b;"#);
+        assert!(matches!(&program[0], Stmt::Global(names) if names == &["a", "{dynamic}"]));
+    }
+
+    #[test]
+    fn shell_exec_backtick_string_parses() {
+        let program = parse(r#"<?php $x = `echo -n ""`;"#);
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        let Expr::Call(callee, _) = rhs.as_ref() else {
+            panic!("expected a call");
+        };
+        assert!(matches!(callee.as_ref(), Expr::Name(n) if n == "shell_exec"));
+    }
+
+    #[test]
+    fn quote_inside_complex_interpolation_does_not_end_the_string() {
+        let program = parse(r#"<?php $x = "before {$data["key"]} after";"#);
+        assert!(matches!(&program[0], Stmt::Expression(Expr::Assign(_, _))));
+    }
+
+    #[test]
+    fn namespace_relative_call_statement_is_not_a_declaration() {
+        let program = parse(r#"<?php namespace\foo();"#);
+        assert!(matches!(
+            &program[0],
+            Stmt::Expression(Expr::Call(callee, _))
+                if matches!(callee.as_ref(), Expr::Name(n) if n == "namespace\\foo")
+        ));
+    }
+
+    #[test]
+    fn double_dollar_variable_variable_in_member_position_parses() {
+        let program = parse(
+            r#"<?php
+            $obj->$$name;
+            Foo::$$name;
+            $obj->$$name();
+        "#,
+        );
+        assert!(matches!(
+            &program[0],
+            Stmt::Expression(Expr::DynamicPropertyAccess(_, _))
+        ));
+        assert!(matches!(
+            &program[1],
+            Stmt::Expression(Expr::StaticAccess(c, m)) if c == "Foo" && m == "{dynamic}"
+        ));
+        assert!(matches!(
+            &program[2],
+            Stmt::Expression(Expr::DynamicMethodCall(_, _, _))
+        ));
     }
 
     #[test]

@@ -92,6 +92,15 @@ impl<'a> Lexer<'a> {
             return Token::DollarBrace;
         }
 
+        // `$$name` - the brace-less variable-variable form, equivalent to
+        // `${$name}`. Falls through here (not identifier-start, not `{`
+        // right after the first `$`) since the inner `$name` becomes its
+        // own Variable token next.
+        if c == b'$' && self.peek_at(1) == b'$' {
+            self.pos += 1;
+            return Token::Dollar;
+        }
+
         // `b'...'` / `b"..."` / `b<<<...` - the legacy byte-string prefix
         // (a no-op today; PHP 6's binary-vs-unicode string split never
         // shipped, but the lexical grammar still accepts the prefix).
@@ -123,6 +132,9 @@ impl<'a> Lexer<'a> {
         }
         if c == b'"' {
             return self.lex_double_quoted();
+        }
+        if c == b'`' {
+            return self.lex_backtick();
         }
         if self.starts_with("<<<") {
             return self.lex_heredoc();
@@ -272,7 +284,13 @@ impl<'a> Lexer<'a> {
         while self.peek().is_ascii_digit() || self.peek() == b'_' {
             self.pos += 1;
         }
-        if self.peek() == b'.' && self.peek_at(1).is_ascii_digit() {
+        // A `.` right after integer digits always starts a float, even
+        // with no fractional digits following (`123.` is a valid float
+        // literal, equal to `123.0`) - verified against a real PHP 8.5
+        // build: `1.$b` is a real syntax error there too (the `.` is
+        // greedily consumed into the number, not treated as concat),
+        // confirming this isn't conditional on what follows the dot.
+        if self.peek() == b'.' {
             is_float = true;
             self.pos += 1;
             while self.peek().is_ascii_digit() || self.peek() == b'_' {
@@ -317,19 +335,46 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_double_quoted(&mut self) -> Token {
-        self.pos += 1; // opening "
+        Token::InterpString(self.lex_interpolated_run(b'"'))
+    }
+
+    fn lex_backtick(&mut self) -> Token {
+        Token::ShellExec(self.lex_interpolated_run(b'`'))
+    }
+
+    /// Shared scanning logic for double-quoted strings and backtick
+    /// shell-exec strings - identical interpolation rules, just a
+    /// different closing delimiter.
+    fn lex_interpolated_run(&mut self, delim: u8) -> Vec<StringPart> {
+        self.pos += 1; // opening delimiter
         let start = self.pos;
-        while self.pos < self.src.len() && self.peek() != b'"' {
+        while self.pos < self.src.len() && self.peek() != delim {
             if self.peek() == b'\\' {
                 self.pos = (self.pos + 2).min(self.src.len());
+            } else if self.peek() == b'{' && self.peek_at(1) == b'$' {
+                // A `{$...}` complex-interpolation block can contain its
+                // own delimiter characters (`{$data["key"]}`), which must
+                // not be mistaken for this string's own closing delimiter -
+                // skip the whole balanced-brace block before resuming the
+                // search for the real closing delimiter.
+                self.pos += 1;
+                let mut depth = 1;
+                while self.pos < self.src.len() && depth > 0 {
+                    match self.peek() {
+                        b'{' => depth += 1,
+                        b'}' => depth -= 1,
+                        _ => {}
+                    }
+                    self.pos += 1;
+                }
             } else {
                 self.pos += 1;
             }
         }
         let raw = &self.src[start..self.pos];
         let parts = scan_interpolated(raw);
-        self.pos = (self.pos + 1).min(self.src.len()); // closing "
-        Token::InterpString(parts)
+        self.pos = (self.pos + 1).min(self.src.len()); // closing delimiter
+        parts
     }
 
     fn lex_doc_comment(&mut self) -> Token {

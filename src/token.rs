@@ -235,6 +235,10 @@ pub enum Token {
     Float(f64),
     StringLit(String),
     InterpString(Vec<StringPart>),
+    // `` `shell command $with $interpolation` `` - same interpolation
+    // rules as a double-quoted string, different delimiter and runtime
+    // meaning (shell_exec).
+    ShellExec(Vec<StringPart>),
     Identifier(String),
     Keyword(Keyword),
 
@@ -301,6 +305,10 @@ pub enum Token {
     PipeGt,
     // `${` - starts the older "variable variable" syntax `${expr}`.
     DollarBrace,
+    // A lone `$` not immediately followed by an identifier or `{` - the
+    // brace-less variable-variable form (`$$name`, meaning "the variable
+    // named by the value of $name", same as `${$name}`).
+    Dollar,
 
     Eof,
 }
