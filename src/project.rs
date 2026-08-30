@@ -30,16 +30,15 @@ struct FileState {
 ///
 /// `load_file` is for the initial, full load of a codebase; `update_file`
 /// is the incremental path: re-parsing and re-checking only the file that
-/// changed, plus (new) every file that references a symbol it declares -
-/// every other file's parse tree and registry entries are untouched.
+/// changed, plus the *transitive* closure of every file that references a
+/// symbol it declares, or references a symbol declared by one of those
+/// files, and so on (see `transitive_affected_files`) - every other file's
+/// parse tree and registry entries are untouched.
 ///
-/// What this does NOT do: chase invalidation transitively (if A depends on
-/// B and B depends on C, changing C re-checks B but not A, even though A's
-/// diagnostics could in principle depend on C through B) or narrow by
-/// *which* aspect of a symbol changed (any file referencing a changed
-/// symbol at all gets re-checked, even if the specific thing it uses
-/// didn't change) - both are safe over-approximations in the direction
-/// that costs an occasional extra re-check rather than a missed one, and
+/// What this does NOT do: narrow by *which* aspect of a symbol changed -
+/// any file reachable through that chain gets re-checked, even if the
+/// specific thing it uses didn't change. That's a safe over-approximation
+/// (it costs an occasional extra re-check, never a missed one) and
 /// straightforward to tighten later if the extra re-checking ever matters
 /// in practice.
 pub struct Project {
@@ -135,21 +134,69 @@ impl Project {
             },
         );
 
-        let mut affected: HashSet<PathBuf> = HashSet::new();
-        affected.insert(path.to_path_buf());
-        for symbol in &changed_symbols {
-            if let Some(files) = self.dependents.get(symbol) {
-                affected.extend(files.iter().cloned());
-            }
-        }
-
-        affected
+        self.transitive_affected_files(path, changed_symbols)
             .into_iter()
             .map(|p| {
                 let diagnostics = self.check_file(&p);
                 (p, diagnostics)
             })
             .collect()
+    }
+
+    /// The full, transitive closure of files that need re-checking after
+    /// `changed_file`'s declared symbols became `seed_symbols` (its own
+    /// old+new declared names) - not just the files that directly
+    /// reference one of those symbols, but the fixed point of "declares ->
+    /// is referenced by -> declares -> is referenced by -> ...".
+    ///
+    /// This is what makes invalidation correct across inheritance chains:
+    /// if file A references class B (`function f(B $b) { ... $b->x ... }`)
+    /// and B `extends` class C declared in a third file, a change to C's
+    /// shape can change what A's use of `$b->x` type-checks to, even
+    /// though A's own source never mentions C by name. A one-hop lookup
+    /// from C's dependents would find B but stop there and miss A; this
+    /// keeps expanding the frontier through every newly-affected file's
+    /// own declarations until nothing new turns up.
+    fn transitive_affected_files(
+        &self,
+        changed_file: &Path,
+        seed_symbols: HashSet<String>,
+    ) -> HashSet<PathBuf> {
+        let mut affected = HashSet::new();
+        affected.insert(changed_file.to_path_buf());
+
+        let mut seen_symbols = HashSet::new();
+        let mut frontier: Vec<String> = Vec::new();
+        for symbol in seed_symbols {
+            if seen_symbols.insert(symbol.clone()) {
+                frontier.push(symbol);
+            }
+        }
+
+        while let Some(symbol) = frontier.pop() {
+            let Some(files) = self.dependents.get(&symbol) else {
+                continue;
+            };
+            for file in files {
+                if !affected.insert(file.clone()) {
+                    continue;
+                }
+                // `file` is newly affected - its own effective shape may
+                // have just changed too (e.g. it `extends` the symbol that
+                // changed), so anything depending on what *it* declares
+                // needs to be considered next.
+                let Some(state) = self.files.get(file) else {
+                    continue;
+                };
+                for name in state.functions.iter().chain(state.classes.iter()) {
+                    if seen_symbols.insert(name.clone()) {
+                        frontier.push(name.clone());
+                    }
+                }
+            }
+        }
+
+        affected
     }
 
     /// Type-checks one already-loaded file against the project's current
@@ -356,5 +403,61 @@ mod tests {
         assert!(result.contains_key(&PathBuf::from("thing.php")));
         assert!(result.contains_key(&PathBuf::from("caller.php")));
         assert!(!project.registry().functions.contains_key("thing"));
+    }
+
+    #[test]
+    fn invalidation_is_transitive_across_an_inheritance_chain() {
+        let mut project = Project::new();
+        // C declares $x. B extends C (so B's *effective* shape includes
+        // $x, without B's own source ever mentioning it). A references B
+        // by name (a type hint) but never mentions C at all.
+        project.load_file(
+            PathBuf::from("c.php"),
+            "<?php class C { public int $x = 1; }",
+        );
+        project.load_file(PathBuf::from("b.php"), "<?php class B extends C {}");
+        project.load_file(
+            PathBuf::from("a.php"),
+            "<?php function useB(B $b) { return $b->x; }",
+        );
+        project.finish_loading();
+
+        // Changing C ripples through B into A, even though a.php's own
+        // parse tree never references "C" - a one-hop lookup from C's
+        // direct dependents (just b.php) would miss a.php entirely.
+        let result = project.update_file(
+            &PathBuf::from("c.php"),
+            "<?php class C { public string $x = 'a'; }",
+        );
+
+        assert!(result.contains_key(&PathBuf::from("c.php")));
+        assert!(result.contains_key(&PathBuf::from("b.php")));
+        assert!(result.contains_key(&PathBuf::from("a.php")));
+    }
+
+    #[test]
+    fn unrelated_files_are_not_swept_into_transitive_invalidation() {
+        let mut project = Project::new();
+        project.load_file(
+            PathBuf::from("c.php"),
+            "<?php class C { public int $x = 1; }",
+        );
+        project.load_file(PathBuf::from("b.php"), "<?php class B extends C {}");
+        project.load_file(
+            PathBuf::from("a.php"),
+            "<?php function useB(B $b) { return $b->x; }",
+        );
+        project.load_file(
+            PathBuf::from("unrelated.php"),
+            "<?php function unrelated(): int { return 1; }",
+        );
+        project.finish_loading();
+
+        let result = project.update_file(
+            &PathBuf::from("c.php"),
+            "<?php class C { public string $x = 'a'; }",
+        );
+
+        assert!(!result.contains_key(&PathBuf::from("unrelated.php")));
     }
 }
