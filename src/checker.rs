@@ -26,6 +26,26 @@ pub struct Diagnostic {
 /// shares one mutable scope with no forking or narrowing - a real but
 /// bounded gap, not a soundness issue, since no narrowing ever happens
 /// there rather than an incorrect one.
+///
+/// Known limitation, discovered while building undefined-symbol
+/// detection (Phase 9): `Expr::New`/`Expr::Call` flag undefined
+/// classes/functions by *existence* alone, which is safe under this
+/// project's flat, namespace-less registry (`registry.rs`'s own docs on
+/// `remove_declarations` note namespaces aren't modeled at all) - a name
+/// collision between two unrelated packages can only ever produce a
+/// false *negative* there (the wrong one "exists" too), never a false
+/// positive. Undefined-*method* detection would need to trust the
+/// specific `ClassInfo` stored under a colliding name, which real-scale
+/// testing showed is not safe: 1595 distinct class names collide across
+/// one real project plus its `vendor/` (e.g. 77 unrelated declarations
+/// of `InvalidArgumentException` alone), and whichever collides last
+/// wins the registry slot - silently discarding the real class's actual
+/// methods. So `Expr::MethodCall` deliberately does not flag undefined
+/// methods, `Expr::PropertyAccess` does not flag undefined properties on
+/// read (the existing write-side check already made the same call, for
+/// dynamic-property reasons), and `Expr::StaticAccess`/`StaticCall`
+/// aren't given existence checks either - all four need a genuinely
+/// namespace-aware registry first, not a target this project has reached.
 pub struct Checker<'a> {
     registry: &'a Registry,
     diagnostics: Vec<Diagnostic>,
@@ -582,19 +602,36 @@ impl<'a> Checker<'a> {
             }
             Expr::MethodCall(recv, method, args) => {
                 self.check_expr(recv, locals, label);
-                let sig = match self.infer_expr(recv, locals) {
-                    Type::Object(class) => self.registry.lookup_method(&class, &method.clone()),
+                // Deliberately NOT flagging an "undefined method" here the
+                // way Expr::Call/Expr::New do for functions/classes - see
+                // the module-level doc comment's "Known limitation" note.
+                // In short: unlike existence-only checks, a method lookup
+                // depends on *which* class's data is stored under a given
+                // bare name, and this registry has no namespace modeling
+                // at all - a name collision elsewhere in a real dependency
+                // tree (confirmed at real scale: 1595 distinct class names
+                // collide across a single real project + its vendor/,
+                // e.g. 77 unrelated declarations of InvalidArgumentException
+                // alone) can silently overwrite a class's real method
+                // table with an unrelated one's, which would then flag
+                // genuinely-existing methods as undefined. Safe once this
+                // registry becomes namespace-aware; not before.
+                let recv_class = match self.infer_expr(recv, locals) {
+                    Type::Object(class) => Some(class),
                     _ => None,
                 };
+                let sig = recv_class
+                    .as_deref()
+                    .and_then(|class| self.registry.lookup_method(class, method));
                 self.predefine_byref_or_unknown_args(sig, args, locals);
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
-                if let Type::Object(class) = self.infer_expr(recv, locals)
-                    && let Some(sig) = self.registry.lookup_method(&class, method)
+                if let Some(class) = &recv_class
+                    && let Some(sig) = sig
                 {
                     let qualified = format!("{class}::{method}");
-                    self.check_args(&qualified, sig, args, locals, label, Some(&class));
+                    self.check_args(&qualified, sig, args, locals, label, Some(class));
                 }
             }
             Expr::Binary(_, l, r) => {
