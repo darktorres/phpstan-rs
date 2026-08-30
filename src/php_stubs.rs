@@ -138,4 +138,40 @@ mod tests {
         assert!(names.contains("mysqli_query"));
         assert!(stubs.len() > 1000);
     }
+
+    #[test]
+    fn array_map_s_real_stub_no_longer_miscounts_its_superseded_parameter() {
+        let stubs = generated_stubs();
+        let (_, sig) = stubs
+            .iter()
+            .find(|(name, _)| name == "array_map")
+            .expect("array_map should be generated");
+        let required = sig
+            .params
+            .iter()
+            .filter(|p| !p.variadic && !p.has_default)
+            .count();
+        assert_eq!(required, 2, "array_map($callback, $array) is valid");
+    }
+
+    #[test]
+    fn array_keys_and_mt_rand_s_optional_trailing_params_are_not_miscounted() {
+        let stubs = generated_stubs();
+        for name in ["array_keys", "mt_rand"] {
+            let (_, sig) = stubs
+                .iter()
+                .find(|(n, _)| n == name)
+                .unwrap_or_else(|| panic!("{name} should be generated"));
+            let required = sig
+                .params
+                .iter()
+                .filter(|p| !p.variadic && !p.has_default)
+                .count();
+            assert!(
+                required <= 1,
+                "{name} should allow its highest-arity-only overload's \
+                 trailing params to be omitted, got {required} required"
+            );
+        }
+    }
 }

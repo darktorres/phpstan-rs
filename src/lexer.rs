@@ -183,7 +183,9 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                 }
                 b'#' => {
-                    if self.starts_with("#[") {
+                    if self.starts_with("#[PhpStormStubsElementAvailable(") {
+                        self.skip_stub_availability_attribute();
+                    } else if self.starts_with("#[") {
                         // Attribute like #[Foo(...)] - skip to matching ']'.
                         self.pos += 2;
                         let mut depth = 1;
@@ -227,6 +229,100 @@ impl<'a> Lexer<'a> {
                 }
                 _ => break,
             }
+        }
+    }
+
+    /// phpstorm-stubs represents "this parameter only existed in PHP
+    /// versions X-Y" with `#[PhpStormStubsElementAvailable(from: 'X', to:
+    /// 'Y')]` on the parameter itself, rather than maintaining separate
+    /// per-version signatures - e.g. `array_map`'s real stub carries a
+    /// modern, still-open `array $array` parameter *and* a superseded,
+    /// closed-range, no-default `$arrays` one, side by side with the
+    /// modern variadic `array ...$arrays`, both meant to represent the
+    /// same conceptual parameter across two PHP-version eras, never both
+    /// present on one real install. A plain attribute skip (this project's
+    /// treatment of every other attribute, none of which carry
+    /// information any checker feature here consumes) would leave that
+    /// superseded parameter in the token stream as an ordinary,
+    /// permanently-required one, miscounting the function's real minimum
+    /// arity - and not just for this project's own bundled stub corpus:
+    /// real projects commonly vendor `jetbrains/phpstorm-stubs` itself as
+    /// a transitive phpstan dependency, so this needs to be a lexer-level
+    /// fix, not something special-cased only in the stub-generation
+    /// pipeline.
+    ///
+    /// Only a *closed* range (`to:` present) parameter with no `= value`
+    /// default of its own gets dropped - along with, if present, its one
+    /// trailing separator comma (a trailing comma before `)` is valid PHP
+    /// syntax the parser already tolerates, so nothing needs repairing on
+    /// the other side). An open-ended range (`from` only, still valid in
+    /// the latest PHP) is a real, current parameter and is left alone, as
+    /// is one that already has a real default - both fall back to an
+    /// ordinary attribute-only skip. Deliberately conservative about
+    /// *where* this attribute appears: if a `{`/`;` turns up before a
+    /// parameter delimiter, this isn't a single parameter fragment at all
+    /// (most commonly the same attribute gating an entire method, e.g.
+    /// `DateTime::__construct`'s 5.5-8.2 overload) - left completely
+    /// untouched in that case too.
+    fn skip_stub_availability_attribute(&mut self) {
+        self.pos += "#[PhpStormStubsElementAvailable(".len();
+        let attr_args_start = self.pos;
+        let mut depth = 1i32;
+        while depth > 0 && self.pos < self.src.len() {
+            match self.peek() {
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ => {}
+            }
+            self.pos += 1;
+        }
+        if depth != 0 {
+            // Malformed/unexpected shape (EOF before the attribute
+            // closed) - bail out with whatever's been consumed so far.
+            return;
+        }
+        let is_closed_range = std::str::from_utf8(&self.src[attr_args_start..self.pos - 1])
+            .is_ok_and(|s| s.contains("to:"));
+        if self.peek() == b']' {
+            self.pos += 1;
+        }
+        if !is_closed_range {
+            return;
+        }
+
+        let param_start = self.pos;
+        let mut pdepth = 0i32;
+        let mut has_default = false;
+        loop {
+            if self.pos >= self.src.len() {
+                // Reached EOF mid-parameter - leave as skipped so far.
+                return;
+            }
+            match self.peek() {
+                b'(' | b'[' => pdepth += 1,
+                b')' | b']' if pdepth == 0 => break,
+                b')' | b']' => pdepth -= 1,
+                b',' if pdepth == 0 => break,
+                b'{' | b';' if pdepth == 0 => {
+                    // Not a simple parameter fragment - restore and leave
+                    // the attribute-only skip already applied above.
+                    self.pos = param_start;
+                    return;
+                }
+                b'=' if pdepth == 0 => has_default = true,
+                _ => {}
+            }
+            self.pos += 1;
+        }
+        if has_default {
+            // Already counted correctly regardless of its version range.
+            self.pos = param_start;
+            return;
+        }
+        // Drop the parameter too, and its one trailing comma if present
+        // (a closing delimiter is left for the real tokenizer to see).
+        if self.peek() == b',' {
+            self.pos += 1;
         }
     }
 
@@ -819,5 +915,54 @@ mod tests {
         // than error out, matching this lexer's error-recovery style
         // elsewhere.
         let _ = Lexer::new(src).tokenize();
+    }
+
+    // `skip_stub_availability_attribute` - see its own doc comment for the
+    // real-world motivation (array_map's superseded, closed-range,
+    // no-default `$arrays` parameter).
+
+    #[test]
+    fn closed_range_stub_attribute_with_no_default_drops_its_whole_parameter() {
+        let src = "<?php function f(?callable $cb, #[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] $arrays, array ...$arrays) {}";
+        let with_attr = Lexer::new(src).tokenize();
+        let without_attr =
+            Lexer::new("<?php function f(?callable $cb, array ...$arrays) {}").tokenize();
+        assert_eq!(with_attr, without_attr);
+    }
+
+    #[test]
+    fn closed_range_stub_attribute_as_the_only_parameter_leaves_empty_parens() {
+        let src =
+            "<?php function f(#[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] $x) {}";
+        let with_attr = Lexer::new(src).tokenize();
+        let without_attr = Lexer::new("<?php function f() {}").tokenize();
+        assert_eq!(with_attr, without_attr);
+    }
+
+    #[test]
+    fn open_ended_stub_attribute_keeps_its_parameter() {
+        let src = "<?php function f(#[PhpStormStubsElementAvailable(from: '8.0')] array $array) {}";
+        let with_attr = Lexer::new(src).tokenize();
+        let without_attr = Lexer::new("<?php function f(array $array) {}").tokenize();
+        assert_eq!(with_attr, without_attr);
+    }
+
+    #[test]
+    fn closed_range_stub_attribute_on_a_param_with_a_real_default_keeps_it() {
+        let src = "<?php function f(#[PhpStormStubsElementAvailable(from: '5.3', to: '5.6')] $flags = 6) {}";
+        let with_attr = Lexer::new(src).tokenize();
+        let without_attr = Lexer::new("<?php function f($flags = 6) {}").tokenize();
+        assert_eq!(with_attr, without_attr);
+    }
+
+    #[test]
+    fn closed_range_stub_attribute_gating_a_whole_method_is_left_untouched() {
+        let src = "<?php class C { #[PhpStormStubsElementAvailable(from: '5.5', to: '8.2')]\n\
+                   public function __construct($datetime = \"now\") {} }";
+        let with_attr = Lexer::new(src).tokenize();
+        let without_attr =
+            Lexer::new("<?php class C { public function __construct($datetime = \"now\") {} }")
+                .tokenize();
+        assert_eq!(with_attr, without_attr);
     }
 }

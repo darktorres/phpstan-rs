@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A parsed subset of a `/** ... */` doc comment: just the tags this
 /// prototype's type checker can use (`@param`, `@return`, `@var`). Types are
@@ -21,6 +21,13 @@ pub struct DocBlock {
     // `@template T` names (a bound, `@template T of SomeClass`, is parsed
     // past but not recorded - nothing consumes it yet).
     pub templates: Vec<String>,
+    // Names of `@param`s tagged `[optional]` - a real, longstanding PHP
+    // manual/phpstorm-stubs convention marking a native parameter as
+    // conceptually optional even when its own signature has no `= value`
+    // default (phpstorm-stubs models several functions, e.g. `mt_rand`'s
+    // `$max` and `array_keys`'s `$filter_value`, only as their
+    // highest-arity overload this way).
+    pub optional_params: HashSet<String>,
 }
 
 pub fn parse(raw: &str) -> DocBlock {
@@ -63,10 +70,20 @@ pub fn parse(raw: &str) -> DocBlock {
                 let ty = take_type_token(rest);
                 let remainder = rest[ty.len()..].trim_start();
                 let var_token = remainder.split_whitespace().next().unwrap_or("");
-                if let Some(name) = var_token.strip_prefix('$')
-                    && !ty.is_empty()
-                {
-                    block.params.insert(name.to_string(), ty.to_string());
+                // A by-ref param is conventionally documented as `&$name`
+                // (real, common PHP-manual style, e.g. phpstorm-stubs'
+                // `@param string[] &$matches [optional]`) - strip the
+                // leading `&` too, or the name never matches at all and
+                // both its doc type and `[optional]` marker are silently
+                // dropped.
+                if let Some(name) = var_token.trim_start_matches('&').strip_prefix('$') {
+                    if !ty.is_empty() {
+                        block.params.insert(name.to_string(), ty.to_string());
+                    }
+                    let after_name = remainder[var_token.len()..].trim_start();
+                    if after_name.starts_with("[optional]") {
+                        block.optional_params.insert(name.to_string());
+                    }
                 }
             }
             "return" => {
@@ -126,6 +143,30 @@ mod tests {
         );
         assert_eq!(block.params.get("x"), Some(&"int".to_string()));
         assert_eq!(block.return_type, Some("int".to_string()));
+    }
+
+    #[test]
+    fn parses_optional_marker_on_a_param_with_no_native_default() {
+        let block = parse(
+            r#"/**
+             * @param int $min
+             * @param int $max [optional] <p>Optional highest value.</p>
+             */"#,
+        );
+        assert!(!block.optional_params.contains("min"));
+        assert!(block.optional_params.contains("max"));
+    }
+
+    #[test]
+    fn a_by_ref_param_s_ampersand_prefixed_name_is_still_recognized() {
+        let block = parse(
+            r#"/**
+             * @param string $pattern
+             * @param string[] &$matches [optional] <p>Set on match.</p>
+             */"#,
+        );
+        assert_eq!(block.params.get("matches"), Some(&"string[]".to_string()));
+        assert!(block.optional_params.contains("matches"));
     }
 
     #[test]

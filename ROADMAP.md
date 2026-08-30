@@ -149,7 +149,7 @@ suite, plus a handful of non-stub housekeeping files), generated via
 changes - it now resolves 1000+ real function signatures instead of
 two hand-picked extensions (`ctype`, `json`).
 
-## Phase 8.5 (unplanned): Stub arity precision - PLANNED
+## Phase 8.5 (unplanned): Stub arity precision - DONE
 
 Found while researching Phase 12's priority list, not hypothetical -
 each reproduced live against the compiled binary. Two distinct bugs
@@ -201,13 +201,72 @@ teaching `php_stubs.rs` to treat a later `@param ... [optional]`
 docblock hint as an implicit default even with no `= value` in the
 native signature.
 
-**The fix (bug 1):** when generating a signature from stub source,
-recognize `#[PhpStormStubsElementAvailable(...)]` on a parameter whose
-own range doesn't already carry a real default, and keep only the
-*last* declared parameter of that name (phpstorm-stubs' convention:
-later-declared ranges are newer PHP) - dropping the earlier,
-superseded declaration entirely rather than counting it as a real,
-separate required parameter.
+**The fix (bug 1), as shipped:** taught the *lexer* itself (not just the
+stub-generation pipeline) to recognize
+`#[PhpStormStubsElementAvailable(from: ..., to: ...)]` while skipping an
+attribute (`Lexer::skip_stub_availability_attribute`). A *closed* range
+(both `from` and `to` present) parameter with no `= value` default of
+its own is dropped from the token stream entirely, along with its one
+trailing separator comma if present (a trailing comma before `)` is
+valid PHP the parser already tolerates, so nothing needs repairing on
+the other side); an open-ended range (`from` only, still valid in the
+latest PHP) or a parameter that already has a real default is left
+alone, both falling back to an ordinary attribute-only skip. Genuinely
+conservative about where the attribute appears: if a `{`/`;` turns up
+before a parameter delimiter (the attribute is gating a whole
+method/property instead, e.g. `DateTime::__construct`'s 5.5-8.2
+overload), the text is left completely untouched.
+
+This had to be a **lexer-level** fix, not something special-cased only
+in `php_stubs.rs`'s generation pipeline: real projects commonly vendor
+`jetbrains/phpstorm-stubs` itself as a transitive phpstan dependency (a
+real, live example: Piwigo's own `vendor/jetbrains/phpstorm-stubs/`),
+so the exact same attribute shape shows up in ordinary project/vendor
+source being checked at runtime, not just in this project's own bundled
+build-time corpus - an earlier draft of this fix lived only in
+`php_stubs.rs` and, while it fixed the bundled corpus, left 1567 real
+`array_map()` false positives (plus `setlocale`/`max`/`array_merge`/
+`min`/`sprintf`/`getenv`/`strtok`) alive across Piwigo's own `vendor/`
+tree for exactly this reason.
+
+**The fix (bug 2), as shipped:** `DocBlock` gained an `optional_params`
+set, populated from a `[optional]` marker on a `@param` tag
+(`docblock.rs`); `FunctionSig::from_decl` (`registry.rs`) now treats
+that marker as an implicit default when the native parameter has none
+of its own. Found and fixed a second, more consequential bug while
+verifying this against the real Piwigo corpus: the `@param` parser
+never matched a **by-ref** parameter's name at all
+(`@param string[] &$matches [optional]` - the real, common PHP-manual
+docblock convention of prefixing a by-ref param's name with `&`), since
+it looked for a bare `$name` token and `&$matches` doesn't start with
+`$`. This silently dropped both the doc type *and* the `[optional]`
+marker for every by-ref documented parameter - which turned out to be
+the actual live false-positive cause for `preg_match`/`preg_match_all`/
+`preg_replace`/`preg_filter`/`str_replace` against an older, real
+phpstorm-stubs release (the one Piwigo's own `vendor/` happens to pin),
+which models those functions' by-ref params as `[optional]`-with-no-
+native-default rather than with a real `= null`. Fixed by stripping a
+leading `&` before matching `$name`.
+
+**Verified at real scale** (Piwigo's `src/` + `tools/` + `vendor/`,
+18923 files): 46791 -> 42192 diagnostics, all the difference confirmed
+to be exactly these arity false positives disappearing (`array_map`,
+`array_keys`, `mt_rand`, `setlocale`, `max`, `min`, `array_merge`,
+`sprintf`, `getenv`, `strtok`, plus the by-ref-driven
+`preg_match`/`preg_match_all`/`preg_replace`/`preg_filter`/
+`str_replace` false positives from Piwigo's own vendored older
+phpstorm-stubs copy) - zero new first-party false positives, parse
+pass rate unchanged (18923/18923), all 293 unit/CLI tests passing.
+
+A residual ~384 "expects at least" diagnostics remain, mostly a
+structurally different and harder pattern this phase deliberately
+didn't chase: some stubs (`pg_query_params`, `pg_query`, several others)
+interleave *multiple full parameter lists* under the same parameter
+names across version eras (e.g. two separate `$connection` parameters,
+one closed-range-with-default, one open-range-with-no-default, side by
+side) rather than the clean "one superseded param + one modern
+variadic" shape `array_map` has - out of scope here, a candidate for a
+future phase if it turns out to matter in practice.
 
 **Why before Phase 12, not folded into it:** both are correctness
 fixes to an already-shipped pipeline (Phase 8), not new capabilities -
@@ -437,10 +496,10 @@ guess from PHPStan's own list:
    compile-time-known string literal (mirrors this project's own
    `check_shape_key_access`'s "only fires on a literal, never a
    dynamic value" precedent).
-4. **`array_keys`/`mt_rand`** - lower-effort wins once Phase 8.5's
-   second fix (the missing-lower-arity-overload bug) lands: both are
-   confirmed-live false positives from a stub-generation gap, not
-   functions actually needing a bespoke extension.
+4. ~~**`array_keys`/`mt_rand`**~~ - fixed by Phase 8.5, not a Phase 12
+   item after all: both were confirmed-live false positives from a
+   stub-generation gap, not functions actually needing a bespoke
+   extension.
 5. **`array_column`/`array_combine`/`array_flip`/`array_fill*`/
    `array_chunk`/`compact`/`get_defined_vars`** - shape-aware return
    types (mirrors this project's own existing `ArrayShape` inference,
@@ -618,10 +677,10 @@ confused with each other.
 
 | Limitation | Phase |
 | --- | --- |
-| `#[PhpStormStubsElementAvailable(...)]`-gated stub parameters, and stubs modeling only their highest-arity overload, both counted as more-required-than-they-are | 8.5 |
 | No generic variance, template-bound enforcement, or `@extends`/`@implements` inheritance-chain substitution | 10 |
 | No real source positions, level system, or config/baseline | 11 |
 | No bespoke per-function/method type extensions (`array_map`/`preg_match`/`sprintf`/condition-narrowing, ...) | 12 |
+| A handful of stubs (`pg_query_params`, `pg_query`, ...) interleave multiple full parameter lists under duplicate parameter names across version eras rather than Phase 8.5's clean superseded-param-plus-variadic shape, and still miscount arity | 12 |
 | Property-chain narrowing beyond `instanceof` (equality/predicate narrowing on `$a->b`) | 13 |
 | Traits checked standalone, without their eventual host class's shape | 13 |
 | `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed | 13 |

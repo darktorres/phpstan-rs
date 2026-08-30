@@ -287,11 +287,22 @@ impl FunctionSig {
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_names);
                 let ty = resolve_names_in_type(ty, ctx);
+                // A real `= value` default always wins; failing that, a
+                // `[optional]` marker on this param's own `@param` tag is
+                // trusted too (see `DocBlock::optional_params` - phpstorm-
+                // stubs models several functions, e.g. `mt_rand`/
+                // `array_keys`, only as their highest-arity overload, with
+                // trailing params marked optional in the docblock but
+                // carrying no native default at all).
+                let has_default = p.default.is_some()
+                    || doc
+                        .as_ref()
+                        .is_some_and(|d| d.optional_params.contains(&p.name));
                 ParamSig {
                     name: p.name.clone(),
                     ty,
                     variadic: p.variadic,
-                    has_default: p.default.is_some(),
+                    has_default,
                     by_ref: p.by_ref,
                 }
             })
