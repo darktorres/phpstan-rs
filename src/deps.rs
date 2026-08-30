@@ -11,11 +11,15 @@ use crate::ast::*;
 /// toward over-collecting rather than trying to be precise.
 ///
 /// Names are kept exactly as the AST spells them (no backslash-stripping,
-/// no namespace resolution) to match how the checker/registry themselves
-/// already resolve these fields - `is_subclass_of`/`lookup_function` do a
-/// plain exact-string lookup too, since namespaces aren't modeled anywhere
-/// in this project. Type hints are the one exception: they're strings that
-/// get resolved through `types::parse_type_string`, which does strip a
+/// no namespace/`use`-import resolution) - a deliberate, still-safe
+/// simplification even though the registry itself is namespace-aware
+/// (Phase 9.5, `registry::NameContext`): this is only ever used to decide
+/// which files *might* need re-checking, never to look anything up in the
+/// registry directly, so a same-named-but-different-namespace false
+/// match just costs one harmless extra re-check (this function already
+/// over-approximates on purpose, per the doc above) rather than a wrong
+/// diagnostic. Type hints are the one exception: they're strings that get
+/// resolved through `types::parse_type_string`, which does strip a
 /// leading backslash, so the names pulled out of them are stripped the
 /// same way to stay consistent with that.
 pub fn referenced_names(stmts: &[Stmt]) -> HashSet<String> {

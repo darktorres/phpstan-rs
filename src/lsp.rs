@@ -161,6 +161,12 @@ impl Server {
     fn load_workspace(&mut self, root: &Path) {
         let mut files = Vec::new();
         crate::collect_php_files(root, &mut files);
+        // See main.rs's run_check_project for why this matters: a real
+        // workspace can genuinely declare the same fully-qualified class
+        // twice (duplicate vendored copies of a library), and
+        // unsorted readdir order would make which one wins the
+        // registry slot filesystem-dependent.
+        files.sort();
         for path in files {
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;

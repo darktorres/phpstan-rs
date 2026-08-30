@@ -1913,7 +1913,7 @@ impl Parser {
     }
 
     fn parse_multiplicative(&mut self) -> Expr {
-        let mut lhs = self.parse_instanceof();
+        let mut lhs = self.parse_not();
         loop {
             let op = match self.peek() {
                 Token::Star => BinOp::Mul,
@@ -1922,10 +1922,29 @@ impl Parser {
                 _ => break,
             };
             self.advance();
-            let rhs = self.parse_instanceof();
+            let rhs = self.parse_not();
             lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs));
         }
         lhs
+    }
+
+    /// `!` binds *looser* than `instanceof` in real PHP's own precedence
+    /// table (`!$x instanceof Y` means `!($x instanceof Y)`, not
+    /// `(!$x) instanceof Y`) - a real, previously-wrong precedence bug
+    /// this project's negation used to get backwards by folding `!` into
+    /// the same tighter-than-instanceof level as `~`/casts/`++`/`--`/`@`
+    /// (which genuinely do bind tighter than `instanceof` and stay in
+    /// `parse_unary_inner` unchanged). Confirmed via a real guard clause
+    /// (`if (! $x instanceof Y) { ... }`) that never actually narrowed
+    /// `$x` because of this - `apply_narrowing`'s `Unary(Not, Instanceof)`
+    /// pattern never matched, since the old parse produced
+    /// `Instanceof(Unary(Not, $x), Y)` instead.
+    fn parse_not(&mut self) -> Expr {
+        if self.eat(&Token::Bang) {
+            let operand = self.parse_not();
+            return Expr::Unary(UnaryOp::Not, Box::new(operand));
+        }
+        self.parse_instanceof()
     }
 
     fn parse_instanceof(&mut self) -> Expr {
@@ -3096,6 +3115,24 @@ mod tests {
             panic!("expected Instanceof");
         };
         assert!(matches!(target, InstanceofTarget::Name(n) if n == "Foo"));
+    }
+
+    #[test]
+    fn not_binds_looser_than_instanceof() {
+        // `! $x instanceof Y` means `!($x instanceof Y)` in real PHP -
+        // `instanceof` binds tighter than `!`. A real guard clause
+        // (`if (! $x instanceof Y) { ... }`) depended on this for
+        // narrowing to work at all; getting it backwards silently
+        // produced `(!$x) instanceof Y` instead, which never matches the
+        // `Unary(Not, Instanceof(..))` shape narrowing looks for.
+        let program = parse("<?php $ok = ! $x instanceof Foo;");
+        let Stmt::Expression(Expr::Assign(_, rhs)) = &program[0] else {
+            panic!("expected assignment");
+        };
+        let Expr::Unary(UnaryOp::Not, inner) = rhs.as_ref() else {
+            panic!("expected the Not to be the outermost node, got: {rhs:?}");
+        };
+        assert!(matches!(inner.as_ref(), Expr::Instanceof(_, _)));
     }
 
     #[test]

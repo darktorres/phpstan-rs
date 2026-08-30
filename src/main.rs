@@ -252,6 +252,16 @@ fn run_check_project(args: &[String]) {
         eprintln!("no .php files found under {}", args.join(", "));
         return;
     }
+    // Deterministic load order matters now in a way it didn't for
+    // --check (parse-only): a real corpus can genuinely declare the same
+    // fully-qualified class name twice (verified: multiple vendored
+    // copies of nikic/php-parser bundled by different tools, none of
+    // them php-scoper-prefixed relative to each other) - readdir order
+    // is filesystem-dependent, so without sorting, which declaration
+    // "wins" the registry slot (and therefore which one's real methods
+    // are visible) could silently vary between runs on different
+    // machines or filesystems.
+    files.sort();
 
     let mut project = project::Project::new();
     for path in &files {

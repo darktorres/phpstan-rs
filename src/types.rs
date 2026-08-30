@@ -239,10 +239,16 @@ fn parse_type_atom(s: &str) -> Type {
         "void" => Type::Void,
         "mixed" => Type::Mixed,
         "never" | "noreturn" => Type::Never,
-        // `array<V>` / `iterable<V>` and `array<K, V>` (key type discarded -
-        // keyed array subtyping isn't modeled) both resolve to our existing
-        // homogeneous Array(value) representation; no args is bare `array`.
-        "array" | "iterable" => match generic_args.len() {
+        // `array<V>` / `iterable<V>` / `list<V>` and `array<K, V>` (key
+        // type discarded - keyed array subtyping isn't modeled) all
+        // resolve to our existing homogeneous Array(value) representation;
+        // no args is bare `array`. `list` specifically is a real,
+        // widely-used PHPStan-ecosystem pseudo-type (a refined array with
+        // sequential int keys) - without this case it fell through to the
+        // generic-user-class branch below and got treated as a literal
+        // class reference named "list", including getting
+        // namespace-qualified into nonsense like `Some\Namespace\list`.
+        "array" | "iterable" | "list" => match generic_args.len() {
             0 => Type::Array(Box::new(Type::Mixed)),
             1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
             _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
@@ -410,6 +416,22 @@ mod tests {
         assert_eq!(
             parse_type_string("string[][]"),
             Type::Array(Box::new(Type::Array(Box::new(Type::String))))
+        );
+    }
+
+    #[test]
+    fn list_is_treated_as_an_array_alias_not_a_class_reference() {
+        // A real, widely-used PHPStan-ecosystem pseudo-type (nikic/php-parser's
+        // own `@return list<ClassMethod>` is exactly this shape) - without
+        // this, "list" fell through to the generic-user-class branch and
+        // got treated as a literal class named "list".
+        assert_eq!(
+            parse_type_string("list<int>"),
+            Type::Array(Box::new(Type::Int))
+        );
+        assert_eq!(
+            parse_type_string("list"),
+            Type::Array(Box::new(Type::Mixed))
         );
     }
 

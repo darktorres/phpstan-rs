@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::registry::{FunctionSig, Registry};
+use crate::registry::{FunctionSig, NameContext, Registry};
 use crate::types::{self, Type};
 
 #[derive(Debug, Clone)]
@@ -27,38 +27,38 @@ pub struct Diagnostic {
 /// bounded gap, not a soundness issue, since no narrowing ever happens
 /// there rather than an incorrect one.
 ///
-/// Known limitation, discovered while building undefined-symbol
-/// detection (Phase 9): `Expr::New`/`Expr::Call` flag undefined
-/// classes/functions by *existence* alone, which is safe under this
-/// project's flat, namespace-less registry (`registry.rs`'s own docs on
-/// `remove_declarations` note namespaces aren't modeled at all) - a name
-/// collision between two unrelated packages can only ever produce a
-/// false *negative* there (the wrong one "exists" too), never a false
-/// positive. Undefined-*method* detection would need to trust the
-/// specific `ClassInfo` stored under a colliding name, which real-scale
-/// testing showed is not safe: 1595 distinct class names collide across
-/// one real project plus its `vendor/` (e.g. 77 unrelated declarations
-/// of `InvalidArgumentException` alone), and whichever collides last
-/// wins the registry slot - silently discarding the real class's actual
-/// methods. So `Expr::MethodCall` deliberately does not flag undefined
-/// methods, `Expr::PropertyAccess` does not flag undefined properties on
-/// read (the existing write-side check already made the same call, for
-/// dynamic-property reasons), and `Expr::StaticAccess`/`StaticCall`
-/// aren't given existence checks either - all four need a genuinely
-/// namespace-aware registry first, not a target this project has reached.
+/// Resolved limitation (Phase 9.5): undefined-method detection was
+/// initially built and then reverted after real-scale testing found it
+/// trusted *which* `ClassInfo` a bare name resolved to, and this
+/// project's registry didn't model namespaces at all - 1595 distinct
+/// class names were found to collide across one real project plus its
+/// `vendor/` (e.g. 77 unrelated declarations of `InvalidArgumentException`
+/// alone), silently overwriting a class's real method table with an
+/// unrelated one's. Fixed by making `Registry`/`Checker` resolve every
+/// class/function reference to a fully-qualified name first
+/// (`registry::NameContext`, tracking each file's `namespace`/`use`
+/// statements) before any registry key is read or written - two classes
+/// with the same short name in different namespaces now get distinct
+/// keys, the same way real PHP tells them apart. Undefined-method
+/// detection on `Expr::MethodCall` is safe again as of this fix.
+/// `Expr::PropertyAccess` still doesn't flag undefined properties on
+/// read (the existing write-side check already made that call, for
+/// dynamic-property reasons - unrelated to namespaces), and
+/// `Expr::StaticAccess`/`StaticCall` still have no existence checks at
+/// all (unstarted, not blocked).
 pub struct Checker<'a> {
     registry: &'a Registry,
     diagnostics: Vec<Diagnostic>,
-    // Short name (or `as Alias`) -> the class's own bare declared name,
-    // built once per file from its top-level `use` imports. Needed
-    // because almost all real code refers to an imported class by this
+    // Namespace + `use`-import map, built once per file. Needed because
+    // almost all real code refers to an imported class/function by its
     // short name, not a fully-qualified path - without resolving it here
-    // first, undefined-class detection would flag the overwhelming
-    // majority of legitimately-imported classes (Registry itself only
-    // ever keys a class by its own bare declared name, ignoring
-    // namespace, the same simplification `remove_declarations`'s doc
-    // comment already describes for declarations).
-    use_map: HashMap<String, String>,
+    // first, undefined-class/function detection would flag the
+    // overwhelming majority of legitimately-imported symbols. Also must
+    // resolve to exactly the same fully-qualified names
+    // `Registry::index` keys its entries under (Phase 9.5's fix for the
+    // namespace-collision bug documented above), or the two would
+    // silently disagree with each other.
+    name_ctx: NameContext,
     // The class whose method body is currently being checked, if any -
     // needed to resolve self/parent/static to a concrete class name.
     current_class: Option<String>,
@@ -76,22 +76,10 @@ impl<'a> Checker<'a> {
         Checker {
             registry,
             diagnostics: Vec::new(),
-            use_map: HashMap::new(),
+            name_ctx: NameContext::default(),
             current_class: None,
             saw_dynamic_var_construct: false,
         }
-    }
-
-    /// Resolves a bare (no internal `\`) name against this file's
-    /// `use`-import map - covers both class-shaped (`use Foo\Bar;`) and
-    /// function-shaped (`use function foo\bar;`) imports, since both
-    /// resolve the exact same way (short name -> the last path segment) -
-    /// falling back to the name itself when it is not imported (a symbol
-    fn resolve_imported_name(&self, name: &str) -> String {
-        self.use_map
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.to_string())
     }
 
     pub fn into_diagnostics(self) -> Vec<Diagnostic> {
@@ -99,20 +87,14 @@ impl<'a> Checker<'a> {
     }
 
     pub fn check_program(&mut self, program: &[Stmt]) {
-        for stmt in program {
-            if let Stmt::Use(imports) = stmt {
-                for import in imports {
-                    let bare = import
-                        .path
-                        .rsplit('\\')
-                        .next()
-                        .unwrap_or(&import.path)
-                        .to_string();
-                    let short_name = import.alias.clone().unwrap_or_else(|| bare.clone());
-                    self.use_map.insert(short_name, bare);
-                }
-            }
-        }
+        // A simple whole-file pass (last `namespace` seen wins), unlike
+        // `Registry::index`'s positional tracking - brace-delimited
+        // multi-namespace-per-file is rare enough in real application
+        // code that the extra precision isn't worth it here; a mismatch
+        // in such a rare file only risks a missed diagnostic, not the
+        // silent method-table corruption the registry itself had to
+        // guard against.
+        self.name_ctx = NameContext::build(program);
 
         let mut top_locals: HashMap<String, Type> = HashMap::new();
         let diagnostics_before = self.diagnostics.len();
@@ -120,13 +102,21 @@ impl<'a> Checker<'a> {
             match stmt {
                 Stmt::FunctionDecl(f) => self.check_function(f, None),
                 Stmt::ClassDecl(c) => {
+                    // `current_class` must be the fully-qualified name -
+                    // it's looked up directly against
+                    // `self.registry.classes` (via `resolve_pseudo` for
+                    // self/parent/static, and the undefined-class check
+                    // for `new self()`/`new static()`), which is now
+                    // FQN-keyed.
+                    let fqn = self.name_ctx.declared_name(&c.name);
                     for m in &c.methods {
-                        self.check_function(&m.function, Some(&c.name));
+                        self.check_function(&m.function, Some(&fqn));
                     }
                 }
                 Stmt::EnumDecl(e) => {
+                    let fqn = self.name_ctx.declared_name(&e.name);
                     for m in &e.methods {
-                        self.check_function(&m.function, Some(&e.name));
+                        self.check_function(&m.function, Some(&fqn));
                     }
                 }
                 // Top-level script statements share one scope across the
@@ -243,6 +233,35 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// The classic guard clause (`if ($x === null) { return; }`, or the
+    /// less obvious `if (! $x instanceof Foo) { $this->fatalError(...); }`)
+    /// depends on recognizing a branch that never falls through, so its
+    /// (narrowed) scope doesn't incorrectly leak past the `if`. A bare
+    /// call expression counts too, not just `return`/`throw`/`break`/
+    /// `continue`, when its own return type is `never` - a real, common
+    /// pattern (`private function fatalError(string $msg): never`) that a
+    /// purely syntactic check would miss entirely.
+    fn always_terminates(&self, stmt: &Stmt, locals: &HashMap<String, Type>) -> bool {
+        match stmt {
+            Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
+            Stmt::Expression(e) => self.infer_expr(e, locals) == Type::Never,
+            Stmt::Block(stmts) => stmts
+                .last()
+                .is_some_and(|s| self.always_terminates(s, locals)),
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.always_terminates(then_branch, locals)
+                    && else_branch
+                        .as_deref()
+                        .is_some_and(|e| self.always_terminates(e, locals))
+            }
+            _ => false,
+        }
+    }
+
     fn check_block(
         &mut self,
         stmts: &[Stmt],
@@ -314,8 +333,10 @@ impl<'a> Checker<'a> {
                 // should propagate past the if. Without this, the
                 // terminated branch's narrowing (here, "$x is null")
                 // would incorrectly leak into the code after the guard.
-                let then_terminates = always_terminates(then_branch);
-                let else_terminates = else_branch.as_deref().is_some_and(always_terminates);
+                let then_terminates = self.always_terminates(then_branch, &then_locals);
+                let else_terminates = else_branch
+                    .as_deref()
+                    .is_some_and(|e| self.always_terminates(e, &else_locals));
 
                 *locals = match (then_terminates, else_terminates) {
                     (true, false) => else_locals,
@@ -517,10 +538,9 @@ impl<'a> Checker<'a> {
                     && let Expr::Variable(var_name) = inner.as_ref()
                     && let InstanceofTarget::Name(class_name) = target
                 {
-                    let bare = crate::registry::strip_leading_backslash(class_name);
                     locals.insert(
                         var_name.clone(),
-                        Type::Object(self.resolve_imported_name(&bare)),
+                        Type::Object(self.name_ctx.resolve(class_name)),
                     );
                 }
             }
@@ -563,18 +583,32 @@ impl<'a> Checker<'a> {
                 {
                     self.saw_dynamic_var_construct = true;
                 }
-                // Resolved once up front (leading-`\` stripped, then
-                // `use`/`use function` imports applied) so both the
-                // existing arg-checking path and the new undefined-call
-                // diagnostic below see the same name a real call to this
-                // function would actually resolve to - previously
-                // `lookup_function` used the raw, unnormalized name, so
-                // e.g. `\class_exists(...)` silently skipped arg-checking
-                // even when the plain name was a known signature.
+                // Resolved once up front (namespace/`use`-import rules
+                // applied, with the same global-namespace fallback real
+                // PHP gives an unqualified function call) so both the
+                // existing arg-checking path and the undefined-call
+                // diagnostic below see the same name(s) a real call would
+                // actually resolve to - previously `lookup_function` used
+                // the raw, unnormalized name, so e.g. `\class_exists(...)`
+                // silently skipped arg-checking even when the plain name
+                // was a known signature. `is_language_construct` is
+                // checked against the *original* name, before any
+                // namespace-qualification - `isset`/`empty`/etc. are
+                // never real namespaced symbols, unlike an actual function
+                // call, even though the parser models both the same way.
                 let resolved_name = match callee.as_ref() {
+                    Expr::Name(name) if is_language_construct(name) => None,
                     Expr::Name(name) => {
-                        let bare = crate::registry::strip_leading_backslash(name);
-                        Some(self.resolve_imported_name(&bare))
+                        let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+                        if self.registry.lookup_function(&primary).is_some() {
+                            Some(primary)
+                        } else if let Some(global) = &fallback
+                            && self.registry.lookup_function(global).is_some()
+                        {
+                            Some(global.clone())
+                        } else {
+                            Some(primary)
+                        }
                     }
                     _ => None,
                 };
@@ -588,11 +622,14 @@ impl<'a> Checker<'a> {
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
                         self.check_args(name, sig, args, locals, label, None);
-                    } else if !name.contains('\\') && !is_language_construct(name) {
-                        // A genuinely namespaced name this project can't
-                        // resolve (see `resolve_imported_name`'s doc
-                        // comment) is left unchecked rather than risking a
-                        // false positive, same rule `Expr::New` follows.
+                    } else {
+                        // Since resolve_function_candidates always
+                        // produces a definite name (there's no "can't
+                        // resolve" case left for functions the way
+                        // `Expr::New`'s class resolution still has for a
+                        // multi-segment name with no matching import),
+                        // every miss here is a real undefined-function
+                        // finding.
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!("call to undefined function {name}()"),
@@ -602,20 +639,12 @@ impl<'a> Checker<'a> {
             }
             Expr::MethodCall(recv, method, args) => {
                 self.check_expr(recv, locals, label);
-                // Deliberately NOT flagging an "undefined method" here the
-                // way Expr::Call/Expr::New do for functions/classes - see
-                // the module-level doc comment's "Known limitation" note.
-                // In short: unlike existence-only checks, a method lookup
-                // depends on *which* class's data is stored under a given
-                // bare name, and this registry has no namespace modeling
-                // at all - a name collision elsewhere in a real dependency
-                // tree (confirmed at real scale: 1595 distinct class names
-                // collide across a single real project + its vendor/,
-                // e.g. 77 unrelated declarations of InvalidArgumentException
-                // alone) can silently overwrite a class's real method
-                // table with an unrelated one's, which would then flag
-                // genuinely-existing methods as undefined. Safe once this
-                // registry becomes namespace-aware; not before.
+                // Re-enabled (Phase 9.5): the registry is now
+                // namespace-aware, so a method lookup trusts the specific
+                // `ClassInfo` stored under a *fully-qualified* name, not a
+                // bare one two unrelated packages could collide on - see
+                // the module-level doc comment's "Known limitation" note,
+                // now resolved, for the full history.
                 let recv_class = match self.infer_expr(recv, locals) {
                     Type::Object(class) => Some(class),
                     _ => None,
@@ -627,11 +656,27 @@ impl<'a> Checker<'a> {
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
-                if let Some(class) = &recv_class
-                    && let Some(sig) = sig
-                {
-                    let qualified = format!("{class}::{method}");
-                    self.check_args(&qualified, sig, args, locals, label, Some(class));
+                if let Some(class) = &recv_class {
+                    if let Some(sig) = sig {
+                        let qualified = format!("{class}::{method}");
+                        self.check_args(&qualified, sig, args, locals, label, Some(class));
+                    } else if self.registry.classes.contains_key(class)
+                        && self.registry.lookup_method(class, "__call").is_none()
+                    {
+                        // A class not known to the registry at all (an
+                        // unresolvable/uninstalled dependency, the same
+                        // gap `Expr::New`'s check documents) is left
+                        // unchecked rather than risking a false positive -
+                        // only fires once the class itself is confirmed
+                        // known. `__call` anywhere in the chain means any
+                        // method name is legitimately callable at
+                        // runtime, so its presence suppresses this
+                        // entirely, the same way real PHPStan treats it.
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!("call to undefined method {class}::{method}()"),
+                        });
+                    }
                 }
             }
             Expr::Binary(_, l, r) => {
@@ -744,15 +789,13 @@ impl<'a> Checker<'a> {
                     self.check_expr(a, locals, label);
                 }
                 if let Some(class) = &resolved_class {
-                    // A name containing an internal `\` is a genuinely
-                    // namespaced reference (`new Foo\Bar()`) this project
-                    // can't safely resolve (namespaces aren't modeled at
-                    // all - see `strip_leading_backslash`'s doc comment),
-                    // so it's left unchecked rather than risking a false
-                    // positive; only a single leading `\` (fully qualified
-                    // from the global namespace) was already stripped by
-                    // `infer_expr`.
-                    if !class.contains('\\') && !self.registry.classes.contains_key(class) {
+                    // `resolved_class` is already the fully-qualified name
+                    // (`infer_expr`'s New arm resolves it via `name_ctx`),
+                    // so every miss here is a real undefined-class finding
+                    // - no "can't resolve a namespaced name" case left, the
+                    // way there used to be before Phase 9.5's namespace
+                    // support.
+                    if !self.registry.classes.contains_key(class) {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!("instantiated class {class} not found"),
@@ -1006,19 +1049,23 @@ impl<'a> Checker<'a> {
                             None => raw,
                         }
                     }
-                    _ => {
-                        let bare = crate::registry::strip_leading_backslash(name);
-                        Type::Object(self.resolve_imported_name(&bare))
-                    }
+                    _ => Type::Object(self.name_ctx.resolve(name)),
                 },
                 _ => Type::Mixed,
             },
             Expr::Call(callee, args) => match callee.as_ref() {
-                Expr::Name(name) => self
-                    .registry
-                    .lookup_function(name)
-                    .map(|sig| self.infer_call_return_type(sig, args, locals))
-                    .unwrap_or(Type::Mixed),
+                Expr::Name(name) if !is_language_construct(name) => {
+                    let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+                    self.registry
+                        .lookup_function(&primary)
+                        .or_else(|| {
+                            fallback
+                                .as_deref()
+                                .and_then(|g| self.registry.lookup_function(g))
+                        })
+                        .map(|sig| self.infer_call_return_type(sig, args, locals))
+                        .unwrap_or(Type::Mixed)
+                }
                 _ => Type::Mixed,
             },
             Expr::MethodCall(recv, method, args) => match self.infer_expr(recv, locals) {
@@ -1291,28 +1338,6 @@ fn union_types(a: Type, b: Type) -> Type {
         members.into_iter().next().unwrap()
     } else {
         Type::Union(members)
-    }
-}
-
-/// Conservatively recognizes a statement that unconditionally leaves the
-/// current block (return/throw/break/continue, or a block/if where every
-/// path does). Only used to decide whether a branch's locals should
-/// propagate past an `if` - false negatives here (missing a case that
-/// really does always terminate) just mean less narrowing, never a wrong
-/// answer, so loops/switch/try are deliberately not analyzed and just
-/// treated as "might fall through".
-fn always_terminates(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
-        Stmt::Block(stmts) => stmts.last().is_some_and(always_terminates),
-        Stmt::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
-            always_terminates(then_branch) && else_branch.as_deref().is_some_and(always_terminates)
-        }
-        _ => false,
     }
 }
 
@@ -2215,24 +2240,26 @@ mod tests {
     }
 
     #[test]
-    fn use_import_resolves_to_the_bare_short_name_before_lookup() {
+    fn use_import_resolves_to_its_fully_qualified_name_before_lookup() {
         let d = diagnostics_for(
             r#"<?php
             use App\Domain\Widget;
             function f() { return new Widget(); }
         "#,
         );
-        // Widget isn't actually declared anywhere in this snippet, so this
-        // documents the known, accepted limitation (no `use` target is
-        // ever really loaded here) rather than a false negative in the
-        // resolution logic itself - what's under test is that the
-        // *short-name resolution* runs (App\Domain\Widget -> Widget)
-        // without panicking and without also flagging an unrelated
-        // spurious diagnostic; a real project supplies the actual
-        // declaration file, as verified separately against Piwigo.
+        // App\Domain\Widget isn't actually declared anywhere in this
+        // snippet, so this documents the known, accepted limitation (no
+        // `use` target is ever really loaded here) rather than a false
+        // negative in the resolution logic itself - what's under test is
+        // that `use`-import resolution runs (Widget -> App\Domain\Widget)
+        // before the registry lookup, without panicking and without also
+        // flagging an unrelated spurious diagnostic; a real project
+        // supplying the actual declaration file is what makes this
+        // resolve cleanly, verified separately against Piwigo/vendor.
         assert!(
-            d.iter().any(|x| x.message.contains("Widget not found")),
-            "expected exactly the resolved bare name in the diagnostic, got: {d:?}"
+            d.iter()
+                .any(|x| x.message.contains("App\\Domain\\Widget not found")),
+            "expected the fully-qualified name in the diagnostic, got: {d:?}"
         );
     }
 
@@ -2242,6 +2269,34 @@ mod tests {
             r#"<?php
             class Foo {}
             function f() { return new \Foo(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn negated_instanceof_guard_clause_narrows_past_the_if() {
+        // `if (! $x instanceof Y) { throw ...; }` must narrow $x to Y for
+        // the code after the guard - depends on `!` correctly binding
+        // looser than `instanceof` at the parser level (a real bug this
+        // session found and fixed: it used to parse as `(!$x) instanceof
+        // Y`, which silently narrowed nothing).
+        let d = diagnostics_for(
+            r#"<?php
+            interface Base {}
+            interface Specific extends Base {
+                public function specificMethod(): int;
+            }
+            function make(): Base { return new class implements Specific {
+                public function specificMethod(): int { return 1; }
+            }; }
+            function f() {
+                $x = make();
+                if (! $x instanceof Specific) {
+                    throw new \Exception('nope');
+                }
+                return $x->specificMethod();
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
@@ -2355,11 +2410,11 @@ mod tests {
     #[test]
     fn calling_a_function_via_its_use_imported_short_name_resolves_before_lookup() {
         // Mirrors the analogous `new` test: what's under test is that
-        // `use function` resolution runs (App\Helpers\format_date ->
-        // format_date) before the registry lookup, not that the target
-        // actually exists (it isn't declared in this snippet, so a real
-        // project supplying the real declaration is what makes this
-        // resolve cleanly - verified separately against Piwigo/vendor).
+        // `use function` resolution runs (format_date ->
+        // App\Helpers\format_date) before the registry lookup, not that
+        // the target actually exists (it isn't declared in this snippet,
+        // so a real project supplying the real declaration is what makes
+        // this resolve cleanly - verified separately against Piwigo/vendor).
         let d = diagnostics_for(
             r#"<?php
             use function App\Helpers\format_date;
@@ -2367,9 +2422,10 @@ mod tests {
         "#,
         );
         assert!(
-            d.iter()
-                .any(|x| x.message.contains("undefined function format_date")),
-            "expected the resolved bare name in the diagnostic, got: {d:?}"
+            d.iter().any(|x| x
+                .message
+                .contains("undefined function App\\Helpers\\format_date")),
+            "expected the fully-qualified name in the diagnostic, got: {d:?}"
         );
     }
 

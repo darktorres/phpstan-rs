@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ClassDecl, EnumDecl, FunctionDecl, Stmt};
+use crate::ast::{ClassDecl, EnumDecl, FunctionDecl, Stmt, UseImport};
 use crate::docblock::{self, DocBlock};
 use crate::types::{self, Type};
 
@@ -30,6 +30,19 @@ fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
         .unwrap_or(Type::Mixed)
 }
 
+/// A single leading `\` marks "fully qualified from the global namespace"
+/// (`\Exception`) - every declaration is keyed by its own fully-qualified
+/// name now (`NameContext`, below), and the global namespace's own prefix
+/// is simply empty, so stripping this is all a bare reference needs before
+/// `NameContext::resolve` takes over for anything more (a `use`-imported
+/// or same-namespace-relative name). Mirrors `types::parse_type_string`'s
+/// identical handling of type hints, just for `extends`/`implements`/
+/// `uses` and expression-level name references, which go through a
+/// separate code path (`parse_qualified_name`, not `parse_type_string`).
+pub(crate) fn strip_leading_backslash(name: &str) -> String {
+    name.trim_start_matches('\\').to_string()
+}
+
 /// A class constant's value is almost always a literal in real code - this
 /// covers the common cases the same way `checker.rs`'s own literal
 /// inference does, without pulling in the full expression-inference engine
@@ -38,19 +51,6 @@ fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
 /// (an array, a concatenation, another constant) falls back to `Mixed` -
 /// undefined-constant detection only needs the name to be known, not a
 /// precise type.
-/// A single leading `\` marks "fully qualified from the global
-/// namespace" (`\Exception`) - since this project doesn't model
-/// namespaces at all (see `remove_declarations`'s own note: "namespaces
-/// aren't modeled anywhere in this project"), every class/function is
-/// already keyed by its bare name, so a fully-qualified reference to one
-/// only needs this stripped to match. Mirrors `types::parse_type_string`'s
-/// identical handling of type hints, just for `extends`/`implements`/
-/// `uses` and expression-level name references, which go through a
-/// separate code path (`parse_qualified_name`, not `parse_type_string`).
-pub(crate) fn strip_leading_backslash(name: &str) -> String {
-    name.trim_start_matches('\\').to_string()
-}
-
 fn infer_const_type(value: &crate::ast::Expr) -> Type {
     use crate::ast::{Expr, Literal};
     match value {
@@ -95,8 +95,163 @@ fn mark_template_params(ty: Type, template_names: &HashSet<String>) -> Type {
     }
 }
 
+/// Resolves a bare class-name reference (`use`-imports and same-namespace
+/// relative references both apply) to a fully-qualified one, so two
+/// unrelated classes with the same short name in different namespaces get
+/// different registry keys instead of colliding - see the extensive
+/// comment on this in `checker.rs`'s module doc for why that matters (a
+/// name collision used to silently corrupt an unrelated class's method
+/// table). Built once per file (from its own `namespace`/`use`
+/// statements) and shared by `Registry::index` (for extends/implements/
+/// type hints) and `Checker` (for expression-level references like
+/// `new Foo()`) - both need to agree on exactly the same resolution or
+/// the two halves of this registry would disagree with each other.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NameContext {
+    namespace: String,
+    // Short name (or `as Alias`) -> the full path it was imported from.
+    use_map: HashMap<String, String>,
+}
+
+impl NameContext {
+    /// Scans a file's top-level statements for `namespace`/`use`
+    /// declarations. PHP only allows one semicolon-style `namespace Foo;`
+    /// per file (the brace-delimited multi-namespace-per-file form is
+    /// rare enough, and unsupported by the parser's own Stmt::Namespace
+    /// handling already, to not be worth modeling here) - once found, it
+    /// applies to the rest of the file, so a single linear scan suffices.
+    pub(crate) fn build(stmts: &[Stmt]) -> NameContext {
+        let mut ctx = NameContext::default();
+        for stmt in stmts {
+            match stmt {
+                Stmt::Namespace(name) => ctx.set_namespace(name),
+                Stmt::Use(imports) => ctx.add_uses(imports),
+                _ => {}
+            }
+        }
+        ctx
+    }
+
+    /// Enters a (possibly new) namespace - real `use` imports are scoped
+    /// to the namespace block they appear in, so a fresh one clears
+    /// whatever was collected under the previous namespace rather than
+    /// letting it leak into declarations that follow (relevant for
+    /// `namespace { ... } namespace Pdo { ... }`-shaped files - see
+    /// `Registry::index`'s doc comment on why that real shape matters).
+    pub(crate) fn set_namespace(&mut self, name: &str) {
+        self.namespace = strip_leading_backslash(name);
+        self.use_map.clear();
+    }
+
+    pub(crate) fn add_uses(&mut self, imports: &[UseImport]) {
+        for import in imports {
+            let path = strip_leading_backslash(&import.path);
+            let bare = path.rsplit('\\').next().unwrap_or(&path).to_string();
+            let short_name = import.alias.clone().unwrap_or_else(|| bare.clone());
+            self.use_map.insert(short_name, path);
+        }
+    }
+
+    /// The fully-qualified name a declaration with this bare name gets,
+    /// in the current namespace - declarations are never `use`-resolved
+    /// (that only applies to *references*), always just namespace-relative.
+    pub(crate) fn declared_name(&self, bare: &str) -> String {
+        if self.namespace.is_empty() {
+            bare.to_string()
+        } else {
+            format!("{}\\{bare}", self.namespace)
+        }
+    }
+
+    /// Resolves a *reference* to a class/function name as it appears in
+    /// source (`extends Foo`, `new Foo()`, a type hint, ...) to the
+    /// fully-qualified name it actually refers to: a leading `\` means
+    /// already fully qualified; otherwise the first segment is checked
+    /// against this file's `use`-imports, falling back to a
+    /// namespace-relative reference (PHP's own resolution order for
+    /// unqualified class-shaped names). `self`/`parent`/`static` and
+    /// primitive type keywords never reach here - `parse_type_string`
+    /// already turns those into a different `Type` variant before this
+    /// runs, and `Expr::New`'s self/parent/static branch never calls this
+    /// either.
+    pub(crate) fn resolve(&self, name: &str) -> String {
+        if let Some(fq) = name.strip_prefix('\\') {
+            return fq.to_string();
+        }
+        let mut segments = name.splitn(2, '\\');
+        let first = segments.next().unwrap_or(name);
+        let rest = segments.next();
+        if let Some(imported_path) = self.use_map.get(first) {
+            return match rest {
+                Some(r) => format!("{imported_path}\\{r}"),
+                None => imported_path.clone(),
+            };
+        }
+        self.declared_name(name)
+    }
+
+    /// Function-call resolution differs from `resolve()` in exactly the
+    /// one way real PHP's own does: an unqualified name (no leading/
+    /// internal `\`, not matched by a `use function` import) that isn't
+    /// declared in the current namespace falls back to the *global*
+    /// namespace at runtime - classes have no such fallback, which is why
+    /// this is separate from `resolve()` rather than a flag on it.
+    /// Returns the primary candidate to look up first, plus a
+    /// global-namespace fallback candidate when that rule could apply
+    /// (namespaced file, unqualified name, no matching import).
+    pub(crate) fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
+        let is_unqualified = !name.contains('\\');
+        let use_matched = is_unqualified && self.use_map.contains_key(name);
+        if !is_unqualified || use_matched || self.namespace.is_empty() {
+            (self.resolve(name), None)
+        } else {
+            (self.declared_name(name), Some(name.to_string()))
+        }
+    }
+}
+
+/// Rewrites every `Object(name)` in a type tree to the fully-qualified
+/// name `ctx` resolves it to - mirrors `mark_template_params`'s exact
+/// shape (both are a one-time post-processing walk over an already-parsed
+/// `Type`, applied right after `parse_type_string` produces it), applied
+/// second since a name that turned out to be a `@template` parameter
+/// isn't a real class reference to resolve at all.
+fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
+    match ty {
+        // `object` (the native type-hint keyword, not a real class) is
+        // represented as `Type::Object("object")` - `parse_type_string`'s
+        // own sentinel for it (see its `"object" => Type::Object(...)`
+        // arm) - and is never a genuine reference to resolve: `object` is
+        // a PHP-reserved word, so no real class can ever be named that.
+        // Without this, a plain `object` type hint got namespace-qualified
+        // into nonsense like `App\Some\Namespace\object`.
+        Type::Object(name) if name == "object" => Type::Object(name),
+        Type::Object(name) => Type::Object(ctx.resolve(&name)),
+        Type::Array(inner) => Type::Array(Box::new(resolve_names_in_type(*inner, ctx))),
+        Type::Union(members) => Type::Union(
+            members
+                .into_iter()
+                .map(|m| resolve_names_in_type(m, ctx))
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .into_iter()
+                .map(|m| resolve_names_in_type(m, ctx))
+                .collect(),
+        ),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, resolve_names_in_type(t, ctx), opt))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 impl FunctionSig {
-    fn from_decl(f: &FunctionDecl) -> FunctionSig {
+    fn from_decl(f: &FunctionDecl, ctx: &NameContext) -> FunctionSig {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
         let template_names: HashSet<String> = doc
             .as_ref()
@@ -110,6 +265,7 @@ impl FunctionSig {
                 let doc_ty = doc.as_ref().and_then(|d| d.params.get(&p.name));
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_names);
+                let ty = resolve_names_in_type(ty, ctx);
                 ParamSig {
                     name: p.name.clone(),
                     ty,
@@ -123,6 +279,7 @@ impl FunctionSig {
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
         let return_type = resolve_type(doc_return, f.return_type.as_deref());
         let return_type = mark_template_params(return_type, &template_names);
+        let return_type = resolve_names_in_type(return_type, ctx);
 
         FunctionSig {
             params,
@@ -148,11 +305,16 @@ pub struct ClassInfo {
 }
 
 impl ClassInfo {
-    fn from_decl(c: &ClassDecl) -> ClassInfo {
+    fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassInfo {
         let methods = c
             .methods
             .iter()
-            .map(|m| (m.function.name.clone(), FunctionSig::from_decl(&m.function)))
+            .map(|m| {
+                (
+                    m.function.name.clone(),
+                    FunctionSig::from_decl(&m.function, ctx),
+                )
+            })
             .collect();
 
         let mut properties: HashMap<String, PropertySig> = c
@@ -164,6 +326,7 @@ impl ClassInfo {
                     doc_ty.as_ref().and_then(|d| d.var_type.as_deref()),
                     p.type_hint.as_deref(),
                 );
+                let ty = resolve_names_in_type(ty, ctx);
                 (
                     p.name.clone(),
                     PropertySig {
@@ -187,6 +350,7 @@ impl ClassInfo {
                 }
                 let doc_ty = ctor_doc.as_ref().and_then(|d| d.params.get(&p.name));
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
+                let ty = resolve_names_in_type(ty, ctx);
                 properties.insert(
                     p.name.clone(),
                     PropertySig {
@@ -204,20 +368,12 @@ impl ClassInfo {
             .collect();
 
         ClassInfo {
-            extends: c
-                .extends
-                .iter()
-                .map(|s| strip_leading_backslash(s))
-                .collect(),
-            implements: c
-                .implements
-                .iter()
-                .map(|s| strip_leading_backslash(s))
-                .collect(),
+            extends: c.extends.iter().map(|s| ctx.resolve(s)).collect(),
+            implements: c.implements.iter().map(|s| ctx.resolve(s)).collect(),
             methods,
             properties,
             consts,
-            uses: c.uses.iter().map(|s| strip_leading_backslash(s)).collect(),
+            uses: c.uses.iter().map(|s| ctx.resolve(s)).collect(),
         }
     }
 
@@ -228,11 +384,16 @@ impl ClassInfo {
     /// inference, which nothing in the checker does for *any* class today,
     /// not just enums - a separate, pre-existing gap this doesn't attempt
     /// to close.
-    fn from_enum_decl(e: &EnumDecl) -> ClassInfo {
+    fn from_enum_decl(e: &EnumDecl, ctx: &NameContext) -> ClassInfo {
         let methods = e
             .methods
             .iter()
-            .map(|m| (m.function.name.clone(), FunctionSig::from_decl(&m.function)))
+            .map(|m| {
+                (
+                    m.function.name.clone(),
+                    FunctionSig::from_decl(&m.function, ctx),
+                )
+            })
             .collect();
         let consts = e
             .consts
@@ -242,15 +403,11 @@ impl ClassInfo {
 
         ClassInfo {
             extends: Vec::new(),
-            implements: e
-                .implements
-                .iter()
-                .map(|s| strip_leading_backslash(s))
-                .collect(),
+            implements: e.implements.iter().map(|s| ctx.resolve(s)).collect(),
             methods,
             properties: HashMap::new(),
             consts,
-            uses: e.uses.iter().map(|s| strip_leading_backslash(s)).collect(),
+            uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
         }
     }
 }
@@ -336,19 +493,43 @@ impl Registry {
     /// `Project` index one file's statements into an already-built
     /// registry (initial load, or after a re-parse) without re-running
     /// `build`'s from-scratch pass over every other file.
+    /// Indexes a file's declarations, tracking the current
+    /// `NameContext` *positionally* as it walks - a `namespace` statement
+    /// changes it for everything from that point on, exactly like real
+    /// PHP, rather than computing one static context up front for the
+    /// whole file. This matters concretely: the parser has no real model
+    /// of brace-delimited `namespace X { ... }` (see `Stmt::Namespace`'s
+    /// own parsing comment), so it falls out as a `Stmt::Namespace(name)`
+    /// immediately followed by a sibling `Stmt::Block` holding what was
+    /// inside the braces - and real vendored stub files (phpstorm-stubs'
+    /// own `PDO/PDO.php`) really do have *two* such blocks in one file
+    /// (`namespace { ... }` for the global `PDO` class, then a later
+    /// `namespace Pdo { ... }` for PHP 8.4's `Pdo\*` subclasses) - a
+    /// single whole-file context would apply whichever one it saw last to
+    /// both blocks, silently mis-qualifying the first one's classes.
     pub(crate) fn index(&mut self, stmts: &[Stmt]) {
+        let mut ctx = NameContext::default();
+        self.index_with_context(stmts, &mut ctx);
+    }
+
+    fn index_with_context(&mut self, stmts: &[Stmt], ctx: &mut NameContext) {
         for stmt in stmts {
             match stmt {
+                Stmt::Namespace(name) => ctx.set_namespace(name),
+                Stmt::Use(imports) => ctx.add_uses(imports),
                 Stmt::ClassDecl(c) => {
-                    self.classes.insert(c.name.clone(), ClassInfo::from_decl(c));
+                    self.classes
+                        .insert(ctx.declared_name(&c.name), ClassInfo::from_decl(c, ctx));
                 }
                 Stmt::EnumDecl(e) => {
-                    self.classes
-                        .insert(e.name.clone(), ClassInfo::from_enum_decl(e));
+                    self.classes.insert(
+                        ctx.declared_name(&e.name),
+                        ClassInfo::from_enum_decl(e, ctx),
+                    );
                 }
                 Stmt::FunctionDecl(f) => {
                     self.functions
-                        .insert(f.name.clone(), FunctionSig::from_decl(f));
+                        .insert(ctx.declared_name(&f.name), FunctionSig::from_decl(f, ctx));
                 }
                 // The real, common `if (!function_exists('foo')) { function
                 // foo() {} }` polyfill idiom (used throughout the PHP
@@ -360,18 +541,33 @@ impl Registry {
                 // place (a symbol is either indexed or it isn't), so
                 // treating a branch's declarations the same as top-level
                 // ones is consistent with that existing coarseness, not a
-                // new kind of imprecision.
+                // new kind of imprecision. Cloning `ctx` for each branch
+                // means a `use`/`namespace` change inside one doesn't leak
+                // into the other or past the `if` - conservative, and
+                // irrelevant in practice (real code doesn't declare
+                // namespaces inside an `if`).
                 Stmt::If {
                     then_branch,
                     else_branch,
                     ..
                 } => {
-                    self.index(std::slice::from_ref(then_branch));
+                    self.index_with_context(std::slice::from_ref(then_branch), &mut ctx.clone());
                     if let Some(else_branch) = else_branch {
-                        self.index(std::slice::from_ref(else_branch));
+                        self.index_with_context(
+                            std::slice::from_ref(else_branch),
+                            &mut ctx.clone(),
+                        );
                     }
                 }
-                Stmt::Block(inner) => self.index(inner),
+                // Unlike `If`, deliberately *not* cloned: this is the
+                // brace-namespace body itself (see this method's doc
+                // comment), so a `use` statement inside it must be
+                // visible to the declarations that follow it in the very
+                // same block - it's the statement *after* the block ends
+                // that must not see it, which cloning at the point the
+                // *next* `Stmt::Namespace` resets `ctx.use_map` already
+                // ensures (see `set_namespace`).
+                Stmt::Block(inner) => self.index_with_context(inner, ctx),
                 _ => {}
             }
         }
@@ -379,11 +575,17 @@ impl Registry {
 
     /// Surgically removes one file's prior contributions before
     /// re-indexing its new parse - `Project::update_file`'s whole reason
-    /// for existing. Names are the only identity a registry entry has
-    /// (namespaces aren't modeled anywhere in this project), so two files
-    /// declaring the same top-level name would collide here exactly as
-    /// they would everywhere else in this registry - a pre-existing,
-    /// accepted simplification, not something incrementality introduces.
+    /// for existing. `functions`/`classes` must already be the
+    /// fully-qualified names `Registry::index` actually keyed its entries
+    /// under (Phase 9.5 - see `NameContext`) - `project.rs`'s
+    /// `declared_names` mirrors `index`'s own namespace-tracking exactly
+    /// so the two agree. Two files legitimately declaring the exact same
+    /// fully-qualified name (verified at real scale: unrelated packages
+    /// bundling their own non-scoped copy of a third dependency) still
+    /// collide here, the same way real PHP's own class-name uniqueness
+    /// requirement would refuse to load both - a real limit on how many
+    /// "same file, different builds" scenarios this can represent, not a
+    /// namespace-modeling gap.
     pub(crate) fn remove_declarations(&mut self, functions: &[String], classes: &[String]) {
         for name in functions {
             self.functions.remove(name);
@@ -437,56 +639,62 @@ impl Registry {
         false
     }
 
-    /// Looks up a method, walking up the (single-parent) extends chain if
-    /// not declared directly on `class`. Traits aren't modeled yet.
-    pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionSig> {
-        let mut current = class;
+    /// Walks `class`'s own `extends` (*and* `implements`, so an
+    /// interface-typed receiver's own multi-parent `extends` chain and a
+    /// class's declared-but-not-overridden interface methods both
+    /// resolve) ancestor graph, in the same order `is_subclass_of` does,
+    /// returning the first ancestor (closest first) whose `ClassInfo`
+    /// satisfies `get`. A single-parent-only walk (`extends.first()`) is
+    /// wrong for interfaces specifically - unlike a class, PHP lets an
+    /// interface `extends` more than one parent at once (real example
+    /// that surfaced this: league/flysystem's `FilesystemOperator extends
+    /// FilesystemReader, FilesystemWriter`) - so every lookup below needs
+    /// this, not just `is_subclass_of`.
+    fn lookup_in_hierarchy<'r, T>(
+        &'r self,
+        class: &str,
+        get: impl Fn(&'r ClassInfo) -> Option<T>,
+    ) -> Option<T> {
         let mut seen = HashSet::new();
-        loop {
-            if !seen.insert(current.to_string()) {
-                return None;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(class.to_string());
+        while let Some(current) = queue.pop_front() {
+            if !seen.insert(current.clone()) {
+                continue;
             }
-            let info = self.classes.get(current)?;
-            if let Some(sig) = info.methods.get(method) {
-                return Some(sig);
+            let Some(info) = self.classes.get(&current) else {
+                continue;
+            };
+            if let Some(found) = get(info) {
+                return Some(found);
             }
-            current = info.extends.first()?;
+            for parent in info.extends.iter().chain(info.implements.iter()) {
+                queue.push_back(parent.clone());
+            }
         }
+        None
     }
 
-    /// Looks up a property, walking up the extends chain if not declared
+    /// Looks up a method, walking the extends/implements ancestor graph
+    /// if not declared directly on `class`. Traits aren't modeled here as
+    /// a distinct concept - `flatten_traits` already merges a trait's
+    /// members directly into the using class's own `methods` map, so they
+    /// show up as if declared there.
+    pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionSig> {
+        self.lookup_in_hierarchy(class, |info| info.methods.get(method))
+    }
+
+    /// Looks up a property, walking the ancestor graph if not declared
     /// directly on `class` (covers inherited properties, including ones
     /// introduced via constructor promotion).
     pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertySig> {
-        let mut current = class;
-        let mut seen = HashSet::new();
-        loop {
-            if !seen.insert(current.to_string()) {
-                return None;
-            }
-            let info = self.classes.get(current)?;
-            if let Some(sig) = info.properties.get(prop) {
-                return Some(sig);
-            }
-            current = info.extends.first()?;
-        }
+        self.lookup_in_hierarchy(class, |info| info.properties.get(prop))
     }
 
-    /// Looks up a class constant, walking up the extends chain if not
+    /// Looks up a class constant, walking the ancestor graph if not
     /// declared directly on `class` - mirrors `lookup_property`.
     pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&Type> {
-        let mut current = class;
-        let mut seen = HashSet::new();
-        loop {
-            if !seen.insert(current.to_string()) {
-                return None;
-            }
-            let info = self.classes.get(current)?;
-            if let Some(ty) = info.consts.get(const_name) {
-                return Some(ty);
-            }
-            current = info.extends.first()?;
-        }
+        self.lookup_in_hierarchy(class, |info| info.consts.get(const_name))
     }
 
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionSig> {
@@ -561,6 +769,25 @@ mod tests {
         );
         assert!(r.classes.contains_key("Widget"));
         assert!(r.classes.contains_key("OldWidget"));
+    }
+
+    #[test]
+    fn the_object_type_hint_is_not_namespace_qualified() {
+        // `object` is a PHP-reserved word - no real class can ever be
+        // named that, so `Type::Object("object")` (parse_type_string's
+        // own sentinel for the native `object` type hint) must never be
+        // resolved as if it were a genuine class reference.
+        let r = build_registry(
+            r#"<?php
+            namespace App\Some\Deep\Namespace_;
+            class Foo {
+                public function bar(): object { return new \stdClass(); }
+            }"#,
+        );
+        let sig = r
+            .lookup_method("App\\Some\\Deep\\Namespace_\\Foo", "bar")
+            .unwrap();
+        assert_eq!(sig.return_type, Type::Object("object".to_string()));
     }
 
     #[test]

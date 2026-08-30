@@ -7,7 +7,7 @@ use crate::deps;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::php_stubs;
-use crate::registry::Registry;
+use crate::registry::{NameContext, Registry};
 use crate::stubs;
 
 /// One file's parsed state, kept around so `Project::update_file` can undo
@@ -248,14 +248,31 @@ fn parse(source: &str) -> Vec<Stmt> {
 /// exactly what a registry entry needs to be identified by to be removed
 /// again later. Enums share the registry's `classes` map (see
 /// `Registry::index`), so they're collected into the same list here.
+/// Must produce exactly the same names `Registry::index` actually keys
+/// its entries under - otherwise an incremental update's removal step
+/// would look up the wrong key and leave a stale entry behind. Mirrors
+/// `Registry::index_with_context`'s structure (including its positional,
+/// mutated-in-place `NameContext` tracking - see that method's own doc
+/// comment on why a namespace can't just be computed once up front for
+/// the whole file) for exactly that reason.
 fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {
+    let mut ctx = NameContext::default();
+    declared_names_with_context(stmts, &mut ctx)
+}
+
+fn declared_names_with_context(
+    stmts: &[Stmt],
+    ctx: &mut NameContext,
+) -> (Vec<String>, Vec<String>) {
     let mut functions = Vec::new();
     let mut classes = Vec::new();
     for stmt in stmts {
         match stmt {
-            Stmt::FunctionDecl(f) => functions.push(f.name.clone()),
-            Stmt::ClassDecl(c) => classes.push(c.name.clone()),
-            Stmt::EnumDecl(e) => classes.push(e.name.clone()),
+            Stmt::Namespace(name) => ctx.set_namespace(name),
+            Stmt::Use(imports) => ctx.add_uses(imports),
+            Stmt::FunctionDecl(f) => functions.push(ctx.declared_name(&f.name)),
+            Stmt::ClassDecl(c) => classes.push(ctx.declared_name(&c.name)),
+            Stmt::EnumDecl(e) => classes.push(ctx.declared_name(&e.name)),
             // Must mirror Registry::index's recursion into `if`/block
             // bodies (the `if (!function_exists(...)) { function foo()
             // {} }` polyfill idiom) - otherwise an incremental update
@@ -267,17 +284,23 @@ fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {
                 else_branch,
                 ..
             } => {
-                let (f, c) = declared_names(std::slice::from_ref(then_branch));
+                let (f, c) = declared_names_with_context(
+                    std::slice::from_ref(then_branch),
+                    &mut ctx.clone(),
+                );
                 functions.extend(f);
                 classes.extend(c);
                 if let Some(else_branch) = else_branch {
-                    let (f, c) = declared_names(std::slice::from_ref(else_branch));
+                    let (f, c) = declared_names_with_context(
+                        std::slice::from_ref(else_branch),
+                        &mut ctx.clone(),
+                    );
                     functions.extend(f);
                     classes.extend(c);
                 }
             }
             Stmt::Block(inner) => {
-                let (f, c) = declared_names(inner);
+                let (f, c) = declared_names_with_context(inner, ctx);
                 functions.extend(f);
                 classes.extend(c);
             }
