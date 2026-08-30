@@ -697,8 +697,31 @@ UTF-16 code-unit columns; this project's `Span` counts UTF-8
 characters - identical for any line without astral-plane characters
 (the overwhelming majority of real PHP source).
 
-**Not yet shipped**: the level system and config/baseline, both
-independent of positions.
+**Shipped - discrete rule-gating levels (the first of Stage 5's two
+independent mechanisms).** `checker::Diagnostic` gained a `level: u8`
+field. Each of the 16 push sites is tagged with a level loosely
+mirroring real PHPStan's own level groupings - verified against a
+fresh `phpstan/phpstan-src` clone's `conf/config.levelN.neon`
+parameter flags rather than recalled from memory: 0 for the
+undefined-symbol/arity family (matches PHPStan's own level-0 bucket,
+though this project doesn't implement PHPStan's own
+$this-only-vs-any-expression distinction for method/property checks -
+a documented simplification, not an oversight), 2 for
+undefined-property/array-shape-key (PHPDoc-derived structural checks),
+3 for return-type/property-type mismatches (matches PHPStan's own
+`checkPhpDocMethodSignatures` level exactly), 5 for argument-type
+mismatches (matches PHPStan's own `checkFunctionArgumentTypes` level
+exactly), and 6 for this project's own generic bound/variance checks
+(no direct PHPStan equivalent - generics aren't level-gated there at
+all). `--check-project` gained a `--level N` flag, defaulting to the
+maximum level so existing report-everything behavior is unchanged
+unless a user opts in. Verified against the real corpus: unfiltered
+diagnostic count unchanged (2327), with sensible progressive counts
+at each level threshold.
+
+**Not yet shipped**: strictness parameters (Stage 5's other,
+independent mechanism - PHPStan's 7-10-style progressively stricter
+union/nullable/mixed handling) and config/baseline (Stage 6).
 
 ## Phase 12: Bespoke per-function/method type extensions - PLANNED
 
