@@ -430,12 +430,34 @@ prerequisite: `ClassDecl` never captured its own doc comment at all).
 Type arguments substitute correctly at every method-call/property-
 access/argument-check site. Deliberately not modeling variance,
 template bound enforcement, or `@extends`/`@implements`
-inheritance-chain substitution.
+inheritance-chain substitution - a separate, forward-looking scope,
+tracked as its own phase below (10.5) rather than as an open item
+against this one, since this phase's own, narrower goal (call-site
+substitution) is fully shipped.
 
 Found and fixed the same pseudo-type-collision bug again for the whole
 PHPStan/Psalm string and array refinement family (`non-empty-string` -
 2263 real occurrences in one corpus alone - `class-string`, and
 others).
+
+## Phase 10.5 (unplanned): Generic variance and inheritance chains - PLANNED
+
+Phase 10 deliberately scoped itself to call-site generic substitution
+only. Real PHPStan's own `Generic/` (36 files in `src/Type/Generic/`)
+is the fuller class-generics engine this phase would grow toward:
+variance (`@template-covariant`/`@template-contravariant`), template
+bound enforcement (`@template T of Foo` actually checked at bind time,
+not just parsed past), and inheritance-chain substitution via
+`@extends`/`@implements` generic arguments (a subclass fixing a
+parent's template parameter, e.g. `class IntCollection extends
+Collection<int> {}`, currently invisible to this project's parser -
+neither tag is parsed at all today).
+
+Natural follow-on to Phase 10 rather than urgent on its own: real-world
+impact is unverified (unlike Phase 8.5's confirmed-live false
+positives), so this stays behind Phases 11-12 in priority until a real
+corpus check shows it causing genuine false positives/negatives worth
+chasing.
 
 ## Phase 11: Source positions, levels, config - NOT STARTED
 
@@ -677,7 +699,7 @@ confused with each other.
 
 | Limitation | Phase |
 | --- | --- |
-| No generic variance, template-bound enforcement, or `@extends`/`@implements` inheritance-chain substitution | 10 |
+| No generic variance, template-bound enforcement, or `@extends`/`@implements` inheritance-chain substitution | 10.5 |
 | No real source positions, level system, or config/baseline | 11 |
 | No bespoke per-function/method type extensions (`array_map`/`preg_match`/`sprintf`/condition-narrowing, ...) | 12 |
 | A handful of stubs (`pg_query_params`, `pg_query`, ...) interleave multiple full parameter lists under duplicate parameter names across version eras rather than Phase 8.5's clean superseded-param-plus-variadic shape, and still miscount arity | 12 |
