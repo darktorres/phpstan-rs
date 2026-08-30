@@ -164,32 +164,58 @@ non-variadic arguments before its real variadic tail.
 The result: the single most basic, canonical call to one of PHP's most
 common functions - `array_map($callback, $array)`, 2 arguments - is
 flagged as `array_map() expects at least 3 argument(s), 2 given`, a
-false positive on real code (confirmed live). This isn't an isolated
-case: 65 of the 558 vendored stub files (664 occurrences total) use
-this attribute, covering other extremely common functions the exact
-same way. This single fix is very likely responsible for a real,
-measurable share of the "expects at least N argument(s), M given"
-diagnostics already observed as recurring noise throughout every
-corpus check this project has ever run, on functions like `array_map`/
-`array_filter`/`array_keys`/`str_replace`/`version_compare`/`mt_rand`
-- confirmed present in the very first grep of Piwigo's own diagnostic
-output back in Phase 9's audit, unrecognized as a stub bug until now.
+false positive on real code (confirmed live against the compiled
+binary). The attribute itself is real and widespread - 65 of the 558
+vendored stub files, 664 occurrences total - but which of those
+occurrences actually produce a wrong minimum-argument count needs
+checking file by file, not assumed from the attribute's mere presence:
+of six other functions checked directly against the compiled binary
+while researching this (`str_replace`, `version_compare`, `array_filter`,
+`dirname`, `file_put_contents`, `rename`), **none** turned out to be
+affected - `dirname`'s one `PhpStormStubsElementAvailable` parameter
+already carries its own real default (`int $levels = 1`), so it was
+never miscounted as required in the first place, and the other five
+don't use the attribute at all despite earlier being assumed to (an
+overclaim in an earlier draft of this section, corrected here after
+direct verification). `array_map` remains the one confirmed, reproduced
+case; this fix's real blast radius among the other 65 files needs the
+same direct check before any of them are added to this list.
 
-**The fix**: when generating a function/method signature from stub
-source, recognize `#[PhpStormStubsElementAvailable(...)]` on a
-parameter and keep only the *last* declared parameter of that name
+**A second, differently-rooted stub-arity bug found alongside it**:
+`array_keys(['a' => 1])` (the real, valid 1-argument form) and
+`mt_rand()` (the real, valid 0-argument form) are *also* flagged as
+missing required arguments - confirmed live - but neither stub uses
+`PhpStormStubsElementAvailable` at all. Each is a single, un-version-gated
+declaration that only models the function's *highest*-arity overload
+(`array_keys(array $array, mixed $filter_value, bool $strict = false)`;
+`mt_rand(int $min, int $max)`), with phpstorm-stubs providing no second,
+lower-arity declaration the way `version_compare` does (two full
+`function version_compare(...)` declarations in the same file, one
+`has_default`-friendly enough that this project's last-write-wins
+generation happens to land on a working signature - confirmed live,
+not flagged - more by luck of declaration order than by design).
+This needs a different fix than the first: recognizing an attribute
+that isn't there won't help - either a small hand-curated override in
+`stubs.rs` (which already exists specifically to win over a generated
+signature, per Phase 8's own two-tier design), or teaching
+`php_stubs.rs` to treat a later `@param ... [optional]`-documented
+parameter as having an implicit default even with no `= value` in the
+native signature.
+
+**The fix (first bug)**: when generating a function/method signature
+from stub source, recognize `#[PhpStormStubsElementAvailable(...)]` on
+a parameter whose own `to`/`from` range doesn't already carry a
+default, and keep only the *last* declared parameter of that name
 (phpstorm-stubs' own convention: later-declared version ranges are
-newer PHP - the last one describes the current, still-supported
-behavior), dropping the earlier, superseded declaration(s) entirely
+newer PHP), dropping the earlier, superseded declaration(s) entirely
 rather than counting them as real, separate required parameters.
 
-**Why before Phase 12, not folded into it**: this is a correctness fix
+**Why before Phase 12, not folded into it**: both are correctness fixes
 to a real, already-shipped pipeline (Phase 8), not a new capability -
-it belongs in the same category as Phase 9.5's retroactive fix to
-Phase 9's own registry, not alongside brand-new bespoke type
-extensions. Fixing it first means Phase 12's own before/after
-diagnostic-count comparisons won't be muddied by noise this bug alone
-already causes.
+the same category as Phase 9.5's retroactive fix to Phase 9's own
+registry, not alongside brand-new bespoke type extensions. Fixing
+these first means Phase 12's own before/after diagnostic-count
+comparisons won't be muddied by noise these bugs alone already cause.
 
 ## Phase 9: Undefined-symbol rule family - DONE
 
@@ -410,12 +436,15 @@ alone:
    compile-time-known string literal (mirrors this project's own
    `check_shape_key_access`'s "only fires on a literal, never a
    dynamic value" precedent).
-4. **`str_replace`/`str_ireplace`/`version_compare`/`mt_rand`/
-   `array_keys`/`dirname`/`file_put_contents`/`rename`** - lower-effort
-   wins once Phase 8.5 lands: these are current false-positive sources
-   from the *same* stub-attribute bug, not functions actually needing
-   bespoke extensions - re-verify each against the real corpus after
-   8.5 ships before deciding any of them still needs one.
+4. **`array_keys`/`mt_rand`** - lower-effort wins once Phase 8.5's
+   second fix (the missing-lower-arity-overload bug) lands: both are
+   confirmed-live false positives from a stub-generation gap, not
+   functions actually needing a bespoke extension. (`str_replace`,
+   `version_compare`, `array_filter`, `dirname`, `file_put_contents`,
+   and `rename` were checked directly against the compiled binary
+   while researching this phase and are already correct today - an
+   earlier draft of this list wrongly assumed they shared Phase 8.5's
+   first bug without checking each one; corrected here.)
 5. **`array_column`/`array_combine`/`array_flip`/`array_fill*`/
    `array_chunk`/`compact`/`get_defined_vars`** - shape-aware return
    types (mirrors this project's own existing `ArrayShape` inference,
@@ -502,27 +531,34 @@ one (a non-empty string literal, `trim()`'s known-safe cases, a
 ## Phase 15: Broader rule catalog - SKETCHED, NOT STARTED
 
 Real, current per-category rule-class counts (2026-08-30, same fresh
-clone - noticeably higher than the original plan's 8-months-earlier
-snapshot in every category, real project growth, not a discrepancy):
-Functions 46, Classes 45, Methods 39, Properties 38, PhpDoc 31,
-Comparison 31, Generics 21, Exceptions 20, RestrictedUsage 19,
-DeadCode 17, Api 17, Arrays 15, Variables 14, Constants 14, Playground
-10, TooWideTypehints 9, Operators 7, Cast 7, Traits 6 (plus a 129-file
-`RuleErrors/` that's shared error-message plumbing, not one rule per
-file, so not a category to chase file-for-file).
+clone) - filtered to files that actually `implements Rule`, not a raw
+file-count of each directory: a first pass through this section used
+the raw count (e.g. 17 files under `DeadCode/`) and overstated every
+category, since each one also holds non-`Rule` helper classes the
+original Phase 8+ plan had already warned about avoiding - corrected
+here by re-checking with `grep -l "implements Rule\b"`. The real
+counts turn out close to that original plan's own count from 8 months
+earlier, not higher - this project hasn't grown the categories that
+matter here much at all: Functions 44, Classes 39, Properties 32,
+Methods 30, PhpDoc 22, Comparison 22, Exceptions 16, Api 16, Generics
+15, Variables 13, Constants 13, Arrays 13, RestrictedUsage 10,
+Playground 9, DeadCode 9, TooWideTypehints 7, Operators 7, Cast 7,
+Traits 4 (plus a 129-file `RuleErrors/` that's shared error-message
+plumbing, not one rule per file, so not a category to chase
+file-for-file either way).
 
 The categories this project has nothing in yet, checked against real
 file names rather than assumed from the category label alone:
-- **DeadCode** (17 files) - unreachable code after an always-terminating
-  statement (this project's own `always_terminates` from Phase 3 is a
+- **DeadCode** (9 real rule files) - unreachable code after an
+  always-terminating statement (this project's own `always_terminates` is a
   real, direct prerequisite already built), always-true/false
   conditions, unused private methods/constants (`UnusedPrivateMethodRule`,
   `UnusedPrivateConstantRule` - both real files in this category).
-- **Comparison** (31 files) - `match`/`switch` exhaustiveness
+- **Comparison** (22 real rule files) - `match`/`switch` exhaustiveness
   (`MatchExpressionRule`), strict-comparison-of-incompatible-types
   (`StrictComparisonOfDifferentTypesRule`), always-true/false `in_array`/
   `array_key_exists` checks against a finite-valued haystack.
-- **Exceptions** (20 files) - uncaught/unthrown-type checks; needs a
+- **Exceptions** (16 real rule files) - uncaught/unthrown-type checks; needs a
   real throw-type model this project doesn't have at all yet (not even
   a `FunctionSig`-level "what can this throw" field).
 - **Visibility enforcement / abstract-method completeness** - not
