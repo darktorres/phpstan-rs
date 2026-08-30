@@ -111,6 +111,7 @@ impl<'a> Checker<'a> {
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.
                     let fqn = self.name_ctx.declared_name(&c.name);
+                    self.check_class_generic_bounds(&fqn);
                     for m in &c.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
@@ -215,6 +216,18 @@ impl<'a> Checker<'a> {
             Some(c) => format!("{c}::{}", f.name),
             None => f.name.clone(),
         };
+
+        // Phase 10.5's bound-enforcement: checked once here, against the
+        // declaration itself, not at every call site - and deliberately
+        // outside the dynamic-var-construct truncation below, since a
+        // bound violation is about the signature as written, not
+        // something a `extract()` in the *body* should be able to hide.
+        if let Some(sig) = sig {
+            for param in &sig.params {
+                self.check_generic_bounds(&param.ty, &label);
+            }
+        }
+        self.check_generic_bounds(declared_return.as_ref().unwrap_or(&Type::Mixed), &label);
 
         let previous_class = self.current_class.take();
         self.current_class = class_name.map(|s| s.to_string());
@@ -346,6 +359,157 @@ impl<'a> Checker<'a> {
                         .is_some_and(|e| self.always_terminates(e, locals))
             }
             _ => false,
+        }
+    }
+
+    /// Walks `ty` for every `Object(class, args)` naming a class with its
+    /// own `@template T of Bound` (Phase 10.5's bound-enforcement half),
+    /// flagging any argument that doesn't satisfy its bound - e.g.
+    /// `Collection<Foo>` where `Collection`'s own `@template T of Shape`
+    /// and `Foo` doesn't implement `Shape`. Recurses into every argument
+    /// too (so `Collection<Box<Foo>>` still checks `Box`'s own bound), and
+    /// into `Union`/`Intersection`/`Array`/`ArrayShape` members (a bound
+    /// violation doesn't stop being real just because it's wrapped in a
+    /// union or is one array's element type).
+    ///
+    /// Bindings are computed once, positionally, before any bound is
+    /// checked - not just so multiple arguments against multiple bounds
+    /// each see the right value, but because a bound can itself reference
+    /// another of the *same* class's own templates (`@template A`
+    /// `@template B of A`), which only resolves correctly once `A`'s own
+    /// concrete argument is known.
+    ///
+    /// Called once per declared type (a function's params/return type, a
+    /// class's own properties, its `@extends`/`@implements` tags) rather
+    /// than at every call/access site - a generic type only needs
+    /// flagging once, where it's *written*, the same way real PHPStan's
+    /// own `GenericObjectTypeCheck` documents itself.
+    fn check_generic_bounds(&mut self, ty: &Type, label: &str) {
+        match ty {
+            Type::Object(class, args) => {
+                if !args.is_empty()
+                    && let Some(info) = self.registry.classes.get(class)
+                    && !info.template_bounds.is_empty()
+                {
+                    let bindings: HashMap<String, Type> = info
+                        .templates
+                        .iter()
+                        .cloned()
+                        .zip(args.iter().cloned())
+                        .collect();
+                    for (name, arg) in info.templates.iter().zip(args.iter()) {
+                        let Some(bound) = info.template_bounds.get(name) else {
+                            continue;
+                        };
+                        let bound = types::substitute_template(bound, &bindings);
+                        // Same "don't know, don't guess" leniency every
+                        // other undefined-symbol-adjacent check in this
+                        // project already applies to a class the registry
+                        // has no real data for (an uninstalled dependency,
+                        // or - the real case found verifying this against
+                        // Piwigo's corpus - a PHAR-bundled one like
+                        // `phpstan/phpstan` itself, which ships with no
+                        // loose source files to parse at all): without it,
+                        // every reference to one of its own real classes,
+                        // e.g. `PHPStan\Type\ArrayType implements
+                        // PHPStan\Type\Type`, reads as violating a bound
+                        // this project simply has no way to verify either
+                        // way, not one it's actually confirmed broken.
+                        if *arg != Type::Mixed
+                            && self.is_type_fully_known(arg)
+                            && self.is_type_fully_known(&bound)
+                            && !self.registry.is_assignable(arg, &bound)
+                        {
+                            self.diagnostics.push(Diagnostic {
+                                location: label.to_string(),
+                                message: format!(
+                                    "{class}'s @template {name} requires {bound}, got {arg}"
+                                ),
+                            });
+                        }
+                    }
+                }
+                for arg in args {
+                    self.check_generic_bounds(arg, label);
+                }
+            }
+            Type::Array(inner) => self.check_generic_bounds(inner, label),
+            Type::Union(members) | Type::Intersection(members) => {
+                for m in members {
+                    self.check_generic_bounds(m, label);
+                }
+            }
+            Type::ArrayShape(fields) => {
+                for (_, t, _) in fields {
+                    self.check_generic_bounds(t, label);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `false` if `ty` mentions any class this project has no real data
+    /// for at all - an uninstalled dependency, or a PHAR-bundled one
+    /// (real `phpstan/phpstan` ships as a compiled PHAR with no loose
+    /// source files, the same gap Phase 9's own undefined-symbol checks
+    /// already document). `check_generic_bounds` uses this to skip a
+    /// bound it has no way to actually verify, rather than guess wrong.
+    fn is_type_fully_known(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Object(name, args) => {
+                (name == "object" || self.registry.classes.contains_key(name))
+                    && args.iter().all(|a| self.is_type_fully_known(a))
+            }
+            Type::Array(inner) => self.is_type_fully_known(inner),
+            Type::Union(members) | Type::Intersection(members) => {
+                members.iter().all(|m| self.is_type_fully_known(m))
+            }
+            Type::ArrayShape(fields) => fields.iter().all(|(_, t, _)| self.is_type_fully_known(t)),
+            _ => true,
+        }
+    }
+
+    /// `check_generic_bounds` for everything a class declares outside its
+    /// own methods (which `check_function` already covers per-method):
+    /// every property's type, plus its own `@extends`/`@implements`
+    /// arguments - both are real places a generic bound violation can be
+    /// written (`class Bad extends Collection<NotAShape> {}`) without
+    /// ever showing up in a method signature at all.
+    fn check_class_generic_bounds(&mut self, fqn: &str) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        // Both maps below are `HashMap`s with no guaranteed iteration
+        // order - sorted by key so two diagnostics for the same class
+        // (e.g. one from `extends_args`, one from an `implements_args`
+        // entry) always come out in the same relative order, not one
+        // that silently varies by process (Rust's default hasher is
+        // randomly seeded per run).
+        let mut prop_names: Vec<&String> = info.properties.keys().collect();
+        prop_names.sort();
+        let mut types_to_check: Vec<Type> = prop_names
+            .into_iter()
+            .map(|name| info.properties[name].ty.clone())
+            .collect();
+        // `extends_args`/`implements_args` store just the argument list,
+        // not paired with the parent/interface's own name - re-pair each
+        // one into a real `Object(class, args)` here, or
+        // `check_generic_bounds` has no class to look bounds up against
+        // at all (it would just see the *arguments* as if they were the
+        // generic reference themselves).
+        if let Some(parent) = info.extends.first() {
+            types_to_check.push(Type::Object(parent.clone(), info.extends_args.clone()));
+        }
+        let mut iface_names: Vec<&String> = info.implements_args.keys().collect();
+        iface_names.sort();
+        for iface in iface_names {
+            types_to_check.push(Type::Object(
+                iface.clone(),
+                info.implements_args[iface].clone(),
+            ));
+        }
+        for ty in types_to_check {
+            self.check_generic_bounds(&ty, fqn);
         }
     }
 
@@ -4104,5 +4268,211 @@ mod tests {
                 && !x.message.contains("Whatever")),
             "expected a return-type mismatch naming Money (not Whatever), got: {d:?}"
         );
+    }
+
+    #[test]
+    fn a_bounded_template_flags_a_param_type_that_violates_the_bound() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Shape {}
+            class NotAShape {}
+            /**
+             * @template T of Shape
+             */
+            class Collection {}
+            /** @param Collection<NotAShape> $c */
+            function f($c) {}
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("@template T requires Shape")
+                    && x.message.contains("NotAShape")),
+            "expected a bound-violation diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_bounded_template_argument_satisfying_the_bound_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Shape {}
+            class Circle implements Shape {}
+            /**
+             * @template T of Shape
+             */
+            class Collection {}
+            /** @param Collection<Circle> $c */
+            function f($c) {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_bare_unspecified_generic_never_triggers_bound_checking() {
+        // No `<...>` at all - nothing to check, same "don't know, don't
+        // guess" fallback as everywhere else an erased generic shows up.
+        let d = diagnostics_for(
+            r#"<?php
+            interface Shape {}
+            /**
+             * @template T of Shape
+             */
+            class Collection {}
+            function f(Collection $c) {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_bound_violation_in_a_return_type_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Shape {}
+            class NotAShape {}
+            /**
+             * @template T of Shape
+             */
+            class Collection {}
+            /** @return Collection<NotAShape> */
+            function f() {}
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("@template T requires Shape")),
+            "expected a bound-violation diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_bound_violation_in_a_property_type_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Shape {}
+            class NotAShape {}
+            /**
+             * @template T of Shape
+             */
+            class Collection {}
+            class Holder {
+                /** @var Collection<NotAShape> */
+                public $items;
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("@template T requires Shape")),
+            "expected a bound-violation diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_bound_violation_via_an_extends_tag_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Shape {}
+            class NotAShape {}
+            /**
+             * @template T of Shape
+             */
+            class Collection {}
+            /** @extends Collection<NotAShape> */
+            class Bad extends Collection {}
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("@template T requires Shape")),
+            "expected a bound-violation diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_bound_referencing_the_same_class_s_own_earlier_template_resolves_positionally() {
+        // @template B of A - checking B's argument against "A" only makes
+        // sense once A's own concrete argument (from the same <...> list)
+        // is known, not treated as a literal unrelated class named "A".
+        let d = diagnostics_for(
+            r#"<?php
+            interface Shape {}
+            class Circle implements Shape {}
+            class NotAShape {}
+            /**
+             * @template A of Shape
+             * @template B of A
+             */
+            class Pair {}
+            /** @param Pair<Circle, NotAShape> $p */
+            function f($p) {}
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("@template B requires Circle")
+                    && x.message.contains("NotAShape")),
+            "expected B's bound to resolve to Circle (A's own argument), got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_bound_of_object_is_satisfied_by_any_class_the_common_doctrine_repository_shape() {
+        // Real bug found verifying bound-enforcement against the real
+        // Piwigo corpus: `is_assignable` had never treated the native
+        // `object` type hint as a universal supertype of any class
+        // instance before this (nothing had compared against it this way
+        // until bound-checking started) - `Doctrine\ORM\EntityRepository
+        // <T of object>` is an extremely common real-world shape every
+        // one of Piwigo's own repository classes uses.
+        let d = diagnostics_for(
+            r#"<?php
+            class ActivityEntity {}
+            /**
+             * @template T of object
+             */
+            class EntityRepository {}
+            /** @extends EntityRepository<ActivityEntity> */
+            class ActivityRepository extends EntityRepository {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_native_object_return_type_accepts_any_class_instance() {
+        // The narrower, non-generics-related form of the same bug -
+        // caught investigating the Doctrine case above, not hypothetical.
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {}
+            function f(): object { return new Foo(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_bound_argument_that_s_an_unregistered_class_is_never_flagged() {
+        // Real bug found on the real Piwigo corpus: real phpstan/phpstan
+        // ships as a compiled PHAR (no loose source files at all), so
+        // `PHPStan\Type\ArrayType` (a real class implementing the real
+        // `PHPStan\Type\Type` interface) is never actually registered -
+        // this project has no way to verify that relationship, so it
+        // shouldn't guess a violation. Uses `Bound` itself as the
+        // stand-in for a class this project simply never saw declared.
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T of Bound
+             */
+            class Collection {}
+            /** @param Collection<UnregisteredArg> $c */
+            function f($c) {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 }

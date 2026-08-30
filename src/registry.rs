@@ -356,6 +356,17 @@ pub struct ClassInfo {
     // more than one at once) - the key is resolved to the same
     // fully-qualified name `implements` itself uses, so the two agree.
     pub implements_args: HashMap<String, Vec<Type>>,
+    // `@template T of Bound` (Phase 10.5's bound-enforcement half) - the
+    // resolved bound for whichever of `templates` above declared one.
+    // Checked by `checker::check_generic_bounds` wherever this class is
+    // referenced with concrete type arguments (`Collection<Foo>`), not
+    // just parsed past like it was before this phase.
+    pub template_bounds: HashMap<String, Type>,
+    // Names from `templates` above additionally declared
+    // `@template-covariant`/`@template-contravariant` (Phase 10.5's
+    // variance half) - a name absent from both stays invariant.
+    pub covariant_templates: HashSet<String>,
+    pub contravariant_templates: HashSet<String>,
 }
 
 impl ClassInfo {
@@ -456,6 +467,23 @@ impl ClassInfo {
                 _ => None,
             })
             .collect();
+        let template_bounds: HashMap<String, Type> = class_doc
+            .as_ref()
+            .map(|d| {
+                d.template_bounds
+                    .iter()
+                    .map(|(name, raw)| (name.clone(), resolve_generic_tag(raw)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let covariant_templates = class_doc
+            .as_ref()
+            .map(|d| d.covariant_templates.clone())
+            .unwrap_or_default();
+        let contravariant_templates = class_doc
+            .as_ref()
+            .map(|d| d.contravariant_templates.clone())
+            .unwrap_or_default();
 
         ClassInfo {
             extends: c.extends.iter().map(|s| ctx.resolve(s)).collect(),
@@ -467,6 +495,9 @@ impl ClassInfo {
             templates,
             extends_args,
             implements_args,
+            template_bounds,
+            covariant_templates,
+            contravariant_templates,
         }
     }
 
@@ -576,9 +607,24 @@ impl ClassInfo {
             );
         }
 
+        // Every enum implements `UnitEnum` (and a backed one also
+        // `BackedEnum`) by virtue of being an enum at all - never
+        // declared in source, the same as its synthesized `cases()`/
+        // `name`/`value` above, but this time needed for hierarchy
+        // checks (`is_subclass_of`/`is_assignable`), not member lookup.
+        // Found the hard way: real code narrowing/typing an enum against
+        // `UnitEnum` (e.g. doctrine/lexer's own `AbstractLexer<T of
+        // UnitEnum|string|int>`) was flagged as a bound violation despite
+        // being exactly what real PHP guarantees.
+        let mut implements: Vec<String> = e.implements.iter().map(|s| ctx.resolve(s)).collect();
+        implements.push("UnitEnum".to_string());
+        if e.backing_type.is_some() {
+            implements.push("BackedEnum".to_string());
+        }
+
         ClassInfo {
             extends: Vec::new(),
-            implements: e.implements.iter().map(|s| ctx.resolve(s)).collect(),
+            implements,
             methods,
             properties,
             consts,
@@ -586,6 +632,9 @@ impl ClassInfo {
             templates: Vec::new(),
             extends_args: Vec::new(),
             implements_args: HashMap::new(),
+            template_bounds: HashMap::new(),
+            covariant_templates: HashSet::new(),
+            contravariant_templates: HashSet::new(),
         }
     }
 }
@@ -934,6 +983,18 @@ impl Registry {
             // genuine mismatch either way once real variance rules would
             // matter. Matches this checker's general preference for fewer
             // false positives over catching everything.
+            // The native `object` type hint (`Type::Object("object", _)` -
+            // `types::parse_type_string`'s own sentinel for it, since
+            // `object` is a reserved word no real class can ever be named)
+            // is satisfied by *any* class instance - a real, pre-existing
+            // gap this had never hit before Phase 10.5's bound-checking
+            // started comparing against it for the first time (a real,
+            // extremely common pattern: Doctrine's `EntityRepository
+            // <T of object>`). Confirmed live: a plain native `function
+            // f(): object { return new Foo(); }` was already
+            // incorrectly flagged before this fix, unrelated to generics
+            // at all.
+            (Type::Object(_, _), Type::Object(b, _)) if b == "object" => true,
             (Type::Object(a, _), Type::Object(b, _)) => a == b || self.is_subclass_of(a, b),
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
@@ -1138,6 +1199,21 @@ mod tests {
         assert!(!r.is_assignable(
             &Type::Object("Shape".to_string(), Vec::new()),
             &Type::Object("Circle".to_string(), Vec::new())
+        ));
+    }
+
+    #[test]
+    fn any_class_instance_is_assignable_to_the_native_object_type() {
+        let r = build_registry("<?php class Foo {}");
+        assert!(r.is_assignable(
+            &Type::Object("Foo".to_string(), Vec::new()),
+            &Type::Object("object".to_string(), Vec::new())
+        ));
+        // Not the other way around - a plain `object` isn't known to be
+        // any particular class.
+        assert!(!r.is_assignable(
+            &Type::Object("object".to_string(), Vec::new()),
+            &Type::Object("Foo".to_string(), Vec::new())
         ));
     }
 
@@ -1449,5 +1525,29 @@ mod tests {
             r.lookup_method("Suit", "label").unwrap().return_type,
             Type::String
         );
+    }
+
+    #[test]
+    fn every_enum_implements_unit_enum_and_a_backed_one_also_implements_backed_enum() {
+        // Real bug found on the real Piwigo corpus: doctrine/lexer's own
+        // `AbstractLexer<T of UnitEnum|string|int>` flagged every real
+        // backed enum passed to it as a bound violation, since nothing
+        // ever registered an enum as implementing `UnitEnum`/`BackedEnum`
+        // - only their synthesized cases()/name/value members existed,
+        // never the hierarchy relationship itself.
+        let r = build_registry(
+            r#"<?php
+            enum Suit: string {
+                case Hearts = 'H';
+            }
+            enum Pure {
+                case A;
+            }
+        "#,
+        );
+        assert!(r.is_subclass_of("Suit", "UnitEnum"));
+        assert!(r.is_subclass_of("Suit", "BackedEnum"));
+        assert!(r.is_subclass_of("Pure", "UnitEnum"));
+        assert!(!r.is_subclass_of("Pure", "BackedEnum"));
     }
 }

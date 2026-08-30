@@ -7,20 +7,30 @@ use std::collections::{HashMap, HashSet};
 /// on `types` at all, so it can't unintentionally do (or fail to do) any
 /// resolution work of its own.
 ///
-/// Deliberately does not parse conditional return types or `@template` -
-/// those need real per-call-site type parameter binding, not just parsing.
-/// `@param`/`@return`/`@var` cover PHPDoc's single biggest practical win
-/// with the least machinery: adding a type to something a native hint can't
-/// express (an untyped param/property, a native `array` refined to a shape
-/// or generic, or PHP versions without union types).
+/// Deliberately does not parse conditional return types - those need real
+/// per-call-site type parameter binding, not just parsing. `@param`/
+/// `@return`/`@var` cover PHPDoc's single biggest practical win with the
+/// least machinery: adding a type to something a native hint can't express
+/// (an untyped param/property, a native `array` refined to a shape or
+/// generic, or PHP versions without union types).
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DocBlock {
     pub params: HashMap<String, String>,
     pub return_type: Option<String>,
     pub var_type: Option<String>,
-    // `@template T` names (a bound, `@template T of SomeClass`, is parsed
-    // past but not recorded - nothing consumes it yet).
+    // `@template T` names, in declaration order (order matters for
+    // positional binding - see `registry::ClassInfo::templates`).
     pub templates: Vec<String>,
+    // `@template T of Bound` - the bound text for whichever of `templates`
+    // above declared one (Phase 10.5's bound-enforcement half). A `T` with
+    // no `of` clause simply has no entry here.
+    pub template_bounds: HashMap<String, String>,
+    // Names from `templates` above additionally declared
+    // `@template-covariant`/`@template-contravariant` (Phase 10.5's
+    // variance half) - a name absent from both stays invariant, this
+    // project's only behavior before Phase 10.5 and still the default.
+    pub covariant_templates: HashSet<String>,
+    pub contravariant_templates: HashSet<String>,
     // Names of `@param`s tagged `[optional]` - a real, longstanding PHP
     // manual/phpstorm-stubs convention marking a native parameter as
     // conceptually optional even when its own signature has no `= value`
@@ -110,8 +120,33 @@ pub fn parse(raw: &str) -> DocBlock {
                 }
             }
             "template" => {
-                if let Some(name) = rest.split_whitespace().next() {
-                    block.templates.push(name.to_string());
+                if let Some((name, bound)) = parse_template_tag(rest) {
+                    block.templates.push(name.clone());
+                    if let Some(bound) = bound {
+                        block.template_bounds.insert(name, bound);
+                    }
+                }
+            }
+            // `@template-covariant`/`@template-contravariant` (Phase
+            // 10.5's variance half) - same shape as a plain `@template`,
+            // just also marking which direction the parameter is allowed
+            // to vary in.
+            "template-covariant" => {
+                if let Some((name, bound)) = parse_template_tag(rest) {
+                    block.templates.push(name.clone());
+                    if let Some(bound) = bound {
+                        block.template_bounds.insert(name.clone(), bound);
+                    }
+                    block.covariant_templates.insert(name);
+                }
+            }
+            "template-contravariant" => {
+                if let Some((name, bound)) = parse_template_tag(rest) {
+                    block.templates.push(name.clone());
+                    if let Some(bound) = bound {
+                        block.template_bounds.insert(name.clone(), bound);
+                    }
+                    block.contravariant_templates.insert(name);
                 }
             }
             "extends" => {
@@ -131,6 +166,27 @@ pub fn parse(raw: &str) -> DocBlock {
     }
 
     block
+}
+
+/// Parses `@template`'s own body: `T` alone, or `T of Bound` (a bound can
+/// itself be a union, e.g. `T of Foo|Bar`, so it goes through
+/// `take_type_token` like every other type token here, not a bare
+/// `split_whitespace`). Returns `None` only when there's no name at all
+/// (a malformed/empty tag).
+fn parse_template_tag(rest: &str) -> Option<(String, Option<String>)> {
+    let mut parts = rest.splitn(2, char::is_whitespace);
+    let name = parts.next()?.to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let after_name = parts.next().unwrap_or("").trim();
+    let bound = after_name
+        .strip_prefix("of")
+        .filter(|s| s.starts_with(char::is_whitespace))
+        .map(|s| take_type_token(s.trim_start()))
+        .filter(|b| !b.is_empty())
+        .map(str::to_string);
+    Some((name, bound))
 }
 
 /// Takes the leading type expression off `s`, stopping at the first
@@ -296,9 +352,41 @@ mod tests {
     }
 
     #[test]
-    fn parses_bounded_template_name_ignoring_the_bound() {
+    fn parses_bounded_template_name_and_its_bound() {
         let block = parse("/** @template T of \\Countable */");
         assert_eq!(block.templates, vec!["T".to_string()]);
+        assert_eq!(
+            block.template_bounds.get("T"),
+            Some(&"\\Countable".to_string())
+        );
+    }
+
+    #[test]
+    fn a_template_with_no_bound_has_no_bound_entry() {
+        let block = parse("/** @template T */");
+        assert_eq!(block.templates, vec!["T".to_string()]);
+        assert!(!block.template_bounds.contains_key("T"));
+    }
+
+    #[test]
+    fn parses_a_union_bound() {
+        let block = parse("/** @template T of Foo|Bar */");
+        assert_eq!(block.template_bounds.get("T"), Some(&"Foo|Bar".to_string()));
+    }
+
+    #[test]
+    fn parses_covariant_and_contravariant_template_tags() {
+        let block = parse(
+            r#"/**
+             * @template-covariant TOut
+             * @template-contravariant TIn of Bound
+             */"#,
+        );
+        assert_eq!(block.templates, vec!["TOut".to_string(), "TIn".to_string()]);
+        assert!(block.covariant_templates.contains("TOut"));
+        assert!(!block.contravariant_templates.contains("TOut"));
+        assert!(block.contravariant_templates.contains("TIn"));
+        assert_eq!(block.template_bounds.get("TIn"), Some(&"Bound".to_string()));
     }
 
     #[test]
