@@ -66,6 +66,19 @@ protocol. Added the project's first dependency (`serde`/`serde_json`).
 Known limitation carried forward: `Diagnostic` has no real source
 position - every diagnostic is anchored at line 1 (Phase 11's job).
 
+**Re-audited 2026-08-30, found and fixed a real regression** introduced
+by Phase 9.5 (not caught by the unit test suite, since its own
+invalidation tests happen to use non-namespaced PHP snippets where the
+bug is invisible): `declared_names` started returning fully-qualified
+names to fix registry removal, but the invalidation BFS looks names up
+in `dependents`, which stays keyed by bare names on purpose. Feeding an
+FQN into a bare-keyed lookup found nothing for any namespaced class -
+confirmed live against Piwigo, editing a 247-reference class stopped
+cascading to any dependents at all. Fixed by converting back to the
+bare last segment at the three points feeding that lookup; re-verified
+the exact real-world scenario recorded when this phase was first built
+(editing `AbstractNamedCachePool` cascades to 344 files again).
+
 ## Phase 8: Ingest `jetbrains/phpstorm-stubs` - DONE
 
 Real PHPStan's actual stub dependency is `jetbrains/phpstorm-stubs`,
