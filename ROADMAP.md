@@ -7,6 +7,7 @@ knowledge) and verified at real scale against Piwigo's own codebase
 (`src/`, `tools/`) plus its `vendor/` tree (18923 files combined).
 
 Status key:
+
 - **DONE** - shipped and verified.
 - **PARTIAL** - some of the phase's own scope shipped, some didn't.
 - **PLANNED** - a real, detailed, source-grounded design exists; not
@@ -66,6 +67,7 @@ no `use` needed). `match` now infers a real union of its arm result
 types instead of always `Mixed`.
 
 Found two more real, independent bugs while fixing this:
+
 - `check_function` bound `$this` for *any* method with a class context,
   never checking if the method was actually `static` - a static
   method's own `$this->prop` reference was never flagged, when real
@@ -82,6 +84,7 @@ Found two more real, independent bugs while fixing this:
 Chasing the resulting diagnostic-count changes on real code surfaced
 two more independent, pre-existing bugs, unrelated to closures but
 newly visible once closure bodies started getting checked at all:
+
 - `docblock::parse` worked strictly one physical line at a time, so a
   `@return`/`@param` type wrapped across multiple lines - a real,
   common style for documenting a large array-shape DTO - got truncated
@@ -216,6 +219,7 @@ cause.
 ## Phase 9: Undefined-symbol rule family - DONE
 
 **Shipped:**
+
 - `ClassInfo::consts` and `Registry::lookup_const` (were entirely
   absent); class/interface extraction from the phpstorm-stubs corpus,
   so built-ins like `Exception`/`ArrayObject` are known as classes, not
@@ -254,6 +258,7 @@ polyfill idiom used throughout the ecosystem.
 more real, substantial gaps**, each surfacing as a wave of false
 positives on the very first real-corpus check after shipping the new
 rule, each fixed before the rule could be considered done:
+
 - Backed enums' built-in `->value` (and every enum's `->name`) weren't
   registered as properties at all - provided by the language itself
   (`UnitEnum`/`BackedEnum`), not declared in source. ~2800 false
@@ -299,8 +304,8 @@ in that one snapshot, not this project's own code).
 Undefined-method detection was built, then reverted after real-scale
 testing found it unsafe: the registry had no namespace modeling at
 all, so a class-name collision between two unrelated packages (real,
-quantified example: 1595 distinct colliding class names across Piwigo
-+ its `vendor/`) could silently overwrite one class's real method
+quantified example: 1595 distinct colliding class names across Piwigo,
+plus its `vendor/`) could silently overwrite one class's real method
 table with an unrelated one's.
 
 Fixed properly: `registry::NameContext` (namespace + `use`-import map,
@@ -536,6 +541,7 @@ file, so not a category to chase file-for-file either way).
 
 The categories this project has nothing in yet, checked against real
 file names rather than assumed from the category label alone:
+
 - **DeadCode** (9 real rule files) - unreachable code after an
   always-terminating statement (this project's own `always_terminates`
   is a real, direct prerequisite already built), always-true/false
@@ -611,7 +617,7 @@ confused with each other.
 **Tracked under a phase:**
 
 | Limitation | Phase |
-|---|---|
+| --- | --- |
 | `#[PhpStormStubsElementAvailable(...)]`-gated stub parameters, and stubs modeling only their highest-arity overload, both counted as more-required-than-they-are | 8.5 |
 | No generic variance, template-bound enforcement, or `@extends`/`@implements` inheritance-chain substitution | 10 |
 | No real source positions, level system, or config/baseline | 11 |
