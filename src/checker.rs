@@ -2604,6 +2604,7 @@ fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         "is_array" => Some(Type::Array(Box::new(Type::Mixed))),
         "is_null" => Some(Type::Null),
         "is_object" => Some(Type::Object("object".to_string(), Vec::new())),
+        "is_callable" => Some(Type::Callable),
         _ => None,
     }
 }
@@ -3572,6 +3573,33 @@ mod tests {
         );
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("needsInt"));
+    }
+
+    #[test]
+    fn is_callable_narrowing_catches_misuse_inside_the_guarded_branch() {
+        // Phase 12 item 6: widened narrowing_type_for_predicate's table
+        // to is_callable, the one predicate from the roadmap's own list
+        // that actually fits this mechanism (a single-arg call narrowing
+        // a bare variable to one concrete Type). The others on that list
+        // (class_exists/function_exists/in_array/array_key_exists/
+        // method_exists/property_exists) are all real PHP predicates but
+        // don't fit this table at all - they're either 2-arg calls (this
+        // project's narrowing only matches a single-arg predicate call)
+        // or don't narrow a *value's type* the way is_string/is_array/etc.
+        // do, so they were deliberately not force-fit here.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function process($value) {
+                if (is_callable($value)) {
+                    return needsInt($value);
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsInt"), "got: {d:?}");
     }
 
     #[test]
