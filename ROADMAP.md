@@ -930,14 +930,22 @@ guess from PHPStan's own list:
    (4102 → 4100), confirmed via a before/after diff to be almost
    entirely the same real findings gaining more precise "got" type
    wording, not findings silently disappearing.
-6. **`is_array`/`is_string`/`is_int`/`is_callable`/`class_exists`/
+6. **`is_array`/`is_string`/`is_int`/`is_callable` - DONE** (the rest of
+   this item's original list turned out not to fit at all - see below).
+   `narrowing_type_for_predicate` already covered `is_string`/`is_int`/
+   `is_integer`/`is_long`/`is_float`/`is_double`/`is_bool`/`is_boolean`/
+   `is_array`/`is_null`/`is_object`; `is_callable` was the one real gap
+   that genuinely fit the same mechanism, now added. `class_exists`/
    `function_exists`/`in_array`/`array_key_exists`/`method_exists`/
-   `property_exists`** - `FunctionTypeSpecifyingExtension`-style
-   condition-narrowing. This project's own `apply_narrowing` already
-   has a `narrowing_type_for_predicate` table for a handful of these
-   (`is_int`/`is_string`/etc., `checker.rs:1762`) - this item is about
-   widening that same, already-proven mechanism to the rest of the
-   list, not inventing a new one.
+   `property_exists` are all real PHP predicates but don't fit this
+   table's shape at all: they either take 2 arguments (this project's
+   narrowing only matches a single-arg predicate call against a bare
+   variable) or don't narrow a *value's type* the way `is_string`/
+   `is_array` do (they check existence of a name/key/member, not "what
+   type is this value now") - deliberately left out rather than
+   force-fit for the sake of matching the original list. Verified
+   against the real corpus: small, expected diagnostic-count drop
+   (`src/`-only 2270 → 2269, full corpus 44353 → 44343).
 
 ## Phase 13: Narrowing precision and remaining false-positive causes - PLANNED
 
