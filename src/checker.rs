@@ -1897,12 +1897,15 @@ impl<'a> Checker<'a> {
                     let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
                     self.registry
                         .lookup_function(&primary)
+                        .map(|sig| (primary.as_str(), sig))
                         .or_else(|| {
                             fallback
                                 .as_deref()
-                                .and_then(|g| self.registry.lookup_function(g))
+                                .and_then(|g| self.registry.lookup_function(g).map(|sig| (g, sig)))
                         })
-                        .map(|sig| self.infer_call_return_type(sig, args, locals))
+                        .map(|(resolved_name, sig)| {
+                            self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
+                        })
                         .unwrap_or(Type::Mixed)
                 }
                 _ => Type::Mixed,
@@ -2027,6 +2030,132 @@ impl<'a> Checker<'a> {
             types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
         }
         types::substitute_template(&sig.return_type, &bindings)
+    }
+
+    /// Phase 12's bespoke per-function return-type extensions (real
+    /// PHPStan's own `src/Type/Php/` is 190 files of exactly this kind of
+    /// special-casing, not generic machinery) - `array_map`/`array_filter`
+    /// always return a bare, structureless `array` today (element type
+    /// `Mixed`), discarding real information already available: the
+    /// input array's own element type, and (for `array_map`) the
+    /// callback's own return type. Falls through to the ordinary
+    /// generic-template path (`infer_call_return_type`) for every other
+    /// function, and for any shape of these two this doesn't specially
+    /// handle.
+    fn infer_builtin_call_return_type(
+        &self,
+        name: &str,
+        sig: &FunctionSig,
+        args: &[Expr],
+        locals: &HashMap<String, Type>,
+    ) -> Type {
+        match name {
+            // Scoped to the common 2-arg single-array form - the real
+            // function is variadic (multiple arrays); a 3+-arg call falls
+            // through to the generic path below, unchanged.
+            "array_map" if args.len() == 2 => {
+                if let Type::Array(elem_ty) = self.infer_expr(&args[1], locals)
+                    && let Some(mapped) =
+                        self.infer_closure_return_with_param_override(&args[0], *elem_ty, locals)
+                {
+                    return Type::Array(Box::new(mapped));
+                }
+            }
+            // Filtering never transforms elements, so the result is
+            // simply whatever the input array's own type already is - no
+            // closure introspection needed at all.
+            "array_filter" => {
+                let arr_ty = self.infer_expr(&args[0], locals);
+                if matches!(arr_ty, Type::Array(_)) {
+                    return arr_ty;
+                }
+            }
+            _ => {}
+        }
+        self.infer_call_return_type(sig, args, locals)
+    }
+
+    /// Infers a closure or arrow-fn's own return type *as if* its first
+    /// parameter were bound to `param_override`, instead of the `Mixed`
+    /// it would otherwise get standalone (a closure/arrow-fn's declared
+    /// param, with no further context, has no type unless natively
+    /// hinted) - this is what lets `array_map(fn($x) => $x * 2, $ints)`
+    /// infer a real `array<int>` return instead of `array<mixed>`. Only
+    /// the common single-non-variadic-non-by-ref-param shape is handled;
+    /// anything else safely returns `None`, falling back to the caller's
+    /// own generic (imprecise but correct) behavior. Mirrors the closure-
+    /// capture-scope construction `check_expr`'s own `ExprKind::Closure`/
+    /// `ExprKind::ArrowFn` arms already do, but on this separate,
+    /// read-only inference pass rather than the diagnostic-producing one.
+    fn infer_closure_return_with_param_override(
+        &self,
+        callback: &Expr,
+        param_override: Type,
+        locals: &HashMap<String, Type>,
+    ) -> Option<Type> {
+        match &callback.kind {
+            ExprKind::ArrowFn {
+                params,
+                body,
+                return_type,
+                ..
+            } => {
+                if return_type.is_some() {
+                    return Some(self.resolve_type_hint(return_type.as_deref()));
+                }
+                let [p] = params.as_slice() else {
+                    return None;
+                };
+                if p.variadic || p.by_ref {
+                    return None;
+                }
+                let mut arrow_locals = locals.clone();
+                arrow_locals.insert(p.name.clone(), param_override);
+                Some(self.infer_expr(body, &arrow_locals))
+            }
+            ExprKind::Closure {
+                params,
+                uses,
+                body,
+                is_static,
+                return_type,
+                ..
+            } => {
+                if return_type.is_some() {
+                    return Some(self.resolve_type_hint(return_type.as_deref()));
+                }
+                let [p] = params.as_slice() else {
+                    return None;
+                };
+                if p.variadic || p.by_ref {
+                    return None;
+                }
+                let mut closure_locals: HashMap<String, Type> = HashMap::new();
+                for u in uses {
+                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    closure_locals.insert(u.name.clone(), ty);
+                }
+                if !*is_static && let Some(this_ty) = locals.get("this") {
+                    closure_locals.insert("this".to_string(), this_ty.clone());
+                }
+                closure_locals.insert(p.name.clone(), param_override);
+                // Only the common single-implicit-return-statement body
+                // shape is handled (mirrors check_shape_key_access's own
+                // "only handle the shape that actually comes up, don't
+                // guess at the rest" precedent) - a closure with a more
+                // complex body safely falls back to None too.
+                match body.as_slice() {
+                    [
+                        Stmt {
+                            kind: StmtKind::Return(Some(e)),
+                            ..
+                        },
+                    ] => Some(self.infer_expr(e, &closure_locals)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &HashMap<String, Type>) -> Type {
@@ -2403,6 +2532,119 @@ mod tests {
         let d = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true);
         assert_eq!(d.len(), 1, "got: {d:?}");
         assert!(d[0].message.contains("expects array<int>"), "got: {d:?}");
+    }
+
+    // Phase 12: array_map/array_filter return-type precision. Each test
+    // proves the inferred type is real, not just "still Mixed and
+    // therefore compatible with everything" - is_assignable's own
+    // Array(Mixed) leniency means an imprecise result would silently
+    // satisfy *any* declared element type, so the discriminating check
+    // here is a call the real, precise type must actually fail.
+
+    #[test]
+    fn array_map_infers_the_real_element_type_from_an_untyped_arrow_fn_param() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            $mapped = array_map(fn($x) => $x * 2, [1, 2, 3]);
+            needsInts($mapped);
+            needsStrings($mapped);
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsStrings"), "got: {d:?}");
+        assert!(
+            d[0].message
+                .contains("expects array<string>, array<int> given"),
+            "got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn array_map_infers_the_real_element_type_from_an_untyped_closure_param() {
+        // Same as the arrow-fn test, but the common
+        // `function($x) { return ...; }` single-return-statement body
+        // shape instead.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            $mapped = array_map(function ($x) { return $x * 2; }, [1, 2, 3]);
+            needsStrings($mapped);
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(
+            d[0].message
+                .contains("expects array<string>, array<int> given"),
+            "got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn array_map_trusts_an_explicit_closure_return_type_hint_over_the_array_element_type() {
+        // The closure's own declared return type wins, independent of
+        // what the array's element type would otherwise suggest.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            $mapped = array_map(fn(int $x): string => (string) $x, [1, 2, 3]);
+            needsStrings($mapped);
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_filter_preserves_the_input_array_s_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            /** @param int[] $xs */
+            function f(array $xs) {
+                $filtered = array_filter($xs, fn($x) => $x > 0);
+                needsInts($filtered);
+                needsStrings($filtered);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(
+            d[0].message
+                .contains("expects array<string>, array<int> given"),
+            "got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn array_map_and_array_filter_fall_back_safely_for_shapes_they_do_not_special_case() {
+        // A non-closure callback (a variable, not introspectable), a
+        // 3+-arg multi-array call, a callback with more than one param,
+        // and array_filter on an argument this checker has no specific
+        // type for (Mixed) all safely fall through to the existing,
+        // imprecise (but correct) generic behavior - no panic, no false
+        // positive. Untyped params (Mixed) throughout, deliberately, so
+        // this only exercises the fallback paths themselves, not
+        // check_args's own separate, unrelated argument-type checking.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(callable $cb, array $a, array $b) {
+                $x = array_map($cb, $a);
+                $y = array_map(fn($p, $q) => $p + $q, $a, $b);
+            }
+            function g($m) {
+                $z = array_filter($m);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
