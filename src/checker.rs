@@ -2,12 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::registry::{self, FunctionSig, NameContext, ParamSig, Registry};
+use crate::token::Span;
 use crate::types::{self, Type};
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub location: String,
     pub message: String,
+    pub span: Span,
 }
 
 /// Walks function/method bodies, inferring a best-effort type for each
@@ -111,7 +113,7 @@ impl<'a> Checker<'a> {
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.
                     let fqn = self.name_ctx.declared_name(&c.name);
-                    self.check_class_generic_bounds(&fqn);
+                    self.check_class_generic_bounds(&fqn, c);
                     for m in &c.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
@@ -223,11 +225,15 @@ impl<'a> Checker<'a> {
         // bound violation is about the signature as written, not
         // something a `extract()` in the *body* should be able to hide.
         if let Some(sig) = sig {
-            for param in &sig.params {
-                self.check_generic_bounds(&param.ty, &label);
+            for (param, ast_param) in sig.params.iter().zip(&f.params) {
+                self.check_generic_bounds(&param.ty, &label, ast_param.span);
             }
         }
-        self.check_generic_bounds(declared_return.as_ref().unwrap_or(&Type::Mixed), &label);
+        self.check_generic_bounds(
+            declared_return.as_ref().unwrap_or(&Type::Mixed),
+            &label,
+            f.span,
+        );
 
         // Phase 10.5's variance-enforcement half - same "check the
         // declaration once" placement as bound-enforcement above, and
@@ -247,7 +253,7 @@ impl<'a> Checker<'a> {
         if let (Some(sig), Some(c)) = (sig, class_name)
             && f.name != "__construct"
         {
-            self.check_variance(sig, c, &label);
+            self.check_variance(sig, c, &label, f.span);
         }
 
         let previous_class = self.current_class.take();
@@ -408,7 +414,7 @@ impl<'a> Checker<'a> {
     /// than at every call/access site - a generic type only needs
     /// flagging once, where it's *written*, the same way real PHPStan's
     /// own `GenericObjectTypeCheck` documents itself.
-    fn check_generic_bounds(&mut self, ty: &Type, label: &str) {
+    fn check_generic_bounds(&mut self, ty: &Type, label: &str, span: Span) {
         match ty {
             Type::Object(class, args) => {
                 if !args.is_empty()
@@ -449,23 +455,24 @@ impl<'a> Checker<'a> {
                                 message: format!(
                                     "{class}'s @template {name} requires {bound}, got {arg}"
                                 ),
+                                span,
                             });
                         }
                     }
                 }
                 for arg in args {
-                    self.check_generic_bounds(arg, label);
+                    self.check_generic_bounds(arg, label, span);
                 }
             }
-            Type::Array(inner) => self.check_generic_bounds(inner, label),
+            Type::Array(inner) => self.check_generic_bounds(inner, label, span),
             Type::Union(members) | Type::Intersection(members) => {
                 for m in members {
-                    self.check_generic_bounds(m, label);
+                    self.check_generic_bounds(m, label, span);
                 }
             }
             Type::ArrayShape(fields) => {
                 for (_, t, _) in fields {
-                    self.check_generic_bounds(t, label);
+                    self.check_generic_bounds(t, label, span);
                 }
             }
             _ => {}
@@ -499,31 +506,34 @@ impl<'a> Checker<'a> {
     /// arguments - both are real places a generic bound violation can be
     /// written (`class Bad extends Collection<NotAShape> {}`) without
     /// ever showing up in a method signature at all.
-    fn check_class_generic_bounds(&mut self, fqn: &str) {
+    fn check_class_generic_bounds(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        // Both maps below are `HashMap`s with no guaranteed iteration
-        // order - sorted by key so two diagnostics for the same class
-        // (e.g. one from `extends_args`, one from an `implements_args`
-        // entry) always come out in the same relative order, not one
-        // that silently varies by process (Rust's default hasher is
-        // randomly seeded per run).
-        let mut prop_names: Vec<&String> = info.properties.keys().collect();
-        prop_names.sort();
-        let mut types_to_check: Vec<Type> = prop_names
-            .into_iter()
-            .map(|name| info.properties[name].ty.clone())
-            .collect();
+        // Each property gets its own real span (declaration order, not a
+        // sorted HashMap walk - the AST's `Vec<PropertyDecl>` is already
+        // deterministic, unlike the registry's `HashMap`-backed lookup).
+        for p in &c.properties {
+            if let Some(prop_sig) = info.properties.get(&p.name) {
+                self.check_generic_bounds(&prop_sig.ty, fqn, p.span);
+            }
+        }
         // `extends_args`/`implements_args` store just the argument list,
         // not paired with the parent/interface's own name - re-pair each
         // one into a real `Object(class, args)` here, or
         // `check_generic_bounds` has no class to look bounds up against
         // at all (it would just see the *arguments* as if they were the
-        // generic reference themselves).
+        // generic reference themselves). Neither the parent name nor an
+        // interface name carries its own span in the AST, so both use the
+        // class declaration's own span - imprecise. but still real.
+        let mut types_to_check: Vec<Type> = Vec::new();
         if let Some(parent) = info.extends.first() {
             types_to_check.push(Type::Object(parent.clone(), info.extends_args.clone()));
         }
+        // `implements_args` is a `HashMap` with no guaranteed iteration
+        // order - sorted by key so two diagnostics from it always come out
+        // in the same relative order, not one that silently varies by
+        // process (Rust's default hasher is randomly seeded per run).
         let mut iface_names: Vec<&String> = info.implements_args.keys().collect();
         iface_names.sort();
         for iface in iface_names {
@@ -533,7 +543,7 @@ impl<'a> Checker<'a> {
             ));
         }
         for ty in types_to_check {
-            self.check_generic_bounds(&ty, fqn);
+            self.check_generic_bounds(&ty, fqn, c.span);
         }
     }
 
@@ -561,7 +571,7 @@ impl<'a> Checker<'a> {
     /// re-derived from that other class's own variance) - a full,
     /// correct algorithm needs real per-class variance composition this
     /// project doesn't attempt.
-    fn check_variance(&mut self, sig: &FunctionSig, class_name: &str, label: &str) {
+    fn check_variance(&mut self, sig: &FunctionSig, class_name: &str, label: &str, span: Span) {
         let Some(info) = self.registry.classes.get(class_name) else {
             return;
         };
@@ -599,6 +609,7 @@ impl<'a> Checker<'a> {
             self.diagnostics.push(Diagnostic {
                 location: label.to_string(),
                 message,
+                span,
             });
         }
     }
@@ -771,6 +782,7 @@ impl<'a> Checker<'a> {
                             message: format!(
                                 "return type mismatch: expected {expected}, got {actual}"
                             ),
+                            span: e.span,
                         });
                     }
                 }
@@ -1128,7 +1140,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
-                        self.check_args(name, sig, args, locals, label, None);
+                        self.check_args(name, sig, args, locals, label, None, e.span);
                     } else {
                         // Since resolve_function_candidates always
                         // produces a definite name (there's no "can't
@@ -1140,6 +1152,7 @@ impl<'a> Checker<'a> {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!("call to undefined function {name}()"),
+                            span: e.span,
                         });
                     }
                 }
@@ -1177,7 +1190,7 @@ impl<'a> Checker<'a> {
                 if let Some((class, _)) = &recv_class {
                     if let Some(sig) = &sig {
                         let qualified = format!("{class}::{method}");
-                        self.check_args(&qualified, sig, args, locals, label, Some(class));
+                        self.check_args(&qualified, sig, args, locals, label, Some(class), e.span);
                     } else if self.registry.classes.contains_key(class)
                         && self.registry.lookup_method(class, "__call").is_none()
                     {
@@ -1193,6 +1206,7 @@ impl<'a> Checker<'a> {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!("call to undefined method {class}::{method}()"),
+                            span: e.span,
                         });
                     }
                 }
@@ -1226,6 +1240,7 @@ impl<'a> Checker<'a> {
                     self.diagnostics.push(Diagnostic {
                         location: label.to_string(),
                         message: format!("undefined variable ${name}"),
+                        span: e.span,
                     });
                 }
             }
@@ -1356,6 +1371,7 @@ impl<'a> Checker<'a> {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!("instantiated class {class} not found"),
+                            span: e.span,
                         });
                     } else if let Some(sig) = ctor_sig {
                         self.check_args(
@@ -1365,6 +1381,7 @@ impl<'a> Checker<'a> {
                             locals,
                             label,
                             Some(class),
+                            e.span,
                         );
                     }
                 }
@@ -1397,7 +1414,7 @@ impl<'a> Checker<'a> {
                 if let Some(class) = &resolved_class {
                     if let Some(sig) = sig {
                         let qualified = format!("{class}::{method}");
-                        self.check_args(&qualified, sig, args, locals, label, Some(class));
+                        self.check_args(&qualified, sig, args, locals, label, Some(class), e.span);
                     } else if self.registry.classes.contains_key(class)
                         && self.registry.lookup_method(class, "__callStatic").is_none()
                     {
@@ -1409,6 +1426,7 @@ impl<'a> Checker<'a> {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!("call to undefined static method {class}::{method}()"),
+                            span: e.span,
                         });
                     }
                 }
@@ -1441,12 +1459,14 @@ impl<'a> Checker<'a> {
                             message: format!(
                                 "access to undefined static property {class}::${prop_name}"
                             ),
+                            span: e.span,
                         });
                     }
                 } else if self.registry.lookup_const(&class, member).is_none() {
                     self.diagnostics.push(Diagnostic {
                         location: label.to_string(),
                         message: format!("access to undefined constant {class}::{member}"),
+                        span: e.span,
                     });
                 }
             }
@@ -1469,6 +1489,7 @@ impl<'a> Checker<'a> {
                     self.diagnostics.push(Diagnostic {
                         location: label.to_string(),
                         message: format!("access to undefined property {class}::${prop}"),
+                        span: e.span,
                     });
                 }
             }
@@ -1569,6 +1590,7 @@ impl<'a> Checker<'a> {
                             message: format!(
                                 "return type mismatch: expected {expected}, got {actual}"
                             ),
+                            span: body.span,
                         });
                     }
                 }
@@ -1643,6 +1665,7 @@ impl<'a> Checker<'a> {
         self.diagnostics.push(Diagnostic {
             location: label.to_string(),
             message: format!("{class}::${prop} expects {expected}, {actual} given"),
+            span: rhs.span,
         });
     }
 
@@ -1672,9 +1695,11 @@ impl<'a> Checker<'a> {
         self.diagnostics.push(Diagnostic {
             location: label.to_string(),
             message: format!("array{{...}} has no key '{key}'"),
+            span: idx.span,
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn check_args(
         &mut self,
         callee_label: &str,
@@ -1683,6 +1708,7 @@ impl<'a> Checker<'a> {
         locals: &HashMap<String, Type>,
         label: &str,
         defining_class: Option<&str>,
+        span: Span,
     ) {
         let required = sig
             .params
@@ -1696,6 +1722,7 @@ impl<'a> Checker<'a> {
                     "{callee_label}() expects at least {required} argument(s), {} given",
                     args.len()
                 ),
+                span,
             });
         }
 
@@ -1725,6 +1752,7 @@ impl<'a> Checker<'a> {
                         param_ty,
                         arg_ty
                     ),
+                    span: arg.span,
                 });
             }
         }
@@ -2236,6 +2264,7 @@ mod tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::registry::Registry;
+    use crate::token::Position;
 
     fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
         let tokens = Lexer::new(src).tokenize_with_spans();
@@ -2254,6 +2283,10 @@ mod tests {
         let d = diagnostics_for(r#"<?php strlen(42);"#);
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("expects string"));
+        // Points at the offending argument `42` itself, not the whole
+        // call or the statement.
+        assert_eq!(d[0].span.start, Position { line: 1, col: 14 });
+        assert_eq!(d[0].span.end, Position { line: 1, col: 16 });
     }
 
     #[test]
@@ -2266,6 +2299,10 @@ mod tests {
         );
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("expects at least 2"));
+        // No single argument represents "the whole call" for an arity
+        // mismatch - points at the whole call expression instead.
+        assert_eq!(d[0].span.start, Position { line: 3, col: 13 });
+        assert_eq!(d[0].span.end, Position { line: 3, col: 24 });
     }
 
     #[test]
@@ -2277,6 +2314,10 @@ mod tests {
         );
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("return type mismatch"));
+        // Points at the returned expression, not the `return` keyword or
+        // the enclosing function declaration.
+        assert_eq!(d[0].span.start, Position { line: 2, col: 51 });
+        assert_eq!(d[0].span.end, Position { line: 2, col: 59 });
     }
 
     #[test]
@@ -3397,6 +3438,9 @@ mod tests {
         );
         assert_eq!(d.len(), 1);
         assert!(d[0].message.contains("$neverDefined"));
+        // A real, non-line-1 position - the whole point of this phase.
+        assert_eq!(d[0].span.start, Position { line: 3, col: 24 });
+        assert_eq!(d[0].span.end, Position { line: 3, col: 37 });
     }
 
     #[test]
