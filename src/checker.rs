@@ -2095,6 +2095,48 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // Combining never changes the values' own type - $keys
+            // becomes what our Type::Array can't represent at all (key
+            // types aren't tracked), so the result is simply $values'
+            // own type verbatim, the same "no transformation" shape as
+            // array_filter above.
+            "array_combine" if args.len() == 2 => {
+                let values_ty = self.infer_expr(&args[1], locals);
+                if matches!(values_ty, Type::Array(_)) {
+                    return values_ty;
+                }
+            }
+            // Both fill every slot with the same, already-known $value -
+            // no closure or element-type binding needed at all.
+            "array_fill" if args.len() == 3 => {
+                return Type::Array(Box::new(self.infer_expr(&args[2], locals)));
+            }
+            "array_fill_keys" if args.len() == 2 => {
+                return Type::Array(Box::new(self.infer_expr(&args[1], locals)));
+            }
+            // Splits one array into several same-shaped ones - the
+            // result is an array *of* arrays, each holding the original
+            // element type.
+            "array_chunk" if args.len() == 2 || args.len() == 3 => {
+                if let Type::Array(elem_ty) = self.infer_expr(&args[0], locals) {
+                    return Type::Array(Box::new(Type::Array(elem_ty)));
+                }
+            }
+            // Extracts one named field from an array of known shapes
+            // (e.g. `array<array{id: int, name: string}>`) - only fires
+            // when the element type is a real, known ArrayShape and the
+            // column key is a compile-time-known literal, mirroring
+            // check_shape_key_access's own "only a literal, never a
+            // dynamic value" precedent.
+            "array_column" if args.len() == 2 || args.len() == 3 => {
+                if let Type::Array(elem_ty) = self.infer_expr(&args[0], locals)
+                    && let Type::ArrayShape(fields) = *elem_ty
+                    && let Some(key) = literal_string_key(&args[1])
+                    && let Some((_, field_ty, _)) = fields.into_iter().find(|(n, _, _)| *n == key)
+                {
+                    return Type::Array(Box::new(field_ty));
+                }
+            }
             _ => {}
         }
         self.infer_call_return_type(sig, args, locals)
@@ -2710,6 +2752,107 @@ mod tests {
         );
         assert_eq!(d.len(), 1, "got: {d:?}");
         assert!(d[0].message.contains("needsString"), "got: {d:?}");
+    }
+
+    #[test]
+    fn array_combine_infers_the_values_array_s_own_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            /** @param string[] $keys
+             *  @param int[] $vals */
+            function f(array $keys, array $vals) {
+                $combined = array_combine($keys, $vals);
+                needsInts($combined);
+                needsStrings($combined);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsStrings"), "got: {d:?}");
+    }
+
+    #[test]
+    fn array_fill_and_array_fill_keys_infer_the_fill_value_s_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            function f(array $keys) {
+                $a = array_fill(0, 5, 42);
+                $b = array_fill_keys($keys, 42);
+                needsStrings($a);
+                needsStrings($b);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 2, "got: {d:?}");
+        assert!(d.iter().all(|x| x.message.contains("needsStrings")));
+    }
+
+    #[test]
+    fn array_chunk_wraps_the_original_element_type_in_an_extra_array_layer() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            /** @param int[] $xs */
+            function f(array $xs) {
+                $chunks = array_chunk($xs, 2);
+                needsStrings($chunks);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(
+            d[0].message
+                .contains("expects string[], array<array<int>> given")
+                || d[0]
+                    .message
+                    .contains("expects array<string>, array<array<int>> given"),
+            "got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn array_column_extracts_a_known_shape_field_s_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            /** @param array<array{id: int, name: string}> $rows */
+            function f(array $rows) {
+                $ids = array_column($rows, 'id');
+                needsStrings($ids);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsStrings"), "got: {d:?}");
+    }
+
+    #[test]
+    fn array_column_falls_back_safely_without_a_known_shape_or_literal_key() {
+        // Neither a plain, unshaped array<int> element type nor a
+        // dynamic (non-literal) column key can be resolved to a
+        // specific field type - both must fall through to the existing
+        // generic behavior without panicking or guessing wrong.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $xs */
+            function f(array $xs, string $dynamicKey) {
+                $a = array_column($xs, 'whatever');
+                /** @param array<array{id: int}> $rows */
+                function g(array $rows, string $key) {
+                    $b = array_column($rows, $key);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
