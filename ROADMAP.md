@@ -43,6 +43,58 @@ Undefined-variable detection with real by-ref tracking; bind
 `foreach`/`catch`/destructuring targets to real types; array/shape
 index access (infer real types, catch key typos).
 
+**Re-audited 2026-08-30** via test-coverage measurement (`cargo
+llvm-cov`, newly set up this session): found and fixed the single
+largest gap of this whole project's history so far. `Expr::Closure`,
+`Expr::ArrowFn`, and `Expr::Match` had **no handling anywhere** in
+`checker.rs` - not `check_expr`, not `infer_expr`. Every diagnostic
+this checker has was completely invisible inside any closure, arrow
+function, or `match` expression body - confirmed on a minimal repro
+(two genuinely undefined variables inside a plain closure and an arrow
+function produced zero diagnostics) and on real code (first-party
+diagnostics in Piwigo + tools/ rose from 2221 to 2321, all spot-checked
+genuine, once closures/arrow fns were finally checked).
+
+Fixed with real PHP capture semantics modeled correctly: a closure
+only sees `use (...)`-listed variables (not the enclosing scope) plus
+`$this` auto-bound for a non-static closure inside a method; an arrow
+function sees the whole enclosing scope by value (real PHP's implicit
+capture, no `use` needed). `match` now infers a real union of its arm
+result types instead of always `Mixed`.
+
+Found two more real, independent bugs while fixing this:
+- `check_function` bound `$this` for *any* method with a class context,
+  never checking if the method was actually `static` - a static
+  method's own `$this->prop` reference was never flagged, when real
+  PHP fatal-errors on it.
+- Closure/arrow-fn param and return type hints were parsed with a bare
+  `types::parse_type_string`, bypassing namespace resolution entirely -
+  a `static fn(array $row): ActionCount => new ActionCount(...)` (a
+  real, `use`-imported class) produced a false-positive mismatch
+  comparing its correctly-resolved body type against an unresolved
+  bare name. Fixed by routing every closure/arrow-fn type hint through
+  the same `NameContext`-aware resolution real declarations already
+  get.
+
+Chasing the resulting diagnostic-count changes on real code surfaced
+two more independent, pre-existing bugs, unrelated to closures but
+newly visible once closure bodies started getting checked at all:
+- `docblock::parse` worked strictly one physical line at a time, so a
+  `@return`/`@param` type wrapped across multiple lines - a real,
+  common style for documenting a large array-shape DTO - got truncated
+  mid-shape with an unclosed brace, then namespace-mangled into
+  nonsense. Fixed by joining a tag's continuation lines before parsing.
+- Array-shape parsing aborted the *entire* shape (discarding every real
+  field) on hitting PHPStan/Psalm's `...<K, V>` "unsealed shape" marker,
+  which has no `:` in it. Fixed by skipping just that one unmodeled
+  field instead of failing the whole parse.
+
+All five fixes verified against the real 18923-file Piwigo+vendor
+corpus after every change; the corpus's stable 3 first-party
+undefined-symbol findings were unchanged throughout, and the specific
+false-positive pattern from each bug was confirmed gone by the final
+check.
+
 ## (Unplanned) Real-world hardening pass - DONE
 
 Not a numbered phase - a detour to run the parser against real PHP:
@@ -233,6 +285,22 @@ PHPStan/Psalm string and int refinement family (`non-empty-string` -
   diagnostics against real code by hand to confirm they're genuine
   findings, not false positives - this is what caught every bug listed
   above, before it shipped.
+- **Test-coverage measurement (`cargo llvm-cov`), added 2026-08-30.**
+  Manual code review kept finding real bugs this project's own test
+  suite should have caught but didn't test the path at all - coverage
+  gives an objective answer to "is this actually tested" instead of a
+  subjective one. First run: 80.55% line / 87.25% function coverage
+  overall, with `lsp.rs` and `main.rs` at a flat 0% (untestable without
+  either refactoring a hardcoded-stdio loop into something generic, for
+  `lsp.rs`, or spawning the real binary, for `main.rs`'s print-based
+  CLI glue - both done). Closing every file's gaps this way (adding a
+  test for what coverage flagged, after first manually verifying
+  correctness) found a long tail of real bugs along the way, well
+  beyond the closures/arrow-fn/match blind spot documented under Phase
+  6 above - by the end: 90.53% line / 97.46% function coverage, 273
+  tests total (up from 227 at the start of this session, including a
+  new `tests/cli.rs` integration suite), zero of the remaining gaps
+  found to hide anything real.
 
 Full detail, adversarial fact-checking history, and a dependency
 shortlist live in the planning doc this roadmap was distilled from
