@@ -3878,4 +3878,25 @@ mod tests {
         assert!(matches!(&program[2], Stmt::Continue(None)));
         assert!(matches!(&program[3], Stmt::Continue(Some(3))));
     }
+
+    #[test]
+    fn foreach_alt_syntax_parses_its_body_via_parse_alt_block() {
+        // parse_if_alt and parse_switch each parse their own alt-syntax
+        // body inline - parse_alt_block is the shared path only
+        // while/for/foreach's alt syntax (`endwhile;`/`endfor;`/
+        // `endforeach;`) goes through, and none of the tests above
+        // happen to exercise it.
+        let program = parse(
+            r#"<?php
+            foreach ($items as $item):
+                doA();
+                doB();
+            endforeach;
+        "#,
+        );
+        let Stmt::Foreach { body, .. } = &program[0] else {
+            panic!("expected Foreach");
+        };
+        assert!(matches!(body.as_ref(), Stmt::Block(s) if s.len() == 2));
+    }
 }
