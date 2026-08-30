@@ -105,16 +105,26 @@ impl Project {
         if let Some(old) = self.files.get(path) {
             self.registry
                 .remove_declarations(&old.functions, &old.classes);
-            changed_symbols.extend(old.functions.iter().cloned());
-            changed_symbols.extend(old.classes.iter().cloned());
+            changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
+            changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
             unregister_references(&mut self.dependents, path, &old.references);
         }
 
         let ast = parse(new_source);
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
-        changed_symbols.extend(functions.iter().cloned());
-        changed_symbols.extend(classes.iter().cloned());
+        // `changed_symbols` seeds transitive_affected_files' BFS, which
+        // looks names up in `self.dependents` - keyed by the *bare* names
+        // deps::referenced_names collects (a deliberate simplification,
+        // see that function's own doc comment), not the fully-qualified
+        // ones `functions`/`classes` carry (needed for correct
+        // Registry removal above, Phase 9.5). Feeding FQNs into a
+        // bare-keyed lookup silently found nothing for any namespaced
+        // class - confirmed as a real regression this uncovered:
+        // editing a widely-depended-on namespaced class stopped
+        // cascading to any of its real dependents at all.
+        changed_symbols.extend(functions.iter().map(|s| bare_name(s).to_string()));
+        changed_symbols.extend(classes.iter().map(|s| bare_name(s).to_string()));
 
         self.registry.index(&ast);
         // A changed class's `use TraitName;` list (added, removed, or a
@@ -189,9 +199,13 @@ impl Project {
                 let Some(state) = self.files.get(file) else {
                     continue;
                 };
+                // Bare, not FQN - see update_file's identical note on
+                // changed_symbols; this frontier feeds the same
+                // bare-keyed `self.dependents` lookup above.
                 for name in state.functions.iter().chain(state.classes.iter()) {
-                    if seen_symbols.insert(name.clone()) {
-                        frontier.push(name.clone());
+                    let bare = bare_name(name).to_string();
+                    if seen_symbols.insert(bare.clone()) {
+                        frontier.push(bare);
                     }
                 }
             }
@@ -242,6 +256,17 @@ impl Default for Project {
 fn parse(source: &str) -> Vec<Stmt> {
     let tokens = Lexer::new(source).tokenize();
     Parser::new(tokens).parse_program()
+}
+
+/// The last segment of a fully-qualified name (`"App\Foo\Bar"` becomes
+/// `"Bar"`). `declared_names` returns FQNs (needed to match
+/// `Registry::index`'s namespace-aware keys, for correct removal), but
+/// the invalidation graph (`dependents`, built from
+/// `deps::referenced_names`) is deliberately keyed by bare names, so
+/// anything feeding that graph's BFS needs converting back down to bare
+/// first.
+fn bare_name(fqn: &str) -> &str {
+    fqn.rsplit('\\').next().unwrap_or(fqn)
 }
 
 /// The top-level function/class/enum names one file's parse tree declares -
@@ -495,6 +520,56 @@ mod tests {
         assert!(result.contains_key(&PathBuf::from("c.php")));
         assert!(result.contains_key(&PathBuf::from("b.php")));
         assert!(result.contains_key(&PathBuf::from("a.php")));
+    }
+
+    #[test]
+    fn invalidation_still_works_for_namespaced_classes() {
+        // Same shape as invalidation_is_transitive_across_an_inheritance_chain,
+        // but every class lives in a namespace - real code, unlike almost
+        // every other test in this file. Phase 9.5 made declared_names
+        // return fully-qualified names (to match Registry::index's now
+        // namespace-aware keys, for correct incremental *removal*), but
+        // deps::referenced_names deliberately still collects bare names
+        // (an intentional, documented approximation - see its own doc
+        // comment) - changed_symbols (fed from declared_names) and
+        // `dependents`'s keys (fed from referenced_names) must actually
+        // agree for transitive_affected_files' lookup to find anything at
+        // all, and after Phase 9.5 they silently didn't for any namespaced
+        // class: `dependents.get("App\\C")` found nothing under a
+        // "App\\C" key that was never inserted (only the bare "C" key
+        // was), so a.php was never re-checked even though it genuinely
+        // depends on the changed class.
+        let mut project = Project::new();
+        project.load_file(
+            PathBuf::from("c.php"),
+            "<?php namespace App; class C { public int $x = 1; }",
+        );
+        project.load_file(
+            PathBuf::from("b.php"),
+            "<?php namespace App; class B extends C {}",
+        );
+        project.load_file(
+            PathBuf::from("a.php"),
+            "<?php namespace App; function useB(B $b) { return $b->x; }",
+        );
+        project.finish_loading();
+
+        let result = project.update_file(
+            &PathBuf::from("c.php"),
+            "<?php namespace App; class C { public string $x = 'a'; }",
+        );
+
+        assert!(result.contains_key(&PathBuf::from("c.php")));
+        assert!(
+            result.contains_key(&PathBuf::from("b.php")),
+            "b.php (extends C) should have been re-checked, got: {:?}",
+            result.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            result.contains_key(&PathBuf::from("a.php")),
+            "a.php (references B) should have been re-checked, got: {:?}",
+            result.keys().collect::<Vec<_>>()
+        );
     }
 
     #[test]
