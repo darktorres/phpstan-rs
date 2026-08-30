@@ -1,6 +1,7 @@
 mod ast;
 mod baseline;
 mod checker;
+mod config;
 mod deps;
 mod docblock;
 mod lexer;
@@ -367,7 +368,11 @@ enum Command {
     /// Load every .php file under the given paths and run the full
     /// checker over all of them, reporting every diagnostic.
     CheckProject {
-        #[arg(required = true)]
+        // Not `required = true`: a TOML config file's own `paths` can
+        // supply these instead (see `run_check_project`'s resolution
+        // logic) - the "must know what to check" requirement is
+        // enforced there, once the config (if any) has been consulted,
+        // not statically by clap.
         dirs: Vec<PathBuf>,
         /// Report up to and including this level (see
         /// checker::Diagnostic's own doc comment) - unset means
@@ -380,6 +385,11 @@ enum Command {
         generate_baseline: Option<PathBuf>,
         #[arg(long)]
         baseline: Option<PathBuf>,
+        /// TOML config file (see src/config.rs) supplying defaults for
+        /// paths/level/baseline/strict_mixed_arrays - any flag above,
+        /// when given, overrides the same key in the config.
+        #[arg(long)]
+        config: Option<PathBuf>,
     },
     /// Loads every .php file under `dir` into a Project (timed), then
     /// re-parses/re-checks just one file via the incremental path (also
@@ -406,13 +416,42 @@ fn main() {
             strict_mixed_arrays,
             generate_baseline,
             baseline,
-        } => run_check_project(
-            &dirs,
-            level.unwrap_or(MAX_LEVEL),
-            strict_mixed_arrays,
-            generate_baseline.as_deref(),
-            baseline.as_deref(),
-        ),
+            config,
+        } => {
+            let config = match config {
+                Some(path) => match config::Config::load(&path) {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                },
+                None => None,
+            };
+            let config = config.unwrap_or_default();
+
+            let dirs = if !dirs.is_empty() {
+                dirs
+            } else {
+                config.paths.unwrap_or_default()
+            };
+            if dirs.is_empty() {
+                eprintln!("no paths given on the command line or in the config file");
+                std::process::exit(1);
+            }
+            let level = level.or(config.level).unwrap_or(MAX_LEVEL);
+            let strict_mixed_arrays =
+                strict_mixed_arrays || config.strict_mixed_arrays.unwrap_or(false);
+            let baseline = baseline.or(config.baseline);
+
+            run_check_project(
+                &dirs,
+                level,
+                strict_mixed_arrays,
+                generate_baseline.as_deref(),
+                baseline.as_deref(),
+            )
+        }
         Command::IncrementalBench { dir, file_to_touch } => {
             run_incremental_bench(&dir, file_to_touch.as_deref())
         }

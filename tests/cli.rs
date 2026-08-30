@@ -198,6 +198,70 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
 }
 
 #[test]
+fn check_project_config_file_supplies_paths_and_level() {
+    let dir = TempDir::new("check_project_config");
+    dir.write(
+        "mixed.php",
+        r#"<?php
+            function addOne(int $x): int { return $x . "1"; }
+            function f() { return $undefinedVar; }
+        "#,
+    );
+    let config_path = dir.write(
+        "phpstan.toml",
+        &format!(
+            "paths = [{:?}]\nlevel = 0\n",
+            dir.path().join("mixed.php").display().to_string()
+        ),
+    );
+
+    // No positional dirs given at all - the config file supplies both
+    // which file to check and which level to report.
+    let output = bin()
+        .arg("check-project")
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("undefined variable"), "got: {stdout}");
+    assert!(
+        !stdout.contains("return type mismatch"),
+        "expected the config's level = 0 to filter out the level-3 finding, got: {stdout}"
+    );
+}
+
+#[test]
+fn check_project_cli_level_overrides_a_conflicting_config_level() {
+    let dir = TempDir::new("check_project_config_override");
+    dir.write(
+        "mixed.php",
+        r#"<?php
+            function addOne(int $x): int { return $x . "1"; }
+            function f() { return $undefinedVar; }
+        "#,
+    );
+    let config_path = dir.write("phpstan.toml", "level = 0\n");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--config")
+        .arg(&config_path)
+        .arg("--level")
+        .arg("6")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("return type mismatch"),
+        "expected the explicit CLI --level 6 to override the config's level = 0, got: {stdout}"
+    );
+}
+
+#[test]
 fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_diagnostics() {
     let dir = TempDir::new("check_project_baseline");
     dir.write("bad.php", "<?php function f() { return $existingBug; }\n");
@@ -271,13 +335,18 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
 }
 
 #[test]
-fn check_project_with_no_args_prints_usage_to_stderr() {
+fn check_project_with_no_args_and_no_config_prints_an_error_to_stderr() {
+    // `dirs` isn't `required = true` on the clap side (a config file's
+    // own `paths` can supply it instead - see Part B's own resolution
+    // logic in `main.rs`), so this is a real, hand-written error now,
+    // not a clap-generated one.
     let output = bin().arg("check-project").output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // clap's own generated error, replacing the old hand-rolled
-    // "usage: ..." message - capitalized, hence case-insensitive here.
-    assert!(stderr.to_lowercase().contains("usage:"), "got: {stderr}");
+    assert!(
+        stderr.contains("no paths given on the command line or in the config file"),
+        "got: {stderr}"
+    );
 }
 
 #[test]
