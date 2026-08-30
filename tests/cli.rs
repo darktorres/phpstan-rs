@@ -80,6 +80,49 @@ fn check_project_reports_real_diagnostics_and_a_summary_line() {
         stdout.contains("1 file(s) checked, 1 diagnostic(s)"),
         "got: {stdout}"
     );
+    // A real `path:line:col:` prefix, compiler-style - not the old
+    // line-1 placeholder.
+    assert!(
+        stdout.contains("bad.php:1:29: "),
+        "expected a real line:col prefix, got: {stdout}"
+    );
+}
+
+#[test]
+fn check_project_reports_diagnostics_in_source_order_across_files() {
+    // Two files, each with one diagnostic, loaded in an order that
+    // doesn't match their sorted-by-path report order - `--check-project`
+    // sorts files by path before checking (see `run_check_project`'s own
+    // doc comment on determinism), so this also exercises that a real
+    // per-diagnostic position doesn't disturb the existing file-level
+    // sort.
+    let dir = TempDir::new("check_project_order");
+    dir.write(
+        "z_first.php",
+        "<?php\nfunction f() {\n    return $bogus;\n}\n",
+    );
+    dir.write(
+        "a_second.php",
+        "<?php\nfunction g() {\n    return $alsoBogus;\n}\n",
+    );
+
+    let output = bin()
+        .arg("--check-project")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let a_pos = stdout.find("a_second.php:3:12:").unwrap_or_else(|| {
+        panic!("expected a real line:col prefix for a_second.php, got: {stdout}")
+    });
+    let z_pos = stdout.find("z_first.php:3:12:").unwrap_or_else(|| {
+        panic!("expected a real line:col prefix for z_first.php, got: {stdout}")
+    });
+    assert!(
+        a_pos < z_pos,
+        "expected a_second.php's diagnostic before z_first.php's (path-sorted), got: {stdout}"
+    );
 }
 
 #[test]

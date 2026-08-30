@@ -7,16 +7,15 @@
 //! `serde`/`serde_json` itself, used only for getting JSON parsing and
 //! string escaping right on arbitrary real file content.
 //!
-//! Known limitation, worth being upfront about: `checker::Diagnostic`
-//! doesn't carry a real source position (line/column) today - the lexer
-//! discards position info after tokenizing, and no span threads through
-//! the parser/AST/checker. Every diagnostic reported here is anchored at
-//! line 1, column 1 of its file, with the location label folded into the
-//! message text, rather than pointing at the actual offending code. This
-//! still delivers real, correctly-invalidated diagnostics as you type
-//! (that's the point of Phase 7's incremental/transitive work paying off
-//! here), just not yet pinpoint-accurate within a file. Real position
-//! tracking is a natural, separate follow-up.
+//! `checker::Diagnostic` carries a real `Span` (Phase 11), converted here
+//! to LSP's 0-indexed line/character convention. The `location` symbolic
+//! label (e.g. `"ClassName::methodName"`) is still folded into the
+//! message text rather than dropped - LSP has no field for it. Known
+//! remaining imprecision: LSP wants UTF-16 code-unit columns, and this
+//! project's `Span` counts UTF-8 characters - an acceptable approximation
+//! for now (both agree for any line without astral-plane characters, the
+//! overwhelming majority of real PHP source), not a correctness bug worth
+//! blocking on.
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
@@ -102,15 +101,21 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// One diagnostic's LSP JSON shape. Every diagnostic is anchored at the
-/// very start of the file (see the module doc comment) - `location` (a
-/// symbolic label like `"ClassName::methodName"`, not a position) is
-/// folded into the message text instead of dropped.
+/// One diagnostic's LSP JSON shape. `location` (a symbolic label like
+/// `"ClassName::methodName"`, not a position) is folded into the message
+/// text instead of dropped - LSP's own diagnostic shape has no field for
+/// it. `Span`'s 1-indexed line/col become LSP's 0-indexed line/character.
 fn diagnostic_to_json(d: &Diagnostic) -> Value {
     json!({
         "range": {
-            "start": {"line": 0, "character": 0},
-            "end": {"line": 0, "character": 1},
+            "start": {
+                "line": d.span.start.line.saturating_sub(1),
+                "character": d.span.start.col.saturating_sub(1),
+            },
+            "end": {
+                "line": d.span.end.line.saturating_sub(1),
+                "character": d.span.end.col.saturating_sub(1),
+            },
         },
         "severity": 1, // Error
         "source": "phpstan-rs",
@@ -452,6 +457,13 @@ mod tests {
                 .unwrap()
                 .contains("greet"),
             "expected b.php's diagnostic to mention the now-missing greet() method, got: {b_notification:?}"
+        );
+        // A real range, not the old hardcoded {0,0}-{0,1} placeholder -
+        // pointing at `$g->greet()` itself (0-indexed LSP columns for a
+        // 1-indexed byte range starting at real column 48).
+        assert_eq!(
+            b_notification["params"]["diagnostics"][0]["range"],
+            json!({"start": {"line": 0, "character": 47}, "end": {"line": 0, "character": 58}})
         );
     }
 

@@ -86,7 +86,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub fn into_diagnostics(self) -> Vec<Diagnostic> {
+    pub fn into_diagnostics(mut self) -> Vec<Diagnostic> {
+        // Internal checks run in traversal order (properties/bounds
+        // before method bodies, methods in AST declaration order, an
+        // assignment's right-hand side before its left, ...) - not
+        // necessarily line/column order once different diagnostic
+        // categories or evaluation orders interleave. Sorted once here,
+        // the single real source every caller (CLI output, LSP
+        // publishing, this module's own tests) goes through.
+        self.diagnostics
+            .sort_by_key(|d| (d.span.start.line, d.span.start.col));
         self.diagnostics
     }
 
@@ -3441,6 +3450,22 @@ mod tests {
         // A real, non-line-1 position - the whole point of this phase.
         assert_eq!(d[0].span.start, Position { line: 3, col: 24 });
         assert_eq!(d[0].span.end, Position { line: 3, col: 37 });
+    }
+
+    #[test]
+    fn diagnostics_are_reported_in_source_order_not_internal_check_order() {
+        // ExprKind::Assign checks its right-hand side before its left
+        // (so a bare-variable assignment target isn't flagged as its own
+        // undefined read) - a real, internal traversal order that
+        // doesn't match source order here: `$rhs` (the later column) is
+        // pushed before `$obj` (the earlier one). Without sorting,
+        // `$rhs`'s diagnostic would come out first despite reading
+        // second in the file.
+        let d = diagnostics_for(r#"<?php function f() { $obj->prop = $rhs; }"#);
+        assert_eq!(d.len(), 2, "got: {d:?}");
+        assert!(d[0].message.contains("$obj"), "got: {d:?}");
+        assert!(d[1].message.contains("$rhs"), "got: {d:?}");
+        assert!(d[0].span.start.col < d[1].span.start.col);
     }
 
     #[test]

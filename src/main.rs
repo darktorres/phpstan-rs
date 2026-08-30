@@ -227,7 +227,10 @@ fn run_incremental_bench(args: &[String]) {
         let diagnostics = &results[path];
         println!("{}: {} diagnostic(s)", path.display(), diagnostics.len());
         for d in diagnostics {
-            println!("  {}: {}", d.location, d.message);
+            println!(
+                "  {}:{}: {}: {}",
+                d.span.start.line, d.span.start.col, d.location, d.message
+            );
         }
     }
 }
@@ -281,7 +284,14 @@ fn run_check_project(args: &[String]) {
     for path in paths {
         let diagnostics = &results[path];
         for d in diagnostics {
-            println!("{}: {}: {}", path.display(), d.location, d.message);
+            println!(
+                "{}:{}:{}: {}: {}",
+                path.display(),
+                d.span.start.line,
+                d.span.start.col,
+                d.location,
+                d.message
+            );
             total += 1;
         }
     }
@@ -392,7 +402,10 @@ fn main() {
         println!("(none)");
     } else {
         for d in &diagnostics {
-            println!("{}: {}", d.location, d.message);
+            println!(
+                "{}:{}: {}: {}",
+                d.span.start.line, d.span.start.col, d.location, d.message
+            );
         }
     }
 }
