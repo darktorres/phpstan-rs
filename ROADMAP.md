@@ -678,10 +678,26 @@ the real corpus: the 1492-file `src/` subset still parses 1492/1492
 with the identical 2327-diagnostic count, full 20286-file corpus
 unaffected.
 
-**Not yet shipped**: CLI/LSP output actually using the new spans (and
-sorting diagnostics by position before reporting) - the phase's whole
-user-visible payoff (real editor positions instead of everything
-anchored at line 1) - plus the level system and config/baseline, both
+**Shipped - real CLI/LSP output positions, the phase's whole
+user-visible payoff.** `Checker::into_diagnostics()` sorts every
+diagnostic by `(line, col)` before returning - internal checks run in
+traversal order (an assignment's right-hand side before its left,
+properties before method bodies, ...), not necessarily source order,
+so this is a real, load-bearing fix, not a defensive no-op (a
+regression test exploiting the rhs-before-lhs case confirms it).
+`--check`/`--check-project`/`--incremental-bench`/the default sample
+mode all print real `path:line:col:` prefixes now, compiler-style.
+`lsp.rs`'s `diagnostic_to_json` converts each diagnostic's real `Span`
+into LSP's 0-indexed range, replacing the hardcoded `{0,0}`-`{0,1}`
+every diagnostic used to get regardless of its actual position.
+Spot-checked against the real Piwigo corpus: a reported `line:col`
+lands exactly on the offending argument expression in the real source
+file. Known, deliberately-accepted remaining imprecision: LSP wants
+UTF-16 code-unit columns; this project's `Span` counts UTF-8
+characters - identical for any line without astral-plane characters
+(the overwhelming majority of real PHP source).
+
+**Not yet shipped**: the level system and config/baseline, both
 independent of positions.
 
 ## Phase 12: Bespoke per-function/method type extensions - PLANNED
