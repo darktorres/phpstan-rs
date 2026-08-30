@@ -229,6 +229,27 @@ impl<'a> Checker<'a> {
         }
         self.check_generic_bounds(declared_return.as_ref().unwrap_or(&Type::Mixed), &label);
 
+        // Phase 10.5's variance-enforcement half - same "check the
+        // declaration once" placement as bound-enforcement above, and
+        // only meaningful for a method (a plain top-level function has no
+        // enclosing class to have declared variance for at all).
+        // `__construct` is exempt (real PHPStan's own rule exempts it too):
+        // a constructor is only ever called to build one specific,
+        // concrete instance (`new Success<Cat>($cat)`), never invoked
+        // polymorphically through a variable typed as the covariant
+        // supertype the way an ordinary method can be - so a covariant
+        // `T` constructor parameter doesn't actually violate covariance
+        // safety at all. Real-world confirmation: every one of the 27
+        // diagnostics this check produced on the first real-corpus pass,
+        // with zero exceptions, was on a constructor - the extremely
+        // common `readonly` value-holder pattern (`public function
+        // __construct(private readonly T $value) {}`), not a genuine bug.
+        if let (Some(sig), Some(c)) = (sig, class_name)
+            && f.name != "__construct"
+        {
+            self.check_variance(sig, c, &label);
+        }
+
         let previous_class = self.current_class.take();
         self.current_class = class_name.map(|s| s.to_string());
 
@@ -510,6 +531,72 @@ impl<'a> Checker<'a> {
         }
         for ty in types_to_check {
             self.check_generic_bounds(&ty, fqn);
+        }
+    }
+
+    /// Phase 10.5's variance-enforcement half: a class's own
+    /// `@template-covariant T` may only appear in one of its methods'
+    /// *return* types (an output position - covariance is only sound if
+    /// nothing can ever hand a `T` back *into* the generic container,
+    /// the way `Collection<Cat>` being usable where `Collection<Animal>`
+    /// is expected relies on only ever reading a value out, never
+    /// writing one in); `@template-contravariant T` is the mirror image,
+    /// restricted to *parameter* positions only. A plain, un-annotated
+    /// `@template T` (invariant, the only kind Phase 10 modeled at all)
+    /// is unrestricted, same as always.
+    ///
+    /// Deliberately conservative in two ways, both matching this
+    /// project's general preference for fewer false positives over
+    /// catching everything: only checks method params/return types, not
+    /// properties (this project doesn't track `readonly` at all yet, and
+    /// a *readonly* property typed `T` is actually a legitimate output-
+    /// only position - without that information, checking properties
+    /// here would misflag every real one); and doesn't attempt real
+    /// variance's positional *flipping* through a nested generic
+    /// argument (a `T` found inside another class's own `Collection<T>`
+    /// type argument is treated the same as a direct occurrence, not
+    /// re-derived from that other class's own variance) - a full,
+    /// correct algorithm needs real per-class variance composition this
+    /// project doesn't attempt.
+    fn check_variance(&mut self, sig: &FunctionSig, class_name: &str, label: &str) {
+        let Some(info) = self.registry.classes.get(class_name) else {
+            return;
+        };
+        if info.covariant_templates.is_empty() && info.contravariant_templates.is_empty() {
+            return;
+        }
+        let mut input_names = HashSet::new();
+        for param in &sig.params {
+            collect_template_params(&param.ty, &mut input_names);
+        }
+        let mut output_names = HashSet::new();
+        collect_template_params(&sig.return_type, &mut output_names);
+
+        // Sorted before iterating - both are `HashSet`s, and this project
+        // has already been bitten once this phase by a `HashMap`/`HashSet`
+        // iteration order silently varying a diagnostic's position
+        // between runs (see `check_class_generic_bounds`'s own fix).
+        let mut violations: Vec<String> = Vec::new();
+        for name in &input_names {
+            if info.covariant_templates.contains(name) {
+                violations.push(format!(
+                    "{class_name}'s @template-covariant {name} cannot be used in an input (parameter) position"
+                ));
+            }
+        }
+        for name in &output_names {
+            if info.contravariant_templates.contains(name) {
+                violations.push(format!(
+                    "{class_name}'s @template-contravariant {name} cannot be used in an output (return) position"
+                ));
+            }
+        }
+        violations.sort();
+        for message in violations {
+            self.diagnostics.push(Diagnostic {
+                location: label.to_string(),
+                message,
+            });
         }
     }
 
@@ -1976,6 +2063,32 @@ fn literal_string_key(e: &Expr) -> Option<String> {
         Expr::Literal(Literal::String(s)) => Some(s.clone()),
         Expr::Literal(Literal::Int(n)) => Some(n.to_string()),
         _ => None,
+    }
+}
+
+/// Every `TemplateParam` name appearing anywhere in `ty`, recursing into
+/// `Array`/`Union`/`Intersection`/`ArrayShape` (structural wrappers that
+/// don't change what "position" a template occupies) but *not* into
+/// another `Object`'s own type arguments - see `Checker::check_variance`'s
+/// doc comment for why that second part is a deliberate scope cut, not an
+/// oversight.
+fn collect_template_params(ty: &Type, found: &mut HashSet<String>) {
+    match ty {
+        Type::TemplateParam(name) => {
+            found.insert(name.clone());
+        }
+        Type::Array(inner) => collect_template_params(inner, found),
+        Type::Union(members) | Type::Intersection(members) => {
+            for m in members {
+                collect_template_params(m, found);
+            }
+        }
+        Type::ArrayShape(fields) => {
+            for (_, t, _) in fields {
+                collect_template_params(t, found);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -4471,6 +4584,155 @@ mod tests {
             class Collection {}
             /** @param Collection<UnregisteredArg> $c */
             function f($c) {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_covariant_template_used_only_in_return_position_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template-covariant T
+             */
+            class Producer {
+                /** @return T */
+                public function produce() { return null; }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_covariant_template_used_in_a_parameter_position_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template-covariant T
+             */
+            class Bad {
+                /** @param T $x */
+                public function consume($x): void {}
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("@template-covariant T")
+                && x.message.contains("input (parameter) position")),
+            "expected a covariance-violation diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_contravariant_template_used_only_in_parameter_position_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template-contravariant T
+             */
+            class Consumer {
+                /** @param T $x */
+                public function consume($x): void {}
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_contravariant_template_used_in_return_position_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template-contravariant T
+             */
+            class Bad {
+                /** @return T */
+                public function produce() { return null; }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("@template-contravariant T")
+                    && x.message.contains("output (return) position")),
+            "expected a contravariance-violation diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_plain_invariant_template_is_unrestricted_in_either_position() {
+        // No `-covariant`/`-contravariant` at all - Phase 10's original,
+        // unrestricted behavior must still hold for a plain @template.
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template T
+             */
+            class Box {
+                /** @param T $x */
+                public function set($x): void {}
+                /** @return T */
+                public function get() { return null; }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_covariant_template_nested_in_an_array_parameter_type_is_still_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template-covariant T
+             */
+            class Bad {
+                /** @param T[] $items */
+                public function consumeAll($items): void {}
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("@template-covariant T")
+                && x.message.contains("input (parameter) position")),
+            "expected a covariance-violation diagnostic for the nested T, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_top_level_function_has_no_enclosing_class_variance_to_violate() {
+        // Sanity check that check_variance's class_name lookup doesn't
+        // panic or misfire for a plain function (no class at all).
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param mixed $x */
+            function f($x): void {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_covariant_template_in_a_constructor_parameter_is_exempt() {
+        // Real bug found on the real Piwigo corpus: every single one of
+        // 27 real-corpus diagnostics this check produced before this
+        // exemption was on a constructor - the extremely common readonly
+        // value-holder pattern real PHPStan's own variance rule
+        // explicitly exempts, since a constructor is only ever called to
+        // build one specific concrete instance, never invoked
+        // polymorphically through a supertype-typed variable.
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @template-covariant T
+             */
+            final class Success {
+                /** @param T $value */
+                public function __construct(private $value) {}
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");

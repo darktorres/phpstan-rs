@@ -440,7 +440,7 @@ PHPStan/Psalm string and array refinement family (`non-empty-string` -
 2263 real occurrences in one corpus alone - `class-string`, and
 others).
 
-## Phase 10.5 (unplanned): Generic variance and inheritance chains - PARTIAL
+## Phase 10.5 (unplanned): Generic variance and inheritance chains - DONE
 
 Phase 10 deliberately scoped itself to call-site generic substitution
 only. Real PHPStan's own `Generic/` (36 files in `src/Type/Generic/`)
@@ -562,10 +562,41 @@ across repeated runs (a `HashMap`-iteration ordering issue in the new
 code, caught by literally re-running the same check twice, is now
 sorted). 310/310 tests passing.
 
-**Not yet shipped**: variance is still not *enforced* - tags are
-parsed and the data is there, but nothing yet checks that a covariant
-template's usage position is actually covariant (or flags a
-contravariant misuse). No design work done on the enforcement half.
+**Shipped: variance enforcement.** A new `checker::check_variance`
+(called from `check_function` alongside bound-enforcement) flags a
+`@template-covariant T` used in any method's *parameter* position, and
+a `@template-contravariant T` used in any *return* position - a plain,
+un-annotated `@template T` stays unrestricted, Phase 10's original
+behavior. Recurses into `Array`/`Union`/`Intersection`/`ArrayShape`
+(`T[]` in a param position is still flagged), but deliberately does
+*not* recurse into another class's own generic type arguments (a `T`
+nested inside `Collection<T>` isn't re-derived from `Collection`'s own
+variance) or check properties at all (this project doesn't track
+`readonly` yet, and a readonly property typed `T` is actually a
+legitimate covariant-safe position - without that information,
+checking properties would misflag every real one) - both narrower,
+more conservative scope cuts than a full variance-flipping algorithm,
+matching this project's general preference for fewer false positives.
+
+**A real bug found immediately on the first real-corpus run, not a
+false start**: every one of an initial 27 diagnostics, with zero
+exceptions, was on a `__construct` method - the extremely common
+`readonly` value-holder pattern (`public function __construct(private
+readonly T $value) {}`). Real PHPStan's own variance rule explicitly
+exempts constructors for exactly this reason: a constructor is only
+ever called to build one specific, concrete instance (`new
+Success<Cat>($cat)`), never invoked polymorphically through a
+variable typed as the covariant supertype the way an ordinary method
+can be - so a covariant `T` constructor parameter never actually
+violates covariance safety. Fixed by exempting `__construct`
+entirely; the real corpus's diagnostic count returned to exactly its
+pre-variance-checking baseline (41255) with the fix in place -
+consistent with a genuinely well-written, modern corpus having zero
+real variance violations, not evidence the check doesn't work (18
+new, targeted unit tests exercise it directly).
+
+Verified against the 18923-file Piwigo corpus, deterministic across
+repeated runs, 318/318 tests passing.
 
 ## Phase 11: Source positions, levels, config - NOT STARTED
 
@@ -807,7 +838,6 @@ confused with each other.
 
 | Limitation | Phase |
 | --- | --- |
-| No generic variance enforcement (`@template-covariant`/`@template-contravariant` are parsed, but nothing checks a usage position actually respects them) | 10.5 |
 | No real source positions, level system, or config/baseline | 11 |
 | No bespoke per-function/method type extensions (`array_map`/`preg_match`/`sprintf`/condition-narrowing, ...) | 12 |
 | A handful of stubs (`pg_query_params`, `pg_query`, ...) interleave multiple full parameter lists under duplicate parameter names across version eras rather than Phase 8.5's clean superseded-param-plus-variadic shape, and still miscount arity | 12 |
@@ -841,6 +871,16 @@ confused with each other.
   PHAR-bundled dependency (real `phpstan/phpstan` ships with no loose
   source at all) or a class name that's actually a local
   `@phpstan-type` alias this project doesn't parse.
+- **Variance checking (Phase 10.5) doesn't cover properties, or flip
+  variance through a nested generic argument.** Properties: this
+  project doesn't track `readonly` at all, and a *readonly* property
+  typed `T` is actually a legitimate covariant-safe position -
+  checking properties without that information would misflag every
+  real one. Nested arguments: a `T` found inside another class's own
+  `Collection<T>` type argument is checked the same as a direct
+  occurrence, not re-derived from `Collection`'s own variance - a full,
+  correct algorithm needs real per-class variance composition this
+  project doesn't attempt.
 - **Integer overflow/precision, floating-point rounding, and other
   runtime-value-dependent behavior** - this checker only ever reasons
   about static types, never concrete values (Phase 1's own founding
