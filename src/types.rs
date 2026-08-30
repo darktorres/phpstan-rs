@@ -185,6 +185,19 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
         if field_str.is_empty() {
             continue;
         }
+        // PHPStan/Psalm's "unsealed shape" marker (`...<string, mixed>`
+        // or bare `...`) says the array may carry other, unlisted keys
+        // too - a real, if rare, extra-precision feature this project
+        // doesn't model (same as the accessory/refinement types Phase
+        // 10 already skips). Found the hard way: `?` below used to
+        // propagate this field's missing `:` into failing the ENTIRE
+        // shape parse, silently falling through to treating the whole
+        // `array{...}` text as a literal (and then namespace-mangled)
+        // class name - degrading just this one field is the safe
+        // choice, not aborting every other real field alongside it.
+        if field_str.starts_with("...") {
+            continue;
+        }
         let (key_part, type_part) = field_str.split_once(':')?;
         let key_part = key_part.trim();
         let (key, optional) = match key_part.strip_suffix('?') {
@@ -668,6 +681,30 @@ mod tests {
                 Type::Union(vec![Type::Int, Type::String]),
                 false
             )])
+        );
+    }
+
+    #[test]
+    fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
+        // `...<K, V>` (PHPStan/Psalm's "this shape may carry other,
+        // unlisted keys too" marker - not modeled, same as other
+        // accessory/refinement types this project skips) has no `:` in
+        // it - found on real code that this used to make the field loop's
+        // `?` propagate a None out of the whole function, silently
+        // failing the ENTIRE shape parse (falling through to treating
+        // `array{...}` as a literal, then namespace-mangled, class name)
+        // over one unmodeled marker, discarding every real field
+        // alongside it.
+        let shape = parse_type_string("array{items: int, ...<string, mixed>}");
+        assert_eq!(
+            shape,
+            Type::ArrayShape(vec![("items".to_string(), Type::Int, false)])
+        );
+        // A bare `...` (no generic args) is valid too.
+        let shape2 = parse_type_string("array{items: int, ...}");
+        assert_eq!(
+            shape2,
+            Type::ArrayShape(vec![("items".to_string(), Type::Int, false)])
         );
     }
 
