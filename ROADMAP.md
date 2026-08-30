@@ -598,7 +598,7 @@ new, targeted unit tests exercise it directly).
 Verified against the 18923-file Piwigo corpus, deterministic across
 repeated runs, 318/318 tests passing.
 
-## Phase 11: Source positions, levels, config - PARTIAL
+## Phase 11: Source positions, levels, config - DONE
 
 Full column-precise spans (not a coarser per-statement-line
 compromise) - real PHPStan's own precision. A large, multi-stage
@@ -755,21 +755,40 @@ what a normal run at that configuration would show. Verified against
 the real corpus: 2327 entries baselined, 0 diagnostics on a re-run
 with that baseline applied, default no-flag behavior unchanged.
 
-**Deliberately not shipped, per an explicit scoping decision this
-session** (asked directly, given the plan's own text left the exact
-config-file/`clap`-migration shape underspecified): the TOML config
-file and the `clap`-based CLI restructuring - the other two pieces
-Stage 6's plan text originally bundled together. Both remain real,
-concretely-scoped future work whenever more CLI flags accumulate to
-justify them, per this project's own "only add a dependency when a
-phase's own work concretely justifies it" bar.
+**Shipped - the `clap` CLI migration.** Replaced `main.rs`'s
+hand-rolled `args.get(1) == Some("--check-project")`-style dispatch
+(plus the `extract_level`/`extract_bool_flag`/`extract_value_flag`
+scanners) with a derived `Cli`/`Command` enum. Per an explicit
+decision, this also adopted clap's idiomatic bare-subcommand syntax
+(`phpstan-rs check-project <dir>`, no leading `--`) rather than
+preserving the old flag-prefixed style - a deliberate breaking change
+to the CLI surface, acceptable for this pre-1.0 internal tooling. The
+old silent default (a token/AST/diagnostics debug dump when no
+arguments were given at all) is now an explicit `demo` subcommand; a
+bare `phpstan-rs` invocation prints help and exits non-zero (real
+`arg_required_else_help` clap behavior) instead. Every `tests/cli.rs`
+test updated to match. Verified: full test suite passing, real corpus
+check unchanged (2327 diagnostics, same parse pass rate) - a pure
+CLI-parsing-layer refactor.
 
-**Phase 11 (source positions, levels, config) is now considered
-substantially complete** - all four position-related stages (1-4) and
-the full level system (Stage 5) are done, plus Stage 6's
-highest-value piece (the baseline mechanism). The config
-file/`clap`-migration remainder of Stage 6 stays open, tracked here,
-not silently dropped.
+**Shipped - the TOML config file, completing Stage 6.** New
+`src/config.rs`: a minimal, fully-optional `Config { paths, level,
+baseline, strict_mixed_arrays }`, loaded via `check-project`'s new
+`--config` flag. CLI flags always take precedence over the matching
+config value; `dirs` falls back to `config.paths` when no positional
+directories are given (so `dirs` is no longer `required = true` on
+the clap side - the "must know what to check" requirement is enforced
+after consulting the config, with a real error when neither source
+supplies anything); `--generate-baseline` stays CLI-only (generating a
+baseline isn't a standing project setting the way checking against
+one is). Verified: the real Piwigo corpus check is identical whether
+invoked directly or via `--config` (2327 diagnostics either way).
+
+**Phase 11 (source positions, levels, config) is now fully DONE** -
+all six stages shipped: real column-precise spans end-to-end (lexer
+through AST through diagnostics through CLI/LSP output), the full
+two-part level system, and config/baseline (baseline mechanism, `clap`
+migration, and TOML config file all shipped).
 
 ## Phase 12: Bespoke per-function/method type extensions - PLANNED
 
