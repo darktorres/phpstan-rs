@@ -397,6 +397,12 @@ mod tests {
     }
 
     #[test]
+    fn default_is_equivalent_to_new() {
+        let project = Project::default();
+        assert_eq!(project.file_count(), 0);
+    }
+
+    #[test]
     fn check_all_covers_every_loaded_file_not_just_one() {
         // check_all is a thin fold over the already-well-tested check_file
         // (and is what --check-project actually calls), but had zero
