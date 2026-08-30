@@ -736,8 +736,40 @@ Piwigo corpus (spot-checked genuine: untyped runtime-built arrays
 returned where a specific element type or shape was declared).
 
 **Phase 11 Stage 5 is now fully DONE** (both discrete levels and
-strictness parameters shipped). **Not yet shipped**: Stage 6
-(config/baseline).
+strictness parameters shipped).
+
+**Shipped - Stage 6's baseline mechanism, real PHPStan's own
+`baseline.neon` simplified.** New `src/baseline.rs`:
+`--generate-baseline <file>` records every current diagnostic (keyed
+by file path + logical location + message - deliberately not raw
+line/col, so a baselined finding survives incidental code shifts
+elsewhere in the same file) into a JSON file via `serde_json` (already
+a real dependency from the LSP work, so this needed no new one);
+`--baseline <file>` filters out anything already recorded, so existing
+debt doesn't block CI while new issues are still caught. The file path
+has to be part of the key, not just the location label, since many
+diagnostics share the generic `"<main>"` label for top-level script
+code across different files. Baseline generation runs after
+level/strict-mixed-arrays filtering, so a baseline reflects exactly
+what a normal run at that configuration would show. Verified against
+the real corpus: 2327 entries baselined, 0 diagnostics on a re-run
+with that baseline applied, default no-flag behavior unchanged.
+
+**Deliberately not shipped, per an explicit scoping decision this
+session** (asked directly, given the plan's own text left the exact
+config-file/`clap`-migration shape underspecified): the TOML config
+file and the `clap`-based CLI restructuring - the other two pieces
+Stage 6's plan text originally bundled together. Both remain real,
+concretely-scoped future work whenever more CLI flags accumulate to
+justify them, per this project's own "only add a dependency when a
+phase's own work concretely justifies it" bar.
+
+**Phase 11 (source positions, levels, config) is now considered
+substantially complete** - all four position-related stages (1-4) and
+the full level system (Stage 5) are done, plus Stage 6's
+highest-value piece (the baseline mechanism). The config
+file/`clap`-migration remainder of Stage 6 stays open, tracked here,
+not silently dropped.
 
 ## Phase 12: Bespoke per-function/method type extensions - PLANNED
 
