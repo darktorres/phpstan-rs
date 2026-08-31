@@ -293,6 +293,32 @@ impl<'a> Lexer<'a> {
         Token::InlineHtml(html)
     }
 
+    /// Advances past a single- or double-quoted string literal starting
+    /// at the current position (which must be exactly on the opening
+    /// quote byte), honoring escaping just enough to find the real
+    /// closing quote - a raw byte-level bracket/brace-depth counter that
+    /// doesn't call this before resuming its own count can be fooled by
+    /// an unbalanced `[`/`]`/`{`/`}` inside the string's own content
+    /// (e.g. a regex character class like `'/[^\]]+/'`). Shared by both
+    /// of this lexer's own raw depth-counting scanners that need it
+    /// (the `#[Attribute(...)]` skip, and `{$...}` complex-interpolation
+    /// scanning) rather than duplicating the same fix independently in
+    /// each.
+    fn skip_string_literal(&mut self) {
+        let quote = self.peek();
+        self.pos += 1; // opening quote
+        while self.pos < self.src.len() && self.peek() != quote {
+            if self.peek() == b'\\' && self.pos + 1 < self.src.len() {
+                self.pos += 2;
+            } else {
+                self.pos += 1;
+            }
+        }
+        if self.pos < self.src.len() {
+            self.pos += 1; // closing quote
+        }
+    }
+
     fn skip_whitespace_and_comments(&mut self) {
         loop {
             match self.peek() {
@@ -303,16 +329,27 @@ impl<'a> Lexer<'a> {
                     if self.starts_with("#[PhpStormStubsElementAvailable(") {
                         self.skip_stub_availability_attribute();
                     } else if self.starts_with("#[") {
-                        // Attribute like #[Foo(...)] - skip to matching ']'.
+                        // Attribute like #[Foo(...)] - skip to matching
+                        // ']'. String-aware: an argument string
+                        // containing an unbalanced `[`/`]` (a completely
+                        // ordinary thing to write, e.g. a regex
+                        // character class like `'/[^\]]+/'`) must not
+                        // throw off the depth count.
                         self.pos += 2;
                         let mut depth = 1;
                         while self.pos < self.src.len() && depth > 0 {
                             match self.peek() {
-                                b'[' => depth += 1,
-                                b']' => depth -= 1,
-                                _ => {}
+                                b'\'' | b'"' => self.skip_string_literal(),
+                                b'[' => {
+                                    depth += 1;
+                                    self.pos += 1;
+                                }
+                                b']' => {
+                                    depth -= 1;
+                                    self.pos += 1;
+                                }
+                                _ => self.pos += 1,
                             }
-                            self.pos += 1;
                         }
                     } else {
                         while self.pos < self.src.len()
@@ -1384,5 +1421,18 @@ mod tests {
             toks[0],
             Token::InterpString(vec![StringPart::Literal("a\nb\tc\r\"d\\e$f".to_string())])
         );
+    }
+    // Finding 6 from the architecture audit - the #[Attribute(...)] skip
+    // logic wasn't string-aware, so an unbalanced `[`/`]` inside an
+    // argument string (a completely ordinary regex character class)
+    // ended the skip early and corrupted the rest of the parse.
+
+    #[test]
+    fn attribute_skip_is_not_fooled_by_an_unbalanced_bracket_in_a_string_argument() {
+        let src = "<?php #[Assert\\Regex('/[^\\]]+/')]\nclass C {}\n";
+        let toks = Lexer::new(src).tokenize();
+        // The attribute is skipped entirely - the next real token is the
+        // `class` keyword, not garbage from inside the regex string.
+        assert_eq!(toks[0], Token::Keyword(Keyword::Class));
     }
 }

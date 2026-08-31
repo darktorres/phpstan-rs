@@ -642,7 +642,12 @@ mod tests {
                 json!({
                     "textDocument": {
                         "uri": format!("file://{}/bad.php", dir.0.display()),
-                        "text": "<?php #[Assert\\Regex('/[^\\]]+/')]\nclass C { public string $x = ''; }",
+                        // Momentarily-invalid syntax, the normal state
+                        // while a file is being typed - an unclosed
+                        // parameter list trips this parser's own
+                        // panic!-based error reporting, its only
+                        // mechanism for malformed input.
+                        "text": "<?php function foo(int $x",
                     }
                 }),
             ),
