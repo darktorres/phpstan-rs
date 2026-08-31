@@ -3015,7 +3015,7 @@ impl<'a> Checker<'a> {
                     declared_return.as_ref(),
                     &closure_label,
                 );
-                self.infer_expr(e, locals)
+                Type::Object("Closure".to_string(), Vec::new())
             }
             ExprKind::ArrowFn {
                 params,
@@ -3036,26 +3036,25 @@ impl<'a> Checker<'a> {
                     };
                     arrow_locals.insert(p.name.clone(), ty);
                 }
-                self.check_expr(body, &mut arrow_locals, label);
+                let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 // Its body is a single implicit-return expression, not a
                 // StmtKind::Return - the equivalent of check_stmt's own
                 // Return-vs-declared_return check, kept here since
                 // there's no StmtKind::Return for it to share.
                 if return_type.is_some() {
                     let expected = self.resolve_type_hint(return_type.as_deref());
-                    let actual = self.infer_expr(body, &arrow_locals);
-                    if actual != Type::Mixed && !self.registry.is_assignable(&actual, &expected) {
+                    if body_ty != Type::Mixed && !self.registry.is_assignable(&body_ty, &expected) {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!(
-                                "return type mismatch: expected {expected}, got {actual}"
+                                "return type mismatch: expected {expected}, got {body_ty}"
                             ),
                             span: body.span,
                             level: 3,
                         });
                     }
                 }
-                self.infer_expr(e, locals)
+                Type::Object("Closure".to_string(), Vec::new())
             }
             // Finding 28: `foo(...)`/`$obj->method(...)`/`Class::method(...)`
             // (PHP 8.1 first-class-callable syntax) always wraps a
@@ -3095,8 +3094,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     ExprKind::MethodCall(recv, method, _, _) => {
-                        self.check_expr(recv, locals, label);
-                        let recv_ty = self.infer_expr(recv, locals);
+                        let recv_ty = self.check_expr(recv, locals, label);
                         let recv_class = match &recv_ty {
                             Type::Object(class, _) => Some(class.clone()),
                             Type::Union(members) | Type::Intersection(members) => {
@@ -3149,9 +3147,17 @@ impl<'a> Checker<'a> {
                         self.check_expr(inner, locals, label);
                     }
                 }
-                self.infer_expr(e, locals)
+                Type::Object("Closure".to_string(), Vec::new())
             }
-            _ => self.infer_expr(e, locals),
+            ExprKind::Literal(lit) => match lit {
+                Literal::Int(n) => Type::IntLiteral(*n),
+                Literal::Float(_) => Type::Float,
+                Literal::String(s) => Type::StringLiteral(s.clone()),
+                Literal::Bool(true) => Type::True,
+                Literal::Bool(false) => Type::False,
+                Literal::Null => Type::Null,
+            },
+            ExprKind::Name(_) => Type::Mixed,
         }
     }
 
