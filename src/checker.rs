@@ -2439,8 +2439,18 @@ impl<'a> Checker<'a> {
                     // to dynamically create a static property at all -
                     // no "could be legitimate" case to stay lenient for
                     // here, the way check_property_assignment's write
-                    // side has to for instance properties.
-                    if self.registry.lookup_property(&class, prop_name).is_none() {
+                    // side has to for instance properties. Finding 9: a
+                    // property that exists but was declared as an
+                    // ordinary *instance* property is equally invalid
+                    // through `::` in real PHP ("Access to undeclared
+                    // static property") - from the caller's own
+                    // perspective there's no real static property by
+                    // this name either way, so both share one message.
+                    let is_valid_static = self
+                        .registry
+                        .lookup_property(&class, prop_name)
+                        .is_some_and(|sig| sig.is_static);
+                    if !is_valid_static {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!(
@@ -6399,6 +6409,37 @@ mod tests {
                     T4a::bar insteadof T4b;
                 }
             }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn accessing_a_non_static_property_through_double_colon_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Config {
+                public int $instanceOnly = 0;
+            }
+            function test(): int { return Config::$instanceOnly; }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("access to undefined static property Config::$instanceOnly")),
+            "expected an undefined-static-property diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn accessing_a_real_static_property_through_double_colon_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Config {
+                public static int $staticOne = 1;
+            }
+            function test(): int { return Config::$staticOne; }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
