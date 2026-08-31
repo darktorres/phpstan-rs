@@ -1107,8 +1107,19 @@ impl<'a> Checker<'a> {
                     self.bind_simple_target(k, Type::Mixed, locals);
                     self.check_expr(k, locals, label);
                 }
-                self.bind_simple_target(value, element_ty, locals);
-                self.check_expr(value, locals, label);
+                // A foreach value can itself be a destructuring target
+                // (`foreach ($pairs as [$num, $letter])`, a real, common
+                // way to iterate a list of tuples) - route it through the
+                // same fully-recursive helpers a plain destructuring
+                // assignment uses, not the bare-variable-only
+                // bind_simple_target (which silently bound nothing at all
+                // for anything else). check_assignment_target already
+                // covers "check as a read where appropriate" for whatever
+                // isn't a pure definition site (an Index's key, a
+                // PropertyAccess's base, ...), so there's no separate
+                // check_expr call needed on top of it.
+                self.check_assignment_target(value, locals, label);
+                self.bind_assignment_target(value, element_ty, locals);
                 self.check_stmt(body, locals, declared_return, label);
             }
             StmtKind::Switch { subject, cases } => {
@@ -1291,24 +1302,58 @@ impl<'a> Checker<'a> {
     /// top-level expression statements, which is exactly what let `for ($j
     /// = 0; ...)`'s `$j` go unbound (and then misfire as "undefined") until
     /// this was caught.
-    fn bind_assignment_target(&self, lhs: &Expr, rhs: &Expr, locals: &mut HashMap<String, Type>) {
+    /// Checks an assignment's own left-hand side for whatever isn't a
+    /// pure "definition site" - a plain variable (or nested variable,
+    /// recursing through any level of `[$a, $b] = ...`-style
+    /// destructuring) is never a read, but an `Index`'s own key
+    /// expression and a `PropertyAccess`'s own base still are. Shared
+    /// between the top-level assignment target and every nested
+    /// destructuring element, so `[[$a, $b], $c] = $nested;` doesn't
+    /// wrongly check `$a`/`$b` as reads of not-yet-defined variables the
+    /// way only handling one level of nesting used to.
+    fn check_assignment_target(
+        &mut self,
+        target: &Expr,
+        locals: &mut HashMap<String, Type>,
+        label: &str,
+    ) {
+        match &target.kind {
+            ExprKind::Variable(_) => {}
+            ExprKind::ArrayLiteral(items) => {
+                for (_, item) in items {
+                    self.check_assignment_target(item, locals, label);
+                }
+            }
+            // A property being *assigned* isn't a read of that property -
+            // only its base is (`$obj->prop = ...` reads $obj). Routing
+            // the full PropertyAccess through check_expr here would
+            // wrongly flag legitimate dynamic-property creation as
+            // "undefined property".
+            ExprKind::PropertyAccess(base, _) => self.check_expr(base, locals, label),
+            _ => self.check_expr(target, locals, label),
+        }
+    }
+
+    /// Binds an assignment's (or a `foreach` value's) left-hand side to
+    /// `ty`, the type of whatever was just assigned/iterated - recursing
+    /// into a nested `ArrayLiteral` target (`[$a, $b] = $arr;` and
+    /// `list($a, $b) = $arr;` both parse this way, including a nested
+    /// `[[$a, $b], $c] = $nested;`) rather than only handling one level
+    /// deep. Per-key precision (`['name' => $n] = $shapedArray`) isn't
+    /// resolved for a plain `Type::Array` source - every target gets the
+    /// source's homogeneous element type, or Mixed for anything else.
+    fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut HashMap<String, Type>) {
         match &lhs.kind {
             ExprKind::Variable(name) => {
-                let ty = self.infer_expr(rhs, locals);
                 locals.insert(name.clone(), ty);
             }
-            // Destructuring: `[$a, $b] = $arr;` and `list($a, $b) = $arr;`
-            // both parse as an ArrayLiteral target. Per-key precision
-            // (`['name' => $n] = $shapedArray`) isn't resolved - every
-            // target gets the source's homogeneous element type, or Mixed
-            // for anything else.
             ExprKind::ArrayLiteral(items) => {
-                let element_ty = match self.infer_expr(rhs, locals) {
-                    Type::Array(inner) => *inner,
+                let element_ty = match &ty {
+                    Type::Array(inner) => (**inner).clone(),
                     _ => Type::Mixed,
                 };
                 for (_, item) in items {
-                    self.bind_simple_target(item, element_ty.clone(), locals);
+                    self.bind_assignment_target(item, element_ty.clone(), locals);
                 }
             }
             _ => {}
@@ -1701,32 +1746,10 @@ impl<'a> Checker<'a> {
                 // statement that defines it. PropertyAccess/Index targets
                 // still need their *base* checked (`$obj->prop = ...`
                 // reads $obj).
-                match &lhs.kind {
-                    ExprKind::Variable(_) => {}
-                    ExprKind::ArrayLiteral(items) => {
-                        for (_, item) in items {
-                            match &item.kind {
-                                ExprKind::Variable(_) => {}
-                                // Same "definition site, not a read" logic
-                                // as the PropertyAccess arm just below -
-                                // only the base is a real read here.
-                                ExprKind::PropertyAccess(base, _) => {
-                                    self.check_expr(base, locals, label);
-                                }
-                                _ => self.check_expr(item, locals, label),
-                            }
-                        }
-                    }
-                    // A property being *assigned* isn't a read of that
-                    // property - only its base is (`$obj->prop = ...`
-                    // reads $obj). Routing the full PropertyAccess through
-                    // check_expr here would wrongly flag legitimate
-                    // dynamic-property creation as "undefined property".
-                    ExprKind::PropertyAccess(base, _) => self.check_expr(base, locals, label),
-                    _ => self.check_expr(lhs, locals, label),
-                }
+                self.check_assignment_target(lhs, locals, label);
                 self.check_property_assignment(lhs, rhs, locals, label);
-                self.bind_assignment_target(lhs, rhs, locals);
+                let rhs_ty = self.infer_expr(rhs, locals);
+                self.bind_assignment_target(lhs, rhs_ty, locals);
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {
                 // `$x ??= $default;` is defined as exactly
@@ -6828,5 +6851,85 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 37 from the architecture audit - array destructuring bound
+    // nothing in a `foreach` value position, and a nested destructuring
+    // pattern bound nothing even in a plain assignment; checking the
+    // left-hand side itself had the identical one-level-only gap.
+
+    #[test]
+    fn foreach_value_destructuring_binds_its_variables() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): void {
+                $pairs = [[1, 'a'], [2, 'b']];
+                foreach ($pairs as [$num, $letter]) {
+                    echo $num . $letter;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn foreach_value_list_syntax_destructuring_binds_its_variables() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): void {
+                $pairs = [[1, 'a'], [2, 'b']];
+                foreach ($pairs as list($num, $letter)) {
+                    echo $num . $letter;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn nested_destructuring_assignment_binds_every_level() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): void {
+                $nested = [[1, 2], 3];
+                [[$a, $b], $c] = $nested;
+                echo $a . $b . $c;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn nested_destructuring_does_not_check_its_own_targets_as_reads() {
+        // Regression test for a second, related bug found while fixing
+        // this one: checking the assignment's own left-hand side (not
+        // just binding it) only recursed one level into a destructuring
+        // pattern, so `$a`/`$b` were flagged as undefined on the
+        // destructuring statement itself, before binding ever ran.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): void {
+                $nested = [[1, 2], 3];
+                [[$a, $b], $c] = $nested;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn swap_idiom_still_leaves_a_genuinely_undefined_variable_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): void {
+                [$a, $b] = [1, 2];
+                echo $c;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("undefined variable $c"), "got: {d:?}");
     }
 }
