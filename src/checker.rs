@@ -2354,14 +2354,14 @@ impl<'a> Checker<'a> {
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
                 self.check_expr(r, &mut narrowed, label);
-                self.infer_expr(e, locals)
+                self.infer_binary(&BinOp::And, l, r, locals)
             }
             ExprKind::Binary(BinOp::Or, l, r) => {
                 self.check_expr(l, locals, label);
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
                 self.check_expr(r, &mut narrowed, label);
-                self.infer_expr(e, locals)
+                self.infer_binary(&BinOp::Or, l, r, locals)
             }
             // `??` is built on isset()-style quiet semantics - its left
             // side is evaluated without ever raising an undefined-
@@ -2370,16 +2370,19 @@ impl<'a> Checker<'a> {
             // silences this for the whole dereference chain on the left
             // (`$config['key'] ?? 'default'` is just as warning-free as
             // a bare `$x ?? 'default'`), which is exactly what
-            // `check_expr_quiet_root` walks.
+            // `check_expr_quiet_root` walks. `??`'s own result type is
+            // always just the right side's type (`infer_binary`'s own
+            // Coalesce arm does nothing but `self.infer_expr(r, locals)`)
+            // - reusing `check_expr(r, ...)`'s return value directly
+            // avoids a real, confirmed double-walk of `r`.
             ExprKind::Binary(BinOp::Coalesce, l, r) => {
                 self.check_expr_quiet_root(l, locals, label);
-                self.check_expr(r, locals, label);
-                self.infer_expr(e, locals)
+                self.check_expr(r, locals, label)
             }
-            ExprKind::Binary(_, l, r) => {
+            ExprKind::Binary(op, l, r) => {
                 self.check_expr(l, locals, label);
                 self.check_expr(r, locals, label);
-                self.infer_expr(e, locals)
+                self.infer_binary(op, l, r, locals)
             }
             ExprKind::Variable(name) => {
                 if !locals.contains_key(name) && !is_superglobal(name) {
