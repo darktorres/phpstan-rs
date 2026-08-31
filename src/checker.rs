@@ -9921,4 +9921,211 @@ mod tests {
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
+
+    // Item 2: a small initial port of real, ground-truth-labeled fixtures
+    // from `phpstan/phpstan-src` (MIT-licensed - see `vendor/phpstan-src/LICENSE`),
+    // adapted from the specific `tests/PHPStan/Rules/**/data/*.php` scenarios
+    // that motivated Group E's own findings above. Each fixture is trimmed to
+    // just the class/enum shapes this project's own (simpler) checker models -
+    // PHPStan-specific assertions this project doesn't attempt (class-case-
+    // sensitivity, named-constructor-argument checks, generic/template
+    // variance, ...) are deliberately left out rather than chased for
+    // byte-for-byte parity. These replace this session's own hand-written
+    // repros with real, independently-authored ground truth for the same
+    // gaps, per the audit plan's own Item 2.
+
+    #[test]
+    fn phpstan_instantiation_flags_abstract_class_and_interface() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Classes/data/instantiation.php
+        // (lines ~29-30 of the vendored `2.2.11` tag): `new LoremInstantiation()` /
+        // `new IpsumInstantiation()`, an abstract class and an interface.
+        let d = diagnostics_for(
+            r#"<?php
+            abstract class LoremInstantiation {}
+            interface IpsumInstantiation {}
+            function test(): void {
+                new LoremInstantiation();
+                new IpsumInstantiation();
+            }
+        "#,
+        );
+        assert!(d.iter().any(|x| {
+            x.message
+                .contains("cannot instantiate abstract class LoremInstantiation")
+        }));
+        assert!(d.iter().any(|x| {
+            x.message
+                .contains("cannot instantiate interface IpsumInstantiation")
+        }));
+    }
+
+    #[test]
+    fn phpstan_missing_method_impl_flags_interface_and_abstract_gaps() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Methods/data/missing-method-impl.php:
+        // a concrete class missing both an interface-required method
+        // (`doFoo` from `Foo`) and an inherited abstract method (`doBaz`
+        // from `Bar`) - upstream's own `Baz` message names both origins.
+        let d = diagnostics_for(
+            r#"<?php
+            interface Foo { public function doFoo(); }
+            abstract class Bar implements Foo {
+                public function doBar() {}
+                abstract public function doBaz();
+            }
+            class Baz extends Bar {
+                public function doBar() {}
+            }
+        "#,
+        );
+        assert!(d.iter().any(
+            |x| x.message.contains("does not implement abstract method(s):")
+                && x.message.contains("doFoo")
+                && x.message.contains("doBaz")
+        ));
+    }
+
+    #[test]
+    fn phpstan_overriding_method_flags_a_final_method_override() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Methods/data/overriding-method.php's
+        // `Foo`/`Bar` pair: upstream's own expected message is "Method
+        // OverridingFinalMethod\Bar::doFoo() overrides final method
+        // OverridingFinalMethod\Foo::doFoo().".
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                final public function doFoo(): void {}
+            }
+            class Bar extends Foo {
+                public function doFoo(): void {}
+            }
+        "#,
+        );
+        assert!(d.iter().any(|x| {
+            x.message
+                .contains("cannot override final method Foo::doFoo")
+        }));
+    }
+
+    #[test]
+    fn phpstan_parameter_contravariance_flags_a_narrowed_override() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Methods/data/parameter-contravariance.php's
+        // `Foo`/`Lorem` pair: upstream flags `Lorem::doFoo(InvalidArgumentException $e)`
+        // as "not contravariant with" `Foo::doFoo(Exception $e)` - the same
+        // narrowed-parameter shape Finding 50 covers, using real,
+        // already-registered Exception-hierarchy classes from the vendored
+        // phpstorm-stubs corpus rather than made-up ones.
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                public function doFoo(\Exception $e): void {}
+            }
+            class Lorem extends Foo {
+                public function doFoo(\InvalidArgumentException $e): void {}
+            }
+        "#,
+        );
+        assert!(d.iter().any(|x| x.message.contains("Lorem::doFoo")
+            && x.message.contains("narrows the inherited parameter type")));
+    }
+
+    #[test]
+    fn phpstan_readonly_property_assign_flags_writes_outside_the_constructor() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Properties/data/readonly-assign.php:
+        // a setter re-assigning its own class's readonly property ("setter -
+        // report"), and a subclass's constructor assigning a readonly
+        // property it inherits rather than declares ("not in declaring
+        // class - report").
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                public function __construct(public readonly int $x) {}
+                public function setX(int $x): void { $this->x = $x; }
+            }
+            class Bar extends Foo {
+                public function __construct(int $x) {
+                    parent::__construct($x);
+                    $this->x = $x;
+                }
+            }
+        "#,
+        );
+        let readonly_hits = d
+            .iter()
+            .filter(|x| x.message.contains("Foo::$x is readonly"))
+            .count();
+        assert_eq!(readonly_hits, 2, "expected both writes flagged, got: {d:?}");
+    }
+
+    #[test]
+    fn phpstan_caught_exception_existence_flags_a_non_throwable_catch() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Exceptions/data/catch.php:
+        // upstream's own expected message is "Caught class
+        // TestCatch\FooCatch is not an exception."
+        let d = diagnostics_for(
+            r#"<?php
+            class FooCatch {}
+            function test(): void {
+                try {
+                } catch (FooCatch $e) {
+                }
+            }
+        "#,
+        );
+        assert!(d.iter().any(|x| {
+            x.message
+                .contains("cannot catch FooCatch: it does not implement Throwable")
+        }));
+    }
+
+    #[test]
+    fn phpstan_throw_expr_type_flags_throwing_a_non_throwable() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Exceptions/data/throw-values.php's
+        // `throw new InvalidException();` case (a plain class with no
+        // Throwable in its hierarchy).
+        let d = diagnostics_for(
+            r#"<?php
+            class InvalidException {}
+            function test(): void {
+                throw new InvalidException();
+            }
+        "#,
+        );
+        assert!(d.iter().any(|x| {
+            x.message
+                .contains("cannot throw InvalidException: it does not implement Throwable")
+        }));
+    }
+
+    #[test]
+    fn phpstan_enum_sanity_flags_duplicate_backing_values() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Classes/data/enum-sanity.php's
+        // `EnumDuplicateValue` case - upstream's own expected messages are
+        // "has duplicate value 1 for cases A, E." and "... value 2 for
+        // cases B, C.".
+        let d = diagnostics_for(
+            r#"<?php
+            enum EnumDuplicateValue: int {
+                case A = 1;
+                case B = 2;
+                case C = 2;
+                case D = 3;
+                case E = 1;
+            }
+        "#,
+        );
+        let dupes: Vec<&Diagnostic> = d
+            .iter()
+            .filter(|x| {
+                x.message
+                    .contains("duplicate value in enum EnumDuplicateValue")
+            })
+            .collect();
+        assert_eq!(
+            dupes.len(),
+            2,
+            "expected 2 duplicate-value diagnostics, got: {d:?}"
+        );
+        assert!(dupes.iter().any(|x| x.message.contains("for case C")));
+        assert!(dupes.iter().any(|x| x.message.contains("for case E")));
+    }
 }
