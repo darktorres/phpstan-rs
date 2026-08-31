@@ -220,6 +220,12 @@ pub struct ClassDecl {
     // clauses are parsed (so the file doesn't fail to parse) but not
     // modeled here - not needed to fix Finding 30's own `as`-alias gap.
     pub trait_aliases: Vec<TraitAlias>,
+    // Every method/property name mentioned in ANY adaptation clause at
+    // all (`insteadof` or `as`, including a visibility-only `as public;`)
+    // - Finding 58's own trait-conflict check needs this to know a name
+    // the class author already explicitly addressed, even though this
+    // project doesn't model *which* trait `insteadof` actually picked.
+    pub resolved_trait_conflicts: Vec<String>,
     // The class's own `/** ... */` doc comment, if any - needed for its
     // own `@template T` declarations (class-level generics). Previously
     // never captured at all: the parser only called `take_doc_comment`
@@ -250,6 +256,7 @@ pub struct EnumDecl {
     pub consts: Vec<ClassConst>,
     pub uses: Vec<String>,
     pub trait_aliases: Vec<TraitAlias>,
+    pub resolved_trait_conflicts: Vec<String>,
     pub span: Span,
 }
 

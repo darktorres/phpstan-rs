@@ -1334,7 +1334,7 @@ impl Parser {
             }
         }
 
-        let (properties, methods, consts, uses, trait_aliases) =
+        let (properties, methods, consts, uses, trait_aliases, resolved_trait_conflicts) =
             self.parse_class_body(class_is_readonly);
 
         let decl = ClassDecl {
@@ -1352,6 +1352,7 @@ impl Parser {
             consts,
             uses,
             trait_aliases,
+            resolved_trait_conflicts,
             doc_comment: None,
             span: Span {
                 start: decl_start,
@@ -1375,6 +1376,7 @@ impl Parser {
         Vec<ClassConst>,
         Vec<String>,
         Vec<TraitAlias>,
+        Vec<String>,
     ) {
         self.expect(&Token::LBrace);
         let mut properties = Vec::new();
@@ -1382,6 +1384,7 @@ impl Parser {
         let mut consts = Vec::new();
         let mut uses = Vec::new();
         let mut trait_aliases = Vec::new();
+        let mut resolved_trait_conflicts = Vec::new();
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let member_start = self.current_pos();
@@ -1393,7 +1396,9 @@ impl Parser {
                     uses.push(self.parse_qualified_name());
                 }
                 if self.check(&Token::LBrace) {
-                    trait_aliases.extend(self.parse_trait_adaptations());
+                    let (aliases, resolved) = self.parse_trait_adaptations();
+                    trait_aliases.extend(aliases);
+                    resolved_trait_conflicts.extend(resolved);
                 } else {
                     self.expect_semicolon();
                 }
@@ -1578,7 +1583,14 @@ impl Parser {
         }
         self.expect(&Token::RBrace);
 
-        (properties, methods, consts, uses, trait_aliases)
+        (
+            properties,
+            methods,
+            consts,
+            uses,
+            trait_aliases,
+            resolved_trait_conflicts,
+        )
     }
 
     /// The `{ ... }` conflict-resolution block after a `use A, B;` clause
@@ -1593,8 +1605,9 @@ impl Parser {
     /// traits actually used - `trait_name: None` here defers resolving
     /// that ambiguity to `flatten_traits`, which already has the full,
     /// registry-wide picture this parser doesn't.
-    fn parse_trait_adaptations(&mut self) -> Vec<TraitAlias> {
+    fn parse_trait_adaptations(&mut self) -> (Vec<TraitAlias>, Vec<String>) {
         let mut aliases = Vec::new();
+        let mut resolved = Vec::new();
         self.expect(&Token::LBrace);
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let first = self.expect_ident();
@@ -1609,6 +1622,7 @@ impl Parser {
                 while self.eat(&Token::Comma) {
                     self.parse_qualified_name();
                 }
+                resolved.push(method);
             } else if self.eat(&Token::Keyword(Keyword::As)) {
                 if matches!(
                     self.peek(),
@@ -1620,15 +1634,16 @@ impl Parser {
                     let alias = self.expect_ident();
                     aliases.push(TraitAlias {
                         trait_name,
-                        method,
+                        method: method.clone(),
                         alias,
                     });
                 }
+                resolved.push(method);
             }
             self.expect_semicolon();
         }
         self.expect(&Token::RBrace);
-        aliases
+        (aliases, resolved)
     }
 
     /// PHP 8.4 property hooks body: `{ get => expr; set(Type $value) { .. }
@@ -1768,7 +1783,7 @@ impl Parser {
             }
         }
 
-        let (properties, methods, consts, uses, trait_aliases) =
+        let (properties, methods, consts, uses, trait_aliases, resolved_trait_conflicts) =
             self.parse_class_body(class_is_readonly);
 
         ClassDecl {
@@ -1783,6 +1798,7 @@ impl Parser {
             consts,
             uses,
             trait_aliases,
+            resolved_trait_conflicts,
             doc_comment,
             span: Span {
                 start,
@@ -1821,6 +1837,7 @@ impl Parser {
         let mut consts = Vec::new();
         let mut uses = Vec::new();
         let mut trait_aliases = Vec::new();
+        let mut resolved_trait_conflicts = Vec::new();
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let member_start = self.current_pos();
@@ -1851,7 +1868,9 @@ impl Parser {
                     uses.push(self.parse_qualified_name());
                 }
                 if self.check(&Token::LBrace) {
-                    trait_aliases.extend(self.parse_trait_adaptations());
+                    let (aliases, resolved) = self.parse_trait_adaptations();
+                    trait_aliases.extend(aliases);
+                    resolved_trait_conflicts.extend(resolved);
                 } else {
                     self.expect_semicolon();
                 }
@@ -1958,6 +1977,7 @@ impl Parser {
             consts,
             uses,
             trait_aliases,
+            resolved_trait_conflicts,
             span: Span {
                 start,
                 end: self.previous_end(),
@@ -3613,6 +3633,24 @@ mod tests {
             panic!("expected ClassDecl");
         };
         assert!(c.trait_aliases.is_empty());
+        assert_eq!(c.resolved_trait_conflicts, vec!["greet".to_string()]);
+    }
+
+    #[test]
+    fn an_insteadof_clause_records_its_method_as_a_resolved_conflict() {
+        let program = parse(
+            r#"<?php
+            class C {
+                use A, B {
+                    A::hello insteadof B;
+                }
+            }
+            "#,
+        );
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.resolved_trait_conflicts, vec!["hello".to_string()]);
     }
 
     #[test]

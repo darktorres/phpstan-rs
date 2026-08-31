@@ -422,6 +422,12 @@ pub struct ClassInfo {
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
     // `self.classes` directly.
     pub trait_aliases: Vec<TraitAlias>,
+    // Method/property names explicitly mentioned in ANY trait-adaptation
+    // clause (`insteadof` or `as`) - Finding 58's own trait-conflict check
+    // treats these as already addressed by the class author, even for
+    // `insteadof` (whose actual trait-selection this project doesn't
+    // otherwise model).
+    pub resolved_trait_conflicts: HashSet<String>,
     // This class's own `@template T` names, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
@@ -631,6 +637,7 @@ impl ClassInfo {
             abstract_methods,
             final_methods,
             trait_aliases,
+            resolved_trait_conflicts: c.resolved_trait_conflicts.iter().cloned().collect(),
             templates,
             extends_args,
             implements_args,
@@ -798,6 +805,7 @@ impl ClassInfo {
             abstract_methods,
             final_methods,
             trait_aliases,
+            resolved_trait_conflicts: e.resolved_trait_conflicts.iter().cloned().collect(),
             templates: Vec::new(),
             extends_args: Vec::new(),
             implements_args: HashMap::new(),

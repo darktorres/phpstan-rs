@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
-use crate::registry::{self, FunctionSig, NameContext, ParamSig, Registry};
+use crate::registry::{self, FunctionSig, NameContext, ParamSig, PropertySig, Registry};
 use crate::token::Span;
 use crate::types::{self, Type};
 
@@ -153,6 +153,7 @@ impl<'a> Checker<'a> {
                     self.check_class_completeness(&fqn, c.span);
                     self.check_final_class_extension(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
+                    self.check_trait_conflicts(&fqn, c.span);
                     for m in &c.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
@@ -161,6 +162,7 @@ impl<'a> Checker<'a> {
                     let fqn = self.name_ctx.declared_name(&e.name);
                     self.check_class_completeness(&fqn, e.span);
                     self.check_enum_case_values(&fqn, e);
+                    self.check_trait_conflicts(&fqn, e.span);
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
@@ -778,6 +780,74 @@ impl<'a> Checker<'a> {
                 span,
                 level: 0,
             });
+        }
+    }
+
+    /// Finding 58: two traits used by the same class declaring the same
+    /// property (with a genuinely different type) or method (with a
+    /// genuinely different signature) is a real, unconditional PHP fatal
+    /// error at class-declaration time unless the class explicitly
+    /// resolves the conflict (`insteadof`/`as` - Finding 30's own
+    /// `resolved_trait_conflicts`, tracked regardless of whether this
+    /// project models exactly which trait `insteadof` picked). Compares
+    /// only pairs of *different* traits - a name declared by just one
+    /// used trait is never a conflict, no matter what it looks like.
+    fn check_trait_conflicts(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        if info.uses.len() < 2 {
+            return;
+        }
+
+        let mut seen_props: HashMap<&str, (&str, &PropertySig)> = HashMap::new();
+        let mut seen_methods: HashMap<&str, (&str, &FunctionSig)> = HashMap::new();
+        for trait_name in &info.uses {
+            let Some(trait_info) = self.registry.classes.get(trait_name) else {
+                continue;
+            };
+            for (prop_name, sig) in &trait_info.properties {
+                if info.resolved_trait_conflicts.contains(prop_name) {
+                    continue;
+                }
+                match seen_props.get(prop_name.as_str()) {
+                    Some((first_trait, first_sig)) if first_sig.ty != sig.ty => {
+                        self.diagnostics.push(Diagnostic {
+                            location: fqn.to_string(),
+                            message: format!(
+                                "{first_trait} and {trait_name} define the same property (${prop_name}) with incompatible types in the composition of {fqn}"
+                            ),
+                            span,
+                            level: 0,
+                        });
+                    }
+                    Some(_) => {}
+                    None => {
+                        seen_props.insert(prop_name, (trait_name, sig));
+                    }
+                }
+            }
+            for (method_name, sig) in &trait_info.methods {
+                if info.resolved_trait_conflicts.contains(method_name) {
+                    continue;
+                }
+                match seen_methods.get(method_name.as_str()) {
+                    Some((first_trait, first_sig)) if !signatures_compatible(first_sig, sig) => {
+                        self.diagnostics.push(Diagnostic {
+                            location: fqn.to_string(),
+                            message: format!(
+                                "{first_trait} and {trait_name} define the same method ({method_name}) with an incompatible signature in the composition of {fqn}"
+                            ),
+                            span,
+                            level: 0,
+                        });
+                    }
+                    Some(_) => {}
+                    None => {
+                        seen_methods.insert(method_name, (trait_name, sig));
+                    }
+                }
+            }
         }
     }
 
@@ -3740,6 +3810,27 @@ fn union_types(a: Type, b: Type) -> Type {
     }
 }
 
+/// Finding 58's own notion of "two trait methods with the same name are
+/// genuinely incompatible, not just written slightly differently" -
+/// deliberately narrow (exact param count and exact per-position/return
+/// type equality) rather than a real Liskov-style compatibility check:
+/// this is comparing two *unrelated* trait declarations with no
+/// inheritance relationship between them at all, so there's no
+/// contravariance/covariance direction to apply - only "are these the
+/// same signature" makes sense here.
+fn signatures_compatible(a: &FunctionSig, b: &FunctionSig) -> bool {
+    if a.params.len() != b.params.len() {
+        return false;
+    }
+    if a.return_type != b.return_type {
+        return false;
+    }
+    a.params
+        .iter()
+        .zip(&b.params)
+        .all(|(pa, pb)| pa.ty == pb.ty)
+}
+
 /// Joins two branch-local scopes back into one after an `if`/`while`. A
 /// variable present in both branches gets the union of its two types; one
 /// present in only one branch was introduced there and can't be assumed to
@@ -6249,6 +6340,68 @@ mod tests {
             d.iter().any(|x| x.message.contains("undefined method")),
             "expected an undefined-method diagnostic, got: {d:?}"
         );
+    }
+
+    #[test]
+    fn two_traits_declaring_the_same_property_with_incompatible_types_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait T1a { public int $x = 1; }
+            trait T1b { public string $x = "a"; }
+            class C1 { use T1a, T1b; }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("T1a and T1b define the same property ($x) with incompatible types")),
+            "expected a trait-property-conflict diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn two_traits_declaring_the_same_method_with_incompatible_signatures_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait T2a { public function foo(): int { return 1; } }
+            trait T2b { public function foo(): string { return "a"; } }
+            class C2 { use T2a, T2b; }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains(
+                "T2a and T2b define the same method (foo) with an incompatible signature"
+            )),
+            "expected a trait-method-conflict diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn two_traits_declaring_the_same_property_with_identical_types_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait T3a { public int $y = 1; }
+            trait T3b { public int $y = 2; }
+            class C3 { use T3a, T3b; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_trait_method_conflict_resolved_via_insteadof_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait T4a { public function bar(): int { return 1; } }
+            trait T4b { public function bar(): int { return 2; } }
+            class C4 {
+                use T4a, T4b {
+                    T4a::bar insteadof T4b;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
