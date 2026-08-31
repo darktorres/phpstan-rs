@@ -1142,9 +1142,15 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(l, locals, false);
                 self.apply_narrowing(r, locals, false);
             }
+            // Deliberately `===`/`!==` only, not `==`/`!=` - a loose
+            // comparison matches PHP's own type-juggling table (`0 ==
+            // false`, `0 == null`, `"0" == 0`, ...), a much wider set of
+            // values than the literal compared-to one, so narrowing a
+            // variable down to exactly that value on a loose match would
+            // discard every other value `==` could also have matched.
             ExprKind::Binary(op, l, r) => {
-                let is_eq = matches!(op, BinOp::Identical | BinOp::Eq);
-                let is_neq = matches!(op, BinOp::NotIdentical | BinOp::NotEq);
+                let is_eq = matches!(op, BinOp::Identical);
+                let is_neq = matches!(op, BinOp::NotIdentical);
                 if is_eq || is_neq {
                     let matches_when_true = if is_eq { branch_true } else { !branch_true };
                     self.apply_equality_narrowing(l, r, locals, matches_when_true);
@@ -6350,6 +6356,53 @@ mod tests {
             function f(): string {
                 $x ??= "default";
                 return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 17 from the architecture audit - loose equality (`==`) was
+    // narrowed exactly like strict equality (`===`), discarding every
+    // other value PHP's own type-juggling rules also match.
+
+    #[test]
+    fn loose_equality_does_not_narrow_to_the_literal_compared_to_value() {
+        // `$x == 0` also matches the real bool `false` (PHP's own
+        // `false == 0` rule) - narrowing exactly to the literal `0`
+        // would incorrectly discard that possibility. This project's own
+        // separate, deliberate choice to analyze every file as if
+        // strict_types were always active means passing the
+        // *unnarrowed* `bool|int` union to a `bool`-only parameter can
+        // still legitimately be flagged on its own terms - what this
+        // test actually guards against is over-narrowing to the wrong,
+        // overly-specific literal value.
+        let d = diagnostics_for(
+            r#"<?php
+            function g(bool $flag): void {}
+            function f(bool|int $x): void {
+                if ($x == 0) {
+                    g($x);
+                }
+            }
+        "#,
+        );
+        assert!(
+            !d.iter()
+                .any(|x| x.message.contains("'0' given") || x.message.contains(", 0 given")),
+            "still over-narrowing to the literal compared-to value: {d:?}"
+        );
+    }
+
+    #[test]
+    fn strict_equality_still_narrows() {
+        let d = diagnostics_for(
+            r#"<?php
+            function h(int $y): void {}
+            function f(?int $x): void {
+                if ($x === null) {
+                    return;
+                }
+                h($x);
             }
         "#,
         );
