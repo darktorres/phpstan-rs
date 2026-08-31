@@ -160,6 +160,7 @@ impl<'a> Checker<'a> {
                 StmtKind::EnumDecl(e) => {
                     let fqn = self.name_ctx.declared_name(&e.name);
                     self.check_class_completeness(&fqn, e.span);
+                    self.check_enum_case_values(&fqn, e);
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
@@ -777,6 +778,40 @@ impl<'a> Checker<'a> {
                 span,
                 level: 0,
             });
+        }
+    }
+
+    /// Finding 59: every case of a backed enum must have a unique backing
+    /// value - a real, unconditional PHP fatal error at declaration time
+    /// otherwise ("Duplicate value in enum ... for case ..."), not merely
+    /// a design smell. Only compares cases whose value is a literal
+    /// int/string (the overwhelming majority in practice) - a computed or
+    /// otherwise non-literal case value isn't evaluated, matching this
+    /// project's usual "don't guess" leniency.
+    fn check_enum_case_values(&mut self, fqn: &str, e: &EnumDecl) {
+        let mut seen: HashMap<(bool, String), &str> = HashMap::new();
+        for case in &e.cases {
+            let Some(value) = &case.value else {
+                continue;
+            };
+            let key = match &value.kind {
+                ExprKind::Literal(Literal::Int(n)) => (true, n.to_string()),
+                ExprKind::Literal(Literal::String(s)) => (false, s.clone()),
+                _ => continue,
+            };
+            if let Some(first_case) = seen.get(&key) {
+                self.diagnostics.push(Diagnostic {
+                    location: fqn.to_string(),
+                    message: format!(
+                        "duplicate value in enum {fqn} for case {} (already used by case {first_case})",
+                        case.name
+                    ),
+                    span: case.span,
+                    level: 0,
+                });
+            } else {
+                seen.insert(key, &case.name);
+            }
         }
     }
 
@@ -6095,6 +6130,55 @@ mod tests {
             function doStuff1(): void {}
             function test(): void {
                 try { doStuff1(); } catch (\RuntimeException $e) { echo "caught"; }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_backed_enum_with_a_duplicate_int_value_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            enum Status3: int {
+                case Active = 1;
+                case Inactive = 1;
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("duplicate value in enum Status3 for case Inactive")),
+            "expected a duplicate-enum-value diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_backed_enum_with_a_duplicate_string_value_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'H';
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("duplicate value in enum Suit for case Spades")),
+            "expected a duplicate-enum-value diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_backed_enum_with_all_unique_values_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            enum StatusOk: int {
+                case Active = 1;
+                case Inactive = 2;
             }
         "#,
         );
