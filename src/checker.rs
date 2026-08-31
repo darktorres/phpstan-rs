@@ -2555,7 +2555,7 @@ impl<'a> Checker<'a> {
                     }
                     self.check_expr(&item.value, locals, label);
                 }
-                self.infer_expr(e, locals)
+                self.infer_array_literal_type(items, locals)
             }
             ExprKind::Index(base, idx) => {
                 let base_ty = self.check_expr(base, locals, label);
@@ -2584,8 +2584,9 @@ impl<'a> Checker<'a> {
                 // constructor's own arguments (the way real PHPStan often
                 // does) isn't attempted here, so this is always `Object`
                 // with an empty arg list.
-                let resolved_class = match self.infer_expr(e, locals) {
-                    Type::Object(class, _) => Some(class),
+                let new_ty = self.infer_expr(e, locals);
+                let resolved_class = match &new_ty {
+                    Type::Object(class, _) => Some(class.clone()),
                     _ => None,
                 };
                 // A dynamic target (`new $className()`) or an unresolved
@@ -2648,7 +2649,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                self.infer_expr(e, locals)
+                new_ty
             }
             ExprKind::NewAnonymousClass(decl, args) => {
                 for a in args {
@@ -2661,7 +2662,7 @@ impl<'a> Checker<'a> {
                 for m in &decl.methods {
                     self.check_function(&m.function, Some(&decl.name), m.is_static);
                 }
-                self.infer_expr(e, locals)
+                Type::Mixed
             }
             ExprKind::StaticCall(class_name, method, args) => {
                 // Mirrors ExprKind::MethodCall's own structure exactly -
