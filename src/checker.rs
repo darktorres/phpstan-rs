@@ -2045,6 +2045,41 @@ impl<'a> Checker<'a> {
                     }
                     return;
                 }
+                // `PHPStan\Testing\assertType('expected type string', $expr)`
+                // is real PHPStan's own testing-DSL function, used
+                // throughout its vendored `tests/PHPStan/Analyser/nsrt/`
+                // fixture corpus (see Item 2 of the architecture-audit
+                // plan) to pin down an exact expected inferred type at a
+                // point of interest. Recognizing it here - comparing this
+                // project's own `infer_expr` result (rendered via `Type`'s
+                // existing PHPStan-style `Display` impl) against the
+                // literal expected string - turns that whole corpus into
+                // directly-runnable ground truth against this project's
+                // own checker, with no separate test harness needed.
+                // Real PHPStan itself treats this the same way (a no-op
+                // stub function whose call sites its *own* internal
+                // tooling specially recognizes), so this is additive,
+                // not a real diagnostic anyone would trip on outside of
+                // a fixture file that imports it.
+                if let ExprKind::Name(name) = &callee.kind
+                    && (name == "assertType" || name.ends_with("\\assertType"))
+                    && let [expected_arg, actual_arg] = args.as_slice()
+                    && let ExprKind::Literal(Literal::String(expected)) = &expected_arg.value.kind
+                {
+                    let actual = self.infer_expr(&actual_arg.value, locals).to_string();
+                    if &actual != expected {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!(
+                                "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
+                            ),
+                            span: actual_arg.value.span,
+                            level: 0,
+                        });
+                    }
+                    self.check_expr(&actual_arg.value, locals, label);
+                    return;
+                }
                 if let ExprKind::Name(name) = &callee.kind
                     && (name == "extract" || name == "eval")
                 {
@@ -9935,6 +9970,43 @@ mod tests {
     // gaps, per the audit plan's own Item 2.
 
     #[test]
+    fn assert_type_is_silent_when_the_inferred_type_matches() {
+        let d = diagnostics_for(
+            r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(int $x): void { assertType('int', $x); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn assert_type_flags_a_real_mismatch() {
+        let d = diagnostics_for(
+            r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(int $x): void { assertType('string', $x); }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(
+            d[0].message
+                .contains("assertType() mismatch: expected type \"string\", actual type \"int\"")
+        );
+    }
+
+    #[test]
+    fn assert_type_also_recognizes_the_fully_qualified_call_form() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(int $x): void { \PHPStan\Testing\assertType('string', $x); }
+        "#,
+        );
+        assert_eq!(d.len(), 1);
+        assert!(d[0].message.contains("assertType() mismatch"));
+    }
+
+    #[test]
     fn phpstan_instantiation_flags_abstract_class_and_interface() {
         // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Classes/data/instantiation.php
         // (lines ~29-30 of the vendored `2.2.11` tag): `new LoremInstantiation()` /
@@ -10127,5 +10199,49 @@ mod tests {
         );
         assert!(dupes.iter().any(|x| x.message.contains("for case C")));
         assert!(dupes.iter().any(|x| x.message.contains("for case E")));
+    }
+
+    // The `assertType()` special case in `check_expr`'s `Call` handling
+    // (see its own doc comment) turns any of phpstan-src's real
+    // `tests/PHPStan/Analyser/nsrt/*.php` fixtures into a directly
+    // runnable regression test: `diagnostics_for` returning empty means
+    // this project's own `infer_expr` matches PHPStan's own labeled
+    // ground truth exactly, at that exact call site. These two are
+    // copied verbatim (not trimmed) from real, small fixtures whose
+    // expected type happens to already line up with this project's own
+    // (coarser) `Type` representation - most `assertType` calls in the
+    // corpus assert a precision (integer ranges, literal array shapes,
+    // ...) this project doesn't attempt, so exact matches are the
+    // minority, not the norm; these were found by direct trial against
+    // the vendored corpus, not assumed.
+    #[test]
+    fn phpstan_nsrt_bool_cast_matches_real_assert_type() {
+        // Verbatim from vendor/phpstan-src/tests/PHPStan/Analyser/nsrt/bug-2997.php.
+        let d = diagnostics_for(
+            r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(\SimpleXMLElement $xml): void {
+                assertType('bool', (bool) $xml->Exists);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+    }
+
+    #[test]
+    fn phpstan_nsrt_float_increment_decrement_matches_real_assert_type() {
+        // Derived from vendor/phpstan-src/tests/PHPStan/Analyser/nsrt/bug-10122.php's
+        // `float $f` block - real PHP's `++`/`--` on a float stays a
+        // float, unlike Finding 16's own `null`/string special cases.
+        let d = diagnostics_for(
+            r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(float $f): void { assertType('float', ++$f); }
+            function test2(float $f): void { assertType('float', --$f); }
+            function test3(float $f): void { assertType('float', $f++); }
+            function test4(float $f): void { assertType('float', $f--); }
+        "#,
+        );
+        assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
     }
 }
