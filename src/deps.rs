@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::ast::*;
+use crate::ast_walk::{expr_children, stmt_children};
 
 /// Best-effort, deliberately over-approximating set of every function/class
 /// name one file's parse tree could reference externally - used purely to
@@ -164,9 +165,20 @@ fn collect_enum(e: &EnumDecl, names: &mut HashSet<String>) {
     }
 }
 
+// Delegates the "walk into nested statements" recursion to
+// `ast_walk::stmt_children` - this match only needs to handle each
+// variant's own non-statement fields (a condition, a subject, a case's
+// test, a catch's exception types, ...), which `stmt_children`'s
+// `Vec<&Stmt>` return type can't expose. `FunctionDecl`/`ClassDecl`/
+// `EnumDecl` are the one case where both are needed: `stmt_children`
+// deliberately returns none for them (they already have their own
+// dedicated declaration-walker), so this calls
+// `collect_function`/`collect_class`/`collect_enum` directly instead of
+// relying on the trailing loop.
 fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
     match &stmt.kind {
-        StmtKind::InlineHtml(_)
+        StmtKind::Block(_)
+        | StmtKind::InlineHtml(_)
         | StmtKind::Break(_)
         | StmtKind::Continue(_)
         | StmtKind::Namespace(_)
@@ -185,46 +197,22 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
                 collect_expr(e, names);
             }
         }
-        StmtKind::Block(stmts) => {
-            for s in stmts {
-                collect_stmt(s, names);
-            }
-        }
-        StmtKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            collect_expr(cond, names);
-            collect_stmt(then_branch, names);
-            if let Some(e) = else_branch {
-                collect_stmt(e, names);
-            }
-        }
-        StmtKind::While { cond, body } => {
-            collect_expr(cond, names);
-            collect_stmt(body, names);
-        }
-        StmtKind::DoWhile { body, cond } => {
-            collect_stmt(body, names);
+        StmtKind::If { cond, .. }
+        | StmtKind::While { cond, .. }
+        | StmtKind::DoWhile { cond, .. } => {
             collect_expr(cond, names);
         }
         StmtKind::For {
-            init,
-            cond,
-            step,
-            body,
+            init, cond, step, ..
         } => {
             for e in init.iter().chain(cond).chain(step) {
                 collect_expr(e, names);
             }
-            collect_stmt(body, names);
         }
         StmtKind::Foreach {
             subject,
             key,
             value,
-            body,
             ..
         } => {
             collect_expr(subject, names);
@@ -232,7 +220,6 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
                 collect_expr(k, names);
             }
             collect_expr(value, names);
-            collect_stmt(body, names);
         }
         StmtKind::FunctionDecl(f) => collect_function(f, names),
         StmtKind::ClassDecl(c) => collect_class(c, names),
@@ -255,144 +242,40 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
                 if let Some(t) = &case.test {
                     collect_expr(t, names);
                 }
-                for s in &case.body {
-                    collect_stmt(s, names);
-                }
             }
         }
-        StmtKind::Try {
-            body,
-            catches,
-            finally,
-        } => {
-            for s in body {
-                collect_stmt(s, names);
-            }
+        StmtKind::Try { catches, .. } => {
             for c in catches {
                 names.extend(c.types.iter().cloned());
-                for s in &c.body {
-                    collect_stmt(s, names);
-                }
-            }
-            if let Some(f) = finally {
-                for s in f {
-                    collect_stmt(s, names);
-                }
             }
         }
     }
+    for child in stmt_children(stmt) {
+        collect_stmt(child, names);
+    }
 }
 
+// Delegates the "walk into child expressions" recursion to
+// `ast_walk::expr_children` - this match only needs to handle each
+// variant's own name-bearing fields (a `StaticAccess`/`StaticCall`
+// class name, a bare `Name`, an `instanceof` target's class name) and
+// the three variants `expr_children` deliberately returns no children
+// for (`Closure`/`ArrowFn`/`NewAnonymousClass`, each needing its own
+// non-`Vec<&Expr>`-shaped walk - see `ast_walk`'s own module doc
+// comment for why).
 fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
     match &expr.kind {
-        ExprKind::Literal(_) | ExprKind::Variable(_) => {}
-        ExprKind::DynamicVariable(e) => collect_expr(e, names),
-        ExprKind::ArrayLiteral(items) => {
-            for item in items {
-                if let Some(k) = &item.key {
-                    collect_expr(k, names);
-                }
-                collect_expr(&item.value, names);
-            }
-        }
-        ExprKind::Unary(_, e)
-        | ExprKind::Grouping(e)
-        | ExprKind::Cast(_, e)
-        | ExprKind::Throw(e)
-        | ExprKind::YieldFrom(e)
-        | ExprKind::FirstClassCallable(e) => collect_expr(e, names),
-        ExprKind::Binary(_, l, r) | ExprKind::Assign(l, r) | ExprKind::CompoundAssign(_, l, r) => {
-            collect_expr(l, names);
-            collect_expr(r, names);
-        }
-        ExprKind::Ternary(c, t, e) => {
-            collect_expr(c, names);
-            if let Some(t) = t {
-                collect_expr(t, names);
-            }
-            collect_expr(e, names);
-        }
-        ExprKind::Call(callee, args) => {
-            collect_expr(callee, names);
-            for a in args {
-                collect_expr(&a.value, names);
-            }
-        }
-        ExprKind::New(target, args) => {
-            collect_expr(target, names);
-            for a in args {
-                collect_expr(&a.value, names);
-            }
-        }
-        ExprKind::PropertyAccess(base, _, _) => collect_expr(base, names),
-        ExprKind::MethodCall(recv, _, args, _) => {
-            collect_expr(recv, names);
-            for a in args {
-                collect_expr(&a.value, names);
-            }
-        }
-        ExprKind::DynamicPropertyAccess(base, name_expr) => {
-            collect_expr(base, names);
-            collect_expr(name_expr, names);
-        }
-        ExprKind::DynamicMethodCall(recv, name_expr, args) => {
-            collect_expr(recv, names);
-            collect_expr(name_expr, names);
-            for a in args {
-                collect_expr(&a.value, names);
-            }
-        }
-        ExprKind::StaticAccess(class, _) => {
+        ExprKind::StaticAccess(class, _) | ExprKind::StaticCall(class, _, _) => {
             names.insert(class.clone());
-        }
-        ExprKind::StaticCall(class, _, args) => {
-            names.insert(class.clone());
-            for a in args {
-                collect_expr(&a.value, names);
-            }
-        }
-        ExprKind::Index(base, idx) => {
-            collect_expr(base, names);
-            if let Some(i) = idx {
-                collect_expr(i, names);
-            }
         }
         ExprKind::Name(n) => {
             names.insert(n.clone());
         }
-        ExprKind::Instanceof(inner, target) => {
-            collect_expr(inner, names);
-            match target {
-                InstanceofTarget::Name(n) => {
-                    names.insert(n.clone());
-                }
-                InstanceofTarget::Expr(e) => collect_expr(e, names),
-            }
+        ExprKind::Instanceof(_, InstanceofTarget::Name(n)) => {
+            names.insert(n.clone());
         }
-        ExprKind::Clone(inner, overrides) => {
-            collect_expr(inner, names);
-            if let Some(o) = overrides {
-                collect_expr(o, names);
-            }
-        }
-        ExprKind::NewAnonymousClass(decl, args) => {
+        ExprKind::NewAnonymousClass(decl, _) => {
             collect_class(decl, names);
-            for a in args {
-                collect_expr(&a.value, names);
-            }
-        }
-        ExprKind::Yield(k, v) => {
-            if let Some(k) = k {
-                collect_expr(k, names);
-            }
-            if let Some(v) = v {
-                collect_expr(v, names);
-            }
-        }
-        ExprKind::Interpolated(parts) => {
-            for p in parts {
-                collect_expr(p, names);
-            }
         }
         ExprKind::Closure {
             params,
@@ -424,22 +307,10 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
             collect_expr(body, names);
         }
-        ExprKind::Match {
-            subject,
-            arms,
-            default,
-        } => {
-            collect_expr(subject, names);
-            for (conds, result) in arms {
-                for c in conds {
-                    collect_expr(c, names);
-                }
-                collect_expr(result, names);
-            }
-            if let Some(d) = default {
-                collect_expr(d, names);
-            }
-        }
+        _ => {}
+    }
+    for child in expr_children(expr) {
+        collect_expr(child, names);
     }
 }
 
