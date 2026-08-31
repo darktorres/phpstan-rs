@@ -370,6 +370,41 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
 }
 
 #[test]
+fn check_project_baseline_still_matches_a_differently_spelled_but_identical_path() {
+    // Finding 32: generating with "." then checking with "./." (the same
+    // real directory, spelled differently) must not make the whole
+    // baseline reappear as new - a realistic mismatch (a one-off local
+    // command vs. a CI script, a Makefile target vs. a manual run).
+    let dir = TempDir::new("check_project_baseline_path_spelling");
+    dir.write("bad.php", "<?php function f() { return $existingBug; }\n");
+    let baseline_path = dir.path().join("baseline.json");
+
+    let generate = bin()
+        .arg("check-project")
+        .arg(".")
+        .arg("--generate-baseline")
+        .arg(&baseline_path)
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(generate.status.success());
+
+    let filtered = bin()
+        .arg("check-project")
+        .arg("./.")
+        .arg("--baseline")
+        .arg(&baseline_path)
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let filtered_stdout = String::from_utf8_lossy(&filtered.stdout);
+    assert!(
+        filtered_stdout.contains("1 file(s) checked, 0 diagnostic(s)"),
+        "expected the baseline to still match despite the differently-spelled path, got: {filtered_stdout}"
+    );
+}
+
+#[test]
 fn check_project_with_no_args_and_no_config_prints_an_error_to_stderr() {
     // `dirs` isn't `required = true` on the clap side (a config file's
     // own `paths` can supply it instead - see Part B's own resolution

@@ -31,6 +31,39 @@ struct Entry {
     message: String,
 }
 
+/// Finding 32: a baseline entry's own `file` key was built directly from
+/// whatever `PathBuf` the current run happened to produce - two
+/// invocations that check the exact same real file but spell its path
+/// differently (`check-project .` vs `check-project ./.`, or a config
+/// file's own `paths` entry vs an equivalent positional CLI argument)
+/// produced two different keys for the same diagnostic, silently making
+/// every previously-baselined finding reappear as "new". Lexically
+/// resolves `.`/`..` segments and redundant separators - deliberately
+/// not `fs::canonicalize`, which would fail outright for a path that no
+/// longer exists (checking a file, baselining it, then later reporting
+/// against a moved/renamed baseline) and could also resolve symlinks
+/// differently across machines/checkouts, neither of which this is
+/// trying to solve.
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => match result.components().next_back() {
+                Some(std::path::Component::Normal(_)) => {
+                    result.pop();
+                }
+                _ => result.push(".."),
+            },
+            other => result.push(other.as_os_str()),
+        }
+    }
+    if result.as_os_str().is_empty() {
+        result.push(".");
+    }
+    result
+}
+
 /// Writes every diagnostic in `results` to `path` as a baseline file.
 /// Sorted (by file, then location, then message) so regenerating an
 /// unchanged codebase produces a byte-identical file - real HashMap
@@ -41,7 +74,7 @@ pub fn generate(path: &Path, results: &HashMap<PathBuf, Vec<Diagnostic>>) -> io:
     let mut entries: Vec<Entry> = results
         .iter()
         .flat_map(|(file, diagnostics)| {
-            let file = file.display().to_string();
+            let file = normalize_path(file).display().to_string();
             diagnostics.iter().map(move |d| Entry {
                 file: file.clone(),
                 location: d.location.clone(),
@@ -73,7 +106,7 @@ impl Baseline {
 
     fn contains(&self, file: &Path, d: &Diagnostic) -> bool {
         self.0.contains(&Entry {
-            file: file.display().to_string(),
+            file: normalize_path(file).display().to_string(),
             location: d.location.clone(),
             message: d.message.clone(),
         })
@@ -215,5 +248,42 @@ mod tests {
         assert_eq!(first, second);
 
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_differently_spelled_but_identical_path_is_still_matched() {
+        let mut baselined = HashMap::new();
+        baselined.insert(
+            PathBuf::from("./t.php"),
+            vec![diag("f", "undefined variable $x")],
+        );
+        let path = temp_path("path_spelling");
+        generate(&path, &baselined).unwrap();
+        let baseline = Baseline::load(&path).unwrap();
+
+        let mut results = HashMap::new();
+        results.insert(
+            PathBuf::from("././t.php"),
+            vec![diag("f", "undefined variable $x")],
+        );
+        filter(&mut results, &baseline);
+        assert!(results[&PathBuf::from("././t.php")].is_empty());
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn normalize_path_resolves_dot_and_dotdot_segments() {
+        assert_eq!(normalize_path(Path::new("./t.php")), PathBuf::from("t.php"));
+        assert_eq!(
+            normalize_path(Path::new("././t.php")),
+            PathBuf::from("t.php")
+        );
+        assert_eq!(
+            normalize_path(Path::new("src/../t.php")),
+            PathBuf::from("t.php")
+        );
+        assert_eq!(normalize_path(Path::new(".")), PathBuf::from("."));
+        assert_eq!(normalize_path(Path::new("./.")), PathBuf::from("."));
     }
 }
