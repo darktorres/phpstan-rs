@@ -208,7 +208,18 @@ impl<'a> Checker<'a> {
             // not just checkable from the outside at call sites.
             Some(sig) => {
                 for param in &sig.params {
-                    locals.insert(param.name.clone(), param.ty.clone());
+                    // `ParamSig::ty` holds a variadic parameter's own
+                    // *element* type (the right shape for checking each
+                    // individual argument at a call site) - inside the
+                    // function's own body, real PHP always collects a
+                    // variadic parameter into an `array` from the first
+                    // statement onward, never the bare element type.
+                    let ty = if param.variadic {
+                        Type::Array(Box::new(param.ty.clone()))
+                    } else {
+                        param.ty.clone()
+                    };
+                    locals.insert(param.name.clone(), ty);
                 }
             }
             // Shouldn't happen (this function had to be indexed to be
@@ -220,6 +231,11 @@ impl<'a> Checker<'a> {
                         .as_deref()
                         .map(types::parse_type_string)
                         .unwrap_or(Type::Mixed);
+                    let ty = if p.variadic {
+                        Type::Array(Box::new(ty))
+                    } else {
+                        ty
+                    };
                     locals.insert(p.name.clone(), ty);
                 }
             }
@@ -2144,6 +2160,11 @@ impl<'a> Checker<'a> {
                 }
                 for p in params {
                     let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    let ty = if p.variadic {
+                        Type::Array(Box::new(ty))
+                    } else {
+                        ty
+                    };
                     closure_locals.insert(p.name.clone(), ty);
                 }
                 let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
@@ -2167,6 +2188,11 @@ impl<'a> Checker<'a> {
                 let mut arrow_locals = locals.clone();
                 for p in params {
                     let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    let ty = if p.variadic {
+                        Type::Array(Box::new(ty))
+                    } else {
+                        ty
+                    };
                     arrow_locals.insert(p.name.clone(), ty);
                 }
                 self.check_expr(body, &mut arrow_locals, label);
@@ -7422,5 +7448,42 @@ mod tests {
         "#,
         );
         assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+    // Finding 23 from the architecture audit - a variadic parameter was
+    // bound inside its own function/closure/arrow-fn body as the element
+    // type, not an array of it, in three independent binding sites.
+
+    #[test]
+    fn variadic_parameter_is_an_array_inside_a_top_level_function_body() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int ...$nums): int { return count($nums); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn variadic_parameter_is_an_array_inside_a_closure_body() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void {
+                $f = function (int ...$nums): int { return count($nums); };
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn variadic_parameter_is_an_array_inside_an_arrow_fn_body() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void {
+                $g = fn(int ...$nums): int => count($nums);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 }
