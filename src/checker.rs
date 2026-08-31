@@ -947,12 +947,64 @@ impl<'a> Checker<'a> {
             }
             StmtKind::Switch { subject, cases } => {
                 self.check_expr(subject, locals, label);
+                // Two independent facts are tracked while walking cases
+                // in order:
+                //
+                // `narrowed_locals` accumulates "subject != case_i.test"
+                // for every case with a test, unconditionally - this is
+                // purely a statement about the dispatch comparison chain
+                // (direct dispatch past case_i requires its value not to
+                // have matched) and holds regardless of whether case_i's
+                // own body terminates or falls through.
+                //
+                // `running`/`*locals` tracks what a case reached via real
+                // fallthrough would see - only meaningful when the
+                // *immediately preceding* case is known not to terminate,
+                // tracked by `previous_terminates` (starts `true`: the
+                // first case has no predecessor to fall through from, so
+                // it's always reached via direct dispatch only).
+                //
+                // A case reached only by direct dispatch (previous case
+                // terminates, or this is the first case) is checked
+                // against `narrowed_locals` plus its own positive
+                // "subject === test" narrowing. A case that might also be
+                // reached via fallthrough is checked against the plain
+                // fallthrough-inherited `running` state instead, without
+                // extra narrowing - conservative (it doesn't claim the
+                // precision of the direct-dispatch-only path when
+                // fallthrough is also possible), matching this project's
+                // general preference for missing precision over a false
+                // positive.
+                let mut running = locals.clone();
+                let mut narrowed_locals = locals.clone();
+                let mut previous_terminates = true;
                 for case in cases {
                     if let Some(t) = &case.test {
                         self.check_expr(t, locals, label);
                     }
-                    self.check_block(&case.body, locals, declared_return, label);
+                    let mut case_locals = if previous_terminates {
+                        let mut nl = narrowed_locals.clone();
+                        if let Some(t) = &case.test {
+                            self.apply_equality_narrowing(subject, t, &mut nl, true);
+                        }
+                        nl
+                    } else {
+                        running.clone()
+                    };
+                    self.check_block(&case.body, &mut case_locals, declared_return, label);
+                    let case_terminates = case
+                        .body
+                        .last()
+                        .is_some_and(|s| self.always_terminates(s, &case_locals));
+                    if let Some(t) = &case.test {
+                        self.apply_equality_narrowing(subject, t, &mut narrowed_locals, false);
+                    }
+                    if !case_terminates {
+                        running = case_locals;
+                    }
+                    previous_terminates = case_terminates;
                 }
+                *locals = running;
             }
             StmtKind::Try {
                 body,
@@ -1432,10 +1484,19 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Ternary(cond, then_, else_) => {
                 self.check_expr(cond, locals, label);
+                // Same clone-and-narrow shape as `StmtKind::If` - a
+                // ternary is just as branch-based, and without this,
+                // `$x === null ? "default" : $x` never benefits from the
+                // narrowing an equivalent `if` already gets.
+                let mut then_locals = locals.clone();
+                self.apply_narrowing(cond, &mut then_locals, true);
                 if let Some(t) = then_ {
-                    self.check_expr(t, locals, label);
+                    self.check_expr(t, &mut then_locals, label);
                 }
-                self.check_expr(else_, locals, label);
+                let mut else_locals = locals.clone();
+                self.apply_narrowing(cond, &mut else_locals, false);
+                self.check_expr(else_, &mut else_locals, label);
+                *locals = merge_scopes(&then_locals, &else_locals);
             }
             ExprKind::ArrayLiteral(items) => {
                 for (k, v) in items {
@@ -1635,14 +1696,67 @@ impl<'a> Checker<'a> {
                 default,
             } => {
                 self.check_expr(subject, locals, label);
+                // Real `match` has no fallthrough - each arm is mutually
+                // exclusive, so (unlike `switch`) a later arm/default can
+                // always safely assume every earlier arm's own condition
+                // was false. `match(true) { $cond => ... }` is a common,
+                // deliberate `switch`-replacement idiom specifically
+                // because each arm's own condition is checked with `===`
+                // - treat the arm's condition itself as an `if`-style
+                // condition in that case; otherwise narrow via an
+                // implicit `subject === cond` equality, the same as an
+                // ordinary `switch` case. Only attempted for a
+                // single-condition arm (`1, 2 => ...` multi-value arms
+                // fall back to unnarrowed, rather than guessing at a
+                // combined "or" narrowing).
+                let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
+                let mut accumulated = locals.clone();
+                let mut merged: Option<HashMap<String, Type>> = None;
                 for (conds, result) in arms {
                     for c in conds {
                         self.check_expr(c, locals, label);
                     }
-                    self.check_expr(result, locals, label);
+                    let mut arm_locals = accumulated.clone();
+                    if let [only_cond] = conds.as_slice() {
+                        if match_true {
+                            self.apply_narrowing(only_cond, &mut arm_locals, true);
+                        } else {
+                            self.apply_equality_narrowing(
+                                subject,
+                                only_cond,
+                                &mut arm_locals,
+                                true,
+                            );
+                        }
+                    }
+                    self.check_expr(result, &mut arm_locals, label);
+                    merged = Some(match merged {
+                        Some(m) => merge_scopes(&m, &arm_locals),
+                        None => arm_locals.clone(),
+                    });
+                    if let [only_cond] = conds.as_slice() {
+                        if match_true {
+                            self.apply_narrowing(only_cond, &mut accumulated, false);
+                        } else {
+                            self.apply_equality_narrowing(
+                                subject,
+                                only_cond,
+                                &mut accumulated,
+                                false,
+                            );
+                        }
+                    }
                 }
                 if let Some(d) = default {
-                    self.check_expr(d, locals, label);
+                    let mut default_locals = accumulated.clone();
+                    self.check_expr(d, &mut default_locals, label);
+                    merged = Some(match merged {
+                        Some(m) => merge_scopes(&m, &default_locals),
+                        None => default_locals,
+                    });
+                }
+                if let Some(m) = merged {
+                    *locals = m;
                 }
             }
             ExprKind::Closure {
@@ -1954,20 +2068,51 @@ impl<'a> Checker<'a> {
             ExprKind::FirstClassCallable(_) => Type::Callable,
             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => Type::Callable,
             ExprKind::Match {
-                subject: _,
+                subject,
                 arms,
                 default,
             } => {
                 // Same "don't let an unknown branch compose into a
                 // partial Union that looks more precise than it is" rule
                 // Ternary already applies, generalized to N arms plus an
-                // optional default.
-                let mut result_types: Vec<Type> = arms
-                    .iter()
-                    .map(|(_, result)| self.infer_expr(result, locals))
-                    .collect();
+                // optional default - and the same per-arm narrowing
+                // `check_expr`'s own Match handling applies, so a
+                // `default` arm returning the match's own subject infers
+                // its real, narrowed type rather than the subject's
+                // unnarrowed original type.
+                let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
+                let mut accumulated = locals.clone();
+                let mut result_types: Vec<Type> = Vec::new();
+                for (conds, result) in arms {
+                    let mut arm_locals = accumulated.clone();
+                    if let [only_cond] = conds.as_slice() {
+                        if match_true {
+                            self.apply_narrowing(only_cond, &mut arm_locals, true);
+                        } else {
+                            self.apply_equality_narrowing(
+                                subject,
+                                only_cond,
+                                &mut arm_locals,
+                                true,
+                            );
+                        }
+                    }
+                    result_types.push(self.infer_expr(result, &arm_locals));
+                    if let [only_cond] = conds.as_slice() {
+                        if match_true {
+                            self.apply_narrowing(only_cond, &mut accumulated, false);
+                        } else {
+                            self.apply_equality_narrowing(
+                                subject,
+                                only_cond,
+                                &mut accumulated,
+                                false,
+                            );
+                        }
+                    }
+                }
                 if let Some(d) = default {
-                    result_types.push(self.infer_expr(d, locals));
+                    result_types.push(self.infer_expr(d, &accumulated));
                 }
                 if result_types.contains(&Type::Mixed) {
                     Type::Mixed
@@ -2102,11 +2247,15 @@ impl<'a> Checker<'a> {
                     })
                     .unwrap_or(Type::Mixed)
             }
-            ExprKind::Ternary(_, then_, else_) => {
-                let else_ty = self.infer_expr(else_, locals);
+            ExprKind::Ternary(cond, then_, else_) => {
+                let mut else_locals = locals.clone();
+                self.apply_narrowing(cond, &mut else_locals, false);
+                let else_ty = self.infer_expr(else_, &else_locals);
                 match then_ {
                     Some(t) => {
-                        let then_ty = self.infer_expr(t, locals);
+                        let mut then_locals = locals.clone();
+                        self.apply_narrowing(cond, &mut then_locals, true);
+                        let then_ty = self.infer_expr(t, &then_locals);
                         // Never let an unknown branch compose into a partial
                         // Union that looks more precise than it is.
                         if then_ty == Type::Mixed || else_ty == Type::Mixed {
@@ -5953,6 +6102,133 @@ mod tests {
                     return "empty";
                 }
                 return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 55 from the architecture audit - ternary/switch/match never
+    // applied condition-based narrowing at all, for any condition shape.
+
+    #[test]
+    fn ternary_narrows_both_branches() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                return $x === null ? "default" : $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                return $x !== null ? $x : "default";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let wrong = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                return $x === null ? $x : "default";
+            }
+        "#,
+        );
+        assert_eq!(wrong.len(), 1, "got: {wrong:?}");
+    }
+
+    #[test]
+    fn switch_default_narrows_past_a_terminating_case() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                switch ($x) {
+                    case null:
+                        return "was-null";
+                    default:
+                        return $x;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let wrong = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                switch ($x) {
+                    case null:
+                        return $x;
+                    default:
+                        return "not null";
+                }
+            }
+        "#,
+        );
+        assert_eq!(wrong.len(), 1, "got: {wrong:?}");
+    }
+
+    #[test]
+    fn switch_fallthrough_case_does_not_leak_its_own_narrowing_past_a_later_terminating_case() {
+        // Regression test for a real bug caught while implementing this
+        // fix: an empty `case null: case "": ...` fallthrough group's own
+        // optimistic narrowing (subject === null) must not leak past the
+        // *second* case (which itself terminates) into `default`.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                switch ($x) {
+                    case null:
+                    case "":
+                        return "empty-ish";
+                    default:
+                        return $x;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn match_true_pattern_narrows_each_arm_and_default() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                return match (true) {
+                    $x === null => "default",
+                    default => $x,
+                };
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let wrong = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                return match (true) {
+                    $x === null => $x,
+                    default => "not null",
+                };
+            }
+        "#,
+        );
+        assert_eq!(wrong.len(), 1, "got: {wrong:?}");
+    }
+
+    #[test]
+    fn match_on_a_real_subject_narrows_via_implicit_equality() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                return match ($x) {
+                    null => "default",
+                    default => $x,
+                };
             }
         "#,
         );
