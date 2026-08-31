@@ -3010,6 +3010,38 @@ impl<'a> Checker<'a> {
             });
         }
 
+        // Finding 40: calling a non-variadic function/method with more
+        // positional arguments than it can possibly accept is a real PHP
+        // fatal error ("Too many arguments... expected exactly N"), just
+        // as basic a check as the "too few" one right above it - but
+        // nothing here caught it before, since the per-argument loop
+        // below simply stops (via its own `break` once `sig.params.get(i)`
+        // runs out and the last param isn't variadic) rather than
+        // reporting anything. Uses the raw `args.len()` deliberately, not
+        // whatever a future named-argument resolver's own output would
+        // be sized to - a non-variadic signature's resolved slice is
+        // always exactly `params.len()` long by that resolver's own
+        // design, which would make this check always read `false` if it
+        // read from that shape instead.
+        let last_is_variadic = sig.params.last().is_some_and(|p| p.variadic);
+        if !last_is_variadic && args.len() > sig.params.len() {
+            let quantifier = if required == sig.params.len() {
+                "exactly"
+            } else {
+                "at most"
+            };
+            self.diagnostics.push(Diagnostic {
+                location: label.to_string(),
+                message: format!(
+                    "{callee_label}() expects {quantifier} {} argument(s), {} given",
+                    sig.params.len(),
+                    args.len()
+                ),
+                span,
+                level: 0,
+            });
+        }
+
         for (i, arg) in args.iter().enumerate() {
             let param = match sig.params.get(i) {
                 Some(p) => p,
@@ -6857,6 +6889,97 @@ mod tests {
                 .any(|x| x.message.contains("expects at least 2 argument(s)")),
             "expected a too-few-arguments diagnostic, got: {d:?}"
         );
+    }
+
+    #[test]
+    fn a_call_with_too_many_arguments_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsTwo(int $a, int $b): int { return $a + $b; }
+            function test(): int { return needsTwo(1, 2, 3, 4, 5); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("needsTwo() expects exactly 2 argument(s), 5 given")),
+            "expected a too-many-arguments diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_constructor_call_with_too_many_arguments_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point40 { public function __construct(int $x, int $y) {} }
+            function test(): Point40 { return new Point40(1, 2, 3, 4, 5); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("Point40::__construct() expects exactly 2 argument(s), 5 given")),
+            "expected a too-many-arguments diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_method_call_with_too_many_arguments_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Calc40 { public function add(int $a, int $b): int { return $a + $b; } }
+            function test(Calc40 $c): int { return $c->add(1, 2, 3, 4); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("Calc40::add() expects exactly 2 argument(s), 4 given")),
+            "expected a too-many-arguments diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_static_call_with_too_many_arguments_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Calc40b { public static function multiply(int $a, int $b): int { return $a * $b; } }
+            function test(): int { return Calc40b::multiply(1, 2, 3, 4); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("Calc40b::multiply() expects exactly 2 argument(s), 4 given")),
+            "expected a too-many-arguments diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn too_many_arguments_says_at_most_when_a_parameter_has_a_default() {
+        let d = diagnostics_for(
+            r#"<?php
+            function withDefault40(int $a, int $b = 5): int { return $a + $b; }
+            function test(): int { return withDefault40(1, 2, 3); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("withDefault40() expects at most 2 argument(s), 3 given")),
+            "expected an at-most-N-arguments diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_variadic_function_accepting_extra_positional_arguments_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function withVariadic40(int $a, int ...$rest): int { return $a; }
+            function test(): int { return withVariadic40(1, 2, 3, 4, 5); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
