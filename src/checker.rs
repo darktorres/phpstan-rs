@@ -7392,4 +7392,35 @@ mod tests {
         );
         assert_eq!(d.len(), 1, "got: {d:?}");
     }
+    // Finding 14 from the architecture audit - a PHPDoc type completely
+    // replaced the native hint, silently dropping nullability the native
+    // signature already stated.
+
+    #[test]
+    fn docblock_type_merges_the_native_hints_nullability_when_not_repeated() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                /** @param int $x */
+                public function bar(?int $x = null): void {}
+            }
+            function test(Foo $f): void { $f->bar(null); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn docblock_type_still_rejects_a_genuinely_wrong_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                /** @param int $x */
+                public function bar(?int $x = null): void {}
+            }
+            function test(Foo $f): void { $f->bar("not an int"); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
 }

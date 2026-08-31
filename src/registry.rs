@@ -54,10 +54,32 @@ fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) -> Type {
 }
 
 fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
-    doc_type
-        .or(native_hint)
-        .map(types::parse_type_string)
-        .unwrap_or(Type::Mixed)
+    let Some(doc) = doc_type else {
+        return native_hint
+            .map(types::parse_type_string)
+            .unwrap_or(Type::Mixed);
+    };
+    let ty = types::parse_type_string(doc);
+    // A docblock type is trusted as the complete picture and otherwise
+    // fully replaces the native hint (deliberate - it's usually more
+    // precise) - but real docblocks very commonly aren't fully redundant
+    // with the native hint, most often by not bothering to repeat a `?`
+    // the native signature already has (`/** @param int $x */` on
+    // `function f(?int $x)`, since the signature already fully states
+    // the nullability). Silently losing that would make an entirely
+    // legitimate `null` argument a false positive - union `Null` in
+    // unless the docblock type already says so itself.
+    let native_is_nullable = native_hint.is_some_and(|h| h.trim_start().starts_with('?'));
+    let already_nullable = match &ty {
+        Type::Null | Type::Mixed => true,
+        Type::Union(members) => members.contains(&Type::Null),
+        _ => false,
+    };
+    if native_is_nullable && !already_nullable {
+        Type::Union(vec![ty, Type::Null])
+    } else {
+        ty
+    }
 }
 
 /// A single leading `\` marks "fully qualified from the global namespace"
