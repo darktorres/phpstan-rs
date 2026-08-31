@@ -1315,6 +1315,29 @@ impl<'a> Checker<'a> {
                     });
                 }
             }
+            ExprKind::Unary(
+                op @ (UnaryOp::PreInc | UnaryOp::PostInc | UnaryOp::PreDec | UnaryOp::PostDec),
+                inner,
+            ) => {
+                self.check_expr(inner, locals, label);
+                // Real PHP: incrementing `null` produces `int(1)`;
+                // decrementing `null`, and either direction on a `bool`,
+                // is a no-op (the value is unchanged) - only the
+                // null-to-int case actually changes the tracked type.
+                // A string operand's own exact value isn't modeled
+                // precisely enough to distinguish numeric from
+                // alphanumeric-increment behavior, so it conservatively
+                // stays a string either way.
+                if let ExprKind::Variable(name) = &inner.kind {
+                    let current = locals.get(name).cloned().unwrap_or(Type::Mixed);
+                    let is_increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
+                    let updated = match &current {
+                        Type::Null if is_increment => Type::Int,
+                        other => other.clone(),
+                    };
+                    locals.insert(name.clone(), updated);
+                }
+            }
             ExprKind::Unary(_, inner)
             | ExprKind::Grouping(inner)
             | ExprKind::Cast(_, inner)
@@ -1960,6 +1983,16 @@ impl<'a> Checker<'a> {
                 _ => Type::Mixed,
             },
             ExprKind::Unary(UnaryOp::Not, _) => Type::Bool,
+            // Real PHP's unary minus/plus convert a numeric string
+            // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) -
+            // the same implicit-numeric-coercion rule arithmetic
+            // operators apply generally.
+            ExprKind::Unary(UnaryOp::Neg | UnaryOp::Plus, inner) => {
+                match self.infer_expr(inner, locals) {
+                    Type::String | Type::StringLiteral(_) => Type::Int,
+                    other => other,
+                }
+            }
             ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
             ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),
             ExprKind::Assign(_, rhs) => self.infer_expr(rhs, locals),
@@ -2341,18 +2374,32 @@ impl<'a> Checker<'a> {
             | BinOp::GtEq
             | BinOp::And
             | BinOp::Or
-            | BinOp::LogicalXor
-            | BinOp::Spaceship => Type::Bool,
-            BinOp::Add
-            | BinOp::Sub
-            | BinOp::Mul
-            | BinOp::Mod
-            | BinOp::Pow
-            | BinOp::BitAnd
-            | BinOp::BitOr
-            | BinOp::BitXor
-            | BinOp::Shl
-            | BinOp::Shr => {
+            | BinOp::LogicalXor => Type::Bool,
+            // The spaceship operator returns -1/0/1 (an int), not a bool -
+            // its single most common real use is returning a value
+            // directly from a comparator (`usort`/`uasort`/...).
+            BinOp::Spaceship => Type::Int,
+            BinOp::Add => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                // `+` on two arrays is PHP's array-union operator, not
+                // arithmetic - it keeps every key from the left operand,
+                // filling in any key only present on the right. The real
+                // per-key result type isn't something `Type::Array`/
+                // `Type::ArrayShape` can express precisely today, so
+                // `Array(Mixed)` is the honest answer.
+                if matches!(lt, Type::Array(_) | Type::ArrayShape(_))
+                    && matches!(rt, Type::Array(_) | Type::ArrayShape(_))
+                {
+                    return Type::Array(Box::new(Type::Mixed));
+                }
+                if lt == Type::Float || rt == Type::Float {
+                    Type::Float
+                } else {
+                    Type::Int
+                }
+            }
+            BinOp::Sub | BinOp::Mul | BinOp::Pow => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
                 if lt == Type::Float || rt == Type::Float {
@@ -2360,6 +2407,13 @@ impl<'a> Checker<'a> {
                 } else {
                     Type::Int
                 }
+            }
+            // `%` and the bitwise/shift operators always cast both
+            // operands to int before operating, regardless of whether
+            // either side was a float - unlike Add/Sub/Mul/Pow, there is
+            // no float-promotion rule for these.
+            BinOp::Mod | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                Type::Int
             }
             // Real PHP division returns int or float depending on the
             // runtime values, not just their static types - not modeled.
@@ -5685,6 +5739,113 @@ mod tests {
                 /** @param T $value */
                 public function __construct(private $value) {}
             }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Findings 12/16/18/19 from the architecture audit - infer_binary
+    // grouped several operators by superficial similarity rather than by
+    // each one's real PHP return-type rule; the Unary handling never
+    // rebound `++`/`--`'s own variable, and never modeled numeric-string
+    // coercion for unary `-`/`+`.
+
+    #[test]
+    fn spaceship_operator_infers_as_int_not_bool() {
+        let d = diagnostics_for(
+            r#"<?php
+            function compare(int $a, int $b): int {
+                return $a <=> $b;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let wrong = diagnostics_for(
+            r#"<?php
+            function compareWrong(int $a, int $b): string {
+                return $a <=> $b;
+            }
+        "#,
+        );
+        assert_eq!(wrong.len(), 1, "got: {wrong:?}");
+    }
+
+    #[test]
+    fn modulo_and_bitwise_and_shift_operators_always_infer_as_int() {
+        for src in [
+            r#"<?php function f(float $a, int $b): int { return $a % $b; }"#,
+            r#"<?php function f(float $a, int $b): int { return $a << $b; }"#,
+            r#"<?php function f(float $a, int $b): int { return $a >> $b; }"#,
+            r#"<?php function f(float $a, int $b): int { return $a & $b; }"#,
+            r#"<?php function f(float $a, int $b): int { return $a | $b; }"#,
+            r#"<?php function f(float $a, int $b): int { return $a ^ $b; }"#,
+        ] {
+            let d = diagnostics_for(src);
+            assert!(d.is_empty(), "unexpected diagnostics for {src}: {d:?}");
+        }
+    }
+
+    #[test]
+    fn array_plus_array_infers_as_array_not_arithmetic() {
+        let d = diagnostics_for(
+            r#"<?php
+            function merge(array $config, array $defaults): int {
+                $merged = $config + $defaults;
+                return count($merged);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn increment_on_a_null_variable_rebinds_it_to_int() {
+        let d = diagnostics_for(
+            r#"<?php
+            function counter(): int {
+                $x = null;
+                $x++;
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn decrement_on_a_null_variable_leaves_it_null() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): int {
+                $x = null;
+                $x--;
+                return $x;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("got null"), "got: {d:?}");
+    }
+
+    #[test]
+    fn increment_on_a_bool_variable_leaves_it_a_bool() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): bool {
+                $x = true;
+                $x++;
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn unary_minus_on_a_string_infers_as_int() {
+        let d = diagnostics_for(
+            r#"<?php
+            function negate(string $s): int { return -$s; }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
