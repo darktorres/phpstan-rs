@@ -1388,15 +1388,43 @@ impl<'a> Checker<'a> {
             ExprKind::Variable(name) => {
                 locals.insert(name.clone(), ty);
             }
-            ExprKind::ArrayLiteral(items) => {
-                let element_ty = match &ty {
-                    Type::Array(inner) => (**inner).clone(),
-                    _ => Type::Mixed,
-                };
-                for (_, item) in items {
-                    self.bind_assignment_target(item, element_ty.clone(), locals);
+            ExprKind::ArrayLiteral(items) => match &ty {
+                // A known array shape (from a `@return array{0: int, 1:
+                // string}`-typed source, most commonly) carries real
+                // per-position/per-key types - a plain homogeneous
+                // `Type::Array` fallback would silently discard that
+                // precision. A keyed destructuring element (`['key' =>
+                // $x] = $shaped`) looks up its own literal key directly;
+                // a positional element (`[$a, $b] = $shaped`, the common
+                // tuple-destructuring case) looks up the field whose key
+                // is that position's own index ("0", "1", ...).
+                Type::ArrayShape(fields) => {
+                    for (position, (key, item)) in items.iter().enumerate() {
+                        let field_key = match key.as_ref().map(|k| &k.kind) {
+                            Some(ExprKind::Literal(Literal::String(s))) => Some(s.clone()),
+                            Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
+                            Some(_) => None,
+                            None => Some(position.to_string()),
+                        };
+                        let element_ty = field_key
+                            .and_then(|k| fields.iter().find(|(fk, _, _)| *fk == k))
+                            .map(|(_, t, _)| t.clone())
+                            .unwrap_or(Type::Mixed);
+                        self.bind_assignment_target(item, element_ty, locals);
+                    }
                 }
-            }
+                Type::Array(inner) => {
+                    let element_ty = (**inner).clone();
+                    for (_, item) in items {
+                        self.bind_assignment_target(item, element_ty.clone(), locals);
+                    }
+                }
+                _ => {
+                    for (_, item) in items {
+                        self.bind_assignment_target(item, Type::Mixed, locals);
+                    }
+                }
+            },
             _ => {}
         }
     }
@@ -7616,6 +7644,62 @@ mod tests {
             class Foo {}
             function needsFoo(Foo $x): void {}
             function test(Owner $obj): void { needsFoo($obj->getFoo()); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 42 from the architecture audit - destructuring from an
+    // array{...} shape didn't extract each position/key's own precise
+    // type, falling back to Mixed.
+
+    #[test]
+    fn positional_destructuring_extracts_the_shapes_real_per_position_types() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return array{0: int, 1: string} */
+            function pair(): array { return [1, "a"]; }
+            function test(): string {
+                [$num, $str] = pair();
+                return $num;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(
+            d[0].message.contains("expected string, got int"),
+            "got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn keyed_destructuring_extracts_the_shapes_real_per_key_types() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return array{name: string, age: int} */
+            function person(): array { return ["name" => "Al", "age" => 30]; }
+            function test(): int {
+                ["name" => $name, "age" => $age] = person();
+                return $name;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(
+            d[0].message.contains("expected int, got string"),
+            "got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn correctly_typed_shape_destructuring_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return array{0: int, 1: string} */
+            function pair(): array { return [1, "a"]; }
+            function test(): int {
+                [$num, $str] = pair();
+                return $num;
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
