@@ -265,6 +265,17 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // Without this, a plain `object` type hint got namespace-qualified
         // into nonsense like `App\Some\Namespace\object`.
         Type::Object(name, args) if name == "object" => Type::Object(name, args),
+        // Same reasoning as `object` above, for a different reason:
+        // `Traversable` here is never something the programmer wrote as
+        // a class reference in their own code - it's this project's own
+        // internal desugaring of the `iterable` keyword (`array|
+        // Traversable`), a fixed, always-global meaning `iterable` itself
+        // carries regardless of the current namespace. Without this, a
+        // namespaced file's `iterable`-typed parameter got its synthetic
+        // `Traversable` half namespace-qualified into nonsense like
+        // `App\Traversable`, which no real `Iterator`/`Generator`/
+        // `IteratorAggregate` implementation could ever satisfy.
+        Type::Object(name, args) if name == "Traversable" => Type::Object(name, args),
         Type::Object(name, args) => Type::Object(
             ctx.resolve(&name),
             args.into_iter()

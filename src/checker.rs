@@ -6983,4 +6983,53 @@ mod tests {
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
+    // Finding 33 from the architecture audit - `iterable` was parsed as
+    // plain `array`, silently dropping its `|Traversable` half.
+
+    #[test]
+    fn iterable_accepts_a_real_traversable_not_just_an_array() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(iterable $items): void {
+                foreach ($items as $item) { echo $item; }
+            }
+            function test(): void {
+                f(new ArrayIterator([1, 2, 3]));
+                f([1, 2, 3]);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn iterable_still_rejects_a_genuinely_non_iterable_value() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(iterable $items): void {}
+            function test(): void { f("not iterable"); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn iterable_traversable_half_is_not_namespace_mangled() {
+        // Regression test for a real bug caught while implementing this
+        // fix: the synthesized `Traversable` half of `iterable` is this
+        // project's own internal desugaring, not something the
+        // programmer wrote as a class reference - it must stay global
+        // regardless of the current namespace, the same way the native
+        // `object` hint already does.
+        let d = diagnostics_for(
+            r#"<?php
+            namespace App;
+            function f(iterable $items): void {
+                foreach ($items as $item) { echo $item; }
+            }
+            function test(): void { f(new \ArrayIterator([1, 2, 3])); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
 }

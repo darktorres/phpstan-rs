@@ -361,8 +361,30 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `array<class-string<TKey>, TValue>`) fits the same "2-arg
         // generic, key discarded, value survives" shape the rest of this
         // arm already handles.
-        "array" | "iterable" | "list" | "non-empty-array" | "non-empty-list"
-        | "class-string-map" => match generic_args.len() {
+        "array" | "list" | "non-empty-array" | "class-string-map" => match generic_args.len() {
+            0 => Type::Array(Box::new(Type::Mixed)),
+            1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
+            _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
+        },
+        // Unlike its neighbors above, `iterable` is real PHP's own native
+        // type hint (not a PHPDoc-only pseudo-type), defined as exactly
+        // `array|Traversable` - a broader type than `array`, not a
+        // narrower refinement of it. Parsing it as bare `array` silently
+        // dropped the entire `Traversable` half, rejecting any real
+        // Generator/Iterator/IteratorAggregate passed to an
+        // `iterable`-hinted parameter.
+        "iterable" => {
+            let element_ty = match generic_args.len() {
+                0 => Type::Mixed,
+                1 => parse_type_string(generic_args[0]),
+                _ => parse_type_string(generic_args[1]),
+            };
+            Type::Union(vec![
+                Type::Array(Box::new(element_ty)),
+                Type::Object("Traversable".to_string(), Vec::new()),
+            ])
+        }
+        "non-empty-list" => match generic_args.len() {
             0 => Type::Array(Box::new(Type::Mixed)),
             1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
             _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
