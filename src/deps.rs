@@ -312,43 +312,43 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
             collect_expr(e, names);
         }
-        ExprKind::Call(callee, args, _) => {
+        ExprKind::Call(callee, args) => {
             collect_expr(callee, names);
             for a in args {
-                collect_expr(a, names);
+                collect_expr(&a.value, names);
             }
         }
-        ExprKind::New(target, args, _) => {
+        ExprKind::New(target, args) => {
             collect_expr(target, names);
             for a in args {
-                collect_expr(a, names);
+                collect_expr(&a.value, names);
             }
         }
         ExprKind::PropertyAccess(base, _, _) => collect_expr(base, names),
-        ExprKind::MethodCall(recv, _, args, _, _) => {
+        ExprKind::MethodCall(recv, _, args, _) => {
             collect_expr(recv, names);
             for a in args {
-                collect_expr(a, names);
+                collect_expr(&a.value, names);
             }
         }
         ExprKind::DynamicPropertyAccess(base, name_expr) => {
             collect_expr(base, names);
             collect_expr(name_expr, names);
         }
-        ExprKind::DynamicMethodCall(recv, name_expr, args, _) => {
+        ExprKind::DynamicMethodCall(recv, name_expr, args) => {
             collect_expr(recv, names);
             collect_expr(name_expr, names);
             for a in args {
-                collect_expr(a, names);
+                collect_expr(&a.value, names);
             }
         }
         ExprKind::StaticAccess(class, _) => {
             names.insert(class.clone());
         }
-        ExprKind::StaticCall(class, _, args, _) => {
+        ExprKind::StaticCall(class, _, args) => {
             names.insert(class.clone());
             for a in args {
-                collect_expr(a, names);
+                collect_expr(&a.value, names);
             }
         }
         ExprKind::Index(base, idx) => {
@@ -375,10 +375,10 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_expr(o, names);
             }
         }
-        ExprKind::NewAnonymousClass(decl, args, _) => {
+        ExprKind::NewAnonymousClass(decl, args) => {
             collect_class(decl, names);
             for a in args {
-                collect_expr(a, names);
+                collect_expr(&a.value, names);
             }
         }
         ExprKind::Yield(k, v) => {

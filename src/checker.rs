@@ -1831,9 +1831,9 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(inner, locals, !branch_true);
             }
             ExprKind::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
-            ExprKind::Call(callee, args, _) => {
+            ExprKind::Call(callee, args) => {
                 if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
-                    && let ExprKind::Variable(var_name) = &single_arg.kind
+                    && let ExprKind::Variable(var_name) = &single_arg.value.kind
                 {
                     if name == "empty" {
                         // `empty($x)` is PHP's own falsy check - only the
@@ -1978,7 +1978,7 @@ impl<'a> Checker<'a> {
 
     fn check_expr(&mut self, e: &Expr, locals: &mut HashMap<String, Type>, label: &str) {
         match &e.kind {
-            ExprKind::Call(callee, args, has_spread) => {
+            ExprKind::Call(callee, args) => {
                 // `unset($x)` genuinely removes `$x` from scope in real
                 // PHP - a real bug if it's used afterward. Checked before
                 // anything else below: `predefine_byref_or_unknown_args`
@@ -1995,10 +1995,10 @@ impl<'a> Checker<'a> {
                     && name == "unset"
                 {
                     for a in args {
-                        if let ExprKind::Variable(var_name) = &a.kind {
+                        if let ExprKind::Variable(var_name) = &a.value.kind {
                             locals.remove(var_name);
                         } else {
-                            self.check_expr(a, locals, label);
+                            self.check_expr(&a.value, locals, label);
                         }
                     }
                     return;
@@ -2040,9 +2040,16 @@ impl<'a> Checker<'a> {
                 let sig = resolved_name
                     .as_deref()
                     .and_then(|name| self.registry.lookup_function(name));
-                self.predefine_byref_or_unknown_args(sig, args, locals);
+                // Item 1: resolves the call's own arguments against the
+                // real signature (named/reordered-named arguments no
+                // longer get checked as if they were positional in
+                // written order) before any consumer below sees them.
+                let resolved = sig
+                    .map(|s| resolve_call_args(args, &s.params))
+                    .unwrap_or_default();
+                self.predefine_byref_or_unknown_args(sig, args, &resolved, locals);
                 for a in args {
-                    self.check_expr(a, locals, label);
+                    self.check_expr(&a.value, locals, label);
                 }
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
@@ -2054,8 +2061,11 @@ impl<'a> Checker<'a> {
                         // slot, producing a real, severe false positive
                         // for the standard "forward a dynamically-sized
                         // argument list" idiom.
+                        let has_spread = args.iter().any(|a| a.spread);
                         if !has_spread {
-                            self.check_args(name, sig, args, locals, label, None, e.span);
+                            self.check_args(
+                                name, sig, args, &resolved, locals, label, None, e.span,
+                            );
                             if matches!(name.as_str(), "sprintf" | "printf") {
                                 self.check_format_string_call(name, args, locals, label);
                             }
@@ -2077,7 +2087,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ExprKind::MethodCall(recv, method, args, _, has_spread) => {
+            ExprKind::MethodCall(recv, method, args, _) => {
                 // Finding 49's other real shape: `(function () {...})
                 // ->bindTo($newThis, $scope)` - same idea as
                 // `Closure::bind`, just on the receiver instead of the
@@ -2090,7 +2100,7 @@ impl<'a> Checker<'a> {
                 {
                     let this_ty = args
                         .first()
-                        .map(|a| self.infer_expr(a, locals))
+                        .map(|a| self.infer_expr(&a.value, locals))
                         .unwrap_or(Type::Mixed);
                     self.check_closure_literal_with_this(
                         unwrap_grouping(recv),
@@ -2142,9 +2152,13 @@ impl<'a> Checker<'a> {
                             self.substitute_class_templates(sig, class, type_args, &owner)
                         })
                 });
-                self.predefine_byref_or_unknown_args(sig.as_ref(), args, locals);
+                let resolved = sig
+                    .as_ref()
+                    .map(|s| resolve_call_args(args, &s.params))
+                    .unwrap_or_default();
+                self.predefine_byref_or_unknown_args(sig.as_ref(), args, &resolved, locals);
                 for a in args {
-                    self.check_expr(a, locals, label);
+                    self.check_expr(&a.value, locals, label);
                 }
                 if let Some((class, _)) = &recv_class {
                     // Checked *before* falling back to whether the
@@ -2177,12 +2191,21 @@ impl<'a> Checker<'a> {
                             level: 0,
                         });
                     } else if let Some(sig) = &sig
-                        && !has_spread
+                        && !args.iter().any(|a| a.spread)
                     {
                         // Finding 29: see the identical check on the
                         // plain-function Call arm above.
                         let qualified = format!("{class}::{method}");
-                        self.check_args(&qualified, sig, args, locals, label, Some(class), e.span);
+                        self.check_args(
+                            &qualified,
+                            sig,
+                            args,
+                            &resolved,
+                            locals,
+                            label,
+                            Some(class),
+                            e.span,
+                        );
                     }
                 }
             }
@@ -2342,7 +2365,7 @@ impl<'a> Checker<'a> {
                     self.check_shape_key_access(base, i, locals, label);
                 }
             }
-            ExprKind::New(_, args, has_spread) => {
+            ExprKind::New(_, args) => {
                 // `new Foo()` never carries known type arguments itself -
                 // real PHP's constructor syntax has no way to write
                 // `new Foo<Bar>()` at all, and inferring them from the
@@ -2361,9 +2384,12 @@ impl<'a> Checker<'a> {
                 let ctor_sig = resolved_class
                     .as_deref()
                     .and_then(|class| self.registry.lookup_method(class, "__construct"));
-                self.predefine_byref_or_unknown_args(ctor_sig, args, locals);
+                let resolved = ctor_sig
+                    .map(|s| resolve_call_args(args, &s.params))
+                    .unwrap_or_default();
+                self.predefine_byref_or_unknown_args(ctor_sig, args, &resolved, locals);
                 for a in args {
-                    self.check_expr(a, locals, label);
+                    self.check_expr(&a.value, locals, label);
                 }
                 if let Some(class) = &resolved_class {
                     // `resolved_class` is already the fully-qualified name
@@ -2388,12 +2414,13 @@ impl<'a> Checker<'a> {
                                 level: 0,
                             });
                         } else if let Some(sig) = ctor_sig
-                            && !has_spread
+                            && !args.iter().any(|a| a.spread)
                         {
                             self.check_args(
                                 &format!("{class}::__construct"),
                                 sig,
                                 args,
+                                &resolved,
                                 locals,
                                 label,
                                 Some(class),
@@ -2410,9 +2437,9 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ExprKind::NewAnonymousClass(decl, args, _) => {
+            ExprKind::NewAnonymousClass(decl, args) => {
                 for a in args {
-                    self.check_expr(a, locals, label);
+                    self.check_expr(&a.value, locals, label);
                 }
                 // The anonymous class's own methods are still worth
                 // checking, even though the class itself isn't indexed
@@ -2422,7 +2449,7 @@ impl<'a> Checker<'a> {
                     self.check_function(&m.function, Some(&decl.name), m.is_static);
                 }
             }
-            ExprKind::StaticCall(class_name, method, args, has_spread) => {
+            ExprKind::StaticCall(class_name, method, args) => {
                 // Mirrors ExprKind::MethodCall's own structure exactly -
                 // resolve first (self/parent/static-aware), predefine
                 // byref/unknown args using the real signature before
@@ -2431,7 +2458,10 @@ impl<'a> Checker<'a> {
                 let sig = resolved_class
                     .as_ref()
                     .and_then(|class| self.registry.lookup_method(class, method));
-                self.predefine_byref_or_unknown_args(sig, args, locals);
+                let resolved = sig
+                    .map(|s| resolve_call_args(args, &s.params))
+                    .unwrap_or_default();
+                self.predefine_byref_or_unknown_args(sig, args, &resolved, locals);
                 // Finding 49: `Closure::bind($closure, $newThis, $scope)`
                 // makes `$this` (and, for private/protected access, the
                 // calling scope) available inside a closure that
@@ -2446,38 +2476,39 @@ impl<'a> Checker<'a> {
                     && method == "bind"
                     && !args.is_empty()
                     && matches!(
-                        unwrap_grouping(&args[0]).kind,
+                        unwrap_grouping(&args[0].value).kind,
                         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                     )
                 {
                     let this_ty = args
                         .get(1)
-                        .map(|a| self.infer_expr(a, locals))
+                        .map(|a| self.infer_expr(&a.value, locals))
                         .unwrap_or(Type::Mixed);
                     self.check_closure_literal_with_this(
-                        unwrap_grouping(&args[0]),
+                        unwrap_grouping(&args[0].value),
                         locals,
                         label,
                         this_ty,
                     );
                     for a in &args[1..] {
-                        self.check_expr(a, locals, label);
+                        self.check_expr(&a.value, locals, label);
                     }
                 } else {
                     for a in args {
-                        self.check_expr(a, locals, label);
+                        self.check_expr(&a.value, locals, label);
                     }
                 }
                 if let Some(class) = &resolved_class {
                     if let Some(sig) = sig {
                         // Finding 29: see the identical check on the
                         // plain-function Call arm above.
-                        if !has_spread {
+                        if !args.iter().any(|a| a.spread) {
                             let qualified = format!("{class}::{method}");
                             self.check_args(
                                 &qualified,
                                 sig,
                                 args,
+                                &resolved,
                                 locals,
                                 label,
                                 Some(class),
@@ -2585,11 +2616,11 @@ impl<'a> Checker<'a> {
                 self.check_expr(base, locals, label);
                 self.check_expr(name_expr, locals, label);
             }
-            ExprKind::DynamicMethodCall(recv, name_expr, args, _) => {
+            ExprKind::DynamicMethodCall(recv, name_expr, args) => {
                 self.check_expr(recv, locals, label);
                 self.check_expr(name_expr, locals, label);
                 for a in args {
-                    self.check_expr(a, locals, label);
+                    self.check_expr(&a.value, locals, label);
                 }
             }
             ExprKind::Interpolated(parts) => {
@@ -2761,7 +2792,7 @@ impl<'a> Checker<'a> {
             // each inner arm's own existence-check logic without its
             // argument handling.
             ExprKind::FirstClassCallable(inner) => match &inner.kind {
-                ExprKind::Call(callee, _, _) => {
+                ExprKind::Call(callee, _) => {
                     if let ExprKind::Name(name) = &callee.kind {
                         if !is_language_construct(name) {
                             let (primary, fallback) =
@@ -2783,7 +2814,7 @@ impl<'a> Checker<'a> {
                         self.check_expr(callee, locals, label);
                     }
                 }
-                ExprKind::MethodCall(recv, method, _, _, _) => {
+                ExprKind::MethodCall(recv, method, _, _) => {
                     self.check_expr(recv, locals, label);
                     let recv_ty = self.infer_expr(recv, locals);
                     let recv_class = match &recv_ty {
@@ -2811,7 +2842,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                ExprKind::StaticCall(class_name, method, _, _) => {
+                ExprKind::StaticCall(class_name, method, _) => {
                     if let Some(class) = self.resolve_static_class_name(class_name)
                         && self.registry.classes.contains_key(&class)
                         && self.registry.lookup_method(&class, method).is_none()
@@ -2828,7 +2859,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                ExprKind::DynamicMethodCall(recv, name_expr, _, _) => {
+                ExprKind::DynamicMethodCall(recv, name_expr, _) => {
                     self.check_expr(recv, locals, label);
                     self.check_expr(name_expr, locals, label);
                 }
@@ -2847,29 +2878,49 @@ impl<'a> Checker<'a> {
     /// variable (as Mixed) rather than flag it; a *known* function only
     /// gets this leniency for the specific parameter position actually
     /// marked by-ref.
+    /// `sig: None` (an unresolvable call) conservatively treats *any*
+    /// bare-variable argument, in its own written position, as a
+    /// definition site - the real reason this function exists at all
+    /// (see its own callers' comments on `isset`/`empty`). Once a real
+    /// signature is known, `resolved` (Item 1's own per-parameter
+    /// resolution, already computed by the caller) is used instead of the
+    /// raw argument list - a named or reordered-named by-ref argument
+    /// needs to be matched against its *real* declared parameter, not
+    /// whichever parameter happens to sit at the same index it was
+    /// written at.
     fn predefine_byref_or_unknown_args(
         &self,
         sig: Option<&FunctionSig>,
-        args: &[Expr],
+        args: &[Arg],
+        resolved: &[Option<&Expr>],
         locals: &mut HashMap<String, Type>,
     ) {
-        for (i, arg) in args.iter().enumerate() {
-            let ExprKind::Variable(name) = &arg.kind else {
+        let Some(sig) = sig else {
+            for arg in args {
+                let ExprKind::Variable(name) = &arg.value.kind else {
+                    continue;
+                };
+                locals.entry(name.clone()).or_insert(Type::Mixed);
+            }
+            return;
+        };
+        for (i, slot) in resolved.iter().enumerate() {
+            let Some(arg_expr) = slot else {
+                continue;
+            };
+            let ExprKind::Variable(name) = &arg_expr.kind else {
                 continue;
             };
             if locals.contains_key(name) {
                 continue;
             }
-            let treat_as_defining = match sig {
-                None => true,
-                Some(sig) => sig
-                    .params
-                    .get(i)
-                    .map(|p| p.by_ref)
-                    .or_else(|| sig.params.last().filter(|p| p.variadic).map(|p| p.by_ref))
-                    .unwrap_or(false),
-            };
-            if treat_as_defining {
+            let by_ref = sig
+                .params
+                .get(i)
+                .map(|p| p.by_ref)
+                .or_else(|| sig.params.last().filter(|p| p.variadic).map(|p| p.by_ref))
+                .unwrap_or(false);
+            if by_ref {
                 locals.insert(name.clone(), Type::Mixed);
             }
         }
@@ -2983,11 +3034,21 @@ impl<'a> Checker<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// `args` is the raw, as-written argument list (needed for the two
+    /// count-based checks below, both of which are about how many
+    /// arguments were actually written, not which parameter each one
+    /// resolves to); `resolved` is Item 1's own per-parameter resolution
+    /// of that same list (`resolve_call_args`), used for the "too few"
+    /// check's own missing-required-parameter test (correct for a named
+    /// call that fills required parameters out of order, where a raw
+    /// argument *count* alone can't tell) and for the per-argument
+    /// type-checking loop.
     fn check_args(
         &mut self,
         callee_label: &str,
         sig: &FunctionSig,
-        args: &[Expr],
+        args: &[Arg],
+        resolved: &[Option<&Expr>],
         locals: &HashMap<String, Type>,
         label: &str,
         defining_class: Option<&str>,
@@ -2998,7 +3059,12 @@ impl<'a> Checker<'a> {
             .iter()
             .filter(|p| !p.variadic && !p.has_default)
             .count();
-        if args.len() < required {
+        let missing_required = resolved
+            .iter()
+            .take(required)
+            .filter(|s| s.is_none())
+            .count();
+        if missing_required > 0 {
             self.diagnostics.push(Diagnostic {
                 location: label.to_string(),
                 message: format!(
@@ -3015,14 +3081,13 @@ impl<'a> Checker<'a> {
         // fatal error ("Too many arguments... expected exactly N"), just
         // as basic a check as the "too few" one right above it - but
         // nothing here caught it before, since the per-argument loop
-        // below simply stops (via its own `break` once `sig.params.get(i)`
+        // below simply stops (via its own fallback once `sig.params.get(i)`
         // runs out and the last param isn't variadic) rather than
         // reporting anything. Uses the raw `args.len()` deliberately, not
-        // whatever a future named-argument resolver's own output would
-        // be sized to - a non-variadic signature's resolved slice is
-        // always exactly `params.len()` long by that resolver's own
-        // design, which would make this check always read `false` if it
-        // read from that shape instead.
+        // `resolved`'s own length - a non-variadic signature's resolved
+        // slice is always exactly `params.len()` long by
+        // `resolve_call_args`'s own design, which would make this check
+        // always read `false` if it read from that shape instead.
         let last_is_variadic = sig.params.last().is_some_and(|p| p.variadic);
         if !last_is_variadic && args.len() > sig.params.len() {
             let quantifier = if required == sig.params.len() {
@@ -3042,12 +3107,15 @@ impl<'a> Checker<'a> {
             });
         }
 
-        for (i, arg) in args.iter().enumerate() {
+        for (i, slot) in resolved.iter().enumerate() {
+            let Some(arg) = slot else {
+                continue;
+            };
             let param = match sig.params.get(i) {
                 Some(p) => p,
                 None => match sig.params.last() {
                     Some(p) if p.variadic => p,
-                    _ => break,
+                    _ => continue,
                 },
             };
             let arg_ty = self.infer_expr(arg, locals);
@@ -3091,14 +3159,14 @@ impl<'a> Checker<'a> {
     fn check_format_string_call(
         &mut self,
         name: &str,
-        args: &[Expr],
+        args: &[Arg],
         locals: &HashMap<String, Type>,
         label: &str,
     ) {
         let Some(fmt_expr) = args.first() else {
             return;
         };
-        let Some(fmt) = literal_string_value(fmt_expr) else {
+        let Some(fmt) = literal_string_value(&fmt_expr.value) else {
             return;
         };
         let Some(specs) = parse_format_specifiers(fmt) else {
@@ -3113,18 +3181,18 @@ impl<'a> Checker<'a> {
                     specs.len(),
                     provided.len()
                 ),
-                span: fmt_expr.span,
+                span: fmt_expr.value.span,
                 level: 0,
             });
             return;
         }
         for (spec, arg) in specs.iter().zip(provided) {
-            let arg_ty = self.infer_expr(arg, locals);
+            let arg_ty = self.infer_expr(&arg.value, locals);
             if !format_specifier_accepts(*spec, &arg_ty) {
                 self.diagnostics.push(Diagnostic {
                     location: label.to_string(),
                     message: format!("{name}() format specifier %{spec} does not accept {arg_ty}"),
-                    span: arg.span,
+                    span: arg.value.span,
                     level: 5,
                 });
             }
@@ -3253,7 +3321,7 @@ impl<'a> Checker<'a> {
             // parser: they're indistinguishable from any other identifier),
             // so a literal `ExprKind::Name("self")` has to be special-cased
             // here rather than showing up as an Object of that name.
-            ExprKind::New(class_expr, _, _) => match &class_expr.kind {
+            ExprKind::New(class_expr, _) => match &class_expr.kind {
                 ExprKind::Name(name) => match name.as_str() {
                     "self" | "parent" | "static" => {
                         let raw = match name.as_str() {
@@ -3270,7 +3338,7 @@ impl<'a> Checker<'a> {
                 },
                 _ => Type::Mixed,
             },
-            ExprKind::Call(callee, args, _) => match &callee.kind {
+            ExprKind::Call(callee, args) => match &callee.kind {
                 ExprKind::Name(name) if !is_language_construct(name) => {
                     let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
                     self.registry
@@ -3288,7 +3356,7 @@ impl<'a> Checker<'a> {
                 }
                 _ => Type::Mixed,
             },
-            ExprKind::MethodCall(recv, method, args, nullsafe, _) => {
+            ExprKind::MethodCall(recv, method, args, nullsafe) => {
                 // A nullsafe receiver is virtually always nullable
                 // (that's the entire reason to write `?->`), so its own
                 // inferred type is virtually always `Union([Object(...),
@@ -3312,7 +3380,9 @@ impl<'a> Checker<'a> {
                             // the same signature.
                             let sig =
                                 self.substitute_class_templates(sig, &class, &type_args, &owner);
-                            let resolved = self.infer_call_return_type(&sig, args, locals);
+                            let resolved_args = resolve_call_args(args, &sig.params);
+                            let resolved =
+                                self.infer_call_return_type(&sig, &resolved_args, locals);
                             self.resolve_pseudo(&resolved, &class)
                         })
                         .unwrap_or(Type::Mixed),
@@ -3328,11 +3398,12 @@ impl<'a> Checker<'a> {
                     result
                 }
             }
-            ExprKind::StaticCall(class_name, method, args, _) => self
+            ExprKind::StaticCall(class_name, method, args) => self
                 .resolve_static_class_name(class_name)
                 .and_then(|class| {
                     self.registry.lookup_method(&class, method).map(|sig| {
-                        let resolved = self.infer_call_return_type(sig, args, locals);
+                        let resolved_args = resolve_call_args(args, &sig.params);
+                        let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
                         self.resolve_pseudo(&resolved, &class)
                     })
                 })
@@ -3431,11 +3502,12 @@ impl<'a> Checker<'a> {
     fn infer_call_return_type(
         &self,
         sig: &FunctionSig,
-        args: &[Expr],
+        resolved: &[Option<&Expr>],
         locals: &HashMap<String, Type>,
     ) -> Type {
         let mut bindings: HashMap<String, Type> = HashMap::new();
-        for (param, arg) in sig.params.iter().zip(args.iter()) {
+        for (param, slot) in sig.params.iter().zip(resolved.iter()) {
+            let Some(arg) = slot else { continue };
             let arg_ty = self.infer_expr(arg, locals);
             types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
         }
@@ -3452,11 +3524,20 @@ impl<'a> Checker<'a> {
     /// generic-template path (`infer_call_return_type`) for every other
     /// function, and for any shape of these two this doesn't specially
     /// handle.
+    /// Deliberately stays on the raw, positional `args` (not Item 1's own
+    /// per-parameter resolution) for every special case below - these are
+    /// a small, fixed set of well-known standard-library functions
+    /// nobody realistically calls with named arguments, so resolving
+    /// them by name would add risk (a resolved slice isn't sized the same
+    /// way a raw argument count is - see `check_args`'s own note on this
+    /// exact distinction) for no real benefit. Only the generic fallback
+    /// at the end needs the real resolution, computed here from the same
+    /// raw `args` this function already has.
     fn infer_builtin_call_return_type(
         &self,
         name: &str,
         sig: &FunctionSig,
-        args: &[Expr],
+        args: &[Arg],
         locals: &HashMap<String, Type>,
     ) -> Type {
         match name {
@@ -3464,9 +3545,9 @@ impl<'a> Checker<'a> {
             // function is variadic (multiple arrays); a 3+-arg call falls
             // through to the generic path below, unchanged.
             "array_map" if args.len() == 2 => {
-                if let Type::Array(elem_ty) = self.infer_expr(&args[1], locals)
+                if let Type::Array(elem_ty) = self.infer_expr(&args[1].value, locals)
                     && let Some(mapped) = self.infer_closure_return_with_param_overrides(
-                        &args[0],
+                        &args[0].value,
                         &[*elem_ty],
                         locals,
                     )
@@ -3484,7 +3565,7 @@ impl<'a> Checker<'a> {
             // the *full* corpus, not just first-party src/) still parses
             // fine and must not be indexed into blindly.
             "array_filter" if !args.is_empty() => {
-                let arr_ty = self.infer_expr(&args[0], locals);
+                let arr_ty = self.infer_expr(&args[0].value, locals);
                 if matches!(arr_ty, Type::Array(_)) {
                     return arr_ty;
                 }
@@ -3497,13 +3578,13 @@ impl<'a> Checker<'a> {
             // (Null when omitted, matching real PHP's own default), $item
             // to the array's element type.
             "array_reduce" if args.len() == 2 || args.len() == 3 => {
-                if let Type::Array(item_ty) = self.infer_expr(&args[0], locals) {
+                if let Type::Array(item_ty) = self.infer_expr(&args[0].value, locals) {
                     let carry_ty = args
                         .get(2)
-                        .map(|initial| self.infer_expr(initial, locals))
+                        .map(|initial| self.infer_expr(&initial.value, locals))
                         .unwrap_or(Type::Null);
                     if let Some(reduced) = self.infer_closure_return_with_param_overrides(
-                        &args[1],
+                        &args[1].value,
                         &[carry_ty, *item_ty],
                         locals,
                     ) {
@@ -3517,7 +3598,7 @@ impl<'a> Checker<'a> {
             // own type verbatim, the same "no transformation" shape as
             // array_filter above.
             "array_combine" if args.len() == 2 => {
-                let values_ty = self.infer_expr(&args[1], locals);
+                let values_ty = self.infer_expr(&args[1].value, locals);
                 if matches!(values_ty, Type::Array(_)) {
                     return values_ty;
                 }
@@ -3525,16 +3606,16 @@ impl<'a> Checker<'a> {
             // Both fill every slot with the same, already-known $value -
             // no closure or element-type binding needed at all.
             "array_fill" if args.len() == 3 => {
-                return Type::Array(Box::new(self.infer_expr(&args[2], locals)));
+                return Type::Array(Box::new(self.infer_expr(&args[2].value, locals)));
             }
             "array_fill_keys" if args.len() == 2 => {
-                return Type::Array(Box::new(self.infer_expr(&args[1], locals)));
+                return Type::Array(Box::new(self.infer_expr(&args[1].value, locals)));
             }
             // Splits one array into several same-shaped ones - the
             // result is an array *of* arrays, each holding the original
             // element type.
             "array_chunk" if args.len() == 2 || args.len() == 3 => {
-                if let Type::Array(elem_ty) = self.infer_expr(&args[0], locals) {
+                if let Type::Array(elem_ty) = self.infer_expr(&args[0].value, locals) {
                     return Type::Array(Box::new(Type::Array(elem_ty)));
                 }
             }
@@ -3545,9 +3626,9 @@ impl<'a> Checker<'a> {
             // check_shape_key_access's own "only a literal, never a
             // dynamic value" precedent.
             "array_column" if args.len() == 2 || args.len() == 3 => {
-                if let Type::Array(elem_ty) = self.infer_expr(&args[0], locals)
+                if let Type::Array(elem_ty) = self.infer_expr(&args[0].value, locals)
                     && let Type::ArrayShape(fields) = *elem_ty
-                    && let Some(key) = literal_string_key(&args[1])
+                    && let Some(key) = literal_string_key(&args[1].value)
                     && let Some((_, field_ty, _)) = fields.into_iter().find(|(n, _, _)| *n == key)
                 {
                     return Type::Array(Box::new(field_ty));
@@ -3555,7 +3636,8 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        self.infer_call_return_type(sig, args, locals)
+        let resolved = resolve_call_args(args, &sig.params);
+        self.infer_call_return_type(sig, &resolved, locals)
     }
 
     /// Infers a closure or arrow-fn's own return type *as if* its
@@ -4054,6 +4136,58 @@ fn unwrap_grouping(e: &Expr) -> &Expr {
         ExprKind::Grouping(inner) => unwrap_grouping(inner),
         _ => e,
     }
+}
+
+/// Item 1: resolves a call's own argument list against the declared
+/// parameter list it's being checked against, producing one slot per
+/// declared parameter - `Some(&Expr)` when some argument (positional or
+/// named) actually fills that parameter, `None` when it doesn't (an
+/// omitted optional parameter, or anything past the first spread
+/// argument, whose real contents can't be resolved statically at all).
+/// Every consumer that used to assume `args[i]` lines up with
+/// `params[i]` - true only for the overwhelmingly common all-positional
+/// case - now goes through this first, so a named or reordered-named
+/// call resolves against the *real* parameter, not whichever one happens
+/// to sit at the same index in the written argument list.
+///
+/// The returned `Vec` can be *longer* than `params.len()` when the last
+/// parameter is variadic: real PHP has no way to fill a variadic
+/// parameter by name (there's no single name that means "the rest of the
+/// arguments"), so once a variadic parameter is in play, any further
+/// positional argument is necessarily extra, appended past the initial
+/// `params.len()`-sized block - the same shape `check_args`'s own
+/// existing variadic fallback (`sig.params.last()` when `i` runs past
+/// `params.len()`) already expects.
+///
+/// A positional argument fills the next open slot by declaration order,
+/// tracked via a running count of positional arguments seen so far (not
+/// "the next unfilled slot overall" - the two only diverge for a
+/// positional argument written *after* a named one, which real PHP
+/// itself forbids as a parse-time error; this project's own parser
+/// doesn't enforce that ordering, so such input could reach here anyway,
+/// but only needs to avoid panicking on it, not produce a meaningful
+/// result for syntactically-invalid PHP).
+fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec<Option<&'a Expr>> {
+    let mut resolved: Vec<Option<&Expr>> = vec![None; params.len()];
+    let mut positional_index = 0usize;
+    for arg in args {
+        if arg.spread {
+            break;
+        }
+        if let Some(name) = &arg.name {
+            if let Some(pos) = params.iter().position(|p| &p.name == name) {
+                resolved[pos] = Some(&arg.value);
+            }
+            continue;
+        }
+        if positional_index < resolved.len() {
+            resolved[positional_index] = Some(&arg.value);
+        } else if params.last().is_some_and(|p| p.variadic) {
+            resolved.push(Some(&arg.value));
+        }
+        positional_index += 1;
+    }
+    resolved
 }
 
 /// Finding 58's own notion of "two trait methods with the same name are
@@ -6997,6 +7131,108 @@ mod tests {
                 .contains("sumDocVariadic() argument #3 ($nums) expects int, 'not an int' given")),
             "expected a variadic-argument-type diagnostic, got: {d:?}"
         );
+    }
+
+    #[test]
+    fn a_named_argument_call_in_declaration_order_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f1(int $a, string $b): void {}
+            function test(): void { f1(a: 1, b: "x"); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_named_argument_call_in_a_different_order_than_declared_is_not_misflagged() {
+        // The real bug Item 1 fixes: naive positional reasoning would
+        // compare "x" against $a's own int type and "1" against $b's
+        // own string type, both wrongly.
+        let d = diagnostics_for(
+            r#"<?php
+            function f1(int $a, string $b): void {}
+            function test(): void { f1(b: "x", a: 1); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_named_argument_with_the_wrong_type_is_still_flagged_against_its_real_parameter() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f1(int $a, string $b): void {}
+            function test(): void { f1(b: "x", a: "not an int"); }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("f1() argument #1 ($a) expects int")),
+            "expected a wrong-type diagnostic attributed to $a, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_mix_of_positional_then_named_arguments_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f3(int $a, int $b, int $c): int { return $a + $b + $c; }
+            function test(): int { return f3(1, c: 3, b: 2); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn an_omitted_defaulted_parameter_filled_by_neither_position_nor_name_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f4(int $a, int $b = 5): int { return $a + $b; }
+            function test(): int { return f4(a: 1); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_spread_call_leaves_every_parameter_position_unresolved_rather_than_guessing() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f6(int $a, int $b): void {}
+            function test(array $args): void { f6(...$args); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_variadic_call_with_more_positional_arguments_than_declared_params_resolves_correctly() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f7(int $a, string ...$rest): void {}
+            function test(): void { f7(1, "x", "y", "z"); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_by_ref_parameter_filled_via_a_reordered_named_argument_binds_the_right_variable() {
+        // The specific failure mode that originally motivated Item 1: a
+        // by-ref output parameter, called with reordered named arguments,
+        // must bind the *correct* variable - not whichever one lands at
+        // the naive positional index.
+        let d = diagnostics_for(
+            r#"<?php
+            function f9(string $pattern, string $subject, &$matches): int { $matches = []; return 1; }
+            function test(string $s): void {
+                f9(subject: $s, matches: $m, pattern: '/x/');
+                echo $m;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]

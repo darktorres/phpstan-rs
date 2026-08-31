@@ -268,6 +268,27 @@ pub struct TraitAlias {
     pub alias: String,
 }
 
+/// One argument in a call's own argument list (`Call`/`New`/`MethodCall`/
+/// `DynamicMethodCall`/`StaticCall`/`NewAnonymousClass` all hold
+/// `Vec<Arg>`, not a bare `Vec<Expr>`) - replaces what used to be a plain
+/// `Expr`, since a call's real argument-to-parameter mapping depends on
+/// more than just each argument's own written order: `name` is
+/// `Some("matches")` for a named argument (`matches: $m`), letting a
+/// resolver match it against the right declared parameter regardless of
+/// where it appears among the arguments (real PHP itself doesn't require
+/// named arguments to appear in declaration order); `spread` is `true`
+/// for `...$args` - once true, every argument at or after this one in the
+/// call can't be resolved to a specific declared parameter at all (the
+/// unpacked array's real contents aren't known statically). The
+/// overwhelmingly common case (`name: None, spread: false`) is a plain
+/// positional argument, unchanged in meaning from a bare `Expr`.
+#[derive(Debug, Clone)]
+pub struct Arg {
+    pub name: Option<String>,
+    pub spread: bool,
+    pub value: Expr,
+}
+
 #[derive(Debug, Clone)]
 pub enum Literal {
     Int(i64),
@@ -365,22 +386,15 @@ pub enum ExprKind {
     Assign(Box<Expr>, Box<Expr>),
     CompoundAssign(BinOp, Box<Expr>, Box<Expr>),
     Ternary(Box<Expr>, Option<Box<Expr>>, Box<Expr>),
-    // The trailing `bool` on every call-shaped variant below is
-    // `has_spread` (Finding 29) - `true` when any argument in the call
-    // used `...` (`f(...$args)`) - a spread array's real contents can't
-    // be counted or type-checked positionally at all, so argument-count/
-    // type checking needs to know to skip itself entirely rather than
-    // treating the spread expression as if it were meant to fill the
-    // very next positional slot.
-    Call(Box<Expr>, Vec<Expr>, bool),
-    New(Box<Expr>, Vec<Expr>, bool),
+    Call(Box<Expr>, Vec<Arg>),
+    New(Box<Expr>, Vec<Arg>),
     // The trailing `bool` is `true` for a nullsafe access (`$x?->prop`),
     // `false` for a plain `$x->prop` - the two are otherwise identical
     // syntactically, but real PHP's `?->` implicitly makes the whole
     // access `null` when its base is `null`, which `infer_expr` needs to
     // know to union `Null` into the result.
     PropertyAccess(Box<Expr>, String, bool),
-    MethodCall(Box<Expr>, String, Vec<Expr>, bool, bool),
+    MethodCall(Box<Expr>, String, Vec<Arg>, bool),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
     // itself computed from an expression, not statically known, so it
     // can't share PropertyAccess/MethodCall's plain-String name. Still
@@ -388,9 +402,9 @@ pub enum ExprKind {
     // inside the {} can still be caught), even though the accessed
     // member's own type never can be.
     DynamicPropertyAccess(Box<Expr>, Box<Expr>),
-    DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Expr>, bool),
+    DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Arg>),
     StaticAccess(String, String),
-    StaticCall(String, String, Vec<Expr>, bool),
+    StaticCall(String, String, Vec<Arg>),
     Index(Box<Expr>, Option<Box<Expr>>),
     Name(String),
     Instanceof(Box<Expr>, InstanceofTarget),
@@ -419,7 +433,7 @@ pub enum ExprKind {
     // Never given a stable name multiple such expressions could share, so
     // it isn't indexed into the registry the way a normal class is; its
     // methods are still type-checked (see checker::check_expr).
-    NewAnonymousClass(Box<ClassDecl>, Vec<Expr>, bool),
+    NewAnonymousClass(Box<ClassDecl>, Vec<Arg>),
     // `yield;` / `yield $v;` / `yield $k => $v;` - (key, value). Makes the
     // enclosing function a generator; that broader semantic isn't modeled,
     // only enough structure to parse and check the yielded expression(s).
