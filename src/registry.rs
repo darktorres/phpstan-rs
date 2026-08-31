@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
     ClassDecl, ClassKind, EnumDecl, Expr, ExprKind, FunctionDecl, Literal, Stmt, StmtKind,
-    UseImport,
+    UseImport, Visibility,
 };
 use crate::docblock::{self, DocBlock};
 use crate::types::{self, Type};
@@ -477,10 +477,18 @@ impl ClassInfo {
             .filter(|m| m.is_abstract)
             .map(|m| m.function.name.clone())
             .collect();
+        // A `private` method isn't part of a class's inherited/overridable
+        // surface at all in real PHP - a subclass declaring its own
+        // same-named private method is an independent, unrelated
+        // declaration, not an override - so `final private` doesn't
+        // actually restrict anything a subclass does (confirmed via
+        // vendor/phpstorm-stubs: `Exception`'s own `final private function
+        // __clone()` is freely redeclared, identically, by many of its
+        // subclasses, and real PHP raises no error for it).
         let final_methods: HashSet<String> = c
             .methods
             .iter()
-            .filter(|m| m.is_final)
+            .filter(|m| m.is_final && m.visibility != Visibility::Private)
             .map(|m| m.function.name.clone())
             .collect();
 
@@ -749,7 +757,7 @@ impl ClassInfo {
         let final_methods: HashSet<String> = e
             .methods
             .iter()
-            .filter(|m| m.is_final)
+            .filter(|m| m.is_final && m.visibility != Visibility::Private)
             .map(|m| m.function.name.clone())
             .collect();
 
@@ -1124,6 +1132,36 @@ impl Registry {
         None
     }
 
+    /// Finding 46: real PHP forbids overriding a method declared `final`
+    /// anywhere in the ancestor chain, no matter how many intervening
+    /// subclasses sit between the `final` declaration and this one (a
+    /// method that's final stays final for every descendant, not just
+    /// its immediate subclass). Walks only `extends` - real PHP's own
+    /// `final` keyword applies to ordinary class inheritance; an
+    /// interface's own methods have no bodies to protect, and this
+    /// project doesn't yet propagate a trait's own `final_methods` the
+    /// way it does `abstract_methods` (Finding 46 as reported is scoped
+    /// to class inheritance, matching its own repro). Returns the name
+    /// of the ancestor that declared it final, for the diagnostic.
+    pub fn find_final_ancestor_method(&self, class: &str, method: &str) -> Option<String> {
+        let info = self.classes.get(class)?;
+        let mut seen = HashSet::new();
+        let mut stack: Vec<String> = info.extends.clone();
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            let Some(current_info) = self.classes.get(&current) else {
+                continue;
+            };
+            if current_info.final_methods.contains(method) {
+                return Some(current);
+            }
+            stack.extend(current_info.extends.iter().cloned());
+        }
+        None
+    }
+
     /// Every method name `class` must provide a concrete (non-abstract)
     /// implementation of somewhere in its own hierarchy: every abstract
     /// method declared by an ancestor class, every method declared by an
@@ -1347,6 +1385,20 @@ mod tests {
         assert!(base.abstract_methods.contains("required"));
         assert!(base.final_methods.contains("locked"));
         assert!(base.properties.get("id").unwrap().is_readonly);
+    }
+
+    #[test]
+    fn a_final_private_method_is_not_recorded_as_final() {
+        // A `private` method isn't part of a class's inherited/
+        // overridable surface at all in real PHP - `final` on one is
+        // inert as far as override-compatibility checking goes.
+        let r = build_registry(
+            r#"<?php
+            class Base { final private function __clone() {} }
+            "#,
+        );
+        let base = r.classes.get("Base").unwrap();
+        assert!(!base.final_methods.contains("__clone"));
     }
 
     #[test]

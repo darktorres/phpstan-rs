@@ -144,6 +144,7 @@ impl<'a> Checker<'a> {
                     let fqn = self.name_ctx.declared_name(&c.name);
                     self.check_class_generic_bounds(&fqn, c);
                     self.check_class_completeness(&fqn, c.span);
+                    self.check_final_class_extension(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
                     for m in &c.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
@@ -743,6 +744,32 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Finding 46's class-level half: extending a class declared `final`
+    /// is a real, unconditional fatal error in PHP at class-declaration
+    /// time, regardless of whether the subclass overrides anything at
+    /// all. The method-level half (overriding a `final` *method*) lives
+    /// in `check_method_overrides`, sharing that function's own
+    /// per-method ancestor walk instead of a second one here.
+    fn check_final_class_extension(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        let Some(parent) = info.extends.first() else {
+            return;
+        };
+        let Some(parent_info) = self.registry.classes.get(parent) else {
+            return;
+        };
+        if parent_info.is_final {
+            self.diagnostics.push(Diagnostic {
+                location: fqn.to_string(),
+                message: format!("class {fqn} cannot extend final class {parent}"),
+                span,
+                level: 0,
+            });
+        }
+    }
+
     /// Finding 45: a concrete class must provide a real implementation of
     /// every abstract method it inherits (from a parent class, an
     /// implemented interface, or a directly-`use`d trait) - real PHP
@@ -797,11 +824,34 @@ impl<'a> Checker<'a> {
     /// this project's own `is_assignable` is already lenient there by
     /// design (guessing wrong in either direction is worse than not
     /// checking), and that leniency is the right call here too.
+    ///
+    /// Also covers Finding 46's method-level half: overriding a method
+    /// declared `final` anywhere in the ancestor chain, sharing this same
+    /// per-method loop since both checks need the same "does this
+    /// override collide with an ancestor's declaration" walk.
     fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
         for m in &c.methods {
+            // Finding 46: overriding a `final` method is a real,
+            // unconditional fatal error in PHP - including for
+            // __construct, unlike the signature-compatibility checks
+            // below, so this runs before that exemption.
+            if let Some(ancestor) = self
+                .registry
+                .find_final_ancestor_method(fqn, &m.function.name)
+            {
+                self.diagnostics.push(Diagnostic {
+                    location: fqn.to_string(),
+                    message: format!(
+                        "{fqn}::{}() cannot override final method {ancestor}::{}()",
+                        m.function.name, m.function.name
+                    ),
+                    span: m.span,
+                    level: 0,
+                });
+            }
             // Real PHP deliberately exempts constructors from override-
             // compatibility checking - a subclass's own __construct is
             // allowed an entirely different, otherwise-incompatible
@@ -5759,6 +5809,92 @@ mod tests {
             r#"<?php
             interface Collection12 { /** @return static */ public function copy(); }
             class Vector12 implements Collection12 { public function copy(): Vector12 {} }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn overriding_a_final_method_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Base4 { final public function locked(): int { return 1; } }
+            class Sub4 extends Base4 { public function locked(): int { return 2; } }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("cannot override final method Base4::locked")),
+            "expected a final-override diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn overriding_a_final_method_two_hops_up_the_extends_chain_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Base6 { final public function locked(): void {} }
+            class Mid6 extends Base6 {}
+            class Leaf6 extends Mid6 { public function locked(): void {} }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("cannot override final method Base6::locked")),
+            "expected a final-override diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn overriding_a_non_final_method_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Ok1 { public function open(): int { return 1; } }
+            class Ok2 extends Ok1 { public function open(): int { return 2; } }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn redeclaring_a_final_private_method_is_not_flagged() {
+        // A `private` method isn't part of a class's inherited/
+        // overridable surface at all in real PHP - a subclass declaring
+        // its own same-named private method is an independent,
+        // unrelated declaration, not an override.
+        let d = diagnostics_for(
+            r#"<?php
+            class Base13 { final private function __clone() {} }
+            class Sub13 extends Base13 { final private function __clone() {} }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn extending_a_final_class_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            final class Sealed5 {}
+            class Sub5 extends Sealed5 {}
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("class Sub5 cannot extend final class Sealed5")),
+            "expected a final-class-extension diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn extending_a_non_final_class_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Open5 {}
+            class Sub5b extends Open5 {}
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
