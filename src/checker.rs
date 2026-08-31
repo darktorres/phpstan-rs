@@ -1232,6 +1232,41 @@ impl<'a> Checker<'a> {
         locals.insert(var_name, narrowed);
     }
 
+    /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks
+    /// down through `Index`/`PropertyAccess`/`DynamicPropertyAccess`,
+    /// checking each level's own sub-expressions (an index's key, a
+    /// dynamic property's name) normally, but suppressing the root
+    /// variable's own "undefined variable" check and `PropertyAccess`'s
+    /// own "access to undefined property" check at every level along the
+    /// way - exactly what `isset()`/`??` themselves suppress in real PHP,
+    /// and nothing more. `StaticAccess` is never part of this walk (an
+    /// undeclared *static* property is a real, non-suppressible PHP
+    /// fatal error), and anything past a function/method call is checked
+    /// normally, since `isset()`/`??` don't evaluate quietly past one.
+    fn check_expr_quiet_root(&mut self, e: &Expr, locals: &mut HashMap<String, Type>, label: &str) {
+        match &e.kind {
+            ExprKind::Variable(_) => {
+                // Deliberately not `check_expr` - a bare variable here is
+                // exactly the "might not be defined" case `??` exists to
+                // handle safely.
+            }
+            ExprKind::Index(base, idx) => {
+                self.check_expr_quiet_root(base, locals, label);
+                if let Some(i) = idx {
+                    self.check_expr(i, locals, label);
+                }
+            }
+            ExprKind::PropertyAccess(base, _) => {
+                self.check_expr_quiet_root(base, locals, label);
+            }
+            ExprKind::DynamicPropertyAccess(base, name_expr) => {
+                self.check_expr_quiet_root(base, locals, label);
+                self.check_expr(name_expr, locals, label);
+            }
+            _ => self.check_expr(e, locals, label),
+        }
+    }
+
     fn check_expr(&mut self, e: &Expr, locals: &mut HashMap<String, Type>, label: &str) {
         match &e.kind {
             ExprKind::Call(callee, args) => {
@@ -1374,6 +1409,18 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(l, &mut narrowed, false);
                 self.check_expr(r, &mut narrowed, label);
             }
+            // `??` is built on isset()-style quiet semantics - its left
+            // side is evaluated without ever raising an undefined-
+            // variable/undefined-property notice, even when the root
+            // variable was never assigned anywhere in scope. Real PHP
+            // silences this for the whole dereference chain on the left
+            // (`$config['key'] ?? 'default'` is just as warning-free as
+            // a bare `$x ?? 'default'`), which is exactly what
+            // `check_expr_quiet_root` walks.
+            ExprKind::Binary(BinOp::Coalesce, l, r) => {
+                self.check_expr_quiet_root(l, locals, label);
+                self.check_expr(r, locals, label);
+            }
             ExprKind::Binary(_, l, r) => {
                 self.check_expr(l, locals, label);
                 self.check_expr(r, locals, label);
@@ -1475,7 +1522,14 @@ impl<'a> Checker<'a> {
                 self.bind_assignment_target(lhs, rhs, locals);
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {
-                self.check_expr(lhs, locals, label);
+                // `$x ??= $default;` is defined as exactly
+                // `$x = $x ?? $default;` - the same quiet-left-side
+                // exemption as plain `??` applies to its own left side.
+                if *op == BinOp::Coalesce {
+                    self.check_expr_quiet_root(lhs, locals, label);
+                } else {
+                    self.check_expr(lhs, locals, label);
+                }
                 self.check_expr(rhs, locals, label);
                 if let ExprKind::Variable(name) = &lhs.kind {
                     let ty = self.infer_binary(op, lhs, rhs, locals);
@@ -6229,6 +6283,73 @@ mod tests {
                     null => "default",
                     default => $x,
                 };
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 26 from the architecture audit - `??`/`??=`'s left side was
+    // checked for "undefined variable"/"undefined property" like an
+    // ordinary read, even though both are specifically designed to be
+    // warning-free for a variable/property that isn't set at all.
+
+    #[test]
+    fn coalesce_does_not_flag_a_conditionally_assigned_variable_as_undefined() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $c): string {
+                if ($c) { $result = "computed"; }
+                return $result ?? "default";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn coalesce_does_not_flag_an_undefined_array_key_root_variable() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): string {
+                return $config['key'] ?? "default";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn coalesce_does_not_flag_an_undeclared_instance_property() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {}
+            function f(Foo $x): string { return $x->missing ?? "default"; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn coalesce_still_flags_an_undeclared_static_property() {
+        // isset()/?? silence a suppressible *notice* - an undeclared
+        // *static* property is a real, non-suppressible PHP fatal error,
+        // and must still be flagged under `??`.
+        let d = diagnostics_for(
+            r#"<?php
+            class Bar {}
+            function f(): string { return Bar::$missing ?? "default"; }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn coalesce_assign_does_not_flag_its_own_left_side_as_undefined() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): string {
+                $x ??= "default";
+                return $x;
             }
         "#,
         );
