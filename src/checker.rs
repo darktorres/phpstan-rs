@@ -5,6 +5,11 @@ use crate::registry::{self, FunctionSig, NameContext, ParamSig, PropertySig, Reg
 use crate::token::Span;
 use crate::types::{self, Type};
 
+/// A checked scope's variable-name-to-inferred-type bindings - repeated
+/// across nearly every checker method's own parameter/return type before
+/// this alias existed.
+type Locals = HashMap<String, Type>;
+
 /// Loosely mirrors real PHPStan's own rule-gating levels (0 lowest/laxest,
 /// verified against a fresh `phpstan/phpstan-src` clone's `conf/config.
 /// levelN.neon` files rather than recalled from memory): 0 for the
@@ -101,6 +106,30 @@ pub struct Checker<'a> {
     saw_dynamic_var_construct: bool,
 }
 
+/// `check_args`'s own call bundle. `callee_label`/`label` are two
+/// adjacent, identically-typed `&str` parameters (the callee's own
+/// display name vs. the enclosing function/method being checked) - a
+/// real mis-ordering risk a positional call site can't catch, which
+/// named struct fields fix. `args` is the raw, as-written argument list
+/// (needed for the two count-based checks `check_args` does, both of
+/// which are about how many arguments were actually written, not which
+/// parameter each one resolves to); `resolved` is Item 1's own per-
+/// parameter resolution of that same list (`resolve_call_args`), used
+/// for the "too few" check's own missing-required-parameter test
+/// (correct for a named call that fills required parameters out of
+/// order, where a raw argument *count* alone can't tell) and for the
+/// per-argument type-checking loop.
+struct CheckArgsCall<'a> {
+    callee_label: &'a str,
+    sig: &'a FunctionSig,
+    args: &'a [Arg],
+    resolved: &'a [Option<&'a Expr>],
+    locals: &'a Locals,
+    label: &'a str,
+    defining_class: Option<&'a str>,
+    span: Span,
+}
+
 impl<'a> Checker<'a> {
     pub fn new(registry: &'a Registry) -> Self {
         Checker {
@@ -111,6 +140,19 @@ impl<'a> Checker<'a> {
             current_method: None,
             saw_dynamic_var_construct: false,
         }
+    }
+
+    /// Every diagnostic this checker emits goes through here - replaces
+    /// 38 hand-written `Diagnostic { location, message, span, level }`
+    /// literals (all sharing this exact 4-field shape) with one call
+    /// site.
+    fn report(&mut self, location: String, message: String, span: Span, level: u8) {
+        self.diagnostics.push(Diagnostic {
+            location,
+            message,
+            span,
+            level,
+        });
     }
 
     pub fn into_diagnostics(mut self) -> Vec<Diagnostic> {
@@ -136,7 +178,7 @@ impl<'a> Checker<'a> {
         // guard against.
         self.name_ctx = NameContext::build(program);
 
-        let mut top_locals: HashMap<String, Type> = HashMap::new();
+        let mut top_locals: Locals = HashMap::new();
         let diagnostics_before = self.diagnostics.len();
         for stmt in program {
             match &stmt.kind {
@@ -213,7 +255,7 @@ impl<'a> Checker<'a> {
     fn check_function(&mut self, f: &FunctionDecl, class_name: Option<&str>, is_static: bool) {
         let sig = self.lookup_own_signature(f, class_name);
 
-        let mut locals: HashMap<String, Type> = HashMap::new();
+        let mut locals: Locals = HashMap::new();
         match sig {
             // The registry's FunctionSig already has PHPDoc types merged in
             // (Phase 2) - using it here, instead of re-deriving from the
@@ -362,12 +404,12 @@ impl<'a> Checker<'a> {
                 && expected != Type::Mixed
                 && !self.registry.is_assignable(&Type::Null, &expected)
             {
-                self.diagnostics.push(Diagnostic {
-                    location: label.clone(),
-                    message: format!("return type mismatch: expected {expected}, got null"),
-                    span: f.span,
-                    level: 3,
-                });
+                self.report(
+                    label.clone(),
+                    format!("return type mismatch: expected {expected}, got null"),
+                    f.span,
+                    3,
+                );
             }
         }
 
@@ -506,7 +548,7 @@ impl<'a> Checker<'a> {
     /// `continue`, when its own return type is `never` - a real, common
     /// pattern (`private function fatalError(string $msg): never`) that a
     /// purely syntactic check would miss entirely.
-    fn always_terminates(&self, stmt: &Stmt, locals: &HashMap<String, Type>) -> bool {
+    fn always_terminates(&self, stmt: &Stmt, locals: &Locals) -> bool {
         match &stmt.kind {
             StmtKind::Return(_)
             | StmtKind::Throw(_)
@@ -579,7 +621,7 @@ impl<'a> Checker<'a> {
     /// this different distinction instead: a case ending in `break`
     /// still reaches the code after the switch, one ending in
     /// `return`/`throw`/`continue` never does.
-    fn exits_function_or_loop(&self, stmt: &Stmt, locals: &HashMap<String, Type>) -> bool {
+    fn exits_function_or_loop(&self, stmt: &Stmt, locals: &Locals) -> bool {
         match &stmt.kind {
             StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Continue(_) => true,
             StmtKind::Break(_) => false,
@@ -630,7 +672,7 @@ impl<'a> Checker<'a> {
                     && let Some(info) = self.registry.classes.get(class)
                     && !info.template_bounds.is_empty()
                 {
-                    let bindings: HashMap<String, Type> = info
+                    let bindings: Locals = info
                         .templates
                         .iter()
                         .cloned()
@@ -659,14 +701,12 @@ impl<'a> Checker<'a> {
                             && self.is_type_fully_known(&bound)
                             && !self.registry.is_assignable(arg, &bound)
                         {
-                            self.diagnostics.push(Diagnostic {
-                                location: label.to_string(),
-                                message: format!(
-                                    "{class}'s @template {name} requires {bound}, got {arg}"
-                                ),
+                            self.report(
+                                label.to_string(),
+                                format!("{class}'s @template {name} requires {bound}, got {arg}"),
                                 span,
-                                level: 6,
-                            });
+                                6,
+                            );
                         }
                     }
                 }
@@ -774,12 +814,12 @@ impl<'a> Checker<'a> {
             return;
         };
         if parent_info.is_final {
-            self.diagnostics.push(Diagnostic {
-                location: fqn.to_string(),
-                message: format!("class {fqn} cannot extend final class {parent}"),
+            self.report(
+                fqn.to_string(),
+                format!("class {fqn} cannot extend final class {parent}"),
                 span,
-                level: 0,
-            });
+                0,
+            );
         }
     }
 
@@ -812,14 +852,9 @@ impl<'a> Checker<'a> {
                 }
                 match seen_props.get(prop_name.as_str()) {
                     Some((first_trait, first_sig)) if first_sig.ty != sig.ty => {
-                        self.diagnostics.push(Diagnostic {
-                            location: fqn.to_string(),
-                            message: format!(
+                        self.report(fqn.to_string(), format!(
                                 "{first_trait} and {trait_name} define the same property (${prop_name}) with incompatible types in the composition of {fqn}"
-                            ),
-                            span,
-                            level: 0,
-                        });
+                            ), span, 0);
                     }
                     Some(_) => {}
                     None => {
@@ -833,14 +868,9 @@ impl<'a> Checker<'a> {
                 }
                 match seen_methods.get(method_name.as_str()) {
                     Some((first_trait, first_sig)) if !signatures_compatible(first_sig, sig) => {
-                        self.diagnostics.push(Diagnostic {
-                            location: fqn.to_string(),
-                            message: format!(
+                        self.report(fqn.to_string(), format!(
                                 "{first_trait} and {trait_name} define the same method ({method_name}) with an incompatible signature in the composition of {fqn}"
-                            ),
-                            span,
-                            level: 0,
-                        });
+                            ), span, 0);
                     }
                     Some(_) => {}
                     None => {
@@ -870,15 +900,10 @@ impl<'a> Checker<'a> {
                 _ => continue,
             };
             if let Some(first_case) = seen.get(&key) {
-                self.diagnostics.push(Diagnostic {
-                    location: fqn.to_string(),
-                    message: format!(
+                self.report(fqn.to_string(), format!(
                         "duplicate value in enum {fqn} for case {} (already used by case {first_case})",
                         case.name
-                    ),
-                    span: case.span,
-                    level: 0,
-                });
+                    ), case.span, 0);
             } else {
                 seen.insert(key, &case.name);
             }
@@ -920,12 +945,7 @@ impl<'a> Checker<'a> {
         if missing.len() > shown.len() {
             message.push_str(&format!(", and {} more", missing.len() - shown.len()));
         }
-        self.diagnostics.push(Diagnostic {
-            location: fqn.to_string(),
-            message,
-            span,
-            level: 0,
-        });
+        self.report(fqn.to_string(), message, span, 0);
     }
 
     /// Finding 50: an overriding method's signature must stay
@@ -957,15 +977,15 @@ impl<'a> Checker<'a> {
                 .registry
                 .find_final_ancestor_method(fqn, &m.function.name)
             {
-                self.diagnostics.push(Diagnostic {
-                    location: fqn.to_string(),
-                    message: format!(
+                self.report(
+                    fqn.to_string(),
+                    format!(
                         "{fqn}::{}() cannot override final method {ancestor}::{}()",
                         m.function.name, m.function.name
                     ),
-                    span: m.span,
-                    level: 0,
-                });
+                    m.span,
+                    0,
+                );
             }
             // Real PHP deliberately exempts constructors from override-
             // compatibility checking - a subclass's own __construct is
@@ -1010,19 +1030,14 @@ impl<'a> Checker<'a> {
                     .registry
                     .is_assignable(&ancestor_param.ty, &own_param.ty)
                 {
-                    self.diagnostics.push(Diagnostic {
-                        location: fqn.to_string(),
-                        message: format!(
+                    self.report(fqn.to_string(), format!(
                             "{fqn}::{}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
                             m.function.name,
                             i + 1,
                             own_param.name,
                             own_param.ty,
                             ancestor_param.ty
-                        ),
-                        span: m.span,
-                        level: 0,
-                    });
+                        ), m.span, 0);
                 }
             }
             // An ancestor's own `static`-typed return (`self.registry`
@@ -1043,15 +1058,10 @@ impl<'a> Checker<'a> {
                     .registry
                     .is_assignable(&own_sig.return_type, &ancestor_sig.return_type)
             {
-                self.diagnostics.push(Diagnostic {
-                    location: fqn.to_string(),
-                    message: format!(
+                self.report(fqn.to_string(), format!(
                         "{fqn}::{}() return type {} is not compatible with the inherited return type {}",
                         m.function.name, own_sig.return_type, ancestor_sig.return_type
-                    ),
-                    span: m.span,
-                    level: 0,
-                });
+                    ), m.span, 0);
             }
         }
     }
@@ -1115,12 +1125,7 @@ impl<'a> Checker<'a> {
         }
         violations.sort();
         for message in violations {
-            self.diagnostics.push(Diagnostic {
-                location: label.to_string(),
-                message,
-                span,
-                level: 6,
-            });
+            self.report(label.to_string(), message, span, 6);
         }
     }
 
@@ -1152,12 +1157,7 @@ impl<'a> Checker<'a> {
     /// leave that level's names unbound - `substitute_template` already
     /// treats an unbound `TemplateParam` as `Mixed`, the right
     /// conservative fallback for an "erased" generic.
-    fn class_template_bindings(
-        &self,
-        class: &str,
-        type_args: &[Type],
-        target: &str,
-    ) -> HashMap<String, Type> {
+    fn class_template_bindings(&self, class: &str, type_args: &[Type], target: &str) -> Locals {
         let mut seen = HashSet::new();
         self.class_template_bindings_rec(class, type_args, target, &mut seen)
             .unwrap_or_default()
@@ -1179,12 +1179,12 @@ impl<'a> Checker<'a> {
         type_args: &[Type],
         target: &str,
         seen: &mut HashSet<String>,
-    ) -> Option<HashMap<String, Type>> {
+    ) -> Option<Locals> {
         if !seen.insert(class.to_string()) {
             return None;
         }
         let info = self.registry.classes.get(class)?;
-        let own_bindings: HashMap<String, Type> = info
+        let own_bindings: Locals = info
             .templates
             .iter()
             .cloned()
@@ -1258,7 +1258,7 @@ impl<'a> Checker<'a> {
     fn check_block(
         &mut self,
         stmts: &[Stmt],
-        locals: &mut HashMap<String, Type>,
+        locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
     ) {
@@ -1270,7 +1270,7 @@ impl<'a> Checker<'a> {
     fn check_stmt(
         &mut self,
         stmt: &Stmt,
-        locals: &mut HashMap<String, Type>,
+        locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
     ) {
@@ -1286,14 +1286,12 @@ impl<'a> Checker<'a> {
                         None => expected.clone(),
                     };
                     if actual != Type::Mixed && !self.registry.is_assignable(&actual, &expected) {
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!(
-                                "return type mismatch: expected {expected}, got {actual}"
-                            ),
-                            span: e.span,
-                            level: 3,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("return type mismatch: expected {expected}, got {actual}"),
+                            e.span,
+                            3,
+                        );
                     }
                 }
             }
@@ -1313,12 +1311,12 @@ impl<'a> Checker<'a> {
                         && expected != Type::Mixed
                         && !self.registry.is_assignable(&Type::Null, &expected)
                     {
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!("return type mismatch: expected {expected}, got null"),
-                            span: stmt.span,
-                            level: 3,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("return type mismatch: expected {expected}, got null"),
+                            stmt.span,
+                            3,
+                        );
                     }
                 }
             }
@@ -1513,7 +1511,7 @@ impl<'a> Checker<'a> {
                 let mut running = locals.clone();
                 let mut narrowed_locals = locals.clone();
                 let mut previous_terminates = true;
-                let mut exit_states: Vec<HashMap<String, Type>> = Vec::new();
+                let mut exit_states: Vec<Locals> = Vec::new();
                 if !cases.iter().any(|c| c.test.is_none()) {
                     exit_states.push(locals.clone());
                 }
@@ -1587,14 +1585,12 @@ impl<'a> Checker<'a> {
                         if let Type::Object(class, _) = self.resolve_name_expr(t)
                             && !self.registry.is_subclass_of(&class, "Throwable")
                         {
-                            self.diagnostics.push(Diagnostic {
-                                location: label.to_string(),
-                                message: format!(
-                                    "cannot catch {class}: it does not implement Throwable"
-                                ),
-                                span: c.span,
-                                level: 0,
-                            });
+                            self.report(
+                                label.to_string(),
+                                format!("cannot catch {class}: it does not implement Throwable"),
+                                c.span,
+                                0,
+                            );
                         }
                     }
                     let mut catch_locals = locals.clone();
@@ -1634,12 +1630,12 @@ impl<'a> Checker<'a> {
                 if let Type::Object(class, _) = self.check_expr(e, locals, label)
                     && !self.registry.is_subclass_of(&class, "Throwable")
                 {
-                    self.diagnostics.push(Diagnostic {
-                        location: label.to_string(),
-                        message: format!("cannot throw {class}: it does not implement Throwable"),
-                        span: e.span,
-                        level: 0,
-                    });
+                    self.report(
+                        label.to_string(),
+                        format!("cannot throw {class}: it does not implement Throwable"),
+                        e.span,
+                        0,
+                    );
                 }
             }
             // `global $x;` binds $x to whatever the global scope holds,
@@ -1703,12 +1699,7 @@ impl<'a> Checker<'a> {
     /// destructuring element, so `[[$a, $b], $c] = $nested;` doesn't
     /// wrongly check `$a`/`$b` as reads of not-yet-defined variables the
     /// way only handling one level of nesting used to.
-    fn check_assignment_target(
-        &mut self,
-        target: &Expr,
-        locals: &mut HashMap<String, Type>,
-        label: &str,
-    ) {
+    fn check_assignment_target(&mut self, target: &Expr, locals: &mut Locals, label: &str) {
         match &target.kind {
             ExprKind::Variable(_) => {}
             ExprKind::ArrayLiteral(items) => {
@@ -1754,7 +1745,7 @@ impl<'a> Checker<'a> {
     /// deep. Per-key precision (`['name' => $n] = $shapedArray`) isn't
     /// resolved for a plain `Type::Array` source - every target gets the
     /// source's homogeneous element type, or Mixed for anything else.
-    fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut HashMap<String, Type>) {
+    fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
         match &lhs.kind {
             ExprKind::Variable(name) => {
                 locals.insert(name.clone(), ty);
@@ -1826,7 +1817,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut HashMap<String, Type>) {
+    fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut Locals) {
         if let ExprKind::Variable(name) = &target.kind {
             locals.insert(name.clone(), ty);
         }
@@ -1837,7 +1828,7 @@ impl<'a> Checker<'a> {
     /// common, safe patterns - equality against a known-type value
     /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
     /// anything else leaves `locals` untouched rather than guess.
-    fn apply_narrowing(&self, cond: &Expr, locals: &mut HashMap<String, Type>, branch_true: bool) {
+    fn apply_narrowing(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
         match &cond.kind {
             // `&&` narrows the "both true" branch by composing each side
             // in order (the right operand's own narrowing can rely on the
@@ -1927,7 +1918,7 @@ impl<'a> Checker<'a> {
         &self,
         l: &Expr,
         r: &Expr,
-        locals: &mut HashMap<String, Type>,
+        locals: &mut Locals,
         matches_when_true: bool,
     ) {
         let pair = match (&l.kind, &r.kind) {
@@ -1993,12 +1984,7 @@ impl<'a> Checker<'a> {
     /// undeclared *static* property is a real, non-suppressible PHP
     /// fatal error), and anything past a function/method call is checked
     /// normally, since `isset()`/`??` don't evaluate quietly past one.
-    fn check_expr_quiet_root(
-        &mut self,
-        e: &Expr,
-        locals: &mut HashMap<String, Type>,
-        label: &str,
-    ) -> Type {
+    fn check_expr_quiet_root(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         // Every arm here is consumed only for its side effects - see this
         // function's own doc comment and Phase 3's plan note: neither `??`
         // nor `??=` (its only two call sites) depend on the quiet-checked
@@ -2031,7 +2017,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_expr(&mut self, e: &Expr, locals: &mut HashMap<String, Type>, label: &str) -> Type {
+    fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         match &e.kind {
             ExprKind::Call(callee, args) => {
                 // `unset($x)` genuinely removes `$x` from scope in real
@@ -2081,14 +2067,9 @@ impl<'a> Checker<'a> {
                 {
                     let actual = self.infer_expr(&actual_arg.value, locals).to_string();
                     if &actual != expected {
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!(
+                        self.report(label.to_string(), format!(
                                 "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
-                            ),
-                            span: actual_arg.value.span,
-                            level: 0,
-                        });
+                            ), actual_arg.value.span, 0);
                     }
                     self.check_expr(&actual_arg.value, locals, label);
                     return Type::Mixed;
@@ -2153,9 +2134,16 @@ impl<'a> Checker<'a> {
                         // argument list" idiom.
                         let has_spread = args.iter().any(|a| a.spread);
                         if !has_spread {
-                            self.check_args(
-                                name, sig, args, &resolved, locals, label, None, e.span,
-                            );
+                            self.check_args(CheckArgsCall {
+                                callee_label: name,
+                                sig,
+                                args,
+                                resolved: &resolved,
+                                locals,
+                                label,
+                                defining_class: None,
+                                span: e.span,
+                            });
                             if matches!(name.as_str(), "sprintf" | "printf") {
                                 self.check_format_string_call(name, args, locals, label);
                             }
@@ -2168,12 +2156,12 @@ impl<'a> Checker<'a> {
                         // multi-segment name with no matching import),
                         // every miss here is a real undefined-function
                         // finding.
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!("call to undefined function {name}()"),
-                            span: e.span,
-                            level: 0,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("call to undefined function {name}()"),
+                            e.span,
+                            0,
+                        );
                     }
                 }
                 // Reuses the `resolved_name`/`sig` already resolved above
@@ -2292,28 +2280,28 @@ impl<'a> Checker<'a> {
                                 || self.registry.lookup_method(c, "__call").is_some()
                         })
                     {
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!("call to undefined method {recv_ty}::{method}()"),
-                            span: e.span,
-                            level: 0,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("call to undefined method {recv_ty}::{method}()"),
+                            e.span,
+                            0,
+                        );
                     } else if let Some(sig) = &sig
                         && !args.iter().any(|a| a.spread)
                     {
                         // Finding 29: see the identical check on the
                         // plain-function Call arm above.
                         let qualified = format!("{class}::{method}");
-                        self.check_args(
-                            &qualified,
+                        self.check_args(CheckArgsCall {
+                            callee_label: &qualified,
                             sig,
                             args,
-                            &resolved,
+                            resolved: &resolved,
                             locals,
                             label,
-                            Some(class),
-                            e.span,
-                        );
+                            defining_class: Some(class),
+                            span: e.span,
+                        });
                     }
                 }
                 let result = match &recv_class {
@@ -2381,12 +2369,12 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Variable(name) => {
                 if !locals.contains_key(name) && !is_superglobal(name) {
-                    self.diagnostics.push(Diagnostic {
-                        location: label.to_string(),
-                        message: format!("undefined variable ${name}"),
-                        span: e.span,
-                        level: 0,
-                    });
+                    self.report(
+                        label.to_string(),
+                        format!("undefined variable ${name}"),
+                        e.span,
+                        0,
+                    );
                 }
                 locals.get(name).cloned().unwrap_or(Type::Mixed)
             }
@@ -2608,40 +2596,40 @@ impl<'a> Checker<'a> {
                     // support.
                     if let Some(info) = self.registry.classes.get(class) {
                         if info.kind == ClassKind::Interface {
-                            self.diagnostics.push(Diagnostic {
-                                location: label.to_string(),
-                                message: format!("cannot instantiate interface {class}"),
-                                span: e.span,
-                                level: 0,
-                            });
+                            self.report(
+                                label.to_string(),
+                                format!("cannot instantiate interface {class}"),
+                                e.span,
+                                0,
+                            );
                         } else if info.is_abstract {
-                            self.diagnostics.push(Diagnostic {
-                                location: label.to_string(),
-                                message: format!("cannot instantiate abstract class {class}"),
-                                span: e.span,
-                                level: 0,
-                            });
+                            self.report(
+                                label.to_string(),
+                                format!("cannot instantiate abstract class {class}"),
+                                e.span,
+                                0,
+                            );
                         } else if let Some(sig) = ctor_sig
                             && !args.iter().any(|a| a.spread)
                         {
-                            self.check_args(
-                                &format!("{class}::__construct"),
+                            self.check_args(CheckArgsCall {
+                                callee_label: &format!("{class}::__construct"),
                                 sig,
                                 args,
-                                &resolved,
+                                resolved: &resolved,
                                 locals,
                                 label,
-                                Some(class),
-                                e.span,
-                            );
+                                defining_class: Some(class),
+                                span: e.span,
+                            });
                         }
                     } else {
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!("instantiated class {class} not found"),
-                            span: e.span,
-                            level: 0,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("instantiated class {class} not found"),
+                            e.span,
+                            0,
+                        );
                     }
                 }
                 new_ty
@@ -2714,16 +2702,16 @@ impl<'a> Checker<'a> {
                         // plain-function Call arm above.
                         if !args.iter().any(|a| a.spread) {
                             let qualified = format!("{class}::{method}");
-                            self.check_args(
-                                &qualified,
+                            self.check_args(CheckArgsCall {
+                                callee_label: &qualified,
                                 sig,
                                 args,
-                                &resolved,
+                                resolved: &resolved,
                                 locals,
                                 label,
-                                Some(class),
-                                e.span,
-                            );
+                                defining_class: Some(class),
+                                span: e.span,
+                            });
                         }
                     } else if self.registry.classes.contains_key(class)
                         && self.registry.lookup_method(class, "__callStatic").is_none()
@@ -2733,12 +2721,12 @@ impl<'a> Checker<'a> {
                         // is confirmed known, and __callStatic (the
                         // static equivalent of __call) suppresses it
                         // entirely, matching real PHPStan.
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!("call to undefined static method {class}::{method}()"),
-                            span: e.span,
-                            level: 0,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("call to undefined static method {class}::{method}()"),
+                            e.span,
+                            0,
+                        );
                     }
                 }
                 match (&resolved_class, sig) {
@@ -2783,26 +2771,24 @@ impl<'a> Checker<'a> {
                     let prop = self.registry.lookup_property(&class, prop_name);
                     let is_valid_static = prop.is_some_and(|sig| sig.is_static);
                     if !is_valid_static {
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!(
-                                "access to undefined static property {class}::${prop_name}"
-                            ),
-                            span: e.span,
-                            level: 0,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("access to undefined static property {class}::${prop_name}"),
+                            e.span,
+                            0,
+                        );
                     }
                     prop.map(|p| self.resolve_pseudo(&p.ty, &class))
                         .unwrap_or(Type::Mixed)
                 } else {
                     let const_ty = self.registry.lookup_const(&class, member);
                     if const_ty.is_none() {
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!("access to undefined constant {class}::{member}"),
-                            span: e.span,
-                            level: 0,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("access to undefined constant {class}::{member}"),
+                            e.span,
+                            0,
+                        );
                     }
                     const_ty
                         .map(|ty| self.resolve_pseudo(ty, &class))
@@ -2832,12 +2818,12 @@ impl<'a> Checker<'a> {
                     self.registry.lookup_property(c, prop).is_some()
                         || self.registry.lookup_method(c, "__get").is_some()
                 }) {
-                    self.diagnostics.push(Diagnostic {
-                        location: label.to_string(),
-                        message: format!("access to undefined property {base_ty}::${prop}"),
-                        span: e.span,
-                        level: 2,
-                    });
+                    self.report(
+                        label.to_string(),
+                        format!("access to undefined property {base_ty}::${prop}"),
+                        e.span,
+                        2,
+                    );
                 }
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
@@ -2902,7 +2888,7 @@ impl<'a> Checker<'a> {
                 // combined "or" narrowing).
                 let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
                 let mut accumulated = locals.clone();
-                let mut merged: Option<HashMap<String, Type>> = None;
+                let mut merged: Option<Locals> = None;
                 let mut result_types: Vec<Type> = Vec::new();
                 for (conds, result) in arms {
                     for c in conds {
@@ -2985,7 +2971,7 @@ impl<'a> Checker<'a> {
                 // is the one implicit exception: a non-static closure
                 // declared inside a method still auto-binds it, the same
                 // as real PHP.
-                let mut closure_locals: HashMap<String, Type> = HashMap::new();
+                let mut closure_locals: Locals = HashMap::new();
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     closure_locals.insert(u.name.clone(), ty);
@@ -3039,14 +3025,12 @@ impl<'a> Checker<'a> {
                 if return_type.is_some() {
                     let expected = self.resolve_type_hint(return_type.as_deref());
                     if body_ty != Type::Mixed && !self.registry.is_assignable(&body_ty, &expected) {
-                        self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
-                            message: format!(
-                                "return type mismatch: expected {expected}, got {body_ty}"
-                            ),
-                            span: body.span,
-                            level: 3,
-                        });
+                        self.report(
+                            label.to_string(),
+                            format!("return type mismatch: expected {expected}, got {body_ty}"),
+                            body.span,
+                            3,
+                        );
                     }
                 }
                 Type::Object("Closure".to_string(), Vec::new())
@@ -3076,12 +3060,12 @@ impl<'a> Checker<'a> {
                                         self.registry.lookup_function(g).is_some()
                                     });
                                 if !found {
-                                    self.diagnostics.push(Diagnostic {
-                                        location: label.to_string(),
-                                        message: format!("call to undefined function {primary}()"),
-                                        span: e.span,
-                                        level: 0,
-                                    });
+                                    self.report(
+                                        label.to_string(),
+                                        format!("call to undefined function {primary}()"),
+                                        e.span,
+                                        0,
+                                    );
                                 }
                             }
                         } else {
@@ -3107,12 +3091,12 @@ impl<'a> Checker<'a> {
                                     || self.registry.lookup_method(c, "__call").is_some()
                             })
                         {
-                            self.diagnostics.push(Diagnostic {
-                                location: label.to_string(),
-                                message: format!("call to undefined method {recv_ty}::{method}()"),
-                                span: e.span,
-                                level: 0,
-                            });
+                            self.report(
+                                label.to_string(),
+                                format!("call to undefined method {recv_ty}::{method}()"),
+                                e.span,
+                                0,
+                            );
                         }
                     }
                     ExprKind::StaticCall(class_name, method, _) => {
@@ -3124,14 +3108,12 @@ impl<'a> Checker<'a> {
                                 .lookup_method(&class, "__callStatic")
                                 .is_none()
                         {
-                            self.diagnostics.push(Diagnostic {
-                                location: label.to_string(),
-                                message: format!(
-                                    "call to undefined static method {class}::{method}()"
-                                ),
-                                span: e.span,
-                                level: 0,
-                            });
+                            self.report(
+                                label.to_string(),
+                                format!("call to undefined static method {class}::{method}()"),
+                                e.span,
+                                0,
+                            );
                         }
                     }
                     ExprKind::DynamicMethodCall(recv, name_expr, _) => {
@@ -3180,7 +3162,7 @@ impl<'a> Checker<'a> {
         sig: Option<&FunctionSig>,
         args: &[Arg],
         resolved: &[Option<&Expr>],
-        locals: &mut HashMap<String, Type>,
+        locals: &mut Locals,
     ) {
         let Some(sig) = sig else {
             for arg in args {
@@ -3225,7 +3207,7 @@ impl<'a> Checker<'a> {
     fn check_closure_literal_with_this(
         &mut self,
         closure_expr: &Expr,
-        locals: &HashMap<String, Type>,
+        locals: &Locals,
         label: &str,
         this_ty: Type,
     ) {
@@ -3234,13 +3216,7 @@ impl<'a> Checker<'a> {
         self.check_expr(closure_expr, &mut seeded, label);
     }
 
-    fn check_property_assignment(
-        &mut self,
-        lhs: &Expr,
-        rhs: &Expr,
-        locals: &HashMap<String, Type>,
-        label: &str,
-    ) {
+    fn check_property_assignment(&mut self, lhs: &Expr, rhs: &Expr, locals: &Locals, label: &str) {
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             return;
         };
@@ -3267,12 +3243,12 @@ impl<'a> Checker<'a> {
             && (self.current_class.as_deref() != Some(owner.as_str())
                 || self.current_method.as_deref() != Some("__construct"))
         {
-            self.diagnostics.push(Diagnostic {
-                location: label.to_string(),
-                message: format!("{owner}::${prop} is readonly and cannot be modified here"),
-                span: lhs.span,
-                level: 0,
-            });
+            self.report(
+                label.to_string(),
+                format!("{owner}::${prop} is readonly and cannot be modified here"),
+                lhs.span,
+                0,
+            );
         }
         let bindings = self.class_template_bindings(&class, &type_args, &owner);
         let expected = types::substitute_template(&prop_sig.ty, &bindings);
@@ -3281,12 +3257,12 @@ impl<'a> Checker<'a> {
         if actual == Type::Mixed || self.registry.is_assignable(&actual, &expected) {
             return;
         }
-        self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
-            message: format!("{class}::${prop} expects {expected}, {actual} given"),
-            span: rhs.span,
-            level: 3,
-        });
+        self.report(
+            label.to_string(),
+            format!("{class}::${prop} expects {expected}, {actual} given"),
+            rhs.span,
+            3,
+        );
     }
 
     /// Flags `$x['key']` when `$x`'s type is a known `ArrayShape` and 'key'
@@ -3296,13 +3272,7 @@ impl<'a> Checker<'a> {
     /// a genuinely *optional* field is not flagged either - that's a
     /// possibly-undefined-index warning, a different (and noisier) check
     /// this prototype doesn't attempt.
-    fn check_shape_key_access(
-        &mut self,
-        base: &Expr,
-        idx: &Expr,
-        locals: &HashMap<String, Type>,
-        label: &str,
-    ) {
+    fn check_shape_key_access(&mut self, base: &Expr, idx: &Expr, locals: &Locals, label: &str) {
         let Type::ArrayShape(fields) = self.infer_expr(base, locals) else {
             return;
         };
@@ -3312,35 +3282,25 @@ impl<'a> Checker<'a> {
         if fields.iter().any(|(name, _, _)| *name == key) {
             return;
         }
-        self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
-            message: format!("array{{...}} has no key '{key}'"),
-            span: idx.span,
-            level: 2,
-        });
+        self.report(
+            label.to_string(),
+            format!("array{{...}} has no key '{key}'"),
+            idx.span,
+            2,
+        );
     }
 
-    #[allow(clippy::too_many_arguments)]
-    /// `args` is the raw, as-written argument list (needed for the two
-    /// count-based checks below, both of which are about how many
-    /// arguments were actually written, not which parameter each one
-    /// resolves to); `resolved` is Item 1's own per-parameter resolution
-    /// of that same list (`resolve_call_args`), used for the "too few"
-    /// check's own missing-required-parameter test (correct for a named
-    /// call that fills required parameters out of order, where a raw
-    /// argument *count* alone can't tell) and for the per-argument
-    /// type-checking loop.
-    fn check_args(
-        &mut self,
-        callee_label: &str,
-        sig: &FunctionSig,
-        args: &[Arg],
-        resolved: &[Option<&Expr>],
-        locals: &HashMap<String, Type>,
-        label: &str,
-        defining_class: Option<&str>,
-        span: Span,
-    ) {
+    fn check_args(&mut self, call: CheckArgsCall) {
+        let CheckArgsCall {
+            callee_label,
+            sig,
+            args,
+            resolved,
+            locals,
+            label,
+            defining_class,
+            span,
+        } = call;
         let required = sig
             .params
             .iter()
@@ -3352,15 +3312,15 @@ impl<'a> Checker<'a> {
             .filter(|s| s.is_none())
             .count();
         if missing_required > 0 {
-            self.diagnostics.push(Diagnostic {
-                location: label.to_string(),
-                message: format!(
+            self.report(
+                label.to_string(),
+                format!(
                     "{callee_label}() expects at least {required} argument(s), {} given",
                     args.len()
                 ),
                 span,
-                level: 0,
-            });
+                0,
+            );
         }
 
         // Finding 40: calling a non-variadic function/method with more
@@ -3382,16 +3342,16 @@ impl<'a> Checker<'a> {
             } else {
                 "at most"
             };
-            self.diagnostics.push(Diagnostic {
-                location: label.to_string(),
-                message: format!(
+            self.report(
+                label.to_string(),
+                format!(
                     "{callee_label}() expects {quantifier} {} argument(s), {} given",
                     sig.params.len(),
                     args.len()
                 ),
                 span,
-                level: 0,
-            });
+                0,
+            );
         }
 
         for (i, slot) in resolved.iter().enumerate() {
@@ -3414,18 +3374,18 @@ impl<'a> Checker<'a> {
                 None => param.ty.clone(),
             };
             if !self.registry.is_assignable(&arg_ty, &param_ty) {
-                self.diagnostics.push(Diagnostic {
-                    location: label.to_string(),
-                    message: format!(
+                self.report(
+                    label.to_string(),
+                    format!(
                         "{callee_label}() argument #{} (${}) expects {}, {} given",
                         i + 1,
                         param.name,
                         param_ty,
                         arg_ty
                     ),
-                    span: arg.span,
-                    level: 5,
-                });
+                    arg.span,
+                    5,
+                );
             }
         }
     }
@@ -3443,13 +3403,7 @@ impl<'a> Checker<'a> {
     /// extra arguments is valid, unremarkable PHP that real `sprintf`
     /// just ignores; and an argument whose type couldn't possibly satisfy
     /// its specifier (an array, or an object for a numeric specifier).
-    fn check_format_string_call(
-        &mut self,
-        name: &str,
-        args: &[Arg],
-        locals: &HashMap<String, Type>,
-        label: &str,
-    ) {
+    fn check_format_string_call(&mut self, name: &str, args: &[Arg], locals: &Locals, label: &str) {
         let Some(fmt_expr) = args.first() else {
             return;
         };
@@ -3461,32 +3415,32 @@ impl<'a> Checker<'a> {
         };
         let provided = &args[1..];
         if specs.len() > provided.len() {
-            self.diagnostics.push(Diagnostic {
-                location: label.to_string(),
-                message: format!(
+            self.report(
+                label.to_string(),
+                format!(
                     "{name}() format string expects {} argument(s), {} given",
                     specs.len(),
                     provided.len()
                 ),
-                span: fmt_expr.value.span,
-                level: 0,
-            });
+                fmt_expr.value.span,
+                0,
+            );
             return;
         }
         for (spec, arg) in specs.iter().zip(provided) {
             let arg_ty = self.infer_expr(&arg.value, locals);
             if !format_specifier_accepts(*spec, &arg_ty) {
-                self.diagnostics.push(Diagnostic {
-                    location: label.to_string(),
-                    message: format!("{name}() format specifier %{spec} does not accept {arg_ty}"),
-                    span: arg.value.span,
-                    level: 5,
-                });
+                self.report(
+                    label.to_string(),
+                    format!("{name}() format specifier %{spec} does not accept {arg_ty}"),
+                    arg.value.span,
+                    5,
+                );
             }
         }
     }
 
-    fn infer_expr(&self, e: &Expr, locals: &HashMap<String, Type>) -> Type {
+    fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::IntLiteral(*n),
@@ -3800,11 +3754,7 @@ impl<'a> Checker<'a> {
     /// statically, and a non-literal key has no fixed name to key a
     /// field by at all - degrading to the honest `Array(Mixed)` for
     /// those specific cases, matching the status quo everywhere else.
-    fn infer_array_literal_type(
-        &self,
-        items: &[ArrayItem],
-        locals: &HashMap<String, Type>,
-    ) -> Type {
+    fn infer_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
         let mut fields: Vec<(String, Type, bool)> = Vec::new();
         let mut next_index: i64 = 0;
         for item in items {
@@ -3846,9 +3796,9 @@ impl<'a> Checker<'a> {
         &self,
         sig: &FunctionSig,
         resolved: &[Option<&Expr>],
-        locals: &HashMap<String, Type>,
+        locals: &Locals,
     ) -> Type {
-        let mut bindings: HashMap<String, Type> = HashMap::new();
+        let mut bindings: Locals = HashMap::new();
         for (param, slot) in sig.params.iter().zip(resolved.iter()) {
             let Some(arg) = slot else { continue };
             let arg_ty = self.infer_expr(arg, locals);
@@ -3904,7 +3854,7 @@ impl<'a> Checker<'a> {
         name: &str,
         sig: &FunctionSig,
         args: &[Arg],
-        locals: &HashMap<String, Type>,
+        locals: &Locals,
     ) -> Type {
         match name {
             // Scoped to the common 2-arg single-array form - the real
@@ -4030,7 +3980,7 @@ impl<'a> Checker<'a> {
         &self,
         callback: &Expr,
         param_overrides: &[Type],
-        locals: &HashMap<String, Type>,
+        locals: &Locals,
     ) -> Option<Type> {
         match &callback.kind {
             ExprKind::ArrowFn {
@@ -4069,7 +4019,7 @@ impl<'a> Checker<'a> {
                 {
                     return None;
                 }
-                let mut closure_locals: HashMap<String, Type> = HashMap::new();
+                let mut closure_locals: Locals = HashMap::new();
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     closure_locals.insert(u.name.clone(), ty);
@@ -4099,7 +4049,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &HashMap<String, Type>) -> Type {
+    fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &Locals) -> Type {
         match op {
             BinOp::Concat => Type::String,
             BinOp::Eq
@@ -4586,10 +4536,7 @@ fn signatures_compatible(a: &FunctionSig, b: &FunctionSig) -> bool {
 /// variable present in both branches gets the union of its two types; one
 /// present in only one branch was introduced there and can't be assumed to
 /// exist afterward, so it's dropped rather than carried forward unsoundly.
-fn merge_scopes(
-    then_locals: &HashMap<String, Type>,
-    else_locals: &HashMap<String, Type>,
-) -> HashMap<String, Type> {
+fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
     let mut merged = HashMap::new();
     for (name, then_ty) in then_locals {
         if let Some(else_ty) = else_locals.get(name) {
