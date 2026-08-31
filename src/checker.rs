@@ -1233,11 +1233,21 @@ impl<'a> Checker<'a> {
                     // whole try.
                     let mut catch_locals = locals.clone();
                     if let Some(var) = &c.var {
-                        let ty = c
-                            .types
-                            .first()
-                            .map(|t| self.resolve_name_expr(t))
-                            .unwrap_or(Type::Mixed);
+                        // A multi-type catch (`catch (TypeA|TypeB $e)`,
+                        // real, valid PHP since 7.1) binds the caught
+                        // variable to the *union* of every listed type -
+                        // binding only the first discarded the others
+                        // entirely, making the checker's verdict on
+                        // member access through the variable depend on
+                        // catch-type order, which real PHP itself doesn't
+                        // care about at all.
+                        let ty = match c.types.as_slice() {
+                            [] => Type::Mixed,
+                            [single] => self.resolve_name_expr(single),
+                            multiple => Type::Union(
+                                multiple.iter().map(|t| self.resolve_name_expr(t)).collect(),
+                            ),
+                        };
                         catch_locals.insert(var.clone(), ty);
                     }
                     self.check_block(&c.body, &mut catch_locals, declared_return, label);
@@ -1484,6 +1494,38 @@ impl<'a> Checker<'a> {
         locals.insert(var_name, narrowed);
     }
 
+    /// Whether a method/property is confirmed missing from every value
+    /// `ty` could hold - `has_member(class)` decides for one concrete
+    /// class (already covering whatever fallback, like `__call`/`__get`,
+    /// makes a class "have" the member without declaring it directly). A
+    /// bare `Object` is the base case; a `Union` value could genuinely be
+    /// any member, so missing is confirmed as soon as *any* resolvable
+    /// member lacks it; a value satisfying an `Intersection` has every
+    /// member's capabilities at once, so missing is only confirmed when
+    /// *every* member lacks it. Anything else (a type this checker can't
+    /// resolve into class members at all, or a non-`Object` member found
+    /// while walking a `Union`/`Intersection`) never confirms "missing" -
+    /// this project's consistent preference for fewer false positives
+    /// over catching everything.
+    fn member_confirmed_missing(
+        &self,
+        ty: &Type,
+        has_member: impl Fn(&str) -> bool + Copy,
+    ) -> bool {
+        match ty {
+            Type::Object(class, _) => {
+                self.registry.classes.contains_key(class) && !has_member(class)
+            }
+            Type::Union(members) => members
+                .iter()
+                .any(|m| self.member_confirmed_missing(m, has_member)),
+            Type::Intersection(members) => members
+                .iter()
+                .all(|m| self.member_confirmed_missing(m, has_member)),
+            _ => false,
+        }
+    }
+
     /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks
     /// down through `Index`/`PropertyAccess`/`DynamicPropertyAccess`,
     /// checking each level's own sub-expressions (an index's key, a
@@ -1594,8 +1636,25 @@ impl<'a> Checker<'a> {
                 // bare one two unrelated packages could collide on - see
                 // the module-level doc comment's "Known limitation" note,
                 // now resolved, for the full history.
-                let recv_class = match self.infer_expr(recv, locals) {
-                    Type::Object(class, type_args) => Some((class, type_args)),
+                //
+                // A `Union`/`Intersection` receiver (e.g. a multi-type
+                // `catch` variable, or an ordinarily union-typed
+                // parameter) used to fall to `_ => None` here entirely,
+                // silently skipping this whole check - `member_missing`
+                // below picks up the "should this be flagged" question
+                // for those cases instead, using a representative member
+                // (the first `Object` found) for argument-checking.
+                let recv_ty = self.infer_expr(recv, locals);
+                let recv_class = match &recv_ty {
+                    Type::Object(class, type_args) => Some((class.clone(), type_args.clone())),
+                    Type::Union(members) | Type::Intersection(members) => {
+                        members.iter().find_map(|m| match m {
+                            Type::Object(class, type_args) => {
+                                Some((class.clone(), type_args.clone()))
+                            }
+                            _ => None,
+                        })
+                    }
                     _ => None,
                 };
                 // Substituted through the receiver's own carried type
@@ -1617,27 +1676,38 @@ impl<'a> Checker<'a> {
                     self.check_expr(a, locals, label);
                 }
                 if let Some((class, _)) = &recv_class {
-                    if let Some(sig) = &sig {
-                        let qualified = format!("{class}::{method}");
-                        self.check_args(&qualified, sig, args, locals, label, Some(class), e.span);
-                    } else if self.registry.classes.contains_key(class)
-                        && self.registry.lookup_method(class, "__call").is_none()
+                    // Checked *before* falling back to whether the
+                    // representative member's own `sig` was found: for a
+                    // `Union`, the representative is just the first
+                    // `Object` member encountered, which could easily be
+                    // one that *does* have the method even though another
+                    // member doesn't - the real question is never "does
+                    // the first member have it," it's "is it missing from
+                    // any member (Union) / every member (Intersection)."
+                    // A class not known to the registry at all (an
+                    // unresolvable/uninstalled dependency, the same gap
+                    // `ExprKind::New`'s check documents) is left unchecked
+                    // rather than risking a false positive - only fires
+                    // once the class itself is confirmed known. `__call`
+                    // anywhere in the chain means any method name is
+                    // legitimately callable at runtime, so its presence
+                    // suppresses this entirely, the same way real
+                    // PHPStan treats it.
+                    if self.registry.classes.contains_key(class)
+                        && self.member_confirmed_missing(&recv_ty, |c| {
+                            self.registry.lookup_method(c, method).is_some()
+                                || self.registry.lookup_method(c, "__call").is_some()
+                        })
                     {
-                        // A class not known to the registry at all (an
-                        // unresolvable/uninstalled dependency, the same
-                        // gap `ExprKind::New`'s check documents) is left
-                        // unchecked rather than risking a false positive -
-                        // only fires once the class itself is confirmed
-                        // known. `__call` anywhere in the chain means any
-                        // method name is legitimately callable at
-                        // runtime, so its presence suppresses this
-                        // entirely, the same way real PHPStan treats it.
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
-                            message: format!("call to undefined method {class}::{method}()"),
+                            message: format!("call to undefined method {recv_ty}::{method}()"),
                             span: e.span,
                             level: 0,
                         });
+                    } else if let Some(sig) = &sig {
+                        let qualified = format!("{class}::{method}");
+                        self.check_args(&qualified, sig, args, locals, label, Some(class), e.span);
                     }
                 }
             }
@@ -1945,14 +2015,19 @@ impl<'a> Checker<'a> {
                 // warning in real PHP (unless __get exists). So there's
                 // no "could be a legitimate dynamic property" case to
                 // stay lenient for here, the way there is on write.
-                if let Type::Object(class, _) = self.infer_expr(base, locals)
-                    && self.registry.classes.contains_key(&class)
-                    && self.registry.lookup_property(&class, prop).is_none()
-                    && self.registry.lookup_method(&class, "__get").is_none()
-                {
+                // Same `Union`/`Intersection` handling as `MethodCall`
+                // just above, and the identical reasoning for why: a
+                // multi-type `catch` variable, or an ordinarily
+                // union-typed parameter, used to skip this check
+                // entirely rather than fall to `_ => {}`.
+                let base_ty = self.infer_expr(base, locals);
+                if self.member_confirmed_missing(&base_ty, |c| {
+                    self.registry.lookup_property(c, prop).is_some()
+                        || self.registry.lookup_method(c, "__get").is_some()
+                }) {
                     self.diagnostics.push(Diagnostic {
                         location: label.to_string(),
-                        message: format!("access to undefined property {class}::${prop}"),
+                        message: format!("access to undefined property {base_ty}::${prop}"),
                         span: e.span,
                         level: 2,
                     });
@@ -7223,6 +7298,96 @@ mod tests {
             /** @param 1|2|3 $level */
             function f($level): void {}
             function test(): void { f(5); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+    // Finding 27 from the architecture audit - a multi-type catch clause
+    // bound only its first listed type, and MethodCall/PropertyAccess
+    // never matched a Union/Intersection receiver at all, silently
+    // skipping undefined-method/property checking for either.
+
+    #[test]
+    fn multi_catch_binds_the_union_of_every_listed_type_regardless_of_order() {
+        let first_order = diagnostics_for(
+            r#"<?php
+            class LogicEx extends \LogicException {}
+            class SpecialEx extends \Exception {
+                public function getSpecialData(): string { return "data"; }
+            }
+            function f(): void {
+                try { throw new SpecialEx(); }
+                catch (LogicEx|SpecialEx $e) { echo $e->getSpecialData(); }
+            }
+        "#,
+        );
+        let second_order = diagnostics_for(
+            r#"<?php
+            class LogicEx extends \LogicException {}
+            class SpecialEx extends \Exception {
+                public function getSpecialData(): string { return "data"; }
+            }
+            function f(): void {
+                try { throw new SpecialEx(); }
+                catch (SpecialEx|LogicEx $e) { echo $e->getSpecialData(); }
+            }
+        "#,
+        );
+        // Both orderings describe the same real ambiguity ($e could be
+        // LogicEx, which lacks getSpecialData()) - the verdict must not
+        // depend on which type happens to be written first.
+        assert_eq!(first_order.len(), 1, "got: {first_order:?}");
+        assert_eq!(second_order.len(), 1, "got: {second_order:?}");
+    }
+
+    #[test]
+    fn union_typed_receiver_requires_every_member_to_have_the_method() {
+        let d = diagnostics_for(
+            r#"<?php
+            class A { public function foo(): void {} }
+            class B {}
+            function f(A|B $x): void { $x->foo(); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("undefined method"), "got: {d:?}");
+    }
+
+    #[test]
+    fn union_typed_receiver_requires_every_member_to_have_the_property() {
+        let d = diagnostics_for(
+            r#"<?php
+            class A { public int $x = 0; }
+            class B {}
+            function f(A|B $obj): int { return $obj->x; }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("undefined property"), "got: {d:?}");
+    }
+
+    #[test]
+    fn intersection_typed_receiver_accepts_a_method_found_on_any_member() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Countable2 { public function count2(): int; }
+            interface Nameable { public function name(): string; }
+            function f(Countable2&Nameable $x): void {
+                echo $x->count2();
+                echo $x->name();
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn intersection_typed_receiver_still_rejects_a_method_missing_from_every_member() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Countable2 { public function count2(): int; }
+            interface Nameable { public function name(): string; }
+            function f(Countable2&Nameable $x): void { $x->totallyMissingMethod(); }
         "#,
         );
         assert_eq!(d.len(), 1, "got: {d:?}");
