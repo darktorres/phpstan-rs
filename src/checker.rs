@@ -6932,4 +6932,55 @@ mod tests {
         assert_eq!(d.len(), 1, "got: {d:?}");
         assert!(d[0].message.contains("undefined variable $c"), "got: {d:?}");
     }
+    // Findings 21/22 from the architecture audit - a plain int wasn't
+    // accepted wherever a float was declared, and a native type hint
+    // defaulted to null wasn't treated as implicitly nullable.
+
+    #[test]
+    fn int_widens_to_float_in_arguments_returns_and_property_assignment() {
+        let d = diagnostics_for(
+            r#"<?php
+            function distance(float $x, float $y): float { return $x + $y; }
+            function test(): float { return distance(3, 4); }
+            class Config { public float $rate = 0; }
+            function test2(Config $c): void { $c->rate = 5; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_genuinely_wrong_float_argument_is_still_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsFloat(float $x): void {}
+            function test(): void { needsFloat("not a number"); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn a_native_type_hint_defaulted_to_null_is_implicitly_nullable() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int $x = null): void {}
+            function test(): void { f(null); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_promoted_constructor_property_defaulted_to_null_is_implicitly_nullable() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Widget {
+                public function __construct(public int $size = null) {}
+            }
+            function test(): void { new Widget(null); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
 }

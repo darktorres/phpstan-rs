@@ -410,6 +410,11 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::IntLiteral(_), Type::Int) => true,
         (Type::StringLiteral(_), Type::String) => true,
         (Type::True, Type::Bool) | (Type::False, Type::Bool) => true,
+        // PHP's one documented exception to its own scalar type
+        // declarations, even under strict_types=1: an int value is
+        // always accepted wherever a float is declared (int-to-float
+        // widening - explicit, load-bearing language behavior).
+        (Type::Int | Type::IntLiteral(_), Type::Float) => true,
 
         (Type::Union(members), _) => members.iter().all(|m| is_subtype(m, sup)),
         (_, Type::Union(members)) => members.iter().any(|m| is_subtype(sub, m)),

@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ClassDecl, EnumDecl, ExprKind, FunctionDecl, Stmt, StmtKind, UseImport};
+use crate::ast::{
+    ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Literal, Stmt, StmtKind, UseImport,
+};
 use crate::docblock::{self, DocBlock};
 use crate::types::{self, Type};
 
@@ -23,6 +25,34 @@ pub struct FunctionSig {
 /// over the native hint, since it's usually the more precise of the two
 /// (an untyped native param described only in `@param`, or a native `array`
 /// refined to `User[]`) - falls back to the native hint, then `Mixed`.
+/// A parameter with a plain (non-`?`) native type hint and a bare
+/// `= null` default is implicitly nullable in real PHP - `function
+/// f(int $x = null)` accepts `null` exactly as if it had been written
+/// `function f(?int $x = null)`. This was the only way to write an
+/// optional/nullable native parameter before PHP 7.1 introduced `?`, so
+/// a large amount of real code (old and new) still uses this style;
+/// later PHP versions only added a deprecation notice for it, the
+/// behavior itself is unchanged.
+fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) -> Type {
+    let is_bare_null_default = matches!(
+        default.map(|e| &e.kind),
+        Some(ExprKind::Literal(Literal::Null))
+    );
+    if !is_bare_null_default {
+        return ty;
+    }
+    let already_nullable = match &ty {
+        Type::Null | Type::Mixed => true,
+        Type::Union(members) => members.contains(&Type::Null),
+        _ => false,
+    };
+    if already_nullable {
+        ty
+    } else {
+        Type::Union(vec![ty, Type::Null])
+    }
+}
+
 fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
     doc_type
         .or(native_hint)
@@ -287,6 +317,7 @@ impl FunctionSig {
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_names);
                 let ty = resolve_names_in_type(ty, ctx);
+                let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
                 // A real `= value` default always wins; failing that, a
                 // `[optional]` marker on this param's own `@param` tag is
                 // trusted too (see `DocBlock::optional_params` - phpstorm-
@@ -425,6 +456,7 @@ impl ClassInfo {
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_set);
                 let ty = resolve_names_in_type(ty, ctx);
+                let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
                 properties.insert(
                     p.name.clone(),
                     PropertySig {
