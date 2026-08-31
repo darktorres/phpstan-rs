@@ -2908,6 +2908,7 @@ impl<'a> Checker<'a> {
                 let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
                 let mut accumulated = locals.clone();
                 let mut merged: Option<HashMap<String, Type>> = None;
+                let mut result_types: Vec<Type> = Vec::new();
                 for (conds, result) in arms {
                     for c in conds {
                         self.check_expr(c, locals, label);
@@ -2925,7 +2926,7 @@ impl<'a> Checker<'a> {
                             );
                         }
                     }
-                    self.check_expr(result, &mut arm_locals, label);
+                    result_types.push(self.check_expr(result, &mut arm_locals, label));
                     merged = Some(match merged {
                         Some(m) => merge_scopes(&m, &arm_locals),
                         None => arm_locals.clone(),
@@ -2945,7 +2946,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(d) = default {
                     let mut default_locals = accumulated.clone();
-                    self.check_expr(d, &mut default_locals, label);
+                    result_types.push(self.check_expr(d, &mut default_locals, label));
                     merged = Some(match merged {
                         Some(m) => merge_scopes(&m, &default_locals),
                         None => default_locals,
@@ -2954,7 +2955,24 @@ impl<'a> Checker<'a> {
                 if let Some(m) = merged {
                     *locals = m;
                 }
-                self.infer_expr(e, locals)
+                // Same "don't let an unknown arm compose into a partial
+                // Union that looks more precise than it is" rule Ternary
+                // applies.
+                if result_types.contains(&Type::Mixed) {
+                    Type::Mixed
+                } else {
+                    let mut deduped: Vec<Type> = Vec::new();
+                    for t in result_types {
+                        if !deduped.contains(&t) {
+                            deduped.push(t);
+                        }
+                    }
+                    match deduped.len() {
+                        0 => Type::Never,
+                        1 => deduped.into_iter().next().unwrap(),
+                        _ => Type::Union(deduped),
+                    }
+                }
             }
             ExprKind::Closure {
                 params,
