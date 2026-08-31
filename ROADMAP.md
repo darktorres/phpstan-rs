@@ -1004,18 +1004,11 @@ tracked here rather than fixed on the spot:**
   looks plausible but hasn't been traced to a specific root cause. Real
   next step: sample and trace each pattern the same way the three
   fixed bugs above were found, not guess at a fix.
-- **Separately, a real CLI/UX gap noticed during this same
-  conversation**: `check-project` has no way to load `vendor/` for
-  type-resolution context while only *reporting* diagnostics for
-  `src/` - passing both directories analyzes and reports on both,
-  producing tens of thousands of vendor-code diagnostics nobody wants.
-  Real PHPStan solves this via its own `paths:` config (what to
-  analyze) versus the Composer autoloader (used only for type
-  information, not analyzed itself) - this project would need an
-  equivalent "load for context, don't report" path split, not full
-  Composer-autoloader parsing. Not yet scoped into a specific stage;
-  candidate for Phase 16 (CI-friendly output) or its own small addition
-  to Stage 6-style CLI work.
+- **Composer integration for `vendor/` type context - DONE.**
+  `check-project` now auto-loads a project's installed Composer
+  autoloader (`vendor/composer/autoload_static.php` or the separate
+  `autoload_*.php` files) for symbol resolution without reporting
+  diagnostics on vendor code itself - see `src/composer.rs`.
 
 Grouped together because all of them are the same shape of problem:
 the checker's flow analysis and inference are coarser than they could
