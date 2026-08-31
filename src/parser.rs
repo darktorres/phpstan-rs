@@ -199,6 +199,21 @@ impl Parser {
         matches!(self.peek_at(offset), Token::Keyword(Keyword::Class))
     }
 
+    /// Called with the current token on `function` - does a real
+    /// declaration name follow (skipping an optional by-ref-return `&`),
+    /// as opposed to `(` directly (an anonymous function expression, only
+    /// valid as a statement when written bare and unassigned)? `&` itself
+    /// is never a valid function name, so no further lookahead is needed
+    /// once it's skipped.
+    fn looks_like_function_decl(&self) -> bool {
+        let offset = if matches!(self.peek_at(1), Token::Amp) {
+            2
+        } else {
+            1
+        };
+        !matches!(self.peek_at(offset), Token::LParen)
+    }
+
     /// Is the current position a `(set)` asymmetric-visibility marker
     /// (`private(set)`, `public(set)`, `protected(set)`)? Checked at the
     /// visibility keyword itself, i.e. this looks 3 tokens ahead for the
@@ -390,7 +405,17 @@ impl Parser {
                 self.expect_semicolon();
                 self.stmt(StmtKind::StaticVar(vars), start)
             }
-            Token::Keyword(Keyword::Function) => {
+            // A named declaration (`function foo(...)`) is only one of
+            // two things `function` can start at statement position - the
+            // other is a bare anonymous function *expression* used as a
+            // statement (`function () { ... };`, with no assignment at
+            // all) - a real, if unusual in production code, idiom that's
+            // extremely common in PHPStan's own test fixtures (an
+            // isolated global-scope body with no named function needed).
+            // The two are told apart by what follows `function` (skipping
+            // an optional by-ref-return `&`, which both forms allow): a
+            // name for a declaration, `(` directly for an anonymous one.
+            Token::Keyword(Keyword::Function) if self.looks_like_function_decl() => {
                 let doc = self.take_doc_comment();
                 let mut f = self.parse_function_decl();
                 f.doc_comment = doc;
@@ -3709,6 +3734,57 @@ mod tests {
             panic!("expected ClassDecl");
         };
         assert_eq!(c.resolved_trait_conflicts, vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn a_bare_anonymous_function_statement_parses_as_an_expression_not_a_declaration() {
+        // `function () { ... };` with no assignment at all - a real, if
+        // unusual in production code, idiom that's extremely common in
+        // real PHPStan's own test fixtures (an isolated global-scope body
+        // with no named function needed). Found via bulk-running this
+        // project's checker against the vendored phpstan-src corpus.
+        let program = parse("<?php function () { echo 1; };");
+        assert_eq!(program.len(), 1);
+        let StmtKind::Expression(e) = &program[0].kind else {
+            panic!(
+                "expected an Expression statement, got {:?}",
+                program[0].kind
+            );
+        };
+        assert!(matches!(e.kind, ExprKind::Closure { .. }));
+    }
+
+    #[test]
+    fn a_bare_anonymous_by_ref_function_statement_still_parses_as_an_expression() {
+        let program = parse("<?php function &() { static $x = 1; return $x; };");
+        assert_eq!(program.len(), 1);
+        let StmtKind::Expression(e) = &program[0].kind else {
+            panic!(
+                "expected an Expression statement, got {:?}",
+                program[0].kind
+            );
+        };
+        let ExprKind::Closure { by_ref, .. } = &e.kind else {
+            panic!("expected a Closure, got {:?}", e.kind);
+        };
+        assert!(by_ref);
+    }
+
+    #[test]
+    fn a_named_function_declaration_is_unaffected_by_the_anonymous_statement_lookahead() {
+        let program = parse("<?php function foo(int $x): int { return $x; }");
+        assert_eq!(program.len(), 1);
+        assert!(matches!(program[0].kind, StmtKind::FunctionDecl(_)));
+    }
+
+    #[test]
+    fn a_named_by_ref_function_declaration_is_unaffected_by_the_anonymous_statement_lookahead() {
+        let program = parse("<?php function &bar(): int { static $x = 1; return $x; }");
+        assert_eq!(program.len(), 1);
+        let StmtKind::FunctionDecl(f) = &program[0].kind else {
+            panic!("expected a FunctionDecl, got {:?}", program[0].kind);
+        };
+        assert_eq!(f.name, "bar");
     }
 
     #[test]
