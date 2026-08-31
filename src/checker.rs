@@ -208,6 +208,21 @@ impl<'a> Checker<'a> {
             // not just checkable from the outside at call sites.
             Some(sig) => {
                 for param in &sig.params {
+                    // `self`/`static`/`parent` need resolving against the
+                    // enclosing class the same way `$this` and a return
+                    // type already are - without this, a `self`-typed
+                    // parameter (`function equals(self $other): bool`)
+                    // stays an unresolved pseudo-type for the whole
+                    // function body, and infer_expr's PropertyAccess/
+                    // MethodCall arms only match a concrete `Object`, so
+                    // every property/method access through it silently
+                    // fell through to `Mixed` - no undefined-property/
+                    // method checking at all, unlike the identical access
+                    // through `$this`.
+                    let ty = match class_name {
+                        Some(c) => self.resolve_pseudo(&param.ty, c),
+                        None => param.ty.clone(),
+                    };
                     // `ParamSig::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
                     // individual argument at a call site) - inside the
@@ -215,9 +230,9 @@ impl<'a> Checker<'a> {
                     // variadic parameter into an `array` from the first
                     // statement onward, never the bare element type.
                     let ty = if param.variadic {
-                        Type::Array(Box::new(param.ty.clone()))
+                        Type::Array(Box::new(ty))
                     } else {
-                        param.ty.clone()
+                        ty
                     };
                     locals.insert(param.name.clone(), ty);
                 }
@@ -7481,6 +7496,41 @@ mod tests {
             r#"<?php
             function test(): void {
                 $g = fn(int ...$nums): int => count($nums);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 25 from the architecture audit - a self/static/parent-typed
+    // parameter was never resolved, silently disabling undefined-
+    // property/method checking through it (unlike the identical access
+    // through $this).
+
+    #[test]
+    fn self_typed_parameter_gets_undefined_property_checking() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point {
+                public int $id = 0;
+                public function equals(self $other): bool {
+                    return $this->id === $other->missingProp;
+                }
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("missingProp"), "got: {d:?}");
+    }
+
+    #[test]
+    fn self_typed_parameter_accessing_a_real_property_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point {
+                public int $id = 0;
+                public function equals(self $other): bool {
+                    return $this->id === $other->id;
+                }
             }
         "#,
         );
