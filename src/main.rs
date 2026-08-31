@@ -488,6 +488,24 @@ fn main() {
             no_composer,
             config,
         } => {
+            // Finding 8: a config file's own `paths`/`baseline`/
+            // `scan_paths` are conventionally relative to the config file
+            // itself (matching every comparable format - .gitignore,
+            // tsconfig.json, real PHPStan's own neon includes - and this
+            // project's own module-doc example), not to whatever
+            // directory the invoking shell happens to be in. Captured
+            // here, before `config` is shadowed by the loaded
+            // `config::Config` below, since the parsed struct itself
+            // doesn't carry its own source path.
+            let config_dir = config
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf);
+            let resolve_against_config = |p: PathBuf| match &config_dir {
+                Some(dir) => dir.join(p),
+                None => p,
+            };
+
             let config = match config {
                 Some(path) => match config::Config::load(&path) {
                     Ok(c) => Some(c),
@@ -503,7 +521,12 @@ fn main() {
             let dirs = if !dirs.is_empty() {
                 dirs
             } else {
-                config.paths.unwrap_or_default()
+                config
+                    .paths
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(resolve_against_config)
+                    .collect()
             };
             if dirs.is_empty() {
                 eprintln!("no paths given on the command line or in the config file");
@@ -512,12 +535,17 @@ fn main() {
             let level = level.or(config.level).unwrap_or(MAX_LEVEL);
             let strict_mixed_arrays =
                 strict_mixed_arrays || config.strict_mixed_arrays.unwrap_or(false);
-            let baseline = baseline.or(config.baseline);
+            let baseline = baseline.or(config.baseline.map(resolve_against_config));
 
             let mut scan_dirs = if !scan_dirs.is_empty() {
                 scan_dirs
             } else {
-                config.scan_paths.unwrap_or_default()
+                config
+                    .scan_paths
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(resolve_against_config)
+                    .collect()
             };
             let no_composer = no_composer || config.no_composer.unwrap_or(false);
 

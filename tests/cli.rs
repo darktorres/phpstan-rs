@@ -233,6 +233,41 @@ fn check_project_config_file_supplies_paths_and_level() {
 }
 
 #[test]
+fn check_project_config_relative_paths_resolve_against_the_config_file_not_the_cwd() {
+    // Finding 8: a config file's own relative `paths` must resolve
+    // against the config file's own directory, matching every
+    // comparable format (.gitignore, tsconfig.json, real PHPStan's own
+    // neon includes) - not whatever directory happens to invoke the CLI.
+    // Run with `current_dir` set somewhere else entirely (the system
+    // temp root, guaranteed to hold no `src/` of its own) so a bug that
+    // resolves "src" against the process's cwd instead would report "no
+    // .php files found" rather than actually checking the right file.
+    let dir = TempDir::new("check_project_config_relative");
+    dir.write(
+        "src/mixed.php",
+        r#"<?php
+            function f() { return $undefinedVar; }
+        "#,
+    );
+    let config_path = dir.write("phpstan.toml", "paths = [\"src\"]\n");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--config")
+        .arg(&config_path)
+        .current_dir(std::env::temp_dir())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("undefined variable"),
+        "expected the config's relative \"src\" path to resolve against the config file's own \
+         directory, got stdout: {stdout} / stderr: {stderr}"
+    );
+}
+
+#[test]
 fn check_project_cli_level_overrides_a_conflicting_config_level() {
     let dir = TempDir::new("check_project_config_override");
     dir.write(
