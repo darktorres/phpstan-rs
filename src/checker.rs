@@ -2726,12 +2726,12 @@ impl<'a> Checker<'a> {
             // dispatching to that inner node's own ordinary arm directly:
             // its own `check_args` would misread "no arguments were
             // written" as "zero arguments were passed to this call,"
-            // producing a false "too few arguments" diagnostic (Finding
-            // 40) for any real function/method with required parameters.
-            // So this checks only existence - the one thing that doesn't
-            // depend on argument count at all - mirroring each inner
-            // arm's own existence-check logic without its argument
-            // handling.
+            // producing a false "expects at least N argument(s)"
+            // diagnostic for any real function/method with required
+            // parameters. So this checks only existence - the one thing
+            // that doesn't depend on argument count at all - mirroring
+            // each inner arm's own existence-check logic without its
+            // argument handling.
             ExprKind::FirstClassCallable(inner) => match &inner.kind {
                 ExprKind::Call(callee, _) => {
                     if let ExprKind::Name(name) = &callee.kind {
