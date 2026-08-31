@@ -96,8 +96,18 @@ pub fn parse(raw: &str) -> DocBlock {
                 // `@param string[] &$matches [optional]`) - strip the
                 // leading `&` too, or the name never matches at all and
                 // both its doc type and `[optional]` marker are silently
-                // dropped.
-                if let Some(name) = var_token.trim_start_matches('&').strip_prefix('$') {
+                // dropped. Same idea for a documented variadic parameter
+                // (`@param int ...$nums`) - without stripping the leading
+                // `...`, `strip_prefix('$')` fails on the literal `.`,
+                // silently losing the type for a real, common PHPDoc
+                // convention (confirmed present throughout the vendored
+                // phpstorm-stubs corpus itself, e.g. `gd`/`xdebug`/
+                // `RedisCluster`).
+                if let Some(name) = var_token
+                    .trim_start_matches('&')
+                    .trim_start_matches("...")
+                    .strip_prefix('$')
+                {
                     if !ty.is_empty() {
                         block.params.insert(name.to_string(), ty.to_string());
                     }
@@ -246,6 +256,12 @@ mod tests {
         );
         assert_eq!(block.params.get("matches"), Some(&"string[]".to_string()));
         assert!(block.optional_params.contains("matches"));
+    }
+
+    #[test]
+    fn a_documented_variadic_param_s_ellipsis_prefixed_name_is_still_recognized() {
+        let block = parse("/** @param int ...$nums */");
+        assert_eq!(block.params.get("nums"), Some(&"int".to_string()));
     }
 
     #[test]

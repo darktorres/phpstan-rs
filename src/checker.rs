@@ -6983,6 +6983,23 @@ mod tests {
     }
 
     #[test]
+    fn a_docblock_only_variadic_param_type_is_still_checked_against_call_sites() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int ...$nums */
+            function sumDocVariadic(...$nums): void {}
+            function test(): void { sumDocVariadic(1, 2, "not an int"); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("sumDocVariadic() argument #3 ($nums) expects int, 'not an int' given")),
+            "expected a variadic-argument-type diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
     fn use_import_resolves_to_its_fully_qualified_name_before_lookup() {
         let d = diagnostics_for(
             r#"<?php
