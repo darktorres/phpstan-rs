@@ -1279,9 +1279,8 @@ impl<'a> Checker<'a> {
                 self.check_expr(e, locals, label);
             }
             StmtKind::Return(Some(e)) => {
-                self.check_expr(e, locals, label);
+                let actual = self.check_expr(e, locals, label);
                 if let Some(expected) = declared_return {
-                    let actual = self.infer_expr(e, locals);
                     let expected = match &self.current_class {
                         Some(c) => self.resolve_pseudo(expected, c),
                         None => expected.clone(),
@@ -1441,12 +1440,12 @@ impl<'a> Checker<'a> {
                 body,
                 ..
             } => {
-                self.check_expr(subject, locals, label);
+                let subject_ty = self.check_expr(subject, locals, label);
                 // The loop variable(s) are a definition site, not a read -
                 // bind them (to the subject's known element type, when
                 // it's a homogeneous array) before checking anything that
                 // could reference them.
-                let element_ty = match self.infer_expr(subject, locals) {
+                let element_ty = match subject_ty {
                     Type::Array(inner) => *inner,
                     _ => Type::Mixed,
                 };
@@ -1624,7 +1623,6 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::Throw(e) => {
-                self.check_expr(e, locals, label);
                 // Finding 57: `throw` only accepts a real Throwable - a
                 // real, unconditional PHP fatal error otherwise,
                 // independent of anything about the thrown value at
@@ -1633,7 +1631,7 @@ impl<'a> Checker<'a> {
                 // anything else (Mixed, a dynamic expression) isn't
                 // guessed at, matching this project's usual leniency for
                 // "we don't know" cases.
-                if let Type::Object(class, _) = self.infer_expr(e, locals)
+                if let Type::Object(class, _) = self.check_expr(e, locals, label)
                     && !self.registry.is_subclass_of(&class, "Throwable")
                 {
                     self.diagnostics.push(Diagnostic {
@@ -1655,12 +1653,9 @@ impl<'a> Checker<'a> {
             }
             StmtKind::StaticVar(vars) => {
                 for (name, default) in vars {
-                    if let Some(e) = default {
-                        self.check_expr(e, locals, label);
-                    }
                     let ty = default
                         .as_ref()
-                        .map(|e| self.infer_expr(e, locals))
+                        .map(|e| self.check_expr(e, locals, label))
                         .unwrap_or(Type::Mixed);
                     locals.insert(name.clone(), ty);
                 }
