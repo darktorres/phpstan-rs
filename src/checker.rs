@@ -2818,8 +2818,7 @@ impl<'a> Checker<'a> {
                 self.check_expr(name_expr, locals, label);
                 Type::Mixed
             }
-            ExprKind::PropertyAccess(base, prop, _) => {
-                self.check_expr(base, locals, label);
+            ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 // Unlike a *write* (check_property_assignment, and the
                 // Assign/ArrayLiteral-destructuring arms below that
                 // deliberately route a PropertyAccess target through only
@@ -2833,7 +2832,7 @@ impl<'a> Checker<'a> {
                 // multi-type `catch` variable, or an ordinarily
                 // union-typed parameter, used to skip this check
                 // entirely rather than fall to `_ => {}`.
-                let base_ty = self.infer_expr(base, locals);
+                let base_ty = self.check_expr(base, locals, label);
                 if self.member_confirmed_missing(&base_ty, |c| {
                     self.registry.lookup_property(c, prop).is_some()
                         || self.registry.lookup_method(c, "__get").is_some()
@@ -2845,7 +2844,28 @@ impl<'a> Checker<'a> {
                         level: 2,
                     });
                 }
-                self.infer_expr(e, locals)
+                if let Some(base_key) = narrowing_key(base)
+                    && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
+                {
+                    return narrowed.clone();
+                }
+                let result = match narrow_type_excluding(&base_ty, &Type::Null) {
+                    Type::Object(class, type_args) => self
+                        .registry
+                        .lookup_property_with_owner(&class, prop)
+                        .map(|(owner, p)| {
+                            let bindings = self.class_template_bindings(&class, &type_args, &owner);
+                            let resolved = types::substitute_template(&p.ty, &bindings);
+                            self.resolve_pseudo(&resolved, &class)
+                        })
+                        .unwrap_or(Type::Mixed),
+                    _ => Type::Mixed,
+                };
+                if *nullsafe && result != Type::Mixed {
+                    union_types(result, Type::Null)
+                } else {
+                    result
+                }
             }
             ExprKind::DynamicPropertyAccess(base, name_expr) => {
                 self.check_expr(base, locals, label);
@@ -2864,7 +2884,7 @@ impl<'a> Checker<'a> {
                 for p in parts {
                     self.check_expr(p, locals, label);
                 }
-                self.infer_expr(e, locals)
+                Type::String
             }
             ExprKind::Match {
                 subject,
