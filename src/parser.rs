@@ -1141,15 +1141,15 @@ impl Parser {
     // `(Countable&Iterator)|null`. Real PHP only allows one level of
     // parens here (no `((A&B)|C)&D`), so this doesn't need to recurse into
     // a further union inside the parens - just a run of `&`-joined atoms.
-    fn parse_type_atom(&mut self) -> String {
+    fn parse_type_atom(&mut self) -> Result<String, ParseError> {
         if self.eat(&Token::LParen) {
-            let mut inner = self.parse_type_atom();
+            let mut inner = self.parse_type_atom()?;
             while self.eat(&Token::Amp) {
                 inner.push('&');
-                inner.push_str(&self.parse_type_atom());
+                inner.push_str(&self.parse_type_atom()?);
             }
-            self.expect(&Token::RParen).unwrap();
-            return format!("({inner})");
+            self.expect(&Token::RParen)?;
+            return Ok(format!("({inner})"));
         }
         // These are single keyword tokens - namespaced forms like
         // `array\Foo` don't exist, so each just consumes itself and stops,
@@ -1159,48 +1159,48 @@ impl Parser {
         match self.peek().clone() {
             Token::Keyword(Keyword::Array) => {
                 self.advance();
-                return "array".to_string();
+                return Ok("array".to_string());
             }
             Token::Keyword(Keyword::Static) => {
                 self.advance();
-                return "static".to_string();
+                return Ok("static".to_string());
             }
             Token::Keyword(Keyword::Null) => {
                 self.advance();
-                return "null".to_string();
+                return Ok("null".to_string());
             }
             // PHP 8.2+ stand-alone `true`/`false` types, e.g.
             // `function f(): string|false {}`.
             Token::Keyword(Keyword::True) => {
                 self.advance();
-                return "true".to_string();
+                return Ok("true".to_string());
             }
             Token::Keyword(Keyword::False) => {
                 self.advance();
-                return "false".to_string();
+                return Ok("false".to_string());
             }
             _ => {}
         }
         // Otherwise it's a (possibly namespaced) identifier: `int`, `Foo`,
         // `\App\Foo`, `App\Foo\Bar` - never two unrelated identifiers
         // glued together with no backslash between them.
-        self.parse_qualified_name()
+        Ok(self.parse_qualified_name())
     }
 
-    fn parse_type_hint(&mut self) -> Option<String> {
+    fn parse_type_hint(&mut self) -> Result<Option<String>, ParseError> {
         if !self.is_type_start() {
-            return None;
+            return Ok(None);
         }
         let mut s = String::new();
         if self.eat(&Token::Question) {
             s.push('?');
         }
-        s.push_str(&self.parse_type_atom());
+        s.push_str(&self.parse_type_atom()?);
         loop {
             if self.check(&Token::Pipe) {
                 self.advance();
                 s.push('|');
-                s.push_str(&self.parse_type_atom());
+                s.push_str(&self.parse_type_atom()?);
                 continue;
             }
             // `&` is ambiguous between an intersection type (`A&B`) and a
@@ -1209,12 +1209,12 @@ impl Parser {
             if self.check(&Token::Amp) && self.is_type_start_at(1) {
                 self.advance();
                 s.push('&');
-                s.push_str(&self.parse_type_atom());
+                s.push_str(&self.parse_type_atom()?);
                 continue;
             }
             break;
         }
-        Some(s)
+        Ok(Some(s))
     }
 
     // ---- functions / params ----
@@ -1264,7 +1264,7 @@ impl Parser {
                 self.advance();
             }
 
-            let type_hint = self.parse_type_hint();
+            let type_hint = self.parse_type_hint().unwrap();
             let by_ref = self.eat(&Token::Amp);
             let variadic = self.eat(&Token::Ellipsis);
             let name = self.expect_variable().unwrap();
@@ -1311,7 +1311,7 @@ impl Parser {
         let name = self.expect_ident().unwrap();
         let params = self.parse_params();
         let return_type = if self.eat(&Token::Colon) {
-            self.parse_type_hint()
+            self.parse_type_hint().unwrap()
         } else {
             None
         };
@@ -1552,7 +1552,7 @@ impl Parser {
                 // rather than `=` - `const FOO = 1;`'s `FOO` is followed
                 // directly by `=`, so nothing is consumed as a type there.
                 if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals) {
-                    self.parse_type_hint();
+                    self.parse_type_hint().unwrap();
                 }
                 loop {
                     let const_start = self.current_pos();
@@ -1593,7 +1593,7 @@ impl Parser {
             }
 
             // property, possibly with a type hint
-            let type_hint = self.parse_type_hint();
+            let type_hint = self.parse_type_hint().unwrap();
             let is_readonly = class_is_readonly || is_readonly_member;
             loop {
                 let prop_start = self.current_pos();
@@ -1746,7 +1746,7 @@ impl Parser {
 
             let param = if is_set && self.eat(&Token::LParen) {
                 let param_start = self.previous_end();
-                let type_hint = self.parse_type_hint();
+                let type_hint = self.parse_type_hint().unwrap();
                 let by_ref = self.eat(&Token::Amp);
                 let name = self.expect_variable().unwrap();
                 self.expect(&Token::RParen).unwrap();
@@ -1889,7 +1889,7 @@ impl Parser {
         let name = self.expect_ident().unwrap();
 
         let backing_type = if self.eat(&Token::Colon) {
-            self.parse_type_hint()
+            self.parse_type_hint().unwrap()
         } else {
             None
         };
@@ -1992,7 +1992,7 @@ impl Parser {
                 // rather than `=` - `const FOO = 1;`'s `FOO` is followed
                 // directly by `=`, so nothing is consumed as a type there.
                 if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals) {
-                    self.parse_type_hint();
+                    self.parse_type_hint().unwrap();
                 }
                 loop {
                     let const_start = self.current_pos();
@@ -3143,7 +3143,7 @@ impl Parser {
         }
 
         let return_type = if self.eat(&Token::Colon) {
-            self.parse_type_hint()
+            self.parse_type_hint().unwrap()
         } else {
             None
         };
@@ -3173,7 +3173,7 @@ impl Parser {
         self.eat(&Token::Amp);
         let params = self.parse_params();
         let return_type = if self.eat(&Token::Colon) {
-            self.parse_type_hint()
+            self.parse_type_hint().unwrap()
         } else {
             None
         };
