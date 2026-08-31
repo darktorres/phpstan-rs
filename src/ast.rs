@@ -213,6 +213,13 @@ pub struct ClassDecl {
     pub consts: Vec<ClassConst>,
     // `use TraitA, TraitB;` inside the class body.
     pub uses: Vec<String>,
+    // `use A, B { B::hello as helloB; }` - each `as`-clause that
+    // introduces a new name for an existing trait method (a
+    // visibility-only `as public;` with no new name isn't captured, since
+    // it doesn't need any registration). `insteadof` conflict-resolution
+    // clauses are parsed (so the file doesn't fail to parse) but not
+    // modeled here - not needed to fix Finding 30's own `as`-alias gap.
+    pub trait_aliases: Vec<TraitAlias>,
     // The class's own `/** ... */` doc comment, if any - needed for its
     // own `@template T` declarations (class-level generics). Previously
     // never captured at all: the parser only called `take_doc_comment`
@@ -242,7 +249,16 @@ pub struct EnumDecl {
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
     pub uses: Vec<String>,
+    pub trait_aliases: Vec<TraitAlias>,
     pub span: Span,
+}
+
+// `use A, B { B::hello as helloB; }` - see `ClassDecl.trait_aliases`.
+#[derive(Debug, Clone)]
+pub struct TraitAlias {
+    pub trait_name: Option<String>,
+    pub method: String,
+    pub alias: String,
 }
 
 #[derive(Debug, Clone)]

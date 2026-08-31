@@ -1334,7 +1334,8 @@ impl Parser {
             }
         }
 
-        let (properties, methods, consts, uses) = self.parse_class_body(class_is_readonly);
+        let (properties, methods, consts, uses, trait_aliases) =
+            self.parse_class_body(class_is_readonly);
 
         let decl = ClassDecl {
             // No name multiple anonymous classes in the same file could
@@ -1350,6 +1351,7 @@ impl Parser {
             methods,
             consts,
             uses,
+            trait_aliases,
             doc_comment: None,
             span: Span {
                 start: decl_start,
@@ -1372,12 +1374,14 @@ impl Parser {
         Vec<MethodDecl>,
         Vec<ClassConst>,
         Vec<String>,
+        Vec<TraitAlias>,
     ) {
         self.expect(&Token::LBrace);
         let mut properties = Vec::new();
         let mut methods = Vec::new();
         let mut consts = Vec::new();
         let mut uses = Vec::new();
+        let mut trait_aliases = Vec::new();
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let member_start = self.current_pos();
@@ -1388,17 +1392,8 @@ impl Parser {
                 while self.eat(&Token::Comma) {
                     uses.push(self.parse_qualified_name());
                 }
-                if self.eat(&Token::LBrace) {
-                    // Trait adaptations (`insteadof`/`as`) aren't modeled;
-                    // skip to the matching closing brace.
-                    let mut depth = 1;
-                    while depth > 0 && !self.at_eof() {
-                        match self.advance() {
-                            Token::LBrace => depth += 1,
-                            Token::RBrace => depth -= 1,
-                            _ => {}
-                        }
-                    }
+                if self.check(&Token::LBrace) {
+                    trait_aliases.extend(self.parse_trait_adaptations());
                 } else {
                     self.expect_semicolon();
                 }
@@ -1583,7 +1578,57 @@ impl Parser {
         }
         self.expect(&Token::RBrace);
 
-        (properties, methods, consts, uses)
+        (properties, methods, consts, uses, trait_aliases)
+    }
+
+    /// The `{ ... }` conflict-resolution block after a `use A, B;` clause
+    /// (`use A, B { A::hello insteadof B; B::hello as helloB; }`) - each
+    /// adaptation is `(TraitName::)?method` followed by either
+    /// `insteadof TraitName, ...` (parsed and discarded - not modeled,
+    /// see `ClassDecl.trait_aliases`'s own doc comment for why) or
+    /// `as [visibility] [newName]` (only a real `newName` is captured;
+    /// `as public;`, changing visibility with no rename, has nothing to
+    /// register). Real PHP allows a bare `method as newName;` with no
+    /// `TraitName::` prefix when the name is unambiguous among the
+    /// traits actually used - `trait_name: None` here defers resolving
+    /// that ambiguity to `flatten_traits`, which already has the full,
+    /// registry-wide picture this parser doesn't.
+    fn parse_trait_adaptations(&mut self) -> Vec<TraitAlias> {
+        let mut aliases = Vec::new();
+        self.expect(&Token::LBrace);
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            let first = self.expect_ident();
+            let (trait_name, method) = if self.eat(&Token::DoubleColon) {
+                (Some(first), self.expect_ident())
+            } else {
+                (None, first)
+            };
+            if matches!(self.peek(), Token::Identifier(s) if s == "insteadof") {
+                self.advance();
+                self.parse_qualified_name();
+                while self.eat(&Token::Comma) {
+                    self.parse_qualified_name();
+                }
+            } else if self.eat(&Token::Keyword(Keyword::As)) {
+                if matches!(
+                    self.peek(),
+                    Token::Keyword(Keyword::Public | Keyword::Private | Keyword::Protected)
+                ) {
+                    self.advance();
+                }
+                if !self.check(&Token::Semicolon) {
+                    let alias = self.expect_ident();
+                    aliases.push(TraitAlias {
+                        trait_name,
+                        method,
+                        alias,
+                    });
+                }
+            }
+            self.expect_semicolon();
+        }
+        self.expect(&Token::RBrace);
+        aliases
     }
 
     /// PHP 8.4 property hooks body: `{ get => expr; set(Type $value) { .. }
@@ -1723,7 +1768,8 @@ impl Parser {
             }
         }
 
-        let (properties, methods, consts, uses) = self.parse_class_body(class_is_readonly);
+        let (properties, methods, consts, uses, trait_aliases) =
+            self.parse_class_body(class_is_readonly);
 
         ClassDecl {
             name,
@@ -1736,6 +1782,7 @@ impl Parser {
             methods,
             consts,
             uses,
+            trait_aliases,
             doc_comment,
             span: Span {
                 start,
@@ -1773,6 +1820,7 @@ impl Parser {
         let mut methods = Vec::new();
         let mut consts = Vec::new();
         let mut uses = Vec::new();
+        let mut trait_aliases = Vec::new();
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let member_start = self.current_pos();
@@ -1802,15 +1850,8 @@ impl Parser {
                 while self.eat(&Token::Comma) {
                     uses.push(self.parse_qualified_name());
                 }
-                if self.eat(&Token::LBrace) {
-                    let mut depth = 1;
-                    while depth > 0 && !self.at_eof() {
-                        match self.advance() {
-                            Token::LBrace => depth += 1,
-                            Token::RBrace => depth -= 1,
-                            _ => {}
-                        }
-                    }
+                if self.check(&Token::LBrace) {
+                    trait_aliases.extend(self.parse_trait_adaptations());
                 } else {
                     self.expect_semicolon();
                 }
@@ -1916,6 +1957,7 @@ impl Parser {
             methods,
             consts,
             uses,
+            trait_aliases,
             span: Span {
                 start,
                 end: self.previous_end(),
@@ -3513,6 +3555,64 @@ mod tests {
             .find(|m| m.function.name == "__construct")
             .unwrap();
         assert!(ctor.function.params[0].promoted_readonly);
+    }
+
+    #[test]
+    fn a_trait_as_alias_clause_is_captured_in_the_ast() {
+        let program = parse(
+            r#"<?php
+            class C {
+                use A, B {
+                    A::hello insteadof B;
+                    B::hello as helloB;
+                }
+            }
+            "#,
+        );
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.trait_aliases.len(), 1);
+        assert_eq!(c.trait_aliases[0].trait_name.as_deref(), Some("B"));
+        assert_eq!(c.trait_aliases[0].method, "hello");
+        assert_eq!(c.trait_aliases[0].alias, "helloB");
+    }
+
+    #[test]
+    fn a_bare_as_alias_clause_with_no_trait_qualifier_is_captured() {
+        let program = parse(
+            r#"<?php
+            class C {
+                use X {
+                    greet as greetAlias;
+                }
+            }
+            "#,
+        );
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.trait_aliases.len(), 1);
+        assert_eq!(c.trait_aliases[0].trait_name, None);
+        assert_eq!(c.trait_aliases[0].method, "greet");
+        assert_eq!(c.trait_aliases[0].alias, "greetAlias");
+    }
+
+    #[test]
+    fn an_as_clause_that_only_changes_visibility_captures_no_alias() {
+        let program = parse(
+            r#"<?php
+            class C {
+                use X {
+                    greet as protected;
+                }
+            }
+            "#,
+        );
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert!(c.trait_aliases.is_empty());
     }
 
     #[test]

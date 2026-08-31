@@ -6199,6 +6199,59 @@ mod tests {
     }
 
     #[test]
+    fn a_trait_alias_introduced_via_as_is_callable_under_its_new_name() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait A { public function hello(): string { return "A"; } }
+            trait B { public function hello(): string { return "B"; } }
+            class C {
+                use A, B {
+                    A::hello insteadof B;
+                    B::hello as helloB;
+                }
+            }
+            function test(C $c): void { echo $c->hello(); echo $c->helloB(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn an_unqualified_trait_alias_resolves_against_the_single_used_trait() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait X { public function greet(): string { return "x"; } }
+            class Y {
+                use X {
+                    greet as greetAlias;
+                }
+            }
+            function test(Y $y): void { echo $y->greet(); echo $y->greetAlias(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn calling_an_undeclared_trait_alias_is_still_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait X { public function greet(): string { return "x"; } }
+            class Y {
+                use X {
+                    greet as greetAlias;
+                }
+            }
+            function test(Y $y): void { echo $y->totallyMadeUp(); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("undefined method")),
+            "expected an undefined-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
     fn use_import_resolves_to_its_fully_qualified_name_before_lookup() {
         let d = diagnostics_for(
             r#"<?php

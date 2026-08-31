@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
     ClassDecl, ClassKind, EnumDecl, Expr, ExprKind, FunctionDecl, Literal, Stmt, StmtKind,
-    UseImport, Visibility,
+    TraitAlias, UseImport, Visibility,
 };
 use crate::docblock::{self, DocBlock};
 use crate::types::{self, Type};
@@ -417,6 +417,11 @@ pub struct ClassInfo {
     pub abstract_methods: HashSet<String>,
     // Method names declared `final` in this class's own body.
     pub final_methods: HashSet<String>,
+    // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
+    // present) is already resolved to the same fully-qualified name
+    // `uses` itself is keyed under, so `flatten_traits` can look it up in
+    // `self.classes` directly.
+    pub trait_aliases: Vec<TraitAlias>,
     // This class's own `@template T` names, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
@@ -603,6 +608,15 @@ impl ClassInfo {
         if methods.contains_key("__toString") {
             implements.push("Stringable".to_string());
         }
+        let trait_aliases: Vec<TraitAlias> = c
+            .trait_aliases
+            .iter()
+            .map(|a| TraitAlias {
+                trait_name: a.trait_name.as_ref().map(|t| ctx.resolve(t)),
+                method: a.method.clone(),
+                alias: a.alias.clone(),
+            })
+            .collect();
 
         ClassInfo {
             kind: c.kind,
@@ -616,6 +630,7 @@ impl ClassInfo {
             uses: c.uses.iter().map(|s| ctx.resolve(s)).collect(),
             abstract_methods,
             final_methods,
+            trait_aliases,
             templates,
             extends_args,
             implements_args,
@@ -760,6 +775,15 @@ impl ClassInfo {
             .filter(|m| m.is_final && m.visibility != Visibility::Private)
             .map(|m| m.function.name.clone())
             .collect();
+        let trait_aliases: Vec<TraitAlias> = e
+            .trait_aliases
+            .iter()
+            .map(|a| TraitAlias {
+                trait_name: a.trait_name.as_ref().map(|t| ctx.resolve(t)),
+                method: a.method.clone(),
+                alias: a.alias.clone(),
+            })
+            .collect();
 
         ClassInfo {
             kind: ClassKind::Enum,
@@ -773,6 +797,7 @@ impl ClassInfo {
             uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
             abstract_methods,
             final_methods,
+            trait_aliases,
             templates: Vec::new(),
             extends_args: Vec::new(),
             implements_args: HashMap::new(),
@@ -860,7 +885,8 @@ impl Registry {
 
         for class_name in &class_names {
             let uses = self.classes[class_name].uses.clone();
-            if uses.is_empty() {
+            let trait_aliases = self.classes[class_name].trait_aliases.clone();
+            if uses.is_empty() && trait_aliases.is_empty() {
                 continue;
             }
             // A trait can declare its own `abstract` method (the using
@@ -890,6 +916,30 @@ impl Registry {
                             .iter()
                             .map(|(n, s)| (n.clone(), s.clone())),
                     );
+                }
+            }
+            // Finding 30: `use A, B { B::hello as helloB; }` - register
+            // the trait method under its new alias too, *alongside* its
+            // original name (both stay callable in real PHP). A bare
+            // `method as newName;` with no `TraitName::` prefix (real,
+            // valid PHP when the name is unambiguous among the traits
+            // actually used) resolves against the first used trait that
+            // declares it - this project doesn't detect the ambiguous
+            // case (two used traits both declaring the same method name
+            // with no `insteadof`) as its own separate error either, so
+            // this leniency doesn't introduce a new gap next to it.
+            for alias in &trait_aliases {
+                let source_sig = match &alias.trait_name {
+                    Some(t) => self
+                        .classes
+                        .get(t)
+                        .and_then(|i| i.methods.get(&alias.method)),
+                    None => uses
+                        .iter()
+                        .find_map(|t| self.classes.get(t)?.methods.get(&alias.method)),
+                };
+                if let Some(sig) = source_sig {
+                    methods.push((alias.alias.clone(), sig.clone()));
                 }
             }
             additions.push((
@@ -1469,6 +1519,42 @@ mod tests {
         assert!(deep.methods.contains_key("m1"));
         assert!(deep.methods.contains_key("m2"));
         assert!(deep.methods.contains_key("m3"));
+    }
+
+    #[test]
+    fn a_trait_as_alias_registers_the_method_under_its_new_name_too() {
+        let r = build_registry(
+            r#"<?php
+            trait A { public function hello(): string { return "A"; } }
+            trait B { public function hello(): string { return "B"; } }
+            class C {
+                use A, B {
+                    A::hello insteadof B;
+                    B::hello as helloB;
+                }
+            }
+            "#,
+        );
+        let c = r.classes.get("C").unwrap();
+        assert!(c.methods.contains_key("hello"));
+        assert!(c.methods.contains_key("helloB"));
+    }
+
+    #[test]
+    fn an_unqualified_trait_as_alias_resolves_against_the_used_trait() {
+        let r = build_registry(
+            r#"<?php
+            trait X { public function greet(): string { return "x"; } }
+            class Y {
+                use X {
+                    greet as greetAlias;
+                }
+            }
+            "#,
+        );
+        let y = r.classes.get("Y").unwrap();
+        assert!(y.methods.contains_key("greet"));
+        assert!(y.methods.contains_key("greetAlias"));
     }
 
     #[test]
