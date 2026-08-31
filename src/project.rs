@@ -240,11 +240,14 @@ impl Project {
     }
 
     /// Runs the checker over every currently-loaded file, not just one -
-    /// the whole-project counterpart to `check_file`. Used by
-    /// `--check-project` and by tests/tooling that need to see every
-    /// diagnostic across a real corpus at once, rather than one file (and
-    /// its transitively-affected dependents) at a time the way
-    /// `update_file` does.
+    /// the whole-project counterpart to `check_file`. `--check-project`
+    /// no longer uses this directly (it needs to check only the files it
+    /// was asked to analyze, not every file loaded for context - see
+    /// `main.rs::run_check_project`), but it's still the right tool for
+    /// tests/tooling that need to see every diagnostic across a real
+    /// corpus at once, rather than one file (and its
+    /// transitively-affected dependents) at a time the way `update_file`
+    /// does.
     pub fn check_all(&self) -> HashMap<PathBuf, Vec<Diagnostic>> {
         self.files
             .keys()

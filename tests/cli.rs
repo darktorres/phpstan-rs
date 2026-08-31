@@ -350,6 +350,279 @@ fn check_project_with_no_args_and_no_config_prints_an_error_to_stderr() {
 }
 
 #[test]
+fn check_project_scan_dir_loads_context_but_never_reports_on_it() {
+    let dir = TempDir::new("scan_dir_context");
+    // A genuinely buggy file that must never be reported on.
+    dir.write(
+        "ctx/Helper.php",
+        "<?php class Helper { function bad() { return $undefinedInVendor; } }",
+    );
+    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+
+    // Without --scan-dir, Helper is unresolved.
+    let without = bin()
+        .arg("check-project")
+        .arg(dir.path().join("src"))
+        .output()
+        .unwrap();
+    let without_stdout = String::from_utf8_lossy(&without.stdout);
+    assert!(
+        without_stdout.contains("not found"),
+        "got: {without_stdout}"
+    );
+
+    // With --scan-dir, Helper resolves, but its own bug is never
+    // reported and the summary reflects it as context, not "checked".
+    let with = bin()
+        .arg("check-project")
+        .arg(dir.path().join("src"))
+        .arg("--scan-dir")
+        .arg(dir.path().join("ctx"))
+        .output()
+        .unwrap();
+    assert!(with.status.success());
+    let with_stdout = String::from_utf8_lossy(&with.stdout);
+    assert!(!with_stdout.contains("not found"), "got: {with_stdout}");
+    assert!(
+        !with_stdout.contains("undefinedInVendor"),
+        "got: {with_stdout}"
+    );
+    assert!(
+        with_stdout.contains("1 file(s) checked, 0 diagnostic(s)"),
+        "got: {with_stdout}"
+    );
+    assert!(
+        with_stdout.contains("1 more file(s) loaded for context"),
+        "got: {with_stdout}"
+    );
+}
+
+#[test]
+fn check_project_scan_paths_config_mirrors_scan_dir() {
+    let dir = TempDir::new("scan_paths_config");
+    dir.write(
+        "ctx/Helper.php",
+        "<?php class Helper { function bad() { return $undefinedInVendor; } }",
+    );
+    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+    let config_path = dir.write(
+        "phpstan.toml",
+        &format!(
+            "paths = [{:?}]\nscan_paths = [{:?}]\n",
+            dir.path().join("src").display().to_string(),
+            dir.path().join("ctx").display().to_string()
+        ),
+    );
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("not found"), "got: {stdout}");
+    assert!(
+        stdout.contains("1 file(s) checked, 0 diagnostic(s)"),
+        "got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 more file(s) loaded for context"),
+        "got: {stdout}"
+    );
+}
+
+#[test]
+fn check_project_auto_detects_composer_vendor_and_never_reports_on_it() {
+    let dir = TempDir::new("composer_auto_detect");
+    dir.write("composer.json", "{}");
+    dir.write(
+        "vendor/acme/Helper.php",
+        "<?php class Helper { function bad() { return $undefinedInVendor; } }",
+    );
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+$baseDir = dirname($vendorDir);
+return array(
+    'Helper' => $vendorDir . '/acme/Helper.php',
+);
+"#,
+    );
+    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+
+    let output = bin()
+        .current_dir(dir.path())
+        .arg("check-project")
+        .arg(dir.path().join("src"))
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("not found"), "got: {stdout}");
+    assert!(!stdout.contains("undefinedInVendor"), "got: {stdout}");
+    assert!(
+        stdout.contains("1 file(s) checked, 0 diagnostic(s)"),
+        "got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 more file(s) loaded for context"),
+        "got: {stdout}"
+    );
+}
+
+#[test]
+fn check_project_no_composer_flag_disables_auto_detection() {
+    let dir = TempDir::new("no_composer_flag");
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/Helper.php", "<?php class Helper {}");
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+$baseDir = dirname($vendorDir);
+return array(
+    'Helper' => $vendorDir . '/acme/Helper.php',
+);
+"#,
+    );
+    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+
+    let output = bin()
+        .current_dir(dir.path())
+        .arg("check-project")
+        .arg(dir.path().join("src"))
+        .arg("--no-composer")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("not found"), "got: {stdout}");
+    assert!(
+        !stdout.contains("more file(s) loaded for context"),
+        "got: {stdout}"
+    );
+}
+
+#[test]
+fn check_project_no_composer_config_disables_auto_detection_without_the_flag() {
+    let dir = TempDir::new("no_composer_config");
+    dir.write("composer.json", "{}");
+    dir.write("vendor/acme/Helper.php", "<?php class Helper {}");
+    dir.write(
+        "vendor/composer/autoload_classmap.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+$baseDir = dirname($vendorDir);
+return array(
+    'Helper' => $vendorDir . '/acme/Helper.php',
+);
+"#,
+    );
+    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+    let config_path = dir.write(
+        "phpstan.toml",
+        &format!(
+            "paths = [{:?}]\nno_composer = true\n",
+            dir.path().join("src").display().to_string()
+        ),
+    );
+
+    // No --no-composer flag at all - the config alone must suppress
+    // auto-detection, since a real project will want to set this once
+    // rather than remember a flag on every invocation.
+    let output = bin()
+        .current_dir(dir.path())
+        .arg("check-project")
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("not found"), "got: {stdout}");
+    assert!(
+        !stdout.contains("more file(s) loaded for context"),
+        "got: {stdout}"
+    );
+}
+
+#[test]
+fn check_project_context_file_never_wins_a_fqcn_collision_over_an_analyzed_file() {
+    // A context (vendor) file and an analyzed (first-party) file both
+    // declare a class named `Shape`, with a distinguishably different
+    // `area()` return type. If load order ever regresses (context
+    // loaded after analyze instead of before), the registry's `Shape`
+    // entry would end up as the vendor stand-in's `int`-returning
+    // version, and Caller.php's use of it as a `string` would produce a
+    // real return-type-mismatch diagnostic that must never appear.
+    let dir = TempDir::new("fqcn_collision");
+    dir.write(
+        "ctx/Shape.php",
+        "<?php class Shape { function area(): int { return 1; } }",
+    );
+    dir.write(
+        "src/Shape.php",
+        r#"<?php class Shape { function area(): string { return "hi"; } }"#,
+    );
+    dir.write(
+        "src/Caller.php",
+        r#"<?php function f(): string { return (new Shape())->area(); }"#,
+    );
+
+    let output = bin()
+        .arg("check-project")
+        .arg(dir.path().join("src"))
+        .arg("--scan-dir")
+        .arg(dir.path().join("ctx"))
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("return type mismatch"),
+        "expected the analyzed Shape::area()'s own `string` return type to win the \
+         registry slot over the context file's `int` version, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("2 file(s) checked, 0 diagnostic(s)"),
+        "got: {stdout}"
+    );
+}
+
+#[test]
+fn check_project_survives_a_file_that_crashes_the_parser() {
+    // Reproduces the same "expected Semicolon, found LParen" panic
+    // shape a real, unmodified vendor package (dompdf/dompdf) is
+    // confirmed to trip in this parser - a small synthetic snippet
+    // rather than depending on that package's current state.
+    let dir = TempDir::new("panic_containment");
+    dir.write(
+        "bad.php",
+        "<?php class Foo { public readonly int $x (int $y); }",
+    );
+    dir.write("good.php", "<?php function f() { return $undefinedVar; }");
+
+    let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
+    assert!(
+        output.status.success(),
+        "expected check-project to survive a file that crashes the parser, \
+         stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("undefined variable"), "got: {stdout}");
+    assert!(
+        stdout.contains("1 file(s) checked, 1 diagnostic(s)"),
+        "got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 file(s) skipped: parse error"),
+        "got: {stdout}"
+    );
+}
+
+#[test]
 fn incremental_bench_reports_full_load_and_incremental_timings() {
     let dir = TempDir::new("bench");
     dir.write("a.php", "<?php function f(): int { return 1; }");
