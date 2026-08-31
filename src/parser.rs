@@ -2341,6 +2341,7 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::Arrow | Token::NullsafeArrow => {
+                    let nullsafe = matches!(self.peek(), Token::NullsafeArrow);
                     self.advance();
                     // `$obj->{expr}` - a fully dynamic property/method
                     // name, computed from an arbitrary expression rather
@@ -2408,15 +2409,20 @@ impl Parser {
                     };
                     if self.check(&Token::LParen) {
                         let (args, is_fcc) = self.parse_args();
-                        let call =
-                            self.expr(ExprKind::MethodCall(Box::new(expr), name, args), start);
+                        let call = self.expr(
+                            ExprKind::MethodCall(Box::new(expr), name, args, nullsafe),
+                            start,
+                        );
                         expr = if is_fcc {
                             self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                         } else {
                             call
                         };
                     } else {
-                        expr = self.expr(ExprKind::PropertyAccess(Box::new(expr), name), start);
+                        expr = self.expr(
+                            ExprKind::PropertyAccess(Box::new(expr), name, nullsafe),
+                            start,
+                        );
                     }
                 }
                 Token::DoubleColon => {
@@ -3826,7 +3832,7 @@ mod tests {
         let ExprKind::Clone(inner, None) = &rhs.kind else {
             panic!("expected Clone with no overrides");
         };
-        assert!(matches!(&inner.kind, ExprKind::PropertyAccess(_, _)));
+        assert!(matches!(&inner.kind, ExprKind::PropertyAccess(..)));
 
         // Same rule applies even with explicit parens and no comma:
         // `clone($a)->b` clones `$a->b`, not `$a`.
@@ -3840,7 +3846,7 @@ mod tests {
         let ExprKind::Clone(inner, None) = &rhs.kind else {
             panic!("expected Clone with no overrides");
         };
-        assert!(matches!(&inner.kind, ExprKind::PropertyAccess(_, _)));
+        assert!(matches!(&inner.kind, ExprKind::PropertyAccess(..)));
     }
 
     #[test]

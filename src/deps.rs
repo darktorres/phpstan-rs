@@ -324,8 +324,8 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_expr(a, names);
             }
         }
-        ExprKind::PropertyAccess(base, _) => collect_expr(base, names),
-        ExprKind::MethodCall(recv, _, args) => {
+        ExprKind::PropertyAccess(base, _, _) => collect_expr(base, names),
+        ExprKind::MethodCall(recv, _, args, _) => {
             collect_expr(recv, names);
             for a in args {
                 collect_expr(a, names);

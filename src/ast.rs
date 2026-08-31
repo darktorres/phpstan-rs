@@ -330,8 +330,13 @@ pub enum ExprKind {
     Ternary(Box<Expr>, Option<Box<Expr>>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     New(Box<Expr>, Vec<Expr>),
-    PropertyAccess(Box<Expr>, String),
-    MethodCall(Box<Expr>, String, Vec<Expr>),
+    // The trailing `bool` is `true` for a nullsafe access (`$x?->prop`),
+    // `false` for a plain `$x->prop` - the two are otherwise identical
+    // syntactically, but real PHP's `?->` implicitly makes the whole
+    // access `null` when its base is `null`, which `infer_expr` needs to
+    // know to union `Null` into the result.
+    PropertyAccess(Box<Expr>, String, bool),
+    MethodCall(Box<Expr>, String, Vec<Expr>, bool),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
     // itself computed from an expression, not statically known, so it
     // can't share PropertyAccess/MethodCall's plain-String name. Still

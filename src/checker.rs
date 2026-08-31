@@ -1370,7 +1370,7 @@ impl<'a> Checker<'a> {
             // the full PropertyAccess through check_expr here would
             // wrongly flag legitimate dynamic-property creation as
             // "undefined property".
-            ExprKind::PropertyAccess(base, _) => self.check_expr(base, locals, label),
+            ExprKind::PropertyAccess(base, _, _) => self.check_expr(base, locals, label),
             _ => self.check_expr(target, locals, label),
         }
     }
@@ -1581,7 +1581,7 @@ impl<'a> Checker<'a> {
                     self.check_expr(i, locals, label);
                 }
             }
-            ExprKind::PropertyAccess(base, _) => {
+            ExprKind::PropertyAccess(base, _, _) => {
                 self.check_expr_quiet_root(base, locals, label);
             }
             ExprKind::DynamicPropertyAccess(base, name_expr) => {
@@ -1659,7 +1659,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ExprKind::MethodCall(recv, method, args) => {
+            ExprKind::MethodCall(recv, method, args, _) => {
                 self.check_expr(recv, locals, label);
                 // Re-enabled (Phase 9.5): the registry is now
                 // namespace-aware, so a method lookup trusts the specific
@@ -2036,7 +2036,7 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::DynamicVariable(name_expr) => self.check_expr(name_expr, locals, label),
-            ExprKind::PropertyAccess(base, prop) => {
+            ExprKind::PropertyAccess(base, prop, _) => {
                 self.check_expr(base, locals, label);
                 // Unlike a *write* (check_property_assignment, and the
                 // Assign/ArrayLiteral-destructuring arms below that
@@ -2278,7 +2278,7 @@ impl<'a> Checker<'a> {
         locals: &HashMap<String, Type>,
         label: &str,
     ) {
-        let ExprKind::PropertyAccess(base, prop) = &lhs.kind else {
+        let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             return;
         };
         let Type::Object(class, type_args) = self.infer_expr(base, locals) else {
@@ -2610,26 +2610,46 @@ impl<'a> Checker<'a> {
                 }
                 _ => Type::Mixed,
             },
-            ExprKind::MethodCall(recv, method, args) => match self.infer_expr(recv, locals) {
-                Type::Object(class, type_args) => self
-                    .registry
-                    .lookup_method_with_owner(&class, method)
-                    .map(|(owner, sig)| {
-                        // Class-level substitution (Collection<User>'s own
-                        // `T`, or an inherited method's owner-level `T`
-                        // via Phase 10.5) runs first, then
-                        // infer_call_return_type's existing per-call-
-                        // argument binding handles any template the
-                        // *method itself* separately declares - the two
-                        // are independent parameter scopes that can both
-                        // appear on the same signature.
-                        let sig = self.substitute_class_templates(sig, &class, &type_args, &owner);
-                        let resolved = self.infer_call_return_type(&sig, args, locals);
-                        self.resolve_pseudo(&resolved, &class)
-                    })
-                    .unwrap_or(Type::Mixed),
-                _ => Type::Mixed,
-            },
+            ExprKind::MethodCall(recv, method, args, nullsafe) => {
+                // A nullsafe receiver is virtually always nullable
+                // (that's the entire reason to write `?->`), so its own
+                // inferred type is virtually always `Union([Object(...),
+                // Null])`, not a bare `Object` - strip `Null` out before
+                // matching, the same real class the method is actually
+                // being looked up on either way.
+                let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::Null);
+                let result = match recv_ty {
+                    Type::Object(class, type_args) => self
+                        .registry
+                        .lookup_method_with_owner(&class, method)
+                        .map(|(owner, sig)| {
+                            // Class-level substitution (Collection<User>'s
+                            // own `T`, or an inherited method's
+                            // owner-level `T` via Phase 10.5) runs first,
+                            // then infer_call_return_type's existing
+                            // per-call-argument binding handles any
+                            // template the *method itself* separately
+                            // declares - the two are independent
+                            // parameter scopes that can both appear on
+                            // the same signature.
+                            let sig =
+                                self.substitute_class_templates(sig, &class, &type_args, &owner);
+                            let resolved = self.infer_call_return_type(&sig, args, locals);
+                            self.resolve_pseudo(&resolved, &class)
+                        })
+                        .unwrap_or(Type::Mixed),
+                    _ => Type::Mixed,
+                };
+                // `$x?->method()` short-circuits to `null` when `$x` is
+                // null, on top of whatever the method's own return type
+                // is - real, implicit nullability a plain `->` doesn't
+                // carry.
+                if *nullsafe && result != Type::Mixed {
+                    union_types(result, Type::Null)
+                } else {
+                    result
+                }
+            }
             ExprKind::StaticCall(class_name, method, args) => self
                 .resolve_static_class_name(class_name)
                 .and_then(|class| {
@@ -2680,13 +2700,14 @@ impl<'a> Checker<'a> {
             }
             ExprKind::ArrayLiteral(_) => Type::Array(Box::new(Type::Mixed)),
             ExprKind::Interpolated(_) => Type::String,
-            ExprKind::PropertyAccess(base, prop) => {
+            ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
                 {
                     return narrowed.clone();
                 }
-                match self.infer_expr(base, locals) {
+                let base_ty = narrow_type_excluding(&self.infer_expr(base, locals), &Type::Null);
+                let result = match base_ty {
                     Type::Object(class, type_args) => self
                         .registry
                         .lookup_property_with_owner(&class, prop)
@@ -2697,6 +2718,13 @@ impl<'a> Checker<'a> {
                         })
                         .unwrap_or(Type::Mixed),
                     _ => Type::Mixed,
+                };
+                // Same implicit nullability as `?->method()` just above,
+                // for `$x?->prop`.
+                if *nullsafe && result != Type::Mixed {
+                    union_types(result, Type::Null)
+                } else {
+                    result
                 }
             }
             // A homogeneous array's element type applies regardless of
@@ -3221,7 +3249,7 @@ fn narrowing_key(e: &Expr) -> Option<String> {
         // ever produces a key containing `->`, which can't appear in a
         // real PHP variable name.
         ExprKind::Variable(name) => Some(name.clone()),
-        ExprKind::PropertyAccess(base, prop) => {
+        ExprKind::PropertyAccess(base, prop, _) => {
             narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
         }
         _ => None,
@@ -7532,6 +7560,62 @@ mod tests {
                     return $this->id === $other->id;
                 }
             }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 15 from the architecture audit - the nullsafe operator
+    // (?->) and plain -> produced identical AST nodes, so infer_expr
+    // never knew a nullsafe access's result could be null.
+
+    #[test]
+    fn nullsafe_method_call_result_is_implicitly_nullable() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Owner { public function getFoo(): Foo { return new Foo(); } }
+            class Foo {}
+            function needsFoo(Foo $x): void {}
+            function test(?Owner $obj): void { needsFoo($obj?->getFoo()); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("Foo|null"), "got: {d:?}");
+    }
+
+    #[test]
+    fn nullsafe_property_access_result_is_implicitly_nullable() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Owner { public ?Foo $foo = null; }
+            class Foo {}
+            function needsFoo(Foo $x): void {}
+            function test(?Owner $obj): void { needsFoo($obj?->foo); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn nullsafe_result_accepted_by_a_nullable_parameter_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Owner { public function getFoo(): Foo { return new Foo(); } }
+            class Foo {}
+            function needsMaybeFoo(?Foo $x): void {}
+            function test(?Owner $obj): void { needsMaybeFoo($obj?->getFoo()); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn plain_arrow_on_a_non_nullable_receiver_is_unaffected() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Owner { public function getFoo(): Foo { return new Foo(); } }
+            class Foo {}
+            function needsFoo(Foo $x): void {}
+            function test(Owner $obj): void { needsFoo($obj->getFoo()); }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
