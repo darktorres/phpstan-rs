@@ -12,6 +12,24 @@ use crate::token::{Keyword, Position, Span, StringPart, Token};
 // checker's catch_unwind included) and takes the whole process down.
 const MAX_EXPR_DEPTH: usize = 1000;
 
+/// A recoverable parse failure - genuinely malformed syntax, as opposed to
+/// `enter_expr`'s own `MAX_EXPR_DEPTH` guard (a resource-exhaustion limit,
+/// not a syntax error, and kept as a panic - see its own doc comment).
+/// `message` mirrors this parser's own former panic message text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParseError {
+    pub message: String,
+    pub span: Span,
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for ParseError {}
+
 pub struct Parser {
     tokens: Vec<Token>,
     // Parallel to `tokens` (same length, same indices) - `spans[i]` is
@@ -168,7 +186,7 @@ impl Parser {
             stmts.extend(self.parse_stmt_list_block());
             stmts
         } else {
-            self.expect_semicolon();
+            self.expect_semicolon().unwrap();
             vec![self.stmt(StmtKind::Namespace(name), start)]
         }
     }
@@ -291,24 +309,28 @@ impl Parser {
         }
     }
 
-    fn expect(&mut self, t: &Token) {
+    fn expect(&mut self, t: &Token) -> Result<(), ParseError> {
         if !self.eat(t) {
-            panic!(
-                "parse error: expected {:?}, found {:?} at token {}",
-                t,
-                self.peek(),
-                self.pos
-            );
+            return Err(ParseError {
+                message: format!(
+                    "parse error: expected {:?}, found {:?} at token {}",
+                    t,
+                    self.peek(),
+                    self.pos
+                ),
+                span: self.spans.get(self.pos).copied().unwrap_or_default(),
+            });
         }
+        Ok(())
     }
 
-    fn expect_semicolon(&mut self) {
+    fn expect_semicolon(&mut self) -> Result<(), ParseError> {
         // A `?>` close tag lexes as a Semicolon already; plain EOF also
         // terminates the last statement without one.
         if self.at_eof() {
-            return;
+            return Ok(());
         }
-        self.expect(&Token::Semicolon);
+        self.expect(&Token::Semicolon)
     }
 
     /// Used for every "name in declaration position" (function/class/
@@ -316,10 +338,13 @@ impl Parser {
     /// take_name_segment is: PHP reserves most keywords only in specific
     /// declaration positions, not universally - `const DEFAULT = 1;` is
     /// valid PHP even though `default` is a keyword.
-    fn expect_ident(&mut self) -> String {
+    fn expect_ident(&mut self) -> Result<String, ParseError> {
         match self.peek().clone() {
-            Token::Identifier(_) | Token::Keyword(_) => self.take_name_segment().unwrap(),
-            other => panic!("parse error: expected identifier, found {:?}", other),
+            Token::Identifier(_) | Token::Keyword(_) => Ok(self.take_name_segment().unwrap()),
+            other => Err(ParseError {
+                message: format!("parse error: expected identifier, found {:?}", other),
+                span: self.spans.get(self.pos).copied().unwrap_or_default(),
+            }),
         }
     }
 
@@ -343,7 +368,7 @@ impl Parser {
                 while self.eat(&Token::Comma) {
                     exprs.push(self.parse_expression());
                 }
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Echo(exprs), start)
             }
             Token::Keyword(Keyword::Return) => {
@@ -353,7 +378,7 @@ impl Parser {
                     self.stmt(StmtKind::Return(None), start)
                 } else {
                     let e = self.parse_expression();
-                    self.expect_semicolon();
+                    self.expect_semicolon().unwrap();
                     self.stmt(StmtKind::Return(Some(e)), start)
                 }
             }
@@ -365,13 +390,13 @@ impl Parser {
             Token::Keyword(Keyword::Break) => {
                 self.advance();
                 let level = self.parse_optional_level();
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Break(level), start)
             }
             Token::Keyword(Keyword::Continue) => {
                 self.advance();
                 let level = self.parse_optional_level();
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Continue(level), start)
             }
             Token::Keyword(Keyword::Global) => {
@@ -380,7 +405,7 @@ impl Parser {
                 while self.eat(&Token::Comma) {
                     names.push(self.parse_global_target());
                 }
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Global(names), start)
             }
             // `static $x = 1, $y;` - guarded on the next token being a
@@ -391,7 +416,7 @@ impl Parser {
                 self.advance();
                 let mut vars = Vec::new();
                 loop {
-                    let name = self.expect_variable();
+                    let name = self.expect_variable().unwrap();
                     let default = if self.eat(&Token::Equals) {
                         Some(self.parse_expression())
                     } else {
@@ -402,7 +427,7 @@ impl Parser {
                         break;
                     }
                 }
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::StaticVar(vars), start)
             }
             // A named declaration (`function foo(...)`) is only one of
@@ -461,7 +486,7 @@ impl Parser {
             Token::Keyword(Keyword::Namespace) if !matches!(self.peek_at(1), Token::Backslash) => {
                 self.advance();
                 let name = self.parse_qualified_name();
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Namespace(name), start)
             }
             Token::Keyword(Keyword::Use) => {
@@ -499,7 +524,7 @@ impl Parser {
                         }
                         let member = self.parse_qualified_name();
                         let alias = if self.eat(&Token::Keyword(Keyword::As)) {
-                            Some(self.expect_ident())
+                            Some(self.expect_ident().unwrap())
                         } else {
                             None
                         };
@@ -511,12 +536,12 @@ impl Parser {
                             break;
                         }
                     }
-                    self.expect(&Token::RBrace);
-                    self.expect_semicolon();
+                    self.expect(&Token::RBrace).unwrap();
+                    self.expect_semicolon().unwrap();
                     return self.stmt(StmtKind::Use(imports), start);
                 }
                 let alias = if self.eat(&Token::Keyword(Keyword::As)) {
-                    Some(self.expect_ident())
+                    Some(self.expect_ident().unwrap())
                 } else {
                     None
                 };
@@ -528,13 +553,13 @@ impl Parser {
                 while self.eat(&Token::Comma) {
                     let path = self.parse_qualified_name();
                     let alias = if self.eat(&Token::Keyword(Keyword::As)) {
-                        Some(self.expect_ident())
+                        Some(self.expect_ident().unwrap())
                     } else {
                         None
                     };
                     imports.push(UseImport { path, alias });
                 }
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Use(imports), start)
             }
             Token::Keyword(Keyword::Const) => {
@@ -542,8 +567,8 @@ impl Parser {
                 let mut consts = Vec::new();
                 loop {
                     let const_start = self.current_pos();
-                    let name = self.expect_ident();
-                    self.expect(&Token::Equals);
+                    let name = self.expect_ident().unwrap();
+                    self.expect(&Token::Equals).unwrap();
                     let value = self.parse_expression();
                     consts.push(ClassConst {
                         name,
@@ -557,14 +582,14 @@ impl Parser {
                         break;
                     }
                 }
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::GlobalConst(consts), start)
             }
             Token::Keyword(Keyword::Try) => self.parse_try(),
             Token::Keyword(Keyword::Throw) => {
                 self.advance();
                 let e = self.parse_expression();
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Throw(e), start)
             }
             Token::Keyword(Keyword::Switch) => self.parse_switch(),
@@ -579,18 +604,18 @@ impl Parser {
             // any declarations that a registry needs to see spliced out.
             Token::Identifier(s) if s == "declare" && matches!(self.peek_at(1), Token::LParen) => {
                 self.advance();
-                self.expect(&Token::LParen);
+                self.expect(&Token::LParen).unwrap();
                 while !self.check(&Token::RParen) {
                     self.parse_expression();
                     if !self.eat(&Token::Comma) {
                         break;
                     }
                 }
-                self.expect(&Token::RParen);
+                self.expect(&Token::RParen).unwrap();
                 if self.check(&Token::LBrace) {
                     self.parse_block()
                 } else {
-                    self.expect_semicolon();
+                    self.expect_semicolon().unwrap();
                     self.stmt(StmtKind::Block(Vec::new()), start)
                 }
             }
@@ -609,8 +634,8 @@ impl Parser {
             }
             Token::Keyword(Keyword::Goto) => {
                 self.advance();
-                let name = self.expect_ident();
-                self.expect_semicolon();
+                let name = self.expect_ident().unwrap();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Goto(name), start)
             }
             // `label:` - a goto target. Unambiguous at statement position:
@@ -624,7 +649,7 @@ impl Parser {
             }
             _ => {
                 let e = self.parse_expression();
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 self.stmt(StmtKind::Expression(e), start)
             }
         }
@@ -640,10 +665,14 @@ impl Parser {
         }
     }
 
-    fn expect_variable(&mut self) -> String {
+    fn expect_variable(&mut self) -> Result<String, ParseError> {
+        let span = self.spans.get(self.pos).copied().unwrap_or_default();
         match self.advance() {
-            Token::Variable(s) => s,
-            other => panic!("parse error: expected variable, found {:?}", other),
+            Token::Variable(s) => Ok(s),
+            other => Err(ParseError {
+                message: format!("parse error: expected variable, found {:?}", other),
+                span,
+            }),
         }
     }
 
@@ -655,24 +684,24 @@ impl Parser {
     fn parse_global_target(&mut self) -> String {
         if self.eat(&Token::DollarBrace) {
             self.parse_expression();
-            self.expect(&Token::RBrace);
+            self.expect(&Token::RBrace).unwrap();
             return "{dynamic}".to_string();
         }
         if self.eat(&Token::Dollar) {
             self.parse_primary();
             return "{dynamic}".to_string();
         }
-        self.expect_variable()
+        self.expect_variable().unwrap()
     }
 
     fn parse_block(&mut self) -> Stmt {
         let start = self.current_pos();
-        self.expect(&Token::LBrace);
+        self.expect(&Token::LBrace).unwrap();
         let mut stmts = Vec::new();
         while !self.check(&Token::RBrace) && !self.at_eof() {
             stmts.push(self.parse_statement());
         }
-        self.expect(&Token::RBrace);
+        self.expect(&Token::RBrace).unwrap();
         self.stmt(StmtKind::Block(stmts), start)
     }
 
@@ -698,22 +727,22 @@ impl Parser {
     }
 
     fn parse_alt_block(&mut self, end_kw: Keyword) -> Vec<Stmt> {
-        self.expect(&Token::Colon);
+        self.expect(&Token::Colon).unwrap();
         let mut stmts = Vec::new();
         while !self.check(&Token::Keyword(end_kw.clone())) && !self.at_eof() {
             stmts.push(self.parse_statement());
         }
-        self.expect(&Token::Keyword(end_kw));
-        self.expect_semicolon();
+        self.expect(&Token::Keyword(end_kw)).unwrap();
+        self.expect_semicolon().unwrap();
         stmts
     }
 
     fn parse_if(&mut self) -> Stmt {
         let start = self.current_pos();
         self.advance(); // if
-        self.expect(&Token::LParen);
+        self.expect(&Token::LParen).unwrap();
         let cond = self.parse_expression();
-        self.expect(&Token::RParen);
+        self.expect(&Token::RParen).unwrap();
 
         if self.check(&Token::Colon) {
             return self.parse_if_alt(cond, start);
@@ -754,7 +783,7 @@ impl Parser {
         let mut branches: Vec<(Position, Expr, Vec<Stmt>)> = Vec::new();
         let mut cond = first_cond;
         let mut branch_start = if_start;
-        self.expect(&Token::Colon);
+        self.expect(&Token::Colon).unwrap();
         loop {
             let mut stmts = Vec::new();
             while !matches!(
@@ -769,10 +798,10 @@ impl Parser {
             branches.push((branch_start, cond.clone(), stmts));
             if self.eat(&Token::Keyword(Keyword::ElseIf)) {
                 branch_start = self.previous_end(); // approx: right at `elseif`
-                self.expect(&Token::LParen);
+                self.expect(&Token::LParen).unwrap();
                 cond = self.parse_expression();
-                self.expect(&Token::RParen);
-                self.expect(&Token::Colon);
+                self.expect(&Token::RParen).unwrap();
+                self.expect(&Token::Colon).unwrap();
                 continue;
             }
             break;
@@ -780,7 +809,7 @@ impl Parser {
 
         let else_start = self.current_pos();
         let else_stmts = if self.eat(&Token::Keyword(Keyword::Else)) {
-            self.expect(&Token::Colon);
+            self.expect(&Token::Colon).unwrap();
             let mut stmts = Vec::new();
             while !self.check(&Token::Keyword(Keyword::EndIf)) && !self.at_eof() {
                 stmts.push(self.parse_statement());
@@ -790,8 +819,8 @@ impl Parser {
             None
         };
 
-        self.expect(&Token::Keyword(Keyword::EndIf));
-        self.expect_semicolon();
+        self.expect(&Token::Keyword(Keyword::EndIf)).unwrap();
+        self.expect_semicolon().unwrap();
         let end = self.previous_end();
 
         let mut result = else_stmts.map(|stmts| Stmt {
@@ -826,9 +855,9 @@ impl Parser {
     fn parse_while(&mut self) -> Stmt {
         let start = self.current_pos();
         self.advance();
-        self.expect(&Token::LParen);
+        self.expect(&Token::LParen).unwrap();
         let cond = self.parse_expression();
-        self.expect(&Token::RParen);
+        self.expect(&Token::RParen).unwrap();
         let body = self.parse_body(Keyword::EndWhile);
         self.stmt(StmtKind::While { cond, body }, start)
     }
@@ -837,24 +866,24 @@ impl Parser {
         let start = self.current_pos();
         self.advance();
         let body = Box::new(self.parse_braced_or_single());
-        self.expect(&Token::Keyword(Keyword::While));
-        self.expect(&Token::LParen);
+        self.expect(&Token::Keyword(Keyword::While)).unwrap();
+        self.expect(&Token::LParen).unwrap();
         let cond = self.parse_expression();
-        self.expect(&Token::RParen);
-        self.expect_semicolon();
+        self.expect(&Token::RParen).unwrap();
+        self.expect_semicolon().unwrap();
         self.stmt(StmtKind::DoWhile { body, cond }, start)
     }
 
     fn parse_for(&mut self) -> Stmt {
         let start = self.current_pos();
         self.advance();
-        self.expect(&Token::LParen);
+        self.expect(&Token::LParen).unwrap();
         let init = self.parse_expr_list_until(&Token::Semicolon);
-        self.expect(&Token::Semicolon);
+        self.expect(&Token::Semicolon).unwrap();
         let cond = self.parse_expr_list_until(&Token::Semicolon);
-        self.expect(&Token::Semicolon);
+        self.expect(&Token::Semicolon).unwrap();
         let step = self.parse_expr_list_until(&Token::RParen);
-        self.expect(&Token::RParen);
+        self.expect(&Token::RParen).unwrap();
         let body = self.parse_body(Keyword::EndFor);
         self.stmt(
             StmtKind::For {
@@ -882,9 +911,9 @@ impl Parser {
     fn parse_foreach(&mut self) -> Stmt {
         let start = self.current_pos();
         self.advance();
-        self.expect(&Token::LParen);
+        self.expect(&Token::LParen).unwrap();
         let subject = self.parse_expression();
-        self.expect(&Token::Keyword(Keyword::As));
+        self.expect(&Token::Keyword(Keyword::As)).unwrap();
         let by_ref_first = self.eat(&Token::Amp);
         let first = self.parse_expression();
 
@@ -896,7 +925,7 @@ impl Parser {
             (None, by_ref_first, first)
         };
 
-        self.expect(&Token::RParen);
+        self.expect(&Token::RParen).unwrap();
         let body = self.parse_body(Keyword::EndForeach);
         self.stmt(
             StmtKind::Foreach {
@@ -918,17 +947,17 @@ impl Parser {
         let mut catches = Vec::new();
         while self.eat(&Token::Keyword(Keyword::Catch)) {
             let catch_start = self.previous_end();
-            self.expect(&Token::LParen);
+            self.expect(&Token::LParen).unwrap();
             let mut types = vec![self.parse_qualified_name()];
             while self.eat(&Token::Pipe) {
                 types.push(self.parse_qualified_name());
             }
             let var = if matches!(self.peek(), Token::Variable(_)) {
-                Some(self.expect_variable())
+                Some(self.expect_variable().unwrap())
             } else {
                 None
             };
-            self.expect(&Token::RParen);
+            self.expect(&Token::RParen).unwrap();
             let body = self.parse_stmt_list_block();
             catches.push(CatchClause {
                 types,
@@ -968,15 +997,15 @@ impl Parser {
     fn parse_switch(&mut self) -> Stmt {
         let start = self.current_pos();
         self.advance(); // switch
-        self.expect(&Token::LParen);
+        self.expect(&Token::LParen).unwrap();
         let subject = self.parse_expression();
-        self.expect(&Token::RParen);
+        self.expect(&Token::RParen).unwrap();
 
         let alt = self.check(&Token::Colon);
         if alt {
             self.advance();
         } else {
-            self.expect(&Token::LBrace);
+            self.expect(&Token::LBrace).unwrap();
         }
 
         let mut cases: Vec<SwitchCase> = Vec::new();
@@ -1021,10 +1050,10 @@ impl Parser {
         }
 
         if alt {
-            self.expect(&closer);
-            self.expect_semicolon();
+            self.expect(&closer).unwrap();
+            self.expect_semicolon().unwrap();
         } else {
-            self.expect(&Token::RBrace);
+            self.expect(&Token::RBrace).unwrap();
         }
 
         self.stmt(StmtKind::Switch { subject, cases }, start)
@@ -1119,7 +1148,7 @@ impl Parser {
                 inner.push('&');
                 inner.push_str(&self.parse_type_atom());
             }
-            self.expect(&Token::RParen);
+            self.expect(&Token::RParen).unwrap();
             return format!("({inner})");
         }
         // These are single keyword tokens - namespaced forms like
@@ -1191,7 +1220,7 @@ impl Parser {
     // ---- functions / params ----
 
     fn parse_params(&mut self) -> Vec<Param> {
-        self.expect(&Token::LParen);
+        self.expect(&Token::LParen).unwrap();
         let mut params = Vec::new();
         while !self.check(&Token::RParen) {
             let param_start = self.current_pos();
@@ -1212,8 +1241,8 @@ impl Parser {
                 {
                     self.advance();
                     self.advance();
-                    self.expect_ident();
-                    self.expect(&Token::RParen);
+                    self.expect_ident().unwrap();
+                    self.expect(&Token::RParen).unwrap();
                     continue;
                 }
                 match self.peek() {
@@ -1238,7 +1267,7 @@ impl Parser {
             let type_hint = self.parse_type_hint();
             let by_ref = self.eat(&Token::Amp);
             let variadic = self.eat(&Token::Ellipsis);
-            let name = self.expect_variable();
+            let name = self.expect_variable().unwrap();
             let default = if self.eat(&Token::Equals) {
                 Some(self.parse_expression())
             } else {
@@ -1271,15 +1300,15 @@ impl Parser {
                 break;
             }
         }
-        self.expect(&Token::RParen);
+        self.expect(&Token::RParen).unwrap();
         params
     }
 
     fn parse_function_decl(&mut self) -> FunctionDecl {
         let start = self.current_pos();
-        self.expect(&Token::Keyword(Keyword::Function));
+        self.expect(&Token::Keyword(Keyword::Function)).unwrap();
         self.eat(&Token::Amp); // by-ref return marker
-        let name = self.expect_ident();
+        let name = self.expect_ident().unwrap();
         let params = self.parse_params();
         let return_type = if self.eat(&Token::Colon) {
             self.parse_type_hint()
@@ -1346,7 +1375,7 @@ impl Parser {
                 _ => break,
             }
         }
-        self.expect(&Token::Keyword(Keyword::Class));
+        self.expect(&Token::Keyword(Keyword::Class)).unwrap();
 
         let args = if self.check(&Token::LParen) {
             self.parse_args().0
@@ -1413,7 +1442,7 @@ impl Parser {
         Vec<TraitAlias>,
         Vec<String>,
     ) {
-        self.expect(&Token::LBrace);
+        self.expect(&Token::LBrace).unwrap();
         let mut properties = Vec::new();
         let mut methods = Vec::new();
         let mut consts = Vec::new();
@@ -1435,7 +1464,7 @@ impl Parser {
                     trait_aliases.extend(aliases);
                     resolved_trait_conflicts.extend(resolved);
                 } else {
-                    self.expect_semicolon();
+                    self.expect_semicolon().unwrap();
                 }
                 continue;
             }
@@ -1458,14 +1487,14 @@ impl Parser {
                     Token::Keyword(Keyword::Private) if self.peek_is_set_visibility_marker() => {
                         self.advance();
                         self.advance();
-                        self.expect_ident();
-                        self.expect(&Token::RParen);
+                        self.expect_ident().unwrap();
+                        self.expect(&Token::RParen).unwrap();
                     }
                     Token::Keyword(Keyword::Protected) if self.peek_is_set_visibility_marker() => {
                         self.advance();
                         self.advance();
-                        self.expect_ident();
-                        self.expect(&Token::RParen);
+                        self.expect_ident().unwrap();
+                        self.expect(&Token::RParen).unwrap();
                     }
                     // `public(set)` - same idea, redundantly naming the
                     // write-visibility as public too (e.g. `public
@@ -1473,8 +1502,8 @@ impl Parser {
                     Token::Keyword(Keyword::Public) if self.peek_is_set_visibility_marker() => {
                         self.advance();
                         self.advance();
-                        self.expect_ident();
-                        self.expect(&Token::RParen);
+                        self.expect_ident().unwrap();
+                        self.expect(&Token::RParen).unwrap();
                     }
                     Token::Keyword(Keyword::Public) => {
                         visibility = Visibility::Public;
@@ -1527,8 +1556,8 @@ impl Parser {
                 }
                 loop {
                     let const_start = self.current_pos();
-                    let cname = self.expect_ident();
-                    self.expect(&Token::Equals);
+                    let cname = self.expect_ident().unwrap();
+                    self.expect(&Token::Equals).unwrap();
                     let value = self.parse_expression();
                     consts.push(ClassConst {
                         name: cname,
@@ -1542,7 +1571,7 @@ impl Parser {
                         break;
                     }
                 }
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 continue;
             }
 
@@ -1568,7 +1597,7 @@ impl Parser {
             let is_readonly = class_is_readonly || is_readonly_member;
             loop {
                 let prop_start = self.current_pos();
-                let name = self.expect_variable();
+                let name = self.expect_variable().unwrap();
                 let default = if self.eat(&Token::Equals) {
                     Some(self.parse_expression())
                 } else {
@@ -1611,12 +1640,12 @@ impl Parser {
                     },
                 });
                 if !self.eat(&Token::Comma) {
-                    self.expect_semicolon();
+                    self.expect_semicolon().unwrap();
                     break;
                 }
             }
         }
-        self.expect(&Token::RBrace);
+        self.expect(&Token::RBrace).unwrap();
 
         (
             properties,
@@ -1643,7 +1672,7 @@ impl Parser {
     fn parse_trait_adaptations(&mut self) -> (Vec<TraitAlias>, Vec<String>) {
         let mut aliases = Vec::new();
         let mut resolved = Vec::new();
-        self.expect(&Token::LBrace);
+        self.expect(&Token::LBrace).unwrap();
         while !self.check(&Token::RBrace) && !self.at_eof() {
             // The trait name before `::` can be fully qualified
             // (`\Some\Trait::method insteadof ...`, a real, valid PHP
@@ -1654,7 +1683,7 @@ impl Parser {
             // case identically to the plain `expect_ident` this replaced.
             let first = self.parse_qualified_name();
             let (trait_name, method) = if self.eat(&Token::DoubleColon) {
-                (Some(first), self.expect_ident())
+                (Some(first), self.expect_ident().unwrap())
             } else {
                 (None, first)
             };
@@ -1673,7 +1702,7 @@ impl Parser {
                     self.advance();
                 }
                 if !self.check(&Token::Semicolon) {
-                    let alias = self.expect_ident();
+                    let alias = self.expect_ident().unwrap();
                     aliases.push(TraitAlias {
                         trait_name,
                         method: method.clone(),
@@ -1682,9 +1711,9 @@ impl Parser {
                 }
                 resolved.push(method);
             }
-            self.expect_semicolon();
+            self.expect_semicolon().unwrap();
         }
-        self.expect(&Token::RBrace);
+        self.expect(&Token::RBrace).unwrap();
         (aliases, resolved)
     }
 
@@ -1693,7 +1722,7 @@ impl Parser {
     /// at all. `get`/`set` aren't keywords (they're semi-reserved words
     /// used only in this position), so they arrive as plain identifiers.
     fn parse_property_hooks(&mut self) -> PropertyHooks {
-        self.expect(&Token::LBrace);
+        self.expect(&Token::LBrace).unwrap();
         let mut get = None;
         let mut set = None;
         while !self.check(&Token::RBrace) && !self.at_eof() {
@@ -1719,8 +1748,8 @@ impl Parser {
                 let param_start = self.previous_end();
                 let type_hint = self.parse_type_hint();
                 let by_ref = self.eat(&Token::Amp);
-                let name = self.expect_variable();
-                self.expect(&Token::RParen);
+                let name = self.expect_variable().unwrap();
+                self.expect(&Token::RParen).unwrap();
                 Some(Param {
                     name,
                     type_hint,
@@ -1741,13 +1770,13 @@ impl Parser {
 
             let body = if self.eat(&Token::FatArrow) {
                 let e = self.parse_expression();
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 Some(PropertyHookBody::Arrow(e))
             } else if self.check(&Token::LBrace) {
                 Some(PropertyHookBody::Block(self.parse_stmt_list_block()))
             } else {
                 // Abstract form: `get;` / `set;`, no body at all.
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 None
             };
 
@@ -1757,7 +1786,7 @@ impl Parser {
                 get = body;
             }
         }
-        self.expect(&Token::RBrace);
+        self.expect(&Token::RBrace).unwrap();
         PropertyHooks { get, set }
     }
 
@@ -1803,7 +1832,7 @@ impl Parser {
                 other
             ),
         };
-        let name = self.expect_ident();
+        let name = self.expect_ident().unwrap();
 
         // A class extends at most one class, but an interface can extend
         // several other interfaces (`interface C extends A, B {}`) - both
@@ -1856,8 +1885,8 @@ impl Parser {
     // properties or extend anything.
     fn parse_enum_decl(&mut self) -> EnumDecl {
         let start = self.current_pos();
-        self.expect(&Token::Keyword(Keyword::Enum));
-        let name = self.expect_ident();
+        self.expect(&Token::Keyword(Keyword::Enum)).unwrap();
+        let name = self.expect_ident().unwrap();
 
         let backing_type = if self.eat(&Token::Colon) {
             self.parse_type_hint()
@@ -1873,7 +1902,7 @@ impl Parser {
             }
         }
 
-        self.expect(&Token::LBrace);
+        self.expect(&Token::LBrace).unwrap();
         let mut cases = Vec::new();
         let mut methods = Vec::new();
         let mut consts = Vec::new();
@@ -1886,13 +1915,13 @@ impl Parser {
             let doc = self.take_doc_comment();
 
             if self.eat(&Token::Keyword(Keyword::Case)) {
-                let case_name = self.expect_ident();
+                let case_name = self.expect_ident().unwrap();
                 let value = if self.eat(&Token::Equals) {
                     Some(self.parse_expression())
                 } else {
                     None
                 };
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 cases.push(EnumCase {
                     name: case_name,
                     value,
@@ -1914,7 +1943,7 @@ impl Parser {
                     trait_aliases.extend(aliases);
                     resolved_trait_conflicts.extend(resolved);
                 } else {
-                    self.expect_semicolon();
+                    self.expect_semicolon().unwrap();
                 }
                 continue;
             }
@@ -1967,8 +1996,8 @@ impl Parser {
                 }
                 loop {
                     let const_start = self.current_pos();
-                    let cname = self.expect_ident();
-                    self.expect(&Token::Equals);
+                    let cname = self.expect_ident().unwrap();
+                    self.expect(&Token::Equals).unwrap();
                     let value = self.parse_expression();
                     consts.push(ClassConst {
                         name: cname,
@@ -1982,7 +2011,7 @@ impl Parser {
                         break;
                     }
                 }
-                self.expect_semicolon();
+                self.expect_semicolon().unwrap();
                 continue;
             }
 
@@ -2008,7 +2037,7 @@ impl Parser {
             // whatever unexpected thing is here.
             self.advance();
         }
-        self.expect(&Token::RBrace);
+        self.expect(&Token::RBrace).unwrap();
 
         EnumDecl {
             name,
@@ -2135,7 +2164,7 @@ impl Parser {
                 );
             }
             let then_branch = self.parse_assignment();
-            self.expect(&Token::Colon);
+            self.expect(&Token::Colon).unwrap();
             let else_branch = self.parse_assignment();
             return self.expr(
                 ExprKind::Ternary(
@@ -2490,7 +2519,7 @@ impl Parser {
                         if self.check(&Token::LBrace) || self.check(&Token::DollarBrace) {
                             self.advance();
                             let e = self.parse_expression();
-                            self.expect(&Token::RBrace);
+                            self.expect(&Token::RBrace).unwrap();
                             Some(e)
                         } else if self.check(&Token::Dollar) {
                             self.advance();
@@ -2586,7 +2615,7 @@ impl Parser {
                         Token::LBrace | Token::DollarBrace => {
                             self.advance();
                             self.parse_expression();
-                            self.expect(&Token::RBrace);
+                            self.expect(&Token::RBrace).unwrap();
                             "{dynamic}".to_string()
                         }
                         Token::Dollar => {
@@ -2615,7 +2644,7 @@ impl Parser {
                     } else {
                         Some(Box::new(self.parse_expression()))
                     };
-                    self.expect(&Token::RBracket);
+                    self.expect(&Token::RBracket).unwrap();
                     expr = self.expr(ExprKind::Index(Box::new(expr), index), start);
                 }
                 Token::LParen => {
@@ -2652,7 +2681,7 @@ impl Parser {
     /// checked as if its arguments were positional in written order (see
     /// Item 1's own design notes for the real bug this caused).
     fn parse_args(&mut self) -> (Vec<Arg>, bool) {
-        self.expect(&Token::LParen);
+        self.expect(&Token::LParen).unwrap();
         if matches!(self.peek(), Token::Ellipsis) && matches!(self.peek_at(1), Token::RParen) {
             self.advance();
             self.advance();
@@ -2684,7 +2713,7 @@ impl Parser {
                 break;
             }
         }
-        self.expect(&Token::RParen);
+        self.expect(&Token::RParen).unwrap();
         (args, false)
     }
 
@@ -2729,7 +2758,7 @@ impl Parser {
                 break;
             }
         }
-        self.expect(close);
+        self.expect(close).unwrap();
         items
     }
 
@@ -2767,7 +2796,7 @@ impl Parser {
             Token::DollarBrace => {
                 self.advance();
                 let name_expr = self.parse_expression();
-                self.expect(&Token::RBrace);
+                self.expect(&Token::RBrace).unwrap();
                 self.expr(ExprKind::DynamicVariable(Box::new(name_expr)), start)
             }
             // `$$name` (equivalent to `${$name}`) - recurses to allow
@@ -2781,7 +2810,7 @@ impl Parser {
             Token::LParen => {
                 self.advance();
                 let inner = self.parse_expression();
-                self.expect(&Token::RParen);
+                self.expect(&Token::RParen).unwrap();
                 self.expr(ExprKind::Grouping(Box::new(inner)), start)
             }
             Token::LBracket => {
@@ -2791,13 +2820,13 @@ impl Parser {
             }
             Token::Keyword(Keyword::Array) => {
                 self.advance();
-                self.expect(&Token::LParen);
+                self.expect(&Token::LParen).unwrap();
                 let items = self.parse_array_items(&Token::RParen);
                 self.expr(ExprKind::ArrayLiteral(items), start)
             }
             Token::Keyword(Keyword::List) => {
                 self.advance();
-                self.expect(&Token::LParen);
+                self.expect(&Token::LParen).unwrap();
                 let items = self.parse_array_items(&Token::RParen);
                 self.expr(ExprKind::ArrayLiteral(items), start)
             }
@@ -2823,7 +2852,7 @@ impl Parser {
                         let s = self.current_pos();
                         self.advance();
                         let e = self.parse_expression();
-                        self.expect(&Token::RParen);
+                        self.expect(&Token::RParen).unwrap();
                         self.expr(ExprKind::Grouping(Box::new(e)), s)
                     }
                     _ => {
@@ -3092,16 +3121,16 @@ impl Parser {
 
     fn parse_closure(&mut self, is_static: bool) -> Expr {
         let start = self.current_pos();
-        self.expect(&Token::Keyword(Keyword::Function));
+        self.expect(&Token::Keyword(Keyword::Function)).unwrap();
         let by_ref = self.eat(&Token::Amp);
         let params = self.parse_params();
 
         let mut uses = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Use)) {
-            self.expect(&Token::LParen);
+            self.expect(&Token::LParen).unwrap();
             while !self.check(&Token::RParen) {
                 let use_by_ref = self.eat(&Token::Amp);
-                let name = self.expect_variable();
+                let name = self.expect_variable().unwrap();
                 uses.push(ClosureUse {
                     name,
                     by_ref: use_by_ref,
@@ -3110,7 +3139,7 @@ impl Parser {
                     break;
                 }
             }
-            self.expect(&Token::RParen);
+            self.expect(&Token::RParen).unwrap();
         }
 
         let return_type = if self.eat(&Token::Colon) {
@@ -3140,7 +3169,7 @@ impl Parser {
 
     fn parse_arrow_fn(&mut self, is_static: bool) -> Expr {
         let start = self.current_pos();
-        self.expect(&Token::Keyword(Keyword::Fn));
+        self.expect(&Token::Keyword(Keyword::Fn)).unwrap();
         self.eat(&Token::Amp);
         let params = self.parse_params();
         let return_type = if self.eat(&Token::Colon) {
@@ -3148,7 +3177,7 @@ impl Parser {
         } else {
             None
         };
-        self.expect(&Token::FatArrow);
+        self.expect(&Token::FatArrow).unwrap();
         let body = self.parse_assignment();
         self.expr(
             ExprKind::ArrowFn {
@@ -3163,11 +3192,11 @@ impl Parser {
 
     fn parse_match_expr(&mut self) -> Expr {
         let start = self.current_pos();
-        self.expect(&Token::Keyword(Keyword::Match));
-        self.expect(&Token::LParen);
+        self.expect(&Token::Keyword(Keyword::Match)).unwrap();
+        self.expect(&Token::LParen).unwrap();
         let subject = self.parse_expression();
-        self.expect(&Token::RParen);
-        self.expect(&Token::LBrace);
+        self.expect(&Token::RParen).unwrap();
+        self.expect(&Token::LBrace).unwrap();
 
         let mut arms = Vec::new();
         let mut default = None;
@@ -3176,7 +3205,7 @@ impl Parser {
                 // `default` also tolerates a trailing comma before `=>`,
                 // same as an ordinary arm's condition list.
                 self.eat(&Token::Comma);
-                self.expect(&Token::FatArrow);
+                self.expect(&Token::FatArrow).unwrap();
                 default = Some(Box::new(self.parse_expression()));
             } else {
                 let mut conds = vec![self.parse_expression()];
@@ -3186,7 +3215,7 @@ impl Parser {
                     }
                     conds.push(self.parse_expression());
                 }
-                self.expect(&Token::FatArrow);
+                self.expect(&Token::FatArrow).unwrap();
                 let result = self.parse_expression();
                 arms.push((conds, result));
             }
@@ -3194,7 +3223,7 @@ impl Parser {
                 break;
             }
         }
-        self.expect(&Token::RBrace);
+        self.expect(&Token::RBrace).unwrap();
 
         self.expr(
             ExprKind::Match {
