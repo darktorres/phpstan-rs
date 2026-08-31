@@ -1831,7 +1831,7 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(inner, locals, !branch_true);
             }
             ExprKind::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
-            ExprKind::Call(callee, args) => {
+            ExprKind::Call(callee, args, _) => {
                 if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
                     && let ExprKind::Variable(var_name) = &single_arg.kind
                 {
@@ -1978,7 +1978,7 @@ impl<'a> Checker<'a> {
 
     fn check_expr(&mut self, e: &Expr, locals: &mut HashMap<String, Type>, label: &str) {
         match &e.kind {
-            ExprKind::Call(callee, args) => {
+            ExprKind::Call(callee, args, has_spread) => {
                 // `unset($x)` genuinely removes `$x` from scope in real
                 // PHP - a real bug if it's used afterward. Checked before
                 // anything else below: `predefine_byref_or_unknown_args`
@@ -2046,9 +2046,19 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
-                        self.check_args(name, sig, args, locals, label, None, e.span);
-                        if matches!(name.as_str(), "sprintf" | "printf") {
-                            self.check_format_string_call(name, args, locals, label);
+                        // Finding 29: a spread argument (`f(...$args)`)
+                        // means the real argument count/types aren't
+                        // known statically at all - checking count/type
+                        // here would treat the spread array itself as if
+                        // it were meant to fill the very next positional
+                        // slot, producing a real, severe false positive
+                        // for the standard "forward a dynamically-sized
+                        // argument list" idiom.
+                        if !has_spread {
+                            self.check_args(name, sig, args, locals, label, None, e.span);
+                            if matches!(name.as_str(), "sprintf" | "printf") {
+                                self.check_format_string_call(name, args, locals, label);
+                            }
                         }
                     } else {
                         // Since resolve_function_candidates always
@@ -2067,7 +2077,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ExprKind::MethodCall(recv, method, args, _) => {
+            ExprKind::MethodCall(recv, method, args, _, has_spread) => {
                 // Finding 49's other real shape: `(function () {...})
                 // ->bindTo($newThis, $scope)` - same idea as
                 // `Closure::bind`, just on the receiver instead of the
@@ -2166,7 +2176,11 @@ impl<'a> Checker<'a> {
                             span: e.span,
                             level: 0,
                         });
-                    } else if let Some(sig) = &sig {
+                    } else if let Some(sig) = &sig
+                        && !has_spread
+                    {
+                        // Finding 29: see the identical check on the
+                        // plain-function Call arm above.
                         let qualified = format!("{class}::{method}");
                         self.check_args(&qualified, sig, args, locals, label, Some(class), e.span);
                     }
@@ -2328,7 +2342,7 @@ impl<'a> Checker<'a> {
                     self.check_shape_key_access(base, i, locals, label);
                 }
             }
-            ExprKind::New(_, args) => {
+            ExprKind::New(_, args, has_spread) => {
                 // `new Foo()` never carries known type arguments itself -
                 // real PHP's constructor syntax has no way to write
                 // `new Foo<Bar>()` at all, and inferring them from the
@@ -2373,7 +2387,9 @@ impl<'a> Checker<'a> {
                                 span: e.span,
                                 level: 0,
                             });
-                        } else if let Some(sig) = ctor_sig {
+                        } else if let Some(sig) = ctor_sig
+                            && !has_spread
+                        {
                             self.check_args(
                                 &format!("{class}::__construct"),
                                 sig,
@@ -2394,7 +2410,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ExprKind::NewAnonymousClass(decl, args) => {
+            ExprKind::NewAnonymousClass(decl, args, _) => {
                 for a in args {
                     self.check_expr(a, locals, label);
                 }
@@ -2406,7 +2422,7 @@ impl<'a> Checker<'a> {
                     self.check_function(&m.function, Some(&decl.name), m.is_static);
                 }
             }
-            ExprKind::StaticCall(class_name, method, args) => {
+            ExprKind::StaticCall(class_name, method, args, has_spread) => {
                 // Mirrors ExprKind::MethodCall's own structure exactly -
                 // resolve first (self/parent/static-aware), predefine
                 // byref/unknown args using the real signature before
@@ -2454,8 +2470,20 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(class) = &resolved_class {
                     if let Some(sig) = sig {
-                        let qualified = format!("{class}::{method}");
-                        self.check_args(&qualified, sig, args, locals, label, Some(class), e.span);
+                        // Finding 29: see the identical check on the
+                        // plain-function Call arm above.
+                        if !has_spread {
+                            let qualified = format!("{class}::{method}");
+                            self.check_args(
+                                &qualified,
+                                sig,
+                                args,
+                                locals,
+                                label,
+                                Some(class),
+                                e.span,
+                            );
+                        }
                     } else if self.registry.classes.contains_key(class)
                         && self.registry.lookup_method(class, "__callStatic").is_none()
                     {
@@ -2557,7 +2585,7 @@ impl<'a> Checker<'a> {
                 self.check_expr(base, locals, label);
                 self.check_expr(name_expr, locals, label);
             }
-            ExprKind::DynamicMethodCall(recv, name_expr, args) => {
+            ExprKind::DynamicMethodCall(recv, name_expr, args, _) => {
                 self.check_expr(recv, locals, label);
                 self.check_expr(name_expr, locals, label);
                 for a in args {
@@ -2733,7 +2761,7 @@ impl<'a> Checker<'a> {
             // each inner arm's own existence-check logic without its
             // argument handling.
             ExprKind::FirstClassCallable(inner) => match &inner.kind {
-                ExprKind::Call(callee, _) => {
+                ExprKind::Call(callee, _, _) => {
                     if let ExprKind::Name(name) = &callee.kind {
                         if !is_language_construct(name) {
                             let (primary, fallback) =
@@ -2755,7 +2783,7 @@ impl<'a> Checker<'a> {
                         self.check_expr(callee, locals, label);
                     }
                 }
-                ExprKind::MethodCall(recv, method, _, _) => {
+                ExprKind::MethodCall(recv, method, _, _, _) => {
                     self.check_expr(recv, locals, label);
                     let recv_ty = self.infer_expr(recv, locals);
                     let recv_class = match &recv_ty {
@@ -2783,7 +2811,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                ExprKind::StaticCall(class_name, method, _) => {
+                ExprKind::StaticCall(class_name, method, _, _) => {
                     if let Some(class) = self.resolve_static_class_name(class_name)
                         && self.registry.classes.contains_key(&class)
                         && self.registry.lookup_method(&class, method).is_none()
@@ -2800,7 +2828,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                ExprKind::DynamicMethodCall(recv, name_expr, _) => {
+                ExprKind::DynamicMethodCall(recv, name_expr, _, _) => {
                     self.check_expr(recv, locals, label);
                     self.check_expr(name_expr, locals, label);
                 }
@@ -3193,7 +3221,7 @@ impl<'a> Checker<'a> {
             // parser: they're indistinguishable from any other identifier),
             // so a literal `ExprKind::Name("self")` has to be special-cased
             // here rather than showing up as an Object of that name.
-            ExprKind::New(class_expr, _) => match &class_expr.kind {
+            ExprKind::New(class_expr, _, _) => match &class_expr.kind {
                 ExprKind::Name(name) => match name.as_str() {
                     "self" | "parent" | "static" => {
                         let raw = match name.as_str() {
@@ -3210,7 +3238,7 @@ impl<'a> Checker<'a> {
                 },
                 _ => Type::Mixed,
             },
-            ExprKind::Call(callee, args) => match &callee.kind {
+            ExprKind::Call(callee, args, _) => match &callee.kind {
                 ExprKind::Name(name) if !is_language_construct(name) => {
                     let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
                     self.registry
@@ -3228,7 +3256,7 @@ impl<'a> Checker<'a> {
                 }
                 _ => Type::Mixed,
             },
-            ExprKind::MethodCall(recv, method, args, nullsafe) => {
+            ExprKind::MethodCall(recv, method, args, nullsafe, _) => {
                 // A nullsafe receiver is virtually always nullable
                 // (that's the entire reason to write `?->`), so its own
                 // inferred type is virtually always `Union([Object(...),
@@ -3268,7 +3296,7 @@ impl<'a> Checker<'a> {
                     result
                 }
             }
-            ExprKind::StaticCall(class_name, method, args) => self
+            ExprKind::StaticCall(class_name, method, args, _) => self
                 .resolve_static_class_name(class_name)
                 .and_then(|class| {
                     self.registry.lookup_method(&class, method).map(|sig| {
@@ -6758,6 +6786,77 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn spread_argument_is_not_checked_as_the_first_positional_argument() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsThree(int $a, int $b, int $c): int { return $a + $b + $c; }
+            function test(array $args): int { return needsThree(...$args); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn spread_argument_in_a_constructor_call_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point {
+                public function __construct(int $x, int $y) {}
+            }
+            function test(array $coords): Point { return new Point(...$coords); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn spread_argument_in_sprintf_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(array $args): string { return sprintf("%s %s", ...$args); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn spread_argument_in_a_method_call_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Calc { public function add(int $a, int $b): int { return $a + $b; } }
+            function test(Calc $c, array $args): int { return $c->add(...$args); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn spread_argument_in_a_static_call_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Calc { public static function multiply(int $a, int $b): int { return $a * $b; } }
+            function test(array $args): int { return Calc::multiply(...$args); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_non_spread_call_with_too_few_arguments_is_still_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsTwo(int $a, int $b): int { return $a + $b; }
+            function test(): int { return needsTwo(1); }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("expects at least 2 argument(s)")),
+            "expected a too-few-arguments diagnostic, got: {d:?}"
+        );
     }
 
     #[test]

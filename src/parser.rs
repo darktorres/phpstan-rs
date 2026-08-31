@@ -1313,10 +1313,11 @@ impl Parser {
         }
         self.expect(&Token::Keyword(Keyword::Class));
 
-        let args = if self.check(&Token::LParen) {
-            self.parse_args().0
+        let (args, ctor_has_spread) = if self.check(&Token::LParen) {
+            let (args, _, has_spread) = self.parse_args();
+            (args, has_spread)
         } else {
-            Vec::new()
+            (Vec::new(), false)
         };
 
         let mut extends = Vec::new();
@@ -1360,7 +1361,10 @@ impl Parser {
             },
         };
 
-        self.expr(ExprKind::NewAnonymousClass(Box::new(decl), args), start)
+        self.expr(
+            ExprKind::NewAnonymousClass(Box::new(decl), args, ctor_has_spread),
+            start,
+        )
     }
 
     /// The `{ ... }` body shared by class/interface/trait declarations and
@@ -2457,12 +2461,13 @@ impl Parser {
                         };
                     if let Some(name_expr) = dynamic_name {
                         expr = if self.check(&Token::LParen) {
-                            let (args, is_fcc) = self.parse_args();
+                            let (args, is_fcc, has_spread) = self.parse_args();
                             let call = self.expr(
                                 ExprKind::DynamicMethodCall(
                                     Box::new(expr),
                                     Box::new(name_expr),
                                     args,
+                                    has_spread,
                                 ),
                                 start,
                             );
@@ -2499,9 +2504,9 @@ impl Parser {
                         ),
                     };
                     if self.check(&Token::LParen) {
-                        let (args, is_fcc) = self.parse_args();
+                        let (args, is_fcc, has_spread) = self.parse_args();
                         let call = self.expr(
-                            ExprKind::MethodCall(Box::new(expr), name, args, nullsafe),
+                            ExprKind::MethodCall(Box::new(expr), name, args, nullsafe, has_spread),
                             start,
                         );
                         expr = if is_fcc {
@@ -2554,8 +2559,11 @@ impl Parser {
                         other => panic!("parse error: expected static member, found {:?}", other),
                     };
                     if self.check(&Token::LParen) {
-                        let (args, is_fcc) = self.parse_args();
-                        let call = self.expr(ExprKind::StaticCall(class_name, member, args), start);
+                        let (args, is_fcc, has_spread) = self.parse_args();
+                        let call = self.expr(
+                            ExprKind::StaticCall(class_name, member, args, has_spread),
+                            start,
+                        );
                         expr = if is_fcc {
                             self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                         } else {
@@ -2576,8 +2584,8 @@ impl Parser {
                     expr = self.expr(ExprKind::Index(Box::new(expr), index), start);
                 }
                 Token::LParen => {
-                    let (args, is_fcc) = self.parse_args();
-                    let call = self.expr(ExprKind::Call(Box::new(expr), args), start);
+                    let (args, is_fcc, has_spread) = self.parse_args();
+                    let call = self.expr(ExprKind::Call(Box::new(expr), args, has_spread), start);
                     expr = if is_fcc {
                         self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                     } else {
@@ -2602,17 +2610,29 @@ impl Parser {
     /// callable reference (`foo(...)` - literally `...` then nothing else,
     /// as opposed to a real spread argument like `foo(...$rest)`, which is
     /// followed by an expression, not directly by `)`).
-    fn parse_args(&mut self) -> (Vec<Expr>, bool) {
+    /// Returns `(args, is_first_class_callable, has_spread)`. `has_spread`
+    /// (Finding 29) is real, load-bearing information for every caller
+    /// that goes on to check argument count/type against a declared
+    /// signature - a spread argument (`f(...$args)`) can't be counted or
+    /// type-checked positionally at all (the real argument count isn't
+    /// known statically), so a caller needs to know a spread was present
+    /// somewhere in the call to skip that checking entirely rather than
+    /// treating the spread array itself as if it were meant to fill the
+    /// very next positional slot.
+    fn parse_args(&mut self) -> (Vec<Expr>, bool, bool) {
         self.expect(&Token::LParen);
         if matches!(self.peek(), Token::Ellipsis) && matches!(self.peek_at(1), Token::RParen) {
             self.advance();
             self.advance();
-            return (Vec::new(), true);
+            return (Vec::new(), true, false);
         }
 
         let mut args = Vec::new();
+        let mut has_spread = false;
         while !self.check(&Token::RParen) {
-            self.eat(&Token::Ellipsis); // spread: argument still parsed normally
+            if self.eat(&Token::Ellipsis) {
+                has_spread = true;
+            }
             // named arguments (`name: expr`) - accept and discard the
             // name. The name is just a label, so any keyword is valid
             // here too (`create(namespace: 'x')`), not just Identifier.
@@ -2628,7 +2648,7 @@ impl Parser {
             }
         }
         self.expect(&Token::RParen);
-        (args, false)
+        (args, false, has_spread)
     }
 
     fn parse_array_items(&mut self, close: &Token) -> Vec<(Option<Expr>, Expr)> {
@@ -2766,12 +2786,13 @@ impl Parser {
                 // `new Foo(...)` first-class-callable syntax doesn't exist
                 // in PHP - a constructor can't be referenced that way - so
                 // the flag is simply dropped here rather than handled.
-                let args = if self.check(&Token::LParen) {
-                    self.parse_args().0
+                let (args, has_spread) = if self.check(&Token::LParen) {
+                    let (args, _, has_spread) = self.parse_args();
+                    (args, has_spread)
                 } else {
-                    Vec::new()
+                    (Vec::new(), false)
                 };
-                self.expr(ExprKind::New(Box::new(class_expr), args), start)
+                self.expr(ExprKind::New(Box::new(class_expr), args, has_spread), start)
             }
             Token::Keyword(Keyword::Clone) => {
                 self.advance();
@@ -2804,7 +2825,7 @@ impl Parser {
                 // resulting args are kept, matching how the RFC only ever
                 // gives this two real parameters.
                 if matches!(self.peek(), Token::LParen) && self.clone_call_has_top_level_comma() {
-                    let (mut args, _) = self.parse_args();
+                    let (mut args, _, _) = self.parse_args();
                     let overrides = if args.len() > 1 {
                         Some(Box::new(args.remove(1)))
                     } else {
@@ -2823,7 +2844,7 @@ impl Parser {
                 self.advance();
                 let e = self.parse_assignment();
                 let name = self.expr(ExprKind::Name("print".to_string()), start);
-                self.expr(ExprKind::Call(Box::new(name), vec![e]), start)
+                self.expr(ExprKind::Call(Box::new(name), vec![e], false), start)
             }
             // `throw` as an expression (`default => throw new X()`, `$x ??
             // throw new X()`, an arrow function body, ...) - a bare `throw
@@ -2896,7 +2917,7 @@ impl Parser {
                 self.advance();
                 let e = self.parse_assignment();
                 let name = self.expr(ExprKind::Name(kw.as_str().to_string()), start);
-                self.expr(ExprKind::Call(Box::new(name), vec![e]), start)
+                self.expr(ExprKind::Call(Box::new(name), vec![e], false), start)
             }
             Token::Keyword(Keyword::Static)
                 if matches!(
@@ -2947,7 +2968,7 @@ impl Parser {
                 self.advance();
                 let cmd = self.build_interpolated(parts, start);
                 let name = self.expr(ExprKind::Name("shell_exec".to_string()), start);
-                self.expr(ExprKind::Call(Box::new(name), vec![cmd]), start)
+                self.expr(ExprKind::Call(Box::new(name), vec![cmd], false), start)
             }
             // `namespace\Foo` - a name explicitly relative to the current
             // namespace. Only ever appears as a value in expression
@@ -3220,19 +3241,19 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
             }
             bias_expr_spans(e, frag_base);
         }
-        ExprKind::Call(callee, args) => {
+        ExprKind::Call(callee, args, _) => {
             bias_expr_spans(callee, frag_base);
             for a in args {
                 bias_expr_spans(a, frag_base);
             }
         }
-        ExprKind::New(target, args) => {
+        ExprKind::New(target, args, _) => {
             bias_expr_spans(target, frag_base);
             for a in args {
                 bias_expr_spans(a, frag_base);
             }
         }
-        ExprKind::MethodCall(recv, _, args, _) => {
+        ExprKind::MethodCall(recv, _, args, _, _) => {
             bias_expr_spans(recv, frag_base);
             for a in args {
                 bias_expr_spans(a, frag_base);
@@ -3242,14 +3263,14 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
             bias_expr_spans(base, frag_base);
             bias_expr_spans(name_expr, frag_base);
         }
-        ExprKind::DynamicMethodCall(recv, name_expr, args) => {
+        ExprKind::DynamicMethodCall(recv, name_expr, args, _) => {
             bias_expr_spans(recv, frag_base);
             bias_expr_spans(name_expr, frag_base);
             for a in args {
                 bias_expr_spans(a, frag_base);
             }
         }
-        ExprKind::StaticCall(_, _, args) => {
+        ExprKind::StaticCall(_, _, args, _) => {
             for a in args {
                 bias_expr_spans(a, frag_base);
             }
@@ -3272,7 +3293,7 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
                 bias_expr_spans(o, frag_base);
             }
         }
-        ExprKind::NewAnonymousClass(_, args) => {
+        ExprKind::NewAnonymousClass(_, args, _) => {
             for a in args {
                 bias_expr_spans(a, frag_base);
             }
@@ -3654,6 +3675,44 @@ mod tests {
     }
 
     #[test]
+    fn a_spread_argument_sets_has_spread_on_a_call() {
+        let program = parse("<?php foo(...$args);");
+        let StmtKind::Expression(e) = &program[0].kind else {
+            panic!("expected Expression");
+        };
+        let ExprKind::Call(_, args, has_spread) = &e.kind else {
+            panic!("expected Call, got {:?}", e.kind);
+        };
+        assert!(has_spread);
+        assert_eq!(args.len(), 1);
+    }
+
+    #[test]
+    fn a_plain_call_with_no_spread_leaves_has_spread_false() {
+        let program = parse("<?php foo($a, $b);");
+        let StmtKind::Expression(e) = &program[0].kind else {
+            panic!("expected Expression");
+        };
+        let ExprKind::Call(_, args, has_spread) = &e.kind else {
+            panic!("expected Call, got {:?}", e.kind);
+        };
+        assert!(!has_spread);
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn a_spread_argument_sets_has_spread_on_new() {
+        let program = parse("<?php new Foo(...$args);");
+        let StmtKind::Expression(e) = &program[0].kind else {
+            panic!("expected Expression");
+        };
+        let ExprKind::New(_, _, has_spread) = &e.kind else {
+            panic!("expected New, got {:?}", e.kind);
+        };
+        assert!(has_spread);
+    }
+
+    #[test]
     fn qualified_name_with_keyword_segment_parses() {
         // `Enum` here is a namespace segment, not the `enum` declaration
         // keyword - PHP's keywords are mostly "semi-reserved". The main
@@ -3764,7 +3823,7 @@ mod tests {
         else {
             panic!("expected an assignment");
         };
-        let ExprKind::NewAnonymousClass(decl, args) = &rhs.kind else {
+        let ExprKind::NewAnonymousClass(decl, args, _) = &rhs.kind else {
             panic!("expected NewAnonymousClass");
         };
         assert_eq!(args.len(), 1);
@@ -3917,7 +3976,7 @@ mod tests {
         "#,
         );
         let StmtKind::Expression(Expr {
-            kind: ExprKind::Call(_, args),
+            kind: ExprKind::Call(_, args, _),
             ..
         }) = &program[0].kind
         else {
@@ -4114,13 +4173,13 @@ mod tests {
         assert!(matches!(
             &program[1].kind,
             StmtKind::Expression(Expr {
-                kind: ExprKind::DynamicMethodCall(_, _, _),
+                kind: ExprKind::DynamicMethodCall(_, _, _, _),
                 ..
             })
         ));
 
         let StmtKind::Expression(Expr {
-            kind: ExprKind::StaticCall(class, member, _),
+            kind: ExprKind::StaticCall(class, member, _, _),
             ..
         }) = &program[2].kind
         else {
@@ -4442,7 +4501,7 @@ mod tests {
             assert!(matches!(
                 &stmt.kind,
                 StmtKind::Expression(Expr {
-                    kind: ExprKind::Call(_, _),
+                    kind: ExprKind::Call(_, _, _),
                     ..
                 })
             ));
@@ -4462,7 +4521,7 @@ mod tests {
             panic!("expected FunctionDecl");
         };
         let StmtKind::Expression(Expr {
-            kind: ExprKind::Call(_, args),
+            kind: ExprKind::Call(_, args, _),
             ..
         }) = &f.body[0].kind
         else {
@@ -4519,7 +4578,7 @@ mod tests {
     fn fn_usable_as_namespace_segment_when_not_a_signature() {
         let program = parse(r#"<?php fn\test();"#);
         assert!(
-            matches!(&program[0].kind, StmtKind::Expression(Expr { kind: ExprKind::Call(callee, _), .. })
+            matches!(&program[0].kind, StmtKind::Expression(Expr { kind: ExprKind::Call(callee, _, _), .. })
             if matches!(&callee.kind, ExprKind::Name(n) if n == "fn\\test"))
         );
     }
@@ -4564,25 +4623,25 @@ mod tests {
         "#,
         );
         let StmtKind::Expression(Expr {
-            kind: ExprKind::Call(_, args),
+            kind: ExprKind::Call(_, args, _),
             ..
         }) = &program[1].kind
         else {
             panic!("expected var_dump() call");
         };
-        let ExprKind::New(class_expr, _) = &args[0].kind else {
+        let ExprKind::New(class_expr, _, _) = &args[0].kind else {
             panic!("expected New");
         };
         assert!(matches!(&class_expr.kind, ExprKind::Grouping(_)));
 
         let StmtKind::Expression(Expr {
-            kind: ExprKind::Call(_, args),
+            kind: ExprKind::Call(_, args, _),
             ..
         }) = &program[2].kind
         else {
             panic!("expected var_dump() call");
         };
-        let ExprKind::New(_, ctor_args) = &args[0].kind else {
+        let ExprKind::New(_, ctor_args, _) = &args[0].kind else {
             panic!("expected New");
         };
         assert_eq!(ctor_args.len(), 0);
@@ -4606,7 +4665,7 @@ mod tests {
         else {
             panic!("expected assignment");
         };
-        let ExprKind::Call(callee, _) = &rhs.kind else {
+        let ExprKind::Call(callee, _, _) = &rhs.kind else {
             panic!("expected a call");
         };
         assert!(matches!(&callee.kind, ExprKind::Name(n) if n == "shell_exec"));
@@ -4656,7 +4715,7 @@ mod tests {
         let program = parse(r#"<?php namespace\foo();"#);
         assert!(matches!(
             &program[0].kind,
-            StmtKind::Expression(Expr { kind: ExprKind::Call(callee, _), .. })
+            StmtKind::Expression(Expr { kind: ExprKind::Call(callee, _, _), .. })
                 if matches!(&callee.kind, ExprKind::Name(n) if n == "namespace\\foo")
         ));
     }
@@ -4684,7 +4743,7 @@ mod tests {
         assert!(matches!(
             &program[2].kind,
             StmtKind::Expression(Expr {
-                kind: ExprKind::DynamicMethodCall(_, _, _),
+                kind: ExprKind::DynamicMethodCall(_, _, _, _),
                 ..
             })
         ));

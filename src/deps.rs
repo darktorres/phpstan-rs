@@ -312,20 +312,20 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
             }
             collect_expr(e, names);
         }
-        ExprKind::Call(callee, args) => {
+        ExprKind::Call(callee, args, _) => {
             collect_expr(callee, names);
             for a in args {
                 collect_expr(a, names);
             }
         }
-        ExprKind::New(target, args) => {
+        ExprKind::New(target, args, _) => {
             collect_expr(target, names);
             for a in args {
                 collect_expr(a, names);
             }
         }
         ExprKind::PropertyAccess(base, _, _) => collect_expr(base, names),
-        ExprKind::MethodCall(recv, _, args, _) => {
+        ExprKind::MethodCall(recv, _, args, _, _) => {
             collect_expr(recv, names);
             for a in args {
                 collect_expr(a, names);
@@ -335,7 +335,7 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
             collect_expr(base, names);
             collect_expr(name_expr, names);
         }
-        ExprKind::DynamicMethodCall(recv, name_expr, args) => {
+        ExprKind::DynamicMethodCall(recv, name_expr, args, _) => {
             collect_expr(recv, names);
             collect_expr(name_expr, names);
             for a in args {
@@ -345,7 +345,7 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
         ExprKind::StaticAccess(class, _) => {
             names.insert(class.clone());
         }
-        ExprKind::StaticCall(class, _, args) => {
+        ExprKind::StaticCall(class, _, args, _) => {
             names.insert(class.clone());
             for a in args {
                 collect_expr(a, names);
@@ -375,7 +375,7 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_expr(o, names);
             }
         }
-        ExprKind::NewAnonymousClass(decl, args) => {
+        ExprKind::NewAnonymousClass(decl, args, _) => {
             collect_class(decl, names);
             for a in args {
                 collect_expr(a, names);

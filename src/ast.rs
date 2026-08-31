@@ -365,15 +365,22 @@ pub enum ExprKind {
     Assign(Box<Expr>, Box<Expr>),
     CompoundAssign(BinOp, Box<Expr>, Box<Expr>),
     Ternary(Box<Expr>, Option<Box<Expr>>, Box<Expr>),
-    Call(Box<Expr>, Vec<Expr>),
-    New(Box<Expr>, Vec<Expr>),
+    // The trailing `bool` on every call-shaped variant below is
+    // `has_spread` (Finding 29) - `true` when any argument in the call
+    // used `...` (`f(...$args)`) - a spread array's real contents can't
+    // be counted or type-checked positionally at all, so argument-count/
+    // type checking needs to know to skip itself entirely rather than
+    // treating the spread expression as if it were meant to fill the
+    // very next positional slot.
+    Call(Box<Expr>, Vec<Expr>, bool),
+    New(Box<Expr>, Vec<Expr>, bool),
     // The trailing `bool` is `true` for a nullsafe access (`$x?->prop`),
     // `false` for a plain `$x->prop` - the two are otherwise identical
     // syntactically, but real PHP's `?->` implicitly makes the whole
     // access `null` when its base is `null`, which `infer_expr` needs to
     // know to union `Null` into the result.
     PropertyAccess(Box<Expr>, String, bool),
-    MethodCall(Box<Expr>, String, Vec<Expr>, bool),
+    MethodCall(Box<Expr>, String, Vec<Expr>, bool, bool),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
     // itself computed from an expression, not statically known, so it
     // can't share PropertyAccess/MethodCall's plain-String name. Still
@@ -381,9 +388,9 @@ pub enum ExprKind {
     // inside the {} can still be caught), even though the accessed
     // member's own type never can be.
     DynamicPropertyAccess(Box<Expr>, Box<Expr>),
-    DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Expr>),
+    DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Expr>, bool),
     StaticAccess(String, String),
-    StaticCall(String, String, Vec<Expr>),
+    StaticCall(String, String, Vec<Expr>, bool),
     Index(Box<Expr>, Option<Box<Expr>>),
     Name(String),
     Instanceof(Box<Expr>, InstanceofTarget),
@@ -412,7 +419,7 @@ pub enum ExprKind {
     // Never given a stable name multiple such expressions could share, so
     // it isn't indexed into the registry the way a normal class is; its
     // methods are still type-checked (see checker::check_expr).
-    NewAnonymousClass(Box<ClassDecl>, Vec<Expr>),
+    NewAnonymousClass(Box<ClassDecl>, Vec<Expr>, bool),
     // `yield;` / `yield $v;` / `yield $k => $v;` - (key, value). Makes the
     // enclosing function a generator; that broader semantic isn't modeled,
     // only enough structure to parse and check the yielded expression(s).
