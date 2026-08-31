@@ -6186,6 +6186,19 @@ mod tests {
     }
 
     #[test]
+    fn calling_a_method_from_a_transitively_used_trait_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait Greets { public function greet(): string { return "hi"; } }
+            trait Combined { use Greets; public function extra(): int { return 1; } }
+            class Foo { use Combined; }
+            function test(Foo $f): string { return $f->greet(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn use_import_resolves_to_its_fully_qualified_name_before_lookup() {
         let d = diagnostics_for(
             r#"<?php

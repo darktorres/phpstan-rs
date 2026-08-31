@@ -823,7 +823,31 @@ impl Registry {
     /// `pub(crate)` (not private) so `Project::update_file` can re-run
     /// just this pass after patching one file's contributions in place,
     /// without needing to go through `build`'s full from-scratch `index`.
+    /// Finding 13: a trait that itself declares `use OtherTrait;` needs
+    /// `OtherTrait`'s own methods folded into it before a class using the
+    /// first trait is processed - a single non-iterative pass only ever
+    /// composes one level deep. Runs `flatten_traits_one_pass` to a fixed
+    /// point (each pass may itself surface a *new* one-level composition
+    /// a later pass can now see, e.g. a trait-of-a-trait-of-a-trait
+    /// chain), bounded by the number of classes/traits registered at all,
+    /// since a real trait-composition cycle is itself a PHP fatal error
+    /// this project doesn't otherwise detect, so degrading to "leave as
+    /// partially flattened" once the bound is hit (rather than looping
+    /// forever) is the honest answer, not a regression.
     pub(crate) fn flatten_traits(&mut self) {
+        let max_iterations = self.classes.len().max(1);
+        for _ in 0..max_iterations {
+            if !self.flatten_traits_one_pass() {
+                break;
+            }
+        }
+    }
+
+    /// One level of trait composition - see `flatten_traits`'s own doc
+    /// comment for why this needs to run more than once. Returns whether
+    /// anything was actually added anywhere, so the caller knows when a
+    /// fixed point has been reached.
+    fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
             String,
             Vec<(String, FunctionSig)>,
@@ -876,17 +900,33 @@ impl Registry {
             ));
         }
 
+        let mut changed = false;
         for (class_name, methods, properties, abstract_from_traits) in additions {
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (name, sig) in methods {
-                    info.methods.entry(name).or_insert(sig);
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        info.methods.entry(name)
+                    {
+                        slot.insert(sig);
+                        changed = true;
+                    }
                 }
                 for (name, sig) in properties {
-                    info.properties.entry(name).or_insert(sig);
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        info.properties.entry(name)
+                    {
+                        slot.insert(sig);
+                        changed = true;
+                    }
                 }
+                let before = info.abstract_methods.len();
                 info.abstract_methods.extend(abstract_from_traits);
+                if info.abstract_methods.len() != before {
+                    changed = true;
+                }
             }
         }
+        changed
     }
 
     /// `pub(crate)` for the same reason as `flatten_traits` - lets
@@ -1399,6 +1439,36 @@ mod tests {
         );
         let base = r.classes.get("Base").unwrap();
         assert!(!base.final_methods.contains("__clone"));
+    }
+
+    #[test]
+    fn a_trait_using_another_trait_is_flattened_transitively() {
+        let r = build_registry(
+            r#"<?php
+            trait Greets { public function greet(): string { return "hi"; } }
+            trait Combined { use Greets; public function extra(): int { return 1; } }
+            class Foo { use Combined; }
+            "#,
+        );
+        let foo = r.classes.get("Foo").unwrap();
+        assert!(foo.methods.contains_key("greet"));
+        assert!(foo.methods.contains_key("extra"));
+    }
+
+    #[test]
+    fn a_three_level_trait_chain_is_flattened_transitively() {
+        let r = build_registry(
+            r#"<?php
+            trait A2 { public function m1(): int { return 1; } }
+            trait B2 { use A2; public function m2(): int { return 2; } }
+            trait C2 { use B2; public function m3(): int { return 3; } }
+            class Deep { use C2; }
+            "#,
+        );
+        let deep = r.classes.get("Deep").unwrap();
+        assert!(deep.methods.contains_key("m1"));
+        assert!(deep.methods.contains_key("m2"));
+        assert!(deep.methods.contains_key("m3"));
     }
 
     #[test]
