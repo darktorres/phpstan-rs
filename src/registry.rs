@@ -276,6 +276,14 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // `App\Traversable`, which no real `Iterator`/`Generator`/
         // `IteratorAggregate` implementation could ever satisfy.
         Type::Object(name, args) if name == "Traversable" => Type::Object(name, args),
+        // Same reasoning as `object`/`Traversable` above: `resource` is
+        // a sentinel for a real PHP value kind with no actual class
+        // behind it (`types::parse_type_keyword_or_class`'s own
+        // `"resource" => Type::Object("resource", ...)` arm), not a
+        // class reference to resolve - without this, the same pseudo-
+        // type used in two different namespaces was treated as two
+        // unrelated "classes" (`Appesource` vs. plain `resource`).
+        Type::Object(name, args) if name == "resource" => Type::Object(name, args),
         Type::Object(name, args) => Type::Object(
             ctx.resolve(&name),
             args.into_iter()

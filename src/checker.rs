@@ -7032,4 +7032,48 @@ mod tests {
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
+    // Finding 34 from the architecture audit - array-key/scalar/numeric/
+    // resource pseudo-types weren't recognized, silently falling through
+    // to a bogus literal class reference.
+
+    #[test]
+    fn array_key_accepts_both_string_and_int() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array-key $key */
+            function f($key): void {}
+            function test(): void { f("hello"); f(42); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_key_still_rejects_a_genuinely_wrong_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array-key $key */
+            function f($key): void {}
+            function test(): void { f([1, 2]); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn resource_pseudo_type_matches_across_namespaces() {
+        let d = diagnostics_for(
+            r#"<?php
+            namespace App;
+            /** @param resource $handle */
+            function useHandle($handle): void {}
+
+            namespace {
+                /** @param resource $h */
+                function passthrough($h): void { \App\useHandle($h); }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
 }

@@ -344,6 +344,24 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "bool" | "boolean" => Type::Bool,
         "true" => Type::True,
         "false" => Type::False,
+        // Real, documented PHPStan/Psalm pseudo-types - without these
+        // they fell through to the generic-user-class branch below and
+        // got treated as a literal (nonsensical) class reference, the
+        // same failure mode this whole match arm already exists to avoid
+        // for its other keywords. `numeric` is an honest approximation
+        // of real PHPStan's own `int|float|numeric-string` - this
+        // project doesn't model numeric-string as a distinct literal-set
+        // from plain `string` anyway, so `string` is the closest fit.
+        "array-key" => Type::Union(vec![Type::Int, Type::String]),
+        "scalar" => Type::Union(vec![Type::Int, Type::Float, Type::String, Type::Bool]),
+        "numeric" => Type::Union(vec![Type::Int, Type::Float, Type::String]),
+        // A real, if untyped-at-the-language-level, PHP value kind
+        // (file/curl/... handles) that still appears constantly in real
+        // docblocks - represented the same way the native `object` hint
+        // is (a sentinel `Object`, not a real class), and given the same
+        // namespace-qualification exemption below for the same reason:
+        // "resource" isn't a real class reference to resolve per-file.
+        "resource" => Type::Object("resource".to_string(), Vec::new()),
         "null" => Type::Null,
         "void" => Type::Void,
         "mixed" => Type::Mixed,
