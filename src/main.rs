@@ -11,7 +11,6 @@ mod parser;
 mod php_stubs;
 mod project;
 mod registry;
-mod stubs;
 mod token;
 mod types;
 
@@ -603,7 +602,6 @@ fn run_demo(file: Option<&Path>) {
     // approximations - merge_stubs only fills in names not already present.
     registry.merge_stubs(php_stubs::generated_stubs());
     registry.merge_stub_classes(php_stubs::generated_stub_classes());
-    registry.merge_stubs(stubs::builtin_stubs());
 
     println!("\n-- resolved signatures (from source) --");
     let mut fn_names: Vec<&String> = registry.functions.keys().collect();

@@ -8,7 +8,6 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
-use crate::stubs;
 
 /// One file's parsed state, kept around so `Project::update_file` can undo
 /// exactly what that file previously contributed - both to the shared
@@ -52,7 +51,6 @@ impl Project {
         let mut registry = Registry::default();
         registry.merge_stubs(php_stubs::generated_stubs());
         registry.merge_stub_classes(php_stubs::generated_stub_classes());
-        registry.merge_stubs(stubs::builtin_stubs());
         Project {
             files: HashMap::new(),
             dependents: HashMap::new(),

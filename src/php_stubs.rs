@@ -1,11 +1,13 @@
 //! Generates built-in function signatures by parsing real stub sources
 //! with this project's own lexer/parser/registry, rather than
-//! hand-transcribing approximations one function at a time (see
-//! `stubs.rs` for the curated overlay, which still wins on conflicts).
-//! This is the "generated skeleton" half of the two-tier design: a build
-//! step pulls real signatures from a vendored corpus, and the hand-curated
-//! overlay only needs to cover corrections/precision gains, not the
-//! entire stdlib surface.
+//! hand-transcribing approximations one function at a time. A hand-
+//! curated overlay (`stubs.rs`) existed alongside this before Phase 8
+//! ingested the real stub corpus below, but every name it covered turned
+//! out to already be present here too (`Registry::merge_stubs`'s
+//! first-registered-wins semantics meant the overlay had already become
+//! dead weight, not an active correction layer) - removed rather than
+//! kept as a doc-comment inaccuracy waiting to mislead the next person
+//! who reads it (Finding 5 from the architecture audit).
 //!
 //! The vendored corpus, under `vendor/phpstorm-stubs/`, is
 //! `jetbrains/phpstorm-stubs` at commit

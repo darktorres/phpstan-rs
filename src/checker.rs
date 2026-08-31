@@ -4246,7 +4246,6 @@ mod tests {
         let mut registry = Registry::build(&program);
         registry.merge_stubs(crate::php_stubs::generated_stubs());
         registry.merge_stub_classes(crate::php_stubs::generated_stub_classes());
-        registry.merge_stubs(crate::stubs::builtin_stubs());
         configure(&mut registry);
         let mut checker = Checker::new(&registry);
         checker.check_program(&program);
