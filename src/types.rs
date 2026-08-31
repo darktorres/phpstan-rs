@@ -407,7 +407,18 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
             _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
         },
-        "callable" | "closure" => Type::Callable,
+        // Deliberately not conflated - a native `Closure $fn` and a
+        // native `callable $fn` are different, if this project doesn't
+        // reflect that: `Closure` is a concrete class only a real
+        // closure object satisfies, strictly narrower than the four real
+        // shapes `callable` itself accepts (see `is_assignable`'s own
+        // `Type::Callable` arms). Representing `Closure` as a real
+        // `Object` (it's a real, already-stubbed class - no new `Type`
+        // variant needed) means `is_assignable`'s ordinary class-hierarchy
+        // check already does the right thing for it, unaffected by
+        // `callable`'s own broader acceptance rules below.
+        "closure" => Type::Object("Closure".to_string(), Vec::new()),
+        "callable" => Type::Callable,
         "self" => Type::SelfRef,
         "parent" => Type::ParentRef,
         // `@return $this` is a real, PHPStan-documented PHPDoc convention -

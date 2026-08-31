@@ -282,7 +282,7 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // `"resource" => Type::Object("resource", ...)` arm), not a
         // class reference to resolve - without this, the same pseudo-
         // type used in two different namespaces was treated as two
-        // unrelated "classes" (`Appesource` vs. plain `resource`).
+        // unrelated "classes" (`App\resource` vs. plain `resource`).
         Type::Object(name, args) if name == "resource" => Type::Object(name, args),
         Type::Object(name, args) => Type::Object(
             ctx.resolve(&name),
@@ -1057,6 +1057,24 @@ impl Registry {
             // incorrectly flagged before this fix, unrelated to generics
             // at all.
             (Type::Object(_, _), Type::Object(b, _)) if b == "object" => true,
+            // Real PHP recognizes (at least) four distinct shapes as a
+            // valid `callable`: an actual `Closure` (already handled by
+            // the ordinary class-hierarchy arm just below, since
+            // `Closure` is now its own real `Object` type rather than
+            // being conflated with `Type::Callable` itself), an object
+            // whose class declares `__invoke()`, a plain string naming a
+            // real function, and a two-element array naming an instance-
+            // or static-method callable. The latter two can't be
+            // statically verified further without evaluating the string/
+            // array's own literal content - accepting them outright
+            // matches this project's existing "don't guess, don't
+            // false-positive" leniency elsewhere (e.g. the `Array(Mixed)`
+            // leniency just below).
+            (Type::Object(class, _), Type::Callable) => {
+                self.lookup_method(class, "__invoke").is_some()
+            }
+            (Type::String | Type::StringLiteral(_), Type::Callable) => true,
+            (Type::Array(_), Type::Callable) => true,
             (Type::Object(a, _), Type::Object(b, _)) => a == b || self.is_subclass_of(a, b),
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),

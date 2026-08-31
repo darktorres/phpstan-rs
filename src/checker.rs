@@ -2349,8 +2349,17 @@ impl<'a> Checker<'a> {
             },
             ExprKind::Variable(name) => locals.get(name).cloned().unwrap_or(Type::Mixed),
             ExprKind::Grouping(inner) | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
-            ExprKind::FirstClassCallable(_) => Type::Callable,
-            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => Type::Callable,
+            // A closure/arrow-fn literal, and first-class-callable syntax
+            // (`strlen(...)`, `$obj->method(...)`), all produce a real
+            // `Closure` instance at runtime in PHP - infer the same
+            // `Object("Closure", ...)` the native `Closure` type hint
+            // itself now resolves to (rather than the broader
+            // `Type::Callable`, which `callable`-hinted parameters
+            // accept via `is_assignable`'s own separate leniency), so a
+            // strictly `Closure`-typed parameter correctly accepts them.
+            ExprKind::FirstClassCallable(_)
+            | ExprKind::Closure { .. }
+            | ExprKind::ArrowFn { .. } => Type::Object("Closure".to_string(), Vec::new()),
             ExprKind::Match {
                 subject,
                 arms,
@@ -7071,6 +7080,92 @@ mod tests {
             namespace {
                 /** @param resource $h */
                 function passthrough($h): void { \App\useHandle($h); }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 35 from the architecture audit - none of PHP's real
+    // "callable" shapes other than a literal Closure satisfied the
+    // `callable` type hint.
+
+    #[test]
+    fn callable_accepts_an_invokable_object() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Multiplier { public function __invoke(int $x): int { return $x * 2; } }
+            function apply(callable $fn, int $x): int { return $fn($x); }
+            function test(): int { return apply(new Multiplier(), 5); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn callable_accepts_a_string_function_name() {
+        let d = diagnostics_for(
+            r#"<?php
+            function apply(callable $fn, string $s): int { return $fn($s); }
+            function test(): int { return apply('strlen', "hello"); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn callable_accepts_a_two_element_method_array() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Handler { public function handle(int $x): int { return $x; } }
+            function apply(callable $fn, int $x): int { return $fn($x); }
+            function test(Handler $h): int { return apply([$h, 'handle'], 5); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn callable_still_rejects_a_non_invokable_object() {
+        let d = diagnostics_for(
+            r#"<?php
+            class NotInvokable {}
+            function apply(callable $fn): void {}
+            function test(NotInvokable $n): void { apply($n); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn closure_type_hint_is_distinct_from_callable_and_still_rejects_a_string() {
+        // Regression-guard for the fix's own caveat: applying callable's
+        // new leniency to an undifferentiated Type::Callable would make
+        // a strictly Closure-typed parameter wrongly start accepting a
+        // string/array/invokable-object too.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsClosure(Closure $fn): void {}
+            function test(): void { needsClosure('strlen'); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn a_real_closure_arrow_fn_and_first_class_callable_all_satisfy_the_closure_type_hint() {
+        // Regression test for a real bug caught while implementing this
+        // fix: splitting `closure`/`callable` into distinct types left
+        // infer_expr still inferring a closure/arrow-fn literal (and
+        // first-class-callable syntax) as the old, undifferentiated
+        // Type::Callable, so a genuine closure literal stopped
+        // satisfying the now-stricter native `Closure` type hint.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsClosure(Closure $fn): void {}
+            function test(): void {
+                needsClosure(fn($x) => $x + 1);
+                needsClosure(function ($x) { return $x + 1; });
+                needsClosure(strlen(...));
             }
         "#,
         );
