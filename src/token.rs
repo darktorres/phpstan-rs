@@ -298,6 +298,7 @@ pub enum Token {
     PlusEquals,
     MinusEquals,
     StarEquals,
+    StarStarEquals,
     SlashEquals,
     PercentEquals,
     AmpEquals,

@@ -2051,6 +2051,7 @@ impl Parser {
             Token::PlusEquals => Some(BinOp::Add),
             Token::MinusEquals => Some(BinOp::Sub),
             Token::StarEquals => Some(BinOp::Mul),
+            Token::StarStarEquals => Some(BinOp::Pow),
             Token::SlashEquals => Some(BinOp::Div),
             Token::PercentEquals => Some(BinOp::Mod),
             Token::DotEquals => Some(BinOp::Concat),
@@ -3734,6 +3735,18 @@ mod tests {
             panic!("expected New, got {:?}", e.kind);
         };
         assert!(args[0].spread);
+    }
+
+    #[test]
+    fn exponent_assign_parses_as_pow_not_mul() {
+        let program = parse("<?php $x **= 3;");
+        let StmtKind::Expression(e) = &program[0].kind else {
+            panic!("expected Expression");
+        };
+        let ExprKind::CompoundAssign(op, ..) = &e.kind else {
+            panic!("expected CompoundAssign, got {:?}", e.kind);
+        };
+        assert_eq!(*op, BinOp::Pow);
     }
 
     #[test]

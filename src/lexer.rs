@@ -786,9 +786,7 @@ impl<'a> Lexer<'a> {
             op!(3, Token::QuestionQuestionEquals);
         }
         if self.starts_with("**=") {
-            // rare, but keep exponent-assign grouped with the operator table
-            self.pos += 3;
-            return Token::StarEquals;
+            op!(3, Token::StarStarEquals);
         }
         if self.starts_with("...") {
             op!(3, Token::Ellipsis);
