@@ -2393,7 +2393,7 @@ impl<'a> Checker<'a> {
                         level: 0,
                     });
                 }
-                self.infer_expr(e, locals)
+                locals.get(name).cloned().unwrap_or(Type::Mixed)
             }
             ExprKind::Unary(
                 op @ (UnaryOp::PreInc | UnaryOp::PostInc | UnaryOp::PreDec | UnaryOp::PostDec),
@@ -2417,7 +2417,7 @@ impl<'a> Checker<'a> {
                     };
                     locals.insert(name.clone(), updated);
                 }
-                self.infer_expr(e, locals)
+                self.infer_expr(inner, locals)
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 self.check_expr(inner, locals, label);
@@ -2428,15 +2428,13 @@ impl<'a> Checker<'a> {
             // same implicit-numeric-coercion rule arithmetic operators
             // apply generally.
             ExprKind::Unary(UnaryOp::Neg | UnaryOp::Plus, inner) => {
-                self.check_expr(inner, locals, label);
-                match self.infer_expr(inner, locals) {
+                match self.check_expr(inner, locals, label) {
                     Type::String | Type::StringLiteral(_) => Type::Int,
                     other => other,
                 }
             }
             ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) => {
-                self.check_expr(inner, locals, label);
-                self.infer_expr(inner, locals)
+                self.check_expr(inner, locals, label)
             }
             ExprKind::Cast(ty, inner) => {
                 self.check_expr(inner, locals, label);
@@ -2468,11 +2466,11 @@ impl<'a> Checker<'a> {
             // this checker tracks - the clone target's own type is the
             // honest answer.
             ExprKind::Clone(inner, overrides) => {
-                self.check_expr(inner, locals, label);
+                let inner_ty = self.check_expr(inner, locals, label);
                 if let Some(o) = overrides {
                     self.check_expr(o, locals, label);
                 }
-                self.infer_expr(inner, locals)
+                inner_ty
             }
             ExprKind::Yield(key, value) => {
                 if let Some(k) = key {
