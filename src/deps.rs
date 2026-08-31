@@ -322,7 +322,7 @@ mod tests {
 
     fn refs(src: &str) -> HashSet<String> {
         let tokens = Lexer::new(src).tokenize_with_spans();
-        let ast = Parser::new(tokens).parse_program();
+        let ast = Parser::new(tokens).parse_program().unwrap();
         referenced_names(&ast)
     }
 

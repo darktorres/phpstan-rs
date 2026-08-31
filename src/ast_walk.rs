@@ -192,7 +192,7 @@ mod tests {
 
     fn parse_expr(src: &str) -> Expr {
         let tokens = Lexer::new(&format!("<?php {src};")).tokenize_with_spans();
-        let program = Parser::new(tokens).parse_program();
+        let program = Parser::new(tokens).parse_program().unwrap();
         match program.into_iter().next().unwrap().kind {
             StmtKind::Expression(e) => e,
             other => panic!("expected an Expression statement, got {other:?}"),
@@ -203,6 +203,7 @@ mod tests {
         let tokens = Lexer::new(&format!("<?php {src}")).tokenize_with_spans();
         Parser::new(tokens)
             .parse_program()
+            .unwrap()
             .into_iter()
             .next()
             .unwrap()

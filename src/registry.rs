@@ -1473,7 +1473,7 @@ mod tests {
 
     fn build_registry(src: &str) -> Registry {
         let tokens = Lexer::new(src).tokenize_with_spans();
-        let program = Parser::new(tokens).parse_program();
+        let program = Parser::new(tokens).parse_program().unwrap();
         Registry::build(&program)
     }
 

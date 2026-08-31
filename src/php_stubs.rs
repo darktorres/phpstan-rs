@@ -42,7 +42,9 @@ include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 /// needed to read them.
 pub fn generate_from_source(source: &str) -> Vec<(String, FunctionSig)> {
     let tokens = Lexer::new(source).tokenize_with_spans();
-    let program = Parser::new(tokens).parse_program();
+    let program = Parser::new(tokens)
+        .parse_program()
+        .expect("vendored phpstorm-stubs source failed to parse");
     let registry = Registry::build(&program);
     registry.functions.into_iter().collect()
 }
@@ -74,7 +76,9 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
 /// `ArrayObject` would look undefined.
 pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
     let tokens = Lexer::new(source).tokenize_with_spans();
-    let program = Parser::new(tokens).parse_program();
+    let program = Parser::new(tokens)
+        .parse_program()
+        .expect("vendored phpstorm-stubs source failed to parse");
     let registry = Registry::build(&program);
     registry.classes.into_iter().collect()
 }

@@ -209,13 +209,9 @@ impl Server {
             // main.rs's own try_load_file for the equivalent check-
             // project path.
             let path_for_log = path.clone();
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.project.load_file(path, &source);
-            }))
-            .is_err()
-            {
+            if let Err(e) = self.project.load_file(path, &source) {
                 eprintln!(
-                    "phpstan-rs lsp: skipping {} - failed to parse",
+                    "phpstan-rs lsp: skipping {} - failed to parse: {e}",
                     path_for_log.display()
                 );
             }
@@ -228,19 +224,18 @@ impl Server {
             return Vec::new();
         };
         self.open_uris.insert(path.clone(), uri.to_string());
-        // Same panic isolation as load_workspace, and more exposed in
-        // practice here: momentarily-invalid syntax is the normal state
-        // while a file is being typed, not an edge case. A crash here
-        // used to take down the whole LSP server process for the rest
-        // of the editing session, not just fail to analyze this one
-        // file.
-        let results = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.project.update_file(&path, text)
-        })) {
+        // Same graceful-degradation as load_workspace, and more exposed
+        // in practice here: momentarily-invalid syntax is the normal
+        // state while a file is being typed, not an edge case. A parse
+        // failure here used to unwind and take down the whole LSP server
+        // process for the rest of the editing session, not just fail to
+        // analyze this one file - update_file's own Result now makes
+        // that a plain, recoverable Err instead.
+        let results = match self.project.update_file(&path, text) {
             Ok(results) => results,
-            Err(_) => {
+            Err(e) => {
                 eprintln!(
-                    "phpstan-rs lsp: skipping {} - failed to parse",
+                    "phpstan-rs lsp: skipping {} - failed to parse: {e}",
                     path.display()
                 );
                 HashMap::new()

@@ -110,17 +110,25 @@ fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
             }
         };
         let source = String::from_utf8_lossy(&bytes).into_owned();
+        // The parser itself no longer panics on ordinary malformed syntax
+        // (it returns a ParseError) - the catch_unwind here now only
+        // guards against the lexer's own, separate, still-panic-based
+        // error handling (out of scope for this parser-only conversion).
         let result = std::panic::catch_unwind(|| {
             let tokens = Lexer::new(&source).tokenize_with_spans();
-            Parser::new(tokens).parse_program();
+            Parser::new(tokens).parse_program()
         });
-        if let Err(payload) = result {
-            let msg = payload
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                .unwrap_or_else(|| "unknown panic".to_string());
-            failures.push((path.clone(), msg));
+        match result {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => failures.push((path.clone(), e.to_string())),
+            Err(payload) => {
+                let msg = payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "unknown panic".to_string());
+                failures.push((path.clone(), msg));
+            }
         }
     }
     failures
@@ -166,7 +174,7 @@ fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
     let full_load_start = std::time::Instant::now();
     let mut project = project::Project::new();
     for (path, source) in &sources {
-        project.load_file(path.clone(), source);
+        project.load_file(path.clone(), source).unwrap();
     }
     project.finish_loading();
     let full_load = full_load_start.elapsed();
@@ -178,7 +186,7 @@ fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
         .unwrap();
 
     let incremental_start = std::time::Instant::now();
-    let results = project.update_file(&target, &target_source);
+    let results = project.update_file(&target, &target_source).unwrap();
     let incremental = incremental_start.elapsed();
 
     println!(
@@ -241,23 +249,19 @@ fn apply_level_filter(
     results
 }
 
-/// Loads one file into `project`, tolerating a lex/parse panic (this
-/// parser's only error-reporting mechanism today - see
-/// `check_chunk`'s own doc comment) rather than letting it crash the
-/// whole run. Returns `false` if the file couldn't be read or failed to
-/// load, in which case it's simply absent from `project` - same
-/// end state as never having attempted it, since the only place a panic
-/// can originate in `Project::load_file`'s pipeline is `parse()`,
-/// called before any registry/`self.files` mutation.
+/// Loads one file into `project`, tolerating a parse failure rather than
+/// letting it crash the whole run. Returns `false` if the file couldn't
+/// be read or failed to load, in which case it's simply absent from
+/// `project` - same end state as never having attempted it, since the
+/// only place a `ParseError` can originate in `Project::load_file`'s
+/// pipeline is `parse()`, called before any registry/`self.files`
+/// mutation.
 fn try_load_file(project: &mut project::Project, path: &Path) -> bool {
     let Ok(bytes) = fs::read(path) else {
         return false;
     };
     let source = String::from_utf8_lossy(&bytes).into_owned();
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        project.load_file(path.to_path_buf(), &source);
-    }))
-    .is_ok()
+    project.load_file(path.to_path_buf(), &source).is_ok()
 }
 
 fn run_check_project(
@@ -564,7 +568,7 @@ fn run_demo(file: Option<&Path>) {
     println!("-- {} tokens --", tokens.len());
 
     let mut parser = Parser::new(tokens);
-    let program = parser.parse_program();
+    let program = parser.parse_program().unwrap();
 
     println!("-- {} top-level statements --", program.len());
     for stmt in &program {

@@ -144,19 +144,15 @@ fn find_class_decl(stmts: &[Stmt]) -> Option<&ClassDecl> {
 }
 
 /// Same pattern as `main.rs::check_chunk`: PHP source isn't guaranteed
-/// UTF-8, so a lossy read rather than a strict one; the parse itself runs
-/// under `catch_unwind` since panics are this parser's only
-/// error-reporting mechanism today, and a malformed/future-syntax
-/// generated file must degrade to "no context from this file", never
-/// crash `check-project`.
+/// UTF-8, so a lossy read rather than a strict one; a malformed/future-
+/// syntax generated file must degrade to "no context from this file",
+/// never crash `check-project` - `parse_program`'s own `Result` already
+/// gives that for free, no `catch_unwind` needed.
 fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
     let bytes = std::fs::read(path).ok()?;
     let source = String::from_utf8_lossy(&bytes).into_owned();
-    std::panic::catch_unwind(|| {
-        let tokens = Lexer::new(&source).tokenize_with_spans();
-        Parser::new(tokens).parse_program()
-    })
-    .ok()
+    let tokens = Lexer::new(&source).tokenize_with_spans();
+    Parser::new(tokens).parse_program().ok()
 }
 
 fn collect_files(
@@ -426,7 +422,7 @@ class ComposerStaticInitTest
         // ordinary bareword constant reference, same as any other bare
         // constant - the assumption `eval_concat` depends on entirely.
         let tokens = Lexer::new("<?php return __DIR__;").tokenize_with_spans();
-        let program = Parser::new(tokens).parse_program();
+        let program = Parser::new(tokens).parse_program().unwrap();
         assert_eq!(program.len(), 1);
         match &program[0].kind {
             StmtKind::Return(Some(e)) => {
