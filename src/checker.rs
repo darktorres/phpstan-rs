@@ -1980,23 +1980,39 @@ impl<'a> Checker<'a> {
                     // - no "can't resolve a namespaced name" case left, the
                     // way there used to be before Phase 9.5's namespace
                     // support.
-                    if !self.registry.classes.contains_key(class) {
+                    if let Some(info) = self.registry.classes.get(class) {
+                        if info.kind == ClassKind::Interface {
+                            self.diagnostics.push(Diagnostic {
+                                location: label.to_string(),
+                                message: format!("cannot instantiate interface {class}"),
+                                span: e.span,
+                                level: 0,
+                            });
+                        } else if info.is_abstract {
+                            self.diagnostics.push(Diagnostic {
+                                location: label.to_string(),
+                                message: format!("cannot instantiate abstract class {class}"),
+                                span: e.span,
+                                level: 0,
+                            });
+                        } else if let Some(sig) = ctor_sig {
+                            self.check_args(
+                                &format!("{class}::__construct"),
+                                sig,
+                                args,
+                                locals,
+                                label,
+                                Some(class),
+                                e.span,
+                            );
+                        }
+                    } else {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
                             message: format!("instantiated class {class} not found"),
                             span: e.span,
                             level: 0,
                         });
-                    } else if let Some(sig) = ctor_sig {
-                        self.check_args(
-                            &format!("{class}::__construct"),
-                            sig,
-                            args,
-                            locals,
-                            label,
-                            Some(class),
-                            e.span,
-                        );
                     }
                 }
             }
@@ -5386,6 +5402,49 @@ mod tests {
             r#"<?php
             class Foo {}
             function f() { return new Foo(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn instantiating_an_interface_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Doer { public function doIt(): void; }
+            function test(): Doer { return new Doer(); }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("cannot instantiate interface Doer")),
+            "expected a cannot-instantiate-interface diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn instantiating_an_abstract_class_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            abstract class AbstractThing { abstract public function doIt(): void; }
+            function test(): AbstractThing { return new AbstractThing(); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("cannot instantiate abstract class AbstractThing")),
+            "expected a cannot-instantiate-abstract-class diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn instantiating_a_concrete_subclass_of_an_abstract_class_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            abstract class AbstractThing { abstract public function doIt(): void; }
+            class Concrete extends AbstractThing { public function doIt(): void {} }
+            function test(): Concrete { return new Concrete(); }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
