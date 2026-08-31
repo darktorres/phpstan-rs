@@ -2746,7 +2746,13 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                self.infer_expr(e, locals)
+                match (&resolved_class, sig) {
+                    (Some(class), Some(s)) => {
+                        let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
+                        self.resolve_pseudo(&resolved_ty, class)
+                    }
+                    _ => Type::Mixed,
+                }
             }
             ExprKind::StaticAccess(class_name, member) => {
                 // `Foo::class` (member == "class") always resolves to a
@@ -2779,10 +2785,8 @@ impl<'a> Checker<'a> {
                     // static property") - from the caller's own
                     // perspective there's no real static property by
                     // this name either way, so both share one message.
-                    let is_valid_static = self
-                        .registry
-                        .lookup_property(&class, prop_name)
-                        .is_some_and(|sig| sig.is_static);
+                    let prop = self.registry.lookup_property(&class, prop_name);
+                    let is_valid_static = prop.is_some_and(|sig| sig.is_static);
                     if !is_valid_static {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),
@@ -2793,15 +2797,22 @@ impl<'a> Checker<'a> {
                             level: 0,
                         });
                     }
-                } else if self.registry.lookup_const(&class, member).is_none() {
-                    self.diagnostics.push(Diagnostic {
-                        location: label.to_string(),
-                        message: format!("access to undefined constant {class}::{member}"),
-                        span: e.span,
-                        level: 0,
-                    });
+                    prop.map(|p| self.resolve_pseudo(&p.ty, &class))
+                        .unwrap_or(Type::Mixed)
+                } else {
+                    let const_ty = self.registry.lookup_const(&class, member);
+                    if const_ty.is_none() {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!("access to undefined constant {class}::{member}"),
+                            span: e.span,
+                            level: 0,
+                        });
+                    }
+                    const_ty
+                        .map(|ty| self.resolve_pseudo(ty, &class))
+                        .unwrap_or(Type::Mixed)
                 }
-                self.infer_expr(e, locals)
             }
             ExprKind::DynamicVariable(name_expr) => {
                 self.check_expr(name_expr, locals, label);
