@@ -1,6 +1,7 @@
 mod ast;
 mod baseline;
 mod checker;
+mod composer;
 mod config;
 mod deps;
 mod docblock;

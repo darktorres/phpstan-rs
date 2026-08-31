@@ -12,6 +12,8 @@
 //! level = 5
 //! baseline = "phpstan-baseline.json"
 //! strict_mixed_arrays = false
+//! scan_paths = ["vendor/some-manual-extra"]
+//! no_composer = false
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -24,6 +26,13 @@ pub struct Config {
     pub level: Option<u8>,
     pub baseline: Option<PathBuf>,
     pub strict_mixed_arrays: Option<bool>,
+    /// Extra directories loaded for type-resolution context only - never
+    /// analyzed or reported on. See `composer::discover_vendor_context`
+    /// for the automatic `vendor/` counterpart to this.
+    pub scan_paths: Option<Vec<PathBuf>>,
+    /// Disables the automatic Composer-autoloader-based `vendor/`
+    /// context load (see `composer::discover_vendor_context`).
+    pub no_composer: Option<bool>,
 }
 
 impl Config {
@@ -56,6 +65,8 @@ mod tests {
             level = 5
             baseline = "phpstan-baseline.json"
             strict_mixed_arrays = true
+            scan_paths = ["vendor/some-manual-extra"]
+            no_composer = true
             "#,
         )
         .unwrap();
@@ -71,6 +82,11 @@ mod tests {
             Some(PathBuf::from("phpstan-baseline.json"))
         );
         assert_eq!(config.strict_mixed_arrays, Some(true));
+        assert_eq!(
+            config.scan_paths,
+            Some(vec![PathBuf::from("vendor/some-manual-extra")])
+        );
+        assert_eq!(config.no_composer, Some(true));
 
         let _ = std::fs::remove_file(&path);
     }
