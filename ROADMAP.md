@@ -1008,7 +1008,33 @@ tracked here rather than fixed on the spot:**
   `check-project` now auto-loads a project's installed Composer
   autoloader (`vendor/composer/autoload_static.php` or the separate
   `autoload_*.php` files) for symbol resolution without reporting
-  diagnostics on vendor code itself - see `src/composer.rs`.
+  diagnostics on vendor code itself - see `src/composer.rs`. Verified
+  against this same real Piwigo `src/` corpus: `--no-composer` (old
+  behavior) reports 2269 diagnostics, 212 of them "instantiated
+  class/undefined method ... not found" noise from unresolved vendor
+  references; with auto-detection on, that drops to 1181 diagnostics,
+  only 5 still "not found". Two known, accepted edge cases account for
+  the remaining 5, neither a gap in the feature:
+  - **3 are genuinely out of scope, not a miss.** `Piwigo\Tools\PhpStan\
+    Latte\*` lives under `tools/phpstan/`, which this project's own
+    `composer.json` autoloads via PSR-4 as *first-party* code (not
+    vendor) - exactly the shape `discover_vendor_context`'s
+    vendor-only filter is designed to exclude from silent
+    context-loading (see the "Also confirmed..." note in this feature's
+    own commit history for why that filter exists at all). Resolving
+    these needs `tools/phpstan` passed as an analyze dir or
+    `--scan-dir`, same as any other first-party directory outside
+    `src/`.
+  - **2 are `Composer\Autoload\ClassLoader`**, Composer's own bootstrap
+    class - `require`'d directly by `autoload_real.php`, never
+    registered through any of the four autoload mechanisms
+    (`classmap`/`psr4`/`namespaces`/`files`) `discover_vendor_context`
+    reads, so it's structurally invisible to this feature by
+    construction, not a bug to fix. Real application code essentially
+    never references it directly (this Piwigo corpus's two call sites
+    are its own Composer-integration plugin/theme autoload-registration
+    code, not typical application logic) - not worth special-casing one
+    hardcoded class for.
 
 Grouped together because all of them are the same shape of problem:
 the checker's flow analysis and inference are coarser than they could
