@@ -2719,6 +2719,93 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // Finding 28: `foo(...)`/`$obj->method(...)`/`Class::method(...)`
+            // (PHP 8.1 first-class-callable syntax) always wraps a
+            // Call/MethodCall/StaticCall/DynamicMethodCall with an empty
+            // argument list (this project's own parser convention) - not
+            // dispatching to that inner node's own ordinary arm directly:
+            // its own `check_args` would misread "no arguments were
+            // written" as "zero arguments were passed to this call,"
+            // producing a false "too few arguments" diagnostic (Finding
+            // 40) for any real function/method with required parameters.
+            // So this checks only existence - the one thing that doesn't
+            // depend on argument count at all - mirroring each inner
+            // arm's own existence-check logic without its argument
+            // handling.
+            ExprKind::FirstClassCallable(inner) => match &inner.kind {
+                ExprKind::Call(callee, _) => {
+                    if let ExprKind::Name(name) = &callee.kind {
+                        if !is_language_construct(name) {
+                            let (primary, fallback) =
+                                self.name_ctx.resolve_function_candidates(name);
+                            let found = self.registry.lookup_function(&primary).is_some()
+                                || fallback
+                                    .as_deref()
+                                    .is_some_and(|g| self.registry.lookup_function(g).is_some());
+                            if !found {
+                                self.diagnostics.push(Diagnostic {
+                                    location: label.to_string(),
+                                    message: format!("call to undefined function {primary}()"),
+                                    span: e.span,
+                                    level: 0,
+                                });
+                            }
+                        }
+                    } else {
+                        self.check_expr(callee, locals, label);
+                    }
+                }
+                ExprKind::MethodCall(recv, method, _, _) => {
+                    self.check_expr(recv, locals, label);
+                    let recv_ty = self.infer_expr(recv, locals);
+                    let recv_class = match &recv_ty {
+                        Type::Object(class, _) => Some(class.clone()),
+                        Type::Union(members) | Type::Intersection(members) => {
+                            members.iter().find_map(|m| match m {
+                                Type::Object(class, _) => Some(class.clone()),
+                                _ => None,
+                            })
+                        }
+                        _ => None,
+                    };
+                    if let Some(class) = &recv_class
+                        && self.registry.classes.contains_key(class)
+                        && self.member_confirmed_missing(&recv_ty, |c| {
+                            self.registry.lookup_method(c, method).is_some()
+                                || self.registry.lookup_method(c, "__call").is_some()
+                        })
+                    {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!("call to undefined method {recv_ty}::{method}()"),
+                            span: e.span,
+                            level: 0,
+                        });
+                    }
+                }
+                ExprKind::StaticCall(class_name, method, _) => {
+                    if let Some(class) = self.resolve_static_class_name(class_name)
+                        && self.registry.classes.contains_key(&class)
+                        && self.registry.lookup_method(&class, method).is_none()
+                        && self
+                            .registry
+                            .lookup_method(&class, "__callStatic")
+                            .is_none()
+                    {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!("call to undefined static method {class}::{method}()"),
+                            span: e.span,
+                            level: 0,
+                        });
+                    }
+                }
+                ExprKind::DynamicMethodCall(recv, name_expr, _) => {
+                    self.check_expr(recv, locals, label);
+                    self.check_expr(name_expr, locals, label);
+                }
+                _ => self.check_expr(inner, locals, label),
+            },
             _ => {}
         }
     }
@@ -6571,6 +6658,102 @@ mod tests {
             function test(Secret4 $s): int {
                 $bound = (function () { return $this->value; })->bindTo($s, Secret4::class);
                 return $bound();
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn first_class_callable_of_an_undefined_function_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void {
+                $f = totallyUndefinedFunction(...);
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("call to undefined function totallyUndefinedFunction")),
+            "expected an undefined-function diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn first_class_callable_of_a_real_function_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function real(int $a, int $b): int { return $a + $b; }
+            function test(): void {
+                $f = real(...);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn first_class_callable_of_an_undefined_method_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo { public function bar(): void {} }
+            function test(Foo $foo): void {
+                $g = $foo->totallyUndefinedMethod(...);
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("call to undefined method Foo::totallyUndefinedMethod")),
+            "expected an undefined-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn first_class_callable_of_a_real_method_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo { public function bar(): void {} }
+            function test(Foo $foo): void {
+                $g = $foo->bar(...);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn first_class_callable_of_an_undefined_static_method_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {}
+            function test(): void {
+                $h = Foo::totallyUndefinedStatic(...);
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("call to undefined static method Foo::totallyUndefinedStatic")),
+            "expected an undefined-static-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn first_class_callable_does_not_flag_too_few_arguments() {
+        // A real, previously-plausible regression: naively dispatching
+        // the wrapped call through its own ordinary arm (which also runs
+        // check_args) would misread "no arguments were written" as
+        // "zero arguments were passed."
+        let d = diagnostics_for(
+            r#"<?php
+            function needsTwo(int $a, int $b): int { return $a + $b; }
+            function test(): void {
+                $f = needsTwo(...);
             }
         "#,
         );
