@@ -896,18 +896,101 @@ impl<'a> Lexer<'a> {
 
             if b == b'\\' && i + 1 < bytes.len() {
                 match bytes[i + 1] {
-                    b'n' => literal.push('\n'),
-                    b't' => literal.push('\t'),
-                    b'r' => literal.push('\r'),
-                    b'"' => literal.push('"'),
-                    b'\\' => literal.push('\\'),
-                    b'$' => literal.push('$'),
+                    b'n' => {
+                        literal.push('\n');
+                        i += 2;
+                    }
+                    b't' => {
+                        literal.push('\t');
+                        i += 2;
+                    }
+                    b'r' => {
+                        literal.push('\r');
+                        i += 2;
+                    }
+                    b'v' => {
+                        literal.push('\u{0B}');
+                        i += 2;
+                    }
+                    b'e' => {
+                        literal.push('\u{1B}');
+                        i += 2;
+                    }
+                    b'f' => {
+                        literal.push('\u{0C}');
+                        i += 2;
+                    }
+                    b'"' => {
+                        literal.push('"');
+                        i += 2;
+                    }
+                    b'\\' => {
+                        literal.push('\\');
+                        i += 2;
+                    }
+                    b'$' => {
+                        literal.push('$');
+                        i += 2;
+                    }
+                    // Octal (`\0`-`\777`, 1-3 digits in `0`-`7`) and hex
+                    // (`\x` + 1-2 hex digits) both decode to one raw
+                    // byte - pushed via `as char`, the same byte-wise
+                    // convention this scanner's own fallback arm below
+                    // already uses for an unrecognized escape's trailing
+                    // character. Real PHP silently truncates an
+                    // out-of-range octal value to fit a byte.
+                    b'0'..=b'7' => {
+                        let mut j = i + 1;
+                        let mut value: u32 = 0;
+                        while j < bytes.len() && j < i + 4 && (b'0'..=b'7').contains(&bytes[j]) {
+                            value = value * 8 + (bytes[j] - b'0') as u32;
+                            j += 1;
+                        }
+                        literal.push((value % 256) as u8 as char);
+                        i = j;
+                    }
+                    b'x' if bytes.get(i + 2).is_some_and(|c| c.is_ascii_hexdigit()) => {
+                        let mut j = i + 2;
+                        let mut value: u32 = 0;
+                        while j < bytes.len() && j < i + 4 && bytes[j].is_ascii_hexdigit() {
+                            value = value * 16 + (bytes[j] as char).to_digit(16).unwrap();
+                            j += 1;
+                        }
+                        literal.push(value as u8 as char);
+                        i = j;
+                    }
+                    // `\u{...}` decodes a full Unicode codepoint (not
+                    // limited to one byte, unlike octal/hex above) -
+                    // real PHP's one double-quoted escape that can
+                    // produce a genuinely multi-byte UTF-8 sequence. An
+                    // invalid codepoint (surrogate half, out of range)
+                    // leaves the sequence undecoded rather than
+                    // panicking.
+                    b'u' if bytes.get(i + 2) == Some(&b'{') => {
+                        let mut j = i + 3;
+                        while j < bytes.len() && bytes[j] != b'}' {
+                            j += 1;
+                        }
+                        let hex = std::str::from_utf8(&bytes[i + 3..j]).unwrap_or("");
+                        let decoded = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32);
+                        match decoded {
+                            Some(c) if j < bytes.len() => {
+                                literal.push(c);
+                                i = j + 1;
+                            }
+                            _ => {
+                                literal.push('\\');
+                                literal.push('u');
+                                i += 2;
+                            }
+                        }
+                    }
                     other => {
                         literal.push('\\');
                         literal.push(other as char);
+                        i += 2;
                     }
                 }
-                i += 2;
                 continue;
             }
 
@@ -1237,6 +1320,69 @@ mod tests {
         assert!(
             elapsed.as_secs() < 2,
             "tokenizing one long line took {elapsed:?} - looks quadratic again"
+        );
+    }
+    // Finding 20 from the architecture audit - double-quoted strings only
+    // decoded 6 of PHP's real escape sequences; anything else kept the
+    // literal backslash and following character verbatim.
+
+    #[test]
+    fn hex_escape_decodes_to_the_real_byte() {
+        let src = r#"<?php "\x41BC";"#;
+        let toks = Lexer::new(src).tokenize();
+        assert_eq!(
+            toks[0],
+            Token::InterpString(vec![StringPart::Literal("ABC".to_string())])
+        );
+    }
+
+    #[test]
+    fn octal_escape_decodes_to_the_real_byte() {
+        let src = r#"<?php "\101BC";"#;
+        let toks = Lexer::new(src).tokenize();
+        assert_eq!(
+            toks[0],
+            Token::InterpString(vec![StringPart::Literal("ABC".to_string())])
+        );
+    }
+
+    #[test]
+    fn unicode_escape_decodes_to_the_real_codepoint() {
+        let src = r#"<?php "\u{41}BC";"#;
+        let toks = Lexer::new(src).tokenize();
+        assert_eq!(
+            toks[0],
+            Token::InterpString(vec![StringPart::Literal("ABC".to_string())])
+        );
+    }
+
+    #[test]
+    fn vertical_tab_escape_and_form_feed_decode_correctly() {
+        let src = r#"<?php "\v\e\f";"#;
+        let toks = Lexer::new(src).tokenize();
+        assert_eq!(
+            toks[0],
+            Token::InterpString(vec![StringPart::Literal("\u{0B}\u{1B}\u{0C}".to_string())])
+        );
+    }
+
+    #[test]
+    fn an_unrecognized_escape_still_keeps_the_literal_backslash_and_character() {
+        let src = r#"<?php "\d+";"#;
+        let toks = Lexer::new(src).tokenize();
+        assert_eq!(
+            toks[0],
+            Token::InterpString(vec![StringPart::Literal("\\d+".to_string())])
+        );
+    }
+
+    #[test]
+    fn the_original_six_escapes_still_decode_correctly() {
+        let src = r#"<?php "a\nb\tc\r\"d\\e\$f";"#;
+        let toks = Lexer::new(src).tokenize();
+        assert_eq!(
+            toks[0],
+            Token::InterpString(vec![StringPart::Literal("a\nb\tc\r\"d\\e$f".to_string())])
         );
     }
 }
