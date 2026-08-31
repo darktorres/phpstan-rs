@@ -29,13 +29,32 @@ use crate::project::Project;
 /// Reads one framed LSP message (`Content-Length: N\r\n\r\n<N bytes of
 /// JSON>`) from `reader`. Returns `None` at a clean EOF (the client closed
 /// the pipe without sending `exit`, which real clients occasionally do).
-fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<Value>> {
+/// The outcome of trying to read one framed LSP message. `Eof` (a clean
+/// transport disconnection) and `Disconnected` (a real I/O failure
+/// reading the header/body - the stream's position afterward is
+/// unknown) both mean "stop the loop". `MalformedBody` is the one
+/// genuinely recoverable case: the header and exactly `Content-Length`
+/// bytes were both read successfully - the reader is correctly
+/// positioned at the start of the *next* message - they just didn't
+/// parse as JSON, so only this one message needs to be skipped, not the
+/// whole connection torn down.
+enum ReadOutcome {
+    Message(Value),
+    Eof,
+    Disconnected(io::Error),
+    MalformedBody(io::Error),
+}
+
+fn read_message<R: BufRead>(reader: &mut R) -> ReadOutcome {
     let mut content_length: Option<usize> = None;
     loop {
         let mut line = String::new();
-        let n = reader.read_line(&mut line)?;
+        let n = match reader.read_line(&mut line) {
+            Ok(n) => n,
+            Err(e) => return ReadOutcome::Disconnected(e),
+        };
         if n == 0 {
-            return Ok(None);
+            return ReadOutcome::Eof;
         }
         let line = line.trim_end_matches(['\r', '\n']);
         if line.is_empty() {
@@ -47,16 +66,22 @@ fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<Value>> {
         // Any other header (e.g. Content-Type) is accepted and ignored.
     }
     let Some(len) = content_length else {
-        return Err(io::Error::new(
+        // No known length to skip past to resynchronize on the next
+        // message - not safely recoverable, unlike a malformed body of a
+        // known length below.
+        return ReadOutcome::Disconnected(io::Error::new(
             io::ErrorKind::InvalidData,
             "message had no Content-Length header",
         ));
     };
     let mut buf = vec![0u8; len];
-    reader.read_exact(&mut buf)?;
-    let value =
-        serde_json::from_slice(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    Ok(Some(value))
+    if let Err(e) = reader.read_exact(&mut buf) {
+        return ReadOutcome::Disconnected(e);
+    }
+    match serde_json::from_slice(&buf) {
+        Ok(value) => ReadOutcome::Message(value),
+        Err(e) => ReadOutcome::MalformedBody(io::Error::new(io::ErrorKind::InvalidData, e)),
+    }
 }
 
 /// Writes one framed LSP message to `writer` (stdout in practice) and
@@ -177,7 +202,23 @@ impl Server {
                 continue;
             };
             let source = String::from_utf8_lossy(&bytes).into_owned();
-            self.project.load_file(path, &source);
+            // Momentarily-invalid syntax is the normal state while a
+            // file is being edited elsewhere in the workspace, not an
+            // edge case - a single malformed file here must not prevent
+            // the rest of the workspace from loading at all, matching
+            // main.rs's own try_load_file for the equivalent check-
+            // project path.
+            let path_for_log = path.clone();
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.project.load_file(path, &source);
+            }))
+            .is_err()
+            {
+                eprintln!(
+                    "phpstan-rs lsp: skipping {} - failed to parse",
+                    path_for_log.display()
+                );
+            }
         }
         self.project.finish_loading();
     }
@@ -187,7 +228,24 @@ impl Server {
             return Vec::new();
         };
         self.open_uris.insert(path.clone(), uri.to_string());
-        let results = self.project.update_file(&path, text);
+        // Same panic isolation as load_workspace, and more exposed in
+        // practice here: momentarily-invalid syntax is the normal state
+        // while a file is being typed, not an edge case. A crash here
+        // used to take down the whole LSP server process for the rest
+        // of the editing session, not just fail to analyze this one
+        // file.
+        let results = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.project.update_file(&path, text)
+        })) {
+            Ok(results) => results,
+            Err(_) => {
+                eprintln!(
+                    "phpstan-rs lsp: skipping {} - failed to parse",
+                    path.display()
+                );
+                HashMap::new()
+            }
+        };
         results
             .into_iter()
             .map(|(p, diags)| {
@@ -222,11 +280,21 @@ fn run_loop<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) {
 
     loop {
         let message = match read_message(reader) {
-            Ok(Some(m)) => m,
-            Ok(None) => break,
-            Err(e) => {
+            ReadOutcome::Message(m) => m,
+            ReadOutcome::Eof => break,
+            ReadOutcome::Disconnected(e) => {
                 eprintln!("phpstan-rs lsp: failed to read message: {e}");
                 break;
+            }
+            // A malformed message body (invalid JSON, but a known
+            // Content-Length correctly consumed) doesn't tear down the
+            // rest of the session - a single non-conformant message from
+            // a client (an editor-extension bug, a dropped byte over a
+            // flaky transport, ...) shouldn't take the whole language
+            // server down for the rest of the editing session.
+            ReadOutcome::MalformedBody(e) => {
+                eprintln!("phpstan-rs lsp: skipping malformed message: {e}");
+                continue;
             }
         };
 
@@ -344,8 +412,14 @@ mod tests {
     fn decode_all(bytes: &[u8]) -> Vec<Value> {
         let mut cursor = Cursor::new(bytes);
         let mut out = Vec::new();
-        while let Some(v) = read_message(&mut cursor).unwrap() {
-            out.push(v);
+        loop {
+            match read_message(&mut cursor) {
+                ReadOutcome::Message(v) => out.push(v),
+                ReadOutcome::Eof => break,
+                ReadOutcome::Disconnected(e) | ReadOutcome::MalformedBody(e) => {
+                    panic!("unexpected read_message failure in test: {e}")
+                }
+            }
         }
         out
     }
@@ -527,5 +601,58 @@ mod tests {
         assert_eq!(path, PathBuf::from("/tmp/foo.php"));
         assert_eq!(path_to_uri(&path), uri);
         assert_eq!(uri_to_path("not-a-uri"), None);
+    }
+
+    // Finding 1 from the architecture audit - a malformed message body
+    // (a real Content-Length header, correctly consumed, but invalid
+    // JSON) used to terminate the whole session rather than just being
+    // skipped; a per-file parser panic during didOpen/didChange/the
+    // initial workspace scan used to crash the whole server process
+    // rather than just failing to analyze that one file.
+
+    #[test]
+    fn a_malformed_message_body_is_skipped_without_terminating_the_session() {
+        let malformed_body = b"{not valid json";
+        let mut input = Vec::new();
+        write!(input, "Content-Length: {}\r\n\r\n", malformed_body.len()).unwrap();
+        input.extend_from_slice(malformed_body);
+        input.extend_from_slice(&encode(&[
+            request(1, "initialize", json!({})),
+            notification("exit", json!({})),
+        ]));
+
+        let mut reader = Cursor::new(input);
+        let mut writer = Vec::new();
+        run_loop(&mut reader, &mut writer);
+
+        let responses = decode_all(&writer);
+        assert_eq!(responses.len(), 1, "got: {responses:?}");
+        assert_eq!(responses[0]["id"], json!(1));
+    }
+
+    #[test]
+    fn a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session() {
+        let dir = TempDir::new("lsp-crash");
+        dir.write("ok.php", "<?php function helperOk(): int { return 1; }");
+
+        let input = encode(&[
+            request(1, "initialize", json!({"rootUri": dir.uri()})),
+            notification(
+                "textDocument/didOpen",
+                json!({
+                    "textDocument": {
+                        "uri": format!("file://{}/bad.php", dir.0.display()),
+                        "text": "<?php #[Assert\\Regex('/[^\\]]+/')]\nclass C { public string $x = ''; }",
+                    }
+                }),
+            ),
+            notification("exit", json!({})),
+        ]);
+        let mut reader = Cursor::new(input);
+        let mut writer = Vec::new();
+        run_loop(&mut reader, &mut writer);
+
+        let responses = decode_all(&writer);
+        assert_eq!(responses.len(), 1, "session should survive: {responses:?}");
     }
 }
