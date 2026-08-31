@@ -1623,6 +1623,30 @@ impl<'a> Checker<'a> {
     fn check_expr(&mut self, e: &Expr, locals: &mut HashMap<String, Type>, label: &str) {
         match &e.kind {
             ExprKind::Call(callee, args) => {
+                // `unset($x)` genuinely removes `$x` from scope in real
+                // PHP - a real bug if it's used afterward. Checked before
+                // anything else below: `predefine_byref_or_unknown_args`
+                // treats *any* bare-variable argument to an unknown-
+                // signature call as a definition site (a mechanism built
+                // for a different reason - conservatively assuming an
+                // unresolvable call might take the argument by
+                // reference - that happens to also make `isset`/`empty`
+                // safe to use on a maybe-undefined variable), which is
+                // backwards for `unset` specifically: it would make
+                // `unset($x)` look like it *defines* `$x` instead of
+                // removing it.
+                if let ExprKind::Name(name) = &callee.kind
+                    && name == "unset"
+                {
+                    for a in args {
+                        if let ExprKind::Variable(var_name) = &a.kind {
+                            locals.remove(var_name);
+                        } else {
+                            self.check_expr(a, locals, label);
+                        }
+                    }
+                    return;
+                }
                 if let ExprKind::Name(name) = &callee.kind
                     && (name == "extract" || name == "eval")
                 {
@@ -7699,6 +7723,53 @@ mod tests {
             function test(): int {
                 [$num, $str] = pair();
                 return $num;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 38 from the architecture audit - unset($x) was treated as
+    // *defining* $x (a side effect of the same mechanism that makes
+    // isset()/empty() safe on a maybe-undefined variable) rather than
+    // removing it.
+
+    #[test]
+    fn using_a_variable_after_unset_is_flagged_as_undefined() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): void {
+                $x = 5;
+                unset($x);
+                echo $x;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("undefined variable $x"), "got: {d:?}");
+    }
+
+    #[test]
+    fn unset_with_multiple_arguments_removes_every_one() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): void {
+                $a = 1;
+                $b = 2;
+                unset($a, $b);
+                echo $a;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn isset_and_empty_are_still_unaffected_by_the_unset_fix() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $c): string {
+                if ($c) { $r = "x"; }
+                return isset($r) ? $r : "no";
             }
         "#,
         );
