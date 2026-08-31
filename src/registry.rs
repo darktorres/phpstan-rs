@@ -428,7 +428,7 @@ impl ClassInfo {
             .unwrap_or_default();
         let template_set: HashSet<String> = templates.iter().cloned().collect();
 
-        let methods = c
+        let methods: HashMap<String, FunctionSig> = c
             .methods
             .iter()
             .map(|m| {
@@ -536,9 +536,22 @@ impl ClassInfo {
             .map(|d| d.contravariant_templates.clone())
             .unwrap_or_default();
 
+        // Real PHP (8.0+) makes any class declaring a public
+        // `__toString()` automatically implement `Stringable`, with no
+        // `implements Stringable` needed - added specifically so the
+        // pre-existing body of `__toString()`-bearing classes would work
+        // seamlessly with the `string|Stringable` idiom without
+        // modification. Same shape as the enum UnitEnum/BackedEnum
+        // implicit-interface handling below, for a different implicit
+        // interface.
+        let mut implements: Vec<String> = c.implements.iter().map(|s| ctx.resolve(s)).collect();
+        if methods.contains_key("__toString") {
+            implements.push("Stringable".to_string());
+        }
+
         ClassInfo {
             extends: c.extends.iter().map(|s| ctx.resolve(s)).collect(),
-            implements: c.implements.iter().map(|s| ctx.resolve(s)).collect(),
+            implements,
             methods,
             properties,
             consts,

@@ -7171,4 +7171,30 @@ mod tests {
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
+    // Finding 36 from the architecture audit - PHP's implicit Stringable
+    // conformance for any class declaring __toString() wasn't modeled.
+
+    #[test]
+    fn a_class_declaring_to_string_implicitly_implements_stringable() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Money { public function __toString(): string { return "money"; } }
+            function display(string|Stringable $x): void {}
+            function test(Money $m): void { display($m); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_class_without_to_string_still_does_not_satisfy_stringable() {
+        let d = diagnostics_for(
+            r#"<?php
+            class NoToString {}
+            function display(string|Stringable $x): void {}
+            function test(NoToString $n): void { display($n); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
 }
