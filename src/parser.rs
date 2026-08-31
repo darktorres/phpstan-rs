@@ -1093,6 +1093,16 @@ impl Parser {
                 | Token::Keyword(Keyword::Null)
                 | Token::Keyword(Keyword::True)
                 | Token::Keyword(Keyword::False)
+                // `enum` is only reserved as a declaration keyword at
+                // statement position (see `looks_like_class_decl`'s own
+                // sibling check for it there) - as a type hint it's just
+                // an ordinary, if unusually-named, class reference (real,
+                // valid PHP: a class literally named `Enum`, distinct
+                // from an `enum` *declaration*). Falls through to
+                // `parse_type_atom`'s final `parse_qualified_name` call,
+                // which already accepts any keyword as a name segment via
+                // `take_name_segment` - no separate arm needed there.
+                | Token::Keyword(Keyword::Enum)
         )
     }
 
@@ -3785,6 +3795,21 @@ mod tests {
             panic!("expected a FunctionDecl, got {:?}", program[0].kind);
         };
         assert_eq!(f.name, "bar");
+    }
+
+    #[test]
+    fn a_class_named_enum_is_accepted_as_a_parameter_type_hint() {
+        // `enum` is only reserved as a declaration keyword at statement
+        // position - as a type hint it's an ordinary (if unusually named)
+        // class reference. Found via bulk-running this project's checker
+        // against the vendored phpstan-src corpus (nsrt/bug-4213.php uses
+        // exactly this shape).
+        let program = parse("<?php function f(Enum ...$enums): void {}");
+        let StmtKind::FunctionDecl(f) = &program[0].kind else {
+            panic!("expected a FunctionDecl, got {:?}", program[0].kind);
+        };
+        assert_eq!(f.params[0].type_hint.as_deref(), Some("enum"));
+        assert!(f.params[0].variadic);
     }
 
     #[test]
