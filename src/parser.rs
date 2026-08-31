@@ -1645,7 +1645,14 @@ impl Parser {
         let mut resolved = Vec::new();
         self.expect(&Token::LBrace);
         while !self.check(&Token::RBrace) && !self.at_eof() {
-            let first = self.expect_ident();
+            // The trait name before `::` can be fully qualified
+            // (`\Some\Trait::method insteadof ...`, a real, valid PHP
+            // shape - found via bulk-running this project's checker
+            // against the vendored phpstan-src corpus) - `parse_qualified_
+            // name` handles that and degrades to a single bare segment
+            // for the (far more common) unqualified-trait or bare-method
+            // case identically to the plain `expect_ident` this replaced.
+            let first = self.parse_qualified_name();
             let (trait_name, method) = if self.eat(&Token::DoubleColon) {
                 (Some(first), self.expect_ident())
             } else {
@@ -3736,6 +3743,28 @@ mod tests {
             class C {
                 use A, B {
                     A::hello insteadof B;
+                }
+            }
+            "#,
+        );
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.resolved_trait_conflicts, vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn an_insteadof_clause_with_a_fully_qualified_trait_name_is_still_parsed() {
+        // A trait name before `::` in a trait-adaptation clause can be
+        // fully qualified (`\Some\Trait::method insteadof ...`) - found
+        // via bulk-running this project's checker against the vendored
+        // phpstan-src corpus (nsrt/traits/traits.php uses exactly this
+        // shape and previously failed to parse at all).
+        let program = parse(
+            r#"<?php
+            class C {
+                use \NsA\A, \NsB\B {
+                    \NsA\A::hello insteadof \NsB\B;
                 }
             }
             "#,
