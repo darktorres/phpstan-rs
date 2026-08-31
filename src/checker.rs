@@ -2181,19 +2181,36 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                self.infer_expr(e, locals)
+                // Reuses the `resolved_name`/`sig` already resolved above
+                // - the same lookup `infer_expr`'s own `Call` arm would
+                // otherwise redundantly redo from scratch.
+                sig.map(|s| {
+                    self.infer_builtin_call_return_type(
+                        resolved_name.as_deref().unwrap_or_default(),
+                        s,
+                        args,
+                        locals,
+                    )
+                })
+                .unwrap_or(Type::Mixed)
             }
-            ExprKind::MethodCall(recv, method, args, _) => {
+            ExprKind::MethodCall(recv, method, args, nullsafe) => {
                 // Finding 49's other real shape: `(function () {...})
                 // ->bindTo($newThis, $scope)` - same idea as
                 // `Closure::bind`, just on the receiver instead of the
                 // first argument.
-                if method == "bindTo"
+                //
+                // The `bindTo` branch can't reuse `check_expr`'s own
+                // return value the way the ordinary branch below does -
+                // `check_closure_literal_with_this` checks the closure's
+                // *body* under a rebound `$this`, it doesn't compute
+                // `recv`'s own type - so `recv` still needs its own
+                // `infer_expr` call there specifically.
+                let recv_ty = if method == "bindTo"
                     && matches!(
                         unwrap_grouping(recv).kind,
                         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
-                    )
-                {
+                    ) {
                     let this_ty = args
                         .first()
                         .map(|a| self.infer_expr(&a.value, locals))
@@ -2204,9 +2221,10 @@ impl<'a> Checker<'a> {
                         label,
                         this_ty,
                     );
+                    self.infer_expr(recv, locals)
                 } else {
-                    self.check_expr(recv, locals, label);
-                }
+                    self.check_expr(recv, locals, label)
+                };
                 // Re-enabled (Phase 9.5): the registry is now
                 // namespace-aware, so a method lookup trusts the specific
                 // `ClassInfo` stored under a *fully-qualified* name, not a
@@ -2221,7 +2239,6 @@ impl<'a> Checker<'a> {
                 // below picks up the "should this be flagged" question
                 // for those cases instead, using a representative member
                 // (the first `Object` found) for argument-checking.
-                let recv_ty = self.infer_expr(recv, locals);
                 let recv_class = match &recv_ty {
                     Type::Object(class, type_args) => Some((class.clone(), type_args.clone())),
                     Type::Union(members) | Type::Intersection(members) => {
@@ -2304,7 +2321,25 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                self.infer_expr(e, locals)
+                let result = match &recv_class {
+                    Some((class, _)) => sig
+                        .as_ref()
+                        .map(|s| {
+                            let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
+                            self.resolve_pseudo(&resolved_ty, class)
+                        })
+                        .unwrap_or(Type::Mixed),
+                    None => Type::Mixed,
+                };
+                // `$x?->method()` short-circuits to `null` when `$x` is
+                // null, on top of whatever the method's own return type
+                // is - real, implicit nullability a plain `->` doesn't
+                // carry.
+                if *nullsafe && result != Type::Mixed {
+                    union_types(result, Type::Null)
+                } else {
+                    result
+                }
             }
             // `&&`/`||` short-circuit, so the right operand only ever runs
             // once the left one's already settled the outcome - it needs
@@ -2381,23 +2416,60 @@ impl<'a> Checker<'a> {
                 }
                 self.infer_expr(e, locals)
             }
-            ExprKind::Unary(_, inner)
-            | ExprKind::Grouping(inner)
-            | ExprKind::Cast(_, inner)
-            | ExprKind::Throw(inner) => {
+            ExprKind::Unary(UnaryOp::Not, inner) => {
                 self.check_expr(inner, locals, label);
-                self.infer_expr(e, locals)
+                Type::Bool
+            }
+            // Real PHP's unary minus/plus convert a numeric string
+            // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) - the
+            // same implicit-numeric-coercion rule arithmetic operators
+            // apply generally.
+            ExprKind::Unary(UnaryOp::Neg | UnaryOp::Plus, inner) => {
+                self.check_expr(inner, locals, label);
+                match self.infer_expr(inner, locals) {
+                    Type::String | Type::StringLiteral(_) => Type::Int,
+                    other => other,
+                }
+            }
+            ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) => {
+                self.check_expr(inner, locals, label);
+                self.infer_expr(inner, locals)
+            }
+            ExprKind::Cast(ty, inner) => {
+                self.check_expr(inner, locals, label);
+                match ty.as_str() {
+                    "int" => Type::Int,
+                    "float" => Type::Float,
+                    "string" => Type::String,
+                    "bool" => Type::Bool,
+                    "array" => Type::Array(Box::new(Type::Mixed)),
+                    "object" => Type::Object("object".to_string(), Vec::new()),
+                    "unset" => Type::Null,
+                    _ => Type::Mixed,
+                }
+            }
+            // A throw expression never actually produces a value - Never
+            // is exactly the right type for it, the same way it's used
+            // for a function that always throws or exits.
+            ExprKind::Throw(inner) => {
+                self.check_expr(inner, locals, label);
+                Type::Never
             }
             ExprKind::YieldFrom(inner) => {
                 self.check_expr(inner, locals, label);
                 Type::Mixed
             }
+            // Never given a stable nominal type by infer_expr either,
+            // since multiple clone-with-overrides expressions could
+            // produce runtime objects that don't share a common shape
+            // this checker tracks - the clone target's own type is the
+            // honest answer.
             ExprKind::Clone(inner, overrides) => {
                 self.check_expr(inner, locals, label);
                 if let Some(o) = overrides {
                     self.check_expr(o, locals, label);
                 }
-                self.infer_expr(e, locals)
+                self.infer_expr(inner, locals)
             }
             ExprKind::Yield(key, value) => {
                 if let Some(k) = key {
