@@ -37,6 +37,31 @@ pub struct Lexer<'a> {
     pos_cache: (usize, Position),
 }
 
+/// Advances past a single- or double-quoted string literal starting at
+/// `i` (which must be exactly on the opening quote byte), honoring just
+/// enough escaping (`\'`/`\\`) to find the real closing quote - shared
+/// by `Lexer::skip_string_literal` (operating on `self.pos`/`self.src`)
+/// and `scan_interpolated`'s own separate scan (operating on a local
+/// index into an already-extracted byte slice), so both of this
+/// lexer's raw bracket/brace-depth counters that need to skip past a
+/// string's own content use the identical logic rather than risking a
+/// third, independently-drifting copy of it.
+fn skip_string_literal_bytes(bytes: &[u8], i: usize) -> usize {
+    let quote = bytes[i];
+    let mut i = i + 1;
+    while i < bytes.len() && bytes[i] != quote {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    if i < bytes.len() {
+        i += 1;
+    }
+    i
+}
+
 fn compute_line_starts(src: &[u8]) -> Vec<usize> {
     let mut starts = vec![0];
     for (i, &b) in src.iter().enumerate() {
@@ -305,18 +330,7 @@ impl<'a> Lexer<'a> {
     /// scanning) rather than duplicating the same fix independently in
     /// each.
     fn skip_string_literal(&mut self) {
-        let quote = self.peek();
-        self.pos += 1; // opening quote
-        while self.pos < self.src.len() && self.peek() != quote {
-            if self.peek() == b'\\' && self.pos + 1 < self.src.len() {
-                self.pos += 2;
-            } else {
-                self.pos += 1;
-            }
-        }
-        if self.pos < self.src.len() {
-            self.pos += 1; // closing quote
-        }
+        self.pos = skip_string_literal_bytes(self.src, self.pos);
     }
 
     fn skip_whitespace_and_comments(&mut self) {
@@ -611,11 +625,22 @@ impl<'a> Lexer<'a> {
                 let mut depth = 1;
                 while self.pos < self.src.len() && depth > 0 {
                     match self.peek() {
-                        b'{' => depth += 1,
-                        b'}' => depth -= 1,
-                        _ => {}
+                        // String-aware: a nested string literal inside
+                        // the expression (`{$f->wrap('}')}`) can contain
+                        // a literal, unbalanced `{`/`}` of its own, which
+                        // must not be mistaken for this block's own
+                        // closing brace.
+                        b'\'' | b'"' => self.skip_string_literal(),
+                        b'{' => {
+                            depth += 1;
+                            self.pos += 1;
+                        }
+                        b'}' => {
+                            depth -= 1;
+                            self.pos += 1;
+                        }
+                        _ => self.pos += 1,
                     }
-                    self.pos += 1;
                 }
             } else {
                 self.pos += 1;
@@ -1037,6 +1062,16 @@ impl<'a> Lexer<'a> {
                 let start = i;
                 let mut depth = 1;
                 while i < bytes.len() && depth > 0 {
+                    // String-aware, the same reason and the same
+                    // shared helper as `lex_interpolated_run`'s own
+                    // brace-depth counter just above - this scanner
+                    // does its own, independent `{`/`}` count over the
+                    // same already-extracted substring, so it needs
+                    // the identical fix, not just the outer one.
+                    if matches!(bytes[i], b'\'' | b'"') {
+                        i = skip_string_literal_bytes(bytes, i);
+                        continue;
+                    }
                     match bytes[i] {
                         b'{' => depth += 1,
                         b'}' => depth -= 1,
@@ -1434,5 +1469,32 @@ mod tests {
         // The attribute is skipped entirely - the next real token is the
         // `class` keyword, not garbage from inside the regex string.
         assert_eq!(toks[0], Token::Keyword(Keyword::Class));
+    }
+    // Finding 10 from the architecture audit - the same string-
+    // unawareness bug as Finding 6, in {$...} complex interpolation's
+    // own brace-depth counters (two independent ones: lex_interpolated_run
+    // scanning for the block's own extent, and scan_interpolated's
+    // separate pass carving it into StringPart pieces).
+
+    #[test]
+    fn complex_interpolation_is_not_fooled_by_a_brace_inside_a_nested_string_argument() {
+        let src = r#"<?php "value: {$f->wrap('}')} end";"#;
+        let toks = Lexer::new(src).tokenize();
+        // A successful, non-panicking tokenize that reaches Eof (rather
+        // than the old parse error stopping partway through the file)
+        // is the real regression test here - the interpolation's own
+        // ComplexExpr part additionally proves the block's real extent
+        // (through the true closing brace, not the one inside the
+        // string) was found correctly.
+        assert_eq!(toks.last(), Some(&Token::Eof));
+        let Token::InterpString(parts) = &toks[0] else {
+            panic!("expected an interpolated string, got {:?}", toks[0]);
+        };
+        assert!(
+            parts.iter().any(
+                |p| matches!(p, StringPart::ComplexExpr(inner, _) if inner == "$f->wrap('}')")
+            ),
+            "got: {parts:?}"
+        );
     }
 }
