@@ -268,18 +268,39 @@ fn apply_level_filter(
     results
 }
 
+/// Loads one file into `project`, tolerating a lex/parse panic (this
+/// parser's only error-reporting mechanism today - see
+/// `check_chunk`'s own doc comment) rather than letting it crash the
+/// whole run. Returns `false` if the file couldn't be read or failed to
+/// load, in which case it's simply absent from `project` - same
+/// end state as never having attempted it, since the only place a panic
+/// can originate in `Project::load_file`'s pipeline is `parse()`,
+/// called before any registry/`self.files` mutation.
+fn try_load_file(project: &mut project::Project, path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let source = String::from_utf8_lossy(&bytes).into_owned();
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        project.load_file(path.to_path_buf(), &source);
+    }))
+    .is_ok()
+}
+
 fn run_check_project(
     dirs: &[PathBuf],
+    scan_dirs: &[PathBuf],
+    scan_files: &[PathBuf],
     level: u8,
     strict_mixed_arrays: bool,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
 ) {
-    let mut files = Vec::new();
+    let mut analyze_files = Vec::new();
     for dir in dirs {
-        collect_php_files(dir, &mut files);
+        collect_php_files(dir, &mut analyze_files);
     }
-    if files.is_empty() {
+    if analyze_files.is_empty() {
         let dirs: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
         eprintln!("no .php files found under {}", dirs.join(", "));
         return;
@@ -293,20 +314,47 @@ fn run_check_project(
     // "wins" the registry slot (and therefore which one's real methods
     // are visible) could silently vary between runs on different
     // machines or filesystems.
-    files.sort();
+    analyze_files.sort();
+
+    let mut context_files: Vec<PathBuf> = scan_files.to_vec();
+    for dir in scan_dirs {
+        collect_php_files(dir, &mut context_files);
+    }
+    context_files.sort();
+    context_files.dedup();
 
     let mut project = project::Project::new();
     project.set_strict_mixed_arrays(strict_mixed_arrays);
-    for path in &files {
-        let Ok(bytes) = fs::read(path) else {
-            continue;
-        };
-        let source = String::from_utf8_lossy(&bytes).into_owned();
-        project.load_file(path.clone(), &source);
-    }
+
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    // Context files load first: `Registry::index` resolves a
+    // fully-qualified-name collision with plain last-write-wins (a bare
+    // `HashMap::insert`, no existence check, no diagnostic), and while
+    // the vendor-only filter in `composer::discover_vendor_context`
+    // keeps a project's own first-party directories out of the context
+    // set, it can't prevent a genuinely different vendor package
+    // declaring a class under the same name as something in the user's
+    // own code (PHP allows unnamespaced global classes). Loading
+    // context first guarantees the analyzed declaration - the one
+    // actually being reported on - always wins the registry slot on any
+    // such collision.
+    let skipped_context = context_files
+        .iter()
+        .filter(|path| !try_load_file(&mut project, path))
+        .count();
+    let skipped_analyze = analyze_files
+        .iter()
+        .filter(|path| !try_load_file(&mut project, path))
+        .count();
+    std::panic::set_hook(default_hook);
     project.finish_loading();
 
-    let mut results = apply_level_filter(project.check_all(), level);
+    let results: HashMap<PathBuf, Vec<checker::Diagnostic>> = analyze_files
+        .iter()
+        .map(|path| (path.clone(), project.check_file(path)))
+        .collect();
+    let mut results = apply_level_filter(results, level);
 
     if let Some(generate_baseline_path) = generate_baseline_path {
         match baseline::generate(generate_baseline_path, &results) {
@@ -346,12 +394,21 @@ fn run_check_project(
             total += 1;
         }
     }
-    println!(
-        "
-{} file(s) checked, {} diagnostic(s)",
-        project.file_count(),
-        total
-    );
+    let checked = analyze_files.len() - skipped_analyze;
+    let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");
+    let mut extras = Vec::new();
+    let context_loaded = context_files.len() - skipped_context;
+    if context_loaded > 0 {
+        extras.push(format!("{context_loaded} more file(s) loaded for context"));
+    }
+    let skipped_total = skipped_analyze + skipped_context;
+    if skipped_total > 0 {
+        extras.push(format!("{skipped_total} file(s) skipped: parse error"));
+    }
+    if !extras.is_empty() {
+        summary.push_str(&format!(" ({})", extras.join(", ")));
+    }
+    println!("{summary}");
 }
 
 #[derive(ClapParser)]
@@ -386,9 +443,19 @@ enum Command {
         generate_baseline: Option<PathBuf>,
         #[arg(long)]
         baseline: Option<PathBuf>,
+        /// Extra directories loaded for type-resolution context only -
+        /// never analyzed or reported on. Repeatable.
+        #[arg(long = "scan-dir")]
+        scan_dirs: Vec<PathBuf>,
+        /// Disables the automatic Composer-autoloader-based `vendor/`
+        /// context load (see `composer::discover_vendor_context`).
+        /// `--scan-dir` still works.
+        #[arg(long)]
+        no_composer: bool,
         /// TOML config file (see src/config.rs) supplying defaults for
-        /// paths/level/baseline/strict_mixed_arrays - any flag above,
-        /// when given, overrides the same key in the config.
+        /// paths/level/baseline/strict_mixed_arrays/scan_paths/
+        /// no_composer - any flag above, when given, overrides the same
+        /// key in the config.
         #[arg(long)]
         config: Option<PathBuf>,
     },
@@ -417,6 +484,8 @@ fn main() {
             strict_mixed_arrays,
             generate_baseline,
             baseline,
+            scan_dirs,
+            no_composer,
             config,
         } => {
             let config = match config {
@@ -445,8 +514,25 @@ fn main() {
                 strict_mixed_arrays || config.strict_mixed_arrays.unwrap_or(false);
             let baseline = baseline.or(config.baseline);
 
+            let mut scan_dirs = if !scan_dirs.is_empty() {
+                scan_dirs
+            } else {
+                config.scan_paths.unwrap_or_default()
+            };
+            let no_composer = no_composer || config.no_composer.unwrap_or(false);
+
+            let mut scan_files = Vec::new();
+            if !no_composer {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                let vendor_context = composer::discover_vendor_context(&cwd);
+                scan_dirs.extend(vendor_context.dirs);
+                scan_files.extend(vendor_context.files);
+            }
+
             run_check_project(
                 &dirs,
+                &scan_dirs,
+                &scan_files,
                 level,
                 strict_mixed_arrays,
                 generate_baseline.as_deref(),
