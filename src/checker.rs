@@ -2489,7 +2489,7 @@ impl<'a> Checker<'a> {
                 Type::Mixed
             }
             ExprKind::Assign(lhs, rhs) => {
-                self.check_expr(rhs, locals, label);
+                let rhs_ty = self.check_expr(rhs, locals, label);
                 // A bare variable (or a destructuring target inside one)
                 // on the left is a definition site, not a read - checking
                 // it here, before it's bound below, would make undefined-
@@ -2499,9 +2499,8 @@ impl<'a> Checker<'a> {
                 // reads $obj).
                 self.check_assignment_target(lhs, locals, label);
                 self.check_property_assignment(lhs, rhs, locals, label);
-                let rhs_ty = self.infer_expr(rhs, locals);
-                self.bind_assignment_target(lhs, rhs_ty, locals);
-                self.infer_expr(e, locals)
+                self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
+                rhs_ty
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {
                 // `$x ??= $default;` is defined as exactly
@@ -2527,14 +2526,27 @@ impl<'a> Checker<'a> {
                 // narrowing an equivalent `if` already gets.
                 let mut then_locals = locals.clone();
                 self.apply_narrowing(cond, &mut then_locals, true);
-                if let Some(t) = then_ {
-                    self.check_expr(t, &mut then_locals, label);
-                }
+                let then_ty = then_
+                    .as_ref()
+                    .map(|t| self.check_expr(t, &mut then_locals, label));
                 let mut else_locals = locals.clone();
                 self.apply_narrowing(cond, &mut else_locals, false);
-                self.check_expr(else_, &mut else_locals, label);
+                let else_ty = self.check_expr(else_, &mut else_locals, label);
                 *locals = merge_scopes(&then_locals, &else_locals);
-                self.infer_expr(e, locals)
+                // Never let an unknown branch compose into a partial
+                // Union that looks more precise than it is.
+                match then_ty {
+                    Some(then_ty) => {
+                        if then_ty == Type::Mixed || else_ty == Type::Mixed {
+                            Type::Mixed
+                        } else if then_ty == else_ty {
+                            then_ty
+                        } else {
+                            Type::Union(vec![then_ty, else_ty])
+                        }
+                    }
+                    None => Type::Mixed,
+                }
             }
             ExprKind::ArrayLiteral(items) => {
                 for item in items {
@@ -2546,12 +2558,24 @@ impl<'a> Checker<'a> {
                 self.infer_expr(e, locals)
             }
             ExprKind::Index(base, idx) => {
-                self.check_expr(base, locals, label);
-                if let Some(i) = idx {
-                    self.check_expr(i, locals, label);
-                    self.check_shape_key_access(base, i, locals, label);
+                let base_ty = self.check_expr(base, locals, label);
+                match idx {
+                    Some(i) => {
+                        self.check_expr(i, locals, label);
+                        self.check_shape_key_access(base, i, locals, label);
+                        match base_ty {
+                            Type::Array(inner) => *inner,
+                            Type::ArrayShape(fields) => literal_string_key(i)
+                                .and_then(|key| {
+                                    fields.into_iter().find(|(name, _, _)| *name == key)
+                                })
+                                .map(|(_, ty, _)| ty)
+                                .unwrap_or(Type::Mixed),
+                            _ => Type::Mixed,
+                        }
+                    }
+                    None => Type::Mixed,
                 }
-                self.infer_expr(e, locals)
             }
             ExprKind::New(_, args) => {
                 // `new Foo()` never carries known type arguments itself -
