@@ -163,13 +163,19 @@ fn check_project_level_flag_filters_out_higher_level_diagnostics() {
 
 #[test]
 fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
+    // Finding 48 made a literal array's own element types real (a real
+    // ArrayShape, not always Array(Mixed)), so a genuinely wrong literal
+    // element is now caught by ordinary, non-strict checking - what
+    // --strict-mixed-arrays still adds is catching a genuinely *unknown*
+    // (Mixed-element) array, such as one read back out of an untyped
+    // parameter.
     let dir = TempDir::new("check_project_strict");
     dir.write(
         "arr.php",
         r#"<?php
             /** @param int[] $xs */
             function needsInts(array $xs): void {}
-            needsInts([1, "two", 3]);
+            function test(array $untyped): void { needsInts($untyped); }
         "#,
     );
 
@@ -177,7 +183,7 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
     let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
     assert!(
         unfiltered_stdout.contains("0 diagnostic(s)"),
-        "expected the untyped array literal to be let through by default, got: {unfiltered_stdout}"
+        "expected the untyped array to be let through by default, got: {unfiltered_stdout}"
     );
 
     let strict = bin()
@@ -195,6 +201,27 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
         strict_stdout.contains("1 file(s) checked, 1 diagnostic(s)"),
         "got: {strict_stdout}"
     );
+}
+
+#[test]
+fn check_project_a_wrong_typed_array_literal_is_flagged_without_strict_mixed_arrays() {
+    // The real capability Finding 48 unlocks: strict_mixed_arrays was
+    // never actually necessary to catch this - it just happened to be
+    // the only way to observe *any* difference before array literals
+    // carried a real per-element type.
+    let dir = TempDir::new("check_project_literal_shape");
+    dir.write(
+        "arr.php",
+        r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            needsInts([1, "two", 3]);
+        "#,
+    );
+
+    let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("expects array<int>"), "got: {stdout}");
 }
 
 #[test]

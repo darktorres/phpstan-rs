@@ -169,8 +169,8 @@ fn collect_files(
     let ExprKind::ArrayLiteral(items) = &array.kind else {
         return;
     };
-    for (_, value) in items {
-        if let Some(path) = eval_path(value, vendor_dir, base_dir, generated_dir) {
+    for item in items {
+        if let Some(path) = eval_path(&item.value, vendor_dir, base_dir, generated_dir) {
             out.push(path);
         }
     }
@@ -186,12 +186,12 @@ fn collect_dirs(
     let ExprKind::ArrayLiteral(items) = &array.kind else {
         return;
     };
-    for (_, value) in items {
-        let ExprKind::ArrayLiteral(dirs) = &value.kind else {
+    for item in items {
+        let ExprKind::ArrayLiteral(dirs) = &item.value.kind else {
             continue;
         };
-        for (_, dir_value) in dirs {
-            if let Some(path) = eval_path(dir_value, vendor_dir, base_dir, generated_dir) {
+        for dir_item in dirs {
+            if let Some(path) = eval_path(&dir_item.value, vendor_dir, base_dir, generated_dir) {
                 out.push(path);
             }
         }

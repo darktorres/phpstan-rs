@@ -288,11 +288,11 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
         ExprKind::Literal(_) | ExprKind::Variable(_) => {}
         ExprKind::DynamicVariable(e) => collect_expr(e, names),
         ExprKind::ArrayLiteral(items) => {
-            for (k, v) in items {
-                if let Some(k) = k {
+            for item in items {
+                if let Some(k) = &item.key {
                     collect_expr(k, names);
                 }
-                collect_expr(v, names);
+                collect_expr(&item.value, names);
             }
         }
         ExprKind::Unary(_, e)

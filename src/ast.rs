@@ -289,6 +289,24 @@ pub struct Arg {
     pub value: Expr,
 }
 
+/// One element of an `ExprKind::ArrayLiteral` (`[...]`) - `key` is
+/// `Some(...)` for a `key => value` pair, `None` for a plain positional
+/// element. `spread` is `true` for `...$other` (PHP's own array-unpacking
+/// syntax inside a literal, not the same construct as a call's own
+/// spread argument even though it shares the same `...` token) -
+/// Finding 48's own per-element shape inference (`infer_expr`'s
+/// `ArrayLiteral` arm) needs to know this to avoid treating a spread
+/// element's own expression as if it were meant to occupy one specific
+/// key: real PHP inserts a variable number of the spread value's own
+/// elements at that point, shifting every subsequent positional key by
+/// an amount this checker has no way to know statically.
+#[derive(Debug, Clone)]
+pub struct ArrayItem {
+    pub key: Option<Expr>,
+    pub value: Expr,
+    pub spread: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum Literal {
     Int(i64),
@@ -380,7 +398,7 @@ pub enum ExprKind {
     // name is computed at runtime by evaluating expr, so unlike Variable
     // there's no fixed name here to look up or bind in `locals`.
     DynamicVariable(Box<Expr>),
-    ArrayLiteral(Vec<(Option<Expr>, Expr)>),
+    ArrayLiteral(Vec<ArrayItem>),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),

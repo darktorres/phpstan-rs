@@ -1717,8 +1717,8 @@ impl<'a> Checker<'a> {
         match &target.kind {
             ExprKind::Variable(_) => {}
             ExprKind::ArrayLiteral(items) => {
-                for (_, item) in items {
-                    self.check_assignment_target(item, locals, label);
+                for item in items {
+                    self.check_assignment_target(&item.value, locals, label);
                 }
             }
             // A property being *assigned* isn't a read of that property -
@@ -1727,6 +1727,22 @@ impl<'a> Checker<'a> {
             // wrongly flag legitimate dynamic-property creation as
             // "undefined property".
             ExprKind::PropertyAccess(base, _, _) => self.check_expr(base, locals, label),
+            // Same reasoning as PropertyAccess just above, for the exact
+            // same reason: `$x['newKey'] = ...` defines that key, it
+            // doesn't read it - routing the full Index expression through
+            // check_expr's own Index arm would call check_shape_key_access
+            // and wrongly flag the ordinary "start from an array literal,
+            // build it up one key at a time" idiom as accessing a
+            // nonexistent key of an already-fully-known shape (Finding
+            // 48 made this a live, common-case bug: an array literal's
+            // own inferred shape is only what's known so far, not a
+            // sealed contract the array can never grow past).
+            ExprKind::Index(base, idx) => {
+                self.check_expr(base, locals, label);
+                if let Some(i) = idx {
+                    self.check_expr(i, locals, label);
+                }
+            }
             _ => self.check_expr(target, locals, label),
         }
     }
@@ -1755,8 +1771,8 @@ impl<'a> Checker<'a> {
                 // tuple-destructuring case) looks up the field whose key
                 // is that position's own index ("0", "1", ...).
                 Type::ArrayShape(fields) => {
-                    for (position, (key, item)) in items.iter().enumerate() {
-                        let field_key = match key.as_ref().map(|k| &k.kind) {
+                    for (position, item) in items.iter().enumerate() {
+                        let field_key = match item.key.as_ref().map(|k| &k.kind) {
                             Some(ExprKind::Literal(Literal::String(s))) => Some(s.clone()),
                             Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
                             Some(_) => None,
@@ -1766,21 +1782,47 @@ impl<'a> Checker<'a> {
                             .and_then(|k| fields.iter().find(|(fk, _, _)| *fk == k))
                             .map(|(_, t, _)| t.clone())
                             .unwrap_or(Type::Mixed);
-                        self.bind_assignment_target(item, element_ty, locals);
+                        self.bind_assignment_target(&item.value, element_ty, locals);
                     }
                 }
                 Type::Array(inner) => {
                     let element_ty = (**inner).clone();
-                    for (_, item) in items {
-                        self.bind_assignment_target(item, element_ty.clone(), locals);
+                    for item in items {
+                        self.bind_assignment_target(&item.value, element_ty.clone(), locals);
                     }
                 }
                 _ => {
-                    for (_, item) in items {
-                        self.bind_assignment_target(item, Type::Mixed, locals);
+                    for item in items {
+                        self.bind_assignment_target(&item.value, Type::Mixed, locals);
                     }
                 }
             },
+            // Finding 48's own follow-on: `$x['newKey'] = $value;` adds a
+            // real key to `$x`'s own tracked shape when `$x` already
+            // holds a known one (most commonly, from an earlier `$x = []`
+            // or `$x = ['a' => 1]` literal) - without this, an array
+            // literal's own new precision made the extremely common
+            // "start from a literal, build it up one key at a time"
+            // idiom look like every later read was accessing a key the
+            // shape could never have, since the shape itself never grew
+            // past its own starting literal. Only updates a *known*
+            // shape already sitting in `locals` under a bare variable
+            // name; anything else (a property chain, a computed base, a
+            // variable with a non-shape or not-yet-known type) is left
+            // alone, matching this project's usual "don't guess" scope.
+            ExprKind::Index(base, Some(idx)) => {
+                if let ExprKind::Variable(name) = &base.kind
+                    && let Some(key) = literal_string_key(idx)
+                    && let Some(Type::ArrayShape(fields)) = locals.get(name)
+                {
+                    let mut fields = fields.clone();
+                    match fields.iter_mut().find(|(k, _, _)| *k == key) {
+                        Some(field) => field.1 = ty,
+                        None => fields.push((key, ty, false)),
+                    }
+                    locals.insert(name.clone(), Type::ArrayShape(fields));
+                }
+            }
             _ => {}
         }
     }
@@ -2351,11 +2393,11 @@ impl<'a> Checker<'a> {
                 *locals = merge_scopes(&then_locals, &else_locals);
             }
             ExprKind::ArrayLiteral(items) => {
-                for (k, v) in items {
-                    if let Some(k) = k {
+                for item in items {
+                    if let Some(k) = &item.key {
                         self.check_expr(k, locals, label);
                     }
-                    self.check_expr(v, locals, label);
+                    self.check_expr(&item.value, locals, label);
                 }
             }
             ExprKind::Index(base, idx) => {
@@ -3447,7 +3489,7 @@ impl<'a> Checker<'a> {
                     None => Type::Mixed,
                 }
             }
-            ExprKind::ArrayLiteral(_) => Type::Array(Box::new(Type::Mixed)),
+            ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
             ExprKind::Interpolated(_) => Type::String,
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 if let Some(base_key) = narrowing_key(base)
@@ -3494,6 +3536,62 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Finding 48: an array literal's own element types were never
+    /// inferred precisely - every literal read as `Array(Mixed)`
+    /// regardless of its actual contents, which silently defeated
+    /// `strict_mixed_arrays` (Phase 11 Stage 5) for its own headline use
+    /// case (checking a hand-written literal against a declared shape)
+    /// and made any destructuring from an inline literal lose all
+    /// per-position precision (Finding 42's own gap, from the same root
+    /// cause). Builds a real `Type::ArrayShape`, keyed by each literal
+    /// key (or, for a positional element, PHP's own real auto-index
+    /// rule: one past the highest explicit integer key seen so far, not
+    /// just a running count - `[5 => 'a', 'b']`'s `'b'` really is key
+    /// `6` in real PHP). A spread element (`...$other`) or a computed,
+    /// non-literal key both defeat precise inference for the *whole*
+    /// literal - real PHP inserts a variable number of the spread
+    /// value's own elements at that point, shifting every subsequent
+    /// positional key by an amount this checker has no way to know
+    /// statically, and a non-literal key has no fixed name to key a
+    /// field by at all - degrading to the honest `Array(Mixed)` for
+    /// those specific cases, matching the status quo everywhere else.
+    fn infer_array_literal_type(
+        &self,
+        items: &[ArrayItem],
+        locals: &HashMap<String, Type>,
+    ) -> Type {
+        let mut fields: Vec<(String, Type, bool)> = Vec::new();
+        let mut next_index: i64 = 0;
+        for item in items {
+            if item.spread {
+                return Type::Array(Box::new(Type::Mixed));
+            }
+            let key = match &item.key {
+                None => {
+                    let k = next_index.to_string();
+                    next_index += 1;
+                    k
+                }
+                Some(k) => match &k.kind {
+                    ExprKind::Literal(Literal::String(s)) => s.clone(),
+                    ExprKind::Literal(Literal::Int(n)) => {
+                        next_index = next_index.max(n + 1);
+                        n.to_string()
+                    }
+                    _ => return Type::Array(Box::new(Type::Mixed)),
+                },
+            };
+            let value_ty = self.infer_expr(&item.value, locals);
+            // A later duplicate key overwrites an earlier one, matching
+            // real PHP's own array-literal semantics.
+            match fields.iter_mut().find(|(k, _, _)| *k == key) {
+                Some(field) => field.1 = value_ty,
+                None => fields.push((key, value_ty, false)),
+            }
+        }
+        Type::ArrayShape(fields)
+    }
+
     /// A generic function's return type may mention its own `@template`
     /// parameters (`TemplateParam`) - this binds each one against the
     /// actual argument at this call site (`identity(5)` binds `T` to
@@ -3512,6 +3610,29 @@ impl<'a> Checker<'a> {
             types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
         }
         types::substitute_template(&sig.return_type, &bindings)
+    }
+
+    /// Finding 48 made a literal array's own inferred type a real
+    /// `Type::ArrayShape` instead of always `Array(Mixed)` - every one of
+    /// Phase 12's own special cases below that used to pattern-match
+    /// `Type::Array(elem_ty)` directly needs this instead, so
+    /// `array_map(fn($x) => ..., [1, 2, 3])` (a literal, now a shape) keeps
+    /// working the same way it already did for a plain `array<int>`-typed
+    /// variable. A shape's own "effective element type" is the union of
+    /// every field's type (`Mixed` for an empty literal - nothing to infer
+    /// a narrower type from).
+    fn array_element_type(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Array(elem) => Some((**elem).clone()),
+            Type::ArrayShape(fields) => Some(
+                fields
+                    .iter()
+                    .map(|(_, t, _)| t.clone())
+                    .reduce(union_types)
+                    .unwrap_or(Type::Mixed),
+            ),
+            _ => None,
+        }
     }
 
     /// Phase 12's bespoke per-function return-type extensions (real
@@ -3545,10 +3666,11 @@ impl<'a> Checker<'a> {
             // function is variadic (multiple arrays); a 3+-arg call falls
             // through to the generic path below, unchanged.
             "array_map" if args.len() == 2 => {
-                if let Type::Array(elem_ty) = self.infer_expr(&args[1].value, locals)
+                if let Some(elem_ty) =
+                    Self::array_element_type(&self.infer_expr(&args[1].value, locals))
                     && let Some(mapped) = self.infer_closure_return_with_param_overrides(
                         &args[0].value,
-                        &[*elem_ty],
+                        &[elem_ty],
                         locals,
                     )
                 {
@@ -3566,7 +3688,7 @@ impl<'a> Checker<'a> {
             // fine and must not be indexed into blindly.
             "array_filter" if !args.is_empty() => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if matches!(arr_ty, Type::Array(_)) {
+                if matches!(arr_ty, Type::Array(_) | Type::ArrayShape(_)) {
                     return arr_ty;
                 }
             }
@@ -3578,14 +3700,16 @@ impl<'a> Checker<'a> {
             // (Null when omitted, matching real PHP's own default), $item
             // to the array's element type.
             "array_reduce" if args.len() == 2 || args.len() == 3 => {
-                if let Type::Array(item_ty) = self.infer_expr(&args[0].value, locals) {
+                if let Some(item_ty) =
+                    Self::array_element_type(&self.infer_expr(&args[0].value, locals))
+                {
                     let carry_ty = args
                         .get(2)
                         .map(|initial| self.infer_expr(&initial.value, locals))
                         .unwrap_or(Type::Null);
                     if let Some(reduced) = self.infer_closure_return_with_param_overrides(
                         &args[1].value,
-                        &[carry_ty, *item_ty],
+                        &[carry_ty, item_ty],
                         locals,
                     ) {
                         return reduced;
@@ -3599,7 +3723,7 @@ impl<'a> Checker<'a> {
             // array_filter above.
             "array_combine" if args.len() == 2 => {
                 let values_ty = self.infer_expr(&args[1].value, locals);
-                if matches!(values_ty, Type::Array(_)) {
+                if matches!(values_ty, Type::Array(_) | Type::ArrayShape(_)) {
                     return values_ty;
                 }
             }
@@ -3615,8 +3739,10 @@ impl<'a> Checker<'a> {
             // result is an array *of* arrays, each holding the original
             // element type.
             "array_chunk" if args.len() == 2 || args.len() == 3 => {
-                if let Type::Array(elem_ty) = self.infer_expr(&args[0].value, locals) {
-                    return Type::Array(Box::new(Type::Array(elem_ty)));
+                if let Some(elem_ty) =
+                    Self::array_element_type(&self.infer_expr(&args[0].value, locals))
+                {
+                    return Type::Array(Box::new(Type::Array(Box::new(elem_ty))));
                 }
             }
             // Extracts one named field from an array of known shapes
@@ -3626,8 +3752,8 @@ impl<'a> Checker<'a> {
             // check_shape_key_access's own "only a literal, never a
             // dynamic value" precedent.
             "array_column" if args.len() == 2 || args.len() == 3 => {
-                if let Type::Array(elem_ty) = self.infer_expr(&args[0].value, locals)
-                    && let Type::ArrayShape(fields) = *elem_ty
+                if let Some(Type::ArrayShape(fields)) =
+                    Self::array_element_type(&self.infer_expr(&args[0].value, locals))
                     && let Some(key) = literal_string_key(&args[1].value)
                     && let Some((_, field_ty, _)) = fields.into_iter().find(|(n, _, _)| *n == key)
                 {
@@ -4310,23 +4436,200 @@ mod tests {
     }
 
     #[test]
-    fn strict_mixed_arrays_flags_an_untyped_array_literal_argument() {
-        // Same code diagnostics_for's default (permissive) registry lets
-        // through - an array literal argument's element type is never
-        // inferred precisely, so it always presents as Array(Mixed).
-        // Opting into strict_mixed_arrays (Phase 11 Stage 5) removes that
-        // "we don't know, so don't guess" leniency end-to-end, through
-        // the real checker, not just registry::is_assignable in
-        // isolation.
+    fn a_wrong_typed_array_literal_element_is_flagged_regardless_of_strict_mixed_arrays() {
+        // Finding 48: an array literal's own element types are now
+        // inferred precisely (a real ArrayShape, not Array(Mixed)), so
+        // real information flows through unconditionally - unlike before
+        // Finding 48, `strict_mixed_arrays` isn't what makes this catch a
+        // genuinely wrong literal element; ordinary, non-strict checking
+        // already does.
         let src = r#"<?php
             /** @param int[] $xs */
             function needsInts(array $xs): void {}
             needsInts([1, "two", 3]);
         "#;
+        let d = diagnostics_for(src);
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("expects array<int>"), "got: {d:?}");
+        // strict_mixed_arrays doesn't change this verdict either way.
+        let d = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true);
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn a_correctly_typed_array_literal_is_not_flagged_with_or_without_strict_mixed_arrays() {
+        // The other half of the same fix: before Finding 48, a *correct*
+        // literal was indistinguishable from an incorrect one once
+        // strict_mixed_arrays removed the Array(Mixed) leniency, since
+        // neither carried any real element-type information. Now that a
+        // literal carries a real shape, the genuinely correct case must
+        // stay silent.
+        let src = r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            needsInts([1, 2, 3]);
+        "#;
+        assert!(diagnostics_for(src).is_empty());
+        assert!(diagnostics_for_with(src, |r| r.strict_mixed_arrays = true).is_empty());
+    }
+
+    #[test]
+    fn strict_mixed_arrays_still_flags_a_genuinely_unknown_mixed_typed_array() {
+        // strict_mixed_arrays' own remaining, real purpose: a value whose
+        // element type is genuinely Mixed for a reason other than being
+        // an array literal (here, read back out of an untyped array
+        // parameter) - not affected by Finding 48's own literal-specific
+        // fix at all.
+        let src = r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            function test(array $untyped): void { needsInts($untyped); }
+        "#;
         assert!(diagnostics_for(src).is_empty());
         let d = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true);
         assert_eq!(d.len(), 1, "got: {d:?}");
         assert!(d[0].message.contains("expects array<int>"), "got: {d:?}");
+    }
+
+    #[test]
+    fn a_literal_array_shape_mismatch_is_flagged_against_a_docblock_shape() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{0: int, 1: string} $pair */
+            function needsPair(array $pair): void {}
+            function test(): void { needsPair(["backwards", 5]); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("needsPair()")),
+            "expected a shape-mismatch diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_correctly_shaped_literal_is_not_flagged_against_a_docblock_shape() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{0: int, 1: string} $pair */
+            function needsPair(array $pair): void {}
+            function test(): void { needsPair([1, "a"]); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn destructuring_a_swap_from_an_inline_array_literal_gets_real_per_position_types() {
+        // Finding 48's shared root cause with Finding 42: before this
+        // fix, [$a, $b] = [$b, $a] silently retyped both sides to Mixed,
+        // since the literal's own element types were never inferred -
+        // masking a real type mismatch the swap introduces.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function test(): void {
+                $a = 1;
+                $b = "x";
+                [$a, $b] = [$b, $a];
+                needsString($b);
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("needsString() argument #1 ($s) expects string, 1 given")),
+            "expected the post-swap type mismatch to be caught, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn building_an_array_progressively_via_index_assignment_is_not_flagged() {
+        // A real regression found while verifying Finding 48 against the
+        // full vendor/phpstorm-stubs corpus: $x = []; $x['a'] = ...; is
+        // one of the most common ways to build an array in real PHP -
+        // check_shape_key_access must not treat the literal's own
+        // starting shape as a sealed contract the array can never grow
+        // past, either at the write site itself or at a later read.
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): string {
+                $x = [];
+                $x['a'] = 'hello';
+                $x['b'] = 42;
+                return $x['a'];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn reading_a_key_never_assigned_after_building_an_array_progressively_is_still_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void {
+                $x = [];
+                $x['a'] = 'hello';
+                echo $x['b'];
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("array{...} has no key 'b'")),
+            "expected a missing-key diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn overwriting_an_existing_key_via_index_assignment_updates_its_tracked_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function test(): int {
+                $x = ['a' => 1];
+                $x['a'] = 5;
+                return needsInt($x['a']);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn an_array_callable_shaped_as_a_literal_still_satisfies_callable() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Handler { public function handle(int $x): int { return $x; } }
+            function apply(callable $fn, int $x): int { return $fn($x); }
+            function test(Handler $h): int { return apply([$h, 'handle'], 5); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_spread_element_inside_a_literal_defeats_precise_shape_inference() {
+        // A spread element's own contents aren't known statically (real
+        // PHP inserts a variable number of the spread value's own
+        // elements, shifting every later positional key by an amount
+        // this checker can't know) - must degrade to the honest
+        // Array(Mixed) for the whole literal rather than mis-keying the
+        // spread expression itself as if it occupied one fixed slot.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $nums */
+            function needsInts(array $nums): void {}
+            function test(array $other): void {
+                needsInts([1, ...$other, "not an int"]);
+            }
+        "#,
+        );
+        assert!(
+            d.is_empty(),
+            "a spread element should defeat shape inference, not produce a wrong verdict: {d:?}"
+        );
     }
 
     // Phase 12: array_map/array_filter return-type precision. Each test

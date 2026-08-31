@@ -2646,7 +2646,7 @@ impl Parser {
         (args, false)
     }
 
-    fn parse_array_items(&mut self, close: &Token) -> Vec<(Option<Expr>, Expr)> {
+    fn parse_array_items(&mut self, close: &Token) -> Vec<ArrayItem> {
         let mut items = Vec::new();
         while !self.check(close) {
             // A skipped destructuring slot (`[, $b] = $arr;`, `[$a, , $c] =
@@ -2657,19 +2657,31 @@ impl Parser {
             // walks below already skip anything that isn't a Variable.
             if self.check(&Token::Comma) {
                 let pos = self.current_pos();
-                items.push((None, self.expr(ExprKind::Literal(Literal::Null), pos)));
+                items.push(ArrayItem {
+                    key: None,
+                    value: self.expr(ExprKind::Literal(Literal::Null), pos),
+                    spread: false,
+                });
                 self.advance();
                 continue;
             }
-            self.eat(&Token::Ellipsis);
+            let spread = self.eat(&Token::Ellipsis);
             self.eat(&Token::Amp); // by-ref element, not modeled
             let first = self.parse_expression();
             if self.eat(&Token::FatArrow) {
                 self.eat(&Token::Amp);
                 let value = self.parse_expression();
-                items.push((Some(first), value));
+                items.push(ArrayItem {
+                    key: Some(first),
+                    value,
+                    spread,
+                });
             } else {
-                items.push((None, first));
+                items.push(ArrayItem {
+                    key: None,
+                    value: first,
+                    spread,
+                });
             }
             if !self.eat(&Token::Comma) {
                 break;
@@ -3248,11 +3260,11 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
         | ExprKind::PropertyAccess(e, _, _) => bias_expr_spans(e, frag_base),
         ExprKind::ArrowFn { body, .. } => bias_expr_spans(body, frag_base),
         ExprKind::ArrayLiteral(items) => {
-            for (k, v) in items {
-                if let Some(k) = k {
+            for item in items {
+                if let Some(k) = &mut item.key {
                     bias_expr_spans(k, frag_base);
                 }
-                bias_expr_spans(v, frag_base);
+                bias_expr_spans(&mut item.value, frag_base);
             }
         }
         ExprKind::Binary(_, l, r) | ExprKind::Assign(l, r) | ExprKind::CompoundAssign(_, l, r) => {
@@ -3750,6 +3762,24 @@ mod tests {
     }
 
     #[test]
+    fn a_spread_element_inside_an_array_literal_sets_its_own_spread_flag() {
+        let program = parse("<?php $x = [1, ...$other, 3];");
+        let StmtKind::Expression(e) = &program[0].kind else {
+            panic!("expected Expression");
+        };
+        let ExprKind::Assign(_, rhs) = &e.kind else {
+            panic!("expected Assign, got {:?}", e.kind);
+        };
+        let ExprKind::ArrayLiteral(items) = &rhs.kind else {
+            panic!("expected ArrayLiteral, got {:?}", rhs.kind);
+        };
+        assert_eq!(items.len(), 3);
+        assert!(!items[0].spread);
+        assert!(items[1].spread);
+        assert!(!items[2].spread);
+    }
+
+    #[test]
     fn qualified_name_with_keyword_segment_parses() {
         // `Enum` here is a namespace segment, not the `enum` declaration
         // keyword - PHP's keywords are mostly "semi-reserved". The main
@@ -4102,8 +4132,11 @@ mod tests {
             panic!("expected ArrayLiteral target");
         };
         assert_eq!(items.len(), 2);
-        assert!(matches!(&items[0].1.kind, ExprKind::Literal(Literal::Null)));
-        assert!(matches!(&items[1].1.kind, ExprKind::Variable(_)));
+        assert!(matches!(
+            &items[0].value.kind,
+            ExprKind::Literal(Literal::Null)
+        ));
+        assert!(matches!(&items[1].value.kind, ExprKind::Variable(_)));
 
         let StmtKind::Expression(Expr {
             kind: ExprKind::Assign(lhs, _),
@@ -4116,7 +4149,10 @@ mod tests {
             panic!("expected ArrayLiteral target");
         };
         assert_eq!(items.len(), 3);
-        assert!(matches!(&items[1].1.kind, ExprKind::Literal(Literal::Null)));
+        assert!(matches!(
+            &items[1].value.kind,
+            ExprKind::Literal(Literal::Null)
+        ));
     }
 
     #[test]
@@ -4646,7 +4682,7 @@ mod tests {
         let ExprKind::ArrayLiteral(items) = &rhs.kind else {
             panic!("expected array literal");
         };
-        assert!(matches!(&items[0].1.kind, ExprKind::Literal(Literal::Float(f)) if *f == 5.0));
+        assert!(matches!(&items[0].value.kind, ExprKind::Literal(Literal::Float(f)) if *f == 5.0));
     }
 
     #[test]

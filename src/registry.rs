@@ -1403,7 +1403,7 @@ impl Registry {
                 self.lookup_method(class, "__invoke").is_some()
             }
             (Type::String | Type::StringLiteral(_), Type::Callable) => true,
-            (Type::Array(_), Type::Callable) => true,
+            (Type::Array(_) | Type::ArrayShape(_), Type::Callable) => true,
             (Type::Object(a, _), Type::Object(b, _)) => a == b || self.is_subclass_of(a, b),
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
@@ -1432,6 +1432,33 @@ impl Registry {
             // correctly fails to satisfy an arbitrary shape.
             (Type::Array(a), Type::ArrayShape(_)) => {
                 !self.strict_mixed_arrays && matches!(**a, Type::Mixed)
+            }
+            // Finding 48's own completion: now that an array literal
+            // carries a real per-position/per-key shape instead of
+            // always reading as `Array(Mixed)`, it needs a real rule
+            // saying such a shape satisfies an ordinary `array`/
+            // `array<T>` hint - without this, `[1, 2, 3]` would stop
+            // being assignable to `int[]`/`array<int>` the moment its
+            // own type became precise, a real regression `types::
+            // is_subtype`'s own (deliberately conservative, pre-Finding-48)
+            // rule doesn't allow for.
+            (Type::ArrayShape(fields), Type::Array(b)) => {
+                fields.iter().all(|(_, ty, _)| self.is_assignable(ty, b))
+            }
+            // Same completion for shape-to-shape: a literal's own shape
+            // satisfies a declared shape when every field the declared
+            // shape actually requires is present (an optional field may
+            // be missing) with an assignable type - extra fields the
+            // literal has beyond what's required are ignored, the same
+            // "structural, not exact" spirit `Array(Mixed)`'s own
+            // leniency already uses elsewhere in this match.
+            (Type::ArrayShape(sub_fields), Type::ArrayShape(sup_fields)) => {
+                sup_fields.iter().all(|(name, sup_ty, optional)| {
+                    match sub_fields.iter().find(|(n, _, _)| n == name) {
+                        Some((_, sub_ty, _)) => self.is_assignable(sub_ty, sup_ty),
+                        None => *optional,
+                    }
+                })
             }
             _ => types::is_subtype(sub, sup),
         }
