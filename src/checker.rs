@@ -1473,6 +1473,26 @@ impl<'a> Checker<'a> {
                     // its catch block) and keeps one catch's binding from
                     // leaking into a sibling catch or the code after the
                     // whole try.
+                    // Finding 57: every type in a multi-type catch must
+                    // implement Throwable, independently of whatever
+                    // Finding 27's own union-binding does with them - a
+                    // real, unconditional PHP fatal error at
+                    // declaration time otherwise ("Cannot catch X
+                    // because it does not implement Throwable").
+                    for t in &c.types {
+                        if let Type::Object(class, _) = self.resolve_name_expr(t)
+                            && !self.registry.is_subclass_of(&class, "Throwable")
+                        {
+                            self.diagnostics.push(Diagnostic {
+                                location: label.to_string(),
+                                message: format!(
+                                    "cannot catch {class}: it does not implement Throwable"
+                                ),
+                                span: c.span,
+                                level: 0,
+                            });
+                        }
+                    }
                     let mut catch_locals = locals.clone();
                     if let Some(var) = &c.var {
                         // A multi-type catch (`catch (TypeA|TypeB $e)`,
@@ -1498,7 +1518,27 @@ impl<'a> Checker<'a> {
                     self.check_block(f, locals, declared_return, label);
                 }
             }
-            StmtKind::Throw(e) => self.check_expr(e, locals, label),
+            StmtKind::Throw(e) => {
+                self.check_expr(e, locals, label);
+                // Finding 57: `throw` only accepts a real Throwable - a
+                // real, unconditional PHP fatal error otherwise,
+                // independent of anything about the thrown value at
+                // runtime. Only checked when the thrown expression's own
+                // class is actually known (a concrete `Type::Object`) -
+                // anything else (Mixed, a dynamic expression) isn't
+                // guessed at, matching this project's usual leniency for
+                // "we don't know" cases.
+                if let Type::Object(class, _) = self.infer_expr(e, locals)
+                    && !self.registry.is_subclass_of(&class, "Throwable")
+                {
+                    self.diagnostics.push(Diagnostic {
+                        location: label.to_string(),
+                        message: format!("cannot throw {class}: it does not implement Throwable"),
+                        span: e.span,
+                        level: 0,
+                    });
+                }
+            }
             // `global $x;` binds $x to whatever the global scope holds,
             // which this checker doesn't track - Mixed is the honest
             // answer, but the important part is that it's bound at all, so
@@ -5997,6 +6037,64 @@ mod tests {
             class Ok3 {
                 public int $mutable = 0;
                 public function change(): void { $this->mutable = 5; }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn throwing_a_non_throwable_class_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class NotAnException2 {}
+            function test(): void { throw new NotAnException2(); }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("cannot throw NotAnException2: it does not implement Throwable")),
+            "expected a cannot-throw diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn throwing_a_real_exception_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void { throw new \RuntimeException("x"); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn catching_a_non_throwable_class_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class NotAnException1 {}
+            function doStuff1(): void {}
+            function test(): void {
+                try { doStuff1(); } catch (NotAnException1 $e) { echo "caught"; }
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("cannot catch NotAnException1: it does not implement Throwable")),
+            "expected a cannot-catch diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn catching_a_real_exception_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function doStuff1(): void {}
+            function test(): void {
+                try { doStuff1(); } catch (\RuntimeException $e) { echo "caught"; }
             }
         "#,
         );
