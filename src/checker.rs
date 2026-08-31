@@ -86,6 +86,12 @@ pub struct Checker<'a> {
     // The class whose method body is currently being checked, if any -
     // needed to resolve self/parent/static to a concrete class name.
     current_class: Option<String>,
+    // The name of the method whose body is currently being checked, if
+    // any - needed to tell whether a `readonly` property write is
+    // happening inside its own declaring class's constructor (Finding
+    // 47's pragmatic first cut: any write outside that exact spot is
+    // flagged).
+    current_method: Option<String>,
     // Set for the duration of one function/method (or the top-level script)
     // body when it calls extract()/eval() - both can define variables this
     // checker has no way to see, so undefined-variable detection would be
@@ -102,6 +108,7 @@ impl<'a> Checker<'a> {
             diagnostics: Vec::new(),
             name_ctx: NameContext::default(),
             current_class: None,
+            current_method: None,
             saw_dynamic_var_construct: false,
         }
     }
@@ -322,6 +329,8 @@ impl<'a> Checker<'a> {
 
         let previous_class = self.current_class.take();
         self.current_class = class_name.map(|s| s.to_string());
+        let previous_method = self.current_method.take();
+        self.current_method = Some(f.name.clone());
 
         let diagnostics_before = self.diagnostics.len();
         let previous_dynamic_flag = self.saw_dynamic_var_construct;
@@ -365,6 +374,7 @@ impl<'a> Checker<'a> {
         self.saw_dynamic_var_construct = previous_dynamic_flag;
 
         self.current_class = previous_class;
+        self.current_method = previous_method;
     }
 
     /// Resolves `self`/`static`/`parent` to a concrete `Object` relative to
@@ -2559,6 +2569,27 @@ impl<'a> Checker<'a> {
             // types on properties we do know about.
             return;
         };
+        // Finding 47: a `readonly` property may only be initialized once,
+        // from within the scope of the class that declares it - in
+        // practice, almost always its own constructor. Pragmatic first
+        // cut (per the plan's own text): flag every write outside the
+        // literal syntactic body of the declaring class's own
+        // constructor, rather than attempting real "has this exact
+        // property already been initialized" dataflow - a promoted
+        // constructor parameter never reaches this check at all (no
+        // `ExprKind::Assign` node exists for it in source), so it counts
+        // as the allowed first write automatically.
+        if prop_sig.is_readonly
+            && (self.current_class.as_deref() != Some(owner.as_str())
+                || self.current_method.as_deref() != Some("__construct"))
+        {
+            self.diagnostics.push(Diagnostic {
+                location: label.to_string(),
+                message: format!("{owner}::${prop} is readonly and cannot be modified here"),
+                span: lhs.span,
+                level: 0,
+            });
+        }
         let bindings = self.class_template_bindings(&class, &type_args, &owner);
         let expected = types::substitute_template(&prop_sig.ty, &bindings);
         let expected = self.resolve_pseudo(&expected, &class);
@@ -5895,6 +5926,78 @@ mod tests {
             r#"<?php
             class Open5 {}
             class Sub5b extends Open5 {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn writing_a_readonly_property_from_outside_its_declaring_class_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point1 {
+                public function __construct(public readonly int $x, public readonly int $y) {}
+            }
+            function mutateReadonly(Point1 $p): void { $p->x = 5; }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("Point1::$x is readonly")),
+            "expected a readonly-write diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn writing_a_readonly_property_from_a_non_constructor_method_of_its_own_class_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Immutable {
+                public function __construct(public readonly int $v) {}
+                public function bump(): void { $this->v = $this->v + 1; }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("Immutable::$v is readonly")),
+            "expected a readonly-write diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_promoted_readonly_property_is_not_flagged_by_its_own_promotion() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Point1 {
+                public function __construct(public readonly int $x, public readonly int $y) {}
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn writing_a_readonly_property_inside_its_own_constructor_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Widget14 {
+                public readonly int $a;
+                public function __construct() { $this->a = 1; }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn writing_an_ordinary_mutable_property_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Ok3 {
+                public int $mutable = 0;
+                public function change(): void { $this->mutable = 5; }
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
