@@ -1105,15 +1105,25 @@ impl<'a> Checker<'a> {
             ExprKind::Call(callee, args) => {
                 if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
                     && let ExprKind::Variable(var_name) = &single_arg.kind
-                    && let Some(target_ty) = narrowing_type_for_predicate(name)
                 {
-                    let current = locals.get(var_name).cloned().unwrap_or(Type::Mixed);
-                    let narrowed = if branch_true {
-                        narrow_type_to(&current, &target_ty)
-                    } else {
-                        narrow_type_excluding(&current, &target_ty)
-                    };
-                    locals.insert(var_name.clone(), narrowed);
+                    if name == "empty" {
+                        // `empty($x)` is PHP's own falsy check - only the
+                        // branch where it evaluated `false` (`$x` proven
+                        // truthy) is safely narrowable, the same asymmetry
+                        // as a bare truthiness check.
+                        if !branch_true {
+                            let current = locals.get(var_name).cloned().unwrap_or(Type::Mixed);
+                            locals.insert(var_name.clone(), narrow_type_excluding_falsy(&current));
+                        }
+                    } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
+                        let current = locals.get(var_name).cloned().unwrap_or(Type::Mixed);
+                        let narrowed = if branch_true {
+                            narrow_type_to(&current, &target_ty)
+                        } else {
+                            narrow_type_excluding(&current, &target_ty)
+                        };
+                        locals.insert(var_name.clone(), narrowed);
+                    }
                 }
             }
             ExprKind::Instanceof(inner, target) => {
@@ -1127,6 +1137,17 @@ impl<'a> Checker<'a> {
                 {
                     locals.insert(key, self.resolve_name_expr(class_name));
                 }
+            }
+            // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
+            // reaching here via the `Not` arm's recursion above) - only
+            // the truthy branch is narrowable, by excluding the falsy
+            // members this project can represent (`Null`/`False`); the
+            // falsy branch isn't safely narrowable to anything more
+            // specific than the current type.
+            _ if branch_true && narrowing_key(cond).is_some() => {
+                let key = narrowing_key(cond).expect("checked by guard above");
+                let current = locals.get(&key).cloned().unwrap_or(Type::Mixed);
+                locals.insert(key, narrow_type_excluding_falsy(&current));
             }
             _ => {}
         }
@@ -2694,6 +2715,30 @@ fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
             }
         }
         other if other == excluded => Type::Never,
+        other => other.clone(),
+    }
+}
+
+/// Narrows `original` by excluding every falsy member this project can
+/// represent (`Null`, `False`) - used for a bare truthiness check
+/// (`if ($x)`) and `empty($x)`'s own truthy branch. Real PHP's full falsy
+/// set also includes `0`/`0.0`/`""`/`"0"`/an empty array, but those aren't
+/// independently representable as excludable members of a `Union` today.
+fn narrow_type_excluding_falsy(original: &Type) -> Type {
+    match original {
+        Type::Union(members) => {
+            let kept: Vec<Type> = members
+                .iter()
+                .filter(|m| !matches!(m, Type::Null | Type::False))
+                .cloned()
+                .collect();
+            match kept.len() {
+                0 => Type::Never,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        Type::Null | Type::False => Type::Never,
         other => other.clone(),
     }
 }
@@ -5846,6 +5891,69 @@ mod tests {
         let d = diagnostics_for(
             r#"<?php
             function negate(string $s): int { return -$s; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Findings 54/56 from the architecture audit - a bare truthiness
+    // check (`if ($x)` / `if (!$x)`) and `empty($x)` both applied no
+    // narrowing at all.
+
+    #[test]
+    fn negated_truthy_guard_narrows_past_the_if() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                if (!$x) {
+                    return "empty";
+                }
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn positive_truthy_guard_narrows_inside_the_if() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                if ($x) {
+                    return $x;
+                }
+                return "default";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn positive_truthy_guard_does_not_narrow_the_false_branch() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                if ($x) {
+                    return "yes";
+                }
+                return $x;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn empty_guard_narrows_past_the_if() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): string {
+                if (empty($x)) {
+                    return "empty";
+                }
+                return $x;
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
