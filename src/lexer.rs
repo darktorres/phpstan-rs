@@ -259,7 +259,7 @@ impl<'a> Lexer<'a> {
 
         if is_ident_start(c) {
             let s = self.lex_ident_raw();
-            if let Some(kw) = Keyword::from_str(&s) {
+            if let Some(kw) = Keyword::try_from_str(&s) {
                 return Token::Keyword(kw);
             }
             return Token::Identifier(s);

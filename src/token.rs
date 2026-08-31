@@ -86,7 +86,7 @@ pub enum Keyword {
 }
 
 impl Keyword {
-    pub fn from_str(s: &str) -> Option<Keyword> {
+    pub fn try_from_str(s: &str) -> Option<Keyword> {
         use Keyword::*;
         Some(match s.to_ascii_lowercase().as_str() {
             "function" => Function,
@@ -155,7 +155,7 @@ impl Keyword {
         })
     }
 
-    /// The inverse of `from_str` - needed because most of these keywords
+    /// The inverse of `try_from_str` - needed because most of these keywords
     /// are only reserved in *declaration* position in real PHP ("semi-
     /// reserved words"): `enum`, `match`, `new`, `list`, `static`, etc are
     /// all valid namespace segments, method names, and property names.

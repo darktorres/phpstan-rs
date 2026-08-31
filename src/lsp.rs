@@ -190,7 +190,7 @@ impl Server {
     /// one `didOpen` at a time.
     fn load_workspace(&mut self, root: &Path) {
         let mut files = Vec::new();
-        crate::collect_php_files(root, &mut files);
+        crate::project::collect_php_files(root, &mut files);
         // See main.rs's run_check_project for why this matters: a real
         // workspace can genuinely declare the same fully-qualified class
         // twice (duplicate vendored copies of a library), and

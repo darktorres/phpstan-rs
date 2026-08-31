@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{Stmt, StmtKind};
@@ -269,6 +270,23 @@ fn parse(source: &str) -> Vec<Stmt> {
     Parser::new(tokens).parse_program()
 }
 
+/// Recursively collects every `.php` file under `path` - shared by the CLI
+/// (`main.rs`'s own subcommands) and the LSP's own workspace-loading path
+/// (`lsp.rs`'s `load_workspace`), which is why this lives in the library
+/// rather than as CLI-only glue in `main.rs`.
+pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
+    if path.is_dir() {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            collect_php_files(&entry.path(), out);
+        }
+    } else if path.extension().is_some_and(|e| e == "php") {
+        out.push(path.to_path_buf());
+    }
+}
+
 /// The last segment of a fully-qualified name (`"App\Foo\Bar"` becomes
 /// `"Bar"`). `declared_names` returns FQNs (needed to match
 /// `Registry::index`'s namespace-aware keys, for correct removal), but
@@ -378,6 +396,46 @@ fn unregister_references(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "phpstan_rs_project_test_{label}_{}_{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+        fn write(&self, rel: &str, contents: &str) -> PathBuf {
+            let path = self.0.join(rel);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&path, contents).unwrap();
+            path
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn collect_php_files_recurses_into_subdirectories_and_skips_non_php() {
+        let dir = TempDir::new("collect");
+        dir.write("a.php", "<?php");
+        dir.write("nested/b.php", "<?php");
+        dir.write("notes.txt", "not php");
+
+        let mut files = Vec::new();
+        collect_php_files(&dir.0, &mut files);
+        files.sort();
+
+        assert_eq!(files, vec![dir.0.join("a.php"), dir.0.join("nested/b.php")]);
+    }
 
     #[test]
     fn updating_one_file_does_not_disturb_another_files_registry_entries() {

@@ -1,19 +1,3 @@
-mod ast;
-mod baseline;
-mod checker;
-mod composer;
-mod config;
-mod deps;
-mod docblock;
-mod lexer;
-mod lsp;
-mod parser;
-mod php_stubs;
-mod project;
-mod registry;
-mod token;
-mod types;
-
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,6 +7,9 @@ use clap::{Parser as ClapParser, Subcommand};
 use checker::Checker;
 use lexer::Lexer;
 use parser::Parser;
+use phpstan_rs::{
+    baseline, checker, composer, config, lexer, lsp, parser, php_stubs, project, registry,
+};
 use registry::{FunctionSig, Registry};
 
 const SAMPLE: &str = r#"<?php
@@ -76,7 +63,7 @@ echo sum([1, 2, 3]) ?? 0;
 fn run_check(paths: &[PathBuf]) {
     let mut files = Vec::new();
     for p in paths {
-        collect_php_files(p, &mut files);
+        project::collect_php_files(p, &mut files);
     }
 
     let default_hook = std::panic::take_hook();
@@ -139,19 +126,6 @@ fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
     failures
 }
 
-fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
-    if path.is_dir() {
-        let Ok(entries) = fs::read_dir(path) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            collect_php_files(&entry.path(), out);
-        }
-    } else if path.extension().is_some_and(|e| e == "php") {
-        out.push(path.to_path_buf());
-    }
-}
-
 /// `phpstan-rs incremental-bench <dir> [<file-to-touch>]` - loads every
 /// .php file under `dir` into a `Project` (a full load, timed), then
 /// re-parses and re-checks just one file via `Project::update_file` (the
@@ -161,7 +135,7 @@ fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
 /// directory-walk order when none is named explicitly.
 fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
     let mut files = Vec::new();
-    collect_php_files(dir, &mut files);
+    project::collect_php_files(dir, &mut files);
     if files.is_empty() {
         eprintln!("no .php files found under {}", dir.display());
         return;
@@ -297,7 +271,7 @@ fn run_check_project(
 ) {
     let mut analyze_files = Vec::new();
     for dir in dirs {
-        collect_php_files(dir, &mut analyze_files);
+        project::collect_php_files(dir, &mut analyze_files);
     }
     if analyze_files.is_empty() {
         let dirs: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
@@ -317,7 +291,7 @@ fn run_check_project(
 
     let mut context_files: Vec<PathBuf> = scan_files.to_vec();
     for dir in scan_dirs {
-        collect_php_files(dir, &mut context_files);
+        project::collect_php_files(dir, &mut context_files);
     }
     context_files.sort();
     context_files.dedup();
@@ -677,10 +651,12 @@ fn format_signature(name: &str, sig: &FunctionSig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use phpstan_rs::types;
 
-    // main.rs had 0% test coverage before this - collect_php_files,
-    // check_chunk, and format_signature are all real, deterministic
-    // logic that doesn't touch stdout, so they're tested directly here.
+    // main.rs had 0% test coverage before this - check_chunk and
+    // format_signature are real, deterministic logic that doesn't touch
+    // stdout, so they're tested directly here (collect_php_files moved to
+    // project.rs, tested there now).
     // run_check/run_check_project/run_incremental_bench and the default
     // no-args mode all print straight to stdout instead of returning
     // anything - those are covered by tests/cli.rs instead, which spawns
@@ -712,20 +688,6 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
-    }
-
-    #[test]
-    fn collect_php_files_recurses_into_subdirectories_and_skips_non_php() {
-        let dir = TempDir::new("collect");
-        dir.write("a.php", "<?php");
-        dir.write("nested/b.php", "<?php");
-        dir.write("notes.txt", "not php");
-
-        let mut files = Vec::new();
-        collect_php_files(&dir.0, &mut files);
-        files.sort();
-
-        assert_eq!(files, vec![dir.0.join("a.php"), dir.0.join("nested/b.php")]);
     }
 
     #[test]
