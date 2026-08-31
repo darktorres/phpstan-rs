@@ -1,11 +1,11 @@
 <?php
-class Point
+class Point4
 {
     public int $x = 0;
     public int $y = 0;
 }
 
-$p1 = new Point();
+$p1 = new Point4();
 $p2 = clone $p1;
 $p2->x = 5;
 ?>

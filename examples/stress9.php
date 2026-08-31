@@ -6,7 +6,7 @@ class Box
     public $value;
 }
 
-class Point
+class Point9
 {
     /**
      * @param int[] $coords
@@ -39,7 +39,7 @@ function sumAll(array $items)
 $box = new Box();
 $box->value = 42;
 
-$p = new Point([1, 2, 3]);
+$p = new Point9([1, 2, 3]);
 
 echo double(21);
 echo sumAll([1, 2, 3]);
