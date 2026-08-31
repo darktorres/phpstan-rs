@@ -143,12 +143,15 @@ impl<'a> Checker<'a> {
                     // FQN-keyed.
                     let fqn = self.name_ctx.declared_name(&c.name);
                     self.check_class_generic_bounds(&fqn, c);
+                    self.check_class_completeness(&fqn, c.span);
+                    self.check_method_overrides(&fqn, c);
                     for m in &c.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
                 }
                 StmtKind::EnumDecl(e) => {
                     let fqn = self.name_ctx.declared_name(&e.name);
+                    self.check_class_completeness(&fqn, e.span);
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
@@ -737,6 +740,154 @@ impl<'a> Checker<'a> {
         }
         for ty in types_to_check {
             self.check_generic_bounds(&ty, fqn, c.span);
+        }
+    }
+
+    /// Finding 45: a concrete class must provide a real implementation of
+    /// every abstract method it inherits (from a parent class, an
+    /// implemented interface, or a directly-`use`d trait) - real PHP
+    /// raises a fatal error at declaration time otherwise, independent of
+    /// whether anything ever calls the missing method. Interfaces,
+    /// traits, and abstract classes are themselves exempt (a class that
+    /// legitimately leaves a method unimplemented is required to declare
+    /// itself `abstract`, and one that does is not itself required to be
+    /// complete).
+    fn check_class_completeness(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        if info.kind != ClassKind::Class && info.kind != ClassKind::Enum {
+            return;
+        }
+        if info.is_abstract {
+            return;
+        }
+        let required = self.registry.required_abstract_methods(fqn);
+        let missing: Vec<&String> = required
+            .iter()
+            .filter(|m| !self.registry.has_concrete_implementation(fqn, m))
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let shown: Vec<&str> = missing.iter().take(3).map(|s| s.as_str()).collect();
+        let mut message = format!(
+            "class {fqn} does not implement abstract method(s): {}",
+            shown.join(", ")
+        );
+        if missing.len() > shown.len() {
+            message.push_str(&format!(", and {} more", missing.len() - shown.len()));
+        }
+        self.diagnostics.push(Diagnostic {
+            location: fqn.to_string(),
+            message,
+            span,
+            level: 0,
+        });
+    }
+
+    /// Finding 50: an overriding method's signature must stay
+    /// Liskov-compatible with the method it overrides - a parameter type
+    /// may only be widened or kept the same (accepting more is safe),
+    /// never narrowed; a return type may only be narrowed or kept the
+    /// same (promising more is safe), never widened. Real PHP enforces
+    /// this unconditionally at class-declaration time. Deliberately
+    /// scoped to concrete parameter/return type mismatches only, not
+    /// generic type-argument variance within an overridden signature -
+    /// this project's own `is_assignable` is already lenient there by
+    /// design (guessing wrong in either direction is worse than not
+    /// checking), and that leniency is the right call here too.
+    fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        for m in &c.methods {
+            // Real PHP deliberately exempts constructors from override-
+            // compatibility checking - a subclass's own __construct is
+            // allowed an entirely different, otherwise-incompatible
+            // signature from its parent's, unlike every other method.
+            if m.function.name == "__construct" {
+                continue;
+            }
+            let Some(own_sig) = info.methods.get(&m.function.name) else {
+                continue;
+            };
+            let Some((_, ancestor_sig)) = self
+                .registry
+                .lookup_ancestor_method_with_owner(fqn, &m.function.name)
+            else {
+                continue;
+            };
+            for (i, ancestor_param) in ancestor_sig.params.iter().enumerate() {
+                let Some(own_param) = own_sig.params.get(i) else {
+                    continue;
+                };
+                // `Type::Mixed` is overloaded throughout this project to
+                // mean both real PHP `mixed` *and* "no type declared at
+                // all, native or docblock" (see this file's own opening
+                // comment) - and real PHP explicitly does NOT enforce
+                // override compatibility for a parameter/return position
+                // that isn't typed at all (only an explicitly *narrower*
+                // declared type is a real fatal error). Since an
+                // intentional, explicit `mixed` on an override is rare
+                // next to "just wasn't declared", skipping either side
+                // being Mixed avoids flagging the overwhelmingly common
+                // case (confirmed via vendor/phpstorm-stubs: dozens of
+                // real stub methods simply don't redeclare an inherited
+                // native return type) at the cost of missing the rare
+                // genuine `mixed`-narrows-a-real-type case - the same
+                // "don't guess wrong on Mixed" tradeoff `is_assignable`
+                // already makes elsewhere in this project.
+                if own_param.ty == Type::Mixed || ancestor_param.ty == Type::Mixed {
+                    continue;
+                }
+                if !self
+                    .registry
+                    .is_assignable(&ancestor_param.ty, &own_param.ty)
+                {
+                    self.diagnostics.push(Diagnostic {
+                        location: fqn.to_string(),
+                        message: format!(
+                            "{fqn}::{}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
+                            m.function.name,
+                            i + 1,
+                            own_param.name,
+                            own_param.ty,
+                            ancestor_param.ty
+                        ),
+                        span: m.span,
+                        level: 0,
+                    });
+                }
+            }
+            // An ancestor's own `static`-typed return (`self.registry`
+            // has no way to resolve what `static` meant relative to the
+            // *ancestor's* declaring class, only the checker's own
+            // current-class-aware `resolve_pseudo`, which isn't
+            // available here) is real PHP's own explicit "late static
+            // binding" covariance escape hatch - a subclass narrowing it
+            // to its own concrete class name (the overwhelmingly common
+            // real shape, confirmed via vendor/phpstorm-stubs'
+            // `Ds\Collection::copy(): static` and its own subclasses'
+            // `copy(): Vector`/`copy(): Stack`/...) is always exactly
+            // what real PHP allows, never a real incompatibility.
+            if own_sig.return_type != Type::Mixed
+                && ancestor_sig.return_type != Type::Mixed
+                && ancestor_sig.return_type != Type::StaticRef
+                && !self
+                    .registry
+                    .is_assignable(&own_sig.return_type, &ancestor_sig.return_type)
+            {
+                self.diagnostics.push(Diagnostic {
+                    location: fqn.to_string(),
+                    message: format!(
+                        "{fqn}::{}() return type {} is not compatible with the inherited return type {}",
+                        m.function.name, own_sig.return_type, ancestor_sig.return_type
+                    ),
+                    span: m.span,
+                    level: 0,
+                });
+            }
         }
     }
 
@@ -5445,6 +5596,169 @@ mod tests {
             abstract class AbstractThing { abstract public function doIt(): void; }
             class Concrete extends AbstractThing { public function doIt(): void {} }
             function test(): Concrete { return new Concrete(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_class_missing_an_inherited_abstract_method_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            abstract class Shape2 { abstract public function area(): float; }
+            class Circle2 extends Shape2 {}
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("does not implement abstract method(s): area")),
+            "expected a missing-abstract-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_class_partially_implementing_an_interface_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface Multi7 { public function a(): void; public function b(): void; }
+            class Impl7 implements Multi7 { public function a(): void {} }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("does not implement abstract method(s): b")),
+            "expected a missing-abstract-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_class_using_a_trait_with_an_unimplemented_abstract_method_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait Greetable9 {
+                abstract public function getName(): string;
+                public function greet(): string { return "Hello " . $this->getName(); }
+            }
+            class Person9 { use Greetable9; }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x
+                .message
+                .contains("does not implement abstract method(s): getName")),
+            "expected a missing-abstract-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_class_that_supplies_a_traits_abstract_method_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait Greetable9 {
+                abstract public function getName(): string;
+                public function greet(): string { return "Hello " . $this->getName(); }
+            }
+            class Person9 { use Greetable9; public function getName(): string { return "x"; } }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_concrete_implementation_two_hops_up_an_extends_chain_satisfies_a_directly_implemented_interface()
+     {
+        // Regression for a real BFS-distance bug found while implementing
+        // this: a class can `implements Throwable` directly while its
+        // real concrete `getCode()` only lives two `extends` hops further
+        // up (e.g. `BaseException -> Exception`) - the *closest* ancestor
+        // mentioning the name at all must not win over a real, if
+        // farther, concrete implementation.
+        let d = diagnostics_for(
+            r#"<?php
+            interface Throwable2 {
+                public function getMessage(): string;
+                public function getCode();
+            }
+            class Exception2 implements Throwable2 {
+                public function getMessage(): string {}
+                public function getCode() {}
+            }
+            class BaseException2 extends Exception2 implements Throwable2 {}
+            class Leaf2 extends BaseException2 implements Throwable2 {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_method_narrowing_an_inherited_parameter_type_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Animal2 {}
+            class Dog2 extends Animal2 {}
+            class Handler2 { public function handle(Animal2 $a): void {} }
+            class DogOnlyHandler2 extends Handler2 { public function handle(Dog2 $a): void {} }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains(
+                "DogOnlyHandler2::handle() parameter #1 ($a) narrows the inherited parameter type"
+            )),
+            "expected a narrowed-parameter diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_method_widening_an_inherited_parameter_type_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Animal2 {}
+            class Handler2 { public function handle(Animal2 $a): void {} }
+            class WideningHandler2 extends Handler2 { public function handle(object $a): void {} }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_constructor_with_an_incompatible_signature_is_not_flagged() {
+        // Real PHP deliberately exempts __construct from override-
+        // compatibility checking - a subclass constructor may have an
+        // entirely different signature from its parent's.
+        let d = diagnostics_for(
+            r#"<?php
+            class Base10 { public function __construct(string $a) {} }
+            class Sub10 extends Base10 { public function __construct(int $a, int $b) {} }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn an_override_with_no_declared_type_is_not_flagged_as_narrowing() {
+        // Type::Mixed here means "nothing declared, native or docblock",
+        // not a genuinely explicit `mixed` - real PHP doesn't enforce
+        // override compatibility for an omitted type at all.
+        let d = diagnostics_for(
+            r#"<?php
+            class Base11 { public function make(): int { return 1; } }
+            class Sub11 extends Base11 { public function make() { return 1; } }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn an_override_narrowing_an_inherited_static_return_type_is_not_flagged() {
+        // Real PHP's late-static-binding covariance rule: an ancestor's
+        // own `static`-typed return is always safely satisfiable by an
+        // override returning its own concrete class name.
+        let d = diagnostics_for(
+            r#"<?php
+            interface Collection12 { /** @return static */ public function copy(); }
+            class Vector12 implements Collection12 { public function copy(): Vector12 {} }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");

@@ -820,6 +820,7 @@ impl Registry {
             String,
             Vec<(String, FunctionSig)>,
             Vec<(String, PropertySig)>,
+            HashSet<String>,
         );
 
         let class_names: Vec<String> = self.classes.keys().cloned().collect();
@@ -830,16 +831,27 @@ impl Registry {
             if uses.is_empty() {
                 continue;
             }
+            // A trait can declare its own `abstract` method (the using
+            // class is required to supply it) - a using class's own
+            // directly-declared method for that same name (checked here,
+            // before any trait's contribution is applied) always wins,
+            // matching the same `or_insert` "first/own wins" semantics
+            // `methods` itself already uses below.
+            let own_method_names: HashSet<String> =
+                self.classes[class_name].methods.keys().cloned().collect();
             let mut methods = Vec::new();
             let mut properties = Vec::new();
+            let mut abstract_from_traits: HashSet<String> = HashSet::new();
             for trait_name in &uses {
                 if let Some(trait_info) = self.classes.get(trait_name) {
-                    methods.extend(
-                        trait_info
-                            .methods
-                            .iter()
-                            .map(|(n, s)| (n.clone(), s.clone())),
-                    );
+                    for (name, sig) in &trait_info.methods {
+                        methods.push((name.clone(), sig.clone()));
+                        if trait_info.abstract_methods.contains(name)
+                            && !own_method_names.contains(name)
+                        {
+                            abstract_from_traits.insert(name.clone());
+                        }
+                    }
                     properties.extend(
                         trait_info
                             .properties
@@ -848,10 +860,15 @@ impl Registry {
                     );
                 }
             }
-            additions.push((class_name.clone(), methods, properties));
+            additions.push((
+                class_name.clone(),
+                methods,
+                properties,
+                abstract_from_traits,
+            ));
         }
 
-        for (class_name, methods, properties) in additions {
+        for (class_name, methods, properties, abstract_from_traits) in additions {
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (name, sig) in methods {
                     info.methods.entry(name).or_insert(sig);
@@ -859,6 +876,7 @@ impl Registry {
                 for (name, sig) in properties {
                     info.properties.entry(name).or_insert(sig);
                 }
+                info.abstract_methods.extend(abstract_from_traits);
             }
         }
     }
@@ -1086,6 +1104,96 @@ impl Registry {
         method: &str,
     ) -> Option<(String, &FunctionSig)> {
         self.lookup_in_hierarchy_with_owner(class, |info| info.methods.get(method))
+    }
+
+    /// Same as `lookup_method_with_owner`, but starts the walk at
+    /// `class`'s own parents rather than `class` itself - used for
+    /// override-compatibility checking (Finding 50), which needs the
+    /// signature a method is overriding, not the overriding one itself.
+    pub fn lookup_ancestor_method_with_owner(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<(String, &FunctionSig)> {
+        let info = self.classes.get(class)?;
+        for parent in info.extends.iter().chain(info.implements.iter()) {
+            if let Some(found) = self.lookup_method_with_owner(parent, method) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Every method name `class` must provide a concrete (non-abstract)
+    /// implementation of somewhere in its own hierarchy: every abstract
+    /// method declared by an ancestor class, every method declared by an
+    /// ancestor interface (interface methods have no body at all, so
+    /// every one of them is implicitly abstract - real PHP doesn't
+    /// require/allow the `abstract` keyword there), and every abstract
+    /// method declared by a trait any of those classes `use`s -
+    /// `flatten_traits` already folds a trait's own `abstract_methods`
+    /// into each using class's own set (unless the using class supplies
+    /// its own concrete override), so a plain walk of `abstract_methods`
+    /// here already covers it, with no separate trait-specific case
+    /// needed.
+    pub fn required_abstract_methods(&self, class: &str) -> Vec<String> {
+        let mut required = HashSet::new();
+        let mut seen = HashSet::new();
+        let mut stack = vec![class.to_string()];
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            let Some(info) = self.classes.get(&current) else {
+                continue;
+            };
+            if info.kind == ClassKind::Interface {
+                required.extend(info.methods.keys().cloned());
+            } else {
+                required.extend(info.abstract_methods.iter().cloned());
+            }
+            for parent in info.extends.iter().chain(info.implements.iter()) {
+                stack.push(parent.clone());
+            }
+        }
+        let mut required: Vec<String> = required.into_iter().collect();
+        required.sort();
+        required
+    }
+
+    /// A required method (see `required_abstract_methods`) counts as
+    /// implemented only if *some* reachable ancestor provides a concrete
+    /// one - not necessarily the *closest* ancestor with any entry at
+    /// all. Deliberately doesn't reuse `lookup_method_with_owner`'s
+    /// closest-match BFS: a class can `implements Throwable` directly
+    /// (graph-adjacent) while its real concrete `getCode()` etc. only
+    /// live two hops further up an `extends` chain (e.g. `BaseException`
+    /// -> real `Exception`) - the closest *node* with any entry for the
+    /// name is the interface's own bodyless declaration, even though a
+    /// real implementation is reachable elsewhere. So this walks the
+    /// whole ancestor graph looking for any concrete match, rather than
+    /// stopping at the first node that merely mentions the name at all.
+    pub fn has_concrete_implementation(&self, class: &str, method: &str) -> bool {
+        let mut seen = HashSet::new();
+        let mut stack = vec![class.to_string()];
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            let Some(info) = self.classes.get(&current) else {
+                continue;
+            };
+            if info.kind != ClassKind::Interface
+                && info.methods.contains_key(method)
+                && !info.abstract_methods.contains(method)
+            {
+                return true;
+            }
+            for parent in info.extends.iter().chain(info.implements.iter()) {
+                stack.push(parent.clone());
+            }
+        }
+        false
     }
 
     /// Looks up a property, walking the ancestor graph if not declared
