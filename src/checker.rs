@@ -903,12 +903,21 @@ impl<'a> Checker<'a> {
                 // iteration produces" - not a real fixed point, but sound
                 // enough to avoid claiming more precision than we have.
                 *locals = merge_scopes(locals, &body_locals);
+                // Reaching code after the loop always means `cond` just
+                // evaluated false, regardless of how many iterations ran -
+                // real, additional narrowing on top of the merge above,
+                // independent of it (e.g. a "loop until no longer null"
+                // idiom is fully narrowed non-null afterward).
+                self.apply_narrowing(cond, locals, false);
             }
             StmtKind::DoWhile { body, cond } => {
                 // The condition is only evaluated after the body has
                 // already run once, so there's nothing to narrow going in.
                 self.check_stmt(body, locals, declared_return, label);
                 self.check_expr(cond, locals, label);
+                // Same as `While` - reaching code after a do-while always
+                // means `cond` just evaluated false.
+                self.apply_narrowing(cond, locals, false);
             }
             StmtKind::For {
                 init,
@@ -916,10 +925,43 @@ impl<'a> Checker<'a> {
                 step,
                 body,
             } => {
-                for e in init.iter().chain(cond).chain(step) {
+                for e in init.iter().chain(cond.iter()) {
                     self.check_expr(e, locals, label);
                 }
-                self.check_stmt(body, locals, declared_return, label);
+                // A real `for`'s condition slot can hold several
+                // comma-separated expressions - only the *last* one's
+                // truthiness actually gates the loop, matching PHP's own
+                // semantics (the others are only there for a side effect).
+                match cond.last() {
+                    Some(c) => {
+                        let mut body_locals = locals.clone();
+                        self.apply_narrowing(c, &mut body_locals, true);
+                        self.check_stmt(body, &mut body_locals, declared_return, label);
+                        // `step` runs after each body iteration, so it
+                        // should see whatever the body just did, not the
+                        // pre-loop state.
+                        for e in step {
+                            self.check_expr(e, &mut body_locals, label);
+                        }
+                        // Same "may run zero times" merge `While` uses,
+                        // for the same reason - unlike before this fix,
+                        // this is no longer treated as if the body always
+                        // executes exactly once.
+                        *locals = merge_scopes(locals, &body_locals);
+                        self.apply_narrowing(c, locals, false);
+                    }
+                    None => {
+                        // `for (;;)` - no condition means an unconditional
+                        // infinite loop (barring an internal break/return/
+                        // etc.), so the body genuinely always executes at
+                        // least once - no "may run zero times" merge is
+                        // needed or correct here.
+                        self.check_stmt(body, locals, declared_return, label);
+                        for e in step {
+                            self.check_expr(e, locals, label);
+                        }
+                    }
+                }
             }
             StmtKind::Foreach {
                 subject,
@@ -6403,6 +6445,73 @@ mod tests {
                     return;
                 }
                 h($x);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Findings 52/53 from the architecture audit - a `while`/`do-while`
+    // loop never applied its negated condition as narrowing after exit,
+    // and a `for` loop's body was checked as if it always executes
+    // exactly once, with no "may run zero times" merge at all.
+
+    #[test]
+    fn while_loop_narrows_the_negated_condition_after_exit() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): int {
+                $x = null;
+                while ($x === null) {
+                    $x = 5;
+                }
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn do_while_loop_narrows_the_negated_condition_after_exit() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): int {
+                $x = null;
+                do {
+                    $x = 5;
+                } while ($x === null);
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn for_loop_that_can_run_zero_times_does_not_define_a_body_only_variable() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): int {
+                for ($i = 0; $i < 0; $i++) {
+                    $x = 5;
+                }
+                return $x;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("undefined variable $x"), "got: {d:?}");
+    }
+
+    #[test]
+    fn for_loop_narrows_the_negated_condition_after_exit() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): int {
+                for ($x = null; $x === null;) {
+                    $x = 5;
+                }
+                return $x;
             }
         "#,
         );
