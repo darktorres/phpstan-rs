@@ -7197,4 +7197,34 @@ mod tests {
         );
         assert_eq!(d.len(), 1, "got: {d:?}");
     }
+    // Finding 41 from the architecture audit (integer-literal half only -
+    // the float-literal half needs a new Type::FloatLiteral variant,
+    // deferred as lower priority per the plan) - PHPStan-style
+    // literal-integer union types (`1|2|3`) rejected every value,
+    // including genuinely valid ones, because a bare integer in a type
+    // string fell through to a bogus literal-class-reference fallback.
+
+    #[test]
+    fn literal_integer_union_type_accepts_a_genuinely_valid_value() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param 1|2|3 $level */
+            function f($level): void {}
+            function test(): void { f(2); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn literal_integer_union_type_still_rejects_a_genuinely_invalid_value() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param 1|2|3 $level */
+            function f($level): void {}
+            function test(): void { f(5); }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
 }

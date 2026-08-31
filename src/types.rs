@@ -262,6 +262,19 @@ fn parse_type_atom(s: &str) -> Type {
         return Type::StringLiteral(inner.to_string());
     }
 
+    // A real, documented PHPStan/Psalm convention, the same idea as the
+    // quoted-string case just above: a bare integer literal as one
+    // member of a union (`1|2|3`, a common way to constrain a value to a
+    // fixed set of integers - log levels, status codes, mode flags, ...)
+    // means "exactly this integer value," not a class reference -
+    // without this it fell through to the generic-class branch below and
+    // became a bogus `Type::Object("1", [])`, rejecting every value
+    // (including genuinely valid ones) regardless of `is_subtype`'s own
+    // otherwise-correct `IntLiteral`/`Union` handling.
+    if let Ok(n) = s.parse::<i64>() {
+        return Type::IntLiteral(n);
+    }
+
     // PHPDoc's `Type[]` array shorthand (`int[]`, even `string[][]`) has no
     // native-hint equivalent, but reusing this parser for doc-comment types
     // makes it worth handling here rather than in a separate PHPDoc-only
