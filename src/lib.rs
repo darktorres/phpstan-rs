@@ -6,6 +6,7 @@
 //! module paths remain available either way.
 
 pub mod ast;
+pub mod ast_walk;
 pub mod baseline;
 pub mod checker;
 pub mod composer;
