@@ -296,6 +296,34 @@ impl<'a> Checker<'a> {
             self.check_stmt(stmt, &mut locals, declared_return.as_ref(), &label);
         }
 
+        // A function that falls off the end of its body with no `return`
+        // at all implicitly returns `null` too - equally a real mismatch
+        // against a non-nullable, non-void, non-mixed declared return
+        // type, and equally easy to miss without this: `always_terminates`
+        // (already used for guard-clause narrowing) answers "does this
+        // statement definitely end control flow" - a `false` here means
+        // this function's own body doesn't guarantee returning anything.
+        if let Some(expected) = &declared_return
+            && let Some(last) = f.body.last()
+            && !self.always_terminates(last, &locals)
+        {
+            let expected = match &self.current_class {
+                Some(c) => self.resolve_pseudo(expected, c),
+                None => expected.clone(),
+            };
+            if expected != Type::Void
+                && expected != Type::Mixed
+                && !self.registry.is_assignable(&Type::Null, &expected)
+            {
+                self.diagnostics.push(Diagnostic {
+                    location: label.clone(),
+                    message: format!("return type mismatch: expected {expected}, got null"),
+                    span: f.span,
+                    level: 3,
+                });
+            }
+        }
+
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
         }
@@ -449,6 +477,77 @@ impl<'a> Checker<'a> {
                     && else_branch
                         .as_deref()
                         .is_some_and(|e| self.always_terminates(e, locals))
+            }
+            // A `switch` guarantees ending control flow only when there's
+            // a `default` (otherwise the subject might match nothing and
+            // fall straight through, doing nothing) and every non-empty
+            // case body genuinely terminates - not just `break`s, which
+            // only exits the switch itself and falls through to whatever
+            // follows it, not out of the enclosing function. An empty
+            // body (`case a: case b: ...`, a pure fallthrough label) is
+            // skipped rather than required to independently terminate -
+            // only the eventual non-empty body it falls into needs to.
+            StmtKind::Switch { cases, .. } => {
+                cases.iter().any(|c| c.test.is_none())
+                    && cases.iter().all(|c| {
+                        c.body.is_empty()
+                            || c.body.last().is_some_and(|s| {
+                                !matches!(s.kind, StmtKind::Break(_))
+                                    && self.always_terminates(s, locals)
+                            })
+                    })
+            }
+            // A `try` guarantees ending control flow when its own body
+            // does (whether by returning normally or by throwing - an
+            // uncaught throw propagates out of the function just as
+            // surely as a caught one returns from a catch block) *and*
+            // every one of its `catch` clauses also does. An empty
+            // `catches` list (a bare `try { ... } finally { ... }`)
+            // vacuously satisfies the second half - nothing can catch and
+            // fail to terminate if nothing catches at all. `finally`
+            // itself doesn't need to independently terminate for this
+            // question - it always runs before whatever the try/catch
+            // already decided.
+            StmtKind::Try { body, catches, .. } => {
+                body.last()
+                    .is_some_and(|s| self.always_terminates(s, locals))
+                    && catches.iter().all(|c| {
+                        c.body
+                            .last()
+                            .is_some_and(|s| self.always_terminates(s, locals))
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether `stmt` exits the whole enclosing function or loop
+    /// (`return`/`throw`/`continue`, or a nested construct that
+    /// guarantees one of those) rather than merely exiting a `switch`
+    /// itself (`break`, or not transferring control at all). Distinct
+    /// from `always_terminates`'s own notion of "doesn't fall through to
+    /// the next case" (which correctly treats `break` as terminating
+    /// *that* question) - a switch's own post-switch scope merge needs
+    /// this different distinction instead: a case ending in `break`
+    /// still reaches the code after the switch, one ending in
+    /// `return`/`throw`/`continue` never does.
+    fn exits_function_or_loop(&self, stmt: &Stmt, locals: &HashMap<String, Type>) -> bool {
+        match &stmt.kind {
+            StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Continue(_) => true,
+            StmtKind::Break(_) => false,
+            StmtKind::Expression(e) => self.infer_expr(e, locals) == Type::Never,
+            StmtKind::Block(stmts) => stmts
+                .last()
+                .is_some_and(|s| self.exits_function_or_loop(s, locals)),
+            StmtKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.exits_function_or_loop(then_branch, locals)
+                    && else_branch
+                        .as_deref()
+                        .is_some_and(|e| self.exits_function_or_loop(e, locals))
             }
             _ => false,
         }
@@ -852,6 +951,31 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // A bare `return;` always returns `null` in real PHP,
+            // regardless of the function's declared return type - a
+            // genuine mismatch inside a function declared to return a
+            // concrete, non-nullable, non-`void` type (the same easy
+            // slip as forgetting to add a return value after an
+            // early-exit guard clause).
+            StmtKind::Return(None) => {
+                if let Some(expected) = declared_return {
+                    let expected = match &self.current_class {
+                        Some(c) => self.resolve_pseudo(expected, c),
+                        None => expected.clone(),
+                    };
+                    if expected != Type::Void
+                        && expected != Type::Mixed
+                        && !self.registry.is_assignable(&Type::Null, &expected)
+                    {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!("return type mismatch: expected {expected}, got null"),
+                            span: stmt.span,
+                            level: 3,
+                        });
+                    }
+                }
+            }
             StmtKind::Echo(exprs) => {
                 for e in exprs {
                     self.check_expr(e, locals, label);
@@ -1017,10 +1141,27 @@ impl<'a> Checker<'a> {
                 // fallthrough is also possible), matching this project's
                 // general preference for missing precision over a false
                 // positive.
+                // A third thing tracked alongside the two above:
+                // `exit_states` collects every case's own ending state
+                // that legitimately reaches the code *after* the whole
+                // switch - either it ends in `break` (exits the switch,
+                // not the enclosing function/loop), or it's the very last
+                // case and simply falls off its own end with no explicit
+                // exit at all. A case ending in `return`/`throw`/
+                // `continue` never contributes here, since control never
+                // reaches past the switch on that path. If there's no
+                // `default:`, the subject might also match nothing at
+                // all, so the original pre-switch state is its own valid
+                // exit path too.
                 let mut running = locals.clone();
                 let mut narrowed_locals = locals.clone();
                 let mut previous_terminates = true;
-                for case in cases {
+                let mut exit_states: Vec<HashMap<String, Type>> = Vec::new();
+                if !cases.iter().any(|c| c.test.is_none()) {
+                    exit_states.push(locals.clone());
+                }
+                let case_count = cases.len();
+                for (i, case) in cases.iter().enumerate() {
                     if let Some(t) = &case.test {
                         self.check_expr(t, locals, label);
                     }
@@ -1034,19 +1175,37 @@ impl<'a> Checker<'a> {
                         running.clone()
                     };
                     self.check_block(&case.body, &mut case_locals, declared_return, label);
-                    let case_terminates = case
-                        .body
-                        .last()
-                        .is_some_and(|s| self.always_terminates(s, &case_locals));
+                    let last_stmt = case.body.last();
+                    let case_terminates =
+                        last_stmt.is_some_and(|s| self.always_terminates(s, &case_locals));
                     if let Some(t) = &case.test {
                         self.apply_equality_narrowing(subject, t, &mut narrowed_locals, false);
+                    }
+                    let is_last = i + 1 == case_count;
+                    let reaches_after_switch = match last_stmt {
+                        Some(s) if matches!(s.kind, StmtKind::Break(_)) => true,
+                        Some(s) => is_last && !self.exits_function_or_loop(s, &case_locals),
+                        None => is_last,
+                    };
+                    if reaches_after_switch {
+                        exit_states.push(case_locals.clone());
                     }
                     if !case_terminates {
                         running = case_locals;
                     }
                     previous_terminates = case_terminates;
                 }
-                *locals = running;
+                // If no path reaches past the switch (every case
+                // return/throw/continues, and a `default:` exists), the
+                // code after it is dead - leave `locals` alone rather
+                // than guess, the same shape `always_terminates`'s own
+                // `Switch` arm independently recognizes.
+                if let Some(first) = exit_states.first().cloned() {
+                    *locals = exit_states
+                        .into_iter()
+                        .skip(1)
+                        .fold(first, |acc, s| merge_scopes(&acc, &s));
+                }
             }
             StmtKind::Try {
                 body,
@@ -6512,6 +6671,159 @@ mod tests {
                     $x = 5;
                 }
                 return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+    // Finding 31 from the architecture audit - a bare `return;`, and
+    // falling off the end of the function body with no `return` at all,
+    // were never checked against a non-nullable, non-void declared
+    // return type.
+
+    #[test]
+    fn bare_return_is_flagged_against_a_non_nullable_return_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $c): int {
+                if ($c) {
+                    return;
+                }
+                return 5;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("got null"), "got: {d:?}");
+    }
+
+    #[test]
+    fn bare_return_is_not_flagged_against_void_or_nullable() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $c): void {
+                if ($c) {
+                    return;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $c): ?int {
+                if ($c) {
+                    return;
+                }
+                return 5;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn falling_off_the_end_is_flagged_against_a_non_nullable_return_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): int { echo "hello"; }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("got null"), "got: {d:?}");
+    }
+
+    #[test]
+    fn a_function_whose_every_path_returns_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $c): int {
+                if ($c) {
+                    return 1;
+                } else {
+                    return 2;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_function_ending_in_an_exhaustive_switch_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int $n): string {
+                switch ($n) {
+                    case 1:
+                        return "one";
+                    default:
+                        return "other";
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_function_ending_in_a_switch_with_no_default_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int $n): string {
+                switch ($n) {
+                    case 1:
+                        return "one";
+                }
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn switch_cases_ending_in_break_still_propagate_their_definitions_past_the_switch() {
+        // Regression test for a real bug caught while implementing this
+        // fix: the Finding 55 rewrite of Switch's own narrowing stopped
+        // tracking what a `break`-terminated case (the most common real
+        // switch style) leaves defined for the code after the switch.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int $x): int {
+                switch ($x) {
+                    case 1:
+                        $y = 1;
+                        break;
+                    default:
+                        $y = 2;
+                        break;
+                }
+                return $y;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_function_ending_in_a_try_catch_that_both_return_is_not_flagged() {
+        // Regression test for a real bug caught while implementing this
+        // fix: `always_terminates` had no case for `Try` at all, so a
+        // function ending in `try { return ...; } catch (...) { return
+        // ...; }` was incorrectly flagged as possibly falling off the
+        // end.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $c): string {
+                try {
+                    if ($c) {
+                        throw new \Exception("bad");
+                    }
+                    return "ok";
+                } catch (\Throwable $e) {
+                    return "error";
+                }
             }
         "#,
         );
