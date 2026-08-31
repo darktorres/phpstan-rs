@@ -2068,7 +2068,29 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::MethodCall(recv, method, args, _) => {
-                self.check_expr(recv, locals, label);
+                // Finding 49's other real shape: `(function () {...})
+                // ->bindTo($newThis, $scope)` - same idea as
+                // `Closure::bind`, just on the receiver instead of the
+                // first argument.
+                if method == "bindTo"
+                    && matches!(
+                        unwrap_grouping(recv).kind,
+                        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                    )
+                {
+                    let this_ty = args
+                        .first()
+                        .map(|a| self.infer_expr(a, locals))
+                        .unwrap_or(Type::Mixed);
+                    self.check_closure_literal_with_this(
+                        unwrap_grouping(recv),
+                        locals,
+                        label,
+                        this_ty,
+                    );
+                } else {
+                    self.check_expr(recv, locals, label);
+                }
                 // Re-enabled (Phase 9.5): the registry is now
                 // namespace-aware, so a method lookup trusts the specific
                 // `ClassInfo` stored under a *fully-qualified* name, not a
@@ -2394,8 +2416,41 @@ impl<'a> Checker<'a> {
                     .as_ref()
                     .and_then(|class| self.registry.lookup_method(class, method));
                 self.predefine_byref_or_unknown_args(sig, args, locals);
-                for a in args {
-                    self.check_expr(a, locals, label);
+                // Finding 49: `Closure::bind($closure, $newThis, $scope)`
+                // makes `$this` (and, for private/protected access, the
+                // calling scope) available inside a closure that
+                // otherwise wouldn't have it - real, idiomatic PHP for
+                // reaching into an object's state from outside its class.
+                // Only special-cased when the first argument is literally
+                // a closure expression right here (not some arbitrary
+                // `Type::Object("Closure", _)`-typed value) - the closure
+                // body needs to still be reachable as an `Expr` to
+                // re-check with the rebound `$this`.
+                if resolved_class.as_deref() == Some("Closure")
+                    && method == "bind"
+                    && !args.is_empty()
+                    && matches!(
+                        unwrap_grouping(&args[0]).kind,
+                        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                    )
+                {
+                    let this_ty = args
+                        .get(1)
+                        .map(|a| self.infer_expr(a, locals))
+                        .unwrap_or(Type::Mixed);
+                    self.check_closure_literal_with_this(
+                        unwrap_grouping(&args[0]),
+                        locals,
+                        label,
+                        this_ty,
+                    );
+                    for a in &args[1..] {
+                        self.check_expr(a, locals, label);
+                    }
+                } else {
+                    for a in args {
+                        self.check_expr(a, locals, label);
+                    }
                 }
                 if let Some(class) = &resolved_class {
                     if let Some(sig) = sig {
@@ -2703,6 +2758,27 @@ impl<'a> Checker<'a> {
                 locals.insert(name.clone(), Type::Mixed);
             }
         }
+    }
+
+    /// Checks a closure/arrow-fn literal's body with `$this` seeded to
+    /// `this_ty` instead of whatever (if anything) the enclosing scope's
+    /// own `locals` would otherwise provide - used by `Closure::bind`/
+    /// `->bindTo()` (Finding 49), both of which explicitly rebind `$this`
+    /// independently of where the closure was lexically declared. A
+    /// clone of `locals`, not a mutation of it: the seeded `$this` (and
+    /// anything the closure's own body binds) must not leak back into the
+    /// caller's real scope, matching how `ExprKind::Closure`'s own
+    /// ordinary handling already keeps `closure_locals` separate.
+    fn check_closure_literal_with_this(
+        &mut self,
+        closure_expr: &Expr,
+        locals: &HashMap<String, Type>,
+        label: &str,
+        this_ty: Type,
+    ) {
+        let mut seeded = locals.clone();
+        seeded.insert("this".to_string(), this_ty);
+        self.check_expr(closure_expr, &mut seeded, label);
     }
 
     fn check_property_assignment(
@@ -3817,6 +3893,19 @@ fn union_types(a: Type, b: Type) -> Type {
         members.into_iter().next().unwrap()
     } else {
         Type::Union(members)
+    }
+}
+
+/// Peels through any `(...)`-grouping wrapper(s) to the real expression
+/// underneath - `ExprKind::Grouping` is a genuine, distinct AST node
+/// (not something parens collapse away during parsing), so a
+/// closure-literal-shaped check like Finding 49's own `Closure::bind`/
+/// `->bindTo()` special-casing needs to see through
+/// `(function () {...})` the same as a bare `function () {...}`.
+fn unwrap_grouping(e: &Expr) -> &Expr {
+    match &e.kind {
+        ExprKind::Grouping(inner) => unwrap_grouping(inner),
+        _ => e,
     }
 }
 
@@ -6440,6 +6529,49 @@ mod tests {
                 public static int $staticOne = 1;
             }
             function test(): int { return Config::$staticOne; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn this_is_available_inside_a_closure_literal_passed_to_closure_bind() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Secret3 { private int $value = 42; }
+            function test(Secret3 $s): int {
+                $getter = Closure::bind(function () { return $this->value; }, $s, Secret3::class);
+                return $getter();
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn closure_bind_still_flags_a_real_bug_inside_the_bound_closure() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void {
+                Closure::bind(function () { return $this->totallyUndefinedVar; }, new \stdClass());
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("undefined property")),
+            "expected the real bug inside the bound closure to still be caught, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn this_is_available_inside_an_inline_closure_bound_via_bind_to() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Secret4 { private int $value = 99; }
+            function test(Secret4 $s): int {
+                $bound = (function () { return $this->value; })->bindTo($s, Secret4::class);
+                return $bound();
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
