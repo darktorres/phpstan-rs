@@ -1,11 +1,13 @@
 //! A minimal Language Server Protocol server, run via `phpstan-rs --lsp`.
 //! Communicates over stdio using LSP's standard JSON-RPC-over-`Content-
-//! Length`-framed-messages transport. Hand-rolls the actual protocol
-//! logic (message loop, method dispatch) directly against `serde_json`
-//! rather than pulling in an LSP framework crate (which would also mean
-//! an async runtime) - this project's first and only dependency is
-//! `serde`/`serde_json` itself, used only for getting JSON parsing and
-//! string escaping right on arbitrary real file content.
+//! Length`-framed-messages transport, via the `lsp-server`/`lsp-types`
+//! crates (protocol framing/message shapes and typed request/notification
+//! params, respectively) rather than hand-rolling either against raw
+//! `serde_json::Value` - this project already depends on `serde`/
+//! `serde_json` for equally "boring, solved" infrastructure elsewhere
+//! (composer.json parsing, this project's own config file), so hand-
+//! rolling the LSP/JSON-RPC layer specifically stopped being the more
+//! consistent choice once those were already dependencies.
 //!
 //! `checker::Diagnostic` carries a real `Span` (Phase 11), converted here
 //! to LSP's 0-indexed line/character convention. The `location` symbolic
@@ -20,93 +22,78 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
-use serde_json::{Value, json};
+use lsp_server::{ErrorCode, Message, Notification as LspNotification, Request, Response};
+use lsp_types::{
+    Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
+    DidOpenTextDocumentParams, InitializeParams, InitializeResult, Position as LspPosition,
+    PublishDiagnosticsParams, Range as LspRange, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+};
 
 use crate::checker::Diagnostic;
 use crate::project::Project;
 
-/// Reads one framed LSP message (`Content-Length: N\r\n\r\n<N bytes of
-/// JSON>`) from `reader`. Returns `None` at a clean EOF (the client closed
-/// the pipe without sending `exit`, which real clients occasionally do).
 /// The outcome of trying to read one framed LSP message. `Eof` (a clean
 /// transport disconnection) and `Disconnected` (a real I/O failure
 /// reading the header/body - the stream's position afterward is
 /// unknown) both mean "stop the loop". `MalformedBody` is the one
-/// genuinely recoverable case: the header and exactly `Content-Length`
-/// bytes were both read successfully - the reader is correctly
-/// positioned at the start of the *next* message - they just didn't
-/// parse as JSON, so only this one message needs to be skipped, not the
-/// whole connection torn down.
+/// genuinely recoverable case: `lsp_server::Message::read` reads exactly
+/// `Content-Length` bytes before ever attempting to parse them as JSON
+/// (confirmed against its own source), so a body that fails to parse
+/// still leaves the reader correctly positioned at the start of the
+/// *next* message - only this one message needs to be skipped, not the
+/// whole connection torn down. `lsp_server` reports both this and a
+/// genuinely unrecoverable framing error (e.g. a missing Content-Length
+/// header, where the next message boundary truly isn't known) as the
+/// same `io::ErrorKind::InvalidData` - real PHP LSP clients essentially
+/// never send the latter, so treating every `InvalidData` as
+/// recoverable-and-skippable (rather than as `Disconnected`) matches
+/// this crate's own real behavior without losing anything this project's
+/// own tests actually exercise.
 enum ReadOutcome {
-    Message(Value),
+    Message(Message),
     Eof,
     Disconnected(io::Error),
     MalformedBody(io::Error),
 }
 
 fn read_message<R: BufRead>(reader: &mut R) -> ReadOutcome {
-    let mut content_length: Option<usize> = None;
-    loop {
-        let mut line = String::new();
-        let n = match reader.read_line(&mut line) {
-            Ok(n) => n,
-            Err(e) => return ReadOutcome::Disconnected(e),
-        };
-        if n == 0 {
-            return ReadOutcome::Eof;
-        }
-        let line = line.trim_end_matches(['\r', '\n']);
-        if line.is_empty() {
-            break; // blank line ends the header block
-        }
-        if let Some(value) = line.strip_prefix("Content-Length:") {
-            content_length = value.trim().parse().ok();
-        }
-        // Any other header (e.g. Content-Type) is accepted and ignored.
-    }
-    let Some(len) = content_length else {
-        // No known length to skip past to resynchronize on the next
-        // message - not safely recoverable, unlike a malformed body of a
-        // known length below.
-        return ReadOutcome::Disconnected(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "message had no Content-Length header",
-        ));
-    };
-    let mut buf = vec![0u8; len];
-    if let Err(e) = reader.read_exact(&mut buf) {
-        return ReadOutcome::Disconnected(e);
-    }
-    match serde_json::from_slice(&buf) {
-        Ok(value) => ReadOutcome::Message(value),
-        Err(e) => ReadOutcome::MalformedBody(io::Error::new(io::ErrorKind::InvalidData, e)),
+    match Message::read(reader) {
+        Ok(Some(msg)) => ReadOutcome::Message(msg),
+        Ok(None) => ReadOutcome::Eof,
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => ReadOutcome::MalformedBody(e),
+        Err(e) => ReadOutcome::Disconnected(e),
     }
 }
 
-/// Writes one framed LSP message to `writer` (stdout in practice) and
-/// flushes it - LSP has no message boundary other than `Content-Length`,
-/// so a buffered-but-unflushed write would leave the client waiting.
-fn write_message<W: Write>(writer: &mut W, value: &Value) -> io::Result<()> {
-    let body = serde_json::to_vec(value)?;
-    write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
-    writer.write_all(&body)?;
-    writer.flush()
+fn write_message<W: Write>(writer: &mut W, message: &Message) -> io::Result<()> {
+    message.write(writer)
 }
 
-fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    let path = uri.strip_prefix("file://")?;
-    Some(PathBuf::from(percent_decode(path)))
+/// `file://`-scheme only - this server has no use for any other URI
+/// scheme a client might send. `Uri::path()` is still percent-encoded
+/// (fluent_uri, `lsp_types::Uri`'s own backing type, never decodes it
+/// implicitly); the small `percent_decode` helper below covers the
+/// common escapes a real filesystem path needs.
+fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
+    if uri.scheme()?.as_str() != "file" {
+        return None;
+    }
+    Some(PathBuf::from(percent_decode(uri.path().as_str())))
 }
 
-fn path_to_uri(path: &Path) -> String {
-    format!("file://{}", path.display())
+fn path_to_uri(path: &Path) -> Uri {
+    let encoded = percent_encode_path(&path.display().to_string());
+    Uri::from_str(&format!("file://{encoded}"))
+        .expect("a percent-encoded absolute filesystem path is always a valid file:// URI")
 }
 
-/// Decodes the small set of percent-escapes a `file://` URI from a real
-/// editor realistically contains (spaces and a few punctuation
-/// characters) - not a general-purpose URI decoder, just enough for real
-/// filesystem paths.
+/// Decodes the small set of percent-escapes a real filesystem path
+/// realistically contains (spaces and a few punctuation characters) -
+/// not a general-purpose URI decoder, just enough for real filesystem
+/// paths.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -126,45 +113,55 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// One diagnostic's LSP JSON shape. `location` (a symbolic label like
+/// The inverse of `percent_decode` - escapes every byte outside a plain
+/// URI path's safe set (keeping `/` itself literal), so a real filesystem
+/// path containing a space or other reserved character still produces a
+/// syntactically valid `file://` URI.
+fn percent_encode_path(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// One diagnostic's LSP shape. `location` (a symbolic label like
 /// `"ClassName::methodName"`, not a position) is folded into the message
-/// text instead of dropped - LSP's own diagnostic shape has no field for
+/// text instead of dropped - `lsp_types::Diagnostic` has no field for
 /// it. `Span`'s 1-indexed line/col become LSP's 0-indexed line/character.
-fn diagnostic_to_json(d: &Diagnostic) -> Value {
-    json!({
-        "range": {
-            "start": {
-                "line": d.span.start.line.saturating_sub(1),
-                "character": d.span.start.col.saturating_sub(1),
+fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
+    LspDiagnostic {
+        range: LspRange {
+            start: LspPosition {
+                line: d.span.start.line.saturating_sub(1),
+                character: d.span.start.col.saturating_sub(1),
             },
-            "end": {
-                "line": d.span.end.line.saturating_sub(1),
-                "character": d.span.end.col.saturating_sub(1),
+            end: LspPosition {
+                line: d.span.end.line.saturating_sub(1),
+                character: d.span.end.col.saturating_sub(1),
             },
         },
-        "severity": 1, // Error
-        "source": "phpstan-rs",
-        "message": format!("{}: {}", d.location, d.message),
-    })
+        severity: Some(DiagnosticSeverity::ERROR),
+        source: Some("phpstan-rs".to_string()),
+        message: format!("{}: {}", d.location, d.message),
+        ..Default::default()
+    }
 }
 
-fn publish_diagnostics_notification(uri: &str, diagnostics: &[Diagnostic]) -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "method": "textDocument/publishDiagnostics",
-        "params": {
-            "uri": uri,
-            "diagnostics": diagnostics.iter().map(diagnostic_to_json).collect::<Vec<_>>(),
+fn publish_diagnostics_notification(uri: Uri, diagnostics: &[Diagnostic]) -> Message {
+    Message::Notification(LspNotification::new(
+        "textDocument/publishDiagnostics".to_string(),
+        PublishDiagnosticsParams {
+            uri,
+            diagnostics: diagnostics.iter().map(to_lsp_diagnostic).collect(),
+            version: None,
         },
-    })
-}
-
-fn response(id: Value, result: Value) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "result": result})
-}
-
-fn error_response(id: Value, code: i64, message: &str) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+    ))
 }
 
 struct Server {
@@ -173,7 +170,7 @@ struct Server {
     // `initialize`'s workspace scan and `didOpen`/`didChange` share one
     // path->diagnostics story instead of the workspace scan being
     // invisible to later incremental updates.
-    open_uris: HashMap<PathBuf, String>,
+    open_uris: HashMap<PathBuf, Uri>,
 }
 
 impl Server {
@@ -219,11 +216,11 @@ impl Server {
         self.project.finish_loading();
     }
 
-    fn handle_open_or_change(&mut self, uri: &str, text: &str) -> Vec<Value> {
+    fn handle_open_or_change(&mut self, uri: &Uri, text: &str) -> Vec<Message> {
         let Some(path) = uri_to_path(uri) else {
             return Vec::new();
         };
-        self.open_uris.insert(path.clone(), uri.to_string());
+        self.open_uris.insert(path.clone(), uri.clone());
         // Same graceful-degradation as load_workspace, and more exposed
         // in practice here: momentarily-invalid syntax is the normal
         // state while a file is being typed, not an edge case. A parse
@@ -253,7 +250,7 @@ impl Server {
                     .get(&p)
                     .cloned()
                     .unwrap_or_else(|| path_to_uri(&p));
-                publish_diagnostics_notification(&dep_uri, &diags)
+                publish_diagnostics_notification(dep_uri, &diags)
             })
             .collect()
     }
@@ -293,93 +290,105 @@ fn run_loop<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) {
             }
         };
 
-        let method = message.get("method").and_then(Value::as_str);
-        let id = message.get("id").cloned();
+        match message {
+            Message::Request(req) => handle_request(&mut server, writer, req),
+            Message::Notification(not) => {
+                if not.method == "exit" {
+                    break;
+                }
+                handle_notification(&mut server, writer, not);
+            }
+            // This server never sends a request of its own, so it never
+            // expects a response back from the client either.
+            Message::Response(_) => {}
+        }
+    }
+}
 
-        match method {
-            Some("initialize") => {
-                if let Some(root) = message
-                    .pointer("/params/rootUri")
-                    .and_then(Value::as_str)
-                    .and_then(uri_to_path)
-                    .or_else(|| {
-                        message
-                            .pointer("/params/workspaceFolders/0/uri")
-                            .and_then(Value::as_str)
-                            .and_then(uri_to_path)
-                    })
-                {
-                    server.load_workspace(&root);
-                }
-                if let Some(id) = id {
-                    let result = json!({
-                        "capabilities": {
-                            // Full sync: didChange always carries the
-                            // whole new document text, not incremental
-                            // ranges - simplest correct choice, and
-                            // update_file already takes a full source
-                            // string anyway.
-                            "textDocumentSync": 1,
-                        },
-                        "serverInfo": {"name": "phpstan-rs", "version": env!("CARGO_PKG_VERSION")},
-                    });
-                    let _ = write_message(writer, &response(id, result));
+fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
+    match req.method.as_str() {
+        "initialize" => {
+            #[allow(deprecated)] // root_uri: no other way to reach it pre-workspace_folders
+            let root = serde_json::from_value::<InitializeParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    params
+                        .root_uri
+                        .or_else(|| params.workspace_folders?.into_iter().next().map(|f| f.uri))
+                });
+            if let Some(root) = root.as_ref().and_then(uri_to_path) {
+                server.load_workspace(&root);
+            }
+            let result = InitializeResult {
+                capabilities: ServerCapabilities {
+                    // Full sync: didChange always carries the whole new
+                    // document text, not incremental ranges - simplest
+                    // correct choice, and update_file already takes a
+                    // full source string anyway.
+                    text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                        TextDocumentSyncKind::FULL,
+                    )),
+                    ..Default::default()
+                },
+                server_info: Some(ServerInfo {
+                    name: "phpstan-rs".to_string(),
+                    version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                }),
+            };
+            let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
+        }
+        "shutdown" => {
+            let _ = write_message(
+                writer,
+                &Message::Response(Response::new_ok(req.id, serde_json::Value::Null)),
+            );
+        }
+        other => {
+            let _ = write_message(
+                writer,
+                &Message::Response(Response::new_err(
+                    req.id,
+                    ErrorCode::MethodNotFound as i32,
+                    format!("method not found: {other}"),
+                )),
+            );
+        }
+    }
+}
+
+fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNotification) {
+    match not.method.as_str() {
+        "initialized" => {} // nothing to do yet
+        "textDocument/didOpen" => {
+            if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(not.params) {
+                let uri = params.text_document.uri;
+                for message in server.handle_open_or_change(&uri, &params.text_document.text) {
+                    let _ = write_message(writer, &message);
                 }
             }
-            Some("initialized") => {} // notification, nothing to do yet
-            Some("textDocument/didOpen") => {
-                let uri = message
-                    .pointer("/params/textDocument/uri")
-                    .and_then(Value::as_str);
-                let text = message
-                    .pointer("/params/textDocument/text")
-                    .and_then(Value::as_str);
-                if let (Some(uri), Some(text)) = (uri, text) {
-                    for notification in server.handle_open_or_change(uri, text) {
-                        let _ = write_message(writer, &notification);
-                    }
-                }
-            }
-            Some("textDocument/didChange") => {
-                let uri = message
-                    .pointer("/params/textDocument/uri")
-                    .and_then(Value::as_str);
-                // Full sync (see the `textDocumentSync: 1` capability
+        }
+        "textDocument/didChange" => {
+            if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(not.params) {
+                let uri = params.text_document.uri;
+                // Full sync (see the `textDocumentSync: FULL` capability
                 // above) guarantees exactly one entry whose `text` is the
                 // complete new document.
-                let text = message
-                    .pointer("/params/contentChanges/0/text")
-                    .and_then(Value::as_str);
-                if let (Some(uri), Some(text)) = (uri, text) {
-                    for notification in server.handle_open_or_change(uri, text) {
-                        let _ = write_message(writer, &notification);
+                if let Some(change) = params.content_changes.into_iter().next() {
+                    for message in server.handle_open_or_change(&uri, &change.text) {
+                        let _ = write_message(writer, &message);
                     }
                 }
             }
-            Some("textDocument/didClose") => {
-                // Deliberately a no-op: the file stays in the project (its
-                // registry entries and dependency edges are still real
-                // and other open files may depend on them), it's just no
-                // longer tracked as "currently open" for the purposes of
-                // picking a URI to publish under later.
-            }
-            Some("shutdown") => {
-                if let Some(id) = id {
-                    let _ = write_message(writer, &response(id, Value::Null));
-                }
-            }
-            Some("exit") => break,
-            Some(other) => {
-                if let Some(id) = id {
-                    let _ = write_message(
-                        writer,
-                        &error_response(id, -32601, &format!("method not found: {other}")),
-                    );
-                }
-                // An unrecognized *notification* (no id) is just ignored,
-                // per the spec.
-            }
-            None => {}
+        }
+        "textDocument/didClose" => {
+            // Deliberately a no-op: the file stays in the project (its
+            // registry entries and dependency edges are still real and
+            // other open files may depend on them), it's just no longer
+            // tracked as "currently open" for the purposes of picking a
+            // URI to publish under later.
+        }
+        _ => {
+            // An unrecognized notification is just ignored, per the spec.
         }
     }
 }
@@ -387,6 +396,7 @@ fn run_loop<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{Value, json};
     use std::io::Cursor;
 
     // lsp.rs had 0% test coverage before this - every function here was
@@ -395,11 +405,19 @@ mod tests {
     // `run`. Splitting that into `run_loop` (generic, tested here) plus a
     // thin `run` wrapper needed no other change - the loop body already
     // only ever calls the generic `read_message`/`write_message`.
+    //
+    // Tests still build/inspect messages as plain `serde_json::Value` -
+    // `lsp_server::Message`'s own `#[serde(untagged)]` Request/Response/
+    // Notification shape round-trips through `Value` exactly the same
+    // way, so this keeps every existing assertion (`responses[0]["id"]`,
+    // etc.) unchanged while the real transport underneath now genuinely
+    // goes through `lsp_server::Message::read`/`write`.
 
     fn encode(msgs: &[Value]) -> Vec<u8> {
         let mut buf = Vec::new();
         for m in msgs {
-            write_message(&mut buf, m).unwrap();
+            let message: Message = serde_json::from_value(m.clone()).unwrap();
+            write_message(&mut buf, &message).unwrap();
         }
         buf
     }
@@ -409,7 +427,7 @@ mod tests {
         let mut out = Vec::new();
         loop {
             match read_message(&mut cursor) {
-                ReadOutcome::Message(v) => out.push(v),
+                ReadOutcome::Message(m) => out.push(serde_json::to_value(&m).unwrap()),
                 ReadOutcome::Eof => break,
                 ReadOutcome::Disconnected(e) | ReadOutcome::MalformedBody(e) => {
                     panic!("unexpected read_message failure in test: {e}")
@@ -447,7 +465,7 @@ mod tests {
             path
         }
         fn uri(&self) -> String {
-            path_to_uri(&self.0)
+            path_to_uri(&self.0).to_string()
         }
     }
     impl Drop for TempDir {
@@ -462,7 +480,11 @@ mod tests {
         dir.write("a.php", "<?php function helperA(): int { return 1; }");
 
         let input = encode(&[
-            request(1, "initialize", json!({"rootUri": dir.uri()})),
+            request(
+                1,
+                "initialize",
+                json!({"rootUri": dir.uri(), "capabilities": {}}),
+            ),
             notification("exit", json!({})),
         ]);
         let mut reader = Cursor::new(input);
@@ -501,10 +523,14 @@ mod tests {
         let a_uri = format!("{}/a.php", dir.uri());
 
         let input = encode(&[
-            request(1, "initialize", json!({"rootUri": dir.uri()})),
+            request(
+                1,
+                "initialize",
+                json!({"rootUri": dir.uri(), "capabilities": {}}),
+            ),
             notification(
                 "textDocument/didOpen",
-                json!({"textDocument": {"uri": a_uri, "text": "<?php class Greeter {}"}}),
+                json!({"textDocument": {"uri": a_uri, "languageId": "php", "version": 1, "text": "<?php class Greeter {}"}}),
             ),
             notification("exit", json!({})),
         ]);
@@ -513,7 +539,7 @@ mod tests {
         run_loop(&mut reader, &mut writer);
 
         let messages = decode_all(&writer);
-        let b_uri = path_to_uri(&b_path);
+        let b_uri = path_to_uri(&b_path).to_string();
         let b_notification = messages.iter().find(|m| {
             m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == b_uri
         });
@@ -591,11 +617,12 @@ mod tests {
 
     #[test]
     fn uri_to_path_and_path_to_uri_round_trip() {
-        let uri = "file:///tmp/foo.php";
-        let path = uri_to_path(uri).unwrap();
+        let uri: Uri = "file:///tmp/foo.php".parse().unwrap();
+        let path = uri_to_path(&uri).unwrap();
         assert_eq!(path, PathBuf::from("/tmp/foo.php"));
-        assert_eq!(path_to_uri(&path), uri);
-        assert_eq!(uri_to_path("not-a-uri"), None);
+        assert_eq!(path_to_uri(&path).to_string(), uri.to_string());
+        let not_a_uri: Uri = "not-a-uri".parse().unwrap();
+        assert_eq!(uri_to_path(&not_a_uri), None);
     }
 
     // Finding 1 from the architecture audit - a malformed message body
@@ -631,17 +658,23 @@ mod tests {
         dir.write("ok.php", "<?php function helperOk(): int { return 1; }");
 
         let input = encode(&[
-            request(1, "initialize", json!({"rootUri": dir.uri()})),
+            request(
+                1,
+                "initialize",
+                json!({"rootUri": dir.uri(), "capabilities": {}}),
+            ),
             notification(
                 "textDocument/didOpen",
                 json!({
                     "textDocument": {
                         "uri": format!("file://{}/bad.php", dir.0.display()),
+                        "languageId": "php",
+                        "version": 1,
                         // Momentarily-invalid syntax, the normal state
                         // while a file is being typed - an unclosed
-                        // parameter list trips this parser's own
-                        // panic!-based error reporting, its only
-                        // mechanism for malformed input.
+                        // parameter list, a real ParseError this
+                        // parser's Result-based error reporting now
+                        // handles gracefully instead of panicking.
                         "text": "<?php function foo(int $x",
                     }
                 }),
