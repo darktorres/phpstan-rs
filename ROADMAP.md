@@ -1241,6 +1241,7 @@ confused with each other.
 | Array-literal element types not tracked (`Array(Mixed)` always) | 13 |
 | Integer division and PHP 8.5's pipe operator (`BinOp::Div`/`Pipe`) always infer `Mixed` | 13 |
 | Refinement/accessory types (`non-empty-string`, `non-empty-array`, ...) aliased to their base type, not tracked precisely | 14 |
+| No `Type::FloatLiteral` variant - a real float literal always widens straight to plain `Float` (unlike `IntLiteral`/`StringLiteral`), so a PHPDoc float-literal-union type (`1.5\|2.5`) rejects every value, valid or not, the same way an integer-literal union did before that half was fixed | 14 |
 | Broader rule catalog (`DeadCode`, `Comparison`/exhaustiveness, `Exceptions`, visibility/abstract-method completeness) | 15 |
 | `break N`/`continue N`'s own level argument is parsed and stored but never consulted - inert only because no loop-boundary-aware reachability analysis exists yet; would silently misbehave (treating `break 2;` as depth-1) if that's ever built without reading it first | 15 |
 | `goto`/`label` are parsed and stored but form no control-flow-graph edge anywhere - a backward `goto` re-entering a block could make an `always_terminates`/narrowing conclusion unsound, since every pass assumes linear fall-through | 15 |
