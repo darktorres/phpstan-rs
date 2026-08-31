@@ -1165,6 +1165,7 @@ impl Parser {
             // - `readonly` can appear alongside it but doesn't itself imply
             // promotion, so it's still just consumed and dropped.
             let mut promoted_visibility = None;
+            let mut promoted_readonly = false;
             loop {
                 // PHP 8.4 asymmetric visibility on a promoted property
                 // (`public public(set) string $a`) - see the identical
@@ -1190,7 +1191,10 @@ impl Parser {
                     Token::Keyword(Keyword::Protected) => {
                         promoted_visibility = Some(Visibility::Protected)
                     }
-                    Token::Keyword(Keyword::Readonly) | Token::Keyword(Keyword::Final) => {}
+                    Token::Keyword(Keyword::Readonly) => {
+                        promoted_readonly = true;
+                    }
+                    Token::Keyword(Keyword::Final) => {}
                     _ => break,
                 }
                 self.advance();
@@ -1221,6 +1225,7 @@ impl Parser {
                 by_ref,
                 variadic,
                 promoted_visibility,
+                promoted_readonly,
                 hooks,
                 span: Span {
                     start: param_start,
@@ -1293,13 +1298,18 @@ impl Parser {
     /// class/interface/trait declaration.
     fn parse_anonymous_class_new(&mut self, start: Position) -> Expr {
         let decl_start = self.current_pos();
-        while matches!(
-            self.peek(),
-            Token::Keyword(Keyword::Readonly)
-                | Token::Keyword(Keyword::Final)
-                | Token::Keyword(Keyword::Abstract)
-        ) {
-            self.advance();
+        let mut class_is_readonly = false;
+        loop {
+            match self.peek() {
+                Token::Keyword(Keyword::Readonly) => {
+                    class_is_readonly = true;
+                    self.advance();
+                }
+                Token::Keyword(Keyword::Final) | Token::Keyword(Keyword::Abstract) => {
+                    self.advance();
+                }
+                _ => break,
+            }
         }
         self.expect(&Token::Keyword(Keyword::Class));
 
@@ -1324,13 +1334,14 @@ impl Parser {
             }
         }
 
-        let (properties, methods, consts, uses) = self.parse_class_body();
+        let (properties, methods, consts, uses) = self.parse_class_body(class_is_readonly);
 
         let decl = ClassDecl {
             // No name multiple anonymous classes in the same file could
             // share safely - never indexed into the registry by this name,
             // only used structurally within this one expression.
             name: "class@anonymous".to_string(),
+            kind: ClassKind::Class,
             extends,
             implements,
             is_abstract: false,
@@ -1355,6 +1366,7 @@ impl Parser {
     #[allow(clippy::type_complexity)]
     fn parse_class_body(
         &mut self,
+        class_is_readonly: bool,
     ) -> (
         Vec<PropertyDecl>,
         Vec<MethodDecl>,
@@ -1396,6 +1408,8 @@ impl Parser {
             let mut visibility = Visibility::Public;
             let mut is_static = false;
             let mut is_abstract_member = false;
+            let mut is_final_member = false;
+            let mut is_readonly_member = false;
             loop {
                 match self.peek() {
                     // PHP 8.4 asymmetric visibility: `private(set)` /
@@ -1447,7 +1461,12 @@ impl Parser {
                         is_abstract_member = true;
                         self.advance();
                     }
-                    Token::Keyword(Keyword::Final) | Token::Keyword(Keyword::Readonly) => {
+                    Token::Keyword(Keyword::Final) => {
+                        is_final_member = true;
+                        self.advance();
+                    }
+                    Token::Keyword(Keyword::Readonly) => {
+                        is_readonly_member = true;
                         self.advance();
                     }
                     // The legacy PHP 4 `var $x;` property declaration -
@@ -1499,6 +1518,7 @@ impl Parser {
                     visibility,
                     is_static,
                     is_abstract: is_abstract_member,
+                    is_final: is_final_member,
                     function,
                     span: Span {
                         start: member_start,
@@ -1510,6 +1530,7 @@ impl Parser {
 
             // property, possibly with a type hint
             let type_hint = self.parse_type_hint();
+            let is_readonly = class_is_readonly || is_readonly_member;
             loop {
                 let prop_start = self.current_pos();
                 let name = self.expect_variable();
@@ -1528,6 +1549,7 @@ impl Parser {
                         name,
                         visibility: visibility.clone(),
                         is_static,
+                        is_readonly,
                         type_hint: type_hint.clone(),
                         default,
                         doc_comment: doc.clone(),
@@ -1543,6 +1565,7 @@ impl Parser {
                     name,
                     visibility: visibility.clone(),
                     is_static,
+                    is_readonly,
                     type_hint: type_hint.clone(),
                     default,
                     doc_comment: doc.clone(),
@@ -1603,6 +1626,7 @@ impl Parser {
                     by_ref,
                     variadic: false,
                     promoted_visibility: None,
+                    promoted_readonly: false,
                     hooks: None,
                     span: Span {
                         start: param_start,
@@ -1647,6 +1671,7 @@ impl Parser {
         let doc_comment = self.take_doc_comment();
         let mut is_abstract = false;
         let mut is_final = false;
+        let mut class_is_readonly = false;
         loop {
             match self.peek() {
                 Token::Keyword(Keyword::Abstract) => {
@@ -1657,28 +1682,25 @@ impl Parser {
                     is_final = true;
                     self.advance();
                 }
-                // PHP 8.2 `readonly class Foo {}` (shorthand for every
-                // property being readonly) - accepted in any order with
-                // abstract/final, same as real PHP's grammar, but not
-                // modeled as its own flag (ClassDecl doesn't track
-                // per-property readonly-ness at all yet, the same way the
-                // class body's own `readonly` property modifier is already
-                // just consumed and dropped).
+                // PHP 8.2 `readonly class Foo {}` - shorthand for every
+                // property being readonly, applied to each property parsed
+                // in parse_class_body below.
                 Token::Keyword(Keyword::Readonly) => {
+                    class_is_readonly = true;
                     self.advance();
                 }
                 _ => break,
             }
         }
-        match self.advance() {
-            Token::Keyword(Keyword::Class)
-            | Token::Keyword(Keyword::Interface)
-            | Token::Keyword(Keyword::Trait) => {}
+        let kind = match self.advance() {
+            Token::Keyword(Keyword::Class) => ClassKind::Class,
+            Token::Keyword(Keyword::Interface) => ClassKind::Interface,
+            Token::Keyword(Keyword::Trait) => ClassKind::Trait,
             other => panic!(
                 "parse error: expected class/interface/trait, found {:?}",
                 other
             ),
-        }
+        };
         let name = self.expect_ident();
 
         // A class extends at most one class, but an interface can extend
@@ -1701,10 +1723,11 @@ impl Parser {
             }
         }
 
-        let (properties, methods, consts, uses) = self.parse_class_body();
+        let (properties, methods, consts, uses) = self.parse_class_body(class_is_readonly);
 
         ClassDecl {
             name,
+            kind,
             extends,
             implements,
             is_abstract,
@@ -1797,6 +1820,7 @@ impl Parser {
             let mut visibility = Visibility::Public;
             let mut is_static = false;
             let mut is_abstract_member = false;
+            let mut is_final_member = false;
             loop {
                 match self.peek() {
                     Token::Keyword(Keyword::Public) => {
@@ -1819,7 +1843,11 @@ impl Parser {
                         is_abstract_member = true;
                         self.advance();
                     }
-                    Token::Keyword(Keyword::Final) | Token::Keyword(Keyword::Readonly) => {
+                    Token::Keyword(Keyword::Final) => {
+                        is_final_member = true;
+                        self.advance();
+                    }
+                    Token::Keyword(Keyword::Readonly) => {
                         self.advance();
                     }
                     _ => break,
@@ -1863,6 +1891,7 @@ impl Parser {
                     visibility,
                     is_static,
                     is_abstract: is_abstract_member,
+                    is_final: is_final_member,
                     function,
                     span: Span {
                         start: member_start,
@@ -3409,6 +3438,81 @@ mod tests {
     fn readonly_class_parses() {
         let program = parse("<?php readonly class Point { public int $x; }");
         assert!(matches!(&program[0].kind, StmtKind::ClassDecl(_)));
+    }
+
+    #[test]
+    fn class_interface_and_trait_declarations_are_tagged_with_their_own_kind() {
+        let program = parse("<?php class C {} interface I {} trait T {}");
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(c.kind, ClassKind::Class);
+        let StmtKind::ClassDecl(i) = &program[1].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(i.kind, ClassKind::Interface);
+        let StmtKind::ClassDecl(t) = &program[2].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert_eq!(t.kind, ClassKind::Trait);
+    }
+
+    #[test]
+    fn a_final_method_is_recorded_as_final_and_a_non_final_one_is_not() {
+        let program = parse(
+            "<?php class C { final public function locked(): void {} public function open(): void {} }",
+        );
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        let locked = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "locked")
+            .unwrap();
+        assert!(locked.is_final);
+        let open = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "open")
+            .unwrap();
+        assert!(!open.is_final);
+    }
+
+    #[test]
+    fn a_readonly_property_modifier_is_recorded_per_property() {
+        let program = parse("<?php class C { public readonly int $x; public int $y; }");
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        let x = c.properties.iter().find(|p| p.name == "x").unwrap();
+        assert!(x.is_readonly);
+        let y = c.properties.iter().find(|p| p.name == "y").unwrap();
+        assert!(!y.is_readonly);
+    }
+
+    #[test]
+    fn readonly_class_shorthand_marks_every_property_readonly() {
+        let program = parse("<?php readonly class C { public int $x; public int $y; }");
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        assert!(c.properties.iter().all(|p| p.is_readonly));
+    }
+
+    #[test]
+    fn a_promoted_constructor_parameter_captures_its_own_readonly_modifier() {
+        let program =
+            parse("<?php class C { public function __construct(public readonly int $id) {} }");
+        let StmtKind::ClassDecl(c) = &program[0].kind else {
+            panic!("expected ClassDecl");
+        };
+        let ctor = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "__construct")
+            .unwrap();
+        assert!(ctor.function.params[0].promoted_readonly);
     }
 
     #[test]

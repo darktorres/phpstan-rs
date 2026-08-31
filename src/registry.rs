@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Literal, Stmt, StmtKind, UseImport,
+    ClassDecl, ClassKind, EnumDecl, Expr, ExprKind, FunctionDecl, Literal, Stmt, StmtKind,
+    UseImport,
 };
 use crate::docblock::{self, DocBlock};
 use crate::types::{self, Type};
@@ -396,16 +397,26 @@ impl FunctionSig {
 pub struct PropertySig {
     pub ty: Type,
     pub is_static: bool,
+    pub is_readonly: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct ClassInfo {
+    pub kind: ClassKind,
+    pub is_abstract: bool,
+    pub is_final: bool,
     pub extends: Vec<String>,
     pub implements: Vec<String>,
     pub methods: HashMap<String, FunctionSig>,
     pub properties: HashMap<String, PropertySig>,
     pub consts: HashMap<String, Type>,
     pub uses: Vec<String>,
+    // Method names declared `abstract` in this class's own body (not
+    // walked up the hierarchy - a completeness check needs to walk
+    // `extends`/`implements` itself and consult each ancestor's own set).
+    pub abstract_methods: HashSet<String>,
+    // Method names declared `final` in this class's own body.
+    pub final_methods: HashSet<String>,
     // This class's own `@template T` names, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
@@ -460,6 +471,18 @@ impl ClassInfo {
                 )
             })
             .collect();
+        let abstract_methods: HashSet<String> = c
+            .methods
+            .iter()
+            .filter(|m| m.is_abstract)
+            .map(|m| m.function.name.clone())
+            .collect();
+        let final_methods: HashSet<String> = c
+            .methods
+            .iter()
+            .filter(|m| m.is_final)
+            .map(|m| m.function.name.clone())
+            .collect();
 
         let mut properties: HashMap<String, PropertySig> = c
             .properties
@@ -477,6 +500,7 @@ impl ClassInfo {
                     PropertySig {
                         ty,
                         is_static: p.is_static,
+                        is_readonly: p.is_readonly,
                     },
                 )
             })
@@ -503,6 +527,7 @@ impl ClassInfo {
                     PropertySig {
                         ty,
                         is_static: false,
+                        is_readonly: p.promoted_readonly,
                     },
                 );
             }
@@ -572,12 +597,17 @@ impl ClassInfo {
         }
 
         ClassInfo {
+            kind: c.kind,
+            is_abstract: c.is_abstract,
+            is_final: c.is_final,
             extends: c.extends.iter().map(|s| ctx.resolve(s)).collect(),
             implements,
             methods,
             properties,
             consts,
             uses: c.uses.iter().map(|s| ctx.resolve(s)).collect(),
+            abstract_methods,
+            final_methods,
             templates,
             extends_args,
             implements_args,
@@ -681,6 +711,7 @@ impl ClassInfo {
             PropertySig {
                 ty: Type::String,
                 is_static: false,
+                is_readonly: false,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -689,6 +720,7 @@ impl ClassInfo {
                 PropertySig {
                     ty: types::parse_type_string(backing),
                     is_static: false,
+                    is_readonly: false,
                 },
             );
         }
@@ -708,13 +740,31 @@ impl ClassInfo {
             implements.push("BackedEnum".to_string());
         }
 
+        let abstract_methods: HashSet<String> = e
+            .methods
+            .iter()
+            .filter(|m| m.is_abstract)
+            .map(|m| m.function.name.clone())
+            .collect();
+        let final_methods: HashSet<String> = e
+            .methods
+            .iter()
+            .filter(|m| m.is_final)
+            .map(|m| m.function.name.clone())
+            .collect();
+
         ClassInfo {
+            kind: ClassKind::Enum,
+            is_abstract: false,
+            is_final: true,
             extends: Vec::new(),
             implements,
             methods,
             properties,
             consts,
             uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
+            abstract_methods,
+            final_methods,
             templates: Vec::new(),
             extends_args: Vec::new(),
             implements_args: HashMap::new(),
@@ -1165,6 +1215,30 @@ mod tests {
             }"#,
         );
         assert!(r.lookup_function("polyfilled").is_some());
+    }
+
+    #[test]
+    fn class_info_records_its_own_kind_and_final_abstract_readonly_members() {
+        let r = build_registry(
+            r#"<?php
+            interface Iface {}
+            abstract class Base {
+                abstract public function required(): void;
+                final public function locked(): void {}
+                public readonly int $id;
+            }
+            "#,
+        );
+        let iface = r.classes.get("Iface").unwrap();
+        assert_eq!(iface.kind, ClassKind::Interface);
+
+        let base = r.classes.get("Base").unwrap();
+        assert_eq!(base.kind, ClassKind::Class);
+        assert!(base.is_abstract);
+        assert!(!base.is_final);
+        assert!(base.abstract_methods.contains("required"));
+        assert!(base.final_methods.contains("locked"));
+        assert!(base.properties.get("id").unwrap().is_readonly);
     }
 
     #[test]

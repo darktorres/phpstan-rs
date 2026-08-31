@@ -105,6 +105,9 @@ pub struct Param {
     // Some(visibility) for constructor property promotion, e.g.
     // `public function __construct(private int $id) {}`.
     pub promoted_visibility: Option<Visibility>,
+    // `public readonly int $id` in a promoted constructor parameter.
+    // Meaningless when promoted_visibility is None.
+    pub promoted_readonly: bool,
     // A promoted property's own hooks, defined inline in the constructor's
     // parameter list rather than on an ordinary property declaration.
     // Boxed because PropertyHooks::set itself embeds a Param - unboxed,
@@ -136,6 +139,7 @@ pub struct PropertyDecl {
     pub name: String,
     pub visibility: Visibility,
     pub is_static: bool,
+    pub is_readonly: bool,
     pub type_hint: Option<String>,
     pub default: Option<Expr>,
     pub doc_comment: Option<String>,
@@ -170,6 +174,7 @@ pub struct MethodDecl {
     pub visibility: Visibility,
     pub is_static: bool,
     pub is_abstract: bool,
+    pub is_final: bool,
     pub function: FunctionDecl,
     pub span: Span,
 }
@@ -187,9 +192,18 @@ pub struct ClassConst {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassKind {
+    Class,
+    Interface,
+    Trait,
+    Enum,
+}
+
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
     pub name: String,
+    pub kind: ClassKind,
     pub extends: Vec<String>,
     pub implements: Vec<String>,
     pub is_abstract: bool,
