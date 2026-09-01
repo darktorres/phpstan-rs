@@ -1041,11 +1041,14 @@ the checker's flow analysis and inference are coarser than they could
 be, in ways that either produce a real false positive on real code
 (the first four) or just lose precision silently (the last three).
 
-- **Property-chain narrowing beyond `instanceof`.** Phase 9's own
-  narrowing fix (`narrowing_key`) only handles `$a->b instanceof X`;
-  equality narrowing (`$a->b === null`) and predicate-function
-  narrowing (`is_string($a->b)`) still only work on a bare variable.
-  Real vendor/ noise (~2000 diagnostics) traces directly to this.
+- **Property-chain narrowing beyond `instanceof` - DONE (Phase 22).**
+  Phase 9's own narrowing fix (`narrowing_key`) only handled `$a->b
+  instanceof X`; equality narrowing (`$a->b === null`) and predicate-
+  function narrowing (`is_string($a->b)`) still only worked on a bare
+  variable. Real vendor/ noise (~2000 diagnostics) traced directly to
+  this. Phase 22 extended `narrowing_key` to literal-key array-index
+  chains too (`$arr['key']`) and updated every `apply_narrowing` call
+  site to actually use it for both property and index chains.
 - **Traits checked standalone.** A trait method referencing
   `$this->propOnHostClass` (expecting whatever class eventually `use`s
   it to provide that member - a common, legal pattern) gets flagged,
@@ -1387,6 +1390,168 @@ next pass):
   | sort | uniq -c | sort -rn | head -50
 ```
 
+## Phase 22: Piwigo false-positive hunt III - DONE
+
+A third pass, this time against a frozen, stable local copy of the
+corpus (`/home/torres/piwigo17-frozen` - the live `~/piwigo17-rewrite`
+was found to drift file counts between runs, unreliable for a
+before/after diff) with a proper scoped config
+(`phpstan-rs.toml`, mirroring the real `phpstan.neon`'s own
+`analyseAndScan` set) rather than a raw whole-directory scan. Along the
+way, found that `check-project`'s automatic Composer vendor-context load
+keys off `std::env::current_dir()`, not the config file's location -
+running from the wrong directory silently skips the entire vendor
+context, which is why the very first run of this pass produced 32,596
+diagnostics dominated by pure noise before that was caught; re-run
+correctly, the real, actionable baseline was **2,312 diagnostics**.
+
+Six clusters, each root-caused by reading real source directly (Piwigo's
+own code, this project's own checker source, and for Finding 1 the
+actual vendored `pestphp/pest-plugin-phpstan` extension rather than a
+guess at its behavior):
+
+1. **Pest's `beforeEach`-assigned dynamic `$this` properties - DONE.**
+   Real Pest binds every `beforeEach`/`test`/`afterEach`/`describe`
+   closure in a file to the same `$this` instance, so a property set in
+   one `beforeEach(function () { $this->root = ...; })` is legitimately
+   readable from another closure - the real
+   `TestCaseDynamicPropertyTypeExtension`/`PestHookPropertyReader`'s own
+   job, narrower than "any Pest closure" in two read-directly-from-source
+   ways `pest_config.rs` now mirrors exactly: only a `beforeEach(...)`
+   call (not `test`/`it`/`afterEach`/`describe`), and only a direct,
+   top-level statement inside its closure body. Both a file-local scan
+   (mirroring `file_local_this_type`'s own top-level-only shape) and a
+   directory-scoped extension to `PestConfig` (walking a
+   `uses(...)->beforeEach(...)->in(...)` chain regardless of what else is
+   chained in between - confirmed against a real shape in
+   `tests/Pest.php`) feed one unioned set. `571 -> 0`.
+2. **Array append/dynamic-key writes never widened a tracked shape -
+   DONE.** `bind_assignment_target`'s `Index` arm only grew a known
+   `Type::ArrayShape` for a compile-time-literal key - `$x[] = v;`
+   (append) and `$x[$k] = v;` (a dynamic key) both fell through
+   untouched, forever, so a real corpus example
+   (`RegenerateFixtureTest.php`'s `$tagIds = []; foreach(...) { $tagIds[]
+   = ...; }` then `$tagIds[0]`/`[1]`/`[2]` read afterward) kept getting
+   flagged as "no such key". Both forms now widen to a generic
+   `Type::Array`, unioning in every pre-existing field's own type - the
+   real, deliberate cost: once widened, `check_shape_key_access` (which
+   only fires on `Type::ArrayShape`) stops catching a genuine typo on
+   *any* key of that variable from that point on, not just the new one.
+   Verifying this against the real corpus surfaced a genuine *nested*
+   write false positive (`CalendarMonthly::buildMonthCalendar`'s
+   `$items[$day]['derivative'] = ...`, whose own base is itself an
+   `Index`, not a bare `Variable`) that the flat fix didn't cover -
+   fixed by recursing: compute the base's own current type, work out its
+   new type as if the write had happened to it, then bind that back onto
+   the base, correctly handling any nesting depth.
+3. **A by-ref argument on an *already-defined* variable wasn't widened -
+   DONE.** `predefine_byref_or_unknown_args`'s "assume the callee might
+   redefine this" leniency only ever applied to an undefined variable -
+   a real corpus example
+   (`InstallService::installDbConnect(array &$infos, array &$errors,
+   ...)` called as `installDbConnect($infos, $errors, ...)` where
+   `$errors` was already `$errors = [];`) kept its stale, narrow pre-call
+   type through the call. Widens to the declared parameter's own type
+   (not a blanket `Mixed`) when it's plainly array-shaped - corpus
+   verification found several real stdlib by-ref parameters
+   (`array_walk(array|object &$array, ...)`, confirmed in the vendored
+   phpstorm-stubs) declare a *union* wider than what an already-array-
+   typed argument could actually become, so only `Type::Array`/
+   `Type::ArrayShape` is trusted; anything else falls back to `Mixed`.
+4. **`?? []` discarded a wider left-side array type - DONE.**
+   `infer_binary`'s `Coalesce` arm returned only the right operand's
+   type, never consulting the left side - `$details = $row->details ??
+   [];` where `$row->details: ?array` genuinely holds arbitrary keys at
+   runtime collapsed the whole expression's type to the literal empty
+   `[]` shape from the fallback alone. Only widens when the left side's
+   real non-null type is a generic `Type::Array` and the right side is a
+   narrower `Type::ArrayShape` - deliberately not a blanket "always union
+   `non_null(l)` with `r`" fix, which would pollute the extremely common,
+   currently-precise `$x ?? 'literal'` pattern with unwanted `Mixed`
+   noise. `26 -> 0`.
+5. **Anonymous classes' method signatures skipped name resolution
+   entirely - DONE.** `check_function`'s signature lookup always misses
+   for an anonymous class (its synthetic name is never indexed into the
+   registry, a deliberate design choice), routing every one of its
+   methods through a fallback branch written as "shouldn't happen, but
+   degrade rather than panic" - one that never resolved a `use`-imported
+   type-hint name to its FQN, confirmed directly from a real diagnostic's
+   own wording ("expected **ResponseInterface**, got Nyholm\Psr7\Response",
+   the expected side printing bare/unqualified), nor resolved a
+   `self`/`static`/`parent` pseudo-type against the enclosing class the
+   way the normal signature-lookup path already does. Both fixed reusing
+   `self.name_ctx`, the exact per-file context real classes already
+   resolve against. `19 -> 0` (30 total once related instances beyond
+   the one diagnosed pattern are included).
+6. **A right-hand `&&`/`||` operand's new variable definitions were
+   silently dropped - DONE.** `&&`/`||`'s right operand was checked
+   against a cloned `Locals` that got discarded once the expression
+   finished, so a by-ref out-param (`preg_match`'s `$matches`) or plain
+   assignment written as the right operand of `&&`/`and` never actually
+   defined its variable in the surrounding scope
+   (`AdminShell::runDispatch`'s own `if (isset(...) and is_string(...)
+   and (bool) preg_match(..., $matches))`). Fixed by merging newly-
+   inserted keys back after checking the right operand - but **only**
+   real PHP variable names (a new `is_real_variable_key` discriminator),
+   never a narrowing-derived synthetic key: `apply_narrowing`'s own
+   `instanceof`/truthy-fallback arms insert synthetic `"base->prop"`/
+   `"base[key]"` keys that are exactly as "new" by the same test, and
+   merging those back would leak conditional narrowing straight past the
+   whole `&&`/`if` into an `else` branch that never proved it true -
+   caught by adversarial review of an early draft of this fix, before it
+   shipped, and locked in with a dedicated regression test for exactly
+   that shape (not just the `preg_match` shape the diagnosed cluster
+   itself demonstrates).
+
+Finding 2's own nested-write fix, once checked against the real corpus,
+surfaced a *different* new false positive (`Template::__construct`'s own
+`is_string($lang_info['jquery_code'])` guard never actually narrowing
+it) rooted in a separate, pre-existing gap: `narrowing_key` only
+supported `Variable`/`PropertyAccess`, so `apply_narrowing` never worked
+on a literal-key array-index expression the way it already worked on a
+property chain. Fixing that properly - needed for, and folded into,
+Finding 6's own implementation, since both land in the same narrowing
+machinery - meant extending `narrowing_key` itself and updating every
+`apply_narrowing` call site (the `Call`-predicate arm,
+`apply_equality_narrowing`, and `infer_expr`'s own `Index` read-side fast
+path, which needed the identical "check the narrowed key first" lookup
+`PropertyAccess` already had) to actually use it. That in turn surfaced
+two more real, independent bugs along the way, both fixed:
+- `apply_narrowing`'s "current type to narrow from" fell back to
+  `Type::Mixed` whenever a property/index chain's synthetic key wasn't
+  already in `locals` (the common case - these keys only ever exist from
+  a *prior* narrowing) - discarding the real declared/inferred type and
+  permanently overriding it with `Mixed` once narrowed.
+- `bind_assignment_target` had no `PropertyAccess` arm at all, so
+  reassigning a property inside its own narrowed branch (the common
+  lazy-init idiom: `if ($this->x === null) { $this->x = compute(); }`)
+  left the stale pre-assignment narrowed value sitting under that same
+  key, which `infer_expr`'s fast path kept reading back afterward.
+
+This closes out the "Property-chain narrowing beyond `instanceof`" item
+the Known Limitations table below carried since Phase 13 - narrowing now
+covers literal-key array-index chains too, not just property chains,
+exceeding that item's original scope.
+
+Combined, this phase dropped the properly-scoped, vendor-context-loaded
+corpus count from 2,312 to 1,280 diagnostics (44.6%) across five commits
+(Findings 2 and 6 landed together, since Finding 2's own verification is
+what surfaced the narrowing gap Finding 6's implementation needed to
+fold in), each independently verified (full test suite + a before/after
+corpus diff, re-run from inside the corpus directory) before the next
+began.
+
+Reproducible categorization for this pass (run from inside the corpus
+directory, not this repo's - see this phase's own opening paragraph for
+why that matters):
+```bash
+cd /home/torres/piwigo17-frozen
+/path/to/phpstan-rs check-project --config phpstan-rs.toml 2>&1 \
+  | grep -oP '(?<=: ).*$' \
+  | sed -E "s/\\\$[A-Za-z_][A-Za-z0-9_]*/\$VAR/g; s/[0-9]+/N/g; s/'[^']*'/'STR'/g" \
+  | sort | uniq -c | sort -rn | head -50
+```
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
@@ -1403,7 +1568,6 @@ confused with each other.
 | No real source positions, level system, or config/baseline | 11 |
 | No bespoke per-function/method type extensions (`array_map`/`preg_match`/`sprintf`/condition-narrowing, ...) | 12 |
 | A handful of stubs (`pg_query_params`, `pg_query`, ...) interleave multiple full parameter lists under duplicate parameter names across version eras rather than Phase 8.5's clean superseded-param-plus-variadic shape, and still miscount arity | 12 |
-| Property-chain narrowing beyond `instanceof` (equality/predicate narrowing on `$a->b`) | 13 |
 | Traits checked standalone, without their eventual host class's shape | 13 |
 | `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed | 13 |
 | `always_terminates` doesn't recognize a terminating `switch`/`try`/`match` | 13 |
