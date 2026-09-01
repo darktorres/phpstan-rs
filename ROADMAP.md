@@ -1779,6 +1779,67 @@ them, landed together - each was a direct, understood consequence of
 verifying the previous step, not an independent unit with its own stable
 stopping point).
 
+## Phase 25: Piwigo false-positive hunt VI - class-declaration merging - DONE
+
+Phase 24 took the corpus from 1,021 to 792 diagnostics. Re-bucketing that
+792-diagnostic baseline found a single new largest cluster - **60
+diagnostics**, ~7.6% of everything left - every real Imagick method/
+constant Piwigo's own `ImageImagick`/`ImageBackend` classes use
+(`getImageWidth`, `cropImage`, `rotateImage`, `ORIENTATION_TOPLEFT`,
+`FILTER_LANCZOS`, ...) reported as **undefined**, even though every one
+is a real, present member of the vendored `jetbrains/phpstorm-stubs`
+`Imagick` class.
+
+**Root cause, confirmed by reading Piwigo's own project config**: Piwigo
+ships a project-local `phpstan-stubs/Imagick.stub.php`, wired into its
+real `phpstan.neon` as a PHPStan `stubFiles` entry - real PHPStan's own
+documented mechanism letting a project redeclare just *one* method of an
+already-known class as a targeted override (this file's own header
+comment: PHPStan's *bundled* Imagick stub has one stale `convolveImage()`
+signature, unpatchable via `composer-patches` since it lives inside
+`phpstan.phar` itself). Real PHPStan's `stubFiles` **merges** a stub
+file's declarations onto whatever's already known for that symbol - the
+override only needs to redeclare the one method it's fixing. This
+project's own config mirrors `phpstan.neon`'s intent by loading
+`phpstan-stubs/` too, but `Registry::index_with_context`'s `ClassDecl`
+arm treated two unconditional declarations of the same name as plain
+last-write-wins, not a merge - so the override's bare `class Imagick {
+convolveImage() }` completely replaced the real class's `ClassInfo`,
+discarding every other method/constant.
+
+**DONE.** `ClassInfo::merge` unions methods/properties/consts/etc. across
+two unconditional declarations of the same class (the second one winning
+any same-name conflict - a deliberate override's whole intent - while
+`extends`/`implements`/generics are only ever filled in, never erased),
+and a new `Registry` field tracks which class names have had an
+unconditional declaration, so a *second* one merges while the pre-
+existing, already-fixed `PHPUnit\Framework\TestCase`-shaped collision (a
+guarded conditional fallback, unrelated to this fix) still correctly
+loses outright as before - confirmed unaffected by the two existing
+regression tests for it.
+
+The real interaction needed a second half: `merge_stub_classes` (this
+project's own embedded, always-loaded built-in class corpus, merged into
+a fresh `Registry` in `Project::new` before any project file is indexed)
+inserted classes via a plain `or_insert`, untracked - so by the time the
+override file was indexed, `index_with_context`'s own new merge logic
+had no record that `Imagick` was already unconditionally declared, and
+still replaced it wholesale. Fixed by recording every `merge_stub_
+classes` name in the same tracking set. Verifying that also caught a
+third gap: `remove_declarations` (incremental re-checking's own removal
+step, `Project::update_file`) cleared `classes` but left the tracking
+set stale, so re-indexing a changed file's class hit the merge branch
+against an already-removed entry - caught immediately by the existing
+incremental-invalidation test suite (`project.rs`'s own tests), not
+discovered later.
+
+Given this change alters *global* class-registration semantics (not a
+scoped, single-function fix like recent phases), verification swept
+every file in both this project's own bundled `vendor/phpstorm-stubs`
+and Piwigo's vendored copy through `check` before considering it done,
+on top of the usual before/after corpus diff. `792 -> 732` diagnostics,
+zero new.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
