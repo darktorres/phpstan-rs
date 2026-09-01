@@ -98,6 +98,16 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
         ExprKind::Literal(Literal::Bool(true)) => Type::True,
         ExprKind::Literal(Literal::Bool(false)) => Type::False,
         ExprKind::Literal(Literal::Null) => Type::Null,
+        // Phase 23: `const int OFF = -1;` parses as a literal `1` wrapped
+        // in a unary negation, not a single negative-literal token - a
+        // negative-valued typed constant (real shape: `Piwigo\Core\
+        // Logger::OFF`, the one negative severity level alongside seven
+        // non-negative ones) otherwise silently fell to `Mixed` below.
+        ExprKind::Unary(crate::ast::UnaryOp::Neg, inner) => match &inner.kind {
+            ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(-n),
+            ExprKind::Literal(Literal::Float(_)) => Type::Float,
+            _ => Type::Mixed,
+        },
         _ => Type::Mixed,
     }
 }

@@ -4577,6 +4577,32 @@ mod tests {
         );
     }
 
+    // Phase 23 Finding 6, real shape: Piwigo\Core\Logger declares eight
+    // non-negative severity constants plus `OFF = -1` - the one negative
+    // one. `const int OFF = -1;` parses as a literal `1` wrapped in a
+    // unary negation, which `infer_const_type` used to fall back to
+    // `Mixed` for, widening `['severity' => Logger::OFF]` to
+    // `array{severity: mixed}` and failing the constructor's declared
+    // `array{severity?: int|string, ...}` shape.
+    #[test]
+    fn a_negative_typed_class_constant_infers_its_real_int_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            final class Logger {
+                public const int EMERGENCY = 0;
+                public const int OFF = -1;
+                /** @param array{severity?: int|string} $options */
+                public function __construct(array $options) {}
+            }
+            function f(): void {
+                new Logger(['severity' => Logger::OFF]);
+                new Logger(['severity' => Logger::EMERGENCY]);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn constructor_argument_type_is_checked() {
         let d = diagnostics_for(
