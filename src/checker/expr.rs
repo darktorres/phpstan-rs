@@ -246,7 +246,7 @@ impl<'a> Checker<'a> {
                         locals,
                     )
                 })
-                .unwrap_or(Type::Mixed)
+                .unwrap_or_else(|| call_fallback_return_type(callee))
             }
             ExprKind::MethodCall(recv, method, args, nullsafe) => {
                 // Finding 49's other real shape: `(function () {...})
@@ -1390,9 +1390,9 @@ impl<'a> Checker<'a> {
                         .map(|(resolved_name, sig)| {
                             self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
                         })
-                        .unwrap_or(Type::Mixed)
+                        .unwrap_or_else(|| call_fallback_return_type(callee))
                 }
-                _ => Type::Mixed,
+                _ => call_fallback_return_type(callee),
             },
             ExprKind::MethodCall(recv, method, args, nullsafe) => {
                 // A nullsafe receiver is virtually always nullable
@@ -2047,6 +2047,26 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         members.into_iter().next().unwrap()
     } else {
         Type::Union(members)
+    }
+}
+
+/// The type of a call this project can't look up a real signature for -
+/// `exit`/`die` are real PHP language constructs (`is_language_construct`)
+/// with no stub of their own, but unlike the others in that list
+/// (`isset`/`empty`/`unset`/`eval`/`include*`/`print`), PHP itself declares
+/// them `never`: control flow can't continue past one. `always_terminates`
+/// (`checker/control_flow.rs`) recognizes a terminating expression
+/// statement via exactly `infer_expr(e, locals) == Type::Never` - without
+/// this, a guard clause built on `exit()`/`die()` instead of `return`/
+/// `throw` (extremely common in this codebase's CLI tools and test
+/// fixtures) was never recognized as terminating, leaking its own
+/// never-actually-reached branch's narrowing into the surrounding scope.
+fn call_fallback_return_type(callee: &Expr) -> Type {
+    match &callee.kind {
+        ExprKind::Name(name) if matches!(name.to_ascii_lowercase().as_str(), "exit" | "die") => {
+            Type::Never
+        }
+        _ => Type::Mixed,
     }
 }
 

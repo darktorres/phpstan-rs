@@ -4630,6 +4630,49 @@ mod tests {
         );
     }
 
+    // Phase 23 Finding 5, real shape:
+    // tests/Unit/Mail/MailServiceTestFakeSmtpServer.php's `$conn =
+    // stream_socket_accept(...); if ($conn === false) { fwrite(STDERR,
+    // ...); exit(1); } stream_set_timeout($conn, 5);` - `exit`/`die`
+    // never inferred as `Type::Never`, so this guard clause wasn't
+    // recognized as terminating and the then-branch's narrowing leaked
+    // into the surrounding scope past the `if`.
+    #[test]
+    fn a_guard_clause_built_on_exit_terminates_like_return() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return resource|false */
+            function open() {}
+            function f(): void {
+                $conn = open();
+                if ($conn === false) {
+                    exit(1);
+                }
+                fclose($conn);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_guard_clause_built_on_die_terminates_like_return() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return resource|false */
+            function open() {}
+            function f(): void {
+                $conn = open();
+                if ($conn === false) {
+                    die('failed');
+                }
+                fclose($conn);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn require_include_and_print_are_never_flagged_as_undefined() {
         // These parse as a synthetic ExprKind::Call (see parser.rs's own
