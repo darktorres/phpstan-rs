@@ -1840,6 +1840,49 @@ and Piwigo's vendored copy through `check` before considering it done,
 on top of the usual before/after corpus diff. `792 -> 732` diagnostics,
 zero new.
 
+## Phase 26: Piwigo false-positive hunt VII - narrowing through wrapper expressions - DONE
+
+Phase 25 took the corpus from 792 to 732 diagnostics. Re-bucketing that
+732-diagnostic baseline found the top clusters largely unchanged from
+Phase 24's own analysis (`string|false`/`resource|false` mismatches still
+dominating) - meaning these weren't stub-precision issues like the last
+few phases, but a real, distinct narrowing gap. Traced directly:
+`Piwigo\Admin\Extensions\ExtensionScanner::scanDirectoryEntries`'s `while
+(($file = readdir($dir)) !== false) { ... preg_match(..., $file) ... }`
+was flagged even though Phase 23 already taught `narrowing_key` to see
+through an `Assign` node for exactly this "assign-then-check" idiom.
+
+**Root cause**: real PHP *requires* the parens here - `=` binds looser
+than `!==`, so `$file = readdir($dir) !== false` would parse as `$file =
+(readdir($dir) !== false)` instead, a completely different (and wrong)
+statement. That makes the parenthesized form the overwhelmingly common
+real-world shape of "assign-then-check" (any `while`/`if` guard reading
+a resource/line/row in a loop), but `narrowing_key` never unwrapped
+`ExprKind::Grouping` at all - Phase 23's own `Assign` arm sat underneath
+a wrapper it never got a chance to see through, so it only ever actually
+fired for the narrower case of an assignment as a bare function-call
+argument (`is_string($result = fetch())`, no parens needed there).
+
+**DONE.** Added `ExprKind::Grouping(inner) => narrowing_key(inner)`,
+mirroring `apply_narrowing`'s own pre-existing `Grouping` unwrap at its
+top level.
+
+A second, unrelated gap surfaced from the same bucket: `Piwigo\Admin\
+Image\ImageBackend::webpInfo`'s `$fp = fopen(...); if (! (bool) $fp) {
+throw ...; } fread($fp, 25);` - a common, explicit style for a
+truthiness guard - was never recognized as narrowing anything, since
+`apply_narrowing` had no arm for `ExprKind::Cast` at all. **DONE.** A
+`(bool)` cast doesn't change which values are truthy/falsy, only makes
+the check explicit, so `Cast("bool", inner)` now delegates straight to
+`apply_narrowing(inner, locals, branch_true)` - narrowing exactly as if
+the cast weren't there. Scoped to `"bool"` specifically - any other cast
+(`(int)`, `(string)`, ...) genuinely changes the value and isn't
+narrowable this way.
+
+`732 -> 706` diagnostics, zero new (2 lines shifted at the same
+locations - only a union member's print order changed, not a new
+diagnostic).
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
