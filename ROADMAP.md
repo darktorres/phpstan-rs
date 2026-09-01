@@ -1228,22 +1228,29 @@ crash bug, not just a slowness concern.
    stack, matching the main thread's own default.
 2. **`Locals`'s cloning cost, the single biggest allocation source per
    profiling (~28% of total time in allocator-churn functions) - DONE,
-   with an honestly-reported result.** `Locals` (`HashMap<String, Type>`)
-   was cloned at ~22 call sites, once per branch of every `if`/`while`/
-   ternary/`match`/closure. Swapped to `imbl::GenericHashMap`, a
-   persistent, structurally-shared map whose clone is O(1). Verified
-   byte-for-byte identical diagnostics against a frozen Piwigo snapshot
-   before/after - a pure performance change. Re-profiling (normalized to
-   userspace-only time, since kernel/scheduler noise varied significantly
-   between runs on the shared host) showed the allocator-churn share
-   essentially unchanged (~32% before, ~31.5% after) - `imbl`'s own
-   functions are individually cheap, but it still allocates per HAMT node
-   touched on each mutation, and typical PHP functions don't have large
-   enough `Locals` scopes for the O(n)-vs-O(1) clone distinction to
-   translate into a measured win on this corpus. Kept anyway (explicit
-   choice): the correctness bar is met, and the O(1) clone property
-   remains available for scopes this corpus's real-world function sizes
-   may simply not exercise much.
+   a real, measured win.** `Locals` (`HashMap<String, Type>`) was cloned
+   at ~22 call sites, once per branch of every `if`/`while`/ternary/
+   `match`/closure. Swapped to `imbl::GenericHashMap`, a persistent,
+   structurally-shared map whose clone is O(1). Verified byte-for-byte
+   identical diagnostics against a frozen Piwigo snapshot before/after -
+   a pure performance change. First verification pass (`perf record`,
+   system-wide CPU sampling normalized to userspace-only time) reported
+   the allocator-churn share as essentially unchanged (~32% before,
+   ~31.5% after) - too coarse to see the real effect. Re-measured with
+   `hotpath` (new opt-in, zero-cost-when-disabled instrumentation
+   feature - see `benches`- and profiling-adjacent tooling below),
+   which times specific functions in-process rather than sampling the
+   whole system: 3 runs each, before/after, averaged. Every function
+   that actually touches `Locals` got measurably faster - `check_stmt`
+   -13.9%, `check_function` -10.1%, `check_program` -8.3%, `check_expr`
+   -7.5%, total runtime -5.3% - while every function untouched by the
+   swap (lexer, parser, registry indexing) stayed flat within run-to-run
+   noise, exactly as expected. A real lesson here: a system-wide
+   sampling profiler on a shared/noisy host can under-report a genuine,
+   internally-consistent improvement that in-process, per-call
+   instrumentation (`hotpath`) can see clearly - don't trust a "no
+   change" result from one profiling method without cross-checking it
+   against a lower-noise one before believing it.
 3. **A faster hasher for `Registry`/`Project`'s other hot HashMaps -
    DONE.** `rustc_hash::FxHashMap` for `Registry::classes`/`functions` and
    `Project::files`/`dependents` (built once, read many times, never
@@ -1265,6 +1272,22 @@ crash bug, not just a slowness concern.
    would have caught the real bug, via a temporary worktree at the prior
    commit), and a scaling assertion for a single very-long-line file
    (confirmed roughly linear, not quadratic, at CI-friendly sizes).
+6. **An in-process instrumentation profiler, `hotpath` - DONE, added
+   along the way.** A new opt-in `hotpath` feature (zero-cost when
+   disabled - confirmed directly, default build/test/clippy output is
+   completely unaffected) instruments the actual pipeline stages
+   (`main`, `run_check_project`, `Project::load_file`/`finish_loading`/
+   `check_file`, `Registry::index`/`flatten_traits`, `Lexer::
+   tokenize_with_spans`, `Parser::parse_program`, `Checker::
+   check_program`/`check_function`/`check_stmt`/`check_expr`) with
+   `#[hotpath::measure]`. `cargo run --features hotpath -- check-project
+   <dir>` now prints a per-function timing breakdown at exit - a real,
+   repeatable profiling capability for future sessions, not just a one-
+   off `perf` session. This is what actually caught item 2's own
+   corrected result above (`Locals`'s real-world speedup): `perf`'s
+   system-wide sampling reported no measurable improvement, `hotpath`'s
+   in-process, per-call timing showed a real, internally-consistent
+   5-14% one instead.
 
 Also found and fixed along the way: `vendor/phpstan-src` is a git
 submodule that `git worktree add` doesn't auto-populate - `build.rs` now
