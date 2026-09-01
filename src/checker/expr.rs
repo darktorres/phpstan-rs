@@ -592,18 +592,21 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(cond, &mut else_locals, false);
                 let else_ty = self.check_expr(else_, &mut else_locals, label);
                 *locals = merge_scopes(&then_locals, &else_locals);
-                // Never let an unknown branch compose into a partial
-                // Union that looks more precise than it is.
+                // Phase 23: `union_types`, not a raw `Type::Union(vec![...])`
+                // - either branch's own type is very commonly already a
+                // `Union` itself (e.g. a stub-declared `resource|false`),
+                // and a bare `vec![then_ty, else_ty]` nests it unflattened
+                // instead of merging its members in - a later `!== false`
+                // narrowing filters only the *outer* union's members, so
+                // it can strip a bare `false` sitting alongside the nested
+                // union but can't reach inside that union to strip its own
+                // `false` member. `union_types` already independently
+                // implements the same "either side Mixed => Mixed" /
+                // "equal sides collapse" rules this match used to
+                // duplicate by hand, so this also simplifies the two arms
+                // into one call.
                 match then_ty {
-                    Some(then_ty) => {
-                        if then_ty == Type::Mixed || else_ty == Type::Mixed {
-                            Type::Mixed
-                        } else if then_ty == else_ty {
-                            then_ty
-                        } else {
-                            Type::Union(vec![then_ty, else_ty])
-                        }
-                    }
+                    Some(then_ty) => union_types(then_ty, else_ty),
                     None => Type::Mixed,
                 }
             }
@@ -1469,15 +1472,10 @@ impl<'a> Checker<'a> {
                         let mut then_locals = locals.clone();
                         self.apply_narrowing(cond, &mut then_locals, true);
                         let then_ty = self.infer_expr(t, &then_locals);
-                        // Never let an unknown branch compose into a partial
-                        // Union that looks more precise than it is.
-                        if then_ty == Type::Mixed || else_ty == Type::Mixed {
-                            Type::Mixed
-                        } else if then_ty == else_ty {
-                            then_ty
-                        } else {
-                            Type::Union(vec![then_ty, else_ty])
-                        }
+                        // Phase 23: see the parallel arm in `check_expr`
+                        // for why this must be `union_types`, not a raw
+                        // `Type::Union(vec![...])`.
+                        union_types(then_ty, else_ty)
                     }
                     None => Type::Mixed,
                 }
@@ -1764,6 +1762,32 @@ impl<'a> Checker<'a> {
                     return Type::Array(Box::new(field_ty));
                 }
             }
+            // Phase 23: the real stubs declare these unconditionally
+            // unioned with `array` (`str_replace(...): array|string`),
+            // even though the function only ever returns an array when
+            // `$subject` itself is one - real PHPStan special-cases this
+            // via its own hand-written dynamic return type extension, not
+            // from the stub signature alone. Scoped to "subject is
+            // exactly `Type::String`" - anything else (`Mixed`, a union, a
+            // real array) correctly keeps today's existing behavior.
+            "str_replace" | "str_ireplace" if args.len() == 3 || args.len() == 4 => {
+                if self.infer_expr(&args[2].value, locals) == Type::String {
+                    return Type::String;
+                }
+            }
+            // Same subject-dependent shape as above, but these can also
+            // return `null` on a regex error (already correctly present
+            // in the real stub's own declared type) - computed from the
+            // ordinary generic path first and then stripped of any
+            // `array` member, rather than hardcoding the nullability this
+            // project doesn't otherwise know for certain.
+            "preg_replace" | "preg_replace_callback" | "preg_filter"
+                if args.len() >= 3 && self.infer_expr(&args[2].value, locals) == Type::String =>
+            {
+                let resolved = resolve_call_args(args, &sig.params);
+                let generic = self.infer_call_return_type(sig, &resolved, locals);
+                return strip_array_member(generic);
+            }
             _ => {}
         }
         let resolved = resolve_call_args(args, &sig.params);
@@ -2023,6 +2047,31 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         members.into_iter().next().unwrap()
     } else {
         Type::Union(members)
+    }
+}
+
+/// Removes any `Array`/`ArrayShape` member from `ty` - the array-ish
+/// counterpart of `narrow_type_excluding`, which matches a specific value
+/// rather than a whole type *kind*. Used for the `preg_replace` family,
+/// where the real return type includes `array` only when `$subject` is
+/// itself an array - once that's confirmed not the case, this drops the
+/// always-possible-per-the-stub `array` member while leaving everything
+/// else (a real declared `null`, say) untouched.
+fn strip_array_member(ty: Type) -> Type {
+    match ty {
+        Type::Union(members) => {
+            let kept: Vec<Type> = members
+                .into_iter()
+                .filter(|m| !matches!(m, Type::Array(_) | Type::ArrayShape(_)))
+                .collect();
+            match kept.len() {
+                0 => Type::Mixed,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        Type::Array(_) | Type::ArrayShape(_) => Type::Mixed,
+        other => other,
     }
 }
 

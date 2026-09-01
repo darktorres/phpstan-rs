@@ -1214,6 +1214,51 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 23 Finding 3: str_replace/preg_replace's real stub return
+    // types are unconditionally unioned with `array`, even though the
+    // function only returns an array when $subject itself is one.
+    #[test]
+    fn str_replace_narrows_to_string_when_the_subject_is_a_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(string $subject): string {
+                return str_replace(['a', 'b'], ['c', 'd'], $subject);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_replace_narrows_to_string_or_null_when_the_subject_is_a_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(string $subject): void {
+                $result = preg_replace('/a/', 'b', $subject);
+                if ($result !== null) {
+                    strlen($result);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn str_replace_falls_back_to_the_generic_path_for_a_non_string_subject() {
+        // Scoped to "subject is exactly Type::String" - a Mixed subject
+        // (or a real array one) must keep today's existing, unaffected
+        // generic-path behavior rather than the new special case firing.
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject) {
+                $result = str_replace('a', 'b', $subject);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn sprintf_flags_too_few_arguments_for_its_own_placeholders() {
         let d = diagnostics_for(r#"<?php sprintf("%s and %s", "only one");"#);
@@ -5630,6 +5675,27 @@ mod tests {
         "#,
         );
         assert_eq!(wrong.len(), 1, "got: {wrong:?}");
+    }
+
+    // Phase 23 Finding 4, real shape: `$handle = $filename !== null ?
+    // @fopen($filename, 'wb') : false;` - fopen()'s own type is already a
+    // Union (`resource|false`); combining it with the ternary's other
+    // branch via a raw `Type::Union(vec![then_ty, else_ty])` nested that
+    // whole union unflattened, so a later `!== false` narrowing on the
+    // outer union couldn't reach the `false` still hiding inside it.
+    #[test]
+    fn ternary_flattens_a_branch_that_is_itself_already_a_union() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $filename): void {
+                $handle = $filename !== null ? @fopen($filename, 'wb') : false;
+                if ($handle !== false) {
+                    fclose($handle);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
