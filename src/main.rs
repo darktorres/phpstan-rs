@@ -280,6 +280,7 @@ fn try_load_file(project: &mut project::Project, path: &Path) -> bool {
     project.load_file(path.to_path_buf(), &source).is_ok()
 }
 
+#[hotpath::measure]
 fn run_check_project(
     dirs: &[PathBuf],
     scan_dirs: &[PathBuf],
@@ -467,6 +468,7 @@ enum Command {
     Demo { file: Option<PathBuf> },
 }
 
+#[hotpath::main]
 fn main() {
     let cli = Cli::parse();
     match cli.command {

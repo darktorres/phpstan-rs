@@ -63,6 +63,7 @@ impl Registry {
     /// this project doesn't otherwise detect, so degrading to "leave as
     /// partially flattened" once the bound is hit (rather than looping
     /// forever) is the honest answer, not a regression.
+    #[hotpath::measure]
     pub(crate) fn flatten_traits(&mut self) {
         let max_iterations = self.classes.len().max(1);
         for _ in 0..max_iterations {
@@ -201,6 +202,7 @@ impl Registry {
     /// `namespace Pdo { ... }` for PHP 8.4's `Pdo\*` subclasses) - a
     /// single whole-file context would apply whichever one it saw last to
     /// both blocks, silently mis-qualifying the first one's classes.
+    #[hotpath::measure]
     pub(crate) fn index(&mut self, stmts: &[Stmt]) {
         let mut ctx = NameContext::default();
         self.index_with_context(stmts, &mut ctx, false);

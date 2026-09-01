@@ -155,6 +155,7 @@ impl<'a> Lexer<'a> {
     /// The real, span-carrying tokenization entry point - `tokenize`
     /// below is a thin adapter over this for the handful of tests that
     /// want to compare bare tokens without spans getting in the way.
+    #[hotpath::measure]
     pub fn tokenize_with_spans(mut self) -> Vec<(Token, Span)> {
         let mut tokens = Vec::new();
         loop {

@@ -229,6 +229,7 @@ impl<'a> Checker<'a> {
         self.diagnostics
     }
 
+    #[hotpath::measure]
     pub fn check_program(&mut self, program: &[Stmt]) {
         // A simple whole-file pass (last `namespace` seen wins), unlike
         // `Registry::index`'s positional tracking - brace-delimited
@@ -322,6 +323,7 @@ impl<'a> Checker<'a> {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn check_function(
         &mut self,
         f: &FunctionDecl,

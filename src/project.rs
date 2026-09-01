@@ -100,6 +100,7 @@ impl Project {
     /// class, so it's wasteful to re-run it after each individual file
     /// during a bulk load the way `update_file` has to for a single
     /// incremental change.
+    #[hotpath::measure]
     pub fn load_file(&mut self, path: PathBuf, source: &str) -> Result<(), ParseError> {
         let ast = parse(source)?;
         let (functions, classes) = declared_names(&ast);
@@ -119,6 +120,7 @@ impl Project {
     }
 
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
+    #[hotpath::measure]
     pub fn finish_loading(&mut self) {
         self.registry.flatten_traits();
         self.rebuild_pest_config();
@@ -254,6 +256,7 @@ impl Project {
 
     /// Type-checks one already-loaded file against the project's current
     /// registry, returning its diagnostics.
+    #[hotpath::measure]
     pub fn check_file(&self, path: &Path) -> Vec<Diagnostic> {
         let Some(file) = self.files.get(path) else {
             return Vec::new();

@@ -58,6 +58,7 @@ impl<'a> Checker<'a> {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         match &e.kind {
             ExprKind::Call(callee, args) => {

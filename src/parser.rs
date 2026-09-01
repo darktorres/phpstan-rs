@@ -158,6 +158,7 @@ impl Parser {
         self.expr_depth -= 1;
     }
 
+    #[hotpath::measure]
     pub fn parse_program(&mut self) -> Result<Vec<Stmt>, ParseError> {
         let mut stmts = Vec::new();
         while !self.at_eof() {

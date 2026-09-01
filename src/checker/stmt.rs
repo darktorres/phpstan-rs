@@ -15,6 +15,7 @@ impl<'a> Checker<'a> {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn check_stmt(
         &mut self,
         stmt: &Stmt,
