@@ -34,6 +34,16 @@ pub struct Registry {
     // existing construction sites already goes through `build`/
     // `default()` and none of them need to change to keep compiling.
     pub strict_mixed_arrays: bool,
+    // Phase 25: class names that have had at least one *unconditional*
+    // declaration indexed so far - lets `index_with_context` tell "this
+    // name's existing entry is itself unconditional, so a second
+    // unconditional declaration should merge onto it" (Piwigo's own
+    // `phpstan-stubs/Imagick.stub.php` shape) apart from "this name's
+    // existing entry is only a conditional stub, so the first real
+    // unconditional declaration should still replace it outright" (the
+    // pre-existing `PHPUnit\Framework\TestCase` shape) - both look
+    // identical from `self.classes.contains_key(&name)` alone.
+    unconditionally_declared_classes: HashSet<String>,
 }
 
 impl Registry {
@@ -237,12 +247,39 @@ impl Registry {
                 StmtKind::Use(imports) => ctx.add_uses(imports),
                 StmtKind::ClassDecl(c) => {
                     let name = ctx.declared_name(&c.name);
+                    let new_info = ClassInfo::from_decl(c, ctx);
                     if conditional {
-                        self.classes
-                            .entry(name)
-                            .or_insert_with(|| ClassInfo::from_decl(c, ctx));
+                        self.classes.entry(name).or_insert_with(|| new_info);
+                    } else if self.unconditionally_declared_classes.contains(&name) {
+                        // Phase 25: a *second* unconditional declaration
+                        // of the same name - real, not always a mistake -
+                        // PHPStan's own `stubFiles` mechanism (Piwigo's own
+                        // `phpstan-stubs/Imagick.stub.php`, wired into its
+                        // `phpstan.neon`) exists specifically to let a
+                        // project redeclare *one* method of a real,
+                        // already-known class as a targeted override,
+                        // relying on PHPStan to merge it onto everything
+                        // else the real declaration already provides. A
+                        // plain overwrite here discarded the *entire* real
+                        // vendored `imagick.php` class - every other
+                        // method/constant - the moment this override's own
+                        // bare `class Imagick { public function
+                        // convolveImage(...) {} }` was indexed, regardless
+                        // of which file happened to load first.
+                        let existing = self
+                            .classes
+                            .remove(&name)
+                            .expect("name is in unconditionally_declared_classes, so it must already be indexed");
+                        self.classes.insert(name, existing.merge(new_info));
                     } else {
-                        self.classes.insert(name, ClassInfo::from_decl(c, ctx));
+                        // The *first* unconditional declaration of this
+                        // name always wins outright over any earlier
+                        // conditional stub (`PHPUnit\Framework\TestCase`'s
+                        // own real-world shape) - merging here would wrongly
+                        // keep a guarded fallback's own members alongside
+                        // the real class's.
+                        self.unconditionally_declared_classes.insert(name.clone());
+                        self.classes.insert(name, new_info);
                     }
                 }
                 StmtKind::EnumDecl(e) => {
@@ -334,6 +371,14 @@ impl Registry {
         }
         for name in classes {
             self.classes.remove(name);
+            // Phase 25: must stay in lockstep with `classes` - otherwise a
+            // later re-index of the same name (incremental re-checking's
+            // whole reason for calling this) would find a stale "already
+            // unconditionally declared" marker with nothing left in
+            // `classes` for it to point at, wrongly taking the merge path
+            // (`index_with_context`'s `ClassDecl` arm) against a
+            // now-nonexistent entry instead of a clean first insertion.
+            self.unconditionally_declared_classes.remove(name);
         }
     }
 
@@ -349,9 +394,37 @@ impl Registry {
     /// without this, built-in classes (`Exception`, `ArrayObject`, ...)
     /// would never be known to the registry at all, since stub sources
     /// were previously only mined for function signatures.
+    ///
+    /// Phase 25: every merged-in name is also recorded in
+    /// `unconditionally_declared_classes` - this runs once, in
+    /// `Project::new`, *before* any real project file is indexed, so a
+    /// built-in class like `Imagick` is already present by the time
+    /// `index_with_context` later processes a project's own
+    /// `#[stubFiles]`-style override (Piwigo's own real shape:
+    /// `phpstan-stubs/Imagick.stub.php`, a bare `class Imagick { public
+    /// function convolveImage(...) {} }` meaning to patch one method).
+    /// Without this, `index_with_context`'s own merge logic (added
+    /// alongside this) would only ever see "no unconditional declaration
+    /// recorded for this name yet" and wholesale-replace the entire
+    /// built-in class with the override's bare one-method version -
+    /// exactly the bug this fix exists to close. The merge itself keeps
+    /// this function's own "user-defined always wins" contract robust
+    /// even in the (today, never-hit in practice, since this always runs
+    /// first) case where user code was somehow indexed before this runs -
+    /// existing user info is `other` in `ClassInfo::merge`, so it still
+    /// wins any member-name conflict.
     pub fn merge_stub_classes<S: Into<String>>(&mut self, stubs: Vec<(S, ClassInfo)>) {
         for (name, info) in stubs {
-            self.classes.entry(name.into()).or_insert(info);
+            let name: String = name.into();
+            self.unconditionally_declared_classes.insert(name.clone());
+            match self.classes.remove(&name) {
+                Some(existing) => {
+                    self.classes.insert(name, info.merge(existing));
+                }
+                None => {
+                    self.classes.insert(name, info);
+                }
+            }
         }
     }
 
@@ -764,6 +837,91 @@ mod tests {
         assert!(!r.classes["X"].methods.contains_key("stub"));
     }
 
+    // Phase 25, real shape: Piwigo's own `phpstan-stubs/Imagick.stub.php`,
+    // wired into `phpstan.neon` as a PHPStan `stubFiles` entry - a bare
+    // `class Imagick { public function convolveImage(...) {} }` meant to
+    // override *one* method of the real, already-known `Imagick` class
+    // from `jetbrains/phpstorm-stubs`. Both declarations are unconditional
+    // - the fix must merge them, not let the second one wholesale-replace
+    // the first and silently drop every other real method/constant.
+    #[test]
+    fn two_unconditional_class_declarations_merge_instead_of_replacing() {
+        let r = build_registry(
+            r#"<?php
+            class Imagick {
+                const FILTER_LANCZOS = 1;
+                public function getImageWidth() {}
+                public function cropImage($width, $height, $x, $y) {}
+                public function convolveImage($kernel) {}
+            }
+            class Imagick {
+                public function convolveImage($kernel, $channel = 1) {}
+            }"#,
+        );
+        assert!(r.classes["Imagick"].methods.contains_key("getImageWidth"));
+        assert!(r.classes["Imagick"].methods.contains_key("cropImage"));
+        assert!(r.classes["Imagick"].consts.contains_key("FILTER_LANCZOS"));
+        // The override's own signature wins for the one method both share.
+        assert_eq!(
+            r.classes["Imagick"].methods["convolveImage"].params.len(),
+            2,
+            "the second declaration's own convolveImage() (2 params) should win over the first's (1 param)"
+        );
+    }
+
+    #[test]
+    fn two_unconditional_class_declarations_with_disjoint_methods_union_both() {
+        // Order-independent, and not specific to an override-shaped
+        // (single-method) second declaration - two genuinely different,
+        // non-overlapping method sets under the same name still end up
+        // with the union of both, either direction.
+        let r = build_registry(
+            r#"<?php
+            class X { public function fromFirst() {} }
+            class X { public function fromSecond() {} }"#,
+        );
+        assert!(r.classes["X"].methods.contains_key("fromFirst"));
+        assert!(r.classes["X"].methods.contains_key("fromSecond"));
+    }
+
+    #[test]
+    fn a_merged_class_keeps_its_extends_when_the_second_declaration_has_none() {
+        // The real Imagick shape: the override redeclares the class bare
+        // (no `extends`/`implements` of its own) - it must not blank out
+        // real inheritance information the first declaration carried.
+        let r = build_registry(
+            r#"<?php
+            class Base {}
+            class X extends Base { public function fromFirst() {} }
+            class X { public function fromSecond() {} }"#,
+        );
+        assert_eq!(r.classes["X"].extends, vec!["Base".to_string()]);
+        assert!(r.classes["X"].methods.contains_key("fromFirst"));
+        assert!(r.classes["X"].methods.contains_key("fromSecond"));
+    }
+
+    #[test]
+    fn re_indexing_an_unconditional_class_after_removal_does_not_panic() {
+        // Found while implementing the merge fix above:
+        // `remove_declarations` (incremental re-checking's own removal
+        // step, `Project::update_file`) cleared `classes` but left a
+        // stale "already unconditionally declared" marker behind, so
+        // re-indexing the same file after a change hit the merge branch
+        // against an entry `remove_declarations` had already deleted -
+        // panicking instead of cleanly re-inserting.
+        let src = "<?php class X { public function original() {} }";
+        let tokens = Lexer::new(src).tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let mut r = Registry::build(&program);
+        assert!(r.classes["X"].methods.contains_key("original"));
+
+        r.remove_declarations(&[], &["X".to_string()]);
+        assert!(!r.classes.contains_key("X"));
+
+        r.index(&program);
+        assert!(r.classes["X"].methods.contains_key("original"));
+    }
+
     #[test]
     fn class_info_records_its_own_kind_and_final_abstract_readonly_members() {
         let r = build_registry(
@@ -1031,6 +1189,53 @@ mod tests {
             },
         )]);
         assert_eq!(r.functions["strlen"].return_type, Type::Int);
+    }
+
+    // Phase 25, real shape: `Project::new` calls `merge_stub_classes`
+    // *before* any project file is indexed - a built-in class like
+    // `Imagick` is already present by the time a project's own
+    // `phpstan-stubs/Imagick.stub.php`-style override (a bare
+    // `class Imagick { public function convolveImage(...) {} }` meaning
+    // to patch one method) gets indexed later. Without also recording
+    // the merged-in name in `unconditionally_declared_classes`,
+    // `index_with_context`'s own merge fix would see "no unconditional
+    // declaration recorded yet" and wholesale-replace the entire
+    // built-in class with the override's bare one-method version.
+    #[test]
+    fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
+        // The built-in class's own `ClassInfo` is built the same way
+        // `php_stubs::generated_stub_classes()` builds a real one - via
+        // `Registry::build` over its own source - rather than
+        // constructing a `ClassInfo` literal by hand.
+        let built_in = build_registry(
+            "<?php class Imagick { public function getImageWidth() {} public function getImageHeight() {} public function convolveImage($kernel) {} }",
+        )
+        .classes
+        .remove("Imagick")
+        .unwrap();
+
+        let mut r = Registry::default();
+        r.merge_stub_classes(vec![("Imagick".to_string(), built_in)]);
+        assert!(r.classes["Imagick"].methods.contains_key("getImageWidth"));
+        assert!(r.classes["Imagick"].methods.contains_key("getImageHeight"));
+
+        let tokens = Lexer::new(
+            "<?php class Imagick { public function convolveImage($kernel, $channel = 1) {} }",
+        )
+        .tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        r.index(&program);
+
+        assert!(
+            r.classes["Imagick"].methods.contains_key("getImageWidth"),
+            "the override must not discard the built-in class's other real methods"
+        );
+        assert!(r.classes["Imagick"].methods.contains_key("getImageHeight"));
+        assert_eq!(
+            r.classes["Imagick"].methods["convolveImage"].params.len(),
+            2,
+            "the override's own convolveImage() (2 params) should win over the built-in's (1 param)"
+        );
     }
 
     #[test]

@@ -430,4 +430,53 @@ impl ClassInfo {
             contravariant_templates: HashSet::new(),
         }
     }
+
+    /// Merges a second unconditional declaration of the same class name
+    /// into `self` - PHPStan's own `stubFiles` mechanism (a real, common
+    /// pattern: Piwigo's own `phpstan-stubs/Imagick.stub.php`) lets a
+    /// project redeclare just *one* method of an already-known class as a
+    /// targeted override, relying on the real declaration to still
+    /// provide everything else. `self`/`other` are symmetric in the sense
+    /// that it doesn't matter which file happened to be indexed first -
+    /// whichever is `other` here (the *second* one indexed) wins on a
+    /// same-name member conflict (`HashMap::extend`'s standard "later
+    /// insert wins" behavior), matching a deliberate override's intent -
+    /// but never *erases* a member, `extends`/`implements`, or generic
+    /// information `self` already had that `other` simply doesn't
+    /// mention (a bare `class Imagick { ... }` override redeclaring no
+    /// `extends`/`implements` of its own must not blank out the real
+    /// class's).
+    pub(crate) fn merge(mut self, other: ClassInfo) -> ClassInfo {
+        self.methods.extend(other.methods);
+        self.properties.extend(other.properties);
+        self.consts.extend(other.consts);
+        self.abstract_methods.extend(other.abstract_methods);
+        self.final_methods.extend(other.final_methods);
+        self.resolved_trait_conflicts
+            .extend(other.resolved_trait_conflicts);
+        self.covariant_templates.extend(other.covariant_templates);
+        self.contravariant_templates
+            .extend(other.contravariant_templates);
+        self.template_bounds.extend(other.template_bounds);
+        self.implements_args.extend(other.implements_args);
+        if self.extends.is_empty() {
+            self.extends = other.extends;
+        }
+        if self.implements.is_empty() {
+            self.implements = other.implements;
+        }
+        if self.uses.is_empty() {
+            self.uses = other.uses;
+        }
+        if self.templates.is_empty() {
+            self.templates = other.templates;
+        }
+        if self.extends_args.is_empty() {
+            self.extends_args = other.extends_args;
+        }
+        if self.trait_aliases.is_empty() {
+            self.trait_aliases = other.trait_aliases;
+        }
+        self
+    }
 }
