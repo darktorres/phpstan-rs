@@ -396,6 +396,27 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         "is_null" => Some(Type::Null),
         "is_object" => Some(Type::Object("object".to_string(), Vec::new())),
         "is_callable" => Some(Type::Callable),
+        // Phase 28, real shape: `proc_open()`/`fsockopen()` return
+        // `resource|false`, guarded everywhere in this corpus with
+        // `if (! is_resource($x)) { throw ...; }` before `fclose`/
+        // `fwrite`/`fread`/`proc_close`/etc. - `resource` has no native
+        // PHP type declaration, so it's represented the same
+        // `Type::Object("resource", _)` way every other stub/checker
+        // site in this project already does.
+        "is_resource" => Some(Type::Object("resource".to_string(), Vec::new())),
+        // `is_scalar($x)` is true for exactly `int|float|string|bool` -
+        // unlike `is_numeric` (which this project deliberately doesn't
+        // narrow at all, since real PHPStan's own `int|float|numeric-
+        // string` result has no representation here and approximating
+        // with `int|float` would wrongly exclude the equally-common
+        // numeric-string case), `is_scalar`'s real set is exactly these
+        // four concrete types with no such gap.
+        "is_scalar" => Some(Type::Union(vec![
+            Type::Int,
+            Type::Float,
+            Type::String,
+            Type::Bool,
+        ])),
         _ => None,
     }
 }

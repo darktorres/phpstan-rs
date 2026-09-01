@@ -1785,6 +1785,50 @@ mod tests {
         assert!(d[0].message.contains("needsInt"), "got: {d:?}");
     }
 
+    // Phase 28, real shape: `proc_open()`/`fsockopen()` return
+    // `resource|false`, and this corpus's test helpers guard every one of
+    // them with `if (! is_resource($x)) { throw ...; }` before
+    // `fclose`/`fwrite`/`fread`/`proc_close`/etc. - `is_resource` was
+    // simply missing from `narrowing_type_for_predicate`'s table.
+    #[test]
+    fn is_resource_narrowing_excludes_false() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return resource|false */
+            function open() {}
+            function f(): void {
+                $proc = open();
+                if (! is_resource($proc)) {
+                    throw new Exception('failed');
+                }
+                fclose($proc);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn is_scalar_narrows_to_the_four_scalar_types() {
+        // Unlike is_numeric (deliberately not narrowed at all - real
+        // PHPStan's own int|float|numeric-string result has no
+        // representation here), is_scalar's real set is exactly
+        // int|float|string|bool, with no such approximation gap.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function process(mixed $value) {
+                if (is_scalar($value)) {
+                    return needsInt($value);
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsInt"), "got: {d:?}");
+    }
+
     #[test]
     fn instanceof_narrows_to_the_checked_class() {
         let d = diagnostics_for(
