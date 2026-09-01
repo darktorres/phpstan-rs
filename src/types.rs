@@ -248,6 +248,30 @@ fn parse_type_atom(s: &str) -> Type {
         return parse_type_string(inner);
     }
 
+    // PHPStan/Psalm's callable-shape syntax: `Closure(ParamType, ...):
+    // ReturnType` or `callable(...): ReturnType` - describes a callable
+    // value's own signature, not a generic type-argument list (only
+    // `<...>` is one, per `split_generic_args`) and not a real class
+    // name despite `Closure(...)` superficially resembling one. This
+    // project doesn't track a callable's own per-parameter/return
+    // signature at all, so - matching its own established leniency for a
+    // bare `callable`/`Closure` type elsewhere (`is_assignable`'s
+    // `(Type::Array(_) | Type::ArrayShape(_), Type::Callable) => true`
+    // and friends) - this degrades to the same `Type::Callable` a bare
+    // `callable` hint already produces. Real corpus shape: Doctrine
+    // DBAL's own `@param Closure(self):T $func` - without this, the
+    // whole literal string `"Closure(self):T"` fell through to the
+    // generic class-name branch below and got mangled into a bogus,
+    // namespace-qualified "class name" (`Doctrine\DBAL\Closure(self):T`).
+    let lower = s.to_ascii_lowercase();
+    if lower.starts_with("closure(")
+        || lower.starts_with("closure (")
+        || lower.starts_with("callable(")
+        || lower.starts_with("callable (")
+    {
+        return Type::Callable;
+    }
+
     // A real, documented PHPStan/Psalm convention: a quoted literal
     // (`'ASC'|'DESC'`, `"foo"`) as one member of a union means "exactly
     // this string value," not a class reference - without this, real
@@ -975,5 +999,41 @@ mod tests {
         assert_eq!(members.len(), 2);
         assert!(matches!(&members[0], Type::Intersection(parts) if parts.len() == 2));
         assert_eq!(members[1], Type::Null);
+    }
+
+    // Phase 30, real shape: Doctrine DBAL's own `@param Closure(self):T
+    // $func` (`Connection::transactional()`) - the callable-shape syntax
+    // wasn't recognized at all, so the whole literal string
+    // `"Closure(self):T"` fell through to the generic class-name branch
+    // and got mangled into a bogus, namespace-qualified "class name"
+    // once resolved against the current file's own namespace.
+    #[test]
+    fn closure_shape_syntax_degrades_to_plain_callable() {
+        assert_eq!(parse_type_string("Closure(self):T"), Type::Callable);
+        assert_eq!(
+            parse_type_string("Closure(int, string): bool"),
+            Type::Callable
+        );
+        assert_eq!(parse_type_string("callable(int): void"), Type::Callable);
+    }
+
+    #[test]
+    fn closure_shape_syntax_still_works_inside_a_union() {
+        let ty = parse_type_string("Closure(self):T|null");
+        let Type::Union(members) = ty else {
+            panic!("expected a top-level union, got {ty:?}");
+        };
+        assert_eq!(members, vec![Type::Callable, Type::Null]);
+    }
+
+    #[test]
+    fn a_class_name_merely_starting_with_closure_is_not_mistaken_for_the_callable_shape() {
+        // `strip_prefix("closure")` alone would wrongly match a real
+        // class like `ClosureFactory` too - only a literal `(` right
+        // after `closure`/`callable` (ignoring case) counts.
+        assert_eq!(
+            parse_type_string("ClosureFactory"),
+            Type::Object("ClosureFactory".to_string(), Vec::new())
+        );
     }
 }
