@@ -202,55 +202,98 @@ impl Registry {
     /// both blocks, silently mis-qualifying the first one's classes.
     pub(crate) fn index(&mut self, stmts: &[Stmt]) {
         let mut ctx = NameContext::default();
-        self.index_with_context(stmts, &mut ctx);
+        self.index_with_context(stmts, &mut ctx, false);
     }
 
-    fn index_with_context(&mut self, stmts: &[Stmt], ctx: &mut NameContext) {
+    /// `conditional` is `true` once inside any `if`/`else` branch (see the
+    /// `StmtKind::If` arm below) - a declaration found there only fills a
+    /// name in if nothing unconditional has already claimed it
+    /// (`or_insert_with`), while a top-level, unconditional declaration
+    /// always wins outright (`insert`), regardless of which is indexed
+    /// first. Without this distinction, two files declaring the same
+    /// fully-qualified name - one for real, one as a defensive `if (!
+    /// class_exists('X')) { class X {...} }`/`if (!function_exists('foo'))
+    /// { function foo() {} }` fallback guarding against a dependency that
+    /// might not be loaded - would resolve to whichever happened to be
+    /// indexed *last* (a plain `HashMap::insert` is order-dependent), not
+    /// whichever is actually real. Confirmed real, not hypothetical: `main.rs::run_check_project`'s own
+    /// `analyze_files.sort()` already anticipates "a real corpus can
+    /// genuinely declare the same fully-qualified class name twice" and
+    /// sorts for *determinism* - but a deterministic wrong answer is still
+    /// wrong, and sorting alone doesn't decide which of the two should
+    /// win. `PHPUnit\Framework\TestCase` is a real, observed instance
+    /// (`vendor/rector/rector/stubs-rector/PHPUnit/Framework/TestCase.php`
+    /// ships a guarded fallback with no `extends Assert`, alphabetically
+    /// after the real `vendor/phpunit/phpunit/.../TestCase.php`, so it
+    /// silently won the registry slot and dropped `assertEquals` from
+    /// every real subclass).
+    fn index_with_context(&mut self, stmts: &[Stmt], ctx: &mut NameContext, conditional: bool) {
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Namespace(name) => ctx.set_namespace(name),
                 StmtKind::Use(imports) => ctx.add_uses(imports),
                 StmtKind::ClassDecl(c) => {
-                    self.classes
-                        .insert(ctx.declared_name(&c.name), ClassInfo::from_decl(c, ctx));
+                    let name = ctx.declared_name(&c.name);
+                    if conditional {
+                        self.classes
+                            .entry(name)
+                            .or_insert_with(|| ClassInfo::from_decl(c, ctx));
+                    } else {
+                        self.classes.insert(name, ClassInfo::from_decl(c, ctx));
+                    }
                 }
                 StmtKind::EnumDecl(e) => {
-                    self.classes.insert(
-                        ctx.declared_name(&e.name),
-                        ClassInfo::from_enum_decl(e, ctx),
-                    );
+                    let name = ctx.declared_name(&e.name);
+                    if conditional {
+                        self.classes
+                            .entry(name)
+                            .or_insert_with(|| ClassInfo::from_enum_decl(e, ctx));
+                    } else {
+                        self.classes.insert(name, ClassInfo::from_enum_decl(e, ctx));
+                    }
                 }
                 StmtKind::FunctionDecl(f) => {
-                    self.functions.insert(
-                        ctx.declared_name(&f.name),
-                        FunctionSig::from_decl(f, ctx, &[]),
-                    );
+                    let name = ctx.declared_name(&f.name);
+                    if conditional {
+                        self.functions
+                            .entry(name)
+                            .or_insert_with(|| FunctionSig::from_decl(f, ctx, &[]));
+                    } else {
+                        self.functions
+                            .insert(name, FunctionSig::from_decl(f, ctx, &[]));
+                    }
                 }
                 // The real, common `if (!function_exists('foo')) { function
                 // foo() {} }` polyfill idiom (used throughout the PHP
                 // ecosystem, e.g. symfony/deprecation-contracts and every
                 // symfony/polyfill-* package) declares a genuinely global
                 // function/class from inside a conditional - recursing
-                // here is what makes those visible at all. This registry
-                // has no notion of "conditionally declared" in the first
-                // place (a symbol is either indexed or it isn't), so
-                // treating a branch's declarations the same as top-level
-                // ones is consistent with that existing coarseness, not a
-                // new kind of imprecision. Cloning `ctx` for each branch
-                // means a `use`/`namespace` change inside one doesn't leak
-                // into the other or past the `if` - conservative, and
-                // irrelevant in practice (real code doesn't declare
-                // namespaces inside an `if`).
+                // here is what makes those visible at all. Cloning `ctx`
+                // for each branch means a `use`/`namespace` change inside
+                // one doesn't leak into the other or past the `if` -
+                // conservative, and irrelevant in practice (real code
+                // doesn't declare namespaces inside an `if`). Both
+                // branches are marked `conditional = true` regardless of
+                // the `if`'s own condition text - this registry has no
+                // notion of *which* conditions are actually guards, only
+                // "was this declaration reached unconditionally or not,"
+                // which is exactly the distinction the doc comment above
+                // needs.
                 StmtKind::If {
                     then_branch,
                     else_branch,
                     ..
                 } => {
-                    self.index_with_context(std::slice::from_ref(then_branch), &mut ctx.clone());
+                    self.index_with_context(
+                        std::slice::from_ref(then_branch),
+                        &mut ctx.clone(),
+                        true,
+                    );
                     if let Some(else_branch) = else_branch {
                         self.index_with_context(
                             std::slice::from_ref(else_branch),
                             &mut ctx.clone(),
+                            true,
                         );
                     }
                 }
@@ -261,8 +304,9 @@ impl Registry {
                 // same block - it's the statement *after* the block ends
                 // that must not see it, which cloning at the point the
                 // *next* `StmtKind::Namespace` resets `ctx.use_map` already
-                // ensures (see `set_namespace`).
-                StmtKind::Block(inner) => self.index_with_context(inner, ctx),
+                // ensures (see `set_namespace`). Inherits whatever
+                // `conditional` its enclosing context already has.
+                StmtKind::Block(inner) => self.index_with_context(inner, ctx, conditional),
                 _ => {}
             }
         }
@@ -681,6 +725,40 @@ mod tests {
             }"#,
         );
         assert!(r.lookup_function("polyfilled").is_some());
+    }
+
+    #[test]
+    fn unconditional_class_wins_over_a_later_conditional_stub() {
+        // Real shape: `vendor/rector/rector/stubs-rector/PHPUnit/Framework/
+        // TestCase.php` guards a minimal fallback `TestCase` (no `extends
+        // Assert`) behind `if (!class_exists(...))`, declared *after* the
+        // real `vendor/phpunit/phpunit/.../TestCase.php` in file-sort
+        // order - the real class must still win.
+        let r = build_registry(
+            r#"<?php
+            class X { public function real() {} }
+            if (!class_exists('X')) {
+                class X { public function stub() {} }
+            }"#,
+        );
+        assert!(r.classes["X"].methods.contains_key("real"));
+        assert!(!r.classes["X"].methods.contains_key("stub"));
+    }
+
+    #[test]
+    fn unconditional_class_wins_over_an_earlier_conditional_stub() {
+        // Same collision, opposite file-processing order - the fix must
+        // be order-independent, not just "unconditional-after-conditional"
+        // happens to work by accident of insertion order.
+        let r = build_registry(
+            r#"<?php
+            if (!class_exists('X')) {
+                class X { public function stub() {} }
+            }
+            class X { public function real() {} }"#,
+        );
+        assert!(r.classes["X"].methods.contains_key("real"));
+        assert!(!r.classes["X"].methods.contains_key("stub"));
     }
 
     #[test]
