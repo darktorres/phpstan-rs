@@ -1217,6 +1217,96 @@ chance) and profiling on pathological inputs (extremely long lines,
 deeply nested expressions, very large single files) rather than only
 "many ordinary files," which the existing corpus already covers well.
 
+## Phase 21: Piwigo false-positive hunt II - DONE
+
+A second false-positive-hunting pass against the same real, PHPStan-clean
+Piwigo corpus Phases 8-12 already used (`~/piwigo17-rewrite`, ~20,300
+files including `vendor/`) - `phpstan-rs check-project` against the whole
+root produced 43,800 diagnostics before this phase, every one
+presumptively a false positive (a real gap in this project, or a
+permanent, out-of-scope limitation - never a real Piwigo defect).
+Categorizing by normalized message shape (strip `#N` argument indices,
+`$VAR` names, string literals, `Class::` prefixes before a member
+reference - see the reproducible pipeline below) surfaced five
+high-frequency clusters, each root-caused by reading the actual triggering
+source (including the real, vendored `pestphp/pest-plugin-phpstan`
+extension and this project's own `registry.rs`/`checker.rs`/`build.rs`)
+rather than guessed from message text alone.
+
+1. **Pest's `it`/`test`/`describe`/`beforeEach`/`afterEach`/`beforeAll`/
+   `afterAll` closures get `$this` bound at runtime - DONE.** Real PHP has
+   no static way to know `$this` is valid inside these top-level-file test
+   closures; Pest's own runtime rebinds it via `Closure::bindTo()`. New
+   `src/pest_config.rs` module replicates the real `pestphp/pest-plugin-
+   phpstan` extension's own resolution algorithm (file-local `uses(...)`
+   first, then directory-scoped `uses(...)->in(...)` from any `Pest.php`
+   config, else default to `PHPUnit\Framework\TestCase`) - read directly
+   from that extension's vendored source, not guessed. `1498 -> 13`
+   occurrences; the 13 remaining are a different pattern entirely (a
+   closure returned for later external `bindTo()` binding by unseen
+   runtime code - Pest's own internal `ChainableClosure`, which even real
+   PHPStan can't resolve, self-disclosed via the package's own
+   `@phpstan-ignore-line`; and Symfony Console's `tryFrom`-style
+   closures), not the `it`/`test`/`describe` call-site pattern this fix
+   targets.
+2. **`assert($x instanceof T)` as a narrowing idiom - DONE.** Real PHPStan
+   documents support for this; `check_stmt`'s `StmtKind::Expression` arm
+   now applies the existing `apply_narrowing` after a call to the builtin
+   `assert()`, the same way a terminating `if`-guard's surviving branch
+   already is. Confirmed via `vendor/pestphp/pest-plugin-mutate`'s real
+   `AbstractFunctionCallUnwrapMutator::mutate()`.
+3. **A generator function/closure flagged as returning null - DONE.** Any
+   body containing `yield`/`yield from` always returns a real `Generator`
+   object - a bare `return;`/falling off the end never mismatches the
+   declared `Generator`/`Iterator`/`Traversable` return type the way it
+   would for an ordinary function. Existed at two independent sites
+   sharing the same diagnostic (`check_function`'s falls-off-the-end
+   check, and `check_stmt`'s `StmtKind::Return(None)` arm - a bare
+   early-exit guard inside a generator body); fixing only the first would
+   have left the second, equally common idiom still misfiring. New
+   `body_contains_yield`/`expr_contains_yield`/`stmt_contains_yield`
+   helpers in `checker/control_flow.rs`. The exact `..., got null` shape:
+   `~100 -> 0`.
+4. **`phpstan/phpstan` ships as a phar - DONE** (upgraded mid-pass from an
+   originally-planned permanent-limitation write-off once a closer look
+   found a real fix). This project already vendors PHPStan's own real,
+   MIT-licensed runtime source at `vendor/phpstan-src/src` (previously
+   used only to derive test fixtures) - `build.rs` now also walks it,
+   `php_stubs.rs` chains it into the existing stub-class pipeline
+   (`generated_stub_classes`, first-occurrence-wins, so real project code
+   still always beats a stub). `instantiated class PHPStan\Type\*Type not
+   found`: gone. Residual, not closed by this fix: `vendor/phpstan-src`
+   itself references `PHPStan\PhpDocParser\Ast\Type\*` from its own
+   dependency, `nikic/php-doc-parser`, not vendored here - see "Known
+   limitations" below.
+5. **A conditionally-declared class stub silently overwriting the real
+   class of the same name - DONE.** `Registry::index_with_context`
+   indexed a `if (!class_exists('X')) { class X {} }`-guarded declaration
+   the same as an unconditional one (a plain `HashMap::insert` -
+   whichever file was indexed last won). Real, observed instance:
+   `vendor/rector`'s own guarded `PHPUnit\Framework\TestCase` fallback (no
+   `extends Assert`) sorted after and silently overwrote the real PHPUnit
+   `TestCase` across the whole corpus, dropping every inherited `Assert`
+   method from every real test file. Fixed with a `conditional` flag - an
+   unconditional declaration always wins regardless of processing order;
+   a conditional one only fills a name nothing unconditional has already
+   claimed.
+
+Combined, this phase dropped the full-corpus count from 43,800 to 32,596
+diagnostics. The long tail of smaller clusters below these five's own
+frequency isn't triaged yet - real, open-ended work for a future,
+separate pass, the same incremental way Phase 12 above was executed
+across many sessions.
+
+Reproducible categorization (re-run this, not a bespoke one-off, for the
+next pass):
+```bash
+./target/release/phpstan-rs check-project ~/piwigo17-rewrite 2>&1 \
+  | sed -E 's/^[^:]+:[0-9]+:[0-9]+: //' \
+  | sed -E "s/#[0-9]+/#N/g; s/\$[A-Za-z_][A-Za-z0-9_]*/\$VAR/g; s/'[^']*'/'STR'/g; s/[A-Za-z_\\][A-Za-z0-9_\\]*::/CLASS::/g" \
+  | sort | uniq -c | sort -rn | head -50
+```
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
@@ -1263,9 +1353,15 @@ confused with each other.
   data for** (`checker::is_type_fully_known`, Phase 10.5) silently
   skips that check rather than guessing - the same "don't know, don't
   guess" precedent as the two boundaries above, applied to a
-  PHAR-bundled dependency (real `phpstan/phpstan` ships with no loose
-  source at all) or a class name that's actually a local
-  `@phpstan-type` alias this project doesn't parse.
+  PHAR-bundled dependency with no loose source available anywhere this
+  project vendors (real `phpstan/phpstan`'s own classes were exactly
+  this case until Phase 21 closed it by reusing this project's
+  already-vendored `phpstan-src` as a second stub-class source - a
+  *different* phar-only dependency with no such fallback available
+  remains unresolvable, and `vendor/phpstan-src` itself still has this
+  problem one level down for its own `nikic/php-doc-parser` dependency,
+  not vendored anywhere in this project) or a class name that's
+  actually a local `@phpstan-type` alias this project doesn't parse.
 - **Variance checking (Phase 10.5) doesn't cover properties, or flip
   variance through a nested generic argument.** Properties: this
   project doesn't track `readonly` at all, and a *readonly* property
