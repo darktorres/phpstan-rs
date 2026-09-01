@@ -1201,21 +1201,78 @@ binary. Not yet designed in any real detail - name and rough intent
 only, deliberately deferred while positions/levels/config (Phase 11)
 and the type-extension/rule-catalog phases (12-15) are still open.
 
-## Phase 20: Performance - NOT STARTED
+## Phase 20: Performance & robustness - DONE
 
-Not yet a real, detailed plan - just a named placeholder, motivated by
-a real incident: Phase 11's own lexer-span work shipped a genuine
-O(line length x tokens on it) blowup that hung for minutes on a real
-file already in this project's test corpus (a single 1.25-million-
+Started from a real incident: Phase 11's own lexer-span work shipped a
+genuine O(line length x tokens on it) blowup that hung for minutes on a
+real file already in this project's test corpus (a single 1.25-million-
 character generated line), caught only because every phase's own
 verification step includes a real-corpus check - not by any dedicated
-performance-regression tooling, which doesn't exist yet. Candidate
-scope once this gets real design attention: a small benchmark suite
-(current parse/check throughput on the standing Piwigo+vendor corpus,
-so a future regression like Phase 11's is caught by CI rather than by
-chance) and profiling on pathological inputs (extremely long lines,
-deeply nested expressions, very large single files) rather than only
-"many ordinary files," which the existing corpus already covers well.
+performance-regression tooling, which didn't exist yet. Profiled the real
+`check-project ~/piwigo17-rewrite` run (`perf record --call-graph dwarf`)
+to give this phase real, prioritized content, then specifically tested
+"pathological inputs" (long lines, deep nesting) empirically instead of
+assuming today's code already handled them - which turned up a genuine
+crash bug, not just a slowness concern.
+
+1. **A real, reproducible stack-overflow crash on realistically-deep
+   nested expressions - DONE.** The parser's own `MAX_EXPR_DEPTH=1000`
+   guard (converts an otherwise-uncatchable stack overflow into a normal,
+   catchable panic) was undermined by a stack-size mismatch: `run_check`'s
+   worker threads spawned with Rust's default ~2MiB stack, well under
+   what the guard needs to safely trip before physically exhausting the
+   stack. Confirmed directly: ~200-300 levels of nested parentheses (a
+   realistic depth for generated/minified code) hard-crashed with an
+   uncatchable SIGABRT under `phpstan-rs check`, well short of the
+   1000-level guard. Fixed by giving worker threads an explicit 8MiB
+   stack, matching the main thread's own default.
+2. **`Locals`'s cloning cost, the single biggest allocation source per
+   profiling (~28% of total time in allocator-churn functions) - DONE,
+   with an honestly-reported result.** `Locals` (`HashMap<String, Type>`)
+   was cloned at ~22 call sites, once per branch of every `if`/`while`/
+   ternary/`match`/closure. Swapped to `imbl::GenericHashMap`, a
+   persistent, structurally-shared map whose clone is O(1). Verified
+   byte-for-byte identical diagnostics against a frozen Piwigo snapshot
+   before/after - a pure performance change. Re-profiling (normalized to
+   userspace-only time, since kernel/scheduler noise varied significantly
+   between runs on the shared host) showed the allocator-churn share
+   essentially unchanged (~32% before, ~31.5% after) - `imbl`'s own
+   functions are individually cheap, but it still allocates per HAMT node
+   touched on each mutation, and typical PHP functions don't have large
+   enough `Locals` scopes for the O(n)-vs-O(1) clone distinction to
+   translate into a measured win on this corpus. Kept anyway (explicit
+   choice): the correctness bar is met, and the O(1) clone property
+   remains available for scopes this corpus's real-world function sizes
+   may simply not exercise much.
+3. **A faster hasher for `Registry`/`Project`'s other hot HashMaps -
+   DONE.** `rustc_hash::FxHashMap` for `Registry::classes`/`functions` and
+   `Project::files`/`dependents` (built once, read many times, never
+   cloned per-branch the way `Locals` is) - the standard, well-
+   established choice for internal, non-adversarial string-keyed maps.
+4. **An automated regression-guard benchmark - DONE.** `run_incremental_
+   bench` (the existing `incremental-bench` CLI command) already times a
+   full load + incremental update, but it's a manual, human-run tool -
+   exactly the gap that let the Phase 11 blowup ship unnoticed. New
+   `benches/vendored_corpus.rs` (criterion, `cargo bench`) benchmarks the
+   same load-then-check shape against this project's own in-repo vendored
+   corpus (`vendor/phpstorm-stubs` + `vendor/phpstan-src/src`, 2351 files)
+   rather than Piwigo, which lives outside this repo and isn't available
+   to CI. Criterion's own baseline comparison (`target/criterion/`) is
+   the actual "caught automatically, not by chance" mechanism.
+5. **Pathological-input regression tests - DONE.** Two new `tests/
+   cli.rs` tests codify this session's own findings: the Finding-A crash
+   repro (asserts the process is never killed by a signal - verified this
+   would have caught the real bug, via a temporary worktree at the prior
+   commit), and a scaling assertion for a single very-long-line file
+   (confirmed roughly linear, not quadratic, at CI-friendly sizes).
+
+Also found and fixed along the way: `vendor/phpstan-src` is a git
+submodule that `git worktree add` doesn't auto-populate - `build.rs` now
+fails the build loudly with the exact fix (`git submodule update --init`)
+if either vendored corpus comes back empty, rather than silently shipping
+an incomplete stub-class pipeline with no error at all (found the hard
+way, chasing a phantom diagnostic difference between two otherwise-
+identical builds).
 
 ## Phase 21: Piwigo false-positive hunt II - DONE
 
