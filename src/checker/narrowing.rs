@@ -217,6 +217,83 @@ impl<'a> Checker<'a> {
             _ => false,
         }
     }
+
+    /// PHPUnit's own narrowing-relevant assertions (`self::assertIsString
+    /// ($output)`, `$this->assertNotNull($x)`, ...) - a real, common
+    /// idiom (real PHPStan explicitly supports it via its own
+    /// `phpstan/phpstan-phpunit` extension, which this project doesn't
+    /// depend on, so the narrowing is replicated directly here) - matches
+    /// exactly the same "statement narrows the rest of the scope
+    /// unconditionally" shape `assert($cond)` already gets in `check_stmt`'s
+    /// `StmtKind::Expression` arm: if execution continues past a failing
+    /// assertion, PHPUnit's own `AssertionFailedError` would have been
+    /// thrown, so there's only one surviving path forward, no branch/merge
+    /// needed. Matched purely on method name, not on confirming the
+    /// receiver is really a `PHPUnit\Framework\TestCase` - these names are
+    /// specific enough that a false match isn't a realistic concern,
+    /// matching this project's existing "trust the name" precedent for
+    /// `is_string`/`empty`/`isset` and friends.
+    ///
+    /// Deliberately excludes `assertIsNumeric` - real PHPStan narrows it to
+    /// `int|float|numeric-string`, a type this project has no
+    /// representation for; narrowing to a plain `int|float` would be
+    /// actively wrong (and a new false negative) for the equally-common
+    /// numeric-*string* case.
+    pub(crate) fn apply_phpunit_assertion_narrowing(
+        &self,
+        method: &str,
+        args: &[Arg],
+        locals: &mut Locals,
+    ) {
+        let narrow_to = |locals: &mut Locals, idx: usize, target: &Type| {
+            if let Some(arg) = args.get(idx)
+                && let Some(key) = narrowing_key(&arg.value)
+            {
+                let current = self.current_narrowed_type(&arg.value, &key, locals);
+                locals.insert(key, narrow_type_to(&current, target));
+            }
+        };
+        let narrow_excluding = |locals: &mut Locals, idx: usize, excluded: &Type| {
+            if let Some(arg) = args.get(idx)
+                && let Some(key) = narrowing_key(&arg.value)
+            {
+                let current = self.current_narrowed_type(&arg.value, &key, locals);
+                locals.insert(key, narrow_type_excluding(&current, excluded));
+            }
+        };
+        match method {
+            "assertIsString" => narrow_to(locals, 0, &Type::String),
+            "assertIsArray" => narrow_to(locals, 0, &Type::Array(Box::new(Type::Mixed))),
+            "assertIsInt" | "assertIsInteger" => narrow_to(locals, 0, &Type::Int),
+            "assertIsFloat" => narrow_to(locals, 0, &Type::Float),
+            "assertIsBool" | "assertIsBoolean" => narrow_to(locals, 0, &Type::Bool),
+            "assertIsResource" => {
+                narrow_to(locals, 0, &Type::Object("resource".to_string(), Vec::new()));
+            }
+            "assertNull" => narrow_to(locals, 0, &Type::Null),
+            "assertTrue" => narrow_to(locals, 0, &Type::True),
+            "assertFalse" => narrow_to(locals, 0, &Type::False),
+            "assertNotNull" => narrow_excluding(locals, 0, &Type::Null),
+            "assertNotFalse" => narrow_excluding(locals, 0, &Type::False),
+            "assertNotTrue" => narrow_excluding(locals, 0, &Type::True),
+            // `assertInstanceOf(string $expected, mixed $actual)` - note
+            // the argument order (expected class first, actual value
+            // second), the reverse of `instanceof`'s own left-to-right
+            // reading - `$expected` is conventionally `Foo::class`, a
+            // `StaticAccess(class_name, "class")` expression.
+            "assertInstanceOf" => {
+                if let Some(class_arg) = args.first()
+                    && let ExprKind::StaticAccess(class_name, member) = &class_arg.value.kind
+                    && member == "class"
+                    && let Some(actual_arg) = args.get(1)
+                    && let Some(key) = narrowing_key(&actual_arg.value)
+                {
+                    locals.insert(key, self.resolve_name_expr(class_name));
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// A stable string key for the small set of expressions this checker can

@@ -42,6 +42,18 @@ impl<'a> Checker<'a> {
                 {
                     self.apply_narrowing(&cond_arg.value, locals, true);
                 }
+                // Phase 27: PHPUnit's own narrowing-relevant assertions
+                // (`self::assertIsString($x)`, `$this->assertNotNull($x)`)
+                // - the exact same "statement narrows unconditionally"
+                // shape as `assert($cond)` above, just per-assertion-name
+                // rather than a generic boolean condition.
+                match &e.kind {
+                    ExprKind::MethodCall(_, method, args, _)
+                    | ExprKind::StaticCall(_, method, args) => {
+                        self.apply_phpunit_assertion_narrowing(method, args, locals);
+                    }
+                    _ => {}
+                }
             }
             StmtKind::Return(Some(e)) => {
                 let actual = self.check_expr(e, locals, label);

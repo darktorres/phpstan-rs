@@ -2069,6 +2069,100 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 27, real shape: real PHPUnit tests throughout this corpus
+    // narrow via assertion calls instead of an `if`-guard - `$output =
+    // ob_get_clean(); self::assertIsString($output);
+    // self::assertStringContainsString(...);` - real PHPStan documents
+    // support for exactly this via its own `phpstan/phpstan-phpunit`
+    // extension, which this project doesn't depend on, so it's
+    // replicated directly. Matches the same "statement narrows
+    // unconditionally" shape `assert($cond)` already gets above.
+    #[test]
+    fn phpunit_assert_is_string_narrows_for_the_rest_of_the_block() {
+        let d = diagnostics_for(
+            r#"<?php
+            class TestCase {
+                public static function assertIsString($actual): void {}
+            }
+            class MyTest extends TestCase {
+                public function testX(): string {
+                    $output = fetch();
+                    self::assertIsString($output);
+                    return $output;
+                }
+            }
+            /** @return string|false */
+            function fetch() {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn phpunit_assert_not_false_narrows_a_resource_for_the_rest_of_the_block() {
+        let d = diagnostics_for(
+            r#"<?php
+            class TestCase {
+                public static function assertNotFalse($actual): void {}
+            }
+            class MyTest extends TestCase {
+                public function testX(): void {
+                    $handle = open();
+                    self::assertNotFalse($handle);
+                    fclose($handle);
+                }
+            }
+            /** @return resource|false */
+            function open() {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn phpunit_assert_not_null_narrows_via_an_instance_method_call_too() {
+        // Same idiom via `$this->assertNotNull(...)` (PHPUnit's methods
+        // are static, but PHP allows calling a static method through an
+        // instance too, and real test code does this constantly).
+        let d = diagnostics_for(
+            r#"<?php
+            class TestCase {
+                public static function assertNotNull($actual): void {}
+            }
+            class MyTest extends TestCase {
+                public function testX(): string {
+                    $value = fetch();
+                    $this->assertNotNull($value);
+                    return $value;
+                }
+            }
+            /** @return ?string */
+            function fetch() {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn phpunit_assert_instance_of_narrows_to_the_expected_class() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Node {}
+            class FuncCall extends Node { public array $args = []; }
+            class TestCase {
+                public static function assertInstanceOf($expected, $actual): void {}
+            }
+            class MyTest extends TestCase {
+                public function testX(Node $node): array {
+                    self::assertInstanceOf(FuncCall::class, $node);
+                    return $node->args;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn scope_fork_does_not_leak_then_branch_assignment_into_else() {
         // Before real forking, then/else shared one mutable scope
