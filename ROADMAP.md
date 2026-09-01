@@ -2037,6 +2037,48 @@ defect in this fix itself. Verified via the same location-based
 methodology as every prior phase: every "new" line traced to ground
 truth individually, not assumed from the raw count alone.
 
+## Phase 30: Piwigo false-positive hunt XI - `Closure(...)`/`callable(...)` shape syntax - DONE
+
+Phase 29 took the corpus from 532 to 533 diagnostics. Re-bucketing that
+533-diagnostic baseline found a garbled-looking third-largest cluster
+(12): `Doctrine\DBAL\Connection::transactional() argument #1 ($func)
+expects Doctrine\DBAL\Closure(self):T, Closure given` - the *expected*
+side prints a nonsensical, namespace-qualified `Doctrine\DBAL\
+Closure(self):T`, immediately suspicious.
+
+**Root cause, confirmed against the real vendored source**: Doctrine
+DBAL's real `Connection::transactional()` declares
+`@param Closure(self):T $func` - a real, documented PHPStan/Psalm
+convention (a callable-shape type describing a callable's own parameter/
+return signature) that `types::parse_type_atom` had no case for at all.
+The whole literal string `"Closure(self):T"` fell through to the
+generic class-name branch, and once resolved against the current file's
+own namespace context, became exactly the garbled `Doctrine\DBAL\
+Closure(self):T` the diagnostic showed - the mangled expected-side text
+was the direct, traceable symptom of the parsing gap, not a display bug.
+
+**DONE.** This project doesn't track a callable's own per-parameter/
+return signature at all, so - matching its own already-established
+leniency for a bare `callable`/`Closure` type elsewhere (`is_assignable`'s
+`(Type::Array(_) | Type::ArrayShape(_), Type::Callable) => true` and
+friends) - `Closure(...)`/`callable(...)` now degrades to the same
+`Type::Callable` a bare `callable` hint already produces, added as one
+new check in `parse_type_atom` guarded on a literal `(` immediately
+following the keyword (so a real class merely starting with the same
+letters, like a hypothetical `ClosureFactory`, isn't mistaken for the
+shape syntax).
+
+`533 -> 512` diagnostics (3.9%). Verifying surfaced 2 new lines in
+Sentry-config tests, both explained: the config array-shape literally
+couldn't be parsed at all before this fix (one of its ~50 fields used
+this same syntax), silently degrading the *entire* shape to `Mixed` and
+hiding every real mismatch inside it; now that it parses, a genuine (and
+permanent, by-design) limitation shows through instead - an anonymous
+class instance always infers as `Mixed` in this project (Phase 22
+Finding 5's own documented territory), so a test's mock `new class()
+implements TransportInterface {}` mismatches the declared
+`TransportInterface|null` field it's assigned to.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
