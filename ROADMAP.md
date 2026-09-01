@@ -1883,6 +1883,49 @@ narrowable this way.
 locations - only a union member's print order changed, not a new
 diagnostic).
 
+## Phase 27: Piwigo false-positive hunt VIII - PHPUnit assertion narrowing - DONE
+
+Phase 26 took the corpus from 732 to 706 diagnostics. Re-bucketing that
+706-diagnostic baseline found the same top clusters as several phases
+running (`string|false`/`resource|false` mismatches) - but this time
+tracing a fresh sample (`InstallWizardTest::testRenderOutputsThe
+InitialInstallFormWithTheSubmittedFieldValuesPrefilled`) found a genuinely
+new root cause: `$output = ob_get_clean(); self::assertIsString($output);
+self::assertStringContainsString('Installation', $output);` -
+`ob_get_clean()` genuinely returns `string|false`, and the test's own
+`assertIsString($output)` call is exactly the proof a human reader (or
+real PHPStan, via its own `phpstan/phpstan-phpunit` extension) would
+recognize as ruling out `false` for everything after it - but nothing in
+this checker did. A `grep` across the whole corpus found this is a huge,
+systemic idiom: 1,200+ combined uses of `assertNull`/`assertTrue`/
+`assertFalse`/`assertNotNull`/`assertIsArray`/`assertIsString`/
+`assertInstanceOf`/`assertNotFalse` and others across the test suite.
+
+**DONE.** A new `apply_phpunit_assertion_narrowing`, hooked into
+`check_stmt`'s `StmtKind::Expression` arm the exact same way the
+pre-existing `assert($cond)` support already is (`checker/stmt.rs`) -
+if execution continues past a failing assertion, PHPUnit's own
+`AssertionFailedError` would already have been thrown, so there's only
+one surviving path forward, no branch/merge machinery needed, same as
+`assert()`. Covers `assertIsString`/`assertIsArray`/`assertIsInt`/
+`assertIsInteger`/`assertIsFloat`/`assertIsBool`/`assertIsBoolean`/
+`assertIsResource`/`assertNull`/`assertTrue`/`assertFalse`/`assertNotNull`/
+`assertNotFalse`/`assertNotTrue`/`assertInstanceOf` - matched purely by
+method name (both `self::`/`static::` static-call and `$this->` instance-
+call forms - PHPUnit's own methods are static, but real test code calls
+them through `$this` constantly), not by confirming the receiver is
+really a `PHPUnit\Framework\TestCase`, matching this project's existing
+"trust the name" precedent for `is_string`/`empty`/`isset`. Deliberately
+excludes `assertIsNumeric` - real PHPStan narrows it to
+`int|float|numeric-string`, a type this project has no representation
+for, and narrowing to plain `int|float` would be actively wrong (a new
+false negative) for the equally-common numeric-*string* case.
+
+`706 -> 580` diagnostics (17.8%) - the largest single-round drop since
+the `#[LanguageLevelTypeAware]` fix (Phase 24) - zero new (2 lines
+shifted at the same locations, a real precision improvement on one tuple
+element of a larger, still-imprecise return type, not a new diagnostic).
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
