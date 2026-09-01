@@ -148,27 +148,47 @@ impl<'a> Checker<'a> {
                 self.check_expr(cond, locals, label);
                 let mut body_locals = locals.clone();
                 self.apply_narrowing(cond, &mut body_locals, true);
+                self.loop_break_states.push(Vec::new());
                 self.check_stmt(body, &mut body_locals, declared_return, label);
+                let break_states = self.loop_break_states.pop().unwrap_or_default();
                 // The loop may run zero times, so what's true after it is
                 // "either the pre-loop state, or whatever one narrowed
                 // iteration produces" - not a real fixed point, but sound
                 // enough to avoid claiming more precision than we have.
                 *locals = merge_scopes(locals, &body_locals);
-                // Reaching code after the loop always means `cond` just
-                // evaluated false, regardless of how many iterations ran -
-                // real, additional narrowing on top of the merge above,
+                // Reaching code after the loop *without having broken out
+                // of it* always means `cond` just evaluated false,
+                // regardless of how many iterations ran - real,
+                // additional narrowing on top of the merge above,
                 // independent of it (e.g. a "loop until no longer null"
-                // idiom is fully narrowed non-null afterward).
+                // idiom is fully narrowed non-null afterward). Applied
+                // *before* folding in break-reached states below - a
+                // `break` doesn't mean `cond` went false, so those states
+                // must not be narrowed as if it had.
                 self.apply_narrowing(cond, locals, false);
+                // Phase 29: fold in every `break`-reached state too - see
+                // `loop_break_states`'s own doc comment on `Checker`.
+                for state in break_states {
+                    *locals = merge_scopes(locals, &state);
+                }
             }
             StmtKind::DoWhile { body, cond } => {
                 // The condition is only evaluated after the body has
                 // already run once, so there's nothing to narrow going in.
+                self.loop_break_states.push(Vec::new());
                 self.check_stmt(body, locals, declared_return, label);
+                let break_states = self.loop_break_states.pop().unwrap_or_default();
                 self.check_expr(cond, locals, label);
                 // Same as `While` - reaching code after a do-while always
-                // means `cond` just evaluated false.
+                // means `cond` just evaluated false. Applied *before*
+                // folding in break-reached states below, same reasoning
+                // as `While` - a `break` doesn't mean `cond` went false.
                 self.apply_narrowing(cond, locals, false);
+                // Phase 29: fold in every `break`-reached state too - see
+                // `loop_break_states`'s own doc comment on `Checker`.
+                for state in break_states {
+                    *locals = merge_scopes(locals, &state);
+                }
             }
             StmtKind::For {
                 init,
@@ -187,7 +207,9 @@ impl<'a> Checker<'a> {
                     Some(c) => {
                         let mut body_locals = locals.clone();
                         self.apply_narrowing(c, &mut body_locals, true);
+                        self.loop_break_states.push(Vec::new());
                         self.check_stmt(body, &mut body_locals, declared_return, label);
+                        let break_states = self.loop_break_states.pop().unwrap_or_default();
                         // `step` runs after each body iteration, so it
                         // should see whatever the body just did, not the
                         // pre-loop state.
@@ -199,17 +221,36 @@ impl<'a> Checker<'a> {
                         // this is no longer treated as if the body always
                         // executes exactly once.
                         *locals = merge_scopes(locals, &body_locals);
+                        // Applied *before* folding in break-reached states
+                        // below, same reasoning as `While` - a `break`
+                        // doesn't mean `cond` went false.
                         self.apply_narrowing(c, locals, false);
+                        // Phase 29: fold in every `break`-reached state
+                        // too - see `loop_break_states`'s own doc comment
+                        // on `Checker`.
+                        for state in break_states {
+                            *locals = merge_scopes(locals, &state);
+                        }
                     }
                     None => {
                         // `for (;;)` - no condition means an unconditional
                         // infinite loop (barring an internal break/return/
                         // etc.), so the body genuinely always executes at
                         // least once - no "may run zero times" merge is
-                        // needed or correct here.
+                        // needed or correct here. The only way code after
+                        // this loop is ever reached at all is via a
+                        // `break` somewhere inside it (Phase 29) - folded
+                        // in additively on top of the direct body-check,
+                        // rather than trying to model "unreachable if no
+                        // break exists" precisely.
+                        self.loop_break_states.push(Vec::new());
                         self.check_stmt(body, locals, declared_return, label);
+                        let break_states = self.loop_break_states.pop().unwrap_or_default();
                         for e in step {
                             self.check_expr(e, locals, label);
+                        }
+                        for state in break_states {
+                            *locals = merge_scopes(locals, &state);
                         }
                     }
                 }
@@ -247,7 +288,33 @@ impl<'a> Checker<'a> {
                 // check_expr call needed on top of it.
                 self.check_assignment_target(value, locals, label);
                 self.bind_assignment_target(value, element_ty, locals);
+                // Phase 29: `Foreach` still checks its body once directly
+                // against the real `locals` (deliberately *not* also
+                // adopting `While`/`For`'s own separate "may run zero
+                // times" merge with the pre-loop state here - tried
+                // during this fix and reverted: a common, real idiom
+                // mutates the very same array a `foreach` iterates via a
+                // nested write keyed by the loop variable itself
+                // (`foreach ($items as $day => $data) { ...;
+                // $items[$day]['derivative'] = ...; }`, confirmed in
+                // `CalendarMonthly::buildMonthCalendar`) - unioning in the
+                // *pre-loop* shape as an "also possible" alternative there
+                // is actively wrong, since every key iterated over really
+                // does get the loop's own treatment, never the stale
+                // pre-loop one). What *was* missing, unconditionally: a
+                // `break` reached anywhere in `body` had its own state
+                // silently discarded from everything past the loop -
+                // `always_terminates` correctly stops a break-ending
+                // branch from leaking into the *rest of its own block*,
+                // but nothing captured it for the loop's own exit state.
+                // `loop_break_states` closes exactly that gap, without
+                // touching the single-representative-pass model otherwise.
+                self.loop_break_states.push(Vec::new());
                 self.check_stmt(body, locals, declared_return, label);
+                let break_states = self.loop_break_states.pop().unwrap_or_default();
+                for state in break_states {
+                    *locals = merge_scopes(locals, &state);
+                }
             }
             StmtKind::Switch { subject, cases } => {
                 self.check_expr(subject, locals, label);
@@ -299,6 +366,15 @@ impl<'a> Checker<'a> {
                     exit_states.push(locals.clone());
                 }
                 let case_count = cases.len();
+                // Phase 29: a bare `break;` written directly inside a
+                // case targets *this* switch, not any enclosing loop -
+                // pushing a frame here (discarded below, never read) only
+                // exists to intercept it, since `loop_break_states`'s
+                // depth-counting would otherwise attribute it to whichever
+                // loop happens to be open around this switch. This
+                // switch's own `exit_states` mechanism above already
+                // handles `break` completely on its own.
+                self.loop_break_states.push(Vec::new());
                 for (i, case) in cases.iter().enumerate() {
                     if let Some(t) = &case.test {
                         self.check_expr(t, locals, label);
@@ -333,6 +409,7 @@ impl<'a> Checker<'a> {
                     }
                     previous_terminates = case_terminates;
                 }
+                self.loop_break_states.pop();
                 // If no path reaches past the switch (every case
                 // return/throw/continues, and a `default:` exists), the
                 // code after it is dead - leave `locals` alone rather
@@ -460,6 +537,19 @@ impl<'a> Checker<'a> {
                 let fqn = self.name_ctx.declared_name(&e.name);
                 for m in &e.methods {
                     self.check_function(&m.function, Some(&fqn), m.is_static);
+                }
+            }
+            // Phase 29: a bare `break;` (`None`, level 1) or an explicit
+            // `break N;` targets the Nth-innermost open loop/switch frame
+            // - `checked_sub` naturally no-ops for an out-of-range level
+            // (more levels than open loops/switches, invalid PHP anyway),
+            // matching this project's "don't guess" default. The level is
+            // already parse-time-resolved to a plain `i64`, no expression
+            // evaluation needed.
+            StmtKind::Break(level) => {
+                let depth = level.unwrap_or(1).max(1) as usize;
+                if let Some(idx) = self.loop_break_states.len().checked_sub(depth) {
+                    self.loop_break_states[idx].push(locals.clone());
                 }
             }
             _ => {}

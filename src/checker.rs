@@ -175,6 +175,24 @@ pub struct Checker<'a> {
     // finds. Defaults empty, so every existing call site untouched by
     // this is completely unaffected.
     pub(crate) pest_hook_properties: HashSet<String>,
+    // Phase 29: one frame per currently-open loop or switch, collecting
+    // the `locals` snapshot at every `break` reached inside it - a stack,
+    // since loops/switches nest. `StmtKind::Foreach`/`While`/`For`/
+    // `DoWhile` each fold every collected state into what flows past the
+    // loop once its body is done being checked (a real `break` inside an
+    // `if` was otherwise silently discarded from post-loop state
+    // entirely - `always_terminates` correctly treats it as "doesn't
+    // fall through to the next statement in this block", but nothing
+    // separately captured it for the *enclosing loop's* own exit state,
+    // the same two-question split `Switch`'s own pre-existing
+    // `exit_states` mechanism already draws for itself). `Switch` also
+    // pushes/pops a frame here - not to consume it (its own `exit_states`
+    // computation is entirely self-contained) but so a bare `break;`
+    // written directly inside a case attaches to *that* frame (discarded
+    // on pop) instead of leaking into whichever enclosing loop happens to
+    // be open, matching real PHP's "innermost loop-or-switch" rule for an
+    // unqualified `break;`.
+    pub(crate) loop_break_states: Vec<Vec<Locals>>,
 }
 
 mod assignment;
@@ -205,6 +223,7 @@ impl<'a> Checker<'a> {
             current_function_is_generator: false,
             pest_this_type: Type::Mixed,
             pest_hook_properties: HashSet::new(),
+            loop_break_states: Vec::new(),
         }
     }
 
@@ -6407,6 +6426,174 @@ mod tests {
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
+
+    // Phase 29, real shape: Piwigo\Core\Lang::load's own `$source_file =
+    // ''; foreach ($languages as $language) { $f = ...; if (found) {
+    // $source_file = $f; break; } } if ($source_file === '') { return
+    // false; } preg_replace(..., $source_file);` - a `break` reached
+    // inside an `if` had its own state (a real string) silently
+    // discarded from what flows past the loop, since `always_terminates`
+    // correctly stops it from leaking into the *rest of the same block*
+    // but nothing captured it for the *loop's own* exit state. Left
+    // `$source_file` permanently typed as the literal `''` after the
+    // loop, which then collapsed to `Type::Never` at the `=== ''` guard -
+    // vacuously assignable to anything, masking every real check after it.
+    #[test]
+    fn a_break_reached_inside_an_if_is_seen_by_code_after_its_foreach_loop() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $items): string {
+                $found = '';
+                foreach ($items as $item) {
+                    if (is_string($item)) {
+                        $found = $item;
+                        break;
+                    }
+                }
+                if ($found === '') {
+                    return 'none';
+                }
+                return strtoupper($found);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_break_reached_inside_an_if_is_seen_by_code_after_its_while_loop() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $items): string {
+                $found = '';
+                $i = 0;
+                while ($i < count($items)) {
+                    if (is_string($items[$i])) {
+                        $found = $items[$i];
+                        break;
+                    }
+                    $i++;
+                }
+                if ($found === '') {
+                    return 'none';
+                }
+                return strtoupper($found);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_break_reached_inside_an_if_is_seen_by_code_after_its_for_loop() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $rows): string {
+                $found = '';
+                for ($i = 0; $i < count($rows); $i++) {
+                    if (is_string($rows[$i])) {
+                        $found = $rows[$i];
+                        break;
+                    }
+                }
+                if ($found === '') {
+                    return 'none';
+                }
+                return strtoupper($found);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_multi_level_break_reaches_the_correct_outer_loop() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $matrix): string {
+                $found = '';
+                foreach ($matrix as $row) {
+                    foreach ($row as $cell) {
+                        if (is_string($cell)) {
+                            $found = $cell;
+                            break 2;
+                        }
+                    }
+                }
+                if ($found === '') {
+                    return 'none';
+                }
+                return strtoupper($found);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_bare_break_inside_a_switch_inside_a_loop_does_not_leak_to_the_loop() {
+        // The switch's own `break` targets the switch itself, not the
+        // enclosing loop - confirming the frame this fix pushes around a
+        // `Switch` (to intercept exactly this) doesn't over-eagerly
+        // propagate the switch's own internal break into the loop's own
+        // post-loop merge (which, here, has no break of its own at all,
+        // so it should merge exactly as if this fix didn't exist).
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $items): void {
+                $x = null;
+                foreach ($items as $item) {
+                    switch (true) {
+                        case is_string($item):
+                            $x = 'from switch';
+                            break;
+                    }
+                }
+                if ($x !== null) {
+                    strtoupper($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Phase 29, real shape: found and reverted mid-fix -
+    // `Piwigo\Calendar\CalendarMonthly::buildMonthCalendar`'s own
+    // `foreach ($items as $day => $data) { ...; $items[$day]['derivative']
+    // = ...; $items[$day]['file'] = ...; }` mutates the very same array
+    // it iterates, via a nested write keyed by the loop variable itself.
+    // An earlier version of this fix also merged `Foreach` with its own
+    // pre-loop state (matching `While`/`For`'s existing "may run zero
+    // times" treatment, for consistency) - but every key iterated over
+    // here really does get the loop's own treatment, so unioning in the
+    // *stale pre-loop* shape as an "also possible" alternative produced a
+    // false "array{...} has no key 'derivative'" the real code never
+    // risks. `Foreach` deliberately keeps checking its body once directly
+    // against the real `locals`, gaining only the `break`-state capture.
+    #[test]
+    fn foreach_mutating_its_own_subject_via_the_loop_key_does_not_regress() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(array $rows): void {
+                $items = [];
+                foreach ($rows as $row) {
+                    $items[(int) $row] = ['nb_images' => 1];
+                }
+                foreach ($items as $day => $data) {
+                    $items[$day]['derivative'] = 'x';
+                    $items[$day]['file'] = 'y';
+                }
+                foreach ($items as $day => $data) {
+                    echo $items[$day]['derivative'];
+                    echo $items[$day]['file'];
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     // Finding 31 from the architecture audit - a bare `return;`, and
     // falling off the end of the function body with no `return` at all,
     // were never checked against a non-nullable, non-void declared
