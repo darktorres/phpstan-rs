@@ -4384,6 +4384,29 @@ mod tests {
     }
 
     #[test]
+    fn is_string_narrows_an_assignment_nested_in_its_own_argument() {
+        // Phase 23, real shape: Piwigo\Admin\Extensions\
+        // CoreUpdateService::checkPiwigoUpgrade's
+        // `is_string($result = @HttpClientService::fetch(...))` -
+        // `narrowing_key` used to return None for an Assign expression, so
+        // this extremely common "assign-then-check" idiom was never
+        // narrowed at all, even though the assignment itself already
+        // defined `$result` correctly.
+        let d = diagnostics_for(
+            r#"<?php
+            function fetch(): string|false { return 'x'; }
+            function f(): string {
+                if (is_string($result = fetch())) {
+                    return $result;
+                }
+                return '';
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn reassigning_a_property_after_narrowing_it_does_not_leave_the_stale_narrowed_type_behind() {
         // Phase 22, real shape: a lazy-init idiom
         // (Piwigo\Asset\ViteManifest::entries) - `if ($this->entries ===

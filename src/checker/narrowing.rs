@@ -261,6 +261,14 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
             let key = literal_string_key(idx)?;
             narrowing_key(base).map(|base_key| format!("{base_key}[{key}]"))
         }
+        // Phase 23: `is_string($result = expr)` - an assignment nested
+        // inside the narrowed expression itself, the common "assign-then-
+        // check" idiom. An assignment's own runtime value is exactly
+        // what ends up stored under its left-hand side, so whatever gets
+        // checked here is equally true of `lhs`'s own key afterward -
+        // narrowing key can borrow the underlying variable/property/index
+        // key without needing its own dedicated storage.
+        ExprKind::Assign(lhs, _) => narrowing_key(lhs),
         _ => None,
     }
 }
