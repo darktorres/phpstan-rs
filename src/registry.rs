@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::FxHashMap;
+use std::collections::HashSet;
 
 use crate::ast::{ClassKind, Stmt, StmtKind};
 use crate::types::{self, Type};
@@ -20,8 +21,8 @@ pub(crate) use name_context::{NameContext, resolve_names_in_type};
 /// project code in a real implementation.
 #[derive(Debug, Default)]
 pub struct Registry {
-    pub classes: HashMap<String, ClassInfo>,
-    pub functions: HashMap<String, FunctionSig>,
+    pub classes: FxHashMap<String, ClassInfo>,
+    pub functions: FxHashMap<String, FunctionSig>,
     // Phase 11 Stage 5's strictness-parameter half (real PHPStan's own
     // 7-10-style progressively-stricter handling, here narrowed to the
     // one real leniency `is_assignable` has purely on its own: an

@@ -1,3 +1,4 @@
+use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,8 +44,8 @@ struct FileState {
 /// straightforward to tighten later if the extra re-checking ever matters
 /// in practice.
 pub struct Project {
-    files: HashMap<PathBuf, FileState>,
-    dependents: HashMap<String, HashSet<PathBuf>>,
+    files: FxHashMap<PathBuf, FileState>,
+    dependents: FxHashMap<String, HashSet<PathBuf>>,
     registry: Registry,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
     // currently-loaded `Pest.php` file whenever the loaded file set could
@@ -59,8 +60,8 @@ impl Project {
         registry.merge_stubs(php_stubs::generated_stubs());
         registry.merge_stub_classes(php_stubs::generated_stub_classes());
         Project {
-            files: HashMap::new(),
-            dependents: HashMap::new(),
+            files: FxHashMap::default(),
+            dependents: FxHashMap::default(),
             registry,
             pest_config: PestConfig::default(),
         }
@@ -394,7 +395,7 @@ fn declared_names_with_context(
 }
 
 fn register_references(
-    dependents: &mut HashMap<String, HashSet<PathBuf>>,
+    dependents: &mut FxHashMap<String, HashSet<PathBuf>>,
     path: &Path,
     references: &HashSet<String>,
 ) {
@@ -407,7 +408,7 @@ fn register_references(
 }
 
 fn unregister_references(
-    dependents: &mut HashMap<String, HashSet<PathBuf>>,
+    dependents: &mut FxHashMap<String, HashSet<PathBuf>>,
     path: &Path,
     references: &HashSet<String>,
 ) {
