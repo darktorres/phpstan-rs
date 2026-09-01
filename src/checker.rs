@@ -104,6 +104,15 @@ pub struct Checker<'a> {
     // which diagnostics came from that check, the whole body's diagnostics
     // are discarded if this ends up true (see check_function).
     pub(crate) saw_dynamic_var_construct: bool,
+    // Set for the duration of one function/method/closure body that
+    // contains a yield/yield from anywhere (Finding 3) - a real
+    // generator, whose implicit `return null` at the end (or an explicit
+    // bare `return;`) never mismatches its declared Generator/Iterator/
+    // Traversable return type, unlike an ordinary function. Consulted by
+    // both check_function's own falls-off-the-end check and check_stmt's
+    // StmtKind::Return(None) arm, which has no direct access to the
+    // enclosing function's body to answer this itself.
+    pub(crate) current_function_is_generator: bool,
 }
 
 mod assignment;
@@ -118,7 +127,7 @@ mod stmt;
 
 pub(crate) use assignment::{is_superglobal, literal_string_key, literal_string_value};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
-pub(crate) use control_flow::merge_scopes;
+pub(crate) use control_flow::{body_contains_yield, merge_scopes};
 pub(crate) use expr::union_types;
 pub(crate) use narrowing::{narrow_type_excluding, narrowing_key};
 
@@ -131,6 +140,7 @@ impl<'a> Checker<'a> {
             current_class: None,
             current_method: None,
             saw_dynamic_var_construct: false,
+            current_function_is_generator: false,
         }
     }
 
@@ -377,6 +387,8 @@ impl<'a> Checker<'a> {
         let diagnostics_before = self.diagnostics.len();
         let previous_dynamic_flag = self.saw_dynamic_var_construct;
         self.saw_dynamic_var_construct = false;
+        let previous_generator_flag = self.current_function_is_generator;
+        self.current_function_is_generator = body_contains_yield(&f.body);
 
         for stmt in &f.body {
             self.check_stmt(stmt, &mut locals, declared_return.as_ref(), &label);
@@ -389,9 +401,15 @@ impl<'a> Checker<'a> {
         // (already used for guard-clause narrowing) answers "does this
         // statement definitely end control flow" - a `false` here means
         // this function's own body doesn't guarantee returning anything.
+        // A real generator (Finding 3) is exempt: falling off the end (or
+        // an explicit bare `return;`, handled in check_stmt) implicitly
+        // ends the *generator's* iteration, not the function's own return
+        // value - real PHPStan never checks either against the function's
+        // declared Generator/Iterator/Traversable return type.
         if let Some(expected) = &declared_return
             && let Some(last) = f.body.last()
             && !self.always_terminates(last, &locals)
+            && !self.current_function_is_generator
         {
             let expected = match &self.current_class {
                 Some(c) => self.resolve_pseudo(expected, c),
@@ -414,6 +432,7 @@ impl<'a> Checker<'a> {
             self.diagnostics.truncate(diagnostics_before);
         }
         self.saw_dynamic_var_construct = previous_dynamic_flag;
+        self.current_function_is_generator = previous_generator_flag;
 
         self.current_class = previous_class;
         self.current_method = previous_method;
@@ -1543,6 +1562,78 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn generator_falling_off_the_end_with_no_return_is_not_a_null_mismatch() {
+        // Real shape: vendor/composer-unused/symbol-parser's own
+        // SymbolList::getIterator(): Generator { yield from
+        // $this->items; } - a generator always returns a real Generator
+        // object, regardless of whether it has an explicit `return`.
+        let d = diagnostics_for(
+            r#"<?php
+            function gen(): Generator {
+                yield 1;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn generator_with_a_bare_early_return_guard_is_not_a_null_mismatch() {
+        // A bare `return;` inside a generator sets Generator::getReturn(),
+        // not the function's own return value - a different call site
+        // (check_stmt's StmtKind::Return(None) arm) than the
+        // falls-off-the-end test above, and a common real idiom
+        // (`if ($done) { return; } yield $x;`).
+        let d = diagnostics_for(
+            r#"<?php
+            function gen(bool $done): Generator {
+                if ($done) {
+                    return;
+                }
+                yield 1;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn generator_closure_with_a_bare_early_return_guard_is_not_a_null_mismatch() {
+        // Same idiom as above, but for a closure literal - check_block
+        // never routes through check_function, so this needs its own
+        // save/set/restore of current_function_is_generator.
+        let d = diagnostics_for(
+            r#"<?php
+            $gen = function (bool $done): Generator {
+                if ($done) {
+                    return;
+                }
+                yield 1;
+            };
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_non_generator_falling_off_the_end_is_still_a_real_null_mismatch() {
+        // Regression guard: Finding 3's fix must not blanket-suppress the
+        // real, pre-existing diagnostic for an ordinary (non-generator)
+        // function that falls off the end with no return.
+        let d = diagnostics_for(
+            r#"<?php
+            function notAGenerator(): int {
+                $x = 1;
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("got null")),
+            "expected a return type mismatch diagnostic, got: {d:?}"
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
+use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::{Checker, Locals, union_types};
 use crate::types::Type;
 
@@ -121,4 +122,68 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         }
     }
     merged
+}
+
+/// Does this function/method/closure body contain a `yield`/`yield from`
+/// anywhere, making it a real PHP generator? A generator always returns a
+/// real `Generator` object when called, regardless of whether it has an
+/// explicit `return` - `return;`/`return $x;` *inside* it sets
+/// `Generator::getReturn()`'s own value, not the enclosing function's
+/// return value, so real PHPStan never checks either against the
+/// function's own declared `Generator`/`Iterator`/`Traversable` return
+/// type (only against a `@return Generator<...,...,...,TReturn>`
+/// docblock's 4th argument, if present - not modeled here, no corpus
+/// evidence for it).
+pub(crate) fn body_contains_yield(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(stmt_contains_yield)
+}
+
+fn expr_contains_yield(e: &Expr) -> bool {
+    matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
+        || expr_children(e).into_iter().any(expr_contains_yield)
+}
+
+/// Mirrors `deps::collect_stmt`'s own exhaustive per-variant shape: each
+/// `StmtKind` variant's own `Expr`-bearing field(s), checked via
+/// `expr_contains_yield`, plus recursing into `stmt_children` for nested
+/// statements. `stmt_children` (and `expr_children`, transitively)
+/// already stop at `Closure`/`ArrowFn`/`NewAnonymousClass`/`FunctionDecl`/
+/// `ClassDecl`/`EnumDecl` boundaries by design - exactly the correct
+/// semantics here too, since a `yield` inside any of those nested scopes
+/// does NOT make the *outer* function a generator.
+fn stmt_contains_yield(stmt: &Stmt) -> bool {
+    let own = match &stmt.kind {
+        StmtKind::Expression(e) | StmtKind::Throw(e) => expr_contains_yield(e),
+        StmtKind::Return(Some(e)) => expr_contains_yield(e),
+        StmtKind::Return(None) => false,
+        StmtKind::Echo(exprs) => exprs.iter().any(expr_contains_yield),
+        StmtKind::If { cond, .. }
+        | StmtKind::While { cond, .. }
+        | StmtKind::DoWhile { cond, .. } => expr_contains_yield(cond),
+        StmtKind::For {
+            init, cond, step, ..
+        } => init.iter().chain(cond).chain(step).any(expr_contains_yield),
+        StmtKind::Foreach {
+            subject,
+            key,
+            value,
+            ..
+        } => {
+            expr_contains_yield(subject)
+                || key.as_ref().is_some_and(expr_contains_yield)
+                || expr_contains_yield(value)
+        }
+        StmtKind::GlobalConst(consts) => consts.iter().any(|c| expr_contains_yield(&c.value)),
+        StmtKind::StaticVar(vars) => vars
+            .iter()
+            .any(|(_, d)| d.as_ref().is_some_and(expr_contains_yield)),
+        StmtKind::Switch { subject, cases } => {
+            expr_contains_yield(subject)
+                || cases
+                    .iter()
+                    .any(|c| c.test.as_ref().is_some_and(expr_contains_yield))
+        }
+        _ => false,
+    };
+    own || stmt_children(stmt).into_iter().any(stmt_contains_yield)
 }

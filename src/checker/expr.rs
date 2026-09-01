@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::checker::{
-    CheckArgsCall, Checker, Locals, is_language_construct, is_superglobal, literal_string_key,
-    merge_scopes, narrow_type_excluding, narrowing_key, resolve_call_args,
+    CheckArgsCall, Checker, Locals, body_contains_yield, is_language_construct, is_superglobal,
+    literal_string_key, merge_scopes, narrow_type_excluding, narrowing_key, resolve_call_args,
 };
 use crate::registry::FunctionSig;
 use crate::types::{self, Type};
@@ -1031,12 +1031,21 @@ impl<'a> Checker<'a> {
                 }
                 let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
                 let closure_label = format!("{label} (closure)");
+                // Finding 3: a generator-returning closure (`function ():
+                // Generator { if ($done) { return; } yield $x; }`, a
+                // plausible callback shape) needs the same
+                // current_function_is_generator save/set/restore
+                // check_function does for a named function/method -
+                // check_block never routes through check_function at all.
+                let previous_generator_flag = self.current_function_is_generator;
+                self.current_function_is_generator = body_contains_yield(body);
                 self.check_block(
                     body,
                     &mut closure_locals,
                     declared_return.as_ref(),
                     &closure_label,
                 );
+                self.current_function_is_generator = previous_generator_flag;
                 Type::Object("Closure".to_string(), Vec::new())
             }
             ExprKind::ArrowFn {

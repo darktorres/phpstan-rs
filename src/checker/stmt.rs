@@ -66,7 +66,13 @@ impl<'a> Checker<'a> {
             // slip as forgetting to add a return value after an
             // early-exit guard clause).
             StmtKind::Return(None) => {
-                if let Some(expected) = declared_return {
+                // A bare `return;` inside a generator (Finding 3) sets
+                // Generator::getReturn()'s own value, not this function's
+                // return value - real PHPStan never checks it against the
+                // declared Generator/Iterator/Traversable return type.
+                if let Some(expected) = declared_return
+                    && !self.current_function_is_generator
+                {
                     let expected = match &self.current_class {
                         Some(c) => self.resolve_pseudo(expected, c),
                         None => expected.clone(),
