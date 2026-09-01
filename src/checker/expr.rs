@@ -5,6 +5,7 @@ use crate::checker::{
     CheckArgsCall, Checker, Locals, body_contains_yield, is_language_construct, is_superglobal,
     literal_string_key, merge_scopes, narrow_type_excluding, narrowing_key, resolve_call_args,
 };
+use crate::pest_config;
 use crate::registry::FunctionSig;
 use crate::types::{self, Type};
 
@@ -160,8 +161,37 @@ impl<'a> Checker<'a> {
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
                 self.predefine_byref_or_unknown_args(sig, args, &resolved, locals);
+                // Finding 1: `it`/`test`/`describe`/`beforeEach`/
+                // `afterEach`/`beforeAll`/`afterAll` rebind `$this` inside
+                // their closure/arrow-fn argument at runtime (Pest's own
+                // `Closure::bindTo()`) - reuses the same
+                // check_closure_literal_with_this helper the
+                // Closure::bind/bindTo special case below already uses
+                // for the identical "externally-bound $this" shape. The
+                // base scanner never spells out Pest's own function names
+                // - it only asks pest_config::is_this_binding_call. Only
+                // a closure/arrow-fn *literal* argument is recognized,
+                // same restriction the existing bind/bindTo case already
+                // has - `it('...', $variableHoldingAClosure)` falls
+                // through to plain check_expr, unrebound.
+                let is_this_binding_call = matches!(&callee.kind, ExprKind::Name(name) if pest_config::is_this_binding_call(name));
                 for a in args {
-                    self.check_expr(&a.value, locals, label);
+                    if is_this_binding_call
+                        && matches!(
+                            unwrap_grouping(&a.value).kind,
+                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                        )
+                    {
+                        let this_ty = self.pest_this_type.clone();
+                        self.check_closure_literal_with_this(
+                            unwrap_grouping(&a.value),
+                            locals,
+                            label,
+                            this_ty,
+                        );
+                    } else {
+                        self.check_expr(&a.value, locals, label);
+                    }
                 }
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {

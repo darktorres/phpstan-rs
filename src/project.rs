@@ -7,6 +7,7 @@ use crate::checker::{Checker, Diagnostic};
 use crate::deps;
 use crate::lexer::Lexer;
 use crate::parser::{ParseError, Parser};
+use crate::pest_config::PestConfig;
 use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
 
@@ -45,6 +46,11 @@ pub struct Project {
     files: HashMap<PathBuf, FileState>,
     dependents: HashMap<String, HashSet<PathBuf>>,
     registry: Registry,
+    // Directory-scoped Pest `$this`-binding config, rebuilt from every
+    // currently-loaded `Pest.php` file whenever the loaded file set could
+    // have changed (`finish_loading`/`update_file`) - see `pest_config`'s
+    // own module doc comment for the full resolution algorithm.
+    pest_config: PestConfig,
 }
 
 impl Project {
@@ -56,7 +62,25 @@ impl Project {
             files: HashMap::new(),
             dependents: HashMap::new(),
             registry,
+            pest_config: PestConfig::default(),
         }
+    }
+
+    /// Rebuilds `pest_config` from every currently-loaded `Pest.php` file
+    /// (`PestConfig::build` itself filters for that filename) - cheap
+    /// regardless of corpus size, since it's proportional only to the
+    /// small number of `Pest.php` files a real project has, never the
+    /// whole loaded file set. Called unconditionally from both
+    /// `finish_loading` and `update_file`, rather than only when the
+    /// specific edited file is itself a `Pest.php`, to keep the LSP
+    /// incremental-edit path correct if a `Pest.php` config itself is
+    /// what just changed.
+    fn rebuild_pest_config(&mut self) {
+        self.pest_config = PestConfig::build(
+            self.files
+                .iter()
+                .map(|(path, state)| (path.as_path(), state.ast.as_slice())),
+        );
     }
 
     /// Opts the whole project's checking into Phase 11 Stage 5's
@@ -96,6 +120,7 @@ impl Project {
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
     pub fn finish_loading(&mut self) {
         self.registry.flatten_traits();
+        self.rebuild_pest_config();
     }
 
     /// Re-parses one already-loaded file, patches just its own registry
@@ -154,6 +179,7 @@ impl Project {
                 references,
             },
         );
+        self.rebuild_pest_config();
 
         Ok(self
             .transitive_affected_files(path, changed_symbols)
@@ -232,6 +258,7 @@ impl Project {
             return Vec::new();
         };
         let mut checker = Checker::new(&self.registry);
+        checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.check_program(&file.ast);
         checker.into_diagnostics()
     }
@@ -471,6 +498,106 @@ mod tests {
         assert!(project.registry().functions.contains_key("helperA"));
         let helper_b = &project.registry().functions["helperB"];
         assert_eq!(helper_b.return_type.to_string(), "string");
+    }
+
+    #[test]
+    fn pest_directory_scoped_uses_resolves_this_to_the_bound_class() {
+        // Real shape: Piwigo's own tests/Pest.php - `uses(X::class)->in
+        // ('Browser/Api')` binds only that subtree; a file outside it
+        // falls through to the default. Calling a real method on the
+        // bound class (not just tolerated via Mixed) proves `$this`
+        // actually resolved to the directory-scoped class, not the
+        // default fallback.
+        let mut project = Project::new();
+        project
+            .load_file(
+                PathBuf::from("tests/Pest.php"),
+                "<?php uses(ApiAssertions::class)->in('Browser/Api');",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Support/ApiAssertions.php"),
+                "<?php class ApiAssertions { public function assertContract(): void {} }",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Browser/Api/FooTest.php"),
+                "<?php function it($description, $callback) {} it('works', function (): void { $this->assertContract(); });",
+            )
+            .unwrap();
+        project.finish_loading();
+
+        let d = project.check_file(&PathBuf::from("tests/Browser/Api/FooTest.php"));
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn pest_directory_scoped_uses_still_flags_a_real_undefined_method() {
+        // Same setup as above, but calling a method the bound class
+        // doesn't declare - proves the directory-scoped binding resolved
+        // a real, specific class (not Mixed, which would tolerate this).
+        let mut project = Project::new();
+        project
+            .load_file(
+                PathBuf::from("tests/Pest.php"),
+                "<?php uses(ApiAssertions::class)->in('Browser/Api');",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Support/ApiAssertions.php"),
+                "<?php class ApiAssertions { public function assertContract(): void {} }",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Browser/Api/FooTest.php"),
+                "<?php function it($description, $callback) {} it('works', function (): void { $this->totallyUndefinedMethod(); });",
+            )
+            .unwrap();
+        project.finish_loading();
+
+        let d = project.check_file(&PathBuf::from("tests/Browser/Api/FooTest.php"));
+        assert!(
+            d.iter().any(|x| x.message.contains("undefined method")),
+            "expected an undefined-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn pest_file_outside_the_bound_directory_does_not_get_the_directory_scoped_type() {
+        // A file outside `Browser/Api` must not see ApiAssertions's
+        // methods - falls through to the default (Mixed, since
+        // PHPUnit\Framework\TestCase isn't registered in this bare
+        // project), which tolerates the call - a weaker, but still
+        // correct, assertion than the bound-directory tests above (this
+        // project has no way to positively assert "resolved to Mixed"
+        // other than "didn't inherit the directory binding's own type").
+        let mut project = Project::new();
+        project
+            .load_file(
+                PathBuf::from("tests/Pest.php"),
+                "<?php uses(ApiAssertions::class)->in('Browser/Api');",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Support/ApiAssertions.php"),
+                "<?php class ApiAssertions { public function assertContract(): void {} }",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Unit/FooTest.php"),
+                "<?php function it($description, $callback) {} it('works', function (): void { $this->assertContract(); });",
+            )
+            .unwrap();
+        project.finish_loading();
+
+        let d = project.check_file(&PathBuf::from("tests/Unit/FooTest.php"));
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]

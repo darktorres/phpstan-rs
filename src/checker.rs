@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
+use crate::pest_config;
 use crate::registry::{FunctionSig, NameContext, Registry};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -113,6 +114,19 @@ pub struct Checker<'a> {
     // StmtKind::Return(None) arm, which has no direct access to the
     // enclosing function's body to answer this itself.
     pub(crate) current_function_is_generator: bool,
+    // Finding 1: the `$this` type inside a Pest `it`/`test`/`describe`/
+    // `beforeEach`/`afterEach`/`beforeAll`/`afterAll` closure - set via
+    // `set_pest_this_type` (by `Project::check_file`, from its own
+    // `PestConfig::resolve_this_type`) before `check_program` runs, then
+    // possibly overridden by a file-local `uses(...)` call
+    // `check_program` itself finds (real Pest's own resolution order:
+    // file-local wins over directory-scoped). Defaults to `Type::Mixed`
+    // so every existing call site untouched by Finding 1 (the ~300+
+    // direct `Checker::new` calls in this project's own tests, the `demo`
+    // subcommand, ...) is completely unaffected - this field is only ever
+    // consulted inside an `is_this_binding_call`-recognized closure
+    // argument, which none of those exercise.
+    pub(crate) pest_this_type: Type,
 }
 
 mod assignment;
@@ -128,7 +142,7 @@ mod stmt;
 pub(crate) use assignment::{is_superglobal, literal_string_key, literal_string_value};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use control_flow::{body_contains_yield, merge_scopes};
-pub(crate) use expr::union_types;
+pub(crate) use expr::{union_types, unwrap_grouping};
 pub(crate) use narrowing::{narrow_type_excluding, narrowing_key};
 
 impl<'a> Checker<'a> {
@@ -141,7 +155,17 @@ impl<'a> Checker<'a> {
             current_method: None,
             saw_dynamic_var_construct: false,
             current_function_is_generator: false,
+            pest_this_type: Type::Mixed,
         }
+    }
+
+    /// Sets the `$this` type Finding 1's Pest support seeds an
+    /// `it`/`test`/`describe`/`beforeEach`/`afterEach`/`beforeAll`/
+    /// `afterAll` closure argument with - a setter rather than a
+    /// `Checker::new` parameter, so the ~300+ existing call sites that
+    /// don't care about Pest at all don't need to change.
+    pub fn set_pest_this_type(&mut self, ty: Type) {
+        self.pest_this_type = ty;
     }
 
     /// Every diagnostic this checker emits goes through here - replaces
@@ -179,6 +203,15 @@ impl<'a> Checker<'a> {
         // silent method-table corruption the registry itself had to
         // guard against.
         self.name_ctx = NameContext::build(program);
+        // Finding 1: a file-local `uses(...)` call (no `->in(...)`) wins
+        // over whatever `Project::check_file` already set via
+        // `set_pest_this_type` from directory-scoped Pest.php config -
+        // matches real Pest's own resolution order (file-local checked
+        // first). A file with no such call leaves `pest_this_type`
+        // exactly as `Project::check_file` set it.
+        if let Some(local_ty) = pest_config::file_local_this_type(program, &self.name_ctx) {
+            self.pest_this_type = local_ty;
+        }
 
         let mut top_locals: Locals = HashMap::new();
         let diagnostics_before = self.diagnostics.len();
@@ -1562,6 +1595,75 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn pest_it_closure_this_is_not_flagged_as_undefined_variable() {
+        // Real shape: tests/Browser/AboutControllerTest.php-style Pest
+        // test files - `it('...', function (): void { ... $this ... })`
+        // at true top-level file scope, no enclosing class/method. No
+        // `uses()` call at all here, so `$this` resolves to the default
+        // fallback (`Type::Mixed`, since `PHPUnit\Framework\TestCase`
+        // isn't registered in this bare snippet) - the core fix under
+        // test is that it's recognized as *defined* at all, not flagged
+        // as an undefined variable the way it would be with no special
+        // handling.
+        let d = diagnostics_for(
+            r#"<?php
+            function it($description, $callback) {}
+            it('does something', function (): void {
+                $this->assertTrue(true);
+            });
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn pest_file_local_uses_resolves_this_to_the_bound_class() {
+        // Real Pest's own file-local `uses(X::class);` (no `->in(...)`) -
+        // checked first, ahead of any directory-scoped Pest.php config.
+        // Calling a real method on the bound class (not just tolerated
+        // via Mixed) proves `$this` actually resolved to `RealTestBase`.
+        let d = diagnostics_for(
+            r#"<?php
+            function uses($class) {}
+            function it($description, $callback) {}
+            class RealTestBase {
+                public function realMethod(): int { return 1; }
+            }
+            uses(RealTestBase::class);
+            it('does something', function (): int {
+                return $this->realMethod();
+            });
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn pest_file_local_uses_still_flags_a_real_undefined_method() {
+        // Regression guard: Finding 1's fix must not blanket-suppress
+        // every diagnostic inside a Pest closure - only the "undefined
+        // variable $this" one. A genuinely undefined method call on the
+        // bound class should still be flagged.
+        let d = diagnostics_for(
+            r#"<?php
+            function uses($class) {}
+            function it($description, $callback) {}
+            class RealTestBase {
+                public function realMethod(): int { return 1; }
+            }
+            uses(RealTestBase::class);
+            it('does something', function (): int {
+                return $this->totallyUndefinedMethod();
+            });
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("undefined method")),
+            "expected an undefined-method diagnostic, got: {d:?}"
+        );
     }
 
     #[test]
