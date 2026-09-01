@@ -5528,6 +5528,54 @@ mod tests {
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
+
+    // Phase 23 Finding 1: `isset($x)`'s truthy branch narrows away `Null`,
+    // the single most common PHP nullability idiom - previously a no-op.
+    #[test]
+    fn isset_guard_narrows_null_away_in_the_truthy_branch() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): int {
+                if (isset($x)) {
+                    return strlen($x);
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn isset_guard_narrows_a_property_access_too() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Box { public ?string $value = null; }
+            function f(Box $box): int {
+                if (isset($box->value)) {
+                    return strlen($box->value);
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn isset_false_branch_is_not_narrowed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $x): int {
+                if (isset($x)) {
+                    return 0;
+                }
+                return strlen($x);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
     // Finding 55 from the architecture audit - ternary/switch/match never
     // applied condition-based narrowing at all, for any condition shape.
 

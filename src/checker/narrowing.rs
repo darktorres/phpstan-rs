@@ -63,6 +63,20 @@ impl<'a> Checker<'a> {
                                 self.current_narrowed_type(&single_arg.value, &key, locals);
                             locals.insert(key, narrow_type_excluding_falsy(&current));
                         }
+                    } else if name == "isset" {
+                        // Phase 23: `isset($x)`'s truthy branch means
+                        // specifically "not null" - it's true for `0`,
+                        // `''`, `false`, an empty array, every falsy-but-
+                        // non-null value - so this narrows only `Null`
+                        // away, unlike `empty()`'s full falsy exclusion
+                        // above. The false branch isn't safely narrowable
+                        // to anything more specific, the same asymmetry
+                        // `empty`/the truthy fallback below already accept.
+                        if branch_true {
+                            let current =
+                                self.current_narrowed_type(&single_arg.value, &key, locals);
+                            locals.insert(key, narrow_type_excluding(&current, &Type::Null));
+                        }
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         let narrowed = if branch_true {
