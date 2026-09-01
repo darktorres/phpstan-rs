@@ -2079,6 +2079,38 @@ Finding 5's own documented territory), so a test's mock `new class()
 implements TransportInterface {}` mismatches the declared
 `TransportInterface|null` field it's assigned to.
 
+## Phase 31: Piwigo false-positive hunt XII - `array_keys()`'s real key type - DONE
+
+Phase 30 took the corpus from 533 to 512 diagnostics. Re-bucketing that
+512-diagnostic baseline found `expects array<string>, array<int>|
+array<string> given` as the new second-largest cluster (13). Traced
+directly: `Piwigo\Admin\Install\InstallDataSeeder::seed`'s own
+`$insert = ['id' => 1, 'galleries_url' => ...]; ...
+massInsert('sites', array_keys($insert), [$insert]);` - the real
+phpstorm-stubs `array_keys()` stub declares `@return int[]|string[]`, a
+*whole-array* either-or (a real array's keys are all-int, all-string, or
+rarer a mix) rather than a single homogeneous key type, which
+`infer_builtin_call_return_type` had no special case for at all - so
+this always won even when the argument's own shape (and therefore every
+one of its keys) was fully knowable.
+
+**DONE.** A new `array_keys` case, scoped to the one-argument form (no
+`$filter_value`, which changes which keys survive) with a known
+`ArrayShape` argument: PHP itself casts a canonical non-negative-integer
+string key to a real int at the point the array is built, so a new
+`is_canonical_int_key` helper mirrors that per-key, unioning into a real
+`int|string` result only when the shape's own keys are genuinely mixed.
+
+`512 -> 508` diagnostics, zero new - exactly the 4 literal-array-shape
+call sites this fix targets. Deliberately scoped no further: most of
+this bucket's remaining occurrences (confirmed directly, e.g. `tools/
+phpstan/Latte/ShimClassGenerator.php`'s own `array_keys($filters)`,
+where `$filters = $this->engine->getFilters();`) pass a variable whose
+type comes from a method call or property with no shape information at
+all - the same disclosed `Type::Array` has-no-key-type-parameter gap
+Phase 29 already surfaced, not something this fix attempts to also
+solve.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
