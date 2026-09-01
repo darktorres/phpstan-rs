@@ -62,6 +62,29 @@ fn main() {
         &mut phpstan_src_files,
     );
 
+    // `vendor/phpstan-src` is a git submodule (see `.gitmodules`) - unlike
+    // a plain vendored directory, `git clone`/`git worktree add` don't
+    // populate it on their own, so it silently sits empty until someone
+    // remembers `git submodule update --init`. Without this check, that
+    // produces a build that compiles and "succeeds" with an empty
+    // PHPSTAN_SRC_SOURCES - no error anywhere, just a stub-class pipeline
+    // quietly missing ~1800 files' worth of real PHPStan classes (found
+    // the hard way: chasing a phantom diagnostic difference between two
+    // otherwise-identical builds that turned out to be exactly this).
+    // Failing loudly here, rather than trying to run `git submodule
+    // update --init` automatically from inside the build script, is the
+    // safer choice - a build script invoking git can break in a
+    // downloaded-tarball, offline, or sandboxed-CI context that has no
+    // reason to expect it.
+    assert!(
+        !phpstan_src_files.is_empty(),
+        "vendor/phpstan-src/src has no .php files - the git submodule          looks uninitialized. Run: git submodule update --init"
+    );
+    assert!(
+        !phpstorm_files.is_empty(),
+        "vendor/phpstorm-stubs has no .php files - expected a fully          checked-out repo, not a shallow or partial clone"
+    );
+
     let mut generated = String::new();
     write_source_array(&mut generated, "PHPSTORM_STUBS_SOURCES", &phpstorm_files);
     write_source_array(&mut generated, "PHPSTAN_SRC_SOURCES", &phpstan_src_files);
