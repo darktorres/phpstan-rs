@@ -4603,6 +4603,69 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 23 Finding 7, real shape: phpstorm-stubs'
+    // `imagecreatefromstring` has a native return hint updated for PHP
+    // 8's GD object migration (`: GdImage|false`) but a stale `@return
+    // resource|GdImage|false` doc comment above it, never revised -
+    // `resolve_type` used to always prefer the docblock, keeping the
+    // stale `resource` member even though the native hint (present,
+    // and not itself mentioning `resource`) is authoritative.
+    #[test]
+    fn a_stale_resource_doc_comment_does_not_override_a_narrower_native_hint() {
+        let d = diagnostics_for(
+            r#"<?php
+            class GdImage {}
+            /** @return resource|GdImage|false */
+            function imagecreatefromstring(string $data): GdImage|false {}
+            class ImageGd {
+                private GdImage $image;
+                public function __construct(string $data) {
+                    $img = imagecreatefromstring($data);
+                    if ($img === false) {
+                        throw new Exception('failed');
+                    }
+                    $this->image = $img;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Phase 23 Finding 7, real shape: Piwigo\Core\Logger::$fileHandle is
+    // declared `private mixed $fileHandle = null;` deliberately - PHP has
+    // no native `resource` type to declare, so the property leans on its
+    // own `@var resource|null` docblock to carry the real type. An
+    // earlier, unconditional version of Finding 7's fix incorrectly
+    // treated `mixed` as an authoritative native hint that contradicts
+    // the docblock's `resource` member, stripping it down to bare `null`
+    // (a `!== null` guard, not the real code's `(bool)`-cast guard - a
+    // cast-wrapped property-access truthy check is a separate, pre-
+    // existing narrowing gap unrelated to this finding).
+    #[test]
+    fn a_mixed_native_hint_does_not_override_a_docblocks_resource_member() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Logger {
+                /** @var resource|null */
+                private mixed $fileHandle = null;
+                private function open(): void {
+                    $handle = fopen('/tmp/x', 'a');
+                    if ($handle !== false) {
+                        $this->fileHandle = $handle;
+                    }
+                }
+                public function __destruct() {
+                    if ($this->fileHandle !== null) {
+                        fclose($this->fileHandle);
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn constructor_argument_type_is_checked() {
         let d = diagnostics_for(

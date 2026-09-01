@@ -74,10 +74,60 @@ pub(crate) fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) ->
         Type::Union(members) => members.contains(&Type::Null),
         _ => false,
     };
-    if native_is_nullable && !already_nullable {
+    let ty = if native_is_nullable && !already_nullable {
         Type::Union(vec![ty, Type::Null])
     } else {
         ty
+    };
+    // Phase 23: phpstorm-stubs' own `@return`/`@param` doc comments
+    // commonly predate a later PHP version's native-signature tightening
+    // - real shape: `imagecreatefromstring`'s native return hint was
+    // updated to `GdImage|false` for PHP 8's GD object migration, but its
+    // `@return resource|GdImage|false` doc comment above it was never
+    // revised. PHP enforces a native type hint identically at runtime on
+    // both params and returns, so when one is present, real, and its own
+    // raw text doesn't mention `resource` at all, it's authoritative over
+    // a docblock that still does - the docblock's `resource` member there
+    // is simply stale, not a legitimate legacy alternative this project
+    // should keep believing is possible.
+    //
+    // "Real" excludes `mixed`/`object` specifically - real code (this
+    // project's own `Logger::$fileHandle`, Symfony `Process::setInput`)
+    // deliberately types something `mixed` *because* PHP has no native
+    // `resource` type to declare, leaning on the docblock to carry the
+    // only real type information rather than the native hint contradicting
+    // anything - confirmed the hard way: an earlier, unconditional version
+    // of this fix incorrectly stripped `resource` from exactly this
+    // legitimate "native hint is a deliberate placeholder" shape.
+    match native_hint {
+        Some(native)
+            if !matches!(native.trim(), "mixed" | "object")
+                && !native.to_ascii_lowercase().contains("resource") =>
+        {
+            strip_resource_member(ty)
+        }
+        _ => ty,
+    }
+}
+
+/// Removes any `Type::Object("resource", _)` member from `ty` - see
+/// `resolve_type`'s own doc comment for why this only fires when a
+/// native type hint is present and itself omits `resource`.
+fn strip_resource_member(ty: Type) -> Type {
+    fn is_resource(t: &Type) -> bool {
+        matches!(t, Type::Object(name, _) if name == "resource")
+    }
+    match ty {
+        Type::Union(members) => {
+            let kept: Vec<Type> = members.into_iter().filter(|m| !is_resource(m)).collect();
+            match kept.len() {
+                0 => Type::Mixed,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        Type::Object(name, _) if name == "resource" => Type::Mixed,
+        other => other,
     }
 }
 
