@@ -5596,6 +5596,45 @@ mod tests {
     }
 
     #[test]
+    fn coalesce_widens_to_the_left_side_s_array_type_when_the_fallback_is_a_narrower_shape() {
+        // Phase 22 Finding 4, real shape: Piwigo\Activity\Projection\
+        // SystemActivityLogEntry::$details is `public ?array $details`;
+        // `$details = $row->details ?? [];` used to collapse the whole
+        // expression's type to the literal empty `[]` shape from the
+        // fallback alone, discarding that `$row->details`'s own real,
+        // non-empty-capable `?array` type could hold arbitrary keys -
+        // every later `$details['key']` read then looked like a typo.
+        let d = diagnostics_for(
+            r#"<?php
+            class Row { public ?array $details; }
+            function f(Row $row): void {
+                $details = $row->details ?? [];
+                echo $details['config_section'];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn coalesce_still_collapses_to_the_fallback_for_an_ordinary_mixed_left_side() {
+        // The common, currently-precise case Finding 4's own fix must
+        // not regress: when the left side's real type isn't an
+        // informative `Type::Array`, `??`'s result stays exactly the
+        // fallback's own (here, literal string) type - not blanket
+        // `Mixed` from unioning in `$x`'s own type.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function f($x): int {
+                return needsInt($x ?? 0);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn coalesce_does_not_flag_an_undeclared_instance_property() {
         let d = diagnostics_for(
             r#"<?php

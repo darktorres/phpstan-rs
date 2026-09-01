@@ -427,13 +427,16 @@ impl<'a> Checker<'a> {
             // (`$config['key'] ?? 'default'` is just as warning-free as
             // a bare `$x ?? 'default'`), which is exactly what
             // `check_expr_quiet_root` walks. `??`'s own result type is
-            // always just the right side's type (`infer_binary`'s own
-            // Coalesce arm does nothing but `self.infer_expr(r, locals)`)
-            // - reusing `check_expr(r, ...)`'s return value directly
-            // avoids a real, confirmed double-walk of `r`.
+            // *usually* just the right side's type - reusing
+            // `check_expr(r, ...)`'s return value directly avoids a real,
+            // confirmed double-walk of `r` - except when `widen_coalesce_
+            // result` (Phase 22 Finding 4) says the left side's own type
+            // carries real information the right side's bare fallback
+            // would otherwise discard.
             ExprKind::Binary(BinOp::Coalesce, l, r) => {
                 self.check_expr_quiet_root(l, locals, label);
-                self.check_expr(r, locals, label)
+                let r_ty = self.check_expr(r, locals, label);
+                self.widen_coalesce_result(l, r_ty, locals)
             }
             ExprKind::Binary(op, l, r) => {
                 self.check_expr(l, locals, label);
@@ -1855,6 +1858,33 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 22 Finding 4: `??`'s result is *usually* just `r`'s own
+    /// type (`ExprKind::Binary(BinOp::Coalesce, ...)` and this function's
+    /// own `BinOp::Coalesce` arm both start from `r_ty` alone) - widening
+    /// away from that is deliberately narrow, not a blanket "always union
+    /// `non_null(l)` with `r`" fix: that would pollute the extremely
+    /// common and currently-precise `$x ?? 'literal'` pattern (where
+    /// `$x`'s real type is often genuinely `Mixed`) with unwanted `Mixed`
+    /// noise across a much broader, currently-well-served set of call
+    /// sites. Only widens when `l`'s real non-null type is `Type::Array`
+    /// (generic/unshaped) and `r`'s own type is a narrower
+    /// `Type::ArrayShape` - `$details = $row->details ?? [];` where
+    /// `$row->details: ?array` genuinely holds arbitrary keys at runtime
+    /// collapsed to the literal empty `[]` shape from the fallback alone,
+    /// so every later `$details['key']` read looked like a typo.
+    /// Deliberately not covering the sibling cases disclosed in
+    /// ROADMAP.md's own Phase 22 write-up (`l`'s non-null type being a
+    /// *different* non-empty `ArrayShape`, or `r` being a `Union`
+    /// containing one) - no corpus evidence either occurs, same class of
+    /// bug, left for a future pass if one turns up.
+    fn widen_coalesce_result(&self, l: &Expr, r_ty: Type, locals: &Locals) -> Type {
+        let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::Null);
+        match (&l_ty, &r_ty) {
+            (Type::Array(_), Type::ArrayShape(_)) => l_ty,
+            _ => r_ty,
+        }
+    }
+
     pub(crate) fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &Locals) -> Type {
         match op {
             BinOp::Concat => Type::String,
@@ -1912,7 +1942,10 @@ impl<'a> Checker<'a> {
             // Real PHP division returns int or float depending on the
             // runtime values, not just their static types - not modeled.
             BinOp::Div => Type::Mixed,
-            BinOp::Coalesce => self.infer_expr(r, locals),
+            BinOp::Coalesce => {
+                let r_ty = self.infer_expr(r, locals);
+                self.widen_coalesce_result(l, r_ty, locals)
+            }
             // `$value |> callable` calls callable($value) - its return
             // type depends on resolving whatever expression `callable` is
             // (a string, a closure, a first-class callable reference...)
