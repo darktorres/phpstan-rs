@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::ast::*;
 use crate::pest_config;
 use crate::registry::{FunctionSig, NameContext, Registry};
@@ -9,7 +7,44 @@ use crate::types::{self, Type};
 /// A checked scope's variable-name-to-inferred-type bindings - repeated
 /// across nearly every checker method's own parameter/return type before
 /// this alias existed.
-pub(crate) type Locals = HashMap<String, Type>;
+///
+/// Phase 20 Finding B: backed by `imbl::HashMap`, a persistent,
+/// structurally-shared map (a HAMT), not `std::collections::HashMap` -
+/// cloned at ~22 call sites across `checker/stmt.rs`/`checker/expr.rs`
+/// (once per branch of every `if`/`while`/ternary/`match`/closure, in
+/// every function, in every file), profiling identified this as the
+/// single biggest allocation source in the whole checker: a plain
+/// `HashMap` clone rehashes every key and deep-clones every `Type`
+/// value's own nested `String`s/`Vec`s. `imbl::HashMap::clone` is O(1) -
+/// "really only a matter of copying a pointer and increasing a reference
+/// counter" - a value only gets deep-copied lazily, on the *next*
+/// mutation of whichever clone diverges from the other. `insert`/
+/// `remove`/`entry`/`get`/`contains_key`/`iter`/`Default`/`IntoIterator`/
+/// `FromIterator`/`PartialEq` all mirror `std::collections::HashMap`'s
+/// own signatures closely enough that every existing call site needed
+/// little to no change - confirmed directly against `imbl`/`im`'s own
+/// docs before making this change, not assumed. `rustc_hash::
+/// FxBuildHasher` (Finding C) as the hasher, since `imbl::HashMap` is
+/// generic over it the same way `std::collections::HashMap` is.
+pub(crate) type Locals = imbl::GenericHashMap<
+    String,
+    Type,
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
+/// A generic `@template` name -> concrete `Type` substitution map (class-
+/// hierarchy template binding, function-call argument-to-template
+/// binding) - built once per call/hierarchy-walk and consumed
+/// immediately by `types::substitute_template`/`bind_template_param`,
+/// never cloned per-branch the way `Locals` is. Used to reuse `Locals`'s
+/// own type alias opportunistically (both were `HashMap<String, Type>`
+/// underneath) before Phase 20 Finding B gave `Locals` its own,
+/// persistent-map-backed identity - kept as a plain
+/// `std::collections::HashMap` here since this use case has none of
+/// `Locals`'s own "cloned once per branch" cost profile that motivated
+/// the swap.
+pub(crate) type TemplateBindings = std::collections::HashMap<String, Type>;
 
 /// Loosely mirrors real PHPStan's own rule-gating levels (0 lowest/laxest,
 /// verified against a fresh `phpstan/phpstan-src` clone's `conf/config.
@@ -213,7 +248,7 @@ impl<'a> Checker<'a> {
             self.pest_this_type = local_ty;
         }
 
-        let mut top_locals: Locals = HashMap::new();
+        let mut top_locals: Locals = Locals::default();
         let diagnostics_before = self.diagnostics.len();
         for stmt in program {
             match &stmt.kind {
@@ -295,7 +330,7 @@ impl<'a> Checker<'a> {
     ) {
         let sig = self.lookup_own_signature(f, class_name);
 
-        let mut locals: Locals = HashMap::new();
+        let mut locals: Locals = Locals::default();
         match sig {
             // The registry's FunctionSig already has PHPDoc types merged in
             // (Phase 2) - using it here, instead of re-deriving from the

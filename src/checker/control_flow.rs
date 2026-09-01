@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::{Checker, Locals, union_types};
@@ -115,7 +113,7 @@ impl<'a> Checker<'a> {
 /// present in only one branch was introduced there and can't be assumed to
 /// exist afterward, so it's dropped rather than carried forward unsoundly.
 pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
-    let mut merged = HashMap::new();
+    let mut merged = Locals::default();
     for (name, then_ty) in then_locals {
         if let Some(else_ty) = else_locals.get(name) {
             merged.insert(name.clone(), union_types(then_ty.clone(), else_ty.clone()));

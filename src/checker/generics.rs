@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::ast::*;
-use crate::checker::{Checker, Locals};
+use crate::checker::{Checker, TemplateBindings};
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -36,7 +36,7 @@ impl<'a> Checker<'a> {
                     && let Some(info) = self.registry.classes.get(class)
                     && !info.template_bounds.is_empty()
                 {
-                    let bindings: Locals = info
+                    let bindings: TemplateBindings = info
                         .templates
                         .iter()
                         .cloned()
@@ -263,7 +263,7 @@ impl<'a> Checker<'a> {
         class: &str,
         type_args: &[Type],
         target: &str,
-    ) -> Locals {
+    ) -> TemplateBindings {
         let mut seen = HashSet::new();
         self.class_template_bindings_rec(class, type_args, target, &mut seen)
             .unwrap_or_default()
@@ -285,12 +285,12 @@ impl<'a> Checker<'a> {
         type_args: &[Type],
         target: &str,
         seen: &mut HashSet<String>,
-    ) -> Option<Locals> {
+    ) -> Option<TemplateBindings> {
         if !seen.insert(class.to_string()) {
             return None;
         }
         let info = self.registry.classes.get(class)?;
-        let own_bindings: Locals = info
+        let own_bindings: TemplateBindings = info
             .templates
             .iter()
             .cloned()

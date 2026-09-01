@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+imbl = "7.0.1"
 lsp-server = "0.10.0"
 lsp-types = "0.97.0"
 rustc-hash = "2.1.3"

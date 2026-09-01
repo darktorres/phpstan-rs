@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use crate::ast::*;
 use crate::checker::{
-    CheckArgsCall, Checker, Locals, body_contains_yield, is_language_construct, is_superglobal,
-    literal_string_key, merge_scopes, narrow_type_excluding, narrowing_key, resolve_call_args,
+    CheckArgsCall, Checker, Locals, TemplateBindings, body_contains_yield, is_language_construct,
+    is_superglobal, literal_string_key, merge_scopes, narrow_type_excluding, narrowing_key,
+    resolve_call_args,
 };
 use crate::pest_config;
 use crate::registry::FunctionSig;
@@ -1042,7 +1041,7 @@ impl<'a> Checker<'a> {
                 // is the one implicit exception: a non-static closure
                 // declared inside a method still auto-binds it, the same
                 // as real PHP.
-                let mut closure_locals: Locals = HashMap::new();
+                let mut closure_locals: Locals = Locals::default();
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     closure_locals.insert(u.name.clone(), ty);
@@ -1576,7 +1575,7 @@ impl<'a> Checker<'a> {
         resolved: &[Option<&Expr>],
         locals: &Locals,
     ) -> Type {
-        let mut bindings: Locals = HashMap::new();
+        let mut bindings: TemplateBindings = TemplateBindings::default();
         for (param, slot) in sig.params.iter().zip(resolved.iter()) {
             let Some(arg) = slot else { continue };
             let arg_ty = self.infer_expr(arg, locals);
@@ -1797,7 +1796,7 @@ impl<'a> Checker<'a> {
                 {
                     return None;
                 }
-                let mut closure_locals: Locals = HashMap::new();
+                let mut closure_locals: Locals = Locals::default();
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     closure_locals.insert(u.name.clone(), ty);
