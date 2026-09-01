@@ -1546,6 +1546,41 @@ mod tests {
     }
 
     #[test]
+    fn assert_instanceof_narrows_for_the_rest_of_the_block() {
+        // Real shape: vendor/pestphp/pest-plugin-mutate's own
+        // AbstractFunctionCallUnwrapMutator::mutate() does exactly this -
+        // `assert($node instanceof FuncCall); $node->args` - real PHPStan
+        // documents support for narrowing on assert() the same as `if`.
+        let d = diagnostics_for(
+            r#"<?php
+            class Node {}
+            class FuncCall extends Node { public array $args = []; }
+            function mutate(Node $node) {
+                assert($node instanceof FuncCall);
+                return $node->args;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn assert_without_a_matching_narrowing_shape_is_a_harmless_no_op() {
+        // apply_narrowing already no-ops on condition shapes it doesn't
+        // understand - this just confirms assert()'s own new call site
+        // doesn't crash or misbehave for one (a plain boolean variable).
+        let d = diagnostics_for(
+            r#"<?php
+            function check(bool $ok) {
+                assert($ok);
+                return $ok;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn scope_fork_does_not_leak_then_branch_assignment_into_else() {
         // Before real forking, then/else shared one mutable scope
         // sequentially, so an assignment in the then-branch could leak into

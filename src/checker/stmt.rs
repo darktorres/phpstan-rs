@@ -25,6 +25,22 @@ impl<'a> Checker<'a> {
         match &stmt.kind {
             StmtKind::Expression(e) => {
                 self.check_expr(e, locals, label);
+                // `assert($cond)` is a real, common narrowing idiom real
+                // PHPStan explicitly documents support for - if execution
+                // continues past this statement, `$cond` held, so it's
+                // narrowed the same way a terminating `if`-guard clause's
+                // surviving branch already is, just without any
+                // branch/merge machinery since there's only one path
+                // forward (assert either holds or the program aborts).
+                // Deliberately not `instanceof`-specific: apply_narrowing
+                // already handles whatever condition shapes it
+                // understands and no-ops harmlessly on the rest.
+                if let ExprKind::Call(callee, args) = &e.kind
+                    && matches!(&callee.kind, ExprKind::Name(name) if name == "assert")
+                    && let Some(cond_arg) = args.first()
+                {
+                    self.apply_narrowing(&cond_arg.value, locals, true);
+                }
             }
             StmtKind::Return(Some(e)) => {
                 let actual = self.check_expr(e, locals, label);
