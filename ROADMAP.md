@@ -1690,6 +1690,95 @@ verified (full test suite + a before/after corpus diff against both the
 immediately-prior commit and the original 1,285-diagnostic baseline,
 re-run from inside the corpus directory) before the next began.
 
+## Phase 24: Piwigo false-positive hunt V - `#[LanguageLevelTypeAware]` - DONE
+
+Phase 23 explicitly deferred one pattern as "probably the single
+highest-value remaining investigation": `#[LanguageLevelTypeAware]`, a
+real phpstorm-stubs attribute (2,033 occurrences across 84 stub files)
+saying "this function/param's type differs by PHP version" - e.g.
+`substr()`'s real stub has **no native return-type hint at all**, so its
+only source of a return type is a stale, pre-8.0 `@return string|false`
+doc comment this attribute exists specifically to override for a modern
+PHP install:
+```php
+#[LanguageLevelTypeAware(["8.0" => "string"], default: "string|false")]
+function substr(string $string, int $offset, ?int $length) {}
+```
+This project didn't parse the attribute at all before this phase, so it
+silently fell back to the legacy value. Re-bucketing the 1,021-diagnostic
+corpus from Phase 23's end found this single gap now dominated everything
+left: `substr()`/`explode()`/`pg_connect()` and others sharing the
+identical shape accounted for roughly a quarter of the remaining count.
+
+**Return-type gating - DONE.** `substr`/`explode`/`pg_connect`'s own
+return type, and every other function sharing the "no native hint, stale
+doc, gated by this attribute" shape. The lexer's own `skip_whitespace_
+and_comments` (already special-casing `#[PhpStormStubsElementAvailable(`
+for the identical reason) captures the attribute's argument text via the
+same paren-depth, string-aware skip every other call site there already
+uses, extracts the highest-versioned type (this project's own established
+"assume the modern/open-ended interpretation" precedent, already used for
+`#[PhpStormStubsElementAvailable]`'s closed-range parameter dropping),
+and splices a fresh `@return <modern>` line into the immediately-
+preceding doc comment - `docblock::parse` processes `@return` tags in
+source order with no early exit, so a later tag simply overwrites an
+earlier one, needing zero parser/AST changes at all.
+
+**Parameter-type gating - DONE**, folded in after verifying the return-
+side fix alone. `finfo_file`'s `$finfo`, `pg_fetch_assoc`'s `$result`,
+and siblings share the exact same shape but on a *parameter* instead of
+a return (`#[LanguageLevelTypeAware(['8.1' => 'finfo'], default:
+'resource')] $finfo`, again no separate native hint). Verifying the
+return-side fix in isolation surfaced these as fresh false positives:
+`finfo_open()`'s now-correctly-modernized `finfo` return no longer
+matched `finfo_file()`'s still-stale `resource`-only parameter - a real
+regression with a well-understood cause, investigated and fixed
+immediately rather than left broken. A parameter has no docblock tag
+guaranteed to exist the way a function has exactly one `@return` line, so
+this shape instead injects real, synthetic native type-hint tokens right
+before the parameter's own `$name` token.
+
+That injection surfaced its own crash, caught by sweeping every file in
+*both* this project's own bundled `vendor/phpstorm-stubs` and Piwigo's
+vendored copy through `check` before considering this phase done (not
+just the diagnosed corpus subset) - `strip_tags()`'s own
+`#[LanguageLevelTypeAware(["7.4" => "string[]|string|null"], ...)]`
+parameter carries `TYPE[]` PHPDoc-only array shorthand, which isn't valid
+*native* type-hint syntax at all, so injecting it as native tokens
+crashed the parser outright (`expected variable, found LBracket`) rather
+than merely mis-typing something. Fixed by declining to inject whenever
+the extracted override contains `[`/`]`, falling back to today's
+existing "leave the parameter untouched" behavior - a real, disclosed
+gap (no diagnosed cluster needed it), chosen over guessing at a
+native-hint-compatible rewrite of PHPDoc-only syntax.
+
+Verifying the combined fix surfaced 3 further "new" diagnostics, each
+investigated to ground truth rather than assumed safe: one is a
+legitimate newly-surfaced precision improvement in `AuthService::
+authKeyLogin` (`explode()`'s now-honest `array<string>` return - instead
+of the old stale `array<string>|false`, which fell through `infer_expr`'s
+`Index` arm to `Mixed`, an even-less-precise decoy - lets a real,
+pre-existing gap in *cross-variable* narrowing become visible: the
+checker can't correlate one variable's nullability with a *different*
+variable's asserted enum value, e.g. "this is non-null whenever that
+other variable equals this specific case," a real but out-of-scope
+feature). The other two are `pg_query()` itself, hitting an *already-
+documented* pre-existing limitation - the Known Limitations table below
+names `pg_query`/`pg_query_params` specifically for interleaving multiple
+full parameter lists under duplicate parameter names across version
+eras, confirmed directly: its own `$connection` parameter is declared
+*twice*, under two different version-gated attributes, neither one
+droppable by the existing (Phase 8.5) attribute-handling logic since both
+have their own default/open-ended range - not a new regression, just a
+known gap becoming visible now that its neighbors are fixed.
+
+Combined, this phase dropped the corpus count from 1,021 to 792
+diagnostics (22.4%) in a single commit (the return- and parameter-gating
+halves, and the bracket-shorthand crash guard discovered while verifying
+them, landed together - each was a direct, understood consequence of
+verifying the previous step, not an independent unit with its own stable
+stopping point).
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
