@@ -4666,6 +4666,84 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 24, real shape: `substr()`/`explode()`/`pg_connect()` have no
+    // native return-type hint at all, so their only source of a return
+    // type is a stale `@return` doc comment, gated by
+    // `#[LanguageLevelTypeAware(['V.V' => 'MODERN'], default: 'LEGACY')]`
+    // immediately above `function` - previously unparsed entirely, so
+    // the checker read the pre-8.0 legacy type unconditionally.
+    #[test]
+    fn language_level_type_aware_return_type_is_used_over_the_stale_docblock() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param string $string
+             * @param int $offset
+             * @param ?int $length
+             * @return string|false
+             */
+            #[LanguageLevelTypeAware(["8.0" => "string"], default: "string|false")]
+            function substr($string, $offset, $length) {}
+            function f(string $s): string {
+                return substr($s, 0, -1);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn language_level_type_aware_still_returns_an_array_when_the_default_would_have() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param string $separator
+             * @param string $string
+             * @return string[]|false
+             */
+            #[LanguageLevelTypeAware(["8.0" => "string[]"], default: "string[]|false")]
+            function explode($separator, $string) {}
+            function f(string $s): array {
+                return explode(',', $s);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Real shape: `finfo_file`'s own first parameter has no native hint
+    // at all, only `#[LanguageLevelTypeAware(['8.1' => 'finfo'], default:
+    // 'resource')] $finfo` - fixing `finfo_open`'s modernized `finfo`
+    // return type alone (without this) left every downstream
+    // `finfo_file($handle, ...)` call newly flagged, since `$handle`'s
+    // now-correct `finfo` type no longer matched `finfo_file`'s still-
+    // stale `resource` parameter type.
+    #[test]
+    fn language_level_type_aware_on_a_parameter_is_used_over_the_stale_docblock() {
+        let d = diagnostics_for(
+            r#"<?php
+            class finfo {}
+            /** @return finfo|false */
+            #[LanguageLevelTypeAware(["8.1" => "finfo|false"], default: "resource|false")]
+            function finfo_open() {}
+            /**
+             * @param resource $finfo
+             * @return string|false
+             */
+            function finfo_file(#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')] $finfo, string $filename) {}
+            function f(string $path): string {
+                $handle = finfo_open();
+                if ($handle === false) {
+                    return '';
+                }
+                $result = finfo_file($handle, $path);
+                return $result === false ? '' : $result;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn constructor_argument_type_is_checked() {
         let d = diagnostics_for(

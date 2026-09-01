@@ -35,6 +35,21 @@ pub struct Lexer<'a> {
     // for an earlier byte offset, or one on a different line, still gets
     // a fully correct (just not delta-accelerated) recomputation.
     pos_cache: (usize, Position),
+    // Phase 24: set by `skip_language_level_type_aware_attribute` when it
+    // finds a return-type-gating `#[LanguageLevelTypeAware(...)]` -
+    // `tokenize_with_spans` checks this right after the `next_token()`
+    // call that set it (before pushing that call's own token) and, if
+    // set, rewrites the immediately-preceding `Token::DocComment` to
+    // carry the modern type instead of the stub's stale one.
+    pending_return_type_override: Option<String>,
+    // Phase 24: the parameter-gating sibling of the field above - set
+    // when the attribute instead gates a parameter (`finfo_file`'s
+    // `#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')]
+    // $finfo`). `tokenize_with_spans` inserts these as real synthetic
+    // tokens right before the upcoming `$name` token, since a parameter
+    // has no docblock tag guaranteed to exist for it the way a function's
+    // one-per-signature `@return` line does.
+    pending_param_type_tokens: Option<Vec<Token>>,
 }
 
 /// Advances past a single- or double-quoted string literal starting at
@@ -62,6 +77,89 @@ fn skip_string_literal_bytes(bytes: &[u8], i: usize) -> usize {
     i
 }
 
+/// Finds the next single- or double-quoted string literal in `s` (quote-
+/// agnostic - the real stub corpus mixes `'...'` and `"..."` freely for
+/// this attribute), returning its unquoted content and the remainder of
+/// `s` right after the closing quote. No escape handling - every type
+/// string this attribute carries is a plain identifier/union, never
+/// containing a quote of its own.
+fn take_quoted_string(s: &str) -> Option<(&str, &str)> {
+    let start = s.find(['\'', '"'])?;
+    let quote = s.as_bytes()[start] as char;
+    let after_open = &s[start + quote.len_utf8()..];
+    let end = after_open.find(quote)?;
+    Some((&after_open[..end], &after_open[end + quote.len_utf8()..]))
+}
+
+/// Parses a `LanguageLevelTypeAware` version key (`"8.1"`) into a
+/// `(major, minor)` pair for numeric comparison - a plain string
+/// comparison would wrongly rank `"8.10"` below `"8.9"`, and while no
+/// version this high exists yet, comparing as numbers costs nothing extra.
+fn parse_version(s: &str) -> Option<(u32, u32)> {
+    let (major, minor) = s.split_once('.')?;
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+/// Extracts the highest-versioned type string from a captured
+/// `LanguageLevelTypeAware(['V.V' => 'TYPE', ...], default: 'TYPE')`
+/// attribute's raw text (including its own `#[...` wrapper - callers
+/// don't need to trim it first, only `default:`'s presence and the
+/// quoted pairs before it matter). This project's own established
+/// "assume the modern/open-ended interpretation" precedent (already used
+/// for `#[PhpStormStubsElementAvailable]`'s closed-range parameter
+/// dropping) - real code being checked is running some real, current PHP
+/// version, so the highest-versioned declared type is the one actually
+/// in effect. A version key that fails to parse as `major.minor` is
+/// skipped, not fatal to the rest of the scan. Falls back to `default:`'s
+/// own value only when no version pair parsed at all (shouldn't happen -
+/// every real occurrence has at least one - but `default:` is always
+/// present regardless, confirmed against the full vendored corpus).
+fn extract_modern_type(raw: &str) -> Option<String> {
+    let (array_part, default_part) = match raw.find("default:") {
+        Some(idx) => (&raw[..idx], Some(&raw[idx + "default:".len()..])),
+        None => (raw, None),
+    };
+    let mut best: Option<((u32, u32), String)> = None;
+    let mut rest = array_part;
+    while let Some((key, after_key)) = take_quoted_string(rest) {
+        let Some(after_arrow) = after_key.trim_start().strip_prefix("=>") else {
+            break;
+        };
+        let Some((ty, tail)) = take_quoted_string(after_arrow) else {
+            break;
+        };
+        if let Some(version) = parse_version(key)
+            && best.as_ref().is_none_or(|(v, _)| version > *v)
+        {
+            best = Some((version, ty.to_string()));
+        }
+        rest = tail;
+    }
+    best.map(|(_, ty)| ty).or_else(|| {
+        default_part
+            .and_then(take_quoted_string)
+            .map(|(ty, _)| ty.to_string())
+    })
+}
+
+/// Splices a fresh `@return <override>` line into `doc` right before its
+/// closing `*/` - `docblock::parse` processes `@return` tags in source
+/// order with no early exit, so a later one simply overwrites an earlier
+/// one's value in the returned `DocBlock`. Appending (rather than
+/// surgically replacing the original `@return` line's own type
+/// substring) sidesteps needing to reimplement `take_type_token`'s own
+/// type-vs-description boundary logic here.
+fn append_return_type_override(doc: &str, override_ty: &str) -> String {
+    match doc.rfind("*/") {
+        Some(idx) => format!(
+            "{}\n * @return {override_ty}\n {}",
+            &doc[..idx],
+            &doc[idx..]
+        ),
+        None => doc.to_string(),
+    }
+}
+
 fn compute_line_starts(src: &[u8]) -> Vec<usize> {
     let mut starts = vec![0];
     for (i, &b) in src.iter().enumerate() {
@@ -82,6 +180,8 @@ impl<'a> Lexer<'a> {
             line_starts: compute_line_starts(bytes),
             last_token_start: 0,
             pos_cache: (0, Position { line: 1, col: 1 }),
+            pending_return_type_override: None,
+            pending_param_type_tokens: None,
         }
     }
 
@@ -97,6 +197,8 @@ impl<'a> Lexer<'a> {
             line_starts: compute_line_starts(bytes),
             last_token_start: 0,
             pos_cache: (0, Position { line: 1, col: 1 }),
+            pending_return_type_override: None,
+            pending_param_type_tokens: None,
         }
     }
 
@@ -160,6 +262,25 @@ impl<'a> Lexer<'a> {
         let mut tokens = Vec::new();
         loop {
             let tok = self.next_token();
+            if let Some(override_ty) = self.pending_return_type_override.take()
+                && let Some((Token::DocComment(doc), _)) = tokens.last_mut()
+            {
+                *doc = append_return_type_override(doc, &override_ty);
+            }
+            if let Some(type_tokens) = self.pending_param_type_tokens.take() {
+                // Synthetic tokens with no real source text of their own -
+                // a zero-width span at the upcoming real token's own
+                // start (computed the same way just below) is the most
+                // sensible position to attribute them to.
+                let synthetic_pos = self.line_col_at(self.last_token_start);
+                let synthetic_span = Span {
+                    start: synthetic_pos,
+                    end: synthetic_pos,
+                };
+                for t in type_tokens {
+                    tokens.push((t, synthetic_span));
+                }
+            }
             let span = Span {
                 start: self.line_col_at(self.last_token_start),
                 end: self.line_col_at(self.pos),
@@ -343,6 +464,8 @@ impl<'a> Lexer<'a> {
                 b'#' => {
                     if self.starts_with("#[PhpStormStubsElementAvailable(") {
                         self.skip_stub_availability_attribute();
+                    } else if self.starts_with("#[LanguageLevelTypeAware(") {
+                        self.skip_language_level_type_aware_attribute();
                     } else if self.starts_with("#[") {
                         // Attribute like #[Foo(...)] - skip to matching
                         // ']'. String-aware: an argument string
@@ -493,6 +616,102 @@ impl<'a> Lexer<'a> {
         if self.peek() == b',' {
             self.pos += 1;
         }
+    }
+
+    /// phpstorm-stubs represents "this function/param's type differs by
+    /// PHP version" with `#[LanguageLevelTypeAware(['V.V' => 'MODERN',
+    /// ...], default: 'LEGACY')]` - e.g. `substr()`'s real stub has *no*
+    /// native return-type hint at all, so its only source of a return
+    /// type is its own `@return string|false` doc comment, a pre-8.0
+    /// legacy value this attribute exists specifically to override for a
+    /// modern PHP install; `finfo_file`'s real stub gates its own first
+    /// *parameter* the identical way (`#[LanguageLevelTypeAware(['8.1' =>
+    /// 'finfo'], default: 'resource')] $finfo`, no separate native hint
+    /// at all either). Captures the attribute's own argument text (via
+    /// the same paren-depth, string-aware skip every other call site here
+    /// already uses), extracts the highest-versioned type via
+    /// `extract_modern_type`, and dispatches on which of the two shapes
+    /// this is (`next_parameter_anchor` - an immediately-following `$`/
+    /// `&`/`...` means a parameter, anything else means a return type):
+    /// a parameter override becomes real, synthetic type-hint tokens
+    /// queued in `pending_param_type_tokens` (inserted right before the
+    /// upcoming `$name` token - no docblock involved, since a parameter's
+    /// own `@param $name` tag may not exist at all for every gated
+    /// parameter); a return override is stashed in
+    /// `pending_return_type_override` for `tokenize_with_spans` to splice
+    /// into the preceding doc comment instead.
+    fn skip_language_level_type_aware_attribute(&mut self) {
+        let attr_start = self.pos;
+        self.pos += "#[LanguageLevelTypeAware(".len();
+        let mut depth = 1i32;
+        while depth > 0 && self.pos < self.src.len() {
+            match self.peek() {
+                b'\'' | b'"' => self.skip_string_literal(),
+                b'(' => {
+                    depth += 1;
+                    self.pos += 1;
+                }
+                b')' => {
+                    depth -= 1;
+                    self.pos += 1;
+                }
+                _ => self.pos += 1,
+            }
+        }
+        if depth != 0 {
+            // Malformed/unexpected shape (EOF before the attribute
+            // closed) - bail out with whatever's been consumed so far.
+            return;
+        }
+        let raw = String::from_utf8_lossy(&self.src[attr_start..self.pos]).into_owned();
+        if self.peek() == b']' {
+            self.pos += 1;
+        }
+        let Some(override_ty) = extract_modern_type(&raw) else {
+            return;
+        };
+        if self.next_parameter_anchor() {
+            // Unlike a return type (routed through the docblock, parsed
+            // by `types::parse_type_string` which understands PHPDoc-only
+            // syntax like `TYPE[]`), an injected parameter override
+            // becomes real *native* type-hint tokens, consumed by the
+            // parser's native `parse_type_hint` - which has no notion of
+            // `[]` shorthand at all. Real corpus proof this isn't
+            // hypothetical: `strip_tags()`'s own `#[LanguageLevelTypeAware(
+            // ["7.4" => "string[]|string|null"], ...)]` parameter crashed
+            // the parser outright before this guard existed. None of this
+            // pass's diagnosed parameter cases (`finfo`, `GdFont|int`,
+            // `PgSql\Connection`) use `[]` shorthand, so skipping this
+            // shape entirely - falling back to today's existing "leave it
+            // alone" behavior - costs nothing evidenced, and is far safer
+            // than guessing at a native-hint-compatible rewrite.
+            if !override_ty.contains(['[', ']']) {
+                let tokens: Vec<Token> = Lexer::new_in_php(&override_ty)
+                    .tokenize()
+                    .into_iter()
+                    .filter(|t| *t != Token::Eof)
+                    .collect();
+                if !tokens.is_empty() {
+                    self.pending_param_type_tokens = Some(tokens);
+                }
+            }
+        } else {
+            self.pending_return_type_override = Some(override_ty);
+        }
+    }
+
+    /// Whether the next real token (skipping only plain ASCII whitespace -
+    /// deliberately not a full trivia skip, since this only needs to
+    /// distinguish "a parameter follows" from everything else) starts a
+    /// parameter - a bare `$name`, a by-ref `&$name`, or a variadic
+    /// `...$name` - as opposed to a return-type-gating position (a
+    /// visibility keyword, `function`, or another attribute).
+    fn next_parameter_anchor(&self) -> bool {
+        let mut p = self.pos;
+        while matches!(self.src.get(p), Some(b' ' | b'\t' | b'\r' | b'\n')) {
+            p += 1;
+        }
+        matches!(self.src.get(p), Some(b'$' | b'&')) || self.src[p..].starts_with(b"...")
     }
 
     fn lex_ident_raw(&mut self) -> String {
@@ -1259,6 +1478,113 @@ mod tests {
         let without_attr =
             Lexer::new("<?php class C { public function __construct($datetime = \"now\") {} }")
                 .tokenize();
+        assert_eq!(with_attr, without_attr);
+    }
+
+    // Phase 24: `#[LanguageLevelTypeAware]` - a real shape from
+    // `substr()`'s own stub: no native return-type hint at all, an
+    // existing but stale `@return` doc comment, and this attribute
+    // immediately above `function`.
+
+    #[test]
+    fn language_level_type_aware_appends_the_modern_return_type_to_the_doc_comment() {
+        let src = "<?php\n/** @return string|false */\n#[LanguageLevelTypeAware([\"8.0\" => \"string\"], default: \"string|false\")]\nfunction f() {}";
+        let toks = Lexer::new(src).tokenize();
+        let Token::DocComment(doc) = &toks[0] else {
+            panic!("expected a doc comment first, got: {toks:?}");
+        };
+        assert!(
+            doc.contains("@return string\n"),
+            "modern @return not appended: {doc:?}"
+        );
+        assert!(
+            doc.contains("@return string|false"),
+            "original @return line should still be present: {doc:?}"
+        );
+    }
+
+    #[test]
+    fn language_level_type_aware_picks_the_highest_versioned_key_over_default() {
+        let src = "<?php\n/** @return resource|false */\n#[LanguageLevelTypeAware(['8.1' => 'PgSql\\Connection|false'], default: 'resource|false')]\nfunction pg_connect() {}";
+        let toks = Lexer::new(src).tokenize();
+        let Token::DocComment(doc) = &toks[0] else {
+            panic!("expected a doc comment first, got: {toks:?}");
+        };
+        assert!(
+            doc.contains("@return PgSql\\Connection|false"),
+            "expected the 8.1 override, not the legacy default: {doc:?}"
+        );
+    }
+
+    #[test]
+    fn language_level_type_aware_picks_the_numerically_highest_of_several_keys() {
+        let src = "<?php\n/** @return int */\n#[LanguageLevelTypeAware(['8.1' => 'A', '8.10' => 'B', '8.2' => 'C'], default: 'int')]\nfunction f() {}";
+        let toks = Lexer::new(src).tokenize();
+        let Token::DocComment(doc) = &toks[0] else {
+            panic!("expected a doc comment first, got: {toks:?}");
+        };
+        assert!(
+            doc.contains("@return B"),
+            "8.10 should numerically outrank 8.2/8.1, not string-sort behind them: {doc:?}"
+        );
+    }
+
+    #[test]
+    fn language_level_type_aware_on_a_parameter_is_not_treated_as_a_return_override() {
+        // Real shape: GD's `#[LanguageLevelTypeAware(['8.1' => 'GdFont|int'],
+        // default: 'int')] $font` - immediately followed by `$name`, not
+        // `function`. Must not append a spurious `@return` override -
+        // this shape becomes injected native tokens instead (see the
+        // dedicated `_injects_a_real_native_type_hint` test below).
+        let src = "<?php\n/** @param int $font */\nfunction f(#[LanguageLevelTypeAware(['8.1' => 'GdFont|int'], default: 'int')] $font) {}";
+        let toks = Lexer::new(src).tokenize();
+        let Token::DocComment(doc) = &toks[0] else {
+            panic!("expected a doc comment first, got: {toks:?}");
+        };
+        assert!(
+            !doc.contains("@return"),
+            "a parameter-gating attribute must not append a @return override: {doc:?}"
+        );
+    }
+
+    #[test]
+    fn language_level_type_aware_on_a_parameter_injects_a_real_native_type_hint() {
+        // Real shape: `finfo_file`'s own `#[LanguageLevelTypeAware(['8.1'
+        // => 'finfo'], default: 'resource')] $finfo` - no separate native
+        // hint of its own, so the modern type has to arrive as a real,
+        // synthetic type-hint token sequence right before `$finfo`.
+        let src = "<?php\nfunction f(#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')] $finfo) {}";
+        let with_attr = Lexer::new(src).tokenize();
+        let without_attr = Lexer::new("<?php\nfunction f(finfo $finfo) {}").tokenize();
+        assert_eq!(with_attr, without_attr);
+    }
+
+    #[test]
+    fn language_level_type_aware_on_a_parameter_with_bracket_shorthand_is_left_alone() {
+        // Real shape (found via a crash while verifying this fix against
+        // this project's own bundled stub corpus): `strip_tags()`'s own
+        // `#[LanguageLevelTypeAware(["7.4" => "string[]|string|null"],
+        // default: "string|null")] $allowed_tags = null` - `TYPE[]` is
+        // PHPDoc-only shorthand, not valid native type-hint syntax at
+        // all, so injecting it as native tokens crashed the parser
+        // outright (`expected variable, found LBracket`) before this
+        // guard existed. Must fall back to leaving the parameter
+        // untouched (today's pre-existing, safe default) rather than
+        // injecting anything.
+        let src = "<?php\nfunction f(#[LanguageLevelTypeAware([\"7.4\" => \"string[]|string|null\"], default: \"string|null\")] $allowed_tags = null) {}";
+        let with_attr = Lexer::new(src).tokenize();
+        let without_attr = Lexer::new("<?php\nfunction f($allowed_tags = null) {}").tokenize();
+        assert_eq!(with_attr, without_attr);
+    }
+
+    #[test]
+    fn language_level_type_aware_with_no_preceding_doc_comment_is_a_safe_no_op() {
+        let src = "<?php\n#[LanguageLevelTypeAware([\"8.0\" => \"string\"], default: \"string|false\")]\nfunction f() {}";
+        // Must not panic, and must tokenize identically to the attribute
+        // being absent entirely (nothing to rewrite - no crash, no stray
+        // synthetic doc comment materializing from nowhere).
+        let with_attr = Lexer::new(src).tokenize();
+        let without_attr = Lexer::new("<?php\nfunction f() {}").tokenize();
         assert_eq!(with_attr, without_attr);
     }
 
