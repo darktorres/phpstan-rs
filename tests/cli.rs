@@ -780,3 +780,78 @@ fn demo_with_a_file_argument_parses_and_checks_that_file() {
     assert!(stdout.contains("-- diagnostics --"), "got: {stdout}");
     assert!(stdout.contains("undefined variable"), "got: {stdout}");
 }
+
+#[test]
+fn check_does_not_crash_on_realistically_deep_nested_expressions() {
+    // Phase 20 Finding A: a real, reproducible bug this session found by
+    // direct testing, not assumption - run_check's worker threads used
+    // to spawn with Rust's default ~2MiB stack, well under what the
+    // parser's own MAX_EXPR_DEPTH=1000 guard needs to safely trip before
+    // physically exhausting the stack. ~500 levels of nested parentheses
+    // (a realistic depth for generated/minified code, not an extreme
+    // adversarial input) used to hard-crash the process with an
+    // uncatchable SIGABRT well short of that guard. Checking for the
+    // absence of a signal specifically (not just a non-zero exit code) -
+    // a graceful "expression nested too deeply" parse failure is still a
+    // real, intentional, non-zero-exit-free success from the process's
+    // own perspective; a SIGABRT is the actual regression this guards
+    // against.
+    use std::os::unix::process::ExitStatusExt;
+
+    let dir = TempDir::new("deep_nesting");
+    let depth = 500;
+    let nested = format!("<?php $x = {}1{};", "(".repeat(depth), ")".repeat(depth));
+    dir.write("deep.php", &nested);
+
+    let output = bin().arg("check").arg(dir.path()).output().unwrap();
+    assert_eq!(
+        output.status.signal(),
+        None,
+        "process was killed by a signal (crash) - status: {:?}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn check_scales_roughly_linearly_with_a_single_very_long_line() {
+    // Phase 20's own namesake incident: a genuine O(line length x tokens
+    // on it) blowup that hung for minutes on a real 1.25M-character
+    // line, caught only by chance. Confirmed this session (manually, at
+    // much larger sizes) that today's code scales roughly linearly, not
+    // quadratically - this codifies that as a permanent regression
+    // guard at CI-friendly sizes: quadratic scaling would need ~16x the
+    // time for 4x the size; a generous 8x ceiling comfortably clears
+    // linear-ish scaling (observed ~3-4x) while still catching a real
+    // quadratic regression.
+    fn single_long_line(statements: usize) -> String {
+        let mut src = String::from("<?php ");
+        for i in 0..statements {
+            src.push_str(&format!("$a{i}=1;"));
+        }
+        src
+    }
+
+    let small_dir = TempDir::new("scale_small");
+    small_dir.write("a.php", &single_long_line(20_000));
+    let large_dir = TempDir::new("scale_large");
+    large_dir.write("a.php", &single_long_line(80_000));
+
+    let small_start = std::time::Instant::now();
+    let small_output = bin().arg("check").arg(small_dir.path()).output().unwrap();
+    let small_elapsed = small_start.elapsed();
+    assert!(small_output.status.success());
+
+    let large_start = std::time::Instant::now();
+    let large_output = bin().arg("check").arg(large_dir.path()).output().unwrap();
+    let large_elapsed = large_start.elapsed();
+    assert!(large_output.status.success());
+
+    assert!(
+        large_elapsed.as_secs_f64() < small_elapsed.as_secs_f64() * 8.0 + 0.5,
+        "4x input size took {:?} vs {:?} for the smaller input - looks quadratic, not linear \
+         (the +0.5s slack absorbs fixed process-startup overhead at these small sizes)",
+        large_elapsed,
+        small_elapsed
+    );
+}
