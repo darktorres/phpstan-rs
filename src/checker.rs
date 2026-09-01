@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::ast::*;
 use crate::pest_config;
-use crate::registry::{FunctionSig, NameContext, Registry};
+use crate::registry::{FunctionSig, NameContext, Registry, resolve_names_in_type};
 use crate::token::Span;
 use crate::types::{self, Type};
 
@@ -399,15 +399,39 @@ impl<'a> Checker<'a> {
                     locals.insert(param.name.clone(), ty);
                 }
             }
-            // Shouldn't happen (this function had to be indexed to be
-            // reachable here at all), but degrade rather than panic.
+            // Meant as a "shouldn't happen, but degrade rather than
+            // panic" fallback (this function had to be indexed to be
+            // reachable here at all) - except it's exactly what every
+            // anonymous class method hits, unconditionally: `lookup_own_
+            // signature` looks up `self.registry.classes.get(c)` for
+            // `class_name = Some(&decl.name)`, and an anonymous class's
+            // synthetic name is never indexed into the registry (see
+            // `ExprKind::NewAnonymousClass`'s own comment) - so `sig` is
+            // always `None` there. Unlike the `Some(sig)` branch above,
+            // this one never resolved a `use`-imported type-hint name to
+            // its FQN (Phase 22 Finding 5 - confirmed directly from a
+            // real diagnostic's own wording: "expected ResponseInterface,
+            // got Nyholm\Psr7\Response", the expected side printing bare/
+            // unqualified where a resolved one would be fully qualified),
+            // nor resolved a `self`/`static`/`parent` pseudo-type against
+            // the enclosing (possibly anonymous) class the way line 385
+            // above does. Both fixed the same way, using `self.name_ctx` -
+            // the exact per-file context real class declarations get
+            // resolved against - since this branch (unlike the `Some`
+            // one) builds each `Type` fresh from a raw string on every
+            // call anyway, with no immutable-AST obstacle to work around.
             None => {
                 for p in &f.params {
                     let ty = p
                         .type_hint
                         .as_deref()
                         .map(types::parse_type_string)
+                        .map(|ty| resolve_names_in_type(ty, &self.name_ctx))
                         .unwrap_or(Type::Mixed);
+                    let ty = match class_name {
+                        Some(c) => self.resolve_pseudo(&ty, c),
+                        None => ty,
+                    };
                     let ty = if p.variadic {
                         Type::Array(Box::new(ty))
                     } else {
@@ -433,9 +457,17 @@ impl<'a> Checker<'a> {
         // never flags anything - so this doesn't need to distinguish "no
         // return type" from "declared mixed" the way the fallback below
         // does with an Option.
-        let declared_return = sig
-            .map(|s| s.return_type.clone())
-            .or_else(|| f.return_type.as_deref().map(types::parse_type_string));
+        let declared_return = sig.map(|s| s.return_type.clone()).or_else(|| {
+            let ty = f
+                .return_type
+                .as_deref()
+                .map(types::parse_type_string)
+                .map(|ty| resolve_names_in_type(ty, &self.name_ctx))?;
+            Some(match class_name {
+                Some(c) => self.resolve_pseudo(&ty, c),
+                None => ty,
+            })
+        });
         let label = match class_name {
             Some(c) => format!("{c}::{}", f.name),
             None => f.name.clone(),
@@ -3026,6 +3058,64 @@ mod tests {
                 return new class {
                     public function value(): int {
                         return needsInt(5);
+                    }
+                };
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn anonymous_class_method_resolves_a_use_imported_return_type() {
+        // Phase 22 Finding 5, real shape: a `use`-imported interface
+        // return type on an anonymous class method - confirmed directly
+        // from a real diagnostic's own wording before this fix: "expected
+        // ResponseInterface, got Nyholm\Psr7\Response" (the expected side
+        // printing bare/unqualified, proving it was never resolved
+        // against the file's own `use` imports the way a top-level
+        // class's method signature already is).
+        let d = diagnostics_for(
+            r#"<?php
+            namespace App\Other;
+            interface ResponseInterface {}
+
+            namespace App\Impl;
+            use App\Other\ResponseInterface;
+            class RealResponse implements ResponseInterface {}
+
+            namespace App;
+            use App\Other\ResponseInterface;
+            use App\Impl\RealResponse;
+            function make() {
+                return new class {
+                    public function handle(): ResponseInterface {
+                        return new RealResponse();
+                    }
+                };
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn anonymous_class_method_resolves_a_static_return_type() {
+        // The sibling gap found alongside the use-import one: the
+        // `Some(sig)` branch resolves self/static/parent pseudo-types via
+        // `resolve_pseudo` whenever `class_name` is known; the anonymous-
+        // class fallback branch did this for neither params nor the
+        // return type. Before the fix, `: static` stayed the literal,
+        // unresolved pseudo-type `Type::Object("static")`, which could
+        // never match `$this`'s real (synthetic anonymous-class) type -
+        // a return-type-mismatch false positive on the most ordinary
+        // possible body (`return $this;`).
+        let d = diagnostics_for(
+            r#"<?php
+            function make() {
+                return new class {
+                    public function self(): static {
+                        return $this;
                     }
                 };
             }
