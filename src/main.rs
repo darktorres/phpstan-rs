@@ -73,10 +73,26 @@ fn run_check(paths: &[PathBuf]) {
         .map(|n| n.get())
         .unwrap_or(1);
     let chunk_size = files.len().div_ceil(num_threads).max(1);
+    // A bare `scope.spawn` uses Rust's default new-thread stack size
+    // (~2MiB on Linux) - smaller than the ~8MiB a main thread gets, and
+    // smaller than what the parser's own MAX_EXPR_DEPTH guard needs to
+    // safely trip before physically exhausting the stack (confirmed
+    // directly: a real, realistic ~200-300 levels of nested parentheses
+    // - not an extreme adversarial input - crashed with an uncatchable
+    // stack overflow here, well short of that guard's 1000-level limit,
+    // while the same input only hit the guard's own intended, graceful
+    // panic under check-project's larger main-thread stack). Matching
+    // the main thread's own default budget here closes that gap.
+    const WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
     let failures: Vec<(PathBuf, String)> = std::thread::scope(|scope| {
         let handles: Vec<_> = files
             .chunks(chunk_size)
-            .map(|chunk| scope.spawn(|| check_chunk(chunk)))
+            .map(|chunk| {
+                std::thread::Builder::new()
+                    .stack_size(WORKER_STACK_SIZE)
+                    .spawn_scoped(scope, || check_chunk(chunk))
+                    .expect("failed to spawn worker thread")
+            })
             .collect();
         handles
             .into_iter()
