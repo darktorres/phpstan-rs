@@ -263,6 +263,7 @@ impl Project {
         };
         let mut checker = Checker::new(&self.registry);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
+        checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.check_program(&file.ast);
         checker.into_diagnostics()
     }
@@ -602,6 +603,101 @@ mod tests {
 
         let d = project.check_file(&PathBuf::from("tests/Unit/FooTest.php"));
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn pest_file_local_before_each_property_is_readable_from_another_closure_in_the_same_file() {
+        let mut project = Project::new();
+        project
+            .load_file(
+                PathBuf::from("tests/FooTest.php"),
+                "<?php
+                function beforeEach($callback) {}
+                function it($description, $callback) {}
+                beforeEach(function (): void { $this->root = 'x'; });
+                it('works', function (): void { echo $this->root; });",
+            )
+            .unwrap();
+        project.finish_loading();
+
+        let d = project.check_file(&PathBuf::from("tests/FooTest.php"));
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn pest_directory_scoped_before_each_property_is_readable_across_files() {
+        // Real shape: Piwigo's own tests/Pest.php - `uses()->beforeEach
+        // (...)->afterEach(...)->in('Unit')` chains an intermediate
+        // afterEach() between uses() and the terminal in() - proves
+        // walk_uses_chain doesn't require beforeEach to sit immediately
+        // next to uses().
+        let mut project = Project::new();
+        project
+            .load_file(
+                PathBuf::from("tests/Pest.php"),
+                "<?php
+                function afterEach($callback) {}
+                uses()
+                    ->beforeEach(function (): void { $this->root = 'x'; })
+                    ->afterEach(function (): void {})
+                    ->in('Unit');",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Unit/FooTest.php"),
+                "<?php
+                function it($description, $callback) {}
+                it('works', function (): void { echo $this->root; });",
+            )
+            .unwrap();
+        project.finish_loading();
+
+        let d = project.check_file(&PathBuf::from("tests/Unit/FooTest.php"));
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn pest_directory_scoped_before_each_property_does_not_leak_outside_its_directory() {
+        // Binds $this to a real, registered class in both directories (via
+        // an unrelated `uses(RealTestBase::class)` for Browser/, matching
+        // `pest_file_outside_the_bound_directory_...`'s own established
+        // pattern) - without a concrete class, `$this` resolves to Mixed
+        // in this bare test harness (no real PHPUnit\Framework\TestCase
+        // registered) and undefined-property checking never fires at all,
+        // regardless of this finding's own fix.
+        let mut project = Project::new();
+        project
+            .load_file(
+                PathBuf::from("tests/Pest.php"),
+                "<?php
+                uses(RealTestBase::class)->in('Browser');
+                uses()
+                    ->beforeEach(function (): void { $this->root = 'x'; })
+                    ->in('Unit');",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Support/RealTestBase.php"),
+                "<?php class RealTestBase {}",
+            )
+            .unwrap();
+        project
+            .load_file(
+                PathBuf::from("tests/Browser/FooTest.php"),
+                "<?php
+                function it($description, $callback) {}
+                it('works', function (): void { echo $this->root; });",
+            )
+            .unwrap();
+        project.finish_loading();
+
+        let d = project.check_file(&PathBuf::from("tests/Browser/FooTest.php"));
+        assert!(
+            d.iter().any(|x| x.message.contains("$root")),
+            "expected an undefined-property diagnostic, got: {d:?}"
+        );
     }
 
     #[test]

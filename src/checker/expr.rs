@@ -885,9 +885,20 @@ impl<'a> Checker<'a> {
                 // union-typed parameter, used to skip this check
                 // entirely rather than fall to `_ => {}`.
                 let base_ty = self.check_expr(base, locals, label);
+                // Phase 22 Finding 1: a Pest `beforeEach(...)` closure's own
+                // `$this->prop = ...` legitimately defines a dynamic
+                // property every other Pest closure in the file/directory
+                // scope can read, real PHPUnit\Framework\TestCase
+                // declaration or not - see `pest_hook_properties`'s own
+                // doc comment. Keyed off the literal `$this` expression
+                // (unlike the real `pestphp/pest-plugin-phpstan`
+                // extension, which resolves by the base's type) - a
+                // disclosed, evidence-free simplification.
+                let is_pest_this = matches!(&base.kind, ExprKind::Variable(name) if name == "this");
                 if self.member_confirmed_missing(&base_ty, |c| {
                     self.registry.lookup_property(c, prop).is_some()
                         || self.registry.lookup_method(c, "__get").is_some()
+                        || (is_pest_this && self.pest_hook_properties.contains(prop.as_str()))
                 }) {
                     self.report(
                         label.to_string(),

@@ -31,9 +31,10 @@
 //! sibling module with its own predicate and resolver, without touching
 //! this one.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::ast::{Arg, ExprKind, Stmt, StmtKind};
+use crate::ast::{Arg, Expr, ExprKind, Stmt, StmtKind};
 use crate::checker::{literal_string_value, unwrap_grouping};
 use crate::registry::{NameContext, Registry};
 use crate::types::Type;
@@ -102,15 +103,124 @@ pub(crate) fn file_local_this_type(program: &[Stmt], ctx: &NameContext) -> Optio
     })
 }
 
-/// Directory-scoped `$this` bindings collected from every `Pest.php`
-/// config file in a project - `uses(X::class, ...)->in(dir1, dir2, ...)`,
-/// each target directory recorded as a path prefix (resolved relative to
-/// that `Pest.php` file's own parent directory, unless absolute).
-/// Bindings accumulate as a union across every matching rule (real
-/// Pest's own behavior - no "most specific wins" pruning).
+/// Real Pest's own dynamic-property idiom, replicated from
+/// `pestphp/pest-plugin-phpstan`'s `TestCaseDynamicPropertyTypeExtension`
+/// and `PestHookPropertyReader`: every `beforeEach`/`test`/`afterEach`/
+/// `describe` closure in a file shares the same `$this` instance, so a
+/// property set in one `beforeEach(...)` closure is legitimately
+/// readable from another closure in the same file. Narrower than the
+/// real reader in the same two ways `file_local_this_type`'s own doc
+/// comment discloses for class resolution, and for the same reason (no
+/// real corpus evidence to justify building more):
+///
+/// - Only a **top-level, file-local** `beforeEach(...)` call is scanned
+///   here (mirroring `file_local_this_type`'s own top-level-only shape) -
+///   the real reader finds `beforeEach(...)` anywhere in the file via a
+///   fully recursive AST search, which would also catch one nested
+///   inside a `describe(...)` closure. Checked directly whether that
+///   matters for this project's own real corpus: no `.php` test file
+///   combines `describe(` and `beforeEach(`, so a top-level-only scan is
+///   fully sufficient today.
+/// - Only a **direct, top-level statement** inside the closure body is
+///   recognized as a property assignment (mirroring the real reader's
+///   own `foreach ($closure->stmts as $stmt)`, no recursion into a
+///   nested `if`/loop).
+///
+/// Property *names* only, not the real reader's full RHS-type inference
+/// (resolving local-variable aliasing, `@var` doc-comment hints, ...) -
+/// this only needs to know a name exists so a read of it isn't flagged
+/// as undefined, matching this project's own established "safe default"
+/// pattern for a definition whose real type isn't worth modeling
+/// precisely (see `predefine_byref_or_unknown_args`).
+pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> HashSet<String> {
+    let mut props = HashSet::new();
+    for stmt in program {
+        let StmtKind::Expression(e) = &stmt.kind else {
+            continue;
+        };
+        let ExprKind::Call(callee, args) = &unwrap_grouping(e).kind else {
+            continue;
+        };
+        let ExprKind::Name(name) = &callee.kind else {
+            continue;
+        };
+        if name != "beforeEach" {
+            continue;
+        }
+        for arg in args {
+            collect_hook_closure_properties(&arg.value, &mut props);
+        }
+    }
+    props
+}
+
+/// The top-level-statements-only half of `file_local_hook_properties`'s
+/// own doc comment: `$this->prop = ...` assignments found as direct
+/// statements in a `beforeEach(...)` closure's own body, keying off the
+/// literal `$this` expression only (unlike the real reader, which
+/// resolves by the property base's *type* via PHPStan's own `Scope` -
+/// an aliased `$self = $this; $self->prop` isn't covered here, with no
+/// corpus evidence it's needed).
+fn collect_hook_closure_properties(expr: &Expr, props: &mut HashSet<String>) {
+    let ExprKind::Closure { body, .. } = &expr.kind else {
+        return;
+    };
+    for stmt in body {
+        let StmtKind::Expression(e) = &stmt.kind else {
+            continue;
+        };
+        let ExprKind::Assign(lhs, _) = &unwrap_grouping(e).kind else {
+            continue;
+        };
+        let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
+            continue;
+        };
+        if matches!(&base.kind, ExprKind::Variable(name) if name == "this") {
+            props.insert(prop.clone());
+        }
+    }
+}
+
+/// Walks a Pest fluent chain (`uses(...)->beforeEach(...)->afterEach(...)
+/// ->in(...)`, any number/order of intermediate calls between `uses(...)`
+/// and the terminal `.in(...)` real Pest requires to register a
+/// directory-scoped rule) down to its base `uses(...)` call, collecting
+/// every `beforeEach(...)` closure's own property assignments found along
+/// the way into `hook_props`. `expr` is whatever the outermost `.in(...)`
+/// call's own receiver is - returns the base `uses(...)` call's own
+/// arguments, or `None` if the chain doesn't bottom out in a real
+/// `uses(...)` call.
+fn walk_uses_chain<'e>(expr: &'e Expr, hook_props: &mut HashSet<String>) -> Option<&'e [Arg]> {
+    match &unwrap_grouping(expr).kind {
+        ExprKind::Call(callee, args) => {
+            let ExprKind::Name(name) = &callee.kind else {
+                return None;
+            };
+            (name == "uses").then_some(args.as_slice())
+        }
+        ExprKind::MethodCall(inner, method, call_args, _) => {
+            if method == "beforeEach" {
+                for arg in call_args {
+                    collect_hook_closure_properties(&arg.value, hook_props);
+                }
+            }
+            walk_uses_chain(inner, hook_props)
+        }
+        _ => None,
+    }
+}
+
+/// Directory-scoped `$this` bindings *and* hook-property names collected
+/// from every `Pest.php` config file in a project -
+/// `uses(X::class, ...)->beforeEach(...)->in(dir1, dir2, ...)`, each
+/// target directory recorded as a path prefix (resolved relative to that
+/// `Pest.php` file's own parent directory, unless absolute). Both
+/// accumulate as a union across every matching rule (real Pest's own
+/// behavior - no "most specific wins" pruning).
 #[derive(Debug, Default)]
 pub struct PestConfig {
     bindings: Vec<(PathBuf, Vec<String>)>,
+    hook_properties: Vec<(PathBuf, Vec<String>)>,
 }
 
 impl PestConfig {
@@ -118,6 +228,7 @@ impl PestConfig {
     /// reusing each one's already-parsed AST - no re-parsing needed.
     pub fn build<'a>(pest_files: impl Iterator<Item = (&'a Path, &'a [Stmt])>) -> PestConfig {
         let mut bindings = Vec::new();
+        let mut hook_properties = Vec::new();
         for (path, ast) in pest_files {
             if path.file_name().and_then(|n| n.to_str()) != Some("Pest.php") {
                 continue;
@@ -137,19 +248,22 @@ impl PestConfig {
                 if method != "in" {
                     continue;
                 }
-                let ExprKind::Call(uses_callee, uses_args) = &unwrap_grouping(inner).kind else {
+                let mut chain_props = HashSet::new();
+                let Some(uses_args) = walk_uses_chain(inner, &mut chain_props) else {
                     continue;
                 };
-                let ExprKind::Name(uses_name) = &uses_callee.kind else {
-                    continue;
-                };
-                if uses_name != "uses" {
-                    continue;
-                }
                 let class_names = class_names_from_uses_call(uses_args, &ctx);
-                if class_names.is_empty() {
+                // A bare `uses()->beforeEach(...)->in(...)` (no class
+                // argument to `uses()` at all - confirmed real, not
+                // hypothetical: `tests/Pest.php`'s own `uses()->
+                // beforeEach(...)->afterEach(...)->in('Unit')`) still has
+                // real hook properties worth recording even though there's
+                // no class binding to go with them - only skip when
+                // *neither* is worth recording.
+                if class_names.is_empty() && chain_props.is_empty() {
                     continue;
                 }
+                let chain_props: Vec<String> = chain_props.into_iter().collect();
                 for in_arg in in_args {
                     let Some(target) = literal_string_value(&in_arg.value) else {
                         continue;
@@ -160,11 +274,19 @@ impl PestConfig {
                     } else {
                         dir.join(target_path)
                     };
-                    bindings.push((prefix, class_names.clone()));
+                    if !class_names.is_empty() {
+                        bindings.push((prefix.clone(), class_names.clone()));
+                    }
+                    if !chain_props.is_empty() {
+                        hook_properties.push((prefix, chain_props.clone()));
+                    }
                 }
             }
         }
-        PestConfig { bindings }
+        PestConfig {
+            bindings,
+            hook_properties,
+        }
     }
 
     /// Resolves the `$this` type for one file being checked - every
@@ -190,5 +312,19 @@ impl PestConfig {
         } else {
             Type::Mixed
         }
+    }
+
+    /// Resolves the directory-scoped dynamic-property names for one file
+    /// being checked - every `hook_properties` binding whose prefix
+    /// matches `file_path`, unioned (unlike `resolve_this_type`'s
+    /// single-value class slot, a property-name set has no "most
+    /// specific wins" precedence to apply - the caller unions this with
+    /// whatever `file_local_hook_properties` finds too).
+    pub fn resolve_hook_properties(&self, file_path: &Path) -> HashSet<String> {
+        self.hook_properties
+            .iter()
+            .filter(|(prefix, _)| file_path.starts_with(prefix))
+            .flat_map(|(_, props)| props.iter().cloned())
+            .collect()
     }
 }

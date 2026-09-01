@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::ast::*;
 use crate::pest_config;
 use crate::registry::{FunctionSig, NameContext, Registry};
@@ -162,6 +164,17 @@ pub struct Checker<'a> {
     // consulted inside an `is_this_binding_call`-recognized closure
     // argument, which none of those exercise.
     pub(crate) pest_this_type: Type,
+    // Phase 22 Finding 1: dynamic property names a Pest `beforeEach(...)`
+    // closure assigns onto the shared `$this` (see `pest_config`'s own
+    // `file_local_hook_properties`/`PestConfig::resolve_hook_properties`)
+    // - set via `set_pest_hook_properties` (by `Project::check_file`, from
+    // `PestConfig::resolve_hook_properties`) before `check_program` runs,
+    // then unioned (not overridden - a property-name set has no "most
+    // specific wins" precedence the way a single class type does) with
+    // whatever file-local `beforeEach(...)` calls `check_program` itself
+    // finds. Defaults empty, so every existing call site untouched by
+    // this is completely unaffected.
+    pub(crate) pest_hook_properties: HashSet<String>,
 }
 
 mod assignment;
@@ -191,6 +204,7 @@ impl<'a> Checker<'a> {
             saw_dynamic_var_construct: false,
             current_function_is_generator: false,
             pest_this_type: Type::Mixed,
+            pest_hook_properties: HashSet::new(),
         }
     }
 
@@ -201,6 +215,15 @@ impl<'a> Checker<'a> {
     /// don't care about Pest at all don't need to change.
     pub fn set_pest_this_type(&mut self, ty: Type) {
         self.pest_this_type = ty;
+    }
+
+    /// Seeds the directory-scoped half of the dynamic-`$this`-property
+    /// name set (`PestConfig::resolve_hook_properties`) - a setter for
+    /// the same reason `set_pest_this_type` is one. `check_program`
+    /// unions this with whatever file-local `beforeEach(...)` calls it
+    /// finds itself, rather than one overriding the other.
+    pub fn set_pest_hook_properties(&mut self, props: HashSet<String>) {
+        self.pest_hook_properties = props;
     }
 
     /// Every diagnostic this checker emits goes through here - replaces
@@ -248,6 +271,12 @@ impl<'a> Checker<'a> {
         if let Some(local_ty) = pest_config::file_local_this_type(program, &self.name_ctx) {
             self.pest_this_type = local_ty;
         }
+        // Unlike `pest_this_type` just above, file-local and
+        // directory-scoped hook properties are unioned, not one
+        // overriding the other - a property-name set has no "file-local
+        // wins" precedence to apply.
+        self.pest_hook_properties
+            .extend(pest_config::file_local_hook_properties(program));
 
         let mut top_locals: Locals = Locals::default();
         let diagnostics_before = self.diagnostics.len();
@@ -1700,6 +1729,70 @@ mod tests {
         assert!(
             d.iter().any(|x| x.message.contains("undefined method")),
             "expected an undefined-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn pest_before_each_property_is_readable_from_another_closure_in_the_same_file() {
+        let d = diagnostics_for(
+            r#"<?php
+            function uses($class) {}
+            function beforeEach($callback) {}
+            function it($description, $callback) {}
+            class RealTestBase {}
+            uses(RealTestBase::class);
+            beforeEach(function (): void { $this->root = 'x'; });
+            it('does something', function (): void {
+                echo $this->root;
+            });
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn pest_a_property_never_assigned_in_any_before_each_is_still_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function uses($class) {}
+            function beforeEach($callback) {}
+            function it($description, $callback) {}
+            class RealTestBase {}
+            uses(RealTestBase::class);
+            beforeEach(function (): void { $this->root = 'x'; });
+            it('does something', function (): void {
+                echo $this->totallyUndefinedProp;
+            });
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("totallyUndefinedProp")),
+            "expected an undefined-property diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn pest_before_each_property_assigned_inside_a_nested_if_is_not_recognized() {
+        // Matches the real `PestHookPropertyReader`'s own narrower-than-
+        // "anywhere in the closure" scan (top-level statements only) -
+        // see `pest_config::collect_hook_closure_properties`'s own doc
+        // comment. Deliberately still flagged, not a bug.
+        let d = diagnostics_for(
+            r#"<?php
+            function uses($class) {}
+            function beforeEach($callback) {}
+            function it($description, $callback) {}
+            class RealTestBase {}
+            uses(RealTestBase::class);
+            beforeEach(function (): void { if (true) { $this->root = 'x'; } });
+            it('does something', function (): void {
+                echo $this->root;
+            });
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("$root")),
+            "expected an undefined-property diagnostic, got: {d:?}"
         );
     }
 
