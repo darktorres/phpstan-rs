@@ -1926,6 +1926,33 @@ the `#[LanguageLevelTypeAware]` fix (Phase 24) - zero new (2 lines
 shifted at the same locations, a real precision improvement on one tuple
 element of a larger, still-imprecise return type, not a new diagnostic).
 
+## Phase 28: Piwigo false-positive hunt IX - `is_resource`/`is_scalar` narrowing - DONE
+
+Phase 27 took the corpus from 706 to 580 diagnostics. Re-bucketing that
+580-diagnostic baseline found `expects resource, resource|false given`
+as the single largest remaining cluster (41). Traced directly:
+`proc_open()`/`fsockopen()` genuinely return `resource|false`, and this
+corpus's test helpers guard every one of them the idiomatic way -
+`if (! is_resource($proc)) { throw ...; } fclose($proc);` (confirmed in
+`PemCatalogTest.php`, `ErrorCollectorTest.php`, and several others) -
+but `is_resource` was simply absent from `narrowing_type_for_predicate`'s
+table (`is_string`/`is_int`/`is_float`/`is_bool`/`is_array`/`is_null`/
+`is_object`/`is_callable` only), so none of these guards narrowed
+anything.
+
+**DONE.** Added `"is_resource" => Some(Type::Object("resource", _))`,
+the same representation every other resource-typed site in this project
+already uses (no native PHP type for `resource` exists to declare).
+Also added `is_scalar`, narrowing to exactly `int|float|string|bool`
+(228 real corpus occurrences) - unlike `is_numeric` (deliberately still
+not narrowed anywhere in this project: real PHPStan's own
+`int|float|numeric-string` result has no representation here, and
+approximating with plain `int|float` would wrongly exclude the equally-
+common numeric-*string* case), `is_scalar`'s real set is exactly these
+four concrete types with no such approximation gap.
+
+`580 -> 532` diagnostics, zero new.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
