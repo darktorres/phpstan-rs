@@ -4451,6 +4451,53 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 26, real shape: Piwigo\Admin\Extensions\
+    // ExtensionScanner::scanDirectoryEntries's `while (($file =
+    // readdir($dir)) !== false) { ... preg_match(..., $file) ... }` -
+    // real PHP *requires* the parens here (`=` binds looser than `!==`,
+    // so `$file = readdir($dir) !== false` would parse as `$file =
+    // (readdir($dir) !== false)` instead), so the extremely common
+    // "assign-then-check" idiom is almost always wrapped in a `Grouping`
+    // node - `narrowing_key` never saw through it to reach the `Assign`
+    // arm Phase 23 added underneath.
+    #[test]
+    fn is_string_narrows_a_parenthesized_assignment_in_a_while_condition() {
+        let d = diagnostics_for(
+            r#"<?php
+            function readdir_(): string|false { return 'x'; }
+            function f(): void {
+                while (($file = readdir_()) !== false) {
+                    preg_match('/x/', $file);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Phase 26, real shape: Piwigo\Admin\Image\ImageBackend::webpInfo's
+    // `$fp = fopen(...); if (! (bool) $fp) { throw ...; } fread($fp,
+    // 25);` - a common, explicit style for a truthiness guard. `(bool)`
+    // doesn't change which values are truthy/falsy, but `apply_narrowing`
+    // had no arm for `Cast` at all, so the guard was never recognized.
+    #[test]
+    fn a_bool_cast_truthiness_guard_narrows_like_a_bare_variable_check() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return resource|false */
+            function open() {}
+            function f(): void {
+                $fp = open();
+                if (! (bool) $fp) {
+                    throw new Exception('failed');
+                }
+                fclose($fp);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn reassigning_a_property_after_narrowing_it_does_not_leave_the_stale_narrowed_type_behind() {
         // Phase 22, real shape: a lazy-init idiom

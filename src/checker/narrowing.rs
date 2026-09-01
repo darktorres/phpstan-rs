@@ -43,6 +43,16 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(inner, locals, !branch_true);
             }
             ExprKind::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
+            // Phase 26: `(bool) $x`'s own truthiness is exactly `$x`'s -
+            // PHP's cast doesn't change which values are truthy/falsy, it
+            // just makes the check explicit (a common, idiomatic style:
+            // `if (! (bool) $fp) { throw ...; }` after `fopen()`) - so
+            // this narrows precisely as if the cast weren't there at all.
+            // Any other cast (`(int)`, `(string)`, ...) genuinely changes
+            // the value and isn't narrowable this way, so it's left alone.
+            ExprKind::Cast(kind, inner) if kind == "bool" => {
+                self.apply_narrowing(inner, locals, branch_true);
+            }
             ExprKind::Call(callee, args) => {
                 // Phase 22: `narrowing_key`, not a bare `ExprKind::
                 // Variable` match - without this, `is_string($arr['key'])`
@@ -269,6 +279,14 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         // narrowing key can borrow the underlying variable/property/index
         // key without needing its own dedicated storage.
         ExprKind::Assign(lhs, _) => narrowing_key(lhs),
+        // Phase 26: `($file = readdir($dir)) !== false` - the
+        // "assign-then-check" idiom above, but wrapped in parens, which
+        // real PHP *requires* here (`=` binds looser than `!==`, so the
+        // parens aren't stylistic - `$file = readdir($dir) !== false`
+        // would parse as `$file = (readdir($dir) !== false)` instead).
+        // Without this, `Assign`'s own arm above never even got a chance
+        // to run for the single most common shape it exists to cover.
+        ExprKind::Grouping(inner) => narrowing_key(inner),
         _ => None,
     }
 }
