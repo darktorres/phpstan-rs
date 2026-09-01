@@ -1552,6 +1552,144 @@ cd /home/torres/piwigo17-frozen
   | sort | uniq -c | sort -rn | head -50
 ```
 
+## Phase 23: Piwigo false-positive hunt IV - DONE
+
+A fourth pass against the same frozen corpus and scoped config Phase 22
+set up, re-confirming the 1,280-diagnostic baseline before bucketing the
+full output by message shape again. Seven clusters, each root-caused by
+reading real source directly (Piwigo's own code, this project's own
+checker source, and the actual vendored `jetbrains/phpstorm-stubs`
+source) and, for several, confirmed with a minimal standalone repro:
+
+1. **`isset($x)` never narrowed away `Null` - DONE.** `apply_narrowing`'s
+   `Call` arm only narrowed `empty()` and the fixed `is_*()` predicate
+   list - `isset`, the single most common PHP nullability idiom (1,073
+   occurrences in this corpus), wasn't in either and had no branch of its
+   own, so it was a complete no-op for narrowing. Fixed with a dedicated
+   branch narrowing via `narrow_type_excluding(current, Null)` (not
+   `empty()`'s full falsy exclusion - `isset` is true for `0`/`''`/`false`,
+   only `null` disqualifies it), reusing the same `narrowing_key`
+   machinery so property/array-index chains fall out for free. No single
+   bucket owns this one the way "Logger" or "GdImage" do below - its
+   effect was spread thinly across many different message shapes.
+2. **`is_string($result = expr)` - an assignment nested inside a
+   narrowing predicate's own argument - was never narrowed - DONE.**
+   `narrowing_key` matched `Variable`/`PropertyAccess`/`Index` but never
+   `ExprKind::Assign`, so the common "assign-then-check" idiom
+   (`CoreUpdateService::checkPiwigoUpgrade`'s `is_string($result =
+   @HttpClientService::fetch(...))`) was never narrowed, even though the
+   assignment itself already correctly defined the variable (Phase 22's
+   `merge_new_variable_definitions`). Fixed with one arm,
+   `Assign(lhs, _) => narrowing_key(lhs)` - an assignment's own runtime
+   value is exactly what ends up stored under `lhs`, so this fixes every
+   `narrowing_key` consumer at once. `136 -> ~0` on this shape (shared
+   with other root causes too, so not all 136 trace to this one).
+3. **`str_replace`/`preg_replace`-family return types didn't depend on
+   `$subject`'s own type - DONE.** The real stubs unconditionally union
+   the return with `array`, even though the function only returns one
+   when `$subject` itself is an array - real PHPStan special-cases this
+   via its own hand-written dynamic extension, not from the stub alone.
+   Two new arms in `infer_builtin_call_return_type`, mirroring the file's
+   existing `array_map`/`array_filter`-style precedent: `str_replace`/
+   `str_ireplace` narrow to `Type::String` when `$subject` is confirmed a
+   plain string; `preg_replace`/`preg_replace_callback`/`preg_filter`
+   compute the ordinary generic result first and strip its `array` member
+   (a new `strip_array_member` helper) rather than hardcoding the real
+   stub's own nullability. `95 -> ~70`.
+4. **A ternary's own two branches built an unflattened, un-narrowable
+   nested `Union` - DONE.** Both of `Ternary`'s return-type computations
+   constructed `Type::Union(vec![then_ty, else_ty])` directly, bypassing
+   the project's own `union_types` helper every other type-combining site
+   already uses - when one branch was already a `Union` itself (a stub-
+   declared `resource|false`, extremely common), the naive construction
+   nested it unflattened, so a later `!== false` narrowing could strip a
+   bare `false` sitting *alongside* the nested union but not reach inside
+   it. Fixed by routing both arms through `union_types`, which also let
+   the surrounding hand-duplicated Mixed-absorption/equal-branch logic
+   collapse into one call. Found and fixed in the same commit as Finding
+   3: verifying Finding 3 alone surfaced this exact bug as a fresh
+   regression (`preg_replace`'s newly-more-precise `String|Null` return,
+   combined via a ternary, produced a nested union), so Finding 4 was
+   implemented immediately rather than left broken across a commit
+   boundary. `52 -> ~0` on the diagnosed shape; verification also
+   surfaced ~26 pre-existing diagnostics with cleaner (deduped) type text
+   at the same locations, confirmed against the original 1,285-diagnostic
+   baseline as text-only precision improvements, not new false positives.
+5. **`exit`/`die` never inferred as `Type::Never` - DONE.** Both
+   `check_expr`'s and `infer_expr`'s `Call` arms fell back to `Type::Mixed`
+   for every language construct (`is_language_construct`), `exit`/`die`
+   included - but PHP itself declares them `never`. `always_terminates`
+   recognizes a terminating statement via exactly `infer_expr(e, locals)
+   == Type::Never`, so a guard clause built on `exit()`/`die()` instead of
+   `return`/`throw` (common in this codebase's CLI tools and test
+   fixtures - `MailServiceTestFakeSmtpServer.php`'s `if ($conn === false)
+   { fwrite(STDERR, ...); exit(1); }`) was never recognized as
+   terminating, leaking the never-actually-reached branch's narrowing
+   into the surrounding scope. Fixed with a shared `call_fallback_return_type`
+   helper used at both call sites; every other language construct
+   (`isset`/`empty`/`unset`/`eval`/`include*`/`print`) keeps `Mixed`
+   unchanged. `19 -> ~0` on the diagnosed shape.
+6. **A negated literal class-constant value inferred as `Mixed` - DONE.**
+   `const int OFF = -1;` parses as a literal `1` wrapped in a unary
+   negation, not a single negative-literal token - `infer_const_type`
+   matched only bare literals and fell back to `Mixed` for anything else.
+   Real shape: `Piwigo\Core\Logger` declares eight non-negative severity
+   constants (correctly inferred) plus `OFF = -1`, the one negative one -
+   `new Logger(['severity' => Logger::OFF])` widened to `array{severity:
+   mixed}`, failing the constructor's declared `array{severity?:
+   int|string, ...}` shape everywhere it's called. Fixed with a
+   `Unary(Neg, ...)` arm scoped to exactly the shape that occurs. `56 -> 0`.
+7. **A stale legacy doc comment overrode its own already-modern native
+   type hint - DONE.** `resolve_type` always prefers a docblock type over
+   the native hint when both are present (deliberate, generally correct -
+   a docblock is usually more precise) - but phpstorm-stubs' own
+   `@return`/`@param` comments commonly predate a later PHP version's
+   native-signature tightening. Real shape: `imagecreatefromstring`'s
+   native return hint was updated to `GdImage|false` for PHP 8's GD
+   object migration, but its `@return resource|GdImage|false` doc comment
+   above it was never revised - this is also a correction to Phase 22's
+   own "Not pursued" note on this exact symptom (deferred back then as
+   "unknown, needs a live probe" - it was never a narrowing bug, just a
+   docblock-preference bug in stub loading, findable directly from the
+   stub source). Fixed by stripping a stale `Type::Object("resource", _)`
+   member from the docblock-derived type when a native hint is present
+   and its own raw text doesn't mention `resource` - **except** when that
+   native hint is itself a deliberate placeholder (`mixed`/`object`),
+   since real code (this project's own `Logger::$fileHandle`, Symfony's
+   `Process::setInput`) uses those specifically *because* PHP has no
+   native `resource` type, leaning on the docblock as the only real
+   source of truth - confirmed the hard way via two genuine regressions
+   before adding that exclusion, both caught by this phase's own
+   before/after corpus diff rather than shipped. `20 -> 0`.
+
+**Not pursued**: `#[LanguageLevelTypeAware]` attribute parsing - a real,
+version-conditional-type mechanism (2,033 occurrences across 84 stub
+files) this project doesn't parse at all, distinct from the already-
+handled `#[PhpStormStubsElementAvailable]` (which only ever gates a whole
+*parameter's* presence/arity, never selects between competing *type
+strings*). `explode()`'s real stub has no native return type at all, so
+its only source of a return type is its own `@return string[]|false` doc
+comment, gated by `#[LanguageLevelTypeAware(["8.0" => "string[]"],
+default: "string[]|false")]` - unlike Finding 7, there's no native hint
+to fall back to, so fixing this genuinely needs the attribute understood
+(parsing its array-literal-plus-named-argument syntax, extracting a type
+string - this project's own "assume the modern/open-ended interpretation"
+precedent from `#[PhpStormStubsElementAvailable]`'s closed-range handling
+would suggest preferring the highest-versioned key over `default`).
+Deferred on the same scope/cost grounds as Phase 22's `#[TypeContract]`
+deferral - real, non-trivial new parsing machinery, not a small addition
+alongside seven otherwise surgical fixes. Its footprint grew more visible
+once Finding 4 stopped masking it (`substr()` carries the identical
+`#[LanguageLevelTypeAware]` gap) - probably the single highest-value
+remaining investigation for a future pass.
+
+Combined, this phase dropped the corpus count from 1,280 to 1,021
+diagnostics (20.2%) across five commits (Findings 3 and 4 landed
+together, for the reason given under Finding 4 above), each independently
+verified (full test suite + a before/after corpus diff against both the
+immediately-prior commit and the original 1,285-diagnostic baseline,
+re-run from inside the corpus directory) before the next began.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
