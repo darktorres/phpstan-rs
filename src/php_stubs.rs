@@ -29,6 +29,28 @@
 //! A real implementation would refresh the vendored snapshot
 //! automatically at build time against a pinned tag; here it's a fixed,
 //! manually-refreshed one.
+//!
+//! `PHPSTAN_SRC_SOURCES` (Finding 4): a second vendored corpus,
+//! `vendor/phpstan-src/src/` - real PHPStan's own MIT-licensed runtime
+//! source (already vendored in this project, previously only used to
+//! derive test fixtures - see the many `// Derived from vendor/
+//! phpstan-src/tests/...` comments throughout `checker.rs`), reused here
+//! for the identical reason `phpstorm-stubs` is: a real corpus vendor
+//! package authoring a PHPStan rule/extension references `PHPStan\Type\*`/
+//! `PHPStan\Rules\Rule`/etc., none of which exist as scannable source in
+//! `phpstan/phpstan`'s own phar distribution. `generated_stubs`/
+//! `generated_stub_classes` chain `PHPSTAN_SRC_SOURCES` in after
+//! `PHPSTORM_STUBS_SOURCES`, so real PHP builtins keep their existing
+//! first-occurrence-wins priority - phpstan-src can only add names, never
+//! take priority over one phpstorm-stubs already claimed. Confirmed
+//! before landing this: `phpstan-rs check vendor/phpstan-src/src` (0 of
+//! 1793 files failed to parse) and `phpstan-rs check-project
+//! vendor/phpstan-src/src` (the full `Registry::build`/`ClassInfo::
+//! from_decl` path this pipeline actually exercises, a strict superset of
+//! what stub generation needs) both completed cleanly with no panic. Not
+//! closed by this: `vendor/phpstan-src/src` itself references classes
+//! from its own dependency, `nikic/php-doc-parser` (`PHPStan\PhpDocParser//! Ast\Type\*`), not vendored here - a smaller, disclosed residual (see
+//! `ROADMAP.md`'s "Known limitations").
 
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -56,16 +78,36 @@ pub fn generate_from_source(source: &str) -> Vec<(String, FunctionSig)> {
 /// simplification, not a precision-critical choice, since `stubs.rs`'s
 /// hand-curated overlay is what wins for anything precision-sensitive.
 pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
-    let mut seen = std::collections::HashSet::new();
-    let mut result = Vec::new();
-    for source in PHPSTORM_STUBS_SOURCES {
-        for (name, sig) in generate_from_source(source) {
-            if seen.insert(name.clone()) {
-                result.push((name, sig));
+    // Chaining PHPSTAN_SRC_SOURCES in (Finding 4) took the combined
+    // corpus from 558 to 2351 files - re-parsing that from scratch on
+    // every call (as this used to do) is fine for the real CLI binary,
+    // which calls this exactly once per process, but made the test suite
+    // (hundreds of `diagnostics_for`/`Project::new` calls, each
+    // previously re-parsing the whole corpus independently) measurably
+    // slower - confirmed directly: the lib test suite went from ~40s to
+    // ~143s. `LazyLock` computes the expensive part (parsing every file)
+    // exactly once per process regardless of caller count; each call
+    // here still returns a fresh, independently-owned `Vec` (cloning
+    // already-built `FunctionSig`s, not re-parsing anything) so this
+    // function's own public signature - and every one of its call sites,
+    // which all consume the returned `Vec` by value - stays unchanged.
+    static CACHE: std::sync::LazyLock<Vec<(String, FunctionSig)>> =
+        std::sync::LazyLock::new(|| {
+            let mut seen = std::collections::HashSet::new();
+            let mut result = Vec::new();
+            for source in PHPSTORM_STUBS_SOURCES
+                .iter()
+                .chain(PHPSTAN_SRC_SOURCES.iter())
+            {
+                for (name, sig) in generate_from_source(source) {
+                    if seen.insert(name.clone()) {
+                        result.push((name, sig));
+                    }
+                }
             }
-        }
-    }
-    result
+            result
+        });
+    CACHE.clone()
 }
 
 /// Parses one stub file's source into `(name, ClassInfo)` pairs for every
@@ -86,16 +128,24 @@ pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
 pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
-    let mut seen = std::collections::HashSet::new();
-    let mut result = Vec::new();
-    for source in PHPSTORM_STUBS_SOURCES {
-        for (name, info) in generate_classes_from_source(source) {
-            if seen.insert(name.clone()) {
-                result.push((name, info));
+    // See `generated_stubs`' own doc comment - identical `LazyLock`
+    // caching, same reason.
+    static CACHE: std::sync::LazyLock<Vec<(String, ClassInfo)>> = std::sync::LazyLock::new(|| {
+        let mut seen = std::collections::HashSet::new();
+        let mut result = Vec::new();
+        for source in PHPSTORM_STUBS_SOURCES
+            .iter()
+            .chain(PHPSTAN_SRC_SOURCES.iter())
+        {
+            for (name, info) in generate_classes_from_source(source) {
+                if seen.insert(name.clone()) {
+                    result.push((name, info));
+                }
             }
         }
-    }
-    result
+        result
+    });
+    CACHE.clone()
 }
 
 #[cfg(test)]
@@ -128,6 +178,18 @@ mod tests {
         assert!(names.contains("ArrayObject"));
         assert!(names.contains("PDO"));
         assert!(classes.len() > 100);
+    }
+
+    #[test]
+    fn generated_stub_classes_cover_real_phpstan_src_classes() {
+        // Finding 4: vendor/phpstan-src's own real classes, chained in
+        // after phpstorm-stubs - confirms PHPSTAN_SRC_SOURCES is actually
+        // wired in, not just declared.
+        let classes = generated_stub_classes();
+        let names: std::collections::HashSet<&str> =
+            classes.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains("PHPStan\\Type\\StringType"));
+        assert!(names.contains("PHPStan\\Rules\\Rule"));
     }
 
     #[test]

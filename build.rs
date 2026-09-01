@@ -1,11 +1,16 @@
-//! Generates `PHPSTORM_STUBS_SOURCES`, a `&[&str]` of every vendored
-//! `jetbrains/phpstorm-stubs` file's contents, so `php_stubs.rs` doesn't
-//! need 558 hand-written `include_str!` calls. Absolute paths are used in
-//! the generated `include_str!` invocations because the generated file
-//! lives under `OUT_DIR` (deep in `target/`), and `include_str!`'s path is
-//! resolved relative to the file containing the macro call, not the
-//! crate root - a relative path here would resolve against the wrong
-//! directory once `include!`-ed into `php_stubs.rs`.
+//! Generates `PHPSTORM_STUBS_SOURCES` (every vendored
+//! `jetbrains/phpstorm-stubs` file's contents) and `PHPSTAN_SRC_SOURCES`
+//! (every vendored `phpstan/phpstan-src` runtime source file's contents,
+//! Finding 4 - real PHPStan classes like `PHPStan\Type\StringType`,
+//! referenced by any vendor package authoring a PHPStan rule/extension,
+//! that `phpstan/phpstan`'s own phar distribution can't provide since it
+//! ships no loose source at all), each a `&[&str]` so `php_stubs.rs`
+//! doesn't need hundreds of hand-written `include_str!` calls. Absolute
+//! paths are used in the generated `include_str!` invocations because the
+//! generated file lives under `OUT_DIR` (deep in `target/`), and
+//! `include_str!`'s path is resolved relative to the file containing the
+//! macro call, not the crate root - a relative path here would resolve
+//! against the wrong directory once `include!`-ed into `php_stubs.rs`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,19 +31,40 @@ fn collect_php_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+fn write_source_array(out: &mut String, name: &str, files: &[PathBuf]) {
+    out.push_str(&format!("pub static {name}: &[&str] = &[\n"));
+    for path in files {
+        out.push_str(&format!("    include_str!({:?}),\n", path));
+    }
+    out.push_str("];\n");
+}
+
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let stubs_dir = Path::new(&manifest_dir).join("vendor/phpstorm-stubs");
 
-    let mut files = Vec::new();
-    collect_php_files(&stubs_dir, &mut files);
+    let mut phpstorm_files = Vec::new();
+    collect_php_files(
+        &Path::new(&manifest_dir).join("vendor/phpstorm-stubs"),
+        &mut phpstorm_files,
+    );
+
+    // Deliberately scoped to `src/` only, not the whole `vendor/
+    // phpstan-src` root - mirrors phpstorm-stubs' own curation (real
+    // runtime source only), excluding `tests/`, `apigen/`, `compiler/`,
+    // `e2e/`, `stubs/` (PHPStan's *own* stubs for third-party libraries
+    // it itself analyzes - a different meaning of "stubs" than this
+    // pipeline's own), `conf/`, `bin/`, `resources/`, `patches/`,
+    // `turbo-ext/` - none of which declare the PHPStan\Type\*/
+    // PHPStan\Rules\Rule-style classes actually referenced in the wild.
+    let mut phpstan_src_files = Vec::new();
+    collect_php_files(
+        &Path::new(&manifest_dir).join("vendor/phpstan-src/src"),
+        &mut phpstan_src_files,
+    );
 
     let mut generated = String::new();
-    generated.push_str("pub static PHPSTORM_STUBS_SOURCES: &[&str] = &[\n");
-    for path in &files {
-        generated.push_str(&format!("    include_str!({:?}),\n", path));
-    }
-    generated.push_str("];\n");
+    write_source_array(&mut generated, "PHPSTORM_STUBS_SOURCES", &phpstorm_files);
+    write_source_array(&mut generated, "PHPSTAN_SRC_SOURCES", &phpstan_src_files);
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     fs::write(
@@ -48,5 +74,6 @@ fn main() {
     .unwrap();
 
     println!("cargo:rerun-if-changed=vendor/phpstorm-stubs");
+    println!("cargo:rerun-if-changed=vendor/phpstan-src/src");
     println!("cargo:rerun-if-changed=build.rs");
 }
