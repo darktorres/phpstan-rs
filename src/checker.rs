@@ -2766,6 +2766,61 @@ mod tests {
     }
 
     #[test]
+    fn an_already_defined_variable_passed_by_ref_is_widened_not_left_stale() {
+        // Phase 22 Finding 3, real shape: Piwigo\Admin\Install\
+        // InstallService::installDbConnect(array &$infos, array &$errors,
+        // ...) called as installDbConnect($infos, $errors, ...) where
+        // $errors was already `$errors = [];` - the by-ref leniency above
+        // only ever applied to an *undefined* variable
+        // (`locals.contains_key(name)` skipped anything already tracked),
+        // so `$errors` kept its stale, narrow `array{}` shape through the
+        // call even though the callee is known to mutate it by reference,
+        // and `$errors[0]` afterward was flagged as "no such key".
+        let d = diagnostics_for(
+            r#"<?php
+            function fillErrors(array &$errors): void {}
+            function test(): void {
+                $errors = [];
+                fillErrors($errors);
+                echo $errors[0];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_by_ref_parameter_declared_wider_than_array_falls_back_to_mixed_not_the_full_union() {
+        // Real corpus example that would otherwise regress:
+        // Piwigo\Core\ArrayHelper::prependAppendArrayItems passes its own
+        // already-array-typed `array $array` parameter into
+        // `array_walk($array, ...)`, whose real phpstorm-stubs signature
+        // is `array_walk(array|object &$array, ...)` - a union wider than
+        // what an already-array-typed argument could ever actually
+        // become (array_walk never turns an array into an object).
+        // Blindly widening to the *full* declared type here regresses
+        // real precision (the return type below would start looking
+        // possibly-object); only a plain `Type::Array`/`Type::ArrayShape`
+        // declared type is trusted, everything else falls back to the
+        // same safe `Mixed` the undefined-variable case already uses.
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param array<int|string, mixed> $array
+             * @return array<int|string, string>
+             */
+            function test(array $array): array {
+                array_walk($array, function (mixed &$value): void {
+                    $value = (string) $value;
+                });
+                return $array;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn unknown_function_argument_is_leniently_defined_not_flagged() {
         // Calling an undeclared function is itself now flagged (Phase 9),
         // but the original point of this test still holds: $result isn't

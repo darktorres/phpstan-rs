@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use crate::ast::*;
 use crate::checker::{Checker, Locals, literal_string_value};
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
-use crate::types::Type;
+use crate::types::{self, Type};
 
 /// `check_args`'s own call bundle. `callee_label`/`label` are two
 /// adjacent, identically-typed `&str` parameters (the callee's own
@@ -71,18 +73,66 @@ impl<'a> Checker<'a> {
             let ExprKind::Variable(name) = &arg_expr.kind else {
                 continue;
             };
-            if locals.contains_key(name) {
-                continue;
-            }
-            let by_ref = sig
+            // Both the by-ref flag and (Phase 22 Finding 3) the declared
+            // parameter itself need the identical primary-then-variadic-
+            // fallback lookup - `resolved` can extend past `sig.params`'
+            // own length for a variadic tail argument (confirmed via
+            // `resolve_call_args`'s own `resolved.push(...)` there).
+            let param = sig
                 .params
                 .get(i)
-                .map(|p| p.by_ref)
-                .or_else(|| sig.params.last().filter(|p| p.variadic).map(|p| p.by_ref))
-                .unwrap_or(false);
-            if by_ref {
-                locals.insert(name.clone(), Type::Mixed);
+                .or_else(|| sig.params.last().filter(|p| p.variadic));
+            let Some(param) = param else {
+                continue;
+            };
+            if !param.by_ref {
+                continue;
             }
+            if !locals.contains_key(name) {
+                locals.insert(name.clone(), Type::Mixed);
+                continue;
+            }
+            // Phase 22 Finding 3: an *already-defined* variable passed
+            // by-ref was previously left untouched entirely (only an
+            // undefined one got the "assume Mixed" leniency above) - a
+            // real corpus example (`Piwigo\Admin\Install\InstallService::
+            // installDbConnect(array &$infos, array &$errors, ...)`
+            // called as `installDbConnect($infos, $errors, ...)` where
+            // `$errors` was already `$errors = [];`) kept its stale,
+            // narrow pre-call type through the call even though the
+            // callee is known (by signature) to mutate it by reference.
+            // Widen to the *declared parameter's own type*, not a
+            // blanket `Type::Mixed` - `array &$errors` becomes
+            // `Type::Array(Mixed)`, preserving the real, guaranteed-by-
+            // the-type-hint information that it's still an array, which
+            // blanket `Mixed` would needlessly discard. `substitute_
+            // template` with empty bindings replaces any unresolved
+            // `TemplateParam` in the declared type with `Mixed` too -
+            // proper substitution would need the receiver's own type
+            // arguments, not available at this call site, so an
+            // unresolved generic by-ref parameter degrades to the same
+            // safe `Mixed` the undefined-variable case already uses.
+            //
+            // Only trust the substituted declared type when it's itself
+            // plainly array-shaped (`Type::Array`/`Type::ArrayShape`) -
+            // found via real corpus verification, not assumed: several
+            // real stdlib by-ref parameters (`array_walk(array|object
+            // &$array, ...)`, confirmed in the vendored phpstorm-stubs)
+            // declare a *union* wider than what the already-array-typed
+            // variable being passed in could actually become - the
+            // parameter type says what the callee *accepts*, not what an
+            // already-narrower-typed argument turns into, so blindly
+            // trusting a `Union`/`Object`/other declared shape here
+            // overshoots into new noise once the corpus is checked, not
+            // just less precision. Anything else falls back to `Mixed`,
+            // exactly this function's own pre-existing behavior for the
+            // undefined-variable case above.
+            let substituted = types::substitute_template(&param.ty, &HashMap::new());
+            let widened = match substituted {
+                Type::Array(_) | Type::ArrayShape(_) => substituted,
+                _ => Type::Mixed,
+            };
+            locals.insert(name.clone(), widened);
         }
     }
 
