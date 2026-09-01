@@ -1753,6 +1753,35 @@ impl<'a> Checker<'a> {
             // column key is a compile-time-known literal, mirroring
             // check_shape_key_access's own "only a literal, never a
             // dynamic value" precedent.
+            // Phase 31: the real stub's own `@return int[]|string[]` -
+            // not a single homogeneous key type but a whole-array
+            // either-or, since a real array's keys could be all-int,
+            // all-string, or (rarer) a mix - printed as the confusing
+            // `array<int>|array<string>` seen in this corpus's own
+            // diagnostics. Scoped to the one-argument form (no
+            // `$filter_value`, which changes which keys survive in a way
+            // this doesn't try to predict) with a known `ArrayShape`
+            // argument, where every key is knowable up front: PHP itself
+            // casts a canonical non-negative-integer string key to a real
+            // int at the point the array was built, so this mirrors that
+            // per-key, folding into a real `int|string` union only when
+            // the shape's own keys are genuinely mixed.
+            "array_keys" if args.len() == 1 => {
+                if let Type::ArrayShape(fields) = self.infer_expr(&args[0].value, locals) {
+                    let key_ty = fields
+                        .iter()
+                        .map(|(k, _, _)| {
+                            if is_canonical_int_key(k) {
+                                Type::Int
+                            } else {
+                                Type::String
+                            }
+                        })
+                        .reduce(union_types)
+                        .unwrap_or(Type::String);
+                    return Type::Array(Box::new(key_ty));
+                }
+            }
             "array_column" if args.len() == 2 || args.len() == 3 => {
                 if let Some(Type::ArrayShape(fields)) =
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
@@ -2068,6 +2097,20 @@ fn call_fallback_return_type(callee: &Expr) -> Type {
         }
         _ => Type::Mixed,
     }
+}
+
+/// Whether a `Type::ArrayShape` key string is one PHP itself would have
+/// already cast to a real integer at the point the array was built -
+/// PHP's own rule: a decimal string with no leading zero (unless it's
+/// exactly `"0"`) and no leading `+`. Deliberately doesn't handle a
+/// leading `-` (a negative-integer key string, real but rare enough as a
+/// literal shape key that no evidence calls for it) - misclassifying one
+/// as a string key here is the same safe-by-omission default this
+/// project uses throughout rather than a wrong answer.
+fn is_canonical_int_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.bytes().all(|b| b.is_ascii_digit())
+        && (key == "0" || !key.starts_with('0'))
 }
 
 /// Removes any `Array`/`ArrayShape` member from `ty` - the array-ish

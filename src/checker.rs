@@ -1125,6 +1125,59 @@ mod tests {
         assert!(d[0].message.contains("needsStrings"), "got: {d:?}");
     }
 
+    // Phase 31, real shape: `Piwigo\Admin\Install\InstallDataSeeder::seed`'s
+    // own `$insert = ['id' => 1, 'galleries_url' => ...]; ...
+    // massInsert('sites', array_keys($insert), [$insert]);` - the real
+    // stub's own `@return int[]|string[]` (a whole-array either-or, not a
+    // single homogeneous key type) always won when the argument's own
+    // shape was knowable, printing as the confusing `array<int>|
+    // array<string>` this cluster's diagnostics showed.
+    #[test]
+    fn array_keys_infers_string_keys_from_a_known_array_shape() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            function f() {
+                $insert = ['id' => 1, 'galleries_url' => 'x'];
+                needsStrings(array_keys($insert));
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_keys_infers_int_keys_when_every_key_is_canonically_numeric() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            function f() {
+                $list = ['x', 'y', 'z'];
+                needsInts(array_keys($list));
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_keys_unions_int_and_string_for_a_genuinely_mixed_shape() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            function f() {
+                $mixed = [0 => 'a', 'name' => 'b'];
+                needsInts(array_keys($mixed));
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("needsInts"), "got: {d:?}");
+    }
+
     #[test]
     fn array_fill_and_array_fill_keys_infer_the_fill_value_s_type() {
         let d = diagnostics_for(
