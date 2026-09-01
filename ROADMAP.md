@@ -1953,6 +1953,90 @@ four concrete types with no such approximation gap.
 
 `580 -> 532` diagnostics, zero new.
 
+## Phase 29: Piwigo false-positive hunt X - a `break`'s own state reaches past its loop - DONE
+
+Phase 28 took the corpus from 580 to 532 diagnostics. Re-bucketing that
+532-diagnostic baseline and tracing its top cluster (`expects string,
+string|array<string> given`, 19) to `Piwigo\Core\Lang::load` found
+something deeper than a stub or narrowing-predicate gap - a real,
+previously-undiscovered control-flow modeling limitation, isolated with
+a minimal standalone repro:
+```php
+$source_file = '';
+foreach ($languages as $language) {
+    $f = /* always a real string */;
+    if (/* found */) { $source_file = $f; break; }
+}
+if ($source_file === '') { return false; }
+preg_replace(..., $source_file); // flagged
+```
+
+**Root cause, traced precisely through the checker's own source**:
+`StmtKind::If`'s own then/else merge decides what state flows to the
+*next statement in the same block* - `always_terminates` correctly
+treats a `break`-ending branch as "terminates" for that narrow, local
+question (its own doc comment: "so its (narrowed) scope doesn't
+incorrectly leak past the `if`"), so only the *not-found* branch's state
+(where `$source_file` was never reassigned) survives into what follows
+*inside the loop body*. That's correct for the same block - but nothing
+anywhere captured the *break-reached* branch's own state for the
+*loop's own post-loop state* - `Foreach` just checked its body once
+directly against the real `locals`, with no way to know a `break`
+happened at all. `$source_file` was left permanently typed as the
+literal `''`, which then collapsed to `Type::Never` at the `=== ''`
+guard (narrowing "not equal to itself," correct in isolation) - `Never`
+is vacuously assignable to anything, masking every real check
+downstream. Confirmed this project already has *precedent* for exactly
+this class of problem: `StmtKind::Switch`'s own case-by-case handling
+already collects every case's own "reaches after the switch" state into
+an `exit_states` accumulator, via a *second*, purpose-built helper
+(`exits_function_or_loop`) distinguishing "terminates within this case"
+from "this state should propagate past the whole construct" - the same
+two-question split loops needed, just never built for them.
+
+**DONE.** A new `Checker` field, `loop_break_states: Vec<Vec<Locals>>`
+(one frame per currently-open loop or switch), a new `StmtKind::Break`
+arm pushing the current `locals` onto the innermost (or Nth, for
+`break N`) open frame, and a push/pop/merge addition to each of
+`Foreach`/`While`/`For`/`DoWhile` folding every collected break state
+into what flows past the loop. `Switch` also pushes/pops a frame around
+its own case-checking loop - not to consume it (its pre-existing
+`exit_states` mechanism is untouched) but to *intercept* a bare `break;`
+written directly inside a case, so it attaches to the switch (discarded
+on pop) rather than leaking into whichever enclosing loop happens to be
+open, matching real PHP's "innermost loop-or-switch" targeting rule.
+
+**A real design mistake found and reverted mid-fix, not shipped**: an
+earlier version also gave `Foreach` the same "may run zero times" merge
+with its pre-loop state `While`/`For` already have, for consistency.
+Verifying it surfaced a genuine regression: `CalendarMonthly::
+buildMonthCalendar`'s own `foreach ($items as $day => $data) { ...;
+$items[$day]['derivative'] = ...; }` mutates the very same array it
+iterates, via a nested write keyed by the loop variable itself - every
+key iterated over there really does get the loop's own treatment, so
+unioning in the *stale pre-loop* shape as an "also possible" alternative
+produced a false `array{...} has no key 'derivative'` the real code
+never risks. Reverted; `Foreach` keeps checking its body once directly
+against the real `locals`, gaining only the `break`-state capture its
+own diagnosed bug actually needed.
+
+**Not a clean win, and disclosed as such**: `532 -> 533` diagnostics - a
+net-tiny *uptick*, not a reduction. The `Lang::load` cluster (5 lines)
+is gone, but correctly capturing what a `break` really does surfaces 6
+further lines in 2 other files (`InstallWizard.php`, `GeneratedFile
+ErrorMapper.php`), both traced to the same separate, pre-existing gap:
+this project's `Type::Array` has no key-type parameter at all, so a
+`foreach ($x as $key => $value)`'s own `$key`, or a `preg_match`
+by-ref `$matches` element, is always `Mixed` - previously masked by the
+very bug this phase fixes, not introduced by it. Shipped anyway: the fix
+corrects a real, general control-flow-soundness gap (a `break`'s
+real effect must never just vanish), and the newly-visible lines are a
+legitimate, disclosed, separate limitation in the same vein as several
+earlier phases' own accepted "newly-surfaced precision" cases - not a
+defect in this fix itself. Verified via the same location-based
+methodology as every prior phase: every "new" line traced to ground
+truth individually, not assumed from the raw count alone.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
@@ -1978,7 +2062,8 @@ confused with each other.
 | Refinement/accessory types (`non-empty-string`, `non-empty-array`, ...) aliased to their base type, not tracked precisely | 14 |
 | No `Type::FloatLiteral` variant - a real float literal always widens straight to plain `Float` (unlike `IntLiteral`/`StringLiteral`), so a PHPDoc float-literal-union type (`1.5\|2.5`) rejects every value, valid or not, the same way an integer-literal union did before that half was fixed | 14 |
 | Broader rule catalog (`DeadCode`, `Comparison`/exhaustiveness, `Exceptions`, visibility/abstract-method completeness) | 15 |
-| `break N`/`continue N`'s own level argument is parsed and stored but never consulted - inert only because no loop-boundary-aware reachability analysis exists yet; would silently misbehave (treating `break 2;` as depth-1) if that's ever built without reading it first | 15 |
+| `continue N`'s own level argument is parsed and stored but never consulted (`break N`'s own level is - Phase 29's `loop_break_states` reads it directly) - `continue`'s effect (restart the loop/re-check its condition, not exit with a settled final state) doesn't fit that same "collect an exit state" mechanism without real additional thought | 15 |
+| `Type::Array` has no key-type parameter - a `foreach ($x as $key => $value)`'s own `$key`, or a `preg_match` by-ref `$matches` element, is always `Mixed`, regardless of how precisely-keyed the real array is | 15 |
 | `goto`/`label` are parsed and stored but form no control-flow-graph edge anywhere - a backward `goto` re-entering a block could make an `always_terminates`/narrowing conclusion unsound, since every pass assumes linear fall-through | 15 |
 | No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
 | No LSP hover/go-to-definition | 17 |
