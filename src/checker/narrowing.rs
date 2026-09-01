@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals};
+use crate::checker::{Checker, Locals, literal_string_key};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -44,8 +44,14 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
             ExprKind::Call(callee, args) => {
+                // Phase 22: `narrowing_key`, not a bare `ExprKind::
+                // Variable` match - without this, `is_string($arr['key'])`
+                // (or `empty($arr['key'])`) never narrowed `$arr['key']`
+                // at all, the array-index counterpart of the exact gap
+                // the `instanceof` arm below already covers for property
+                // chains (`$arg->value instanceof Variable`).
                 if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
-                    && let ExprKind::Variable(var_name) = &single_arg.value.kind
+                    && let Some(key) = narrowing_key(&single_arg.value)
                 {
                     if name == "empty" {
                         // `empty($x)` is PHP's own falsy check - only the
@@ -53,17 +59,18 @@ impl<'a> Checker<'a> {
                         // truthy) is safely narrowable, the same asymmetry
                         // as a bare truthiness check.
                         if !branch_true {
-                            let current = locals.get(var_name).cloned().unwrap_or(Type::Mixed);
-                            locals.insert(var_name.clone(), narrow_type_excluding_falsy(&current));
+                            let current =
+                                self.current_narrowed_type(&single_arg.value, &key, locals);
+                            locals.insert(key, narrow_type_excluding_falsy(&current));
                         }
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
-                        let current = locals.get(var_name).cloned().unwrap_or(Type::Mixed);
+                        let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         let narrowed = if branch_true {
                             narrow_type_to(&current, &target_ty)
                         } else {
                             narrow_type_excluding(&current, &target_ty)
                         };
-                        locals.insert(var_name.clone(), narrowed);
+                        locals.insert(key, narrowed);
                     }
                 }
             }
@@ -87,11 +94,41 @@ impl<'a> Checker<'a> {
             // specific than the current type.
             _ if branch_true && narrowing_key(cond).is_some() => {
                 let key = narrowing_key(cond).expect("checked by guard above");
-                let current = locals.get(&key).cloned().unwrap_or(Type::Mixed);
+                let current = self.current_narrowed_type(cond, &key, locals);
                 locals.insert(key, narrow_type_excluding_falsy(&current));
             }
             _ => {}
         }
+    }
+
+    /// The type to narrow *from* for a synthetic `narrowing_key` (a
+    /// property chain or literal-key array-index chain, never a bare
+    /// variable) - `locals.get(key)` alone, defaulting to `Type::Mixed`
+    /// when absent, is wrong for these: unlike a bare variable (already
+    /// tracked in `locals` by ordinary assignment/definition), a
+    /// property/index chain's key only ever exists in `locals` as the
+    /// result of an *earlier* narrowing - the common case, a chain never
+    /// narrowed before, would silently discard its real, already-known
+    /// declared/inferred type (from `infer_expr`) in favor of a bogus
+    /// `Mixed`, which then gets *narrowed* (a no-op on `Mixed`) and
+    /// written back, permanently overriding the correct type for the
+    /// rest of the enclosing scope. A real corpus example this fix
+    /// exists for: `if ($catListRequest->deleteId !== null) { ... }`
+    /// narrowing `?int` down to `int` only works if the "current" type
+    /// it narrows from is the real `?int`, not a wrongly-defaulted
+    /// `Mixed`. A bare variable already goes through `locals.get(name)`
+    /// correctly (it's always present by the time a condition checks
+    /// it), so this only matters for non-`Variable` `narrowing_key`
+    /// shapes - but computing it uniformly via `expr`/`infer_expr` is
+    /// correct for a bare variable too (`infer_expr` on a `Variable`
+    /// just reads the same `locals` entry), so every `apply_narrowing`
+    /// call site uses this instead of a raw `locals.get(key).unwrap_or
+    /// (Type::Mixed)`.
+    fn current_narrowed_type(&self, expr: &Expr, key: &str, locals: &Locals) -> Type {
+        locals
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| self.infer_expr(expr, locals))
     }
 
     pub(crate) fn apply_equality_narrowing(
@@ -101,24 +138,28 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         matches_when_true: bool,
     ) {
-        let pair = match (&l.kind, &r.kind) {
-            (ExprKind::Variable(name), _) => Some((name.clone(), self.infer_expr(r, locals))),
-            (_, ExprKind::Variable(name)) => Some((name.clone(), self.infer_expr(l, locals))),
-            _ => None,
+        // Phase 22: `narrowing_key` on each side, not a bare `ExprKind::
+        // Variable` match - the same array-index gap the `Call` arm above
+        // has, for the `$arr['key'] === null` idiom instead of an
+        // `is_*()` predicate.
+        let pair = match (narrowing_key(l), narrowing_key(r)) {
+            (Some(key), _) => Some((key, l, self.infer_expr(r, locals))),
+            (None, Some(key)) => Some((key, r, self.infer_expr(l, locals))),
+            (None, None) => None,
         };
-        let Some((var_name, target_ty)) = pair else {
+        let Some((key, narrowed_expr, target_ty)) = pair else {
             return;
         };
         if target_ty == Type::Mixed {
             return;
         }
-        let current = locals.get(&var_name).cloned().unwrap_or(Type::Mixed);
+        let current = self.current_narrowed_type(narrowed_expr, &key, locals);
         let narrowed = if matches_when_true {
             narrow_type_to(&current, &target_ty)
         } else {
             narrow_type_excluding(&current, &target_ty)
         };
-        locals.insert(var_name, narrowed);
+        locals.insert(key, narrowed);
     }
 
     /// Whether a method/property is confirmed missing from every value
@@ -155,37 +196,77 @@ impl<'a> Checker<'a> {
 }
 
 /// A stable string key for the small set of expressions this checker can
-/// narrow: a bare local variable, or a property-access chain rooted in
-/// one (`$a->b->c`). Lets `locals` (otherwise keyed by plain variable
-/// name) also carry narrowed property-chain types, reusing the exact
-/// same map rather than a second, parallel one - safe because a
-/// property-chain key always contains `->`, which can never appear in a
-/// real PHP variable name, so the two key spaces can't collide.
+/// narrow: a bare local variable, a property-access chain rooted in one
+/// (`$a->b->c`), or a literal-key array-index chain rooted in one
+/// (`$a['k1']['k2']`, `$a->b['k']`, any mix of the two). Lets `locals`
+/// (otherwise keyed by plain variable name) also carry narrowed
+/// property-chain/array-index types, reusing the exact same map rather
+/// than a second, parallel one - safe because every synthetic key this
+/// produces contains a character (`-` from `->`, or `[`/`]`) that can
+/// never appear in a real PHP variable name (see `is_real_variable_key`,
+/// the discriminator this invariant exists to support), so the key
+/// spaces can't collide.
 ///
-/// Without this, `apply_narrowing`'s `instanceof` handling could only
-/// ever narrow a bare variable - `$arg->value instanceof Variable &&
-/// $arg->value->name` (an extremely common AST-visitor idiom - narrow a
-/// property, then read a property only the narrowed-to subtype has) had
-/// no way to remember that narrowing at all, so the second half was
-/// checked against `$arg->value`'s un-narrowed declared type. Found via
-/// real false positives once undefined-property-on-read detection
-/// started actually exercising this: nikic/php-parser AST-visitor code
-/// in this project's own `tools/` does exactly this pattern.
+/// Without the `PropertyAccess` case, `apply_narrowing`'s `instanceof`
+/// handling could only ever narrow a bare variable - `$arg->value
+/// instanceof Variable && $arg->value->name` (an extremely common
+/// AST-visitor idiom - narrow a property, then read a property only the
+/// narrowed-to subtype has) had no way to remember that narrowing at
+/// all, so the second half was checked against `$arg->value`'s
+/// un-narrowed declared type. Found via real false positives once
+/// undefined-property-on-read detection started actually exercising
+/// this: nikic/php-parser AST-visitor code in this project's own
+/// `tools/` does exactly this pattern.
+///
+/// Phase 22's own follow-on: the identical gap for a literal array-index
+/// chain instead of a property chain - `is_string($lang_info
+/// ['jquery_code'])` never narrowed `$lang_info['jquery_code']` at all
+/// (every narrowing call site below required a bare `ExprKind::Variable`
+/// directly, bypassing this function entirely, until Phase 22 changed
+/// them to go through `narrowing_key` too), so a later read of the same
+/// expression saw its un-narrowed, wider declared/inferred type - a real
+/// corpus example (`Template::__construct`) fed that wider type into a
+/// call whose declared parameter type no longer matched. A *dynamic*
+/// key (`$a[$k]`) can't be narrowed this way - the same key at another
+/// point in the code isn't guaranteed to be the same runtime index - so
+/// only a literal key participates, matching `literal_string_key`'s own
+/// existing use for the analogous shape-growing case in
+/// `bind_assignment_target`.
 pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
     match &e.kind {
         // No prefix - `locals` is keyed by bare variable name everywhere
         // else in this checker (`ExprKind::Variable(name) => locals.get(name)`),
         // and this has to produce the exact same key for a bare variable
         // to stay a drop-in replacement at the Instanceof-narrowing call
-        // site. Collision-free anyway: only the PropertyAccess case below
-        // ever produces a key containing `->`, which can't appear in a
-        // real PHP variable name.
+        // site.
         ExprKind::Variable(name) => Some(name.clone()),
         ExprKind::PropertyAccess(base, prop, _) => {
             narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
         }
+        ExprKind::Index(base, Some(idx)) => {
+            let key = literal_string_key(idx)?;
+            narrowing_key(base).map(|base_key| format!("{base_key}[{key}]"))
+        }
         _ => None,
     }
+}
+
+/// Whether `key` (as found in a `Locals` map) could be a real PHP
+/// variable name, as opposed to one of `narrowing_key`'s own synthetic
+/// property-chain/array-index keys - real PHP variable names are
+/// restricted to `[A-Za-z_][A-Za-z0-9_]*`, so any other character (`-`
+/// from `->`, `[`, `]`, ...) proves a key is synthetic, regardless of
+/// which of `narrowing_key`'s own formats produced it. A shared,
+/// character-class-based check rather than hunting for one specific
+/// separator (`contains('-')`, say) - robust against `narrowing_key`
+/// gaining a third synthetic shape later without every caller needing
+/// its own update to keep excluding it correctly.
+pub(crate) fn is_real_variable_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {

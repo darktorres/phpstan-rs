@@ -1,8 +1,8 @@
 use crate::ast::*;
 use crate::checker::{
     CheckArgsCall, Checker, Locals, TemplateBindings, body_contains_yield, is_language_construct,
-    is_superglobal, literal_string_key, merge_scopes, narrow_type_excluding, narrowing_key,
-    resolve_call_args,
+    is_real_variable_key, is_superglobal, literal_string_key, merge_scopes, narrow_type_excluding,
+    narrowing_key, resolve_call_args,
 };
 use crate::pest_config;
 use crate::registry::FunctionSig;
@@ -408,6 +408,7 @@ impl<'a> Checker<'a> {
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
                 self.check_expr(r, &mut narrowed, label);
+                merge_new_variable_definitions(locals, &narrowed);
                 self.infer_binary(&BinOp::And, l, r, locals)
             }
             ExprKind::Binary(BinOp::Or, l, r) => {
@@ -415,6 +416,7 @@ impl<'a> Checker<'a> {
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
                 self.check_expr(r, &mut narrowed, label);
+                merge_new_variable_definitions(locals, &narrowed);
                 self.infer_binary(&BinOp::Or, l, r, locals)
             }
             // `??` is built on isset()-style quiet semantics - its left
@@ -1512,14 +1514,29 @@ impl<'a> Checker<'a> {
             // possibly-missing element - consistent with this checker's
             // general preference for fewer false positives over catching
             // every possible runtime-undefined access.
-            ExprKind::Index(base, Some(idx)) => match self.infer_expr(base, locals) {
-                Type::Array(inner) => *inner,
-                Type::ArrayShape(fields) => literal_string_key(idx)
-                    .and_then(|key| fields.into_iter().find(|(name, _, _)| *name == key))
-                    .map(|(_, ty, _)| ty)
-                    .unwrap_or(Type::Mixed),
-                _ => Type::Mixed,
-            },
+            ExprKind::Index(base, Some(idx)) => {
+                // Phase 22: the `Index` counterpart of `PropertyAccess`'s
+                // own "check the narrowed key first" fast path just above
+                // - without this, `apply_narrowing` faithfully *wrote* a
+                // narrowed type under `narrowing_key`'s `"base[key]"`
+                // format (e.g. after `is_string($info['code'])`), but
+                // nothing ever *read* it back: this arm went straight to
+                // re-deriving the type from `$info`'s own declared/
+                // inferred shape, silently discarding the narrowing.
+                if let Some(key) = narrowing_key(e)
+                    && let Some(narrowed) = locals.get(&key)
+                {
+                    return narrowed.clone();
+                }
+                match self.infer_expr(base, locals) {
+                    Type::Array(inner) => *inner,
+                    Type::ArrayShape(fields) => literal_string_key(idx)
+                        .and_then(|key| fields.into_iter().find(|(name, _, _)| *name == key))
+                        .map(|(_, ty, _)| ty)
+                        .unwrap_or(Type::Mixed),
+                    _ => Type::Mixed,
+                }
+            }
             _ => Type::Mixed,
         }
     }
@@ -1901,6 +1918,41 @@ impl<'a> Checker<'a> {
             // (a string, a closure, a first-class callable reference...)
             // to a real signature, which this checker doesn't attempt.
             BinOp::Pipe => Type::Mixed,
+        }
+    }
+}
+
+/// Phase 22 Finding 6: after checking `&&`/`||`'s right operand against a
+/// cloned, possibly-narrowed `Locals`, merges back only the keys that are
+/// both new (absent from `locals` before checking the right operand) and
+/// a real PHP variable name (`is_real_variable_key`) - a genuine
+/// definitional side effect (a by-ref out-param like `preg_match`'s
+/// `$matches`, or a plain assignment) written as the right operand of
+/// `&&`/`and`/`||`/`or` should persist regardless of the whole
+/// expression's truth value, matching this codebase's "assume it might
+/// be defined" philosophy elsewhere (`predefine_byref_or_unknown_args`).
+///
+/// Narrowing-derived synthetic keys (`narrowing_key`'s own
+/// `"base->prop"`/`"base[key]"` shapes) must **not** be merged this way,
+/// even though they're just as "new" by the same test - they're
+/// conditional on the right operand actually having run (true only when
+/// the left operand was truthy), not a real, unconditional definition.
+/// Merging them would leak conditional narrowing straight past the whole
+/// `&&`/`||` expression: for `if ($arg->value instanceof Variable &&
+/// $arg->value->name) {...} else {...}`, it would insert `$arg->value`'s
+/// narrowed type into the real `locals` *before* the `if`'s own
+/// then/else split even runs, contaminating the `else` branch (where the
+/// condition was false, so `$arg->value` is not known to be a
+/// `Variable`) and anything after the whole `if` statement.
+/// `is_real_variable_key` is exactly the discriminator that excludes
+/// them, and composes correctly for a chained `A and B and C`
+/// (left-associative `And(And(A,B),C)`): the inner node's own filtered
+/// merge already lands B's new plain-variable defs in the outer node's
+/// real `locals` before the outer node clones it for `C`.
+fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
+    for (key, ty) in narrowed {
+        if is_real_variable_key(key) && !locals.contains_key(key) {
+            locals.insert(key.clone(), ty.clone());
         }
     }
 }

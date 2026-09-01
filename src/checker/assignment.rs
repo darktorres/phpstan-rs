@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals};
+use crate::checker::{Checker, Locals, narrowing_key, union_types};
 use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
@@ -71,6 +71,23 @@ impl<'a> Checker<'a> {
     /// resolved for a plain `Type::Array` source - every target gets the
     /// source's homogeneous element type, or Mixed for anything else.
     pub(crate) fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
+        // Phase 22: keep any existing `narrowing_key` entry for this
+        // exact property-chain/literal-index-chain expression in sync
+        // with a real assignment - `apply_narrowing`'s own synthetic key
+        // format is a separate slot in the same `Locals` map (see
+        // `narrowing_key`'s own doc comment), and without this,
+        // reassigning a property/element a prior condition already
+        // narrowed left the *old* narrowed value sitting under that key
+        // forever - a real, common idiom this broke: `if ($this->entries
+        // === null) { $this->entries = [...]; } return $this->entries;`,
+        // where `infer_expr`'s own "check narrowed key first" fast path
+        // kept reading back the stale `null` from the condition check
+        // instead of the real, newly-assigned array. Redundant with (but
+        // harmless alongside) the `Variable` arm below, which does the
+        // same insert under the identical key for that one case.
+        if let Some(key) = narrowing_key(lhs) {
+            locals.insert(key, ty.clone());
+        }
         match &lhs.kind {
             ExprKind::Variable(name) => {
                 locals.insert(name.clone(), ty);
@@ -122,22 +139,49 @@ impl<'a> Checker<'a> {
             // shape could never have, since the shape itself never grew
             // past its own starting literal. Only updates a *known*
             // shape already sitting in `locals` under a bare variable
-            // name; anything else (a property chain, a computed base, a
-            // variable with a non-shape or not-yet-known type) is left
-            // alone, matching this project's usual "don't guess" scope.
-            ExprKind::Index(base, Some(idx)) => {
-                if let ExprKind::Variable(name) = &base.kind
-                    && let Some(key) = literal_string_key(idx)
-                    && let Some(Type::ArrayShape(fields)) = locals.get(name)
-                {
-                    let mut fields = fields.clone();
-                    match fields.iter_mut().find(|(k, _, _)| *k == key) {
-                        Some(field) => field.1 = ty,
-                        None => fields.push((key, ty, false)),
+            // name; anything else (a property chain, a variable with a
+            // not-yet-known type) is left alone, matching this project's
+            // usual "don't guess" scope.
+            //
+            // Phase 22 Finding 2's own follow-on: a *nested* write
+            // (`$items[$day]['derivative'] = $derivative;` - `base` is
+            // itself an `Index`, not a bare `Variable`) used to be
+            // silently ignored entirely, which interacted badly with
+            // Finding 2's own widening - a real corpus example
+            // (`CalendarMonthly::buildMonthCalendar`) builds `$items` via
+            // `$items[(int) $row->period] = [...]` (Finding 2 widens this
+            // to `Type::Array`), then adds more fields per-element via
+            // `$items[$day]['derivative'] = ...`/`['file'] = ...` -
+            // ignoring those nested writes meant `$items[$day]`'s
+            // inferred element type stayed frozen at the *initial*
+            // literal's own fields, so reading `$items[$day]['derivative']`
+            // afterward was flagged as a genuinely new false positive,
+            // not present before Finding 2's own widening made `$items`
+            // precise enough to check in the first place. Handled by
+            // recursing: compute `base`'s own current type, work out its
+            // new type as if `base[idx] = ty` had just happened to it,
+            // then bind *that* back onto `base` - which lands in this
+            // same arm again if `base` itself is another `Index`,
+            // correctly handling any nesting depth.
+            ExprKind::Index(base, idx) => match &base.kind {
+                ExprKind::Variable(name) => {
+                    let Some(current) = locals.get(name).cloned() else {
+                        return;
+                    };
+                    if let Some(new_ty) = write_index_into(&current, idx.as_deref(), ty) {
+                        locals.insert(name.clone(), new_ty);
                     }
-                    locals.insert(name.clone(), Type::ArrayShape(fields));
                 }
-            }
+                ExprKind::Index(..) => {
+                    let current_base_ty = self.infer_expr(base, locals);
+                    if let Some(new_base_ty) =
+                        write_index_into(&current_base_ty, idx.as_deref(), ty)
+                    {
+                        self.bind_assignment_target(base, new_base_ty, locals);
+                    }
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -261,6 +305,53 @@ pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.clone()),
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// Computes a container's new type after `container[idx] = value_ty` -
+/// shared by `bind_assignment_target`'s `Index` arm for both a flat write
+/// (`$x[...] = v`, `container_ty` is `$x`'s own current type) and a
+/// nested one (`$a[$k1][$k2] = v`, called once per nesting level with
+/// each level's own `idx`/`value_ty`, `container_ty` being that level's
+/// own current type as computed by `infer_expr`). Returns `None` when
+/// `container_ty` doesn't carry enough shape information to update
+/// precisely - left alone, matching this project's usual "don't guess"
+/// scope.
+fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> Option<Type> {
+    match container_ty {
+        Type::ArrayShape(fields) => match idx.and_then(literal_string_key) {
+            Some(key) => {
+                let mut fields = fields.clone();
+                match fields.iter_mut().find(|(k, _, _)| *k == key) {
+                    Some(field) => field.1 = value_ty,
+                    None => fields.push((key, value_ty, false)),
+                }
+                Some(Type::ArrayShape(fields))
+            }
+            None => {
+                let widened = fields.iter().fold(value_ty, |acc, (_, field_ty, _)| {
+                    union_types(acc, field_ty.clone())
+                });
+                Some(Type::Array(Box::new(widened)))
+            }
+        },
+        // Already widened past a literal shape (by an earlier append/
+        // dynamic-key write) - no single key to grow precisely anymore,
+        // so a write at *any* key (literal or not: once homogeneous,
+        // every element shares one type regardless) merges into the
+        // shared element type instead of being ignored outright. Without
+        // this, a nested write through an already-widened container
+        // (`$items[(int) $row->period] = [...]` widening `$items`, then
+        // `$items[$day]['derivative'] = ...` writing through it) stayed
+        // silently untracked, leaving `$items[$day]`'s inferred type
+        // frozen at its *initial* shape and producing a real false
+        // positive once that initial shape was read back with a field
+        // only ever added by the untracked nested write.
+        Type::Array(inner) => Some(Type::Array(Box::new(union_types(
+            value_ty,
+            (**inner).clone(),
+        )))),
         _ => None,
     }
 }

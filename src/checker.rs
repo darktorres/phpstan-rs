@@ -191,7 +191,7 @@ pub(crate) use assignment::{is_superglobal, literal_string_key, literal_string_v
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use control_flow::{body_contains_yield, merge_scopes};
 pub(crate) use expr::{union_types, unwrap_grouping};
-pub(crate) use narrowing::{narrow_type_excluding, narrowing_key};
+pub(crate) use narrowing::{is_real_variable_key, narrow_type_excluding, narrowing_key};
 
 impl<'a> Checker<'a> {
     pub fn new(registry: &'a Registry) -> Self {
@@ -764,6 +764,95 @@ mod tests {
                 .any(|x| x.message.contains("array{...} has no key 'b'")),
             "expected a missing-key diagnostic, got: {d:?}"
         );
+    }
+
+    #[test]
+    fn appending_to_an_array_in_a_loop_then_reading_a_literal_index_is_not_flagged() {
+        // Phase 22 Finding 2, real shape: RegenerateFixtureTest.php's own
+        // `$tagIds = []; foreach ([...] as $name) { $tagIds[] = ...; }`
+        // then `$tagIds[0]`/`[1]`/`[2]` read afterward.
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void {
+                $tagIds = [];
+                foreach (['a', 'b', 'c'] as $name) {
+                    $tagIds[] = strlen($name);
+                }
+                echo $tagIds[0];
+                echo $tagIds[1];
+                echo $tagIds[2];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn assigning_a_dynamic_key_in_a_loop_then_reading_a_literal_key_is_not_flagged() {
+        // Phase 22 Finding 2, real shape: SearchFilterRenderer.php's own
+        // `$displayFilters[$filtName] = ...;` inside a `foreach`, then
+        // `$displayFilters['words']` read elsewhere.
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void {
+                $displayFilters = [];
+                foreach (['words' => true, 'tags' => false] as $filtName => $filtConf) {
+                    $displayFilters[$filtName] = $filtConf;
+                }
+                echo $displayFilters['words'];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_dynamic_write_disables_typo_catching_for_the_rest_of_that_variable() {
+        // The real, deliberate cost of Finding 2's fix, pinned down as a
+        // test rather than left as prose: once `$x` is widened away from
+        // `Type::ArrayShape` by an append/dynamic-key write anywhere in
+        // its lifetime, `check_shape_key_access` (which only fires on
+        // `Type::ArrayShape`) stops catching a genuine typo on *any* key
+        // of that variable from that point on - not just the new one.
+        let d = diagnostics_for(
+            r#"<?php
+            function test(): void {
+                $x = [];
+                $x['a'] = 1;
+                $x[] = 2;
+                echo $x['typo'];
+            }
+        "#,
+        );
+        assert!(
+            d.is_empty(),
+            "expected the typo to go uncaught (the fix's known trade-off), got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_nested_write_through_a_dynamically_keyed_array_grows_its_element_shape() {
+        // Real shape: CalendarMonthly::buildMonthCalendar builds $items
+        // via a dynamic-key write ($items[(int) $row->period] = [...]),
+        // then adds more fields per-element via a *nested* write
+        // ($items[$day]['derivative'] = ...) - discovered as a genuine
+        // new false positive while verifying Finding 2's own fix:
+        // bind_assignment_target's Index arm required a bare Variable
+        // base, so the nested write (base is itself $items[$day], an
+        // Index, not a Variable) was silently ignored, leaving
+        // $items[$day]'s inferred shape frozen at its initial literal -
+        // missing 'derivative' entirely.
+        let d = diagnostics_for(
+            r#"<?php
+            function test(int $period, string $file): void {
+                $items = [];
+                $items[$period] = ['nb_images' => 0];
+                $items[$period]['derivative'] = $file;
+                echo $items[$period]['derivative'];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
@@ -4047,6 +4136,134 @@ mod tests {
             r#"<?php
             function f(?string $x) {
                 return $x === null || strlen($x) > 0;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_by_ref_out_param_defined_on_the_right_of_and_is_readable_afterward() {
+        // Phase 22 Finding 6, real shape: Piwigo\Admin\AdminShell::
+        // runDispatch's `if (isset(...) and is_string(...) and (bool)
+        // preg_match(..., $matches)) { ... reads $matches ... }` -
+        // `$matches` is `preg_match`'s by-ref out-param, defined as a
+        // side effect of evaluating the right operand of a chained
+        // `and`/`&&`. `check_expr`'s `Binary(And, l, r)` arm used to
+        // check `r` against a *clone* of `locals` that got discarded
+        // once the expression finished, so this definition never
+        // reached the real `locals` the enclosing `if`'s body sees.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(string $subject): void {
+                if (is_string($subject) and (bool) preg_match('/(\d+)/', $subject, $matches)) {
+                    echo $matches[0];
+                    echo $matches[1];
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn instanceof_narrowing_inside_and_does_not_leak_into_the_else_branch() {
+        // The critical regression test for Finding 6's own fix: a naive
+        // "merge every newly-inserted key back into locals" (rather than
+        // only real variable names) would insert `apply_narrowing`'s own
+        // synthetic `"arg->value"` narrowing key into the real `locals`
+        // *before* the `if`'s then/else split even runs - contaminating
+        // the `else` branch (where the condition was false, so
+        // `$arg->value` is NOT known to be a `Variable`) with the
+        // narrowed-to type. A test that only covers the by-ref-in-`&&`
+        // shape above would still pass under that broken version and
+        // would not catch this.
+        let d = diagnostics_for(
+            r#"<?php
+            class Base {}
+            class Variable extends Base { public string $name = ""; }
+            class Arg { public Base $value; }
+            function f(Arg $arg) {
+                if ($arg->value instanceof Variable && $arg->value->name !== '') {
+                    echo 'narrowed';
+                } else {
+                    echo $arg->value->name;
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("Base::$name")),
+            "expected the else branch to still see $arg->value as Base (undefined $name), got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn is_string_narrows_a_literal_array_index_expression() {
+        // Phase 22, real shape: Piwigo\Template\Template::__construct's
+        // `if (isset($lang_info['jquery_code']) and is_string($lang_info
+        // ['jquery_code']) and ...) { ... str_replace('-', '_',
+        // $lang_info['jquery_code']) ... }` - `narrowing_key` (and every
+        // `apply_narrowing` call site consuming it) used to require a
+        // bare `ExprKind::Variable` directly, so `is_string(...)` never
+        // narrowed a literal-key array-index expression the way it
+        // already narrowed a property chain.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{code?: string|null} $info */
+            function f(array $info): string {
+                if (is_string($info['code'])) {
+                    return strtoupper($info['code']);
+                }
+                return '';
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn equality_narrows_a_literal_array_index_expression() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{code?: string|null} $info */
+            function f(array $info): string {
+                if ($info['code'] !== null) {
+                    return strtoupper($info['code']);
+                }
+                return '';
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn reassigning_a_property_after_narrowing_it_does_not_leave_the_stale_narrowed_type_behind() {
+        // Phase 22, real shape: a lazy-init idiom
+        // (Piwigo\Asset\ViteManifest::entries) - `if ($this->entries ===
+        // null) { $this->entries = [...]; } return $this->entries;`.
+        // `apply_equality_narrowing` correctly narrows `$this->entries`
+        // to `null` for the *condition's own* branch, but
+        // `bind_assignment_target` had no `PropertyAccess` arm at all, so
+        // the reassignment inside the `if` body never updated that same
+        // synthetic narrowing-key entry - `infer_expr`'s own "check
+        // narrowed key first" fast path kept reading back the stale
+        // `null` instead of the real, newly-assigned array, so the
+        // return type looked nullable when it never could be.
+        let d = diagnostics_for(
+            r#"<?php
+            class Cache {
+                /** @var array<string>|null */
+                private ?array $entries = null;
+
+                /** @return array<string> */
+                private function entries(): array {
+                    if ($this->entries === null) {
+                        $this->entries = ['a', 'b'];
+                    }
+                    return $this->entries;
+                }
             }
         "#,
         );
