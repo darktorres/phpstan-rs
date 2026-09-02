@@ -1791,6 +1791,20 @@ impl<'a> Checker<'a> {
                     return Type::Array(Box::new(field_ty));
                 }
             }
+            // Phase 32 Finding D: the real stub declares `microtime(bool
+            // $as_float = false): string|float` unconditionally - real
+            // PHPStan's own `MicrotimeFunctionReturnTypeExtension` narrows
+            // a literal `true` argument to plain `float`, a literal
+            // `false` (or no argument) to a string. `is_subtype`, not
+            // `==`, since a `Union` that happens to be all-`True` or
+            // all-`False` (e.g. narrowed from a wider type) should narrow
+            // the same way a bare `True`/`False` would.
+            "microtime" => match args.first().map(|a| self.infer_expr(&a.value, locals)) {
+                None => return Type::String,
+                Some(ty) if types::is_subtype(&ty, &Type::True) => return Type::Float,
+                Some(ty) if types::is_subtype(&ty, &Type::False) => return Type::String,
+                _ => {}
+            },
             // Phase 23: the real stubs declare these unconditionally
             // unioned with `array` (`str_replace(...): array|string`),
             // even though the function only ever returns an array when

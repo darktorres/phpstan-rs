@@ -1331,6 +1331,55 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 32 Finding D: microtime()'s real stub is unconditionally
+    // `string|float` - real PHPStan narrows a literal `true`/`false`
+    // argument via its own dynamic return type extension.
+    #[test]
+    fn microtime_true_infers_plain_float() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): float {
+                return microtime(true);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn microtime_false_and_bare_infer_plain_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): string {
+                return microtime(false);
+            }
+            function g(): string {
+                return microtime();
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn microtime_with_a_non_literal_bool_keeps_todays_generic_union() {
+        // Must not narrow when the argument isn't a literal true/false -
+        // the generic string|float union should still apply, and a bare
+        // `float` return should still be flagged as unsound.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(bool $b): float {
+                return microtime($b);
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected the generic union to still apply: {d:?}"
+        );
+    }
+
     #[test]
     fn sprintf_flags_too_few_arguments_for_its_own_placeholders() {
         let d = diagnostics_for(r#"<?php sprintf("%s and %s", "only one");"#);
