@@ -2548,6 +2548,36 @@ fn preg_leaf_type(offset_capture: bool) -> Type {
     }
 }
 
+/// A per-group leaf type, refined by that group's own literal-value
+/// enumeration (Task 1a) when available - never applied to field `"0"`
+/// (the whole match), matching real PHPStan's own scope: confirmed live
+/// that even a fully-constant pattern like `/(a(?:x|y))/` gets its own
+/// overall match typed as a general refinement (`non-falsy-string`),
+/// never a literal union, so this project's own field-`"0"` handling
+/// (plain `leaf.clone()`, unchanged) already matches that scope without
+/// needing this helper at all.
+fn group_leaf_type(leaf: &Type, literal_values: &Option<Vec<String>>) -> Type {
+    let Some(values) = literal_values else {
+        return leaf.clone();
+    };
+    let literal_ty = values
+        .iter()
+        .cloned()
+        .map(Type::StringLiteral)
+        .reduce(union_types)
+        .expect("literal_values is never Some(empty) by construction");
+    match leaf {
+        Type::String => literal_ty,
+        // PREG_OFFSET_CAPTURE's own [string, int] tuple - refine just
+        // the text slot, leave the byte-offset slot untouched.
+        Type::ArrayShape(fields) if fields.len() == 2 => Type::ArrayShape(vec![
+            (fields[0].0.clone(), literal_ty, fields[0].2),
+            fields[1].clone(),
+        ]),
+        _ => leaf.clone(),
+    }
+}
+
 /// Builds `preg_match`'s own `$matches` shape from a pattern's parsed
 /// capture groups (`regex_groups::parse_capture_groups`): field `"0"` is
 /// always present (the whole match); each group gets a numbered field
@@ -2572,10 +2602,11 @@ pub(crate) fn preg_match_matches_shape(
 ) -> Type {
     let mut fields = vec![("0".to_string(), leaf.clone(), false)];
     for g in groups {
+        let base = group_leaf_type(leaf, &g.literal_values);
         let (ty, optional) = if g.optional && unmatched_as_null {
-            (union_types(leaf.clone(), Type::Null), false)
+            (union_types(base, Type::Null), false)
         } else {
-            (leaf.clone(), g.optional)
+            (base, g.optional)
         };
         fields.push((g.number.to_string(), ty.clone(), optional));
         if let Some(name) = &g.name
@@ -2606,20 +2637,21 @@ fn preg_match_all_pattern_order_shape(
     leaf: &Type,
     unmatched_as_null: bool,
 ) -> Type {
-    let element_ty = |optional: bool| {
+    let element_ty = |base: Type, optional: bool| {
         if optional && unmatched_as_null {
-            union_types(leaf.clone(), Type::Null)
+            union_types(base, Type::Null)
         } else {
-            leaf.clone()
+            base
         }
     };
     let mut fields = vec![(
         "0".to_string(),
-        Type::Array(Box::new(element_ty(false))),
+        Type::Array(Box::new(element_ty(leaf.clone(), false))),
         false,
     )];
     for g in groups {
-        let arr_ty = Type::Array(Box::new(element_ty(g.optional)));
+        let base = group_leaf_type(leaf, &g.literal_values);
+        let arr_ty = Type::Array(Box::new(element_ty(base, g.optional)));
         fields.push((g.number.to_string(), arr_ty.clone(), false));
         if let Some(name) = &g.name
             && !fields.iter().any(|(n, _, _)| n == name)

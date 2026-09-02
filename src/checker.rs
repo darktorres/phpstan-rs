@@ -1603,10 +1603,16 @@ mod tests {
             }
         "#,
         );
+        // Phase 12 (literal enumeration): group 1's own content is the
+        // constant `a`, so it's now typed as the literal `'a'`, not
+        // generic `string` - even more precise than this test's own
+        // original intent (proving precise typing at all, not just
+        // Mixed-leniency), so the check just needs to name the sharper
+        // type.
         assert!(
             d.iter()
-                .any(|x| x.message.contains("needsArray") && x.message.contains("string")),
-            "expected an argument-type mismatch naming string, got: {d:?}"
+                .any(|x| x.message.contains("needsArray") && x.message.contains("'a'")),
+            "expected an argument-type mismatch naming 'a', got: {d:?}"
         );
     }
 
@@ -1721,6 +1727,80 @@ mod tests {
                 .count(),
             2,
             "expected two argument-type mismatches naming string, got: {d:?}"
+        );
+    }
+
+    // --- Phase 12: literal enumeration for constant-only groups ---
+
+    #[test]
+    fn preg_match_a_constant_alternation_group_is_typed_as_a_literal_union() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(cat|dog)/', $subject, $matches)) {
+                    needsInt($matches[1]);
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("needsInt") && x.message.contains("'cat'|'dog'")),
+            "expected an argument-type mismatch naming 'cat'|'dog', got: {d:?}"
+        );
+    }
+
+    // `preg_match` itself can't be used to test this composition:
+    // reading through a flagged call's `$matches` always collapses to
+    // `Mixed` (Finding E's own narrowing is scoped to no-flags callers
+    // only, so a flagged call's `$matches` stays the unconditional
+    // `Union` even inside a confirmed-matched `if` - see
+    // `preg_match_offset_capture_types_each_entry_as_a_string_int_tuple`'s
+    // own comment above). `preg_match_all` never has that Union at all
+    // (Finding D), so it's the only way to observe the composed tuple
+    // shape directly.
+    #[test]
+    fn preg_match_all_a_constant_group_combined_with_offset_capture_only_narrows_the_text_slot() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                preg_match_all('/(cat)/', $subject, $matches, PREG_OFFSET_CAPTURE);
+                needsInt($matches[1][0][0]);
+                needsInt($matches[1][0][1]);
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected exactly one mismatch (the text slot only), got: {d:?}"
+        );
+        assert!(
+            d[0].message.contains("needsInt") && d[0].message.contains("'cat'"),
+            "expected the text slot to be flagged as 'cat', got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn preg_match_a_non_constant_group_stays_plain_string() {
+        // `\d+` is neither a literal sequence nor a top-level alternation -
+        // stays today's plain `string`, not a wrong or guessed literal.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(\d+)/', $subject, $matches)) {
+                    needsInt($matches[1]);
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("needsInt") && x.message.ends_with("string given")),
+            "expected a plain string mismatch, got: {d:?}"
         );
     }
 
@@ -1859,10 +1939,13 @@ mod tests {
             }
         "#,
         );
+        // Phase 12 (literal enumeration): group 1's own content is the
+        // constant `a`, so its per-match array element is now the
+        // literal `'a'`, not generic `string`.
         assert!(
             d.iter()
-                .any(|x| x.message.contains("needsInt") && x.message.contains("array<string>")),
-            "expected an argument-type mismatch naming array<string>, got: {d:?}"
+                .any(|x| x.message.contains("needsInt") && x.message.contains("array<'a'>")),
+            "expected an argument-type mismatch naming array<'a'>, got: {d:?}"
         );
     }
 
