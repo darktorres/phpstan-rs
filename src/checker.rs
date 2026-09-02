@@ -1331,6 +1331,48 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 32 Finding E: same subject-dependent-return-type family as
+    // `str_replace` above, missed by Phase 23/31 - `substr_replace`'s own
+    // subject is argument index 0, not 2.
+    #[test]
+    fn substr_replace_narrows_to_string_when_the_subject_is_a_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(string $subject): string {
+                return substr_replace($subject, 'x', 0, 1);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn substr_replace_falls_back_to_the_generic_path_for_a_non_string_subject() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject) {
+                $result = substr_replace($subject, 'x', 0, 1);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Only the array-stripping half of mb_convert_encoding()'s own real
+    // (more involved) dynamic extension is implemented - evidenced via
+    // `CharsetHelper::convertCharset`'s own real shape.
+    #[test]
+    fn mb_convert_encoding_narrows_to_string_or_false_when_the_subject_is_a_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(string $subject): string|false {
+                return mb_convert_encoding($subject, 'UTF-8', 'ISO-8859-1');
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     // Phase 32 Finding D: microtime()'s real stub is unconditionally
     // `string|float` - real PHPStan narrows a literal `true`/`false`
     // argument via its own dynamic return type extension.

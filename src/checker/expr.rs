@@ -1831,6 +1831,51 @@ impl<'a> Checker<'a> {
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_array_member(generic);
             }
+            // Phase 32 Finding E: the same subject-dependent-return-type
+            // family as the two arms above, missed by Phase 23/31 - the
+            // real stub is `substr_replace(array|string $string, ...):
+            // array|string`, and unlike `str_replace`'s subject at index
+            // 2, `substr_replace`'s own subject is index 0. Never returns
+            // `null`, so a plain early return suffices - no
+            // `strip_array_member` dance needed.
+            "substr_replace" if args.len() == 3 || args.len() == 4 => {
+                if types::is_subtype(&self.infer_expr(&args[0].value, locals), &Type::String) {
+                    return Type::String;
+                }
+            }
+            // Same family, subject at index 1 - not evidenced directly in
+            // this corpus, but identical mechanism and real stub shape
+            // (`preg_replace_callback_array(array $pattern, array|string
+            // $subject, ...): array|string|null`), so kept alongside its
+            // siblings rather than left out for want of a diagnostic.
+            "preg_replace_callback_array"
+                if args.len() >= 2
+                    && types::is_subtype(
+                        &self.infer_expr(&args[1].value, locals),
+                        &Type::String,
+                    ) =>
+            {
+                let resolved = resolve_call_args(args, &sig.params);
+                let generic = self.infer_call_return_type(sig, &resolved, locals);
+                return strip_array_member(generic);
+            }
+            // `mb_convert_encoding()` has its own real dynamic extension,
+            // considerably more involved (it also reasons about
+            // `$from_encoding` to decide whether `false` stays possible) -
+            // only the array-stripping half is evidenced here
+            // (`CharsetHelper::convertCharset`'s `mb_convert_encoding($str,
+            // ...)` with `$str: string`), so that's all this implements.
+            "mb_convert_encoding"
+                if args.len() >= 2
+                    && types::is_subtype(
+                        &self.infer_expr(&args[0].value, locals),
+                        &Type::String,
+                    ) =>
+            {
+                let resolved = resolve_call_args(args, &sig.params);
+                let generic = self.infer_call_return_type(sig, &resolved, locals);
+                return strip_array_member(generic);
+            }
             _ => {}
         }
         let resolved = resolve_call_args(args, &sig.params);
