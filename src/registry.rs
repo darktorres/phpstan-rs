@@ -44,6 +44,17 @@ pub struct Registry {
     // pre-existing `PHPUnit\Framework\TestCase` shape) - both look
     // identical from `self.classes.contains_key(&name)` alone.
     unconditionally_declared_classes: HashSet<String>,
+    // Phase 32 Finding C: the function-side sibling of the tracking set
+    // above - phpstorm-stubs represents a real PHP internal function
+    // overload (different signatures by argument shape, not version) as
+    // two separate top-level `function` declarations sharing one name
+    // (`strtr`'s own real stub: a 3-string-argument form and a
+    // 2-argument, `array $replace_pairs` form, back to back in the same
+    // file) - without this, the second declaration's blind
+    // `self.functions.insert` silently discards the first's own params
+    // entirely, instead of merging into a callable that accepts either
+    // shape.
+    unconditionally_declared_functions: HashSet<String>,
 }
 
 impl Registry {
@@ -294,13 +305,22 @@ impl Registry {
                 }
                 StmtKind::FunctionDecl(f) => {
                     let name = ctx.declared_name(&f.name);
+                    let new_sig = FunctionSig::from_decl(f, ctx, &[]);
                     if conditional {
-                        self.functions
-                            .entry(name)
-                            .or_insert_with(|| FunctionSig::from_decl(f, ctx, &[]));
+                        self.functions.entry(name).or_insert_with(|| new_sig);
+                    } else if self.unconditionally_declared_functions.contains(&name) {
+                        // Phase 32 Finding C: a *second* unconditional
+                        // declaration of the same name - the real-overload
+                        // shape described on this registry's own
+                        // `unconditionally_declared_functions` field -
+                        // merges onto the first rather than replacing it.
+                        let existing = self.functions.remove(&name).expect(
+                            "name is in unconditionally_declared_functions, so it must already be indexed",
+                        );
+                        self.functions.insert(name, existing.merge(new_sig));
                     } else {
-                        self.functions
-                            .insert(name, FunctionSig::from_decl(f, ctx, &[]));
+                        self.unconditionally_declared_functions.insert(name.clone());
+                        self.functions.insert(name, new_sig);
                     }
                 }
                 // The real, common `if (!function_exists('foo')) { function
@@ -368,6 +388,12 @@ impl Registry {
     pub(crate) fn remove_declarations(&mut self, functions: &[String], classes: &[String]) {
         for name in functions {
             self.functions.remove(name);
+            // Phase 32 Finding C: stay in lockstep with `functions`, for
+            // the identical reason the class side does below - otherwise
+            // a later re-index of the same name would find a stale
+            // "already unconditionally declared" marker with nothing left
+            // in `functions` for it to point at.
+            self.unconditionally_declared_functions.remove(name);
         }
         for name in classes {
             self.classes.remove(name);
@@ -383,10 +409,25 @@ impl Registry {
     }
 
     /// User-defined symbols always win: a stub only fills in a name that
-    /// isn't already declared in the indexed source.
+    /// isn't already declared in the indexed source (verified directly by
+    /// `merge_stubs_does_not_override_user_functions` - unlike
+    /// `merge_stub_classes` below, this one is *not* a merge, on purpose:
+    /// a user-declared function sharing a builtin's name is a distinct
+    /// definition the user's own code should win outright, not a second
+    /// "overload" of the same conceptual function the way phpstorm-stubs'
+    /// own `strtr`-style split declarations are).
+    ///
+    /// Phase 32 Finding C: every merged-in name is also recorded in
+    /// `unconditionally_declared_functions` regardless - not for this call
+    /// itself (which never merges), but so a *later* real project file
+    /// legitimately declaring a function with the same name as a builtin
+    /// correctly takes `index_with_context`'s own merge path (the `strtr`
+    /// case) instead of blindly overwriting.
     pub fn merge_stubs<S: Into<String>>(&mut self, stubs: Vec<(S, FunctionSig)>) {
         for (name, sig) in stubs {
-            self.functions.entry(name.into()).or_insert(sig);
+            let name: String = name.into();
+            self.unconditionally_declared_functions.insert(name.clone());
+            self.functions.entry(name).or_insert(sig);
         }
     }
 
@@ -920,6 +961,68 @@ mod tests {
 
         r.index(&program);
         assert!(r.classes["X"].methods.contains_key("original"));
+    }
+
+    // Finding C (Phase 32): two unconditional declarations of the same
+    // function name overwrite instead of merging - the function-side
+    // sibling of Phase 25's class-merge fix. Real shape: `strtr`'s own
+    // real stub declares a 3-string-argument overload and a 2-argument,
+    // `array $replace_pairs` overload as two separate top-level
+    // declarations sharing one name.
+    #[test]
+    fn two_unconditional_function_declarations_with_different_arities_merge() {
+        let r = build_registry(
+            r#"<?php
+            function strtr(string $string, string $from, string $to): string {}
+            function strtr(string $str, array $replace_pairs): string {}
+        "#,
+        );
+        let sig = &r.functions["strtr"];
+        assert_eq!(sig.params.len(), 3);
+        assert_eq!(sig.params[0].name, "str", "later declaration's name wins");
+        assert_eq!(sig.params[0].ty, Type::String);
+        assert!(!sig.params[0].has_default);
+        assert_eq!(sig.params[1].name, "replace_pairs");
+        assert_eq!(
+            sig.params[1].ty,
+            Type::Union(vec![Type::String, Type::Array(Box::new(Type::Mixed))])
+        );
+        assert!(!sig.params[1].has_default);
+        assert_eq!(sig.params[2].name, "to");
+        assert_eq!(sig.params[2].ty, Type::String);
+        assert!(
+            sig.params[2].has_default,
+            "a position only the first overload has can't be required in the merged callable"
+        );
+    }
+
+    #[test]
+    fn two_unconditional_function_declarations_with_a_disjoint_type_at_one_position_union_it() {
+        let r = build_registry(
+            r#"<?php
+            function f(int $x): int {}
+            function f(string $x): string {}
+        "#,
+        );
+        let sig = &r.functions["f"];
+        assert_eq!(sig.params.len(), 1);
+        assert_eq!(sig.params[0].ty, Type::Union(vec![Type::Int, Type::String]));
+        assert_eq!(sig.return_type, Type::Union(vec![Type::Int, Type::String]));
+    }
+
+    #[test]
+    fn re_indexing_an_unconditional_function_after_removal_does_not_panic() {
+        let src = "<?php function f(int $x): int {}";
+        let tokens = Lexer::new(src).tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let mut r = Registry::build(&program);
+        assert_eq!(r.functions["f"].params[0].ty, Type::Int);
+
+        r.remove_declarations(&["f".to_string()], &[]);
+        assert!(!r.functions.contains_key("f"));
+
+        r.index(&program);
+        assert_eq!(r.functions["f"].params[0].ty, Type::Int);
     }
 
     #[test]

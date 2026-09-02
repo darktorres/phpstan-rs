@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Expr, ExprKind, FunctionDecl, Literal};
+use crate::checker::union_types;
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{NameContext, resolve_names_in_type};
 use crate::types::{self, Type};
@@ -264,6 +265,60 @@ impl FunctionSig {
         let return_type = mark_template_params(return_type, &template_names);
         let return_type = resolve_names_in_type(return_type, ctx);
 
+        FunctionSig {
+            params,
+            return_type,
+        }
+    }
+
+    /// Phase 32 Finding C: merges two *unconditional* declarations of the
+    /// same function name - the real-overload shape phpstorm-stubs uses
+    /// for `strtr` (a 3-string-argument form and a 2-argument, `array
+    /// $replace_pairs` form, as two separate top-level declarations
+    /// sharing one name), mirroring `ClassInfo::merge`'s own "later
+    /// declaration wins on conflict" convention.
+    pub(crate) fn merge(self, other: FunctionSig) -> FunctionSig {
+        let return_type = union_types(self.return_type, other.return_type);
+        let len = self.params.len().max(other.params.len());
+        let mut self_params = self.params.into_iter();
+        let mut other_params = other.params.into_iter();
+        let mut params = Vec::with_capacity(len);
+        for _ in 0..len {
+            let a = self_params.next();
+            let b = other_params.next();
+            let merged = match (a, b) {
+                (Some(a), Some(b)) => ParamSig {
+                    // Later declaration wins on conflict, matching
+                    // `ClassInfo::merge`'s own convention.
+                    name: b.name,
+                    ty: union_types(a.ty, b.ty),
+                    // Permissive: accepting a variadic-style tail call
+                    // when *either* real overload allows it costs nothing
+                    // a stricter rule would have caught.
+                    variadic: a.variadic || b.variadic,
+                    // A position required by only one real overload can't
+                    // be required in a callable meant to accept either.
+                    has_default: a.has_default || b.has_default,
+                    // Unlike the above, NOT permissive: `by_ref` is a
+                    // restriction placed on the *caller* (an lvalue is
+                    // required), not something being accepted - OR-ing it
+                    // would wrongly flag a call matching the non-by-ref
+                    // overload's own shape just because the *other*
+                    // overload needs a reference there. AND keeps the
+                    // merged signature only as strict as every real
+                    // overload agrees it should be.
+                    by_ref: a.by_ref && b.by_ref,
+                },
+                // A position present in only one real overload can't be
+                // required in the merged callable either.
+                (Some(mut only), None) | (None, Some(mut only)) => {
+                    only.has_default = true;
+                    only
+                }
+                (None, None) => unreachable!("loop bound is the longer side's own length"),
+            };
+            params.push(merged);
+        }
         FunctionSig {
             params,
             return_type,
