@@ -2262,6 +2262,94 @@ Also traced but deliberately not fixed:
   that merely *contains* the reassigned name as a substring - a real
   soundness question, left for a dedicated future round.
 
+## Phase 33: close Phase 32's own disclosed Known Limitations rows - DONE
+
+Phase 32 left four new rows in the Known Limitations table below, each a
+gap its own fixes surfaced rather than caused. Closed all four:
+
+- **`instanceof`'s false branch now drops the checked class from a
+  Union.** The false branch never needed a "not this class" type to be
+  representable - it only needs to *drop* the one member just proven
+  impossible from an already-enumerated `Union`, exactly what
+  `narrow_type_excluding` already does soundly for every other
+  predicate. Fixes `BrowserTestHelpers::dbEscape`'s real shape
+  (`mysqli|Connection` narrowed via a ternary on `instanceof mysqli`).
+  Checking `is_subtype`'s actual `Object`-vs-`Object` mechanism directly
+  (rather than trusting its own doc comment's "name-equality only"
+  shorthand) found it's really full structural equality including
+  generic type arguments - an even more conservative check than
+  advertised, reinforcing rather than undermining this fix's safety.
+- **`in_array($needle, $literalArray, true)` is now a recognized
+  narrowing predicate**, mirroring real PHPStan's own
+  `InArrayFunctionTypeSpecifyingExtension` (strict comparison against a
+  literal array only - a loose comparison's type-juggling makes the
+  real safe target wider than the listed values). Traced all the way to
+  two live diagnostics: `CatPermSubmitRequest::fromArray` and
+  `ElementSetRanksRequest::fromArrays` both build an allowlisted value
+  via `in_array(..., true) ? $raw : $fallback`, where `$raw` itself
+  infers `Type::Null` (a `widen_coalesce_result` quirk - a `?? null`
+  coalesce falls through to its own `_ => r_ty` arm for anything that
+  isn't `Array`/`ArrayShape`, `Mixed` included) - narrowing it against
+  the haystack's own literal values before the fix.
+- **`array_key_exists($literalKey, $arr)` now narrows `$arr` itself**,
+  the checked expression real PHPStan's own `TypeSpecifier` support for
+  this function also targets - a `Union`/`ArrayShape` member proven
+  unable to satisfy (or fail) the call is dropped, the same "keep/drop a
+  member based on a provable fact" shape `instanceof`'s own resolution
+  already uses. No single live corpus diagnostic was pinned down for
+  this one specifically - shipped on real-PHPStan-parity grounds alone,
+  verified (like every finding) via the full corpus diff.
+- **A real, invalidated variable-subscript narrowing key.**
+  `narrowing_key`'s `Index` arm now falls back to a `$`-prefixed
+  variable-subscript marker when the index isn't a literal, fixing
+  `Translator::translate`'s `is_string($this->mirror[$key])` guard
+  (confirmed against two live diagnostics - a return-type mismatch and
+  a `vsprintf()` argument mismatch, both `string|array<string>`).
+  Checking whether this project had *any* invalidation-on-reassignment
+  mechanism at all before trusting the new key format found it didn't -
+  not just for a variable-subscript key, but for *any* composite key:
+  reassigning `$foo` left a stale `"foo->bar"` sitting in `locals`
+  forever, undocumented and unrelated to this row specifically. Fixed
+  with a shared `purge_stale_narrowing_for` helper, generalized over
+  whatever `narrowing_key` string is being reassigned (a bare variable,
+  a property chain, or an index chain all resolve through the same
+  mechanism), wired into all seven real call sites that can give one a
+  new value - found via a repo-wide grep for every `locals.insert`/
+  `.entry().or_insert()` call, not assumed from memory. Verified each
+  "invalidation actually happens" test by temporarily disabling its
+  corresponding purge call and confirming the expected failure, before
+  trusting it as a real regression guard.
+- **The disclosed `int<min, max>` gap turned out to be misdiagnosed.**
+  Isolated probes showed a bare `int<0, 255>` (and one nested in a
+  *keyed* shape) already degraded harmlessly to plain `int`, both before
+  and after this phase - the real bug was that `array{...}`'s
+  *positional* (unkeyed) fields, real PHPStan/Psalm tuple syntax
+  (`array{int, string}`), failed to parse at all: every field was
+  assumed to have a `key:` prefix, so a field with none aborted the
+  *entire* shape's parse, falling through to a bogus, namespace-mangled
+  class-name `Object`. Fixed by numbering an unkeyed field the same way
+  `infer_array_literal_type` numbers a real array literal's own
+  positional elements, disambiguated from a keyed field via a new
+  `looks_like_shape_key` helper.
+
+**Correction, found by the mandatory full-corpus re-check**:
+`looks_like_shape_key`'s first version only accepted
+`[A-Za-z_][A-Za-z0-9_]*` as a bare identifier, rejecting
+`Translator::toDictionaryEntry`'s real `@return array{domain: string,
+plural-forms: string, ...}` - a hyphenated, unquoted key gettext's own
+dictionary convention uses, already accepted before this project ever
+validated key shape at all - and misclassifying that field as
+positional instead. Fixed by allowing `-` in the identifier character
+class, following this project's own established transparency precedent
+for a correction found via the corpus diff rather than during planning.
+
+**DONE.** `350 -> 295` diagnostics. Verified with the same location-based
+classification loop established since Phase 25: every changed line
+landed at an already-diagnosed location (each a positional-array-shape
+type going from mangled/namespace-garbage text to its correctly-parsed
+form, once the correction above landed) - zero genuinely new
+diagnostic locations.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
@@ -2283,7 +2371,7 @@ confused with each other.
 | `for`/`foreach`/`switch`/`try` share one unforked, unnarrowed scope | 13 |
 | Array-literal element types not tracked (`Array(Mixed)` always) | 13 |
 | Integer division and PHP 8.5's pipe operator (`BinOp::Div`/`Pipe`) always infer `Mixed` | 13 |
-| Refinement/accessory types (`non-empty-string`, `non-empty-array`, ...) aliased to their base type, not tracked precisely | 14 |
+| Refinement/accessory types (`non-empty-string`, `non-empty-array`, `int<min, max>` ranges, ...) aliased to their base type, not tracked precisely | 14 |
 | No `Type::FloatLiteral` variant - a real float literal always widens straight to plain `Float` (unlike `IntLiteral`/`StringLiteral`), so a PHPDoc float-literal-union type (`1.5\|2.5`) rejects every value, valid or not, the same way an integer-literal union did before that half was fixed | 14 |
 | Broader rule catalog (`DeadCode`, `Comparison`/exhaustiveness, `Exceptions`, visibility/abstract-method completeness) | 15 |
 | `continue N`'s own level argument is parsed and stored but never consulted (`break N`'s own level is - Phase 29's `loop_break_states` reads it directly) - `continue`'s effect (restart the loop/re-check its condition, not exit with a settled final state) doesn't fit that same "collect an exit state" mechanism without real additional thought | 15 |
@@ -2292,10 +2380,6 @@ confused with each other.
 | No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
 | No LSP hover/go-to-definition | 17 |
 | No extension/plugin API | 18 |
-| `in_array()`/`array_key_exists()` aren't recognized narrowing predicates - a guard clause built on either never narrows the checked expression, unlike `isset()`/`is_*()`/`empty()` | 32 |
-| `instanceof`'s false branch narrows nothing (documented in `apply_narrowing`'s own doc comment since it was written - no "not this class" type is representable) - surfaced concretely by Phase 32's own fixes: a `$db instanceof mysqli ? ... : pg_query($db, ...)` idiom still sees `$db`'s full pre-check union in the `else` branch | 32 |
-| A variable-subscript array-index narrowing key (`is_string($this->mirror[$key])` where `$key` is a variable, not a literal) isn't attempted - sound in principle only as long as nothing between the check and the use reassigns the subscript variable, which this project's narrowing-invalidation-on-reassignment doesn't obviously extend to for a composite key that merely contains the reassigned name as a substring | 32 |
-| `int<min, max>`-style PHPStan/Psalm integer-range syntax isn't parsed | 32 |
 
 **Permanent design boundaries (not phase-tracked - not planned, by choice):**
 
