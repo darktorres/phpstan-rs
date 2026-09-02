@@ -256,8 +256,13 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
 
 /// Whether `key_part` (the text before a candidate `:` inside an
 /// `array{...}` field) actually looks like a shape key - a bare
-/// identifier, an integer, or a quoted string, optionally `?`-suffixed -
-/// as opposed to being part of a *positional* field's own type text that
+/// identifier (hyphen included: `Translator::toDictionaryEntry`'s real
+/// `@return array{..., plural-forms: string, ...}`, gettext's own
+/// dictionary-key convention, is unquoted in real code and was already
+/// accepted before this project ever validated key shape at all - a
+/// real regression, caught by the full corpus re-check, not assumed
+/// safe), an integer, or a quoted string, optionally `?`-suffixed - as
+/// opposed to being part of a *positional* field's own type text that
 /// merely happens to contain a colon (a callable-shape return type,
 /// `Closure(int): string`). See `try_parse_array_shape`'s own call site.
 fn looks_like_shape_key(key_part: &str) -> bool {
@@ -278,7 +283,7 @@ fn looks_like_shape_key(key_part: &str) -> bool {
     chars
         .next()
         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Splits a trailing `<...>` generic argument list off a type atom, e.g.
@@ -1002,6 +1007,25 @@ mod tests {
             Type::ArrayShape(vec![
                 ("0".to_string(), Type::Int, false),
                 ("name".to_string(), Type::String, false),
+            ])
+        );
+    }
+
+    // Regression guard: Translator::toDictionaryEntry's real
+    // @return array{domain: string, plural-forms: string, ...} - found by
+    // the full corpus re-check after this fix first shipped, since a
+    // hyphenated bare key was already accepted before any key-shape
+    // validation existed at all, and `looks_like_shape_key`'s first
+    // version wrongly rejected it, misclassifying the field as
+    // positional.
+    #[test]
+    fn array_shape_with_a_hyphenated_bare_key_still_parses_as_keyed() {
+        let shape = parse_type_string("array{domain: string, plural-forms: string}");
+        assert_eq!(
+            shape,
+            Type::ArrayShape(vec![
+                ("domain".to_string(), Type::String, false),
+                ("plural-forms".to_string(), Type::String, false),
             ])
         );
     }
