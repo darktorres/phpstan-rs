@@ -54,6 +54,24 @@ impl<'a> Checker<'a> {
                     }
                     _ => {}
                 }
+                // Phase 32 Finding K: a bare `$cond || neverReturningCall();`
+                // statement - PHP's classic "guard or die" idiom
+                // (`$pos !== false || $this->ierror('Missing .', 400);`).
+                // `ierror(): never` is a real `never` return type; if
+                // execution reaches the statement *after* this one, the
+                // `||`'s right side didn't run, so (by short-circuit
+                // evaluation) the left side was already true - the same
+                // "statement narrows unconditionally" reasoning as
+                // `assert($cond)` above, just for a condition spelled as
+                // an `Or` instead of a direct call. `Or`-only, not `And` -
+                // `A && B;` gives no equivalent guarantee (if `A` is
+                // false, `B` never runs and the statement simply ends,
+                // without proving `A` either way).
+                if let ExprKind::Binary(BinOp::Or, lhs, rhs) = &e.kind
+                    && self.infer_expr(rhs, locals) == Type::Never
+                {
+                    self.apply_narrowing(lhs, locals, true);
+                }
             }
             StmtKind::Return(Some(e)) => {
                 let actual = self.check_expr(e, locals, label);

@@ -1471,6 +1471,52 @@ mod tests {
         );
     }
 
+    // Phase 32 Finding K, real shape: `ImageDerivativeController::
+    // parseRequest`'s `$pos = strrpos($req, '.'); $pos !== false ||
+    // $this->ierror('Missing .', 400); $ext = substr($req, $pos);` -
+    // `ierror(): never` is a real PHP `never` return type.
+    #[test]
+    fn a_bare_or_statement_with_a_never_returning_right_side_narrows_the_left() {
+        let d = diagnostics_for(
+            r#"<?php
+            class C {
+                function ierror(string $msg): never {
+                    throw new Exception($msg);
+                }
+                function f(string $req): string {
+                    $pos = strrpos($req, '.');
+                    $pos !== false || $this->ierror('Missing .');
+                    return substr($req, $pos);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_bare_or_statement_does_not_narrow_when_the_right_side_isnt_never() {
+        let d = diagnostics_for(
+            r#"<?php
+            class C {
+                function regular(): bool {
+                    return true;
+                }
+                function f(string $req): string {
+                    $pos = strrpos($req, '.');
+                    $pos !== false || $this->regular();
+                    return substr($req, $pos);
+                }
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected $pos to stay unnarrowed (still int|false): {d:?}"
+        );
+    }
+
     #[test]
     fn sprintf_flags_too_few_arguments_for_its_own_placeholders() {
         let d = diagnostics_for(r#"<?php sprintf("%s and %s", "only one");"#);
