@@ -195,6 +195,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
     let inner = &rest[1..rest.len() - 1];
 
     let mut fields = Vec::new();
+    let mut next_index: i64 = 0;
     for field_str in split_top_level(inner, ',') {
         let field_str = field_str.trim();
         if field_str.is_empty() {
@@ -213,19 +214,71 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
         if field_str.starts_with("...") {
             continue;
         }
-        let (key_part, type_part) = field_str.split_once(':')?;
-        let key_part = key_part.trim();
-        let (key, optional) = match key_part.strip_suffix('?') {
-            Some(k) => (k.trim(), true),
-            None => (key_part, false),
-        };
-        fields.push((
-            key.to_string(),
-            parse_type_string(type_part.trim()),
-            optional,
-        ));
+        // Phase 33 Finding 3: a *positional* (unkeyed) field
+        // (`array{int, string}`, real PHPStan/Psalm tuple syntax) has no
+        // `key:` prefix at all - `split_once(':')` alone can't tell that
+        // apart from a keyed field whose own type happens to contain a
+        // colon (`Closure(int): string`), so `looks_like_shape_key` also
+        // checks that whatever comes before the candidate colon is
+        // actually shaped like a key before trusting the split. Numbers
+        // a positional field the same way `infer_array_literal_type`
+        // numbers a real array literal's own positional elements, so a
+        // doc-declared shape and a real literal's inferred shape end up
+        // structurally identical.
+        let keyed = field_str
+            .split_once(':')
+            .filter(|(key_part, _)| looks_like_shape_key(key_part.trim()));
+        match keyed {
+            Some((key_part, type_part)) => {
+                let key_part = key_part.trim();
+                let (key, optional) = match key_part.strip_suffix('?') {
+                    Some(k) => (k.trim(), true),
+                    None => (key_part, false),
+                };
+                if let Ok(n) = key.parse::<i64>() {
+                    next_index = next_index.max(n + 1);
+                }
+                fields.push((
+                    key.to_string(),
+                    parse_type_string(type_part.trim()),
+                    optional,
+                ));
+            }
+            None => {
+                let key = next_index.to_string();
+                next_index += 1;
+                fields.push((key, parse_type_string(field_str), false));
+            }
+        }
     }
     Some(Type::ArrayShape(fields))
+}
+
+/// Whether `key_part` (the text before a candidate `:` inside an
+/// `array{...}` field) actually looks like a shape key - a bare
+/// identifier, an integer, or a quoted string, optionally `?`-suffixed -
+/// as opposed to being part of a *positional* field's own type text that
+/// merely happens to contain a colon (a callable-shape return type,
+/// `Closure(int): string`). See `try_parse_array_shape`'s own call site.
+fn looks_like_shape_key(key_part: &str) -> bool {
+    let key_part = key_part.strip_suffix('?').unwrap_or(key_part).trim();
+    if key_part.is_empty() {
+        return false;
+    }
+    if key_part.parse::<i64>().is_ok() {
+        return true;
+    }
+    if key_part.starts_with('\'') && key_part.ends_with('\'') && key_part.len() >= 2 {
+        return true;
+    }
+    if key_part.starts_with('"') && key_part.ends_with('"') && key_part.len() >= 2 {
+        return true;
+    }
+    let mut chars = key_part.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Splits a trailing `<...>` generic argument list off a type atom, e.g.
@@ -906,6 +959,64 @@ mod tests {
         assert_eq!(
             shape2,
             Type::ArrayShape(vec![("items".to_string(), Type::Int, false)])
+        );
+    }
+
+    // Phase 33 Finding 3: a positional (unkeyed) field - real, valid
+    // PHPStan/Psalm tuple syntax - used to fail the *entire* shape's parse
+    // (`split_once(':')?` had nothing to split), falling through to a
+    // bogus, unparsed class-name `Object`. Numbered the same way
+    // `infer_array_literal_type` numbers a real array literal's own
+    // positional elements, so both end up structurally identical.
+    #[test]
+    fn array_shape_with_positional_fields_numbers_them_like_a_real_array_literal() {
+        let shape = parse_type_string("array{int, string}");
+        assert_eq!(
+            shape,
+            Type::ArrayShape(vec![
+                ("0".to_string(), Type::Int, false),
+                ("1".to_string(), Type::String, false),
+            ])
+        );
+    }
+
+    // The real `idcUploadSizedPhoto` shape this finding exists for.
+    #[test]
+    fn array_shape_with_positional_int_range_fields_parses() {
+        let shape = parse_type_string("array{int<0, 255>, int<0, 255>, int<0, 255>}");
+        assert_eq!(
+            shape,
+            Type::ArrayShape(vec![
+                ("0".to_string(), Type::Int, false),
+                ("1".to_string(), Type::Int, false),
+                ("2".to_string(), Type::Int, false),
+            ])
+        );
+    }
+
+    #[test]
+    fn array_shape_mixing_explicit_int_keys_and_named_keys_still_parses_correctly() {
+        let shape = parse_type_string("array{0: int, name: string}");
+        assert_eq!(
+            shape,
+            Type::ArrayShape(vec![
+                ("0".to_string(), Type::Int, false),
+                ("name".to_string(), Type::String, false),
+            ])
+        );
+    }
+
+    // A positional field whose own type contains a colon (a callable
+    // shape's return type) must not be mis-split at that internal colon.
+    #[test]
+    fn array_shape_with_a_positional_closure_field_is_not_split_at_its_own_colon() {
+        let shape = parse_type_string("array{Closure(int): string, int}");
+        assert_eq!(
+            shape,
+            Type::ArrayShape(vec![
+                ("0".to_string(), Type::Callable, false),
+                ("1".to_string(), Type::Int, false),
+            ])
         );
     }
 
