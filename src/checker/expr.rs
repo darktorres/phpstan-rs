@@ -2164,10 +2164,51 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
             }
         }
     }
+    // Phase 32 Finding L: drop a literal member whenever its own exact
+    // base type is *also* present in the same union - a ternary's two
+    // branches (`is_string($x) ? $x : ''`, `check_expr`'s own `Ternary`
+    // arm calling this) build exactly this shape,
+    // `union_types(String, StringLiteral(""))`, and keeping both was
+    // this project's actual root cause for `SectionInitializer::parse()`'s
+    // `str_replace()` subject never matching `== Type::String` again
+    // after the ternary. Snapshotting which base types are present
+    // first, rather than checking `members` from inside its own
+    // `retain` closure (which Rust's borrow checker won't allow).
+    let present_bases: Vec<Type> = members
+        .iter()
+        .filter(|m| matches!(m, Type::Int | Type::String | Type::Bool))
+        .cloned()
+        .collect();
+    members.retain(|m| match literal_base_type(m) {
+        Some(base) => !present_bases.contains(&base),
+        None => true,
+    });
     if members.len() == 1 {
         members.into_iter().next().unwrap()
     } else {
         Type::Union(members)
+    }
+}
+
+/// The "lossless absorption" half of `union_types`' own literal-dedup
+/// fix - an `IntLiteral`/`StringLiteral`/`True`/`False` member is
+/// redundant once its own *exact* base type is already present in the
+/// same union (an `Int` member already includes every possible
+/// `IntLiteral`'s value, etc.), mirroring `is_subtype`'s own first four
+/// match arms specifically (`types.rs` lines 498-500) rather than
+/// calling `is_subtype` itself - `is_subtype`'s int-to-float widening
+/// rule is a real, load-bearing *assignability* fact (an int argument is
+/// accepted wherever a float is declared), not a "this value's
+/// representation is a subset of that value's representation" one, so
+/// reusing it here would also silently drop an `IntLiteral` sitting next
+/// to an unrelated `Float` member, discarding real information for a
+/// relation that only holds for compatibility, not equivalence.
+fn literal_base_type(t: &Type) -> Option<Type> {
+    match t {
+        Type::IntLiteral(_) => Some(Type::Int),
+        Type::StringLiteral(_) => Some(Type::String),
+        Type::True | Type::False => Some(Type::Bool),
+        _ => None,
     }
 }
 

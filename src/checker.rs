@@ -1517,6 +1517,123 @@ mod tests {
         );
     }
 
+    // Phase 32 Finding L: exact type equality is the wrong tool for "is
+    // this the kind of thing being narrowed" - both `narrow_type_to`/
+    // `narrow_type_excluding` (member filtering) and `union_types`
+    // (member dedup at construction time) used plain `==`/`!=`.
+
+    #[test]
+    fn union_types_collapses_a_string_literal_into_an_already_present_string() {
+        assert_eq!(
+            union_types(Type::String, Type::StringLiteral("".to_string())),
+            Type::String
+        );
+    }
+
+    #[test]
+    fn union_types_collapses_an_int_literal_into_an_already_present_int() {
+        assert_eq!(union_types(Type::Int, Type::IntLiteral(0)), Type::Int);
+    }
+
+    // The float-widening pitfall this fix deliberately avoids: `is_subtype
+    // (IntLiteral(0), Float)` is `true` (PHP's int-to-float argument
+    // coercion), but that's an *assignability* fact, not a "this value's
+    // representation is already covered" one - an `IntLiteral` sitting
+    // next to an unrelated `Float` member must not be silently dropped.
+    #[test]
+    fn union_types_does_not_collapse_an_int_literal_into_an_unrelated_float() {
+        assert_eq!(
+            union_types(Type::Float, Type::IntLiteral(0)),
+            Type::Union(vec![Type::Float, Type::IntLiteral(0)])
+        );
+    }
+
+    // Real shape: `Piwigo\Tag\TagService::getTagIds(string|array<string>
+    // $rawTags, ...)`: `if (! is_array($rawTags)) { $rawTags =
+    // explode(',', $rawTags); }` - `is_array()`'s registered target is
+    // generic `Type::Array(Mixed)`; the specific-element `Array(String)`
+    // member used to survive the exclusion untouched (`Array(String) !=
+    // Array(Mixed)`), keeping the full `string|array<string>` type going
+    // into `explode()`'s plain-`string` argument.
+    #[test]
+    fn is_array_false_branch_excludes_a_specific_element_array_member_too() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param string|array<string> $rawTags */
+            function f($rawTags): int {
+                if (! is_array($rawTags)) {
+                    $rawTags = explode(',', $rawTags);
+                }
+                return count($rawTags);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Real shape: `Piwigo\Section\SectionInitializer::parse()`'s
+    // `$rewritten = is_string($rewritten) ? $rewritten : '';` then
+    // `str_replace('//', '/', $rewritten)` - the ternary's own
+    // `union_types(String, StringLiteral(""))` used to keep both members,
+    // so `$rewritten` never matched `str_replace`'s subject-narrowing
+    // `== Type::String` check again.
+    #[test]
+    fn str_replace_narrows_a_subject_built_from_a_ternarys_string_and_string_literal_branches() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($rewritten): string {
+                $rewritten = is_string($rewritten) ? $rewritten : '';
+                $rewritten = str_replace('//', '/', $rewritten);
+                return strtoupper($rewritten);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // The false-branch side of Phase 28's `is_scalar` special case was
+    // outright broken with no diagnostic in this corpus surfacing it:
+    // `narrow_type_excluding(current, is_scalar's 4-member target)`
+    // filtered via `*m != excluded`, and no real member is ever
+    // structurally equal to the whole 4-member union, so `!is_scalar($x)`
+    // never excluded anything, silently.
+    #[test]
+    fn is_scalar_false_branch_actually_excludes_the_scalar_members() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int|array $x */
+            function f($x): array {
+                if (! is_scalar($x)) {
+                    return $x;
+                }
+                return [];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // `apply_phpunit_assertion_narrowing` (Phase 27) shares the exact same
+    // bug as `is_array()` above, found via this finding's own caller
+    // audit: `assertIsArray($x)` with `$x: array<string>|int` used to
+    // fall back to the imprecise generic `array` for the same reason.
+    #[test]
+    fn assert_is_array_keeps_a_specific_element_type_not_the_generic_array() {
+        let d = diagnostics_for(
+            r#"<?php
+            class T {
+                /** @param array<string>|int $x */
+                function f($x): array {
+                    self::assertIsArray($x);
+                    return $x;
+                }
+                static function assertIsArray($x): void {}
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn sprintf_flags_too_few_arguments_for_its_own_placeholders() {
         let d = diagnostics_for(r#"<?php sprintf("%s and %s", "only one");"#);

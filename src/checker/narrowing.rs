@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::checker::{Checker, Locals, literal_string_key};
-use crate::types::Type;
+use crate::types::{Type, is_subtype};
 
 impl<'a> Checker<'a> {
     /// Narrows `locals` in place based on `cond` being true (`branch_true`)
@@ -510,10 +510,28 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
 /// Narrows `original` to `target` along the branch where a check for
 /// `target` succeeded: if `original` is a union, keep only the member(s)
 /// that match; otherwise just trust the more specific `target`.
+///
+/// Phase 32 Finding L: a union member is kept when it's a *subtype* of
+/// `target`, not just when it's structurally identical to it - exact
+/// equality is the wrong tool for "is this the kind of thing being
+/// narrowed": `is_array()`'s registered target is generic
+/// `Type::Array(Mixed)`, so a specific-element `Array(String)` member
+/// (from a docblock-refined param type) used to survive an `is_array()`
+/// exclusion untouched, since `Array(String) != Array(Mixed)` even
+/// though every value it describes plainly *is* an array. Deliberately
+/// scoped to this `Union(members)` branch only, not the `_ => target.
+/// clone()` fallback below it for a non-`Union` `original` - that
+/// fallback already unconditionally trusts `target` regardless of
+/// `original`'s own content, so there's nothing for `is_subtype` to
+/// usefully change there.
 pub(crate) fn narrow_type_to(original: &Type, target: &Type) -> Type {
     match original {
         Type::Union(members) => {
-            let kept: Vec<Type> = members.iter().filter(|m| *m == target).cloned().collect();
+            let kept: Vec<Type> = members
+                .iter()
+                .filter(|m| is_subtype(m, target))
+                .cloned()
+                .collect();
             match kept.len() {
                 0 => target.clone(),
                 1 => kept.into_iter().next().unwrap(),
@@ -527,10 +545,33 @@ pub(crate) fn narrow_type_to(original: &Type, target: &Type) -> Type {
 /// Narrows `original` by removing `excluded` along the branch where a check
 /// for it failed - the "not null" half of a `=== null` guard clause, the
 /// most common narrowing pattern in real code.
+///
+/// Phase 32 Finding L: a union member is dropped when it's a *subtype* of
+/// `excluded`, not just when it's structurally identical to it - the same
+/// reasoning as `narrow_type_to` above, mirrored for exclusion (`is_array
+/// (...)`'s *false*-branch exclusion of `Array(Mixed)` used to leave a
+/// specific-element `Array(String)` member behind, since it was never
+/// `==` to the generic target it should have matched as "an array").
+///
+/// Deliberately **not** applied to the non-`Union` fallback below
+/// (`other if other == excluded => Type::Never`): `is_subtype`'s own
+/// int-to-float argument-coercion rule (`Type::Int` is a subtype of
+/// `Type::Float`) would make `narrow_type_excluding(Type::Int,
+/// Type::Float)` wrongly collapse a plain, correctly-known `int` to
+/// `Type::Never` - the value genuinely is an int, and its coercibility to
+/// `float` for parameter-passing purposes has nothing to do with whether
+/// it should be excluded here. Every existing caller of this branch
+/// (`isset`'s `Null` exclusion, and similar plain-`Null` exclusions
+/// elsewhere) is unaffected either way, since no other `Type` variant is
+/// ever a subtype of `Null`.
 pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
     match original {
         Type::Union(members) => {
-            let kept: Vec<Type> = members.iter().filter(|m| *m != excluded).cloned().collect();
+            let kept: Vec<Type> = members
+                .iter()
+                .filter(|m| !is_subtype(m, excluded))
+                .cloned()
+                .collect();
             match kept.len() {
                 0 => Type::Never,
                 1 => kept.into_iter().next().unwrap(),
