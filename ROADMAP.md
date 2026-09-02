@@ -2111,6 +2111,157 @@ all - the same disclosed `Type::Array` has-no-key-type-parameter gap
 Phase 29 already surfaced, not something this fix attempts to also
 solve.
 
+## Phase 32: Piwigo false-positive hunt XIII - a full-corpus bucket sweep - DONE
+
+Phase 31 left the corpus at 508 diagnostics. Instead of chasing one
+bucket per round, this round bucketed *every* line by normalized
+message shape and root-caused each one via direct source reading and
+minimal standalone repros through `phpstan-rs demo`, verified against
+the actual current source (exact line numbers, exact function/type/enum
+names, real call sites) rather than reasoning from memory of similar
+code. Twelve independent bugs were found and fixed, each its own
+commit:
+
+- **A - duplicate-named parameters from phpstorm-stubs' own version-era
+  convention weren't deduplicated.** phpstorm-stubs represents "this
+  parameter changed across PHP versions" by declaring the same
+  conceptual parameter twice under separate
+  `#[PhpStormStubsElementAvailable]` gates (`pg_query`'s/`fsockopen`'s/
+  `SQLite3::open`'s real stubs); the lexer's own drop heuristic only
+  removed one of these when it had no default, so a duplicate reused by
+  a later parameter survived, shifting every later argument by one
+  position (`fsockopen` resolved to six params instead of five). Fixed
+  at the registry layer instead of teaching the lexer the same
+  versioning semantics a second time: real PHP can never have two
+  same-named parameters in one function, so any duplicate reaching
+  `FunctionSig::from_decl` is unconditionally this artifact - collapse
+  to the last occurrence's fields at the first occurrence's position.
+- **B - a `LanguageLevelTypeAware` parameter override lost to a
+  competing legacy `@param` docblock tag** (`resolve_type` treats a
+  matching doc tag as authoritative over the native hint - `ini_set`'s
+  own stale `@param string $value` beat a native override to
+  `string|int|float|bool|null`). Mirrors the already-correct return-type
+  override mechanism (`append_return_type_override`) for parameters
+  instead of changing `resolve_type`'s general doc-wins priority, which
+  real code elsewhere legitimately depends on.
+- **I - `resolve_type`'s docblock-vs-native reconciliation generalized
+  past `resource`.** Phase 23's `resource`-specific staleness check
+  (native hint present and real -> authoritative over a stale doc
+  member) applies to any excluded member, not just `resource` -
+  `imagesx()`'s native `int` dropped `false` for the same GD-object
+  migration Phase 23 found, without its `@return int|false` doc ever
+  catching up. Generalized via `is_subtype` - **and then corrected**
+  after a full corpus re-check found a real regression: `is_subtype`'s
+  `Object` handling is name-equality only (no class hierarchy), so a
+  doc type naming a real subclass of a more generic native return hint
+  (Doctrine-repository-typed services with a native `EntityRepository`
+  return and a doc type naming the concrete subclass) was wrongly
+  treated as incompatible and discarded - scoped back to exactly the
+  one class-name case provable without a hierarchy (a literal
+  `resource` doc member), any other class name is always kept.
+- **C - two unconditional declarations of the same function name
+  overwrote instead of merging** - the function-side sibling of Phase
+  25's class-merge fix. `strtr`'s real stub declares a
+  3-string-argument overload and a 2-argument, `array $replace_pairs`
+  overload as two separate declarations sharing one name; the second
+  silently discarded the first's own params. `FunctionSig::merge` unions
+  per-position types (later name wins on conflict), with `by_ref`
+  specifically AND'd rather than OR'd like `variadic`/`has_default` -
+  it's a restriction on the *caller*, not something being accepted.
+- **D - `microtime()`'s bool-literal-dependent return type** wasn't
+  special-cased (`microtime(true)` - the overwhelmingly common real call
+  shape - stayed `string|float` everywhere it fed `round()`/`floor()`/
+  `fmod()`).
+- **E - three more functions missing from the subject-dependent-
+  return-type family** Phase 23/31 already established:
+  `substr_replace` (subject at argument index 0), `preg_replace_callback_array`
+  (index 1), and the array-stripping half of `mb_convert_encoding`'s own
+  more involved real dynamic extension.
+- **F - `narrowing_key` didn't unwrap `??` with a literal `null`
+  fallback** (`is_int($decoded['status'] ?? null)`, a common
+  defensive-coding idiom) - deliberately scoped to a literal `null`
+  fallback specifically, since `is_int($x ?? 0)` gives no equivalent
+  soundness guarantee. Also fixed a related, pre-existing gap found
+  while testing this: `check_expr`'s own `Index` arm never consulted
+  narrowed `locals` state at all, unlike `infer_expr`'s `Index` arm and
+  `check_expr`'s own `PropertyAccess` arm right above it - a narrowed
+  array-index expression read back via a bare `return $x['k'];` kept
+  seeing the unnarrowed type.
+- **G - `is_numeric()` wasn't a recognized narrowing predicate.** A
+  first attempt added it to the shared `narrowing_type_for_predicate`
+  table - checking that against the table's actual dispatch code found
+  it would introduce a *new* false positive: the table's single target
+  type feeds both directions through the same dispatch, sound for
+  `is_scalar`/`is_string`/etc. (a string is unconditionally scalar/
+  a-string either way) but not for `is_numeric`, where a string only
+  *sometimes* qualifies - a shared target would make the false branch
+  wrongly drop `String` entirely. Implemented as its own dedicated arm
+  instead, with asymmetric, independently-sound exclusion sets per
+  branch.
+- **H - a docblock union containing `mixed` didn't collapse to plain
+  `mixed`** (`end()`'s real stub: native `mixed`, stale `@return
+  mixed|false`) - `union_types` already collapses this at construction
+  time everywhere it's used; `parse_type_string` builds a `Type::Union`
+  straight from doc text with no equivalent normalization.
+- **J - `json_encode(..., JSON_THROW_ON_ERROR)` didn't drop `false`
+  from the return type**, including through an arbitrary-depth
+  bitwise-OR flag chain (`JSON_HEX_TAG | ... | JSON_THROW_ON_ERROR`).
+- **K - a bare `$cond || neverReturningCall();` statement didn't narrow
+  `$cond`** (`ierror(): never`, PHP's "guard or die" idiom) - the same
+  "statement narrows unconditionally" reasoning already applied to
+  `assert($cond)`, extended to a condition spelled as an `Or`.
+- **L - exact type equality was the wrong tool for "is this the kind of
+  thing being narrowed."** `narrow_type_to`/`narrow_type_excluding`
+  filtered union members via `==`/`!=`, so a docblock-refined
+  `array<string>` member survived an `is_array()` exclusion untouched
+  (`Array(String) != Array(Mixed)`). Switched to `is_subtype`-based
+  membership, scoped to each function's `Union` branch only - their own
+  non-`Union` fallback stays exact-equality, since `is_subtype`'s
+  int-to-float argument-coercion rule would wrongly collapse a known
+  `int` to `Never` there. Also fixed a second, previously-silent bug
+  this uncovered in the already-shipped Phase 28 `is_scalar` special
+  case (its false branch never actually excluded anything). Separately,
+  `union_types` had the identical blind spot in the *construction*
+  direction (`union_types(String, StringLiteral(""))` kept both members
+  instead of collapsing) - fixed via a dedicated literal-absorption
+  helper, not a call to `is_subtype` itself, since `is_subtype`'s
+  int-to-float rule is an assignability fact, not a "this
+  representation is already covered" one, and would have silently
+  dropped a real `IntLiteral` sitting next to an unrelated `Float`
+  member.
+
+**DONE.** `508 -> 350` diagnostics. Verified with the same location-based
+classification loop established since Phase 25: of the lines that
+changed, the ones landing at an already-diagnosed location (a
+reworded/reordered message, e.g. Finding L's literal-absorption
+shortening `string|array|'127.0.0.1'` to `string|array`) were confirmed
+safe; every genuinely new location was traced individually. All six
+traced to the same shape - a narrowing predicate this checker doesn't
+recognize (`in_array()`, `array_key_exists()`) or `instanceof`'s
+already-disclosed unnarrowable false branch, previously masked by the
+very bugs this phase fixed, now legitimately visible - not a new defect
+introduced by this phase's own fixes.
+
+Also traced but deliberately not fixed:
+- `array_keys()`'s generic (non-`ArrayShape`) fallback and the
+  `array{...} has no key 'X'` bucket - both the already-disclosed
+  `Type::Array`-has-no-key-type limitation, not new bugs.
+- `getenv($name)` **with** an argument still types as
+  `array|string|false` under real PHPStan too (no dynamic return type
+  extension for `getenv` exists in `phpstan-src` at all) - a true
+  positive, not a false positive.
+- A `try`/`catch`-assigned variable's type after the block correctly
+  includes the pre-try value, since real PHPStan also can't prove a
+  constructor call unconditionally throws - also a true positive.
+- `int<0, 255>`-style PHPStan integer-range syntax isn't parsed at all -
+  one call site, and real support is a materially bigger feature than
+  anything else in this phase for a 3-diagnostic return.
+- A variable-subscript narrowing key (`is_string($this->mirror[$key])`
+  where `$key` is a variable, not a literal) would need this project's
+  narrowing-invalidation-on-reassignment to extend to a composite key
+  that merely *contains* the reassigned name as a substring - a real
+  soundness question, left for a dedicated future round.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
@@ -2126,7 +2277,6 @@ confused with each other.
 | --- | --- |
 | No real source positions, level system, or config/baseline | 11 |
 | No bespoke per-function/method type extensions (`array_map`/`preg_match`/`sprintf`/condition-narrowing, ...) | 12 |
-| A handful of stubs (`pg_query_params`, `pg_query`, ...) interleave multiple full parameter lists under duplicate parameter names across version eras rather than Phase 8.5's clean superseded-param-plus-variadic shape, and still miscount arity | 12 |
 | Traits checked standalone, without their eventual host class's shape | 13 |
 | `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed | 13 |
 | `always_terminates` doesn't recognize a terminating `switch`/`try`/`match` | 13 |
@@ -2142,6 +2292,10 @@ confused with each other.
 | No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
 | No LSP hover/go-to-definition | 17 |
 | No extension/plugin API | 18 |
+| `in_array()`/`array_key_exists()` aren't recognized narrowing predicates - a guard clause built on either never narrows the checked expression, unlike `isset()`/`is_*()`/`empty()` | 32 |
+| `instanceof`'s false branch narrows nothing (documented in `apply_narrowing`'s own doc comment since it was written - no "not this class" type is representable) - surfaced concretely by Phase 32's own fixes: a `$db instanceof mysqli ? ... : pg_query($db, ...)` idiom still sees `$db`'s full pre-check union in the `else` branch | 32 |
+| A variable-subscript array-index narrowing key (`is_string($this->mirror[$key])` where `$key` is a variable, not a literal) isn't attempted - sound in principle only as long as nothing between the check and the use reassigns the subscript variable, which this project's narrowing-invalidation-on-reassignment doesn't obviously extend to for a composite key that merely contains the reassigned name as a substring | 32 |
+| `int<min, max>`-style PHPStan/Psalm integer-range syntax isn't parsed | 32 |
 
 **Permanent design boundaries (not phase-tracked - not planned, by choice):**
 
