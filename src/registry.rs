@@ -1538,6 +1538,96 @@ mod tests {
         assert_eq!(sig.return_type, Type::Int);
     }
 
+    // Finding A (Phase 32): phpstorm-stubs represents "this parameter
+    // changed across PHP versions" as the same conceptual parameter
+    // declared twice, each gated by its own `#[PhpStormStubsElementAvailable]`
+    // attribute - real PHP can't have two same-named parameters in one
+    // function, so a duplicate name reaching `FunctionSig::from_decl` is
+    // unconditionally this versioning artifact. Real shape: `pg_query`'s
+    // `$connection`.
+    #[test]
+    fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
+        let r = build_registry(
+            r#"<?php
+            function pg_query(
+                #[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] $connection = null,
+                #[PhpStormStubsElementAvailable(from: '8.0')] \PgSql\Connection $connection,
+                string $query
+            ) {}
+        "#,
+        );
+        let sig = &r.functions["pg_query"];
+        assert_eq!(sig.params.len(), 2, "the legacy duplicate must be dropped");
+        assert_eq!(sig.params[0].name, "connection");
+        assert_eq!(
+            sig.params[0].ty,
+            Type::Object("PgSql\\Connection".to_string(), Vec::new()),
+            "the surviving type must be the modern (second) occurrence's, not the legacy (first, untyped) one"
+        );
+        assert_eq!(sig.params[1].name, "query");
+        assert_eq!(sig.params[1].ty, Type::String);
+    }
+
+    // Real shape: `SQLite3::open`'s `$flags`/`$encryptionKey`, two
+    // separate duplicated pairs in the same parameter list.
+    #[test]
+    fn two_separate_duplicated_parameter_pairs_both_collapse() {
+        let r = build_registry(
+            r#"<?php
+            function sqlite3_open(
+                string $filename,
+                #[PhpStormStubsElementAvailable(from: '5.3', to: '5.6')] $flags = 6,
+                #[PhpStormStubsElementAvailable(from: '5.3', to: '5.6')] $encryptionKey = '',
+                #[PhpStormStubsElementAvailable(from: '7.0')] int $flags = 0,
+                #[PhpStormStubsElementAvailable(from: '7.0')] string $encryptionKey = ''
+            ) {}
+        "#,
+        );
+        let sig = &r.functions["sqlite3_open"];
+        assert_eq!(sig.params.len(), 3);
+        assert_eq!(sig.params[1].name, "flags");
+        assert_eq!(sig.params[1].ty, Type::Int);
+        assert_eq!(sig.params[2].name, "encryptionKey");
+        assert_eq!(sig.params[2].ty, Type::String);
+    }
+
+    // Real shape: `fsockopen`'s duplicated `$port` - the duplicate that
+    // actually broke argument binding (Finding A's own motivating case),
+    // since it isn't the last parameter.
+    #[test]
+    fn a_duplicated_parameter_in_the_middle_of_the_list_doesn_t_shift_later_ones() {
+        let r = build_registry(
+            r#"<?php
+            function fsockopen(
+                string $hostname,
+                #[PhpStormStubsElementAvailable(from: '5.3', to: '7.0')] int $port = -1,
+                #[PhpStormStubsElementAvailable(from: '7.1')] int $port = -1,
+                &$error_code = null,
+                &$error_message = null,
+                ?float $timeout = null
+            ) {}
+        "#,
+        );
+        let sig = &r.functions["fsockopen"];
+        assert_eq!(sig.params.len(), 5);
+        assert_eq!(
+            sig.params
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["hostname", "port", "error_code", "error_message", "timeout"]
+        );
+    }
+
+    #[test]
+    fn a_function_with_no_duplicate_parameters_is_unaffected() {
+        let r = build_registry(r#"<?php function f(int $a, string $b) {}"#);
+        let sig = &r.functions["f"];
+        assert_eq!(sig.params.len(), 2);
+        assert_eq!(sig.params[0].name, "a");
+        assert_eq!(sig.params[1].name, "b");
+    }
+
     #[test]
     fn phpdoc_wins_over_a_conflicting_native_hint() {
         let r = build_registry(

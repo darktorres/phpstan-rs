@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Expr, ExprKind, FunctionDecl, Literal};
 use crate::docblock::{self, DocBlock};
@@ -250,6 +250,7 @@ impl FunctionSig {
                 }
             })
             .collect();
+        let params = dedup_versioned_params(params);
 
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
         let return_type = resolve_type(doc_return, f.return_type.as_deref());
@@ -261,4 +262,41 @@ impl FunctionSig {
             return_type,
         }
     }
+}
+
+/// phpstorm-stubs represents "this parameter's type/default changed
+/// across PHP versions" by declaring the *same conceptual parameter
+/// twice*, once per era, each gated by its own
+/// `#[PhpStormStubsElementAvailable(from: X, to: Y)]` attribute (real
+/// shape: `pg_query`'s `$connection`, `fsockopen`'s `$port`,
+/// `SQLite3::open`'s `$flags`/`$encryptionKey`) - but real PHP cannot
+/// declare two parameters with the same name in one function (a fatal
+/// error), so any duplicate name reaching here is unconditionally this
+/// versioning artifact, never a legitimate shape, regardless of which
+/// attribute produced it or whether it has a default. The lexer's own
+/// `skip_stub_availability_attribute` heuristic already drops some of
+/// these (a closed-range duplicate with no default), but keeps one that
+/// does have a default - correct for a different real shape
+/// (`imagefilter`'s uniquely-named `$arg1`..`$arg4` before a
+/// differently-named variadic) but wrong when the kept duplicate's name
+/// is reused by a later parameter, producing a function with one extra
+/// position and every real argument after it binding to the wrong
+/// parameter. Collapsing here, after the lexer, needs no knowledge of
+/// that versioning idiom at all: keep each name's *last* occurrence
+/// (phpstorm-stubs always writes the legacy era first, the modern one
+/// last), at the *position* of its *first* occurrence, so later
+/// uniquely-named parameters aren't shifted.
+fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
+    let mut order: Vec<String> = Vec::new();
+    let mut by_name: HashMap<String, ParamSig> = HashMap::new();
+    for p in params {
+        if !by_name.contains_key(&p.name) {
+            order.push(p.name.clone());
+        }
+        by_name.insert(p.name.clone(), p);
+    }
+    order
+        .into_iter()
+        .map(|name| by_name.remove(&name).expect("just inserted for this name"))
+        .collect()
 }
