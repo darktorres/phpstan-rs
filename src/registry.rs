@@ -1868,6 +1868,38 @@ mod tests {
         );
     }
 
+    // Found via a full corpus re-check after first shipping Finding I as
+    // a bare `is_subtype(member, native_ty)` filter: `is_subtype`'s own
+    // `Object` handling is name-equality only (no class hierarchy), so a
+    // doc type naming a real subclass of a more generic native return
+    // hint - the actual real corpus shape, a Doctrine-repository-typed
+    // service declaring a native `EntityRepository` return with a doc
+    // type naming the real concrete repository subclass - was wrongly
+    // treated as "incompatible" and discarded in favor of the generic
+    // native type, a real regression across dozens of real call sites.
+    // Scoped back to exactly the one class-name case this project can
+    // prove reliably (a literal `resource` doc member) - any other class
+    // name must always be kept.
+    #[test]
+    fn a_doc_type_naming_a_real_subclass_of_the_native_hint_is_not_discarded() {
+        let r = build_registry(
+            r#"<?php
+            class EntityRepository {}
+            class ActivityRepository extends EntityRepository {}
+            class ActivityService {
+                /** @return ActivityRepository */
+                private function getRepository(): EntityRepository {
+                    return new ActivityRepository();
+                }
+            }
+        "#,
+        );
+        assert_eq!(
+            r.classes["ActivityService"].methods["getRepository"].return_type,
+            Type::Object("ActivityRepository".to_string(), Vec::new())
+        );
+    }
+
     #[test]
     fn phpdoc_wins_over_a_conflicting_native_hint() {
         let r = build_registry(

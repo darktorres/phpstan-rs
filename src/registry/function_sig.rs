@@ -130,12 +130,45 @@ fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
     };
     let kept: Vec<Type> = members
         .into_iter()
-        .filter(|m| types::is_subtype(m, &native_ty))
+        .filter(|m| member_possible_given_native(m, &native_ty))
         .collect();
     match kept.len() {
         0 => native_ty,
         1 => kept.into_iter().next().unwrap(),
         _ => Type::Union(kept),
+    }
+}
+
+/// Whether a docblock-derived member `m` could still be real given
+/// `native_ty` - found necessary the hard way, via a full corpus re-check
+/// after first shipping this as a bare `is_subtype(m, native_ty)` call:
+/// for anything except a named class/interface (`Type::Object`),
+/// `is_subtype` gives a reliable, hierarchy-independent answer (scalar/
+/// array/... subtyping never depends on an unverified class
+/// relationship). For an `Object`, this project has no class hierarchy
+/// to consult at the point `resolve_type` runs (`FunctionSig::from_decl`
+/// is still building the very registry a real lookup would need,
+/// long before one exists) - `is_subtype`'s own Object handling is
+/// name-equality only, so treating that as "incompatible" wrongly
+/// discarded a real, common shape: a doc type naming an actual subclass
+/// of a more generic native return hint (real corpus regression:
+/// Doctrine-repository-typed services declaring a native
+/// `EntityRepository` return with a doc type naming the real concrete
+/// repository subclass, e.g. `ActivityRepository` - is_subtype couldn't
+/// see the inheritance, so the doc's own more-precise type was wrongly
+/// dropped in favor of the generic base class). Scoped back to exactly
+/// the one class-name case this project *can* prove reliably (Phase 23's
+/// own original, narrower finding: a literal `resource` doc member
+/// against a native hint that no longer mentions it) - any other class
+/// name is always kept, since "doc names a real subclass" and "doc is
+/// simply stale" can't be told apart without the hierarchy this function
+/// doesn't have, and silently guessing wrong here is worse than not
+/// generalizing past what's actually provable.
+fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
+    match m {
+        Type::Object(name, _) if name == "resource" => types::is_subtype(m, native_ty),
+        Type::Object(_, _) => true,
+        _ => types::is_subtype(m, native_ty),
     }
 }
 
