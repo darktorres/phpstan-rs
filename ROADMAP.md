@@ -29,13 +29,13 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 815 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 817 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 12's preg_match work.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
-  249 (Phase 35) -> **241 (current, Phase 12's preg_match work)**.
+  249 (Phase 35) -> **240 (current, Phase 12's preg_match work)**.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -180,41 +180,6 @@ comments.
   sequential/nested branches, not just for `preg_match`'s own `$matches`.
   No phase scheduled yet - a candidate for whichever future round tackles
   array-shape generalization.
-- **A class's own type-checking completeness depends on whether *that
-  exact file* is itself one of the files passed to `check-project`, not
-  just reachable as context** - a real, confirmed, and still-unexplained
-  correctness bug, found via this same Phase 12 corpus re-check (not
-  guessed): `Piwigo\Controller\Api\Categories\CategoryUpdateController::
-  __invoke` infers `$update`'s type completely differently depending on
-  invocation scope. Checking `src/Piwigo/Controller/Api/Categories/
-  CategoryUpdateController.php` alone (or its whole containing directory)
-  gives the correct 8-member `Union` (matching direct hand-tracing of its
-  three independent `if ($input->visible/name/comment !== null)` guards,
-  half of which genuinely include a `'visible'` key). Adding
-  `src/Piwigo/Category/Projection/Category.php` (the `instanceof Category`
-  target this function itself narrows `$category` against, a few lines
-  above `$update` is even built) to the *same* invocation changes the
-  computed union to 4 members and *silently drops every variant that
-  includes `'visible'`* - confirmed deterministic (reproduced 3x, not
-  HashMap-iteration-order noise) and narrowed via directory/file
-  bisection to specifically that one file's presence-or-absence in the
-  invocation's own file list, not corpus size or ordering in general.
-  Leading, unverified hypothesis (not yet confirmed by reading the actual
-  registry-population code path): whether a referenced class like
-  `Category` is "checked" vs merely "loaded for context" changes how
-  completely its own property/method info gets registered, which could
-  make `instanceof Category` narrowing (or the later `$category->visible`
-  property read) behave differently depending on that completeness -
-  consistent with the observed symptom, but not confirmed as the actual
-  mechanism. Left as a named, real, unresolved bug for a dedicated future
-  session (needs its own root-cause trace through `registry.rs`'s class
-  population, not a quick fix alongside Phase 12) - surfaced one false
-  positive so far (`CategoryUpdateController.php:96:29`, "no key
-  'visible'" on `unset($updateFields['visible'])`), but the underlying
-  mechanism could affect *any* class referenced via `instanceof` whose own
-  file isn't part of a given `check-project` invocation's explicit file
-  list, which is concerning enough to flag prominently rather than folding
-  quietly into a single-diagnostic note.
 - **phpstorm-stubs' interleaved-multiple-parameter-list shape isn't
   recognized.** Some stubs (`pg_query_params`, `pg_query`, several
   others) declare *two full parameter lists* under the same parameter
@@ -560,6 +525,78 @@ new bug: `DerivativeImage::build`'s `getByType()` argument mismatch
 (`int|string` where `string` is expected) comes from `array_keys()`'s own
 lack of a real key-type parameter, the existing `Type::Array` key-type row
 in the Known limitations table above (tracked under Phase 15).
+
+**Follow-on investigation, 2026-09-02**: a further corpus re-check (using
+`--config phpstan-rs.toml <explicit files>` for bisection) surfaced a
+`CategoryUpdateController::__invoke` false positive ("no key 'visible'")
+that looked, at first, like a deep, alarming bug: checking that file
+alone (or its whole directory) inferred `$update`'s type correctly, but
+adding `src/Piwigo/Category/Projection/Category.php` (the `instanceof`
+target it narrows `$category` against) to the *same* invocation changed
+the result and silently dropped every union member that included
+`'visible'`. That framing turned out to be a real but misleading
+symptom, not the actual mechanism - direct tracing (via `gdb`-style
+targeted `eprintln!` instrumentation on `always_terminates`, then a
+from-scratch minimal repro) found two independent, genuinely
+general, always-reproducible bugs, neither specific to cross-file
+context at all:
+
+- **`apply_equality_narrowing`'s exclusion branch (`checker/
+  narrowing.rs`) treated "the other side of a `!==` comparison has this
+  *general* static type" the same as "the other side is one specific,
+  already-known value"** - sound for `Null`/`True`/`False`/a literal (its
+  only real callers before this), unsound for a general type like `Bool`
+  (which covers *two* distinct values): `?bool $a` narrowed to `bool` by
+  `$a !== null`, then compared `$a !== $b` (`bool $b`, itself not a
+  literal) wrongly collapsed `$a` to `Type::Never` the moment
+  `$category->visible`'s real type resolved precisely to `Bool` (which is
+  why the two-file case differed - `Category.php` not being checked at
+  all left `$category->visible` as `Mixed`, which the existing `target_ty
+  == Type::Mixed` bail already skips). A `Never`-typed last statement
+  then made `always_terminates` (`checker/control_flow.rs`) wrongly treat
+  the whole `if`-branch as dead code, discarding its `$update['visible']
+  = ...` write entirely from the merged result. Fixed with a new
+  `is_known_single_value` gate: only `Null`/`True`/`False`/a literal
+  authorize the exclusion; anything else leaves the narrowed type
+  unchanged, this project's usual "don't guess" default. Minimized,
+  single-file repro: `function test(?bool $a, bool $b) { if ($a !== null
+  && $a !== $b) { $update['flag'] = $a; } echo $update['flag']; }`.
+  `narrow_type_to` (the `===`-true-branch counterpart) doesn't share this
+  bug - for a non-`Union` original it always returns the target
+  outright, sound regardless of whether the target is a literal or a
+  general type, since `===` between statically-incompatible types is
+  dead code either way.
+- **`check_expr`'s own `Ternary` arm (`checker/expr.rs`) wrote
+  `merge_scopes(then_locals, else_locals)` back into the *real* `locals`
+  afterward, copying `StmtKind::If`'s own pattern for a construct that
+  isn't actually a control-flow statement.** A ternary's condition
+  narrowing a variable within evaluating its own `then`/`else`
+  sub-expressions is correct and already achieved by the existing
+  per-branch clones; writing that back into the surrounding scope isn't -
+  once the ternary as a whole finishes, only its *value* matters to
+  whatever contains it, not which hypothetical branch's narrowing might
+  have applied. Real, confirmed impact: `$collected === [] ? null :
+  preg_replace('/.../', '', $collected[0])` narrowed `$collected`
+  (declared `list<string>`) down to the literal empty shape on the
+  condition's own true branch, then permanently unioned that into
+  `$collected`'s real tracked type - corrupting a *second*, independent
+  evaluation of the same sub-expression (`check_property_assignment`'s
+  own redundant `infer_expr` call on the same right-hand side) into
+  seeing `$collected[0]` as `Mixed` instead of `string`, defeating
+  `preg_replace`'s own subject-type-dependent return-type precision.
+  `infer_expr`'s own parallel `Ternary` handling never had this bug - it
+  only ever receives `&Locals`, not `&mut Locals`, so it structurally
+  can't write back at all; the fix removes the write-back from
+  `check_expr`'s side to match. Confirmed dead code, not just
+  theoretically unnecessary: removing it left all 816 then-existing
+  tests passing unchanged.
+
+Both fixed and verified via the disable-and-confirm-failure technique;
+frozen-corpus count fell 249 -> 241 (the equality-narrowing fix, plus
+incidentally correcting a `never`-typed leak in
+`CategoryService::updateUppercats`'s own diagnostic message) -> 240 (the
+ternary fix, closing the false positive it had briefly introduced along
+the way). No diagnostic regressed at any step.
 
 ## Phase 13 - Narrowing precision and remaining false-positive causes - PLANNED
 
