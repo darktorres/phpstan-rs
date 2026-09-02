@@ -79,55 +79,62 @@ pub(crate) fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) ->
     } else {
         ty
     };
-    // Phase 23: phpstorm-stubs' own `@return`/`@param` doc comments
-    // commonly predate a later PHP version's native-signature tightening
-    // - real shape: `imagecreatefromstring`'s native return hint was
-    // updated to `GdImage|false` for PHP 8's GD object migration, but its
-    // `@return resource|GdImage|false` doc comment above it was never
-    // revised. PHP enforces a native type hint identically at runtime on
-    // both params and returns, so when one is present, real, and its own
-    // raw text doesn't mention `resource` at all, it's authoritative over
-    // a docblock that still does - the docblock's `resource` member there
-    // is simply stale, not a legitimate legacy alternative this project
-    // should keep believing is possible.
+    // Phase 23/Phase 32 Finding I: phpstorm-stubs' own `@return`/`@param`
+    // doc comments commonly predate a later PHP version's native-signature
+    // tightening - real shape: `imagecreatefromstring`'s native return hint
+    // was updated to `GdImage|false` for PHP 8's GD object migration, but
+    // its `@return resource|GdImage|false` doc comment above it was never
+    // revised (Phase 23's own motivating case); `imagesx`/`imagesy`'s
+    // native `int` similarly dropped `false` without their `@return
+    // int|false` doc ever catching up. PHP enforces a native type hint
+    // identically at runtime, so when one is present and real, it's
+    // authoritative about what's *possible* - any docblock member
+    // incompatible with it can never actually happen, whatever a stale
+    // comment claims. `resource` and `false` aren't the only members that
+    // can go stale this way, so rather than hardcoding a check per member
+    // (as this project's own first attempt at `false` did, before finding
+    // this generalization instead), `reconcile_with_native` tests
+    // "incompatible" precisely via `is_subtype`.
     //
-    // "Real" excludes `mixed`/`object` specifically - real code (this
-    // project's own `Logger::$fileHandle`, Symfony `Process::setInput`)
-    // deliberately types something `mixed` *because* PHP has no native
+    // Excludes `object` specifically - real code (this project's own
+    // `Logger::$fileHandle`, Symfony `Process::setInput`) deliberately
+    // types something `mixed`/`object` *because* PHP has no native
     // `resource` type to declare, leaning on the docblock to carry the
-    // only real type information rather than the native hint contradicting
-    // anything - confirmed the hard way: an earlier, unconditional version
-    // of this fix incorrectly stripped `resource` from exactly this
-    // legitimate "native hint is a deliberate placeholder" shape.
+    // only real type information. A `mixed` native doesn't need its own
+    // exclusion here: `is_subtype(_, Type::Mixed)` is unconditionally
+    // `true`, so `reconcile_with_native` already keeps every doc member
+    // when native is `mixed`, for free. `object`'s own subtyping is
+    // name-equality-only (see `types::is_subtype`'s own doc comment), so
+    // it doesn't get the same automatic fallout and still needs the
+    // explicit guard.
     match native_hint {
-        Some(native)
-            if !matches!(native.trim(), "mixed" | "object")
-                && !native.to_ascii_lowercase().contains("resource") =>
-        {
-            strip_resource_member(ty)
+        Some(native) if native.trim() != "object" => {
+            reconcile_with_native(ty, types::parse_type_string(native))
         }
         _ => ty,
     }
 }
 
-/// Removes any `Type::Object("resource", _)` member from `ty` - see
-/// `resolve_type`'s own doc comment for why this only fires when a
-/// native type hint is present and itself omits `resource`.
-fn strip_resource_member(ty: Type) -> Type {
-    fn is_resource(t: &Type) -> bool {
-        matches!(t, Type::Object(name, _) if name == "resource")
-    }
-    match ty {
-        Type::Union(members) => {
-            let kept: Vec<Type> = members.into_iter().filter(|m| !is_resource(m)).collect();
-            match kept.len() {
-                0 => Type::Mixed,
-                1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
-            }
-        }
-        Type::Object(name, _) if name == "resource" => Type::Mixed,
-        other => other,
+/// Filters `doc_ty`'s own members down to whichever are subtypes of
+/// `native_ty` - see `resolve_type`'s own doc comment for the reasoning.
+/// Falls back to `native_ty` itself when *no* doc member survives (rather
+/// than collapsing to `Mixed`), so a doc type that's entirely stale
+/// (`finfo_file`'s bare `resource` against a modern `finfo` native) still
+/// resolves to the real, useful native type instead of losing all
+/// precision.
+fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
+    let members: Vec<Type> = match doc_ty {
+        Type::Union(members) => members,
+        other => vec![other],
+    };
+    let kept: Vec<Type> = members
+        .into_iter()
+        .filter(|m| types::is_subtype(m, &native_ty))
+        .collect();
+    match kept.len() {
+        0 => native_ty,
+        1 => kept.into_iter().next().unwrap(),
+        _ => Type::Union(kept),
     }
 }
 

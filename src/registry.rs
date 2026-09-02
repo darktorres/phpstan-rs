@@ -1709,6 +1709,62 @@ mod tests {
         );
     }
 
+    // Finding I (Phase 32): `resolve_type`'s docblock-vs-native
+    // reconciliation generalizes Phase 23's `resource`-specific staleness
+    // check into one rule via `is_subtype` - a real, present, non-`object`
+    // native hint is authoritative about what's possible; any docblock
+    // member incompatible with it can never actually happen. Real shape:
+    // `imagesx`'s native `int` vs. a stale `@return int|false` doc (the
+    // GD-object migration dropped `false` from the native hint without
+    // the doc ever being updated).
+    #[test]
+    fn a_stale_false_member_is_dropped_when_the_native_hint_no_longer_allows_it() {
+        let r = build_registry(
+            r#"<?php
+            /** @return int|false */
+            function imagesx(): int {}
+        "#,
+        );
+        assert_eq!(r.functions["imagesx"].return_type, Type::Int);
+    }
+
+    // A native hint that itself keeps `false` must *not* have it stripped
+    // from the doc - proof this isn't now unconditionally dropping `false`,
+    // only when the native hint disallows it.
+    #[test]
+    fn a_false_member_the_native_hint_still_allows_is_kept() {
+        let r = build_registry(
+            r#"<?php
+            /** @return int|false */
+            function f(): int|false {}
+        "#,
+        );
+        assert_eq!(
+            r.functions["f"].return_type,
+            Type::Union(vec![Type::Int, Type::False])
+        );
+    }
+
+    // A `mixed`-native case must still trust the doc fully, now via the
+    // general `is_subtype(_, Type::Mixed)` rule falling out for free
+    // rather than a dedicated `mixed`/`object` branch.
+    #[test]
+    fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
+        let r = build_registry(
+            r#"<?php
+            /** @return resource|false */
+            function f(): mixed {}
+        "#,
+        );
+        assert_eq!(
+            r.functions["f"].return_type,
+            Type::Union(vec![
+                Type::Object("resource".to_string(), Vec::new()),
+                Type::False
+            ])
+        );
+    }
+
     #[test]
     fn phpdoc_wins_over_a_conflicting_native_hint() {
         let r = build_registry(
