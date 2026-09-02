@@ -209,6 +209,12 @@ pub(crate) use assignment::{is_superglobal, literal_string_key, literal_string_v
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use control_flow::{body_contains_yield, merge_scopes};
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
+// Only ever called by `union_types` itself in real code (`checker/expr.rs`) -
+// this crate-level re-export exists solely so this module's own test
+// suite can exercise it directly, the same reason `preg_match_matches_shape`
+// isn't re-exported either.
+#[cfg(test)]
+pub(crate) use expr::generalize_by_key_set;
 pub(crate) use narrowing::{
     is_real_variable_key, narrow_type_excluding, narrowing_key, purge_stale_narrowing_for,
 };
@@ -2466,6 +2472,112 @@ mod tests {
             result,
             Type::Union(vec![Type::Int, Type::String, Type::Bool, Type::Null])
         );
+    }
+
+    // Task 2: array-shape generalization, tried before the hard
+    // MAX_UNION_MEMBERS collapse - 13 shapes that all share the *same*
+    // key set merge into one shape with unioned field types instead of
+    // collapsing to `Mixed`. Tested directly against `generalize_by_key_
+    // set` itself, not via sequential `union_types` calls: `.reduce()`
+    // builds the union one pairwise call at a time, which triggers
+    // generalization repeatedly at different *partial* states (and can
+    // itself separately trip the per-field union's own `MAX_UNION_
+    // MEMBERS` cap when the field values are too varied) - a real
+    // property of how `union_types` is actually invoked, but not what
+    // this test is trying to isolate, which is `generalize_by_key_set`'s
+    // own one-shot merge behavior over an already-complete member list.
+    #[test]
+    fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
+        // Only 2 distinct field values (alternating), so the per-field
+        // union stays well under its own cap and the result is a clean,
+        // precise `bool`, not `Mixed` - proving the merge actually folds
+        // real field types together, not just picks one arbitrarily.
+        let members: Vec<Type> = (0..13)
+            .map(|i| {
+                let value = if i % 2 == 0 { Type::True } else { Type::False };
+                Type::ArrayShape(vec![("x".to_string(), value, false)])
+            })
+            .collect();
+        let result = generalize_by_key_set(members);
+        assert_eq!(
+            result.len(),
+            1,
+            "expected every same-key-set shape to merge into one"
+        );
+        match &result[0] {
+            Type::ArrayShape(fields) => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].0, "x");
+                assert!(!fields[0].2, "the merged field must not be optional");
+                assert_eq!(
+                    fields[0].1,
+                    Type::Union(vec![Type::True, Type::False]),
+                    "expected the alternating True/False values to fold into a real Union"
+                );
+            }
+            other => panic!("expected a single merged ArrayShape, got {other:?}"),
+        }
+    }
+
+    // A mix of same- and different-key-set shapes only merges the
+    // matching subset - the different-key-set members pass through
+    // untouched, exactly as many members as went in.
+    #[test]
+    fn generalize_by_key_set_only_merges_the_matching_subset() {
+        let mut members: Vec<Type> = (0..13)
+            .map(|i| {
+                let value = if i % 2 == 0 { Type::True } else { Type::False };
+                Type::ArrayShape(vec![("x".to_string(), value, false)])
+            })
+            .collect();
+        members.extend((0..5).map(|i| Type::ArrayShape(vec![(format!("y{i}"), Type::Int, false)])));
+        let result = generalize_by_key_set(members);
+        // The 13 same-key-set ("x") shapes merge into 1; the 5
+        // different-key-set ("y0".."y4") shapes each stay distinct and
+        // untouched.
+        assert_eq!(result.len(), 6, "expected 1 merged + 5 untouched members");
+        let untouched_y_shapes = result
+            .iter()
+            .filter(|m| matches!(m, Type::ArrayShape(fields) if fields.len() == 1 && fields[0].0.starts_with('y')))
+            .count();
+        assert_eq!(
+            untouched_y_shapes, 5,
+            "expected all 5 y-shapes to pass through unmerged"
+        );
+    }
+
+    // The two tests above exercise `generalize_by_key_set` directly;
+    // this one confirms `union_types` itself actually calls it - built as
+    // a single `union_types(pre_built_union_of_12, one_more_shape)` call
+    // (not a `.reduce()` chain) specifically so only *one* generalization
+    // pass happens, matching what `generalize_by_key_set`'s own
+    // standalone tests already prove that pass does.
+    #[test]
+    fn union_types_itself_generalizes_before_collapsing_to_mixed() {
+        let first_twelve = Type::Union(
+            (0..12)
+                .map(|i| {
+                    let value = if i % 2 == 0 { Type::True } else { Type::False };
+                    Type::ArrayShape(vec![("x".to_string(), value, false)])
+                })
+                .collect(),
+        );
+        // A genuinely new value, distinct from every one of the first 12
+        // (which only alternate True/False) - `union_types`'s own
+        // existing dedup (`!members.contains(&other)`) would otherwise
+        // silently no-op adding a 13th member that already exists,
+        // masking whether generalization ran at all.
+        let thirteenth = Type::ArrayShape(vec![("x".to_string(), Type::Null, false)]);
+        let result = union_types(first_twelve, thirteenth);
+        match result {
+            Type::ArrayShape(fields) => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].0, "x");
+            }
+            other => panic!(
+                "expected union_types to generalize down to one merged ArrayShape, got {other:?}"
+            ),
+        }
     }
 
     // Real shape: `Piwigo\Tag\TagService::getTagIds(string|array<string>

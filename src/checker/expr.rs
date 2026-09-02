@@ -2417,6 +2417,9 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         None => true,
     });
     if members.len() > MAX_UNION_MEMBERS {
+        members = generalize_by_key_set(members);
+    }
+    if members.len() > MAX_UNION_MEMBERS {
         return Type::Mixed;
     }
     if members.len() == 1 {
@@ -2424,6 +2427,66 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
     } else {
         Type::Union(members)
     }
+}
+
+/// A follow-up to the `MAX_UNION_MEMBERS` cap above: before giving up to
+/// `Mixed`, try to merge same-key-set `ArrayShape`s into one shape with
+/// unioned field types - only tried once the cap would otherwise fire,
+/// never applied to a union already under it, so a small union's
+/// behavior is completely unaffected. Two `ArrayShape`s merge only when
+/// their field-name *sets* are identical (order-independent) -
+/// deliberately not a fuzzier "mostly-the-same-shape" heuristic. This
+/// directly targets the exact failure pattern that caused the real hang
+/// `MAX_UNION_MEMBERS` itself was added to fix (many sequential/nested
+/// branches repeatedly writing the *same* known keys with different
+/// value types onto one variable), without touching the cap itself,
+/// which stays as the safety net for whatever's left ungeneralizable
+/// (e.g. a variable whose branches genuinely have *different* key sets -
+/// real, inherent branching precision, correctly left untouched here,
+/// still protected by the hard cap if it ever grows past it).
+pub(crate) fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
+    type ShapeFields = Vec<(String, Type, bool)>;
+    let mut groups: Vec<(Vec<String>, Vec<ShapeFields>)> = Vec::new();
+    let mut passthrough: Vec<Type> = Vec::new();
+    for m in members {
+        match m {
+            Type::ArrayShape(fields) => {
+                let mut key_set: Vec<String> = fields.iter().map(|(k, _, _)| k.clone()).collect();
+                key_set.sort();
+                match groups.iter_mut().find(|(k, _)| *k == key_set) {
+                    Some((_, variants)) => variants.push(fields),
+                    None => groups.push((key_set, vec![fields])),
+                }
+            }
+            other => passthrough.push(other),
+        }
+    }
+    for (_, variants) in groups {
+        if variants.len() == 1 {
+            passthrough.push(Type::ArrayShape(variants.into_iter().next().unwrap()));
+            continue;
+        }
+        let field_names: Vec<String> = variants[0].iter().map(|(k, _, _)| k.clone()).collect();
+        let merged = field_names
+            .into_iter()
+            .map(|name| {
+                let mut ty: Option<Type> = None;
+                let mut optional = false;
+                for fields in &variants {
+                    let (_, field_ty, field_opt) =
+                        fields.iter().find(|(k, _, _)| *k == name).unwrap();
+                    ty = Some(match ty {
+                        None => field_ty.clone(),
+                        Some(acc) => union_types(acc, field_ty.clone()),
+                    });
+                    optional |= *field_opt;
+                }
+                (name, ty.unwrap(), optional)
+            })
+            .collect();
+        passthrough.push(Type::ArrayShape(merged));
+    }
+    passthrough
 }
 
 /// The "lossless absorption" half of `union_types`' own literal-dedup
