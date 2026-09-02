@@ -1895,6 +1895,20 @@ impl<'a> Checker<'a> {
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_array_member(generic);
             }
+            // Phase 32 Finding J: json_encode(...): string|false -
+            // passing JSON_THROW_ON_ERROR makes a real failure throw
+            // instead of returning false. Real PHPStan's own
+            // JsonThrowOnErrorDynamicReturnTypeExtension recognizes this
+            // via a bitwise-OR-aware constant check on the flags
+            // argument - `contains_json_throw_on_error` walks an
+            // arbitrary-depth `|`-chain the same way (real corpus shape:
+            // `JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+            // | JSON_THROW_ON_ERROR`), not just a bare constant.
+            "json_encode" if args.len() >= 2 && contains_json_throw_on_error(&args[1].value) => {
+                let resolved = resolve_call_args(args, &sig.params);
+                let generic = self.infer_call_return_type(sig, &resolved, locals);
+                return strip_false_member(generic);
+            }
             _ => {}
         }
         let resolved = resolve_call_args(args, &sig.params);
@@ -2213,6 +2227,40 @@ fn strip_array_member(ty: Type) -> Type {
         }
         Type::Array(_) | Type::ArrayShape(_) => Type::Mixed,
         other => other,
+    }
+}
+
+/// The `json_encode`/Finding J counterpart of `strip_array_member` above -
+/// identical shape, filtering `Type::False` instead of `Array`/`ArrayShape`.
+fn strip_false_member(ty: Type) -> Type {
+    match ty {
+        Type::Union(members) => {
+            let kept: Vec<Type> = members.into_iter().filter(|m| *m != Type::False).collect();
+            match kept.len() {
+                0 => Type::Mixed,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        Type::False => Type::Mixed,
+        other => other,
+    }
+}
+
+/// Whether `e` is (or bitwise-ORs together, to any depth) a `Name`
+/// resolving to `JSON_THROW_ON_ERROR` - real corpus shapes include both a
+/// bare `JSON_THROW_ON_ERROR` and a multi-flag chain
+/// (`JSON_HEX_TAG | JSON_HEX_AMP | ... | JSON_THROW_ON_ERROR`). Tolerates
+/// a leading-backslash global name (`\JSON_THROW_ON_ERROR`), seen as-is
+/// in the corpus.
+fn contains_json_throw_on_error(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Name(name) => name.trim_start_matches('\\') == "JSON_THROW_ON_ERROR",
+        ExprKind::Binary(BinOp::BitOr, l, r) => {
+            contains_json_throw_on_error(l) || contains_json_throw_on_error(r)
+        }
+        ExprKind::Grouping(inner) => contains_json_throw_on_error(inner),
+        _ => false,
     }
 }
 

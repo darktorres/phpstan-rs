@@ -1422,6 +1422,55 @@ mod tests {
         );
     }
 
+    // Phase 32 Finding J: json_encode(...): string|false - passing
+    // JSON_THROW_ON_ERROR makes a real failure throw instead of
+    // returning false.
+    #[test]
+    fn json_encode_with_throw_on_error_infers_plain_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($x): string {
+                return json_encode($x, JSON_THROW_ON_ERROR);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Real shape: `UserListPageRenderer`'s own bitwise-OR'd multi-flag
+    // call - the fix has to walk an arbitrary-depth `|`-chain, not just
+    // match a bare constant.
+    #[test]
+    fn json_encode_with_throw_on_error_in_a_multi_flag_bitor_chain_infers_plain_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($x): string {
+                return json_encode($x, JSON_HEX_TAG | JSON_HEX_AMP | JSON_THROW_ON_ERROR);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn json_encode_without_throw_on_error_keeps_todays_generic_union() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($x): string {
+                return json_encode($x);
+            }
+            function g($x): string {
+                return json_encode($x, JSON_PRETTY_PRINT);
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            2,
+            "expected the generic string|false union to still apply to both: {d:?}"
+        );
+    }
+
     #[test]
     fn sprintf_flags_too_few_arguments_for_its_own_placeholders() {
         let d = diagnostics_for(r#"<?php sprintf("%s and %s", "only one");"#);
