@@ -1628,6 +1628,87 @@ mod tests {
         assert_eq!(sig.params[1].name, "b");
     }
 
+    // Finding B (Phase 32): a `LanguageLevelTypeAware` parameter override
+    // loses to a competing legacy `@param` docblock tag, since the
+    // override was only ever injected as a native type hint - `resolve_type`
+    // treats a matching `@param` tag as authoritative over the native hint.
+    // Real shape: `ini_set`'s `@param string $value` next to a native
+    // `#[LanguageLevelTypeAware(['8.1' => 'string|int|float|bool|null'],
+    // default: 'string')] $value`.
+    #[test]
+    fn a_language_level_type_aware_override_wins_over_a_matching_stale_param_tag() {
+        let r = build_registry(
+            r#"<?php
+            /**
+             * @param string $option
+             * @param string $value
+             * @return string|false
+             */
+            function ini_set($option, #[LanguageLevelTypeAware(['8.1' => 'string|int|float|bool|null'], default: 'string')] $value) {}
+        "#,
+        );
+        assert_eq!(
+            r.functions["ini_set"].params[1].ty,
+            Type::Union(vec![
+                Type::String,
+                Type::Int,
+                Type::Float,
+                Type::Bool,
+                Type::Null,
+            ]),
+            "the modern override must win over the stale '@param string' tag"
+        );
+    }
+
+    // Real shape: `finfo_file`'s doc type is `resource`; before Finding B,
+    // this collapsed to `Type::Mixed` (a *worse* failure than `ini_set`'s,
+    // since `resolve_type`'s own `resource`-stripping fires on the
+    // never-overridden stale doc type) rather than resolving to the
+    // override at all.
+    #[test]
+    fn a_language_level_type_aware_override_wins_even_when_the_stale_doc_type_is_resource() {
+        let r = build_registry(
+            r#"<?php
+            class finfo {}
+            /**
+             * @param resource $finfo
+             * @return string|false
+             */
+            function finfo_file(#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')] $finfo, string $filename) {}
+        "#,
+        );
+        assert_eq!(
+            r.functions["finfo_file"].params[0].ty,
+            Type::Object("finfo".to_string(), Vec::new())
+        );
+    }
+
+    // The boundary-crossing guard's own regression test: `later`'s
+    // override must not be spliced onto `earlier`'s unrelated docblock
+    // just because it's the nearest one found by an unbounded backward
+    // scan - `later` has no doc comment of its own, so the override must
+    // fall back to the native-hint-only path instead.
+    #[test]
+    fn an_override_is_not_spliced_onto_an_unrelated_earlier_declaration_s_docblock() {
+        let r = build_registry(
+            r#"<?php
+            /** @param resource $x */
+            function earlier($x) {}
+            function later(#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')] $finfo) {}
+        "#,
+        );
+        assert_eq!(
+            r.functions["earlier"].params[0].ty,
+            Type::Object("resource".to_string(), Vec::new()),
+            "earlier's own docblock must be untouched by later's override"
+        );
+        assert_eq!(
+            r.functions["later"].params[0].ty,
+            Type::Object("finfo".to_string(), Vec::new()),
+            "later's override must still win via the native-hint-only path"
+        );
+    }
+
     #[test]
     fn phpdoc_wins_over_a_conflicting_native_hint() {
         let r = build_registry(

@@ -50,6 +50,22 @@ pub struct Lexer<'a> {
     // has no docblock tag guaranteed to exist for it the way a function's
     // one-per-signature `@return` line does.
     pending_param_type_tokens: Option<Vec<Token>>,
+    // Phase 32 Finding B: `pending_param_type_tokens` alone loses to a
+    // competing legacy `@param` docblock tag (`resolve_type` treats a
+    // matching doc tag as authoritative over the native hint) - real
+    // shape: `ini_set`'s `@param string $value` next to a native
+    // `#[LanguageLevelTypeAware(['8.1' => 'string|int|float|bool|null'],
+    // default: 'string')] $value`. Set alongside
+    // `pending_param_type_tokens` to (parameter name, override type);
+    // `tokenize_with_spans` searches `tokens` backward for the nearest
+    // enclosing `Token::DocComment` and splices a fresh `@param` line onto
+    // it - mirroring `pending_return_type_override`'s own `@return`
+    // splice, but needing its own field since a parameter override, unlike
+    // a return override, isn't found immediately after the doc comment
+    // that owns it (other parameters/attributes/commas sit in between),
+    // so the backward search can only happen where `tokens` itself lives -
+    // `tokenize_with_spans`'s own loop, not this lexer's inner methods.
+    pending_param_doc_override: Option<(String, String)>,
 }
 
 /// Advances past a single- or double-quoted string literal starting at
@@ -160,6 +176,25 @@ fn append_return_type_override(doc: &str, override_ty: &str) -> String {
     }
 }
 
+/// Phase 32 Finding B: the parameter-position sibling of
+/// `append_return_type_override` - splices a fresh `@param <override>
+/// $<name>` line into `doc` right before its closing `*/`, so
+/// `resolve_type`'s own "docblock wins" priority (each `@param` tag
+/// matched by name, last one wins - see `docblock::parse`'s
+/// `HashMap::insert`) makes the modernization override win over a stale
+/// legacy `@param` tag for the same parameter, without touching
+/// `resolve_type`'s general priority rule at all.
+fn append_param_type_override(doc: &str, name: &str, override_ty: &str) -> String {
+    match doc.rfind("*/") {
+        Some(idx) => format!(
+            "{}\n * @param {override_ty} ${name}\n {}",
+            &doc[..idx],
+            &doc[idx..]
+        ),
+        None => doc.to_string(),
+    }
+}
+
 fn compute_line_starts(src: &[u8]) -> Vec<usize> {
     let mut starts = vec![0];
     for (i, &b) in src.iter().enumerate() {
@@ -182,6 +217,7 @@ impl<'a> Lexer<'a> {
             pos_cache: (0, Position { line: 1, col: 1 }),
             pending_return_type_override: None,
             pending_param_type_tokens: None,
+            pending_param_doc_override: None,
         }
     }
 
@@ -199,6 +235,7 @@ impl<'a> Lexer<'a> {
             pos_cache: (0, Position { line: 1, col: 1 }),
             pending_return_type_override: None,
             pending_param_type_tokens: None,
+            pending_param_doc_override: None,
         }
     }
 
@@ -279,6 +316,28 @@ impl<'a> Lexer<'a> {
                 };
                 for t in type_tokens {
                     tokens.push((t, synthetic_span));
+                }
+            }
+            if let Some((name, override_ty)) = self.pending_param_doc_override.take() {
+                // Finding B: unlike a return override (found immediately
+                // after the doc comment that owns it, via `tokens.last_mut()`
+                // above), a parameter override can be many tokens past its
+                // own enclosing doc comment (other parameters, attributes,
+                // commas) - so this searches backward through everything
+                // `tokens` holds so far, stopping (doing nothing) the
+                // moment a statement/declaration boundary token is crossed,
+                // to avoid misattributing the override to an unrelated
+                // *earlier* declaration's docblock when the current
+                // function has none of its own.
+                for (t, _) in tokens.iter_mut().rev() {
+                    match t {
+                        Token::DocComment(doc) => {
+                            *doc = append_param_type_override(doc, &name, &override_ty);
+                            break;
+                        }
+                        Token::Semicolon | Token::LBrace | Token::RBrace => break,
+                        _ => {}
+                    }
                 }
             }
             let span = Span {
@@ -692,12 +751,55 @@ impl<'a> Lexer<'a> {
                     .filter(|t| *t != Token::Eof)
                     .collect();
                 if !tokens.is_empty() {
-                    self.pending_param_type_tokens = Some(tokens);
+                    self.pending_param_type_tokens = Some(tokens.clone());
+                }
+                // Finding B: also queue a doc-splice fallback, keyed by the
+                // parameter's own name - a no-op if there's no enclosing
+                // doc comment to find, but the only way to beat a
+                // competing legacy `@param` tag for this same name when
+                // one does exist (see this field's own doc comment).
+                if !tokens.is_empty()
+                    && let Some(name) = self.peek_param_name()
+                {
+                    self.pending_param_doc_override = Some((name, override_ty));
                 }
             }
         } else {
             self.pending_return_type_override = Some(override_ty);
         }
+    }
+
+    /// Peeks (without consuming) the parameter name that
+    /// `next_parameter_anchor` already confirmed follows - skips leading
+    /// whitespace, an optional `&` (by-ref) or `...` (variadic) marker,
+    /// then the `$` and its identifier. `None` for anything other than
+    /// exactly this shape - conservative, matching every other bail-out in
+    /// this file rather than guessing.
+    fn peek_param_name(&self) -> Option<String> {
+        let mut p = self.pos;
+        while matches!(self.src.get(p), Some(b' ' | b'\t' | b'\r' | b'\n')) {
+            p += 1;
+        }
+        if self.src[p..].starts_with(b"...") {
+            p += 3;
+        } else if self.src.get(p) == Some(&b'&') {
+            p += 1;
+        }
+        while matches!(self.src.get(p), Some(b' ' | b'\t' | b'\r' | b'\n')) {
+            p += 1;
+        }
+        if self.src.get(p) != Some(&b'$') {
+            return None;
+        }
+        p += 1;
+        let start = p;
+        while self.src.get(p).is_some_and(|b| is_ident_continue(*b)) {
+            p += 1;
+        }
+        if p == start {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&self.src[start..p]).into_owned())
     }
 
     /// Whether the next real token (skipping only plain ASCII whitespace -
