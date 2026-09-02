@@ -2302,6 +2302,62 @@ mod tests {
     }
 
     #[test]
+    fn in_array_strict_narrows_the_true_branch_to_the_haystacks_literal_union() {
+        // Phase 33 Finding 2: CatPermSubmitRequest::fromArray's real
+        // shape - $post['status'] ?? null infers Type::Null (not Mixed),
+        // so this exercises narrow_type_to's non-Union fallback too.
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param array<array-key, mixed> $post
+             */
+            function fromArray(array $post): string {
+                $status_raw = $post['status'] ?? null;
+                $status = in_array($status_raw, ['public', 'private'], true) ? $status_raw : '';
+                return $status;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn in_array_without_the_strict_flag_narrows_nothing() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param array<array-key, mixed> $post
+             */
+            function fromArray(array $post): string {
+                $status_raw = $post['status'] ?? null;
+                $status = in_array($status_raw, ['public', 'private']) ? $status_raw : '';
+                return $status;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("null"), "got: {d:?}");
+    }
+
+    #[test]
+    fn in_array_strict_with_a_non_literal_haystack_element_narrows_nothing() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param array<array-key, mixed> $post
+             */
+            function fromArray(array $post, string $other): string {
+                $status_raw = $post['status'] ?? null;
+                $status = in_array($status_raw, [$other, 'public'], true) ? $status_raw : '';
+                return $status;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("null"), "got: {d:?}");
+    }
+
+    #[test]
     fn pest_it_closure_this_is_not_flagged_as_undefined_variable() {
         // Real shape: tests/Browser/AboutControllerTest.php-style Pest
         // test files - `it('...', function (): void { ... $this ... })`

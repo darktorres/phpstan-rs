@@ -135,6 +135,26 @@ impl<'a> Checker<'a> {
                         };
                         locals.insert(key, narrowed);
                     }
+                } else if let ExprKind::Name(name) = &callee.kind
+                    && name == "in_array"
+                    && let [needle, haystack, strict] = args.as_slice()
+                    // Phase 33 Finding 2: only the strict, literal-array
+                    // form real PHPStan's own `InArrayFunctionTypeSpecifyingExtension`
+                    // narrows - a loose comparison's type-juggling would
+                    // make the real safe target wider than the literal
+                    // values listed here.
+                    && matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(true)))
+                    && let ExprKind::ArrayLiteral(items) = &haystack.value.kind
+                    && let Some(target_ty) = self.in_array_target_type(items, locals)
+                    && let Some(key) = narrowing_key(&needle.value)
+                {
+                    let current = self.current_narrowed_type(&needle.value, &key, locals);
+                    let narrowed = if branch_true {
+                        narrow_type_to(&current, &target_ty)
+                    } else {
+                        narrow_type_excluding(&current, &target_ty)
+                    };
+                    locals.insert(key, narrowed);
                 }
             }
             ExprKind::Instanceof(inner, target) => {
@@ -200,6 +220,35 @@ impl<'a> Checker<'a> {
             .get(key)
             .cloned()
             .unwrap_or_else(|| self.infer_expr(narrowing_infer_target(expr), locals))
+    }
+
+    /// The union of `in_array()`'s own haystack literal values, if every
+    /// element is a bare, unkeyed literal (`int`/`string`/`bool`/`null`) -
+    /// `None` if any element is a spread, a keyed entry, or anything other
+    /// than a syntactic literal, since this project has no way to prove a
+    /// non-literal haystack element's value statically. Reuses `infer_expr`
+    /// on each element rather than duplicating the `Literal -> Type`
+    /// mapping that already exists, verbatim, in `check_expr`'s and
+    /// `infer_expr`'s own `Literal` arms.
+    fn in_array_target_type(&self, items: &[ArrayItem], locals: &Locals) -> Option<Type> {
+        let mut member_types: Vec<Type> = Vec::new();
+        for item in items {
+            if item.spread || item.key.is_some() {
+                return None;
+            }
+            if !matches!(item.value.kind, ExprKind::Literal(_)) {
+                return None;
+            }
+            let ty = self.infer_expr(&item.value, locals);
+            if !member_types.contains(&ty) {
+                member_types.push(ty);
+            }
+        }
+        match member_types.len() {
+            0 => None,
+            1 => member_types.into_iter().next(),
+            _ => Some(Type::Union(member_types)),
+        }
     }
 
     pub(crate) fn apply_equality_narrowing(
