@@ -29,13 +29,16 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 817 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 12's preg_match work.
+- Test suite: 856 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 12's closing round
+  (literal enumeration, tagged unions, array-shape generalization).
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
-  249 (Phase 35) -> **240 (current, Phase 12's preg_match work)**.
+  249 (Phase 35) -> 240 -> **239 (current, Phase 12's closing round: the
+  `union_types` array-shape-generalization follow-up removed a
+  `SiteUpdateSubController` false positive)**.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -48,24 +51,6 @@ cited in both halves so either can be cross-referenced from the other.
 
 Every phase not listed here is DONE (see history below). These are the
 phases with real, concrete open work:
-
-**Phase 12 - Bespoke per-function/method type extensions (PARTIAL).**
-`preg_match`/`preg_match_all`'s by-ref `$matches` shape now ships
-(Findings A-E): a hand-rolled PCRE *structure* parser
-(`src/regex_groups.rs`) that never executes a pattern, only parses its
-capturing-group/alternation/quantifier structure - the same principle
-real PHPStan's own `RegexGroupParser` uses, so no PCRE-compatible regex
-engine was ever actually needed. Covers the base shape,
-`PREG_OFFSET_CAPTURE`, `PREG_UNMATCHED_AS_NULL`, `preg_match_all`'s
-`PATTERN_ORDER`/`SET_ORDER`, and closing the unconditional no-match case
-via a `Union` with narrowing recovery on the checked `if (preg_match(...))`
-idiom. Stays PARTIAL for one remaining, deliberately deferred item: real
-PHPStan's own literal-string-enumeration (`(cat|dog)` -> `'cat'|'dog'`,
-not generic `string`) and single-optional-group tagged-union
-representation - a different *kind* of feature (general literal-value
-tracking through alternation/quantification), comparable in size to
-Phase 14, not a natural extension of the structure-parsing mechanism
-above. See the Known limitations table.
 
 **Phase 13 - Narrowing precision and remaining false-positive causes
 (PLANNED).** Open items:
@@ -152,7 +137,6 @@ comments.
 
 | Limitation | Phase |
 | --- | --- |
-| `preg_match`'s by-ref `$matches` shape doesn't enumerate a constant-only group's literal values (`(cat\|dog)` infers `string`, not `'cat'\|'dog'`), or build a single-optional-group tagged union the way real PHPStan's `RegexArrayShapeMatcher` does | 12 |
 | Traits checked standalone, without their eventual host class's shape | 13 |
 | `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed | 13 |
 | `always_terminates` doesn't recognize a terminating `switch`/`try`/`match` | 13 |
@@ -170,16 +154,6 @@ comments.
 
 ### Known but not yet scheduled to any phase
 
-- **`union_types` caps at `MAX_UNION_MEMBERS` (12) and collapses to
-  `Mixed` past it**, rather than generalizing same-shaped `ArrayShape`s
-  (merging shapes that share a key set into one shape with unioned field
-  types, the way real PHPStan does) - see Phase 12's completed-history
-  entry above for the real hang that found this and why the cap, not
-  generalization, was the fix that landed. A real precision loss for any
-  variable that accumulates more than 12 genuinely distinct shapes across
-  sequential/nested branches, not just for `preg_match`'s own `$matches`.
-  No phase scheduled yet - a candidate for whichever future round tackles
-  array-shape generalization.
 - **phpstorm-stubs' interleaved-multiple-parameter-list shape isn't
   recognized.** Some stubs (`pg_query_params`, `pg_query`, several
   others) declare *two full parameter lists* under the same parameter
@@ -424,7 +398,7 @@ Six ordered stages, each its own commit:
    syntax change, acceptable pre-1.0); `phpstan-rs.toml` config with CLI
    flags taking precedence.
 
-## Phase 12 - Bespoke per-function/method type extensions - PARTIAL
+## Phase 12 - Bespoke per-function/method type extensions - DONE
 
 See **Open phases** above for what's left (`preg_match`'s remaining
 literal-enumeration/tagged-union precision). Shipped: `array_map`/
@@ -597,6 +571,75 @@ incidentally correcting a `never`-typed leak in
 `CategoryService::updateUppercats`'s own diagnostic message) -> 240 (the
 ternary fix, closing the false positive it had briefly introduced along
 the way). No diagnostic regressed at any step.
+
+**Closing round, 2026-09-02**: the two remaining named follow-ups -
+`preg_match`'s own literal-enumeration/tagged-union precision, and the
+`union_types`/`MAX_UNION_MEMBERS` array-shape-generalization follow-up -
+both closed, plus a third gap found while designing the work (the
+already-shipped flat shape treated every optional group uniformly as
+"maybe entirely absent," when real `$matches` only ever truncates from
+its own trailing end). Grounded directly in real PHPStan source
+(`RegexGroupParser.php`, `RegexAlternation.php`, `RegexCapturingGroup.php`,
+`RegexArrayShapeMatcher.php`) and verified against real PHPStan 2.2.8's
+own `\PHPStan\dumpType()` output and live `php`, not recalled from a
+single reading - this caught four real design bugs a first read of the
+source missed (a sibling alternation branch's earlier group is
+force-filled with `''`, not removed; the single-optional-group "without"
+variant is a bare `{0: subject}` shape, not "every group but the target";
+`in_optional_quantification` resets at every non-quantification AST node
+including a non-capturing wrapper, unlike the broader `optional`
+propagation; a lookaround's own interior must never leak into its
+enclosing literal computation). Full design in
+`plans/linked-sniffing-twilight.md`.
+
+Shipped, as four separately committed and verified pieces
+(`src/regex_groups.rs`, `checker/expr.rs`, `checker/narrowing.rs`):
+
+- **Literal enumeration** for a constant-only capture group - `(cat|dog)`
+  now infers `'cat'|'dog'`, not generic `string` - via a parallel
+  `literal_values: Option<Vec<String>>` computed alongside the existing
+  structure scan (concatenation as cross-product, alternation as union,
+  bounded quantifiers as repetition, all capped at `LITERAL_ENUM_LIMIT`
+  (32)), with `^`/`$`/lookarounds correctly contributing a known empty
+  string rather than bailing, and a group repeated more than once
+  externally correctly losing its own constant typing.
+- **Tagged unions** for the two shapes real PHPStan itself special-cases:
+  exactly one optional top-level group, and exactly one top-level
+  alternation - full array-shape variants (the group/branch present, or
+  not) instead of one shape with a bare `optional` field, including the
+  `alternation_wrapped_in_optional_quantifier` signal needed for
+  `(?:(a)|(b))?`-shaped patterns real PHPStan still tags.
+- **Trailing-vs-interior optional-group fix**: an optional group with
+  something *required* after it is always present in `$matches` (`''`
+  when it didn't itself capture), not "maybe entirely absent" - only a
+  *trailing* optional group can really vanish. `''` is also now a real
+  possible value for any optional group except the literal last one,
+  independent of trailing/interior.
+- **`union_types` array-shape generalization**: `generalize_by_key_set`
+  merges `ArrayShape`s sharing an identical field-name set (unioning
+  their field types) before the `MAX_UNION_MEMBERS` (12) collapse to
+  `Mixed` fires, rather than collapsing unconditionally - closing the
+  known follow-up left by this phase's own earlier hang fix (see above).
+  Confirmed against the live corpus: removed a false positive in
+  `SiteUpdateSubController::handle` where `$counts`'s own fields (written
+  across many sequential conditional branches) had been collapsing to
+  `Mixed` past the cap, wrongly failing `SiteUpdateView`'s own
+  constructor-argument check. Frozen-corpus count 240 -> 239, zero
+  diagnostics regressed.
+
+**Deliberately still out of scope**: real PHPStan's own literal-value
+refinement into `non-empty-string`/`non-falsy-string`/`numeric-string`
+accessory intersection types for a regex group. This conflicts with an
+existing, deliberate, evidence-backed project-wide policy of aliasing
+every string-refinement pseudo-type to plain `Type::String`
+everywhere (`types.rs`'s `parse_type_string`) - building it just for
+regex groups while every `@param non-empty-string $x` elsewhere keeps
+resolving to plain `string` would be an inconsistent special case.
+Sequenced as Phase 14's own project-wide effort instead (new refinement
+`Type` variant(s), `is_subtype`/`union_types` rules, PHPDoc's own
+pseudo-type parsing), with a short follow-on afterward to have this
+phase's own literal-vs-plain dispatch use those types instead of falling
+back to `string` in the non-literal case.
 
 ## Phase 13 - Narrowing precision and remaining false-positive causes - PLANNED
 
