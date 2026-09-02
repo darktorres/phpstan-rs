@@ -675,6 +675,43 @@ impl<'a> Checker<'a> {
                 // ternary is just as branch-based, and without this,
                 // `$x === null ? "default" : $x` never benefits from the
                 // narrowing an equivalent `if` already gets.
+                //
+                // Deliberately **not** writing `merge_scopes(&then_locals,
+                // &else_locals)` back into the real `locals` afterward,
+                // unlike `StmtKind::If` - a real, previously-uninvestigated
+                // bug found via a Phase 12 corpus re-check traced this
+                // exact write-back as the root cause of a genuine
+                // divergence between `check_expr` and `infer_expr` (which
+                // can't do this at all - it only ever receives `&Locals`,
+                // never `&mut`) for the *same* expression tree.
+                // Minimized repro: `$collected === [] ? null :
+                // preg_replace('/.../', '', $collected[0])` - evaluating
+                // the *condition's own true branch* narrows `$collected`
+                // (declared `list<string>`) down to the literal empty
+                // shape `array{}` (`narrow_type_to`'s own blind
+                // `target.clone()` for a non-`Union` original, correct in
+                // isolation: if `$collected` really does equal `[]`, its
+                // type genuinely is the empty array). Writing that back
+                // into the outer scope via `merge_scopes` then unioned it
+                // with the else branch's own unnarrowed `list<string>`,
+                // permanently corrupting `$collected`'s tracked type to
+                // `array{}|list<string>` for anything checked afterward -
+                // here, a *second*, separate evaluation of the very same
+                // ternary (`check_property_assignment`'s own redundant
+                // `infer_expr` call on the same `rhs`), where indexing
+                // into the now-corrupted union's empty-shape member
+                // produced `Mixed`, defeating `preg_replace`'s own
+                // subject-type-dependent precision and leaking a spurious
+                // `array<string>` into the property-assignment mismatch.
+                // A ternary is an expression, not a control-flow
+                // statement: narrowing *within* evaluating `then_`/`else_`
+                // themselves (already achieved by `then_locals`/
+                // `else_locals` below) is exactly what the comment above
+                // is about and needs no further help: once the ternary as
+                // a whole finishes evaluating, only its *value* matters to
+                // whatever contains it, never which hypothetical branch's
+                // narrowing might have applied - the outer `locals` should
+                // come out exactly as they went in.
                 let mut then_locals = locals.clone();
                 self.apply_narrowing(cond, &mut then_locals, true);
                 let then_ty = then_
@@ -683,7 +720,6 @@ impl<'a> Checker<'a> {
                 let mut else_locals = locals.clone();
                 self.apply_narrowing(cond, &mut else_locals, false);
                 let else_ty = self.check_expr(else_, &mut else_locals, label);
-                *locals = merge_scopes(&then_locals, &else_locals);
                 // Phase 23: `union_types`, not a raw `Type::Union(vec![...])`
                 // - either branch's own type is very commonly already a
                 // `Union` itself (e.g. a stub-declared `resource|false`),

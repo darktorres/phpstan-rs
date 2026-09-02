@@ -6194,6 +6194,61 @@ mod tests {
         );
     }
 
+    // Real, general unsoundness bug found via a Phase 12 corpus re-check
+    // (`CategoryUpdateController::__invoke`, minimized here) that first
+    // looked like a cross-file registry-timing mystery but turned out to
+    // be a plain, always-reproducible narrowing bug: `apply_equality_
+    // narrowing`'s exclusion branch was using the *other side's own
+    // static type* (`Bool`, a general type covering both `true`/`false`,
+    // not one specific value) the same way it uses a genuine single-value
+    // exclusion (`Null`/`True`/`False`/a literal) - wrongly collapsing an
+    // already-known `bool` to `Type::Never` the moment it was compared
+    // `!==` against another `bool`-typed (but not literally known) value.
+    #[test]
+    fn not_identical_to_a_non_literal_bool_does_not_collapse_the_narrowed_type_to_never() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(?bool $a, bool $b): void {
+                $update = [];
+                if ($a !== null && $a !== $b) {
+                    $update['flag'] = $a;
+                }
+                echo $update['flag'];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Real, general bug found via a Phase 12 corpus re-check (minimized
+    // from `HtmlServiceTestFatalErrorCaller::call`): `check_expr`'s own
+    // `Ternary` arm wrote `merge_scopes(then_locals, else_locals)` back
+    // into the *outer* locals, unlike a `Ternary` used as a value inside
+    // a larger expression ever should - a ternary's own condition
+    // narrowing a *param* (`$collected` here) down to the literal empty
+    // shape on its true branch then got permanently unioned into
+    // `$collected`'s real, tracked type for everything checked
+    // afterward, including a second, independent evaluation of the exact
+    // same sub-expression - here, `preg_replace`'s own subject-type
+    // check saw the corrupted union instead of `$collected[0]`'s real
+    // `string` type, losing its precise return type.
+    #[test]
+    fn a_ternarys_own_condition_narrowing_does_not_leak_past_the_ternary() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Holder {
+                public ?string $captured = null;
+
+                /** @param list<string> $collected */
+                public function run(array $collected): void {
+                    $this->captured = $collected === [] ? null : preg_replace('/^x/', '', $collected[0]);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn reassigning_a_property_after_narrowing_it_does_not_leave_the_stale_narrowed_type_behind() {
         // Phase 22, real shape: a lazy-init idiom

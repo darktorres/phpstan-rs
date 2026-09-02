@@ -332,10 +332,37 @@ impl<'a> Checker<'a> {
             return;
         }
         let current = self.current_narrowed_type(narrowed_expr, &key, locals);
+        // A real, general unsoundness bug found via a corpus re-check
+        // that turned out to have nothing to do with the two-file
+        // cross-checking mystery it first looked like: `$x !== $y` was
+        // narrowing `$x` by *excluding* `$y`'s own static type -
+        // `Bool`/`Int`/`String`/... - not just a known single value.
+        // `narrow_type_excluding` is only sound when `excluded`
+        // represents one specific, already-proven value (`Null`,
+        // `True`/`False`, a literal, an `is_*()` predicate's own
+        // provably-exhaustive target) - every one of its other real
+        // callers passes exactly that. A general type like plain `Bool`
+        // covers *multiple* distinct values, so `$x !== $y` where `$y`'s
+        // only known fact is "some `Bool`" proves nothing about which
+        // specific value `$x` isn't - excluding the whole `Bool` type
+        // from an already-`Bool`-typed `$x` wrongly collapsed it to
+        // `Type::Never`. Confirmed live: `?bool $a` narrowed to `bool` by
+        // `$a !== null`, then compared `$a !== $b` (`bool $b`) inside the
+        // same `&&` - real corpus shape in
+        // `CategoryUpdateController::__invoke`, minimized to `function
+        // test(?bool $a, bool $b) { if ($a !== null && $a !== $b) { ... }
+        // }`. `narrow_type_to` doesn't share this bug: for a non-`Union`
+        // original it always returns `target` outright (matches iff both
+        // sides are already type-compatible, since `===` between
+        // incompatible static types is dead code either way) - safe
+        // regardless of whether `target_ty` is a literal or a general
+        // type, so only the exclusion branch needs gating here.
         let narrowed = if matches_when_true {
             narrow_type_to(&current, &target_ty)
-        } else {
+        } else if is_known_single_value(&target_ty) {
             narrow_type_excluding(&current, &target_ty)
+        } else {
+            current
         };
         locals.insert(key, narrowed);
     }
@@ -848,6 +875,21 @@ pub(crate) fn narrow_type_to(original: &Type, target: &Type) -> Type {
 /// (`isset`'s `Null` exclusion, and similar plain-`Null` exclusions
 /// elsewhere) is unaffected either way, since no other `Type` variant is
 /// ever a subtype of `Null`.
+/// Whether `ty` is proven to hold exactly one possible value - the only
+/// kind of type it's sound to *exclude* from another type based on a
+/// runtime `===`/`!==` comparison (`apply_equality_narrowing`'s own use).
+/// `Null`/`True`/`False` and a literal are each their own single value;
+/// everything else (`Bool`, `Int`, `String`, any other general/composite
+/// type) covers multiple possible values, so knowing only "the other side
+/// has this general type" - not which of its values it actually holds -
+/// proves nothing about which value to rule out.
+fn is_known_single_value(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Null | Type::True | Type::False | Type::IntLiteral(_) | Type::StringLiteral(_)
+    )
+}
+
 pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
     match original {
         Type::Union(members) => {
