@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, literal_string_key};
+use crate::checker::{Checker, Locals, literal_string_key, union_types};
 use crate::types::{Type, is_subtype};
 
 impl<'a> Checker<'a> {
@@ -24,6 +24,21 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(BinOp::Or, l, r) if !branch_true => {
                 self.apply_narrowing(l, locals, false);
                 self.apply_narrowing(r, locals, false);
+            }
+            // Phase 34 Finding B: "at least one is true, but not sure
+            // which" isn't representable *in general* - but when every
+            // operand is a direct predicate-table check on the identical
+            // expression, it narrows precisely to the union of what each
+            // operand would give alone (`is_int($x) || is_string($x)`
+            // being true means `$x` is exactly `int|string`, not "give
+            // up"). `or_chain_narrowing_target` is the one doing the
+            // actual restriction-checking; this arm only acts when it
+            // succeeds.
+            ExprKind::Binary(BinOp::Or, ..) if branch_true => {
+                if let Some((key, target_ty, repr_expr)) = or_chain_narrowing_target(cond) {
+                    let current = self.current_narrowed_type(repr_expr, &key, locals);
+                    locals.insert(key, narrow_type_to(&current, &target_ty));
+                }
             }
             // Deliberately `===`/`!==` only, not `==`/`!=` - a loose
             // comparison matches PHP's own type-juggling table (`0 ==
@@ -633,6 +648,37 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
             Type::String,
             Type::Bool,
         ])),
+        _ => None,
+    }
+}
+
+/// If `cond` is an `Or`-tree (any depth, matching a left-associative
+/// `A || B || C` chain) whose every leaf is a direct, single-argument
+/// call to a name `narrowing_type_for_predicate` recognizes, all
+/// narrowing the *identical* expression, returns that shared key, the
+/// union of every leaf's own target type, and one representative leaf
+/// expression (for `current_narrowed_type`'s own fallback, when the key
+/// isn't already in `locals`) - `None` for anything else (a mixed bag of
+/// keys, a non-simple-predicate leaf, `is_numeric`/`in_array`/
+/// `array_key_exists`, none of which are `narrowing_type_for_predicate`
+/// table entries, ...), the same conservative "give up" this project's
+/// narrowing already falls back to everywhere else.
+fn or_chain_narrowing_target(cond: &Expr) -> Option<(String, Type, &Expr)> {
+    match &cond.kind {
+        ExprKind::Binary(BinOp::Or, l, r) => {
+            let (lk, lt, le) = or_chain_narrowing_target(l)?;
+            let (rk, rt, _) = or_chain_narrowing_target(r)?;
+            (lk == rk).then(|| (lk, union_types(lt, rt), le))
+        }
+        ExprKind::Grouping(inner) => or_chain_narrowing_target(inner),
+        ExprKind::Call(callee, args) => {
+            let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice()) else {
+                return None;
+            };
+            let key = narrowing_key(&single_arg.value)?;
+            let target_ty = narrowing_type_for_predicate(name)?;
+            Some((key, target_ty, &single_arg.value))
+        }
         _ => None,
     }
 }

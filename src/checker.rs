@@ -2624,6 +2624,64 @@ mod tests {
     }
 
     #[test]
+    fn or_of_same_key_predicates_narrows_the_true_branch_to_their_union() {
+        // Phase 34 Finding B: CalendarMonthly::buildMonthCalendar's real
+        // shape - $year infers Type::Null before this fix
+        // (widen_coalesce_result's own fallback for a Mixed left side).
+        let d = diagnostics_for(
+            r#"<?php
+            function needsIntOrString(int|string $x): void {}
+            /**
+             * @param array<string, mixed> $chronology_date
+             */
+            function handle(array $chronology_date): void {
+                $year = $chronology_date['year'] ?? null;
+                $year = is_int($year) || is_string($year) ? $year : 0;
+                needsIntOrString($year);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_three_way_or_of_same_key_predicates_still_narrows() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsIntOrStringOrBool(int|string|bool $x): void {}
+            /**
+             * @param array<string, mixed> $arr
+             */
+            function handle(array $arr): void {
+                $x = $arr['x'] ?? null;
+                $x = is_int($x) || is_string($x) || is_bool($x) ? $x : 0;
+                needsIntOrStringOrBool($x);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn or_of_predicates_on_different_keys_narrows_neither() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            /**
+             * @param array<string, mixed> $arr
+             */
+            function handle(array $arr): void {
+                $x = $arr['x'] ?? null;
+                $y = $arr['y'] ?? null;
+                $x = is_int($x) || is_string($y) ? $x : 0;
+                needsString($x);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
     fn pest_it_closure_this_is_not_flagged_as_undefined_variable() {
         // Real shape: tests/Browser/AboutControllerTest.php-style Pest
         // test files - `it('...', function (): void { ... $this ... })`
