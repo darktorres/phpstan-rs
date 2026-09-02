@@ -2350,6 +2350,92 @@ type going from mangled/namespace-garbage text to its correctly-parsed
 form, once the correction above landed) - zero genuinely new
 diagnostic locations.
 
+## Phase 34: a fourth Piwigo false-positive hunt round - DONE
+
+Phase 33 left the corpus at 295 diagnostics. Bucketed it by root cause
+again, this time against source directly rather than just message
+shape - two of the bigger buckets turned out to need genuine new type-
+system machinery, deliberately deferred (see below, matching Phase 32's
+own `int<min,max>` precedent); four others were real, narrowly-scoped
+bugs:
+
+- **A - `curl_getinfo($ch, CONSTANT)` had no dynamic return type - 16
+  diagnostics.** The real stub declares it unconditionally `mixed`; real
+  PHPStan's own `CurlGetinfoFunctionDynamicReturnTypeExtension` (read
+  directly from `vendor/phpstan-src`) maps a literal `CURLINFO_*` option
+  constant to a concrete type instead. Every real call site in this
+  corpus uses the 2-arg form with a literal constant - fixed with a
+  curated ~35-entry subset of real PHPStan's own ~70-entry table
+  (the commonly-used constants; RTSP/proxy/microsecond/bignum variants
+  and the unmodeled 1-arg "all components" array shape both fall back to
+  today's `mixed`, unevidenced anywhere in this corpus).
+- **B - `||`'s true branch can narrow when every leaf is a same-key
+  predicate check.** `apply_narrowing`'s own doc comment says "at least
+  one is true, but not sure which" isn't representable - true in
+  general, but incomplete: when every operand is a direct,
+  `narrowing_type_for_predicate`-recognized call on the *identical*
+  expression, it narrows precisely to the union of what each operand
+  gives alone. Fixes `CalendarMonthly::buildMonthCalendar`/
+  `generateCategoryContent`'s `is_int($year) || is_string($year) ?
+  $year : 0` idiom (`$year` previously stayed `Type::Null` in the true
+  branch, since `narrowing_key` doesn't recognize a bare `Or`
+  expression at all).
+- **C - a backed enum's `->value` widened to the backing type instead of
+  the union of its own case literals.** `ClassInfo::from_enum_decl`
+  already synthesizes `->value` (real PHP: `BackedEnum` guarantees it)
+  but typed it via the generic backing type, discarding each
+  `EnumCase`'s own already-captured literal value entirely. Fixes
+  `Piwigo\Db\SortRenderer::toDql`/`resolveDqlOrderBy`:
+  `$entry->dir->value` (`SortOrder: string { case Asc = 'ASC'; case Desc
+  = 'DESC'; }`) now types as `'ASC'|'DESC'`, matching
+  `OrderByClause::__construct`'s own declared parameter, instead of
+  widening to plain `string`.
+- **D - `stdClass` was wrongly subject to "access to undefined
+  property".** `vendor/phpstorm-stubs/Core/Core_c.php` declares `class
+  stdClass {}` - a real, registered, zero-property class - so any
+  dynamic property read on it was "confirmed missing." Real PHP (and
+  real PHPStan) treat `stdClass` as the canonical arbitrary-property-bag
+  class and never flag this. Scoped to the property-access call site
+  only, not the shared `member_confirmed_missing` helper - an undefined
+  *method* call on `stdClass` is still a real fatal error real PHPStan
+  also flags. Fixes `FilesystemHelperTest`/`LangTest`'s real shape (a
+  Pest test double capturing a message via a dynamic property on a
+  plain `new stdClass()`). Found and fixed an existing test that
+  incidentally depended on the old, stricter behavior along the way -
+  `closure_bind_still_flags_a_real_bug_inside_the_bound_closure` used
+  `stdClass` merely as a convenient empty class to prove `Closure::
+  bind`'s own `$this`-rebinding is checked at all, unrelated to
+  `stdClass`'s own semantics - switched to a plain empty class instead.
+
+**Deliberately out of scope this phase**:
+- **`class-string<T>` template binding** (the whole `*TestRepoWithEm`/
+  `*TestConnAndRepo` family, 6 diagnostics) - `class-string<R>` collapses
+  straight to plain `Type::String` at parse time
+  (`parse_type_keyword_or_class`'s own keyword match discards the
+  generic argument entirely), so by the time template binding would run,
+  the fact that this was ever a `class-string<R>` no longer exists
+  anywhere to bind from. A real fix needs a new `Type::ClassString
+  (Box<Type>)` variant (touching `Display`/`is_subtype`/
+  `substitute_template`/`bind_template_param`/the parser) or an
+  equivalent representation - genuine new type-system surface.
+- **Inline `@var` annotations on an arbitrary statement** (`StructuralTest.php`'s
+  `findCallSites`/`findBareCallSites`/`findDuplicateServiceConstructionChains`,
+  6 diagnostics) - already disclosed in an existing test comment
+  (`checker.rs`): this checker only reads `@var` on an actual
+  property/param/return declaration. `Stmt` (`src/ast.rs`) carries no
+  `doc_comment` field at all today - a real parser-level gap, not just a
+  checker-side one.
+- Both confirmed true positives from prior rounds (`getenv()`, the
+  try/catch shape) and the already-tracked `Type::Array`-has-no-key-type
+  bucket (Phase 15) are unaffected.
+
+**DONE.** `295 -> 270` diagnostics. Verified with the same location-based
+classification loop: every changed line landed at an already-diagnosed
+location (Findings A/B each partially-but-not-fully fixing a multi-field
+shape, e.g. `feedRawGet`'s `status: mixed` becoming `status: int` while
+its separate, untouched `body: mixed` stays as-is) - zero genuinely new
+diagnostic locations.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
@@ -2380,6 +2466,8 @@ confused with each other.
 | No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
 | No LSP hover/go-to-definition | 17 |
 | No extension/plugin API | 18 |
+| `class-string<T>` doesn't participate in `@template` binding - it collapses straight to plain `string` at parse time, discarding the generic argument before template binding ever runs | 34 |
+| Inline `@var` annotations on an arbitrary statement aren't read - only on an actual property/param/return declaration; `Stmt` carries no `doc_comment` field at all | 34 |
 
 **Permanent design boundaries (not phase-tracked - not planned, by choice):**
 
