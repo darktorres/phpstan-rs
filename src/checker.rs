@@ -2682,6 +2682,28 @@ mod tests {
     }
 
     #[test]
+    fn a_backed_enum_s_value_satisfies_a_matching_literal_union_parameter() {
+        // Phase 34 Finding C: Piwigo\Db\SortRenderer's real shape -
+        // OrderByClause::__construct(string $column, 'ASC'|'DESC' $dir).
+        let d = diagnostics_for(
+            r#"<?php
+            enum SortOrder: string {
+                case Asc = 'ASC';
+                case Desc = 'DESC';
+            }
+            class OrderByClause {
+                /** @param 'ASC'|'DESC' $dir */
+                public function __construct(string $column, string $dir) {}
+            }
+            function render(SortOrder $order): OrderByClause {
+                return new OrderByClause('col', $order->value);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn pest_it_closure_this_is_not_flagged_as_undefined_variable() {
         // Real shape: tests/Browser/AboutControllerTest.php-style Pest
         // test files - `it('...', function (): void { ... $this ... })`

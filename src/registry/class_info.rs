@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ClassDecl, ClassKind, EnumDecl, TraitAlias, Visibility};
+use crate::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use crate::docblock::{self, DocBlock};
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, infer_const_type, mark_template_params,
@@ -361,10 +361,38 @@ impl ClassInfo {
             },
         );
         if let Some(backing) = &e.backing_type {
+            // Phase 34 Finding C: when every case's own value is a bare
+            // literal (the overwhelmingly common shape - a case value
+            // naming a class constant instead falls back to the plain
+            // backing type below, "don't guess"), `->value` is typed as
+            // the union of those literals, not the generic backing type
+            // - matching real PHPStan's own precision for a backed
+            // enum's `->value`. Real shape: `SortOrder: string { case
+            // Asc = 'ASC'; case Desc = 'DESC'; }`'s `->value` needs to be
+            // `'ASC'|'DESC'`, not bare `string`, to satisfy
+            // `OrderByClause::__construct`'s own declared parameter.
+            let case_values: Vec<Type> = e
+                .cases
+                .iter()
+                .filter_map(|c| c.value.as_ref())
+                .filter_map(|v| match &v.kind {
+                    ExprKind::Literal(Literal::String(s)) => Some(Type::StringLiteral(s.clone())),
+                    ExprKind::Literal(Literal::Int(n)) => Some(Type::IntLiteral(*n)),
+                    _ => None,
+                })
+                .collect();
+            let value_ty = if !case_values.is_empty() && case_values.len() == e.cases.len() {
+                match case_values.len() {
+                    1 => case_values.into_iter().next().unwrap(),
+                    _ => Type::Union(case_values),
+                }
+            } else {
+                types::parse_type_string(backing)
+            };
             properties.insert(
                 "value".to_string(),
                 PropertySig {
-                    ty: types::parse_type_string(backing),
+                    ty: value_ty,
                     is_static: false,
                     is_readonly: false,
                 },
