@@ -208,7 +208,7 @@ mod stmt;
 pub(crate) use assignment::{is_superglobal, literal_string_key, literal_string_value};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use control_flow::{body_contains_yield, merge_scopes};
-pub(crate) use expr::{preg_match_matches_shape, union_types, unwrap_grouping};
+pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
 pub(crate) use narrowing::{
     is_real_variable_key, narrow_type_excluding, narrowing_key, purge_stale_narrowing_for,
 };
@@ -1802,6 +1802,204 @@ mod tests {
                 .any(|x| x.message.contains("needsInt") && x.message.ends_with("string given")),
             "expected a plain string mismatch, got: {d:?}"
         );
+    }
+
+    // --- Task 1b: tagged unions ---
+    //
+    // Reading `$matches[N]` directly from the tagged `Union` collapses to
+    // `Mixed` (the "without" variant genuinely lacks key N, and a `Union`
+    // read already correctly falls back to `Mixed` whenever any member
+    // lacks the key - established, correct behavior, not something to
+    // work around). `array_key_exists('N', $matches)` narrowing
+    // (`narrow_array_shape_by_key_presence`) is what actually drops the
+    // non-matching member first, leaving a plain (non-`Union`) shape
+    // behind - the same mechanism these tests use to observe the tagged
+    // union's own internal shape precisely.
+
+    #[test]
+    fn preg_match_single_optional_group_with_variant_keeps_the_nested_descendant() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(a(b))?/', $subject, $matches)) {
+                    if (array_key_exists('1', $matches)) {
+                        needsInt($matches[1]);
+                        needsInt($matches[2]);
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("needsInt") && x.message.contains("'ab'")),
+            "expected the with-variant's group 1 to be 'ab', got: {d:?}"
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("needsInt") && x.message.contains("'b'")),
+            "expected the with-variant's nested group 2 to be 'b', got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn preg_match_single_optional_group_without_variant_is_bare() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                if (preg_match('/(a(b))?/', $subject, $matches)) {
+                    if (!array_key_exists('1', $matches)) {
+                        echo $matches[1];
+                        echo $matches[2];
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("no key '1'")),
+            "expected the without-variant to lack key 1, got: {d:?}"
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("no key '2'")),
+            "expected the without-variant to also lack the nested descendant's own key 2, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn preg_match_two_optional_top_level_groups_stay_on_the_flat_path() {
+        // Two top-level groups fails the "exactly one" gate - stays flat
+        // (an `optional` field), not tagged. `array_key_exists` on a
+        // *flat* shape's own optional field narrows without ever
+        // touching a `Union` at all, so a diagnostic here would only
+        // appear if this pattern were wrongly treated as a single
+        // optional group.
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match('/(a)?(b)?/', $subject, $matches);
+                echo $matches[1];
+                echo $matches[2];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_a_top_level_alternation_forces_earlier_siblings_and_removes_later_ones() {
+        // `array_key_exists('2', ...)` alone isn't enough to isolate the
+        // "dog" branch specifically: field 2 is *also* present (forced
+        // `''`) in the "bird" branch's own variant, as an *earlier*
+        // sibling of group 3 - real, confirmed behavior, not a test bug
+        // to work around by accident. Combined with `!array_key_exists
+        // ('3', ...)` (true only for "cat" and "dog", since "bird" is
+        // the only variant with field 3 present), the pair together
+        // isolates "dog" specifically.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(cat)|(dog)|(bird)/', $subject, $matches)) {
+                    if (array_key_exists('2', $matches) && !array_key_exists('3', $matches)) {
+                        needsInt($matches[1]); // earlier sibling - forced ''
+                        needsInt($matches[2]); // this branch's own group
+                        echo $matches[3]; // later sibling - removed entirely
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("needsInt") && x.message.contains("''")),
+            "expected the earlier sibling to be forced to '', got: {d:?}"
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("needsInt") && x.message.contains("'dog'")),
+            "expected this branch's own group to be 'dog', got: {d:?}"
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("no key '3'")),
+            "expected the later sibling to be entirely removed, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn preg_match_a_zero_group_alternation_branch_adds_the_bare_variant() {
+        // 2 top-level groups rules out the single-optional-group
+        // dispatch; the alternation has 3 branches but only 2 groups
+        // (`x` has none) - matching it produces $matches with only
+        // field "0", a real possibility this test confirms is present
+        // by narrowing array_key_exists('1', ...) to false and checking
+        // the surviving shape is genuinely bare.
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                if (preg_match('/(cat)|(dog)|x/', $subject, $matches)) {
+                    if (!array_key_exists('1', $matches) && !array_key_exists('2', $matches)) {
+                        echo $matches[1];
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("no key '1'")),
+            "expected the bare (zero-group-branch) variant to lack key 1, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn preg_match_an_alternation_wrapped_in_an_optional_quantifier_still_adds_the_bare_variant() {
+        // Every branch already has a group (no branch-count mismatch) -
+        // the bare variant here can only come from
+        // `alternation_wrapped_in_optional_quantifier`.
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                if (preg_match('/(?:(cat)|(dog))?/', $subject, $matches)) {
+                    if (!array_key_exists('1', $matches) && !array_key_exists('2', $matches)) {
+                        echo $matches[1];
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("no key '1'")),
+            "expected the bare (whole-alternation-optional) variant to lack key 1, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn preg_match_unmatched_as_null_stays_flat_for_the_single_optional_group_case() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match('/(a(b))?/', $subject, $matches, PREG_UNMATCHED_AS_NULL);
+                echo $matches[1];
+                echo $matches[2];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_unmatched_as_null_stays_flat_for_the_alternation_case() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match('/(cat)|(dog)/', $subject, $matches, PREG_UNMATCHED_AS_NULL);
+                echo $matches[1];
+                echo $matches[2];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]

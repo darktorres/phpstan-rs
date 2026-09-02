@@ -266,7 +266,7 @@ impl<'a> Checker<'a> {
                     && let Some(matches_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(matches_name) = &matches_arg.kind
                     && let Some(pattern_str) = literal_string_value(pattern_arg)
-                    && let Some(groups) = regex_groups::parse_capture_groups(pattern_str)
+                    && let Some(parsed) = regex_groups::parse_capture_groups(pattern_str)
                     && let Some(flags) = resolved
                         .get(3)
                         .copied()
@@ -274,7 +274,13 @@ impl<'a> Checker<'a> {
                         .map_or(Some(PregFlags::default()), |e| parse_preg_flags(e, false))
                 {
                     let leaf = preg_leaf_type(flags.offset_capture);
-                    let matched = preg_match_matches_shape(&groups, &leaf, flags.unmatched_as_null);
+                    let matched = build_matched_shape(
+                        &parsed.groups,
+                        &parsed.alternation_branch_counts,
+                        &parsed.alternation_wrapped_in_optional_quantifier,
+                        &leaf,
+                        flags.unmatched_as_null,
+                    );
                     // Phase 12 Finding E, Part 3: unioned with an empty
                     // shape for the real `0`-return/no-match case (real
                     // PHP genuinely sets `$matches = []` then) - sound on
@@ -305,7 +311,7 @@ impl<'a> Checker<'a> {
                     && let Some(matches_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(matches_name) = &matches_arg.kind
                     && let Some(pattern_str) = literal_string_value(pattern_arg)
-                    && let Some(groups) = regex_groups::parse_capture_groups(pattern_str)
+                    && let Some(parsed) = regex_groups::parse_capture_groups(pattern_str)
                     && let Some(flags) = resolved
                         .get(3)
                         .copied()
@@ -315,12 +321,16 @@ impl<'a> Checker<'a> {
                     let leaf = preg_leaf_type(flags.offset_capture);
                     let shape = if flags.set_order {
                         Type::Array(Box::new(preg_match_matches_shape(
-                            &groups,
+                            &parsed.groups,
                             &leaf,
                             flags.unmatched_as_null,
                         )))
                     } else {
-                        preg_match_all_pattern_order_shape(&groups, &leaf, flags.unmatched_as_null)
+                        preg_match_all_pattern_order_shape(
+                            &parsed.groups,
+                            &leaf,
+                            flags.unmatched_as_null,
+                        )
                     };
                     purge_stale_narrowing_for(locals, matches_name);
                     locals.insert(matches_name.clone(), shape);
@@ -2602,6 +2612,22 @@ pub(crate) fn preg_match_matches_shape(
 ) -> Type {
     let mut fields = vec![("0".to_string(), leaf.clone(), false)];
     for g in groups {
+        // Set only by `build_matched_shape`'s own alternation-variant
+        // builder, for a group known to sit *before* the variant's own
+        // matched branch - always present, forced to the empty string,
+        // bypassing `literal_values` entirely even when the group has
+        // its own (confirmed: a forced group never unions in what it
+        // *could* have been).
+        if g.forced_empty {
+            let ty = Type::StringLiteral(String::new());
+            fields.push((g.number.to_string(), ty.clone(), false));
+            if let Some(name) = &g.name
+                && !fields.iter().any(|(n, _, _)| n == name)
+            {
+                fields.push((name.clone(), ty, false));
+            }
+            continue;
+        }
         let base = group_leaf_type(leaf, &g.literal_values);
         let (ty, optional) = if g.optional && unmatched_as_null {
             (union_types(base, Type::Null), false)
@@ -2616,6 +2642,134 @@ pub(crate) fn preg_match_matches_shape(
         }
     }
     Type::ArrayShape(fields)
+}
+
+/// Dispatches `preg_match`'s own unconditional `$matches` shape to one of
+/// real PHPStan's two tagged-union special cases when a pattern
+/// qualifies, falling back to the ordinary flat `preg_match_matches_shape`
+/// otherwise. `preg_match_all` never calls this - Finding D already
+/// established it needs none of this (both its own modes already produce
+/// a single, unconditional, always-correct shape for every match count).
+pub(crate) fn build_matched_shape(
+    groups: &[regex_groups::RegexCaptureGroup],
+    alternation_branch_counts: &[(u32, usize)],
+    alternation_wrapped_in_optional_quantifier: &[u32],
+    leaf: &Type,
+    unmatched_as_null: bool,
+) -> Type {
+    let top_level: Vec<&regex_groups::RegexCaptureGroup> =
+        groups.iter().filter(|g| g.top_level).collect();
+
+    // Case 1: exactly one optional top-level group - checked first,
+    // matching real PHPStan's own `if`/`elseif` precedence (mutually
+    // exclusive with case 2 below even when a pattern would technically
+    // also qualify for it, confirmed via `/(a)|x/`, which has exactly
+    // one top-level group and so takes this path).
+    if !unmatched_as_null && top_level.len() == 1 && top_level[0].optional {
+        let target = top_level[0].number;
+        let with_group: Vec<regex_groups::RegexCaptureGroup> = groups
+            .iter()
+            .map(|g| regex_groups::RegexCaptureGroup {
+                optional: g.optional && g.number != target,
+                ..g.clone()
+            })
+            .collect();
+        // The "without" variant is a *bare* `{0: subject}` shape (an
+        // empty groups slice), not "every group except the target" -
+        // confirmed via `/(a(b))?/` -> `array{string, 'ab',
+        // 'b'}|array{string}` (field 2, `(b)`'s own nested capture, is
+        // entirely absent from the second variant, not present-but-
+        // optional). Also structurally forced, not an arbitrary choice:
+        // the qualifying gate requires *exactly one* top-level group, so
+        // any other group in the pattern must be nested inside it - if
+        // it didn't run, nothing nested inside it could have either.
+        return union_types(
+            preg_match_matches_shape(&with_group, leaf, unmatched_as_null),
+            preg_match_matches_shape(&[], leaf, unmatched_as_null),
+        );
+    }
+
+    // Case 2: exactly one top-level alternation - every top-level group
+    // shares one alternation id, and none is `in_optional_quantification`
+    // (the pattern's own top-level structure *is* this one alternation,
+    // not wrapped in a further `?`/`*` around the whole thing).
+    if !unmatched_as_null
+        && let Some(first) = top_level.first()
+        && let Some((alt_id, _)) = first.alternation
+        && !first.in_optional_quantification
+        && top_level.iter().all(|g| {
+            g.alternation.map(|(id, _)| id) == Some(alt_id) && !g.in_optional_quantification
+        })
+    {
+        let alternations_count = alternation_branch_counts
+            .iter()
+            .find(|(id, _)| *id == alt_id)
+            .map(|(_, n)| *n)
+            .unwrap_or(0);
+        let mut branches: Vec<u32> = groups
+            .iter()
+            .filter_map(|g| {
+                g.alternation
+                    .and_then(|(id, b)| (id == alt_id).then_some(b))
+            })
+            .collect();
+        branches.sort_unstable();
+        branches.dedup();
+        // Iterating groups in number order, tracking a `before_combo`
+        // flag that flips false the moment a group belonging to *this*
+        // branch is reached: any group encountered *while still before*
+        // the branch's own group(s) gets forced to `''` (never removed)
+        // - confirmed via `/(a)|(b)|(c)/`'s own branch-3 variant,
+        // `array{string, '', '', 'c'}` (groups 1 and 2, from earlier
+        // branches, both show as `''`). Only a sibling's group
+        // encountered *after* is removed.
+        let mut variants: Vec<Type> = branches
+            .iter()
+            .map(|&b| {
+                let mut before_combo = true;
+                let variant_groups: Vec<regex_groups::RegexCaptureGroup> = groups
+                    .iter()
+                    .filter_map(|g| {
+                        let in_this_branch = g.alternation == Some((alt_id, b));
+                        if in_this_branch {
+                            before_combo = false;
+                            Some(regex_groups::RegexCaptureGroup {
+                                optional: false,
+                                ..g.clone()
+                            })
+                        } else if before_combo {
+                            Some(regex_groups::RegexCaptureGroup {
+                                optional: false,
+                                forced_empty: true,
+                                ..g.clone()
+                            })
+                        } else if g.alternation.map(|(id, _)| id) == Some(alt_id) {
+                            None // a *later* sibling branch's own group - never participated
+                        } else {
+                            Some(g.clone()) // unrelated (e.g. nested under a *different* alternation) - untouched
+                        }
+                    })
+                    .collect();
+                preg_match_matches_shape(&variant_groups, leaf, unmatched_as_null)
+            })
+            .collect();
+        // The bare `{0: subject}` variant is added whenever some branch
+        // has zero groups *or* the whole alternation sits under an outer
+        // `?`/`*` (`alternation_wrapped_in_optional_quantifier`,
+        // confirmed via `/(?:(a)|(b))?/`) - either condition alone is
+        // sufficient, matching real PHPStan's own `||`.
+        if branches.len() != alternations_count
+            || alternation_wrapped_in_optional_quantifier.contains(&alt_id)
+        {
+            variants.push(preg_match_matches_shape(&[], leaf, unmatched_as_null));
+        }
+        return variants
+            .into_iter()
+            .reduce(union_types)
+            .expect("branches is non-empty: at least one top-level group exists");
+    }
+
+    preg_match_matches_shape(groups, leaf, unmatched_as_null)
 }
 
 /// Builds `preg_match_all`'s own `$matches` shape for its default

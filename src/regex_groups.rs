@@ -13,6 +13,7 @@
 /// order (matching real PCRE's own numbering, which counts every
 /// capturing group - named or not - by the position of its opening
 /// paren).
+#[derive(Clone)]
 pub(crate) struct RegexCaptureGroup {
     pub number: usize,
     pub name: Option<String>,
@@ -23,6 +24,43 @@ pub(crate) struct RegexCaptureGroup {
     /// enumerable by this scanner's own (deliberately narrower than real
     /// PHPStan's) understanding - the safe default, never a guess.
     pub literal_values: Option<Vec<String>>,
+    /// `true` iff this group isn't nested inside another *capturing*
+    /// group - a non-capturing wrapper doesn't break top-level-ness.
+    /// Mirrors real PHPStan's own `isTopLevel()`; feeds the "exactly one
+    /// optional top-level group" / "exactly one top-level alternation"
+    /// tagged-union dispatch (`checker::expr::build_matched_shape`).
+    pub top_level: bool,
+    /// `true` only when this group is *directly* the atom a zero-min
+    /// quantifier applies to (`(a)?`) - **not** propagated through an
+    /// intervening non-capturing wrapper (`(?:(a))?` does not set this
+    /// on group 1). A real, non-obvious correction found only by testing
+    /// against real PHPStan, not by re-reading source: real PHPStan's
+    /// own `inOptionalQuantification` is captured as a constructor
+    /// parameter at the exact moment a group object is built, then
+    /// unconditionally reset to `false` before recursing into children
+    /// unless the current node is itself a quantification - so it
+    /// resets at every non-quantification node, including a bare
+    /// non-capturing wrapper.
+    pub in_optional_quantification: bool,
+    /// Which real (2+ branch) alternation, and which branch, this
+    /// group's own *innermost enclosing* alternation is - `None` if
+    /// none.
+    pub alternation: Option<(u32, u32)>,
+    /// Set only by `checker::expr::build_matched_shape`'s own
+    /// alternation-variant builder (never by this scanner) - `true`
+    /// overrides this group's own value entirely to the empty string for
+    /// one specific tagged-union variant, for a group known to sit
+    /// *before* the variant's own matched branch (verified against real
+    /// PHPStan: it's always present there, backfilled, never entirely
+    /// absent). Just a `bool`, not a richer "forced value" type: the one
+    /// dispatch that sets this (the "exactly one top-level alternation"
+    /// case) is already scoped to `!unmatched_as_null` callers only, so
+    /// the only forced value ever needed here is the empty string - a
+    /// `PREG_UNMATCHED_AS_NULL` variant would need `null` instead, but
+    /// nothing in this project's own call graph can reach that
+    /// combination yet, and adding a case for it now would be dead code
+    /// with no caller to exercise it.
+    pub forced_empty: bool,
 }
 
 /// A deeply-nested pattern is a real stack-overflow risk via this
@@ -51,11 +89,34 @@ const LITERAL_ENUM_LIMIT: usize = 32;
 /// explicit termination argument" precedent Phase 20 already established.
 const MAX_QUANTIFIER_REPEAT: u64 = 1000;
 
+/// The full result of parsing a pattern's own structure: its capturing
+/// groups, plus two pieces of per-alternation metadata
+/// `RegexCaptureGroup` itself has no room for (they describe a whole
+/// alternation, not any one group) - both feed
+/// `checker::expr::build_matched_shape`'s own "exactly one top-level
+/// alternation" tagged-union dispatch.
+pub(crate) struct ParsedPattern {
+    pub groups: Vec<RegexCaptureGroup>,
+    /// `(alternation_id, branch_count)` - the total number of `|`-
+    /// separated branches a given alternation has, *regardless* of
+    /// whether every branch contains a capturing group. Needed to detect
+    /// a branch with zero groups (real PCRE fact: matching it still
+    /// produces `$matches` with only field `"0"`).
+    pub alternation_branch_counts: Vec<(u32, usize)>,
+    /// Which alternation ids sit inside a zero-min-quantified atom
+    /// somewhere (`(?:(a)|(b))?`) - real PHPStan's own
+    /// `RegexCapturingGroup::inOptionalAlternation()`, confirmed to do
+    /// real work (not a no-op) via `/(?:(a)|(b))?/` still unioning in a
+    /// bare `{0: subject}` possibility even though every branch already
+    /// has a group.
+    pub alternation_wrapped_in_optional_quantifier: Vec<u32>,
+}
+
 /// Parses a PHP PCRE pattern literal's own delimiters/modifiers and
 /// structure to enumerate its capturing groups, in left-to-right
 /// numbering order. Returns `None` for anything outside this function's
 /// own understood subset.
-pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<Vec<RegexCaptureGroup>> {
+pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<ParsedPattern> {
     let (body, modifiers) = split_delimiters_and_modifiers(pattern_literal)?;
     // `x` (free-spacing mode) and `J` (duplicate named groups, excluded
     // by real PHPStan itself as "too complicated") both change the
@@ -74,7 +135,12 @@ pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<Vec<RegexCap
         // cleanly. Never guess past this point.
         return None;
     }
-    Some(scanner.groups)
+    Some(ParsedPattern {
+        groups: scanner.groups,
+        alternation_branch_counts: scanner.alternation_branch_counts,
+        alternation_wrapped_in_optional_quantifier: scanner
+            .alternation_wrapped_in_optional_quantifier,
+    })
 }
 
 /// Splits a PHP PCRE pattern literal into its raw body and modifier
@@ -103,13 +169,20 @@ fn split_delimiters_and_modifiers(pattern: &str) -> Option<(&str, &str)> {
 
 /// One atom's own contribution when scanned: its capturing-group handles
 /// (unchanged from before literal tracking existed), its own literal
-/// value set if fully enumerable, and whether this atom was specifically
-/// a `\Q...\E` block (needed so a quantifier directly following one
-/// doesn't wrongly cross-product the whole block - see `scan_branch`).
+/// value set if fully enumerable, whether this atom was specifically a
+/// `\Q...\E` block (needed so a quantifier directly following one
+/// doesn't wrongly cross-product the whole block - see `scan_branch`),
+/// and - only when this atom is *directly and only* one bare or named
+/// capturing group with nothing wrapping it - that group's own index
+/// (needed to scope `in_optional_quantification` correctly: `None` for
+/// every other form, even one whose own interior contains capturing
+/// groups - a non-capturing wrapper, a lookaround, `\Q...\E`, a literal,
+/// a character class).
 struct AtomResult {
     handles: Vec<usize>,
     literal_values: Option<Vec<String>>,
     is_quoted_block: bool,
+    direct_group: Option<usize>,
 }
 
 impl AtomResult {
@@ -120,6 +193,7 @@ impl AtomResult {
             handles: Vec::new(),
             literal_values: None,
             is_quoted_block: false,
+            direct_group: None,
         }
     }
 
@@ -131,6 +205,7 @@ impl AtomResult {
             handles: Vec::new(),
             literal_values: Some(vec![value]),
             is_quoted_block: false,
+            direct_group: None,
         }
     }
 }
@@ -210,6 +285,15 @@ struct Scanner {
     /// complexity of exact scoping for a construct with zero evidenced
     /// real usage.
     literal_globally_suppressed: bool,
+    /// Incremented only in `finish_capturing_group`, around its own body
+    /// scan - a group's own `top_level` is set from `self.capturing_depth
+    /// == 0` at creation, before that increment (so it reflects whether
+    /// *this* group sits inside another capturing group, not whether
+    /// anything inside *it* does).
+    capturing_depth: usize,
+    next_alternation_id: u32,
+    alternation_branch_counts: Vec<(u32, usize)>,
+    alternation_wrapped_in_optional_quantifier: Vec<u32>,
 }
 
 impl Scanner {
@@ -221,6 +305,10 @@ impl Scanner {
             groups: Vec::new(),
             next_number: 1,
             literal_globally_suppressed: case_insensitive,
+            capturing_depth: 0,
+            next_alternation_id: 0,
+            alternation_branch_counts: Vec::new(),
+            alternation_wrapped_in_optional_quantifier: Vec::new(),
         }
     }
 
@@ -265,12 +353,27 @@ impl Scanner {
             branches.push(self.scan_branch()?);
         }
         let multi_branch = branches.len() > 1;
+        let alt_id = self.next_alternation_id;
+        if multi_branch {
+            self.next_alternation_id += 1;
+            self.alternation_branch_counts
+                .push((alt_id, branches.len()));
+        }
         let mut handles = Vec::new();
         let mut literal_values: Option<Vec<String>> = Some(Vec::new());
-        for branch in branches {
+        for (branch_index, branch) in branches.into_iter().enumerate() {
             if multi_branch {
                 for &idx in &branch.handles {
                     self.groups[idx].optional = true;
+                    // Only claim a group not already claimed by a *more
+                    // inner* real alternation - an inner `scan_alternation`
+                    // call's own retroactive marking always finishes
+                    // before this outer fixup runs, so `is_none()` here
+                    // correctly means "no more-inner alternation owns
+                    // this."
+                    if self.groups[idx].alternation.is_none() {
+                        self.groups[idx].alternation = Some((alt_id, branch_index as u32));
+                    }
                 }
             }
             handles.extend(branch.handles);
@@ -294,6 +397,7 @@ impl Scanner {
             handles,
             literal_values,
             is_quoted_block: false,
+            direct_group: None,
         })
     }
 
@@ -317,6 +421,27 @@ impl Scanner {
             {
                 for &idx in &atom.handles {
                     self.groups[idx].optional = true;
+                    // Broad, deliberately using `atom.handles` (not
+                    // `atom.direct_group`) - real PHPStan's own
+                    // `inOptionalAlternation()`, confirmed to do real
+                    // work via `/(?:(a)|(b))?/` still unioning in a bare
+                    // `{0: subject}` possibility even though every
+                    // branch already has a group. This is a *different*
+                    // signal than `in_optional_quantification` below,
+                    // scoped to the whole alternation, not one group.
+                    if let Some((alt_id, _)) = self.groups[idx].alternation
+                        && !self
+                            .alternation_wrapped_in_optional_quantifier
+                            .contains(&alt_id)
+                    {
+                        self.alternation_wrapped_in_optional_quantifier.push(alt_id);
+                    }
+                }
+                // Narrow, using `atom.direct_group` - see
+                // `RegexCaptureGroup::in_optional_quantification`'s own
+                // doc comment for why this must not use `atom.handles`.
+                if let Some(idx) = atom.direct_group {
+                    self.groups[idx].in_optional_quantification = true;
                 }
             }
             // "Repeated more than once" disables constant typing for
@@ -352,6 +477,7 @@ impl Scanner {
             handles,
             literal_values,
             is_quoted_block: false,
+            direct_group: None,
         })
     }
 
@@ -575,6 +701,7 @@ impl Scanner {
                         Some(vec![text])
                     },
                     is_quoted_block: true,
+                    direct_group: None,
                 })
             }
             Some(c) if c.is_ascii_punctuation() => {
@@ -733,13 +860,26 @@ impl Scanner {
         let number = self.next_number;
         self.next_number += 1;
         let idx = self.groups.len();
+        // `top_level` reflects whether *this* group sits inside another
+        // capturing group - read before incrementing `capturing_depth`
+        // for its own body scan below, so a group nested inside *this*
+        // one sees the incremented depth, while this group itself
+        // correctly sees whatever depth was active before it.
+        let top_level = self.capturing_depth == 0;
         self.groups.push(RegexCaptureGroup {
             number,
             name,
             optional: false,
             literal_values: None,
+            top_level,
+            in_optional_quantification: false,
+            alternation: None,
+            forced_empty: false,
         });
-        let body = self.scan_alternation()?;
+        self.capturing_depth += 1;
+        let body = self.scan_alternation();
+        self.capturing_depth -= 1;
+        let body = body?;
         if !self.eat(')') {
             return None;
         }
@@ -750,6 +890,7 @@ impl Scanner {
             handles,
             literal_values: body.literal_values,
             is_quoted_block: false,
+            direct_group: Some(idx),
         })
     }
 
@@ -781,6 +922,7 @@ impl Scanner {
             handles: body.handles,
             literal_values: Some(vec![String::new()]),
             is_quoted_block: false,
+            direct_group: None,
         })
     }
 
@@ -830,7 +972,7 @@ mod tests {
 
     #[test]
     fn bare_numbered_groups_are_required() {
-        let groups = parse_capture_groups(r"/(\d+)-(\d+)/").unwrap();
+        let groups = parse_capture_groups(r"/(\d+)-(\d+)/").unwrap().groups;
         assert_eq!(
             numbers_and_names(&groups),
             vec![(1, None, false), (2, None, false)]
@@ -839,7 +981,9 @@ mod tests {
 
     #[test]
     fn named_groups_capture_both_number_and_name() {
-        let groups = parse_capture_groups(r"/(?<year>\d+)-(?<month>\d+)/").unwrap();
+        let groups = parse_capture_groups(r"/(?<year>\d+)-(?<month>\d+)/")
+            .unwrap()
+            .groups;
         assert_eq!(
             numbers_and_names(&groups),
             vec![(1, Some("year"), false), (2, Some("month"), false)]
@@ -848,7 +992,7 @@ mod tests {
 
     #[test]
     fn optional_group_via_question_mark() {
-        let groups = parse_capture_groups("/(a)(b)?/").unwrap();
+        let groups = parse_capture_groups("/(a)(b)?/").unwrap().groups;
         assert_eq!(
             numbers_and_names(&groups),
             vec![(1, None, false), (2, None, true)]
@@ -857,7 +1001,7 @@ mod tests {
 
     #[test]
     fn optional_group_via_alternation() {
-        let groups = parse_capture_groups("/(a)|(b)/").unwrap();
+        let groups = parse_capture_groups("/(a)|(b)/").unwrap().groups;
         assert_eq!(
             numbers_and_names(&groups),
             vec![(1, None, true), (2, None, true)]
@@ -866,21 +1010,21 @@ mod tests {
 
     #[test]
     fn optionality_propagates_through_a_non_capturing_wrapper() {
-        let groups = parse_capture_groups("/(?:(a))?/").unwrap();
+        let groups = parse_capture_groups("/(?:(a))?/").unwrap().groups;
         assert_eq!(numbers_and_names(&groups), vec![(1, None, true)]);
     }
 
     #[test]
     fn p_angle_and_quote_named_group_syntax_are_equivalent() {
-        let angle = parse_capture_groups("/(?P<x>a)/").unwrap();
-        let quote = parse_capture_groups("/(?'x'a)/").unwrap();
+        let angle = parse_capture_groups("/(?P<x>a)/").unwrap().groups;
+        let quote = parse_capture_groups("/(?'x'a)/").unwrap().groups;
         assert_eq!(numbers_and_names(&angle), vec![(1, Some("x"), false)]);
         assert_eq!(numbers_and_names(&quote), vec![(1, Some("x"), false)]);
     }
 
     #[test]
     fn a_leading_bracket_and_a_posix_class_dont_miscount_group_boundaries() {
-        let groups = parse_capture_groups("/[]a[:digit:]]+/").unwrap();
+        let groups = parse_capture_groups("/[]a[:digit:]]+/").unwrap().groups;
         assert!(groups.is_empty());
     }
 
@@ -890,25 +1034,25 @@ mod tests {
         // class is already open, since real POSIX syntax `[:name:]` is
         // itself bracket-delimited - a bare top-level `/[:foo](x)/` never
         // reaches this code path at all.
-        let groups = parse_capture_groups("/[[:foo](x)/").unwrap();
+        let groups = parse_capture_groups("/[[:foo](x)/").unwrap().groups;
         assert_eq!(numbers_and_names(&groups), vec![(1, None, false)]);
     }
 
     #[test]
     fn q_e_literal_block_does_not_open_a_group() {
-        let groups = parse_capture_groups(r"/\Q(\E/").unwrap();
+        let groups = parse_capture_groups(r"/\Q(\E/").unwrap().groups;
         assert!(groups.is_empty());
     }
 
     #[test]
     fn a_literal_brace_not_forming_a_quantifier_is_plain_text() {
-        let groups = parse_capture_groups("/a{b/").unwrap();
+        let groups = parse_capture_groups("/a{b/").unwrap().groups;
         assert!(groups.is_empty());
     }
 
     #[test]
     fn duplicate_names_on_alternation_branches_dont_crash() {
-        let groups = parse_capture_groups("/(?<x>a)|(?<x>b)/").unwrap();
+        let groups = parse_capture_groups("/(?<x>a)|(?<x>b)/").unwrap().groups;
         assert_eq!(
             numbers_and_names(&groups),
             vec![(1, Some("x"), true), (2, Some("x"), true)]
@@ -952,7 +1096,8 @@ mod tests {
         let groups = parse_capture_groups(
             "/([0-9]{4})-?((?:1[0-2])|(?:0?[1-9]))?-?((?:(?:[1-3][0-9])|(?:0?[1-9])))?/",
         )
-        .unwrap();
+        .unwrap()
+        .groups;
         assert_eq!(
             numbers_and_names(&groups),
             vec![(1, None, false), (2, None, true), (3, None, true)]
@@ -981,13 +1126,13 @@ mod tests {
 
     #[test]
     fn a_plain_literal_group_is_fully_enumerable() {
-        let groups = parse_capture_groups("/(cat)/").unwrap();
+        let groups = parse_capture_groups("/(cat)/").unwrap().groups;
         assert_eq!(literals(&groups), vec![Some(vec!["cat".to_string()])]);
     }
 
     #[test]
     fn an_alternation_of_literals_unions_their_values() {
-        let groups = parse_capture_groups("/(cat|dog)/").unwrap();
+        let groups = parse_capture_groups("/(cat|dog)/").unwrap().groups;
         assert_eq!(
             literals(&groups),
             vec![Some(vec!["cat".to_string(), "dog".to_string()])]
@@ -996,25 +1141,25 @@ mod tests {
 
     #[test]
     fn q_e_contributes_its_own_verbatim_text() {
-        let groups = parse_capture_groups(r"/(\Qa.b\E)/").unwrap();
+        let groups = parse_capture_groups(r"/(\Qa.b\E)/").unwrap().groups;
         assert_eq!(literals(&groups), vec![Some(vec!["a.b".to_string()])]);
     }
 
     #[test]
     fn an_escaped_punctuation_character_is_literal() {
-        let groups = parse_capture_groups(r"/(a\.b)/").unwrap();
+        let groups = parse_capture_groups(r"/(a\.b)/").unwrap().groups;
         assert_eq!(literals(&groups), vec![Some(vec!["a.b".to_string()])]);
     }
 
     #[test]
     fn a_bounded_quantifier_repeats_a_literal_atom() {
-        let groups = parse_capture_groups("/(a{2})/").unwrap();
+        let groups = parse_capture_groups("/(a{2})/").unwrap().groups;
         assert_eq!(literals(&groups), vec![Some(vec!["aa".to_string()])]);
     }
 
     #[test]
     fn a_bounded_range_quantifier_enumerates_every_repeat_count() {
-        let groups = parse_capture_groups("/(a{1,2})/").unwrap();
+        let groups = parse_capture_groups("/(a{1,2})/").unwrap().groups;
         let mut values = literals(&groups)[0].clone().unwrap();
         values.sort();
         assert_eq!(values, vec!["a".to_string(), "aa".to_string()]);
@@ -1022,63 +1167,63 @@ mod tests {
 
     #[test]
     fn the_i_modifier_disables_literal_tracking_but_not_group_counting() {
-        let groups = parse_capture_groups("/(cat)/i").unwrap();
+        let groups = parse_capture_groups("/(cat)/i").unwrap().groups;
         assert_eq!(numbers_and_names(&groups), vec![(1, None, false)]);
         assert_eq!(literals(&groups), vec![None]);
     }
 
     #[test]
     fn a_character_class_is_never_literal_tracked() {
-        let groups = parse_capture_groups("/([a])/").unwrap();
+        let groups = parse_capture_groups("/([a])/").unwrap().groups;
         assert_eq!(literals(&groups), vec![None]);
     }
 
     #[test]
     fn a_wildcard_dot_is_never_literal_tracked() {
-        let groups = parse_capture_groups("/(a.b)/").unwrap();
+        let groups = parse_capture_groups("/(a.b)/").unwrap().groups;
         assert_eq!(literals(&groups), vec![None]);
     }
 
     #[test]
     fn anchors_contribute_the_empty_string_not_a_bail() {
-        let groups = parse_capture_groups("/(a^b)/").unwrap();
+        let groups = parse_capture_groups("/(a^b)/").unwrap().groups;
         assert_eq!(literals(&groups), vec![Some(vec!["ab".to_string()])]);
     }
 
     #[test]
     fn an_unbounded_quantifier_disables_literal_tracking_for_that_atom() {
-        let groups = parse_capture_groups("/(a+)/").unwrap();
+        let groups = parse_capture_groups("/(a+)/").unwrap().groups;
         assert_eq!(literals(&groups), vec![None]);
     }
 
     #[test]
     fn an_unrecognized_escape_disables_literal_tracking_for_that_atom() {
-        let groups = parse_capture_groups(r"/(a\db)/").unwrap();
+        let groups = parse_capture_groups(r"/(a\db)/").unwrap().groups;
         assert_eq!(literals(&groups), vec![None]);
     }
 
     #[test]
     fn a_bounded_quantifier_directly_after_a_quoted_block_bails_that_span() {
-        let groups = parse_capture_groups(r"/(\Qab\E{2})/").unwrap();
+        let groups = parse_capture_groups(r"/(\Qab\E{2})/").unwrap().groups;
         assert_eq!(literals(&groups), vec![None]);
     }
 
     #[test]
     fn a_group_repeated_more_than_once_externally_loses_its_own_literal_value() {
-        let groups = parse_capture_groups("/(?:(a)){2,}/").unwrap();
+        let groups = parse_capture_groups("/(?:(a)){2,}/").unwrap().groups;
         assert_eq!(literals(&groups), vec![None]);
         assert_eq!(numbers_and_names(&groups), vec![(1, None, false)]);
     }
 
     #[test]
     fn a_lookahead_contributes_the_empty_string_not_its_own_interior() {
-        let groups = parse_capture_groups("/(a(?=b))/").unwrap();
+        let groups = parse_capture_groups("/(a(?=b))/").unwrap().groups;
         assert_eq!(literals(&groups), vec![Some(vec!["a".to_string()])]);
     }
 
     #[test]
     fn a_capturing_group_inside_a_lookahead_still_gets_its_own_correct_value() {
-        let groups = parse_capture_groups("/(?=(a))/").unwrap();
+        let groups = parse_capture_groups("/(?=(a))/").unwrap().groups;
         assert_eq!(literals(&groups), vec![Some(vec!["a".to_string()])]);
     }
 
@@ -1086,12 +1231,101 @@ mod tests {
     fn the_literal_enum_limit_degrades_one_span_without_failing_the_whole_parse() {
         // 6 branches of 2 chars each, repeated 6 times -> 6^6 = 46656
         // combinations, well past LITERAL_ENUM_LIMIT (32).
-        let groups = parse_capture_groups("/((?:aa|bb|cc|dd|ee|ff){6})(x)/").unwrap();
+        let groups = parse_capture_groups("/((?:aa|bb|cc|dd|ee|ff){6})(x)/")
+            .unwrap()
+            .groups;
         assert_eq!(
             numbers_and_names(&groups),
             vec![(1, None, false), (2, None, false)]
         );
         assert_eq!(literals(&groups)[0], None);
         assert_eq!(literals(&groups)[1], Some(vec!["x".to_string()]));
+    }
+
+    // --- Task 1b: tagged unions ---
+
+    fn top_levels(groups: &[RegexCaptureGroup]) -> Vec<bool> {
+        groups.iter().map(|g| g.top_level).collect()
+    }
+
+    #[test]
+    fn top_level_is_correct_for_a_bare_a_wrapped_and_a_doubly_nested_group() {
+        let bare = parse_capture_groups("/(a)/").unwrap().groups;
+        assert_eq!(top_levels(&bare), vec![true]);
+
+        let wrapped = parse_capture_groups("/(?:(a))/").unwrap().groups;
+        assert_eq!(top_levels(&wrapped), vec![true]);
+
+        let nested = parse_capture_groups("/((a))/").unwrap().groups;
+        assert_eq!(top_levels(&nested), vec![true, false]);
+    }
+
+    #[test]
+    fn alternation_identifies_the_shared_id_and_distinct_branch_indices() {
+        let groups = parse_capture_groups("/(a)|(b)|(c)/").unwrap().groups;
+        let ids: Vec<u32> = groups.iter().map(|g| g.alternation.unwrap().0).collect();
+        let branches: Vec<u32> = groups.iter().map(|g| g.alternation.unwrap().1).collect();
+        assert_eq!(ids[0], ids[1]);
+        assert_eq!(ids[1], ids[2]);
+        assert_eq!(branches, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn a_nested_alternations_own_descendants_are_attributed_to_the_inner_one() {
+        // Group 1 wraps a nested alternation (groups 2, 3); group 4 is
+        // the outer alternation's other branch. Groups 2/3 must belong
+        // to the *inner* alternation, not the outer one, even though
+        // they're discovered while scanning the outer alternation's own
+        // branch 0.
+        let groups = parse_capture_groups("/((a)|(b))|(c)/").unwrap().groups;
+        let outer_id = groups[0].alternation.unwrap().0;
+        let outer_other_id = groups[3].alternation.unwrap().0;
+        assert_eq!(outer_id, outer_other_id);
+        let inner_id_a = groups[1].alternation.unwrap().0;
+        let inner_id_b = groups[2].alternation.unwrap().0;
+        assert_eq!(inner_id_a, inner_id_b);
+        assert_ne!(inner_id_a, outer_id);
+    }
+
+    #[test]
+    fn in_optional_quantification_does_not_propagate_through_a_non_capturing_wrapper() {
+        let direct = parse_capture_groups("/(a)?/").unwrap().groups;
+        assert!(direct[0].in_optional_quantification);
+
+        // A real, non-obvious correction: real PHPStan's own flag resets
+        // at every non-quantification node, so it must be `false` here,
+        // not `true` - confirmed against real PHPStan directly (see
+        // `RegexCaptureGroup::in_optional_quantification`'s own doc
+        // comment).
+        let wrapped = parse_capture_groups("/(?:(a))?/").unwrap().groups;
+        assert!(!wrapped[0].in_optional_quantification);
+    }
+
+    #[test]
+    fn alternation_wrapped_in_optional_quantifier_is_set_even_when_no_group_is_directly_quantified()
+    {
+        let parsed = parse_capture_groups("/(?:(a)|(b))?/").unwrap();
+        assert!(!parsed.groups[0].in_optional_quantification);
+        assert!(!parsed.groups[1].in_optional_quantification);
+        let alt_id = parsed.groups[0].alternation.unwrap().0;
+        assert!(
+            parsed
+                .alternation_wrapped_in_optional_quantifier
+                .contains(&alt_id)
+        );
+    }
+
+    #[test]
+    fn alternation_branch_counts_reflects_every_branch_including_groupless_ones() {
+        let parsed = parse_capture_groups("/(a)|(b)|x/").unwrap();
+        let alt_id = parsed.groups[0].alternation.unwrap().0;
+        assert_eq!(
+            parsed
+                .alternation_branch_counts
+                .iter()
+                .find(|(id, _)| *id == alt_id)
+                .map(|(_, n)| *n),
+            Some(3)
+        );
     }
 }

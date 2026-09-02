@@ -1,7 +1,6 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, literal_string_key, literal_string_value, preg_match_matches_shape,
-    union_types,
+    Checker, Locals, build_matched_shape, literal_string_key, literal_string_value, union_types,
 };
 use crate::regex_groups;
 use crate::types::{Type, is_subtype};
@@ -25,10 +24,16 @@ impl<'a> Checker<'a> {
         if let Some((pattern_arg, matches_arg, true_means_matched)) = preg_match_condition(cond)
             && let ExprKind::Variable(matches_name) = &matches_arg.kind
             && let Some(pattern_str) = literal_string_value(pattern_arg)
-            && let Some(groups) = regex_groups::parse_capture_groups(pattern_str)
+            && let Some(parsed) = regex_groups::parse_capture_groups(pattern_str)
         {
             let narrowed = if branch_true == true_means_matched {
-                preg_match_matches_shape(&groups, &Type::String, false)
+                build_matched_shape(
+                    &parsed.groups,
+                    &parsed.alternation_branch_counts,
+                    &parsed.alternation_wrapped_in_optional_quantifier,
+                    &Type::String,
+                    false,
+                )
             } else {
                 Type::ArrayShape(vec![])
             };
