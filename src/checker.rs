@@ -2358,6 +2358,76 @@ mod tests {
     }
 
     #[test]
+    fn array_key_exists_true_branch_keeps_only_shapes_declaring_the_key() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsBValue(string $b): void {}
+            /**
+             * @param array{a: int} $withA
+             * @param array{b: string} $withB
+             */
+            function handle(array $withA, array $withB, bool $cond): void {
+                $x = $cond ? $withA : $withB;
+                if (array_key_exists('b', $x)) {
+                    needsBValue($x['b']);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_key_exists_false_branch_keeps_only_shapes_lacking_the_key() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsAValue(int $a): void {}
+            /**
+             * @param array{a: int} $withA
+             * @param array{b: string} $withB
+             */
+            function handle(array $withA, array $withB, bool $cond): void {
+                $x = $cond ? $withA : $withB;
+                if (! array_key_exists('b', $x)) {
+                    needsAValue($x['a']);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_key_exists_on_a_merely_optional_key_narrows_neither_branch() {
+        let shape = Type::ArrayShape(vec![("a".to_string(), Type::Int, true)]);
+        assert_eq!(
+            narrowing::narrow_array_shape_by_key_presence(&shape, "a", true),
+            shape
+        );
+        assert_eq!(
+            narrowing::narrow_array_shape_by_key_presence(&shape, "a", false),
+            shape
+        );
+    }
+
+    #[test]
+    fn array_key_exists_on_a_plain_array_leaves_the_type_untouched() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param array<string, int> $x
+             */
+            function handle(array $x): void {
+                if (array_key_exists('a', $x)) {
+                    $y = $x;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn pest_it_closure_this_is_not_flagged_as_undefined_variable() {
         // Real shape: tests/Browser/AboutControllerTest.php-style Pest
         // test files - `it('...', function (): void { ... $this ... })`

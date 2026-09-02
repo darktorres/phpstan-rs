@@ -155,6 +155,23 @@ impl<'a> Checker<'a> {
                         narrow_type_excluding(&current, &target_ty)
                     };
                     locals.insert(key, narrowed);
+                } else if let ExprKind::Name(name) = &callee.kind
+                    && name == "array_key_exists"
+                    && let [key_arg, arr_arg] = args.as_slice()
+                    && let ExprKind::Literal(Literal::String(lit_key)) = &key_arg.value.kind
+                    && let Some(arr_key) = narrowing_key(&arr_arg.value)
+                {
+                    // Phase 33 Finding 4: the checked expression here is
+                    // the array argument, not the key - proving/disproving
+                    // whether a specific offset is present lets a `Union`
+                    // member that could never make the call come out this
+                    // way be dropped, the same "keep/drop a Union member
+                    // based on a provable fact" shape `instanceof`'s own
+                    // member resolution already uses.
+                    let current = self.current_narrowed_type(&arr_arg.value, &arr_key, locals);
+                    let narrowed =
+                        narrow_array_shape_by_key_presence(&current, lit_key, branch_true);
+                    locals.insert(arr_key, narrowed);
                 }
             }
             ExprKind::Instanceof(inner, target) => {
@@ -637,6 +654,52 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         }
         other if other == excluded => Type::Never,
         other => other.clone(),
+    }
+}
+
+/// Narrows `ty` by whether `key` is (`present = true`) or isn't
+/// (`present = false`) provably a real offset of it -
+/// `array_key_exists($key, $ty)`'s own true/false branches. An
+/// `ArrayShape` member declaring `key` (required or optional) can always
+/// make the call `true`; only a member declaring it *required* can be
+/// proven to make the call `false` (an optional field's absence is
+/// exactly what "optional" means, so its being false there is not
+/// impossible for that member specifically). A member omitting `key`
+/// altogether can never make the call `true`. Recurses through `Union`
+/// the same way `narrow_type_to`/`narrow_type_excluding` do; anything
+/// that isn't an `ArrayShape` (or a `Union` of them) is left untouched,
+/// this project's usual "don't guess" precedent.
+pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: bool) -> Type {
+    match ty {
+        Type::ArrayShape(fields) => match fields.iter().find(|(k, _, _)| k == key) {
+            Some((_, _, optional)) => {
+                if !present && !*optional {
+                    Type::Never
+                } else {
+                    ty.clone()
+                }
+            }
+            None => {
+                if present {
+                    Type::Never
+                } else {
+                    ty.clone()
+                }
+            }
+        },
+        Type::Union(members) => {
+            let kept: Vec<Type> = members
+                .iter()
+                .map(|m| narrow_array_shape_by_key_presence(m, key, present))
+                .filter(|m| *m != Type::Never)
+                .collect();
+            match kept.len() {
+                0 => Type::Never,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        _ => ty.clone(),
     }
 }
 
