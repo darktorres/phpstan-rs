@@ -2436,6 +2436,74 @@ shape, e.g. `feedRawGet`'s `status: mixed` becoming `status: int` while
 its separate, untouched `body: mixed` stays as-is) - zero genuinely new
 diagnostic locations.
 
+## Phase 35: close Phase 34's own deliberately-deferred items, properly - DONE
+
+Phase 34 deferred two buckets because each needed genuine new machinery
+rather than a narrow bug fix. Closed both properly this round - real,
+traced-through-to-completion designs, not shortcuts:
+
+- **E - `class-string<T>` now participates in `@template` binding.** A
+  new `Type::ClassString(Box<Type>)` variant survives from parsing
+  through `Foo::class`/`get_class($obj)` inference, template binding/
+  substitution, and every other `Type`-tree walker (`mark_template_params`,
+  `resolve_names_in_type`, `resolve_pseudo`, `check_generic_bounds`,
+  `is_type_fully_known`). `is_subtype`/`is_assignable` both keep it
+  freely interchangeable with plain `string` in both directions
+  (backward compatibility - this project can't verify a string's actual
+  content names a real class either way), with `is_assignable` adding
+  its own hierarchy-aware override (`class-string<Derived>` satisfies
+  `class-string<Base>`) the same way it already does for plain
+  `Object`-vs-`Object`. `get_class($obj)` got the identical treatment as
+  `Foo::class`, matching real PHPStan's own
+  `GetClassDynamicReturnTypeExtension`. Fixes the whole
+  `*TestRepoWithEm`/`*TestConnAndRepo` family (6 diagnostics) - and, it
+  turned out, far more: `$rate_repository = TypedRepository::narrow(...)`-
+  shaped construction appears throughout the real corpus, and every
+  repository built this way was previously `Mixed` end to end (so
+  *every* call through it was unchecked). Also fixed PHPUnit's own
+  `self::createStub(Foo::class)` (a `@template T` / `class-string<T>`
+  method in its own stubs) resolving to `Foo&Stub` instead of `Mixed`,
+  closing three previously-silent `TelemetryServiceTest` argument-type
+  mismatches. One new, isolated false positive surfaced as a direct
+  result of a repository finally being checked at all
+  (`RatingUserPageRenderer`'s `array_keys($image_ids)` typing as
+  `array<int>|array<string>` for an array whose keys are always `int`)
+  - traced to the already-tracked `Type::Array`-has-no-key-type
+    limitation (Phase 15), not a new gap this phase introduced.
+- **F - inline `@var` annotations are now recognized on any statement,**
+  not just an actual property/param/return declaration. `Stmt` carries
+  its own leading doc comment now; `check_stmt` applies a recognized
+  `@var` assertion before dispatch (so later reads in the same block see
+  it - the evidenced shape, a tag on a statement that merely *reads* the
+  variable) and, when the statement itself is a plain assignment to the
+  same variable, again after dispatch (otherwise `bind_assignment_target`
+  would silently clobber the assertion with the assignment's own
+  inference, found during adversarial validation of this exact design
+  before any code was written). A tag directly on a `foreach` header is
+  deliberately left unsupported: the loop body is checked *inside* the
+  same match arm that binds the loop variable, so only an after-dispatch
+  reapplication would produce a half-working result (correct after the
+  loop, wrong inside it) - worse than not supporting the shape at all.
+  Fixes the evidenced `StructuralTest` family (`findCallSites`/
+  `findCallSitesOutsideComments`/`findBareCallSites`/
+  `findDuplicateServiceConstructionChains`, matching `tools/p58/trace.php`'s
+  own real `/** @var SplFileInfo $file */`) and, since the mechanism
+  applies to *every* real `@var` comment already written in the corpus
+  rather than one specific file, also several unrelated genuine
+  developer annotations this checker had simply never read before
+  (`MetadataService::getIptcData`'s `/** @var array<string, mixed>
+  $imginfo */`, and similar `array<string, mixed>` annotations in
+  `PictureModifyPageRenderer`/`UserListPageRenderer`/
+  `BatchManagerSubController`).
+
+**DONE.** `270 -> 249` diagnostics. Verified with the same location-based
+classification loop: 23 locations resolved (all traced to a real `@var`
+comment or a `TypedRepository::narrow`/`class-string<T>` call site now
+correctly typed), 2 partially reshaped (a nested field within an
+already-diagnosed multi-field shape became more precise without fully
+resolving the outer mismatch), 1 new location (the `array_keys`/
+`Type::Array`-key-type gap above, already tracked under Phase 15).
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
@@ -2466,8 +2534,6 @@ confused with each other.
 | No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
 | No LSP hover/go-to-definition | 17 |
 | No extension/plugin API | 18 |
-| `class-string<T>` doesn't participate in `@template` binding - it collapses straight to plain `string` at parse time, discarding the generic argument before template binding ever runs | 34 |
-| Inline `@var` annotations on an arbitrary statement aren't read - only on an actual property/param/return declaration; `Stmt` carries no `doc_comment` field at all | 34 |
 
 **Permanent design boundaries (not phase-tracked - not planned, by choice):**
 
