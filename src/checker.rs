@@ -2249,6 +2249,59 @@ mod tests {
     }
 
     #[test]
+    fn instanceof_false_branch_drops_the_checked_class_from_a_union() {
+        // Phase 33 Finding 1: BrowserTestHelpers::dbEscape's real shape.
+        let d = diagnostics_for(
+            r#"<?php
+            class Mysqli {}
+            class PgConnection {}
+            function needsPgConnection(PgConnection $c): void {}
+            function dbEscape(Mysqli|PgConnection $db): void {
+                if ($db instanceof Mysqli) {
+                    return;
+                }
+                needsPgConnection($db);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn instanceof_false_branch_of_the_exact_declared_class_is_dead_code() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Cat {}
+            function needsInt(int $n): void {}
+            function handle(Cat $c): void {
+                if (! ($c instanceof Cat)) {
+                    needsInt($c);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn instanceof_false_branch_against_an_unrelated_class_leaves_the_type_untouched() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Cat {}
+            class Dog {}
+            function needsCat(Cat $c): void {}
+            function handle(Cat|Dog $animal): void {
+                if ($animal instanceof Dog) {
+                    return;
+                }
+                needsCat($animal);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn pest_it_closure_this_is_not_flagged_as_undefined_variable() {
         // Real shape: tests/Browser/AboutControllerTest.php-style Pest
         // test files - `it('...', function (): void { ... $this ... })`

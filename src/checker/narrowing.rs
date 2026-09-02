@@ -138,15 +138,23 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Instanceof(inner, target) => {
-                // The false branch would need a "not this class" type we
-                // don't have a representation for, so it's left alone. A
-                // dynamic target (`$x instanceof $className`) doesn't name
-                // a concrete class to narrow to either.
-                if branch_true
-                    && let Some(key) = narrowing_key(inner)
+                // Phase 33 Finding 1: the false branch doesn't need a
+                // "not this class" type to be representable - it only
+                // needs to *drop* the one member just proven impossible
+                // from an already-enumerated `Union`, exactly what
+                // `narrow_type_excluding` already does soundly elsewhere.
+                // A dynamic target (`$x instanceof $className`) still
+                // doesn't name a concrete class to narrow to either way.
+                if let Some(key) = narrowing_key(inner)
                     && let InstanceofTarget::Name(class_name) = target
                 {
-                    locals.insert(key, self.resolve_name_expr(class_name));
+                    let resolved = self.resolve_name_expr(class_name);
+                    if branch_true {
+                        locals.insert(key, resolved);
+                    } else {
+                        let current = self.current_narrowed_type(inner, &key, locals);
+                        locals.insert(key, narrow_type_excluding(&current, &resolved));
+                    }
                 }
             }
             // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
