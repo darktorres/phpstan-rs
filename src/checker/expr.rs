@@ -625,6 +625,25 @@ impl<'a> Checker<'a> {
                     Some(i) => {
                         self.check_expr(i, locals, label);
                         self.check_shape_key_access(base, i, locals, label);
+                        // Phase 32 Finding F (found while testing it): the
+                        // `Index` counterpart of `PropertyAccess`'s own
+                        // "check the narrowed key first" handling just
+                        // above - `check_expr` (unlike `infer_expr`, which
+                        // already does this for `Index`) went straight to
+                        // re-deriving the type from the base's own
+                        // declared/inferred shape, silently discarding
+                        // whatever `apply_narrowing` had written under
+                        // this exact `narrowing_key`. Real impact: a bare
+                        // `return $x['k'];` right after narrowing
+                        // `$x['k']` saw the un-narrowed type, while
+                        // passing the same expression as a function
+                        // argument (going through `infer_expr` for the
+                        // argument-type comparison) already didn't.
+                        if let Some(key) = narrowing_key(e)
+                            && let Some(narrowed) = locals.get(&key)
+                        {
+                            return narrowed.clone();
+                        }
                         match base_ty {
                             Type::Array(inner) => *inner,
                             Type::ArrayShape(fields) => literal_string_key(i)

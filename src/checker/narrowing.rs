@@ -152,7 +152,7 @@ impl<'a> Checker<'a> {
         locals
             .get(key)
             .cloned()
-            .unwrap_or_else(|| self.infer_expr(expr, locals))
+            .unwrap_or_else(|| self.infer_expr(narrowing_infer_target(expr), locals))
     }
 
     pub(crate) fn apply_equality_narrowing(
@@ -296,6 +296,36 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// Phase 32 Finding F: the expression `current_narrowed_type`'s own
+/// fallback should actually infer from, when no prior narrowing entry
+/// exists yet. `narrowing_key`'s own unwrapping (`Grouping`, `Assign`,
+/// the literal-`null`-coalesce case below) picks a *key* based on the
+/// real underlying target, but inferring the type straight from the
+/// original (still-wrapped) expression is only safe for some of those
+/// shapes: `Grouping` is transparent (`infer_expr` already sees straight
+/// through it), and `Assign` is deliberately *not* unwrapped here -
+/// `infer_expr` on the whole `Assign` already gives exactly the
+/// right-hand side's own type, which is what ends up stored under the
+/// left-hand side too, so unwrapping it further would infer from the
+/// *pre-assignment* value instead. A `??`-wrapped expression is
+/// genuinely different: `infer_expr` on the whole coalesce already
+/// strips `null` via the coalesce's own semantics before an `is_int`/
+/// `is_string`/etc. predicate gets a chance to narrow anything from the
+/// *real* left-hand type - inferring from the real target directly is
+/// what lets `is_int($x['k'] ?? null)` see `$x['k']`'s own true type
+/// (`int|null`), not the coalesce result's already-narrower one.
+fn narrowing_infer_target(e: &Expr) -> &Expr {
+    match &e.kind {
+        ExprKind::Grouping(inner) => narrowing_infer_target(inner),
+        ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
+            if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
+        {
+            narrowing_infer_target(lhs)
+        }
+        _ => e,
+    }
+}
+
 /// A stable string key for the small set of expressions this checker can
 /// narrow: a bare local variable, a property-access chain rooted in one
 /// (`$a->b->c`), or a literal-key array-index chain rooted in one
@@ -364,6 +394,23 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         // Without this, `Assign`'s own arm above never even got a chance
         // to run for the single most common shape it exists to cover.
         ExprKind::Grouping(inner) => narrowing_key(inner),
+        // Phase 32 Finding F: `is_int($decoded['status'] ?? null)` - a
+        // common defensive-coding idiom (json_decode results,
+        // `$_SERVER`/`$_GET` reads, ...). Scoped to a literal `null`
+        // fallback specifically, not any coalesce: `is_int($x['k'] ??
+        // null)` being true can only happen if `$x['k']` itself was
+        // already `int` (the fallback `null` would fail `is_int`
+        // otherwise, so `null` specifically can never be the reason the
+        // predicate passed) - but `is_int($x['k'] ?? 0)` gives no such
+        // guarantee, since `$x['k']` being absent/`null` would still make
+        // the whole expression `is_int`-true via the fallback `0`,
+        // wrongly narrowing `$x['k']` itself away from a real possibility
+        // (`null`) it could still hold.
+        ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
+            if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
+        {
+            narrowing_key(lhs)
+        }
         _ => None,
     }
 }

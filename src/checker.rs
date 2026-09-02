@@ -4713,6 +4713,30 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Found while implementing/testing Finding F above: `check_expr`'s own
+    // `Index` arm never consulted the narrowed `locals` state at all -
+    // unlike `infer_expr`'s `Index` arm, and unlike `check_expr`'s own
+    // `PropertyAccess` arm just above it in the same match. A narrowed
+    // array-index expression passed as a *function argument* (checked via
+    // `infer_expr` for the argument-type comparison, the shape the test
+    // just above this one exercises) already worked; a bare `return
+    // $x['k'];` reading the same narrowed expression directly did not.
+    #[test]
+    fn is_string_narrows_a_literal_array_index_expression_read_back_via_a_bare_return() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{code?: string|null} $info */
+            function f(array $info): string {
+                if (is_string($info['code'])) {
+                    return $info['code'];
+                }
+                return '';
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn equality_narrows_a_literal_array_index_expression() {
         let d = diagnostics_for(
@@ -4797,6 +4821,75 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Phase 32 Finding F, real shape: `BrowserTestHelpers::apiFetch`'s
+    // `is_int($decoded['status'] ?? null)` - `narrowing_key` had no arm
+    // for a `??`-wrapped expression at all, so this common
+    // "narrow-an-array-element-that-might-be-absent" idiom never narrowed
+    // `$decoded['status']` itself.
+    #[test]
+    fn is_int_narrows_through_a_null_coalesce_fallback() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{status?: int|null} $decoded */
+            function f(array $decoded): int {
+                if (is_int($decoded['status'] ?? null)) {
+                    return $decoded['status'];
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // The unsoundness this fix's own scoping avoids: unlike `?? null`,
+    // `is_int($decoded['status'] ?? 0)` can be true purely because the
+    // fallback `0` itself is an int, even when `$decoded['status']` is
+    // absent/`null` - narrowing it to `int` there would be a real, new
+    // false negative, so the coalesce arm must not fire for this
+    // fallback.
+    #[test]
+    fn is_int_does_not_narrow_through_a_non_null_coalesce_fallback() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{status?: int|string} $decoded */
+            function f(array $decoded): int {
+                if (is_int($decoded['status'] ?? 0)) {
+                    return $decoded['status'];
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected $decoded['status'] to stay unnarrowed (still int|string): {d:?}"
+        );
+    }
+
+    // The same boundary, checked against a non-literal fallback too - not
+    // just "a fallback that happens to be non-zero."
+    #[test]
+    fn is_int_does_not_narrow_through_a_variable_coalesce_fallback() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{status?: int|string} $decoded */
+            function f(array $decoded, int $default): int {
+                if (is_int($decoded['status'] ?? $default)) {
+                    return $decoded['status'];
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected $decoded['status'] to stay unnarrowed (still int|string): {d:?}"
+        );
     }
 
     #[test]
