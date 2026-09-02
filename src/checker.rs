@@ -4794,6 +4794,25 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 32 Finding H, corpus-level check: `end()`'s own real stub
+    // (`function end(object|array &$array): mixed {}` with `@return
+    // mixed|false`) used to resolve to the literal `mixed|false` - a
+    // stray `False` member fails `strtoupper()`'s plain `string` argument
+    // check on its own, even though the whole union is vacuously
+    // satisfiable via `Mixed`.
+    #[test]
+    fn strtoupper_accepts_ends_own_still_mixed_return_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param string[] $items */
+            function f(array $items): string {
+                return strtoupper(end($items));
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn equality_narrows_a_literal_array_index_expression() {
         let d = diagnostics_for(

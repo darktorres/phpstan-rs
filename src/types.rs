@@ -128,7 +128,22 @@ pub fn parse_type_string(raw: &str) -> Type {
     let pipe_parts = split_top_level(s, '|');
     let amp_parts = split_top_level(s, '&');
     let ty = if pipe_parts.len() > 1 {
-        Type::Union(pipe_parts.into_iter().map(parse_type_atom).collect())
+        let members: Vec<Type> = pipe_parts.into_iter().map(parse_type_atom).collect();
+        // Phase 32 Finding H: `Mixed` already includes every other
+        // possible value, so a union with `Mixed` sitting alongside
+        // anything else (`end()`'s real stub: `@return mixed|false`,
+        // never updated after `end(): mixed` dropped its own native
+        // `|false`) is simply `Mixed` - `union_types` (`checker/expr.rs`)
+        // already special-cases this at *construction* time everywhere
+        // it's used, but this is the lower-level parser building a
+        // `Type::Union` directly from doc text, with no such
+        // normalization. A stray non-`Mixed` member surviving otherwise
+        // fails an ordinary argument-compatibility check on its own,
+        // even though the whole union is vacuously satisfiable.
+        if members.contains(&Type::Mixed) {
+            return Type::Mixed;
+        }
+        Type::Union(members)
     } else if amp_parts.len() > 1 {
         Type::Intersection(amp_parts.into_iter().map(parse_type_atom).collect())
     } else {
@@ -601,6 +616,26 @@ mod tests {
 
     #[test]
     fn union_parses_flat() {
+        assert_eq!(
+            parse_type_string("int|string"),
+            Type::Union(vec![Type::Int, Type::String])
+        );
+    }
+
+    // Phase 32 Finding H, real shape: `end()`'s real stub is `function
+    // end(object|array &$array): mixed {}` with a never-updated
+    // `@return mixed|false` doc comment - `Mixed` already includes every
+    // other possible value, so a stray `False` (or `Null`) member sitting
+    // alongside it fails an ordinary argument-compatibility check on its
+    // own, even though the whole union is vacuously satisfiable.
+    #[test]
+    fn a_union_containing_mixed_collapses_to_plain_mixed() {
+        assert_eq!(parse_type_string("mixed|false"), Type::Mixed);
+        assert_eq!(parse_type_string("mixed|null"), Type::Mixed);
+    }
+
+    #[test]
+    fn an_ordinary_union_with_no_mixed_member_is_unaffected() {
         assert_eq!(
             parse_type_string("int|string"),
             Type::Union(vec![Type::Int, Type::String])
