@@ -1911,6 +1911,23 @@ impl<'a> Checker<'a> {
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_false_member(generic);
             }
+            // Phase 34 Finding A: the real stub declares `curl_getinfo`
+            // unconditionally `mixed` - real PHPStan's own
+            // CurlGetinfoFunctionDynamicReturnTypeExtension maps a
+            // literal CURLINFO_* option constant to a concrete type
+            // instead. Scoped to the 2-arg form actually used anywhere
+            // in real code (a bare 1-arg `curl_getinfo($ch)` call
+            // returns a much bigger "all components" array shape this
+            // project doesn't model - falls through to today's `mixed`
+            // unchanged).
+            "curl_getinfo" if args.len() == 2 => {
+                if let ExprKind::Name(option_name) = &args[1].value.kind
+                    && let Some(ty) =
+                        curl_getinfo_component_type(option_name.trim_start_matches('\\'))
+                {
+                    return ty;
+                }
+            }
             _ => {}
         }
         let resolved = resolve_call_args(args, &sig.params);
@@ -2305,6 +2322,55 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
         ExprKind::Grouping(inner) => contains_json_throw_on_error(inner),
         _ => false,
     }
+}
+
+/// `curl_getinfo($ch, CONSTANT)`'s own real per-option return type - a
+/// curated subset of real PHPStan's own ~70-entry
+/// `CurlGetinfoFunctionDynamicReturnTypeExtension` table, covering the
+/// commonly-used constants real code actually reaches for (every real
+/// call site in this project's own verification corpus uses one of
+/// these) rather than transcribing the full table, including its RTSP/
+/// proxy/microsecond/bignum variants, for entries nothing here gives any
+/// evidence about. `None` for anything else falls through to this
+/// project's existing generic (`mixed`) behavior, unchanged.
+fn curl_getinfo_component_type(name: &str) -> Option<Type> {
+    let string_false = Type::Union(vec![Type::String, Type::False]);
+    Some(match name {
+        "CURLINFO_EFFECTIVE_URL"
+        | "CURLINFO_PRIMARY_IP"
+        | "CURLINFO_LOCAL_IP"
+        | "CURLINFO_SCHEME"
+        | "CURLINFO_EFFECTIVE_METHOD" => Type::String,
+        "CURLINFO_REDIRECT_URL" | "CURLINFO_HEADER_OUT" | "CURLINFO_CONTENT_TYPE" => string_false,
+        "CURLINFO_TOTAL_TIME"
+        | "CURLINFO_NAMELOOKUP_TIME"
+        | "CURLINFO_CONNECT_TIME"
+        | "CURLINFO_PRETRANSFER_TIME"
+        | "CURLINFO_STARTTRANSFER_TIME"
+        | "CURLINFO_REDIRECT_TIME"
+        | "CURLINFO_SIZE_UPLOAD"
+        | "CURLINFO_SIZE_DOWNLOAD"
+        | "CURLINFO_SPEED_DOWNLOAD"
+        | "CURLINFO_SPEED_UPLOAD"
+        | "CURLINFO_CONTENT_LENGTH_DOWNLOAD"
+        | "CURLINFO_CONTENT_LENGTH_UPLOAD" => Type::Float,
+        "CURLINFO_FILETIME"
+        | "CURLINFO_REDIRECT_COUNT"
+        | "CURLINFO_PRIMARY_PORT"
+        | "CURLINFO_LOCAL_PORT"
+        | "CURLINFO_HEADER_SIZE"
+        | "CURLINFO_REQUEST_SIZE"
+        | "CURLINFO_SSL_VERIFYRESULT"
+        | "CURLINFO_RESPONSE_CODE"
+        | "CURLINFO_HTTP_CODE"
+        | "CURLINFO_HTTP_CONNECTCODE"
+        | "CURLINFO_OS_ERRNO"
+        | "CURLINFO_NUM_CONNECTS"
+        | "CURLINFO_PROTOCOL"
+        | "CURLINFO_HTTP_VERSION" => Type::Int,
+        "CURLINFO_PRIVATE" => Type::Mixed,
+        _ => return None,
+    })
 }
 
 /// Peels through any `(...)`-grouping wrapper(s) to the real expression

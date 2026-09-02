@@ -1454,6 +1454,72 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 34 Finding A: curl_getinfo($ch, CONSTANT) has a real,
+    // per-constant return type real PHPStan already models - the real
+    // shape driving 16 corpus diagnostics (idcGet, identCurl, and every
+    // other browser-test curl helper).
+    #[test]
+    fn curl_getinfo_response_code_infers_int() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($ch): int {
+                return curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn curl_getinfo_effective_url_infers_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($ch): string {
+                return curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn curl_getinfo_redirect_url_infers_string_or_false() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($ch): string|false {
+                return curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn curl_getinfo_with_an_unrecognized_constant_keeps_todays_mixed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function f($ch): void {
+                needsString(curl_getinfo($ch, CURLINFO_NOT_IN_THE_CURATED_TABLE));
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn curl_getinfo_with_no_option_argument_keeps_todays_mixed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function f($ch): void {
+                needsString(curl_getinfo($ch));
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn json_encode_without_throw_on_error_keeps_todays_generic_union() {
         let d = diagnostics_for(
