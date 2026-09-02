@@ -6309,6 +6309,149 @@ mod tests {
     }
 
     #[test]
+    fn an_inline_var_annotation_on_a_later_statement_narrows_a_generically_typed_read() {
+        // Phase 35 Finding F: the real `StructuralTest::findCallSites`
+        // shape, reduced - `$file` comes back from `current()`'s own
+        // generic (untyped, so `mixed`) return, an inline `/** @var
+        // FakeFileInfo9921 $file */` sits on an unrelated `if` statement that
+        // merely reads it, and code after that `if` calls a method only
+        // `FakeFileInfo9921` has. Without the annotation, `$file` stays
+        // `mixed` and this method call is never checked at all (this
+        // project's usual mixed-argument/mixed-receiver leniency) - so a
+        // real "undefined method" diagnostic here proves the annotation
+        // actually took effect, not just that nothing was flagged.
+        let d = diagnostics_for(
+            r#"<?php
+            class FakeFileInfo9921 {}
+            class Iter {
+                public function current() { return null; }
+            }
+            function f(Iter $it): void {
+                $file = $it->current();
+                /** @var FakeFileInfo9921 $file */
+                if (true) {
+                }
+                $file->missingMethod();
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("undefined method")),
+            "expected an undefined-method diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_bare_inline_var_annotation_overrides_the_immediately_following_assignment() {
+        // The bug found during adversarial validation: applying the
+        // assertion only *before* dispatch would have this immediately
+        // clobbered by the assignment's own natural (mixed) inference,
+        // since `bind_assignment_target` runs inside the very same
+        // `check_stmt` call. A `return type mismatch` naming FakeFileInfo9921
+        // proves the after-dispatch reapplication actually won.
+        let d = diagnostics_for(
+            r#"<?php
+            class FakeFileInfo9921 {}
+            class Iter {
+                public function current() { return null; }
+            }
+            function f(Iter $it): string {
+                /** @var FakeFileInfo9921 */
+                $file = $it->current();
+                return $file;
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("return type mismatch")
+                && x.message.contains("FakeFileInfo9921")),
+            "expected a return-type mismatch naming FakeFileInfo9921, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_named_inline_var_annotation_on_its_own_assignment_also_overrides_it() {
+        // Same bug, explicitly-named form - proving the fix isn't
+        // bare-form-specific.
+        let d = diagnostics_for(
+            r#"<?php
+            class FakeFileInfo9921 {}
+            class Iter {
+                public function current() { return null; }
+            }
+            function f(Iter $it): string {
+                /** @var FakeFileInfo9921 $file */
+                $file = $it->current();
+                return $file;
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("return type mismatch")
+                && x.message.contains("FakeFileInfo9921")),
+            "expected a return-type mismatch naming FakeFileInfo9921, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn an_inline_var_override_is_invalidated_by_a_later_real_reassignment() {
+        // The override correctly gets invalidated by a later real
+        // reassignment of the same variable - Phase 33 Finding 5's own
+        // purge-on-reassignment, exercised through this new call site.
+        let d = diagnostics_for(
+            r#"<?php
+            class FakeFileInfo9921 {}
+            function needsInt(int $n): void {}
+            function f($it): void {
+                $file = $it;
+                /** @var FakeFileInfo9921 $file */
+                if (true) {
+                }
+                $file = 5;
+                needsInt($file);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_bare_inline_var_annotation_preceding_a_foreach_binding_two_names_is_a_no_op() {
+        // Scope guard for `statement_defined_variable_names`'s own
+        // restriction: a bare (nameless) tag can only infer its target
+        // when the statement it precedes has exactly one candidate -
+        // a `foreach` binding both a key and a value has two, so this is
+        // left unguessed rather than assuming either one.
+        let d = diagnostics_for(
+            r#"<?php
+            class FakeFileInfo9921 {}
+            function f(array $items): string {
+                /** @var FakeFileInfo9921 */
+                foreach ($items as $k => $v) {
+                    return $v;
+                }
+                return "fallback";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_doc_comment_with_no_var_tag_is_a_no_op() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): int {
+                /** Just a description, no @var tag here. */
+                $x = "not an int";
+                return 1;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn class_level_template_substitutes_a_property_type() {
         let d = diagnostics_for(
             r#"<?php

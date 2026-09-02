@@ -7,6 +7,15 @@ use crate::token::Span;
 pub struct Stmt {
     pub kind: StmtKind,
     pub span: Span,
+    // The raw text of a `/** ... */` doc comment immediately preceding this
+    // statement, if any - lets the checker recognize an inline `@var`
+    // assertion sitting on an arbitrary statement, not just on an actual
+    // declaration (see `checker::stmt::inline_var_annotation`). A statement
+    // that's also a declaration (e.g. a function) claiming its own doc
+    // comment via `Parser::take_doc_comment` still gets the same raw text
+    // here too - harmless, since a declaration's own docblock never has a
+    // `@var $name` tag for that logic to act on.
+    pub doc_comment: Option<String>,
 }
 
 #[derive(Debug, Clone)]

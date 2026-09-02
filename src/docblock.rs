@@ -18,6 +18,14 @@ pub struct DocBlock {
     pub params: HashMap<String, String>,
     pub return_type: Option<String>,
     pub var_type: Option<String>,
+    // The `$name` half of `@var Type $name`, when present - the common
+    // property-level `@var Type` (no name) form leaves this `None`; an
+    // inline `@var` on an arbitrary statement (checker::stmt) uses this to
+    // know which variable it names, when the bare form's own "assumed from
+    // the statement's own single assignment target" heuristic doesn't
+    // apply (e.g. a comment naming a variable other than the one that
+    // immediately follows it).
+    pub var_name: Option<String>,
     // `@template T` names, in declaration order (order matters for
     // positional binding - see `registry::ClassInfo::templates`).
     pub templates: Vec<String>,
@@ -127,6 +135,14 @@ pub fn parse(raw: &str) -> DocBlock {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
                     block.var_type = Some(ty.to_string());
+                    let remainder = rest[ty.len()..].trim_start();
+                    if let Some(name) = remainder
+                        .split_whitespace()
+                        .next()
+                        .and_then(|t| t.strip_prefix('$'))
+                    {
+                        block.var_name = Some(name.to_string());
+                    }
                 }
             }
             "template" => {
@@ -291,6 +307,14 @@ mod tests {
     fn parses_var() {
         let block = parse("/** @var string|null */");
         assert_eq!(block.var_type, Some("string|null".to_string()));
+        assert_eq!(block.var_name, None);
+    }
+
+    #[test]
+    fn parses_var_with_a_name() {
+        let block = parse("/** @var SplFileInfo $file */");
+        assert_eq!(block.var_type, Some("SplFileInfo".to_string()));
+        assert_eq!(block.var_name, Some("file".to_string()));
     }
 
     #[test]

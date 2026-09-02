@@ -6,8 +6,13 @@ impl Parser {
     // ---- statements ----
 
     pub(crate) fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        // A non-destructive peek, not `take_doc_comment()` - a statement
+        // that's also a declaration (e.g. a function) consuming its own
+        // doc comment for its own `@param`/`@return` tags further down is
+        // unaffected, since the peek doesn't remove the map entry.
+        let leading_doc_comment = self.doc_comments.get(&self.pos).cloned();
         let start = self.current_pos();
-        Ok(match self.peek().clone() {
+        let mut stmt = match self.peek().clone() {
             Token::InlineHtml(s) => {
                 self.advance();
                 self.stmt(StmtKind::InlineHtml(s), start)
@@ -307,7 +312,9 @@ impl Parser {
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Expression(e), start)
             }
-        })
+        };
+        stmt.doc_comment = leading_doc_comment;
+        Ok(stmt)
     }
 
     pub(crate) fn parse_optional_level(&mut self) -> Option<i64> {
@@ -477,6 +484,7 @@ impl Parser {
                 start: else_start,
                 end,
             },
+            doc_comment: None,
         });
         for (branch_pos, c, stmts) in branches.into_iter().rev() {
             result = Some(Stmt {
@@ -488,6 +496,7 @@ impl Parser {
                             start: branch_pos,
                             end,
                         },
+                        doc_comment: None,
                     }),
                     else_branch: result.map(Box::new),
                 },
@@ -495,6 +504,7 @@ impl Parser {
                     start: branch_pos,
                     end,
                 },
+                doc_comment: None,
             });
         }
         Ok(result.unwrap())

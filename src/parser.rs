@@ -122,6 +122,7 @@ impl Parser {
                 start,
                 end: self.previous_end(),
             },
+            doc_comment: None,
         }
     }
 

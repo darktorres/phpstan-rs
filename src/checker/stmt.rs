@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::checker::{Checker, Locals, merge_scopes, purge_stale_narrowing_for};
+use crate::docblock;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -23,6 +24,11 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
+        let inline_var = self.inline_var_annotation(stmt);
+        if let Some((name, ty)) = &inline_var {
+            purge_stale_narrowing_for(locals, name);
+            locals.insert(name.clone(), ty.clone());
+        }
         match &stmt.kind {
             StmtKind::Expression(e) => {
                 self.check_expr(e, locals, label);
@@ -574,5 +580,89 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
+        // Re-applied *after* dispatch too, but only when this exact
+        // statement is itself a plain assignment to the same variable the
+        // assertion names (the bare `/** @var Type */ $x = expr();` form,
+        // or an explicitly-named `@var Type $x` sitting on its own
+        // assignment) - the whole point of `@var` there is to override
+        // whatever the assignment's own natural inference produces, which
+        // `bind_assignment_target` (called from the `match` above, for
+        // the `Assign` case) would otherwise silently clobber the
+        // pre-applied assertion with. For every other statement shape
+        // (an unrelated statement merely *reading* the variable), this
+        // never matches - the single before-dispatch application above
+        // already covers it, since the statement's own body needs to see
+        // the narrowed type *during* its own check, not after.
+        //
+        // Deliberately does NOT extend this to a tag sitting directly on
+        // a `foreach` header (`/** @var T $x */ foreach (...) { ... }`):
+        // `bind_assignment_target` for the loop variable, and the loop
+        // body's own check, both happen *inside* the `Foreach` arm above,
+        // before this point ever runs - reapplying only here would fix
+        // the type seen *after* the loop but leave the body itself seeing
+        // the loop's own natural (usually `Mixed`) element type, a
+        // half-working result worse than not supporting the shape at
+        // all. The evidenced real-world case (`findCallSites`) instead
+        // puts the tag on a statement *inside* the loop body, which the
+        // before-dispatch application above already handles correctly
+        // and completely on its own.
+        if let Some((name, ty)) = inline_var
+            && statement_defined_variable_names(&stmt.kind).contains(&name)
+        {
+            purge_stale_narrowing_for(locals, &name);
+            locals.insert(name, ty);
+        }
+    }
+
+    /// Recognizes an inline `/** @var Type $name */` (or bare `/** @var
+    /// Type */`) doc comment sitting on `stmt` itself, and resolves it to
+    /// the `(name, type)` assertion it makes - `None` for a statement with
+    /// no doc comment, one with no `@var` tag, or a bare tag whose target
+    /// can't be inferred (see `statement_defined_variable_names`'s own
+    /// "don't guess" scope).
+    fn inline_var_annotation(&self, stmt: &Stmt) -> Option<(String, Type)> {
+        let doc = stmt.doc_comment.as_deref()?;
+        // A cheap substring pre-filter - `check_stmt` is already
+        // `#[hotpath::measure]`-instrumented, confirming this is a real
+        // hot path worth avoiding a full docblock parse on every
+        // statement's own `@param`/`@return`-only declaration comment.
+        if !doc.contains("@var") {
+            return None;
+        }
+        let block = docblock::parse(doc);
+        let ty_str = block.var_type?;
+        // A *named* tag (`@var Type $name`) always wins when present. The
+        // bare form (`@var Type`, no name) applies to whatever single
+        // variable the statement it precedes assigns, inferred from that
+        // statement's own left-hand side, not guessed at from thin air.
+        let name = block.var_name.or_else(|| {
+            match statement_defined_variable_names(&stmt.kind).as_slice() {
+                [single] => Some(single.clone()),
+                _ => None,
+            }
+        })?;
+        Some((name, self.resolve_type_hint(Some(&ty_str))))
+    }
+}
+
+/// Every bare-variable name `kind` itself unconditionally (re)binds via a
+/// plain `$x = ...;` expression statement's own LHS. Used two ways:
+/// inferring a *nameless* `@var Type` tag's own target (only when there's
+/// exactly one candidate), and deciding whether an inline `@var` assertion
+/// (named or not) needs re-applying *after* this statement's own dispatch,
+/// because the assignment's own natural binding would otherwise silently
+/// overwrite it first. Deliberately doesn't cover `foreach` - see the
+/// comment in `check_stmt` on why a tag on a `foreach` header isn't
+/// supported at all, rather than half-supported.
+fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
+    match kind {
+        StmtKind::Expression(e) => match &e.kind {
+            ExprKind::Assign(lhs, _) => match &lhs.kind {
+                ExprKind::Variable(name) => vec![name.clone()],
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
     }
 }
