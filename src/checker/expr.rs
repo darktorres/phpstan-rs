@@ -845,7 +845,12 @@ impl<'a> Checker<'a> {
                 // the first place. Both are the parser's own documented
                 // encoding for these two cases, not something to check.
                 if member == "class" {
-                    return Type::String;
+                    return match self.resolve_static_class_name(class_name) {
+                        Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
+                        // A genuinely dynamic target (`$obj::class`) -
+                        // unresolvable, unchanged from before.
+                        None => Type::String,
+                    };
                 }
                 if member == "{dynamic}" {
                     return Type::Mixed;
@@ -1480,7 +1485,10 @@ impl<'a> Checker<'a> {
                 .unwrap_or(Type::Mixed),
             ExprKind::StaticAccess(class_name, member) => {
                 if member == "class" {
-                    return Type::String;
+                    return match self.resolve_static_class_name(class_name) {
+                        Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
+                        None => Type::String,
+                    };
                 }
                 self.resolve_static_class_name(class_name)
                     .and_then(|class| match member.strip_prefix('$') {
@@ -1937,6 +1945,22 @@ impl<'a> Checker<'a> {
                         curl_getinfo_component_type(option_name.trim_start_matches('\\'))
                 {
                     return ty;
+                }
+            }
+            // Phase 35 Finding E: the real stub declares `get_class`
+            // unconditionally `string` - real PHPStan's own
+            // GetClassDynamicReturnTypeExtension resolves the return type
+            // from the argument's own class instead, the same
+            // "the correct type lives in a dynamic extension, not the
+            // stub" shape `curl_getinfo`/`json_encode` above already
+            // establish. Scoped to the 1-arg form - the 0-arg form ("the
+            // calling object's own class") was removed in PHP 8. An
+            // argument whose own type isn't a concrete `Object` falls
+            // through to today's plain `string`, unchanged - matching
+            // real PHPStan's own fallback for the same case.
+            "get_class" if args.len() == 1 => {
+                if let Type::Object(class, _) = self.infer_expr(&args[0].value, locals) {
+                    return Type::ClassString(Box::new(Type::Object(class, Vec::new())));
                 }
             }
             _ => {}

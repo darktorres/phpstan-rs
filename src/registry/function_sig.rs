@@ -221,6 +221,9 @@ pub(crate) fn mark_template_params(ty: Type, template_names: &HashSet<String>) -
                 .collect(),
         ),
         Type::Array(inner) => Type::Array(Box::new(mark_template_params(*inner, template_names))),
+        Type::ClassString(inner) => {
+            Type::ClassString(Box::new(mark_template_params(*inner, template_names)))
+        }
         Type::Union(members) => Type::Union(
             members
                 .into_iter()

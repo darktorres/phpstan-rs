@@ -761,6 +761,14 @@ impl Registry {
             (Type::String | Type::StringLiteral(_), Type::Callable) => true,
             (Type::Array(_) | Type::ArrayShape(_), Type::Callable) => true,
             (Type::Object(a, _), Type::Object(b, _)) => a == b || self.is_subclass_of(a, b),
+            // Same hierarchy-aware override as the plain Object-vs-Object
+            // arm just above, one level up: `types::is_subtype`'s own
+            // `ClassString` arm inherits its non-hierarchy-aware Object
+            // comparison (name equality only), so without this a
+            // `class-string<Derived>` value would incorrectly fail to
+            // satisfy a `class-string<Base>`-typed parameter even when
+            // `Derived extends Base`.
+            (Type::ClassString(a), Type::ClassString(b)) => self.is_assignable(a, b),
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
             (Type::Intersection(members), _) => members.iter().any(|m| self.is_assignable(m, sup)),
@@ -1357,6 +1365,21 @@ mod tests {
             &Type::Object("Shape".to_string(), Vec::new()),
             &Type::Object("Circle".to_string(), Vec::new())
         ));
+    }
+
+    #[test]
+    fn class_string_is_assignable_follows_class_hierarchy_not_name_equality() {
+        let r = build_registry(
+            r#"<?php
+            interface Shape {}
+            class Circle implements Shape {}
+            class Square {}
+        "#,
+        );
+        let cs =
+            |name: &str| Type::ClassString(Box::new(Type::Object(name.to_string(), Vec::new())));
+        assert!(r.is_assignable(&cs("Circle"), &cs("Shape")));
+        assert!(!r.is_assignable(&cs("Square"), &cs("Shape")));
     }
 
     #[test]

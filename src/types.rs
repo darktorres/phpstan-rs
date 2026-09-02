@@ -24,6 +24,13 @@ pub enum Type {
     String,
     StringLiteral(String),
     Array(Box<Type>),
+    // `class-string<T>` - a string known to hold `T`'s (or a subclass's)
+    // fully-qualified name, tracked precisely enough to participate in
+    // `@template` binding (unlike a bare `class-string`, which collapses to
+    // plain `String` since there's no `T` to bind - see
+    // `parse_type_keyword_or_class`). Produced by `Foo::class` and
+    // `get_class($obj)` when the target class is statically known.
+    ClassString(Box<Type>),
     // `array{name: string, age?: int}` - PHPDoc's structural array type.
     // (field name, field type, optional)
     ArrayShape(Vec<(String, Type, bool)>),
@@ -74,6 +81,7 @@ impl fmt::Display for Type {
                 Type::Mixed => write!(f, "array"),
                 other => write!(f, "array<{other}>"),
             },
+            Type::ClassString(inner) => write!(f, "class-string<{inner}>"),
             Type::ArrayShape(fields) => {
                 let parts: Vec<String> = fields
                     .iter()
@@ -449,8 +457,19 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // string holding Foo's fully-qualified name`) is similarly just
         // dropped rather than tracked.
         "string" | "non-empty-string" | "non-falsy-string" | "truthy-string" | "literal-string"
-        | "numeric-string" | "callable-string" | "class-string" | "trait-string"
-        | "interface-string" | "enum-string" => Type::String,
+        | "numeric-string" | "callable-string" | "trait-string" | "interface-string"
+        | "enum-string" => Type::String,
+        // Unlike its string-refinement neighbors above, `class-string<T>`
+        // carries a real, template-bindable inner type when given one -
+        // needed for `@template R of Base` / `@param class-string<R> $x`
+        // shapes to bind `R` from a real `Foo::class` argument. A bare
+        // `class-string` (no `<T>`, the common case) has nothing to
+        // preserve and stays plain `String`, unchanged from before.
+        "class-string" => match generic_args {
+            [] => Type::String,
+            [single] => Type::ClassString(Box::new(parse_type_string(single))),
+            _ => Type::String,
+        },
         "bool" | "boolean" => Type::Bool,
         "true" => Type::True,
         "false" => Type::False,
@@ -585,6 +604,21 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
 
         (Type::Array(a), Type::Array(b)) => is_subtype(a, b),
 
+        // `class-string<T>` stays freely interchangeable with plain
+        // `string` in both directions - this project has no way to verify
+        // a string's actual content names a real class, so a `::class`
+        // literal (now precisely tracked) must still satisfy an ordinary
+        // `string`-typed sink, and a plain, unrefined `string` must still
+        // satisfy a `class-string<T>`-typed one. Two `ClassString`s
+        // compared against each other recurse the same way `Array` does
+        // just above, for a `class-string<T>` result flowing into another
+        // `class-string<T>`-typed sink without erasing to bare `String`
+        // along the way.
+        (Type::ClassString(a), Type::ClassString(b)) => is_subtype(a, b),
+        (Type::ClassString(_), Type::String) => true,
+        (Type::StringLiteral(_), Type::ClassString(_)) => true,
+        (Type::String, Type::ClassString(_)) => true,
+
         // A shape is structurally an array, so it satisfies the bare
         // `array` hint; the reverse (does some homogeneous array actually
         // have these exact keys?) isn't verifiable without shape-aware
@@ -628,6 +662,11 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMa
                 bind_template_param(inner, arg_inner, bindings);
             }
         }
+        Type::ClassString(inner) => {
+            if let Type::ClassString(arg_inner) = arg_ty {
+                bind_template_param(inner, arg_inner, bindings);
+            }
+        }
         _ => {}
     }
 }
@@ -638,6 +677,9 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
     match ty {
         Type::TemplateParam(name) => bindings.get(name).cloned().unwrap_or(Type::Mixed),
         Type::Array(inner) => Type::Array(Box::new(substitute_template(inner, bindings))),
+        Type::ClassString(inner) => {
+            Type::ClassString(Box::new(substitute_template(inner, bindings)))
+        }
         Type::Union(members) => Type::Union(
             members
                 .iter()
@@ -796,10 +838,28 @@ mod tests {
         ] {
             assert_eq!(parse_type_string(name), Type::String, "for {name}");
         }
-        // class-string's own optional generic argument is dropped, not
-        // tracked as "a string naming a Foo subclass" - just treated as
-        // plain string, same as the bare form.
-        assert_eq!(parse_type_string("class-string<Foo>"), Type::String);
+    }
+
+    #[test]
+    fn class_string_with_a_generic_argument_is_tracked_precisely() {
+        assert_eq!(
+            parse_type_string("class-string<Foo>"),
+            Type::ClassString(Box::new(Type::Object("Foo".to_string(), Vec::new())))
+        );
+        // Two or more args isn't real PHPStan syntax - falls back to plain
+        // string rather than guessing which one is meant.
+        assert_eq!(parse_type_string("class-string<Foo, Bar>"), Type::String);
+    }
+
+    #[test]
+    fn class_string_is_interchangeable_with_plain_string_both_ways() {
+        let cs = Type::ClassString(Box::new(Type::Object("Foo".to_string(), Vec::new())));
+        assert!(is_subtype(&cs, &Type::String));
+        assert!(is_subtype(&Type::String, &cs));
+        assert!(is_subtype(&Type::StringLiteral("Foo".to_string()), &cs));
+        assert!(is_subtype(&cs, &cs));
+        let cs_other = Type::ClassString(Box::new(Type::Object("Bar".to_string(), Vec::new())));
+        assert!(!is_subtype(&cs, &cs_other));
     }
 
     #[test]

@@ -99,6 +99,9 @@ impl<'a> Checker<'a> {
                 .map(|p| Type::Object(p.clone(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
             Type::Array(inner) => Type::Array(Box::new(self.resolve_pseudo(inner, defining_class))),
+            Type::ClassString(inner) => {
+                Type::ClassString(Box::new(self.resolve_pseudo(inner, defining_class)))
+            }
             Type::Union(members) => Type::Union(
                 members
                     .iter()

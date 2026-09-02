@@ -78,7 +78,9 @@ impl<'a> Checker<'a> {
                     self.check_generic_bounds(arg, label, span);
                 }
             }
-            Type::Array(inner) => self.check_generic_bounds(inner, label, span),
+            Type::Array(inner) | Type::ClassString(inner) => {
+                self.check_generic_bounds(inner, label, span)
+            }
             Type::Union(members) | Type::Intersection(members) => {
                 for m in members {
                     self.check_generic_bounds(m, label, span);
@@ -105,7 +107,7 @@ impl<'a> Checker<'a> {
                 (name == "object" || self.registry.classes.contains_key(name))
                     && args.iter().all(|a| self.is_type_fully_known(a))
             }
-            Type::Array(inner) => self.is_type_fully_known(inner),
+            Type::Array(inner) | Type::ClassString(inner) => self.is_type_fully_known(inner),
             Type::Union(members) | Type::Intersection(members) => {
                 members.iter().all(|m| self.is_type_fully_known(m))
             }

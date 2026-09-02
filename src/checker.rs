@@ -6156,9 +6156,10 @@ mod tests {
         // anything) - proven here by returning it from a function
         // declared to return `int`, which only fails if the inferred type
         // really is User. $c's own generic type comes from a `@param`
-        // annotation - this checker has no notion of an inline `@var`
-        // annotation on an arbitrary local-variable assignment, only on
-        // an actual property/param/return declaration.
+        // annotation on an actual property/param/return declaration - a
+        // separate family of tests (see
+        // `an_inline_var_annotation_...` below) covers the inline
+        // `@var` form on an arbitrary statement.
         let d = diagnostics_for(
             r#"<?php
             class User {}
@@ -6183,6 +6184,128 @@ mod tests {
                 .any(|x| x.message.contains("return type mismatch") && x.message.contains("User")),
             "expected a return-type mismatch naming User, got: {d:?}"
         );
+    }
+
+    #[test]
+    fn class_string_template_binds_the_concrete_subclass_from_a_static_factory_call() {
+        // Phase 35 Finding E: `TypedRepository::narrow`-shaped repro -
+        // `class-string<R>` needs to survive from the argument
+        // (`Derived::class`) all the way through `@template R of Base`
+        // binding to the `@return R` result, not collapse to plain
+        // `string` (which would carry no `R` to bind at all).
+        let d = diagnostics_for(
+            r#"<?php
+            class Base {}
+            class Derived extends Base {}
+            class TypedRepository {
+                /**
+                 * @template R of Base
+                 * @param class-string<R> $repositoryClass
+                 * @return R
+                 */
+                public static function narrow(string $repositoryClass) {
+                    return new $repositoryClass();
+                }
+            }
+            function f(): int {
+                return TypedRepository::narrow(Derived::class);
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(
+                |x| x.message.contains("return type mismatch") && x.message.contains("Derived")
+            ),
+            "expected a return-type mismatch naming Derived, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_class_literal_still_satisfies_an_ordinary_string_parameter() {
+        // Backward compatibility: `Foo::class` used to infer plain
+        // `String`; now it's `ClassString(Object("Foo"))`, which must stay
+        // freely assignable to an ordinary `string`-typed parameter - the
+        // extremely common logging/error-message idiom.
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {}
+            function needsString(string $s): void {}
+            function f(): void {
+                needsString(Foo::class);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_class_string_template_parameter_still_accepts_a_plain_string_argument() {
+        // The other, deliberately lenient direction: this project can't
+        // verify a plain string's actual runtime content names a real
+        // class, so a `class-string<R>`-typed parameter must still accept
+        // an ordinary, non-literal `string` argument rather than
+        // false-positive on it.
+        let d = diagnostics_for(
+            r#"<?php
+            class Base {}
+            class TypedRepository {
+                /**
+                 * @template R of Base
+                 * @param class-string<R> $repositoryClass
+                 * @return R
+                 */
+                public static function narrow(string $repositoryClass) {
+                    return new $repositoryClass();
+                }
+            }
+            function f(string $repositoryClass): void {
+                TypedRepository::narrow($repositoryClass);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn get_class_of_a_known_object_infers_a_class_string_binding_the_same_template() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Base {}
+            class Derived extends Base {}
+            class TypedRepository {
+                /**
+                 * @template R of Base
+                 * @param class-string<R> $repositoryClass
+                 * @return R
+                 */
+                public static function narrow(string $repositoryClass) {
+                    return new $repositoryClass();
+                }
+            }
+            function f(Derived $d): int {
+                return TypedRepository::narrow(get_class($d));
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(
+                |x| x.message.contains("return type mismatch") && x.message.contains("Derived")
+            ),
+            "expected a return-type mismatch naming Derived, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn get_class_of_an_unknown_typed_value_stays_plain_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function f($x): void {
+                needsString(get_class($x));
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
