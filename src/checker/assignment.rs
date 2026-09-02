@@ -50,8 +50,31 @@ impl<'a> Checker<'a> {
             // 48 made this a live, common-case bug: an array literal's
             // own inferred shape is only what's known so far, not a
             // sealed contract the array can never grow past).
+            //
+            // Phase 12 (unplanned follow-on): a *nested* write
+            // (`$piwigoInfos['updates'][] = [...]`, target itself an
+            // `Index` whose own base is *another* `Index`) used to route
+            // that inner `base` through `check_expr` too - correct for the
+            // single-level case (the base there is the real container
+            // being read, e.g. a bare `$piwigoInfos`), but wrong one level
+            // deeper: `$piwigoInfos['updates']` is itself part of *this
+            // same* write's own path, not a value being read, so it must
+            // not be checked via `check_shape_key_access` either - real,
+            // previously-masked bug, only surfaced once Finding E's own
+            // `Union`-awareness made `check_shape_key_access` actually
+            // inspect a `Union`-typed `$piwigoInfos` instead of bailing on
+            // it outright. Recursing through `check_assignment_target`
+            // itself for an `Index` base (instead of `check_expr`)
+            // generalizes this over any nesting depth, the same way
+            // `bind_assignment_target`'s own `Index` arm already does for
+            // the write side.
             ExprKind::Index(base, idx) => {
-                self.check_expr(base, locals, label);
+                match &base.kind {
+                    ExprKind::Index(..) => self.check_assignment_target(base, locals, label),
+                    _ => {
+                        self.check_expr(base, locals, label);
+                    }
+                }
                 if let Some(i) = idx {
                     self.check_expr(i, locals, label);
                 }
@@ -385,6 +408,35 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
             value_ty,
             (**inner).clone(),
         )))),
+        // Phase 12 Finding E: a real, pre-existing gap found by making
+        // `check_shape_key_access` `Union`-aware and re-checking the real
+        // corpus - a container whose type is a `Union` (e.g. two
+        // differently-shaped `ArrayShape`s merged across an `if`/`else`,
+        // confirmed live in `PiwigoInfosSender::send`) fell straight to
+        // the `_ => None` "don't guess" bail below, silently *not*
+        // updating any member - so a later read through the same
+        // now-stale `Union` (e.g. a nested write's own "does this key
+        // already exist" check) saw a key that was written one line
+        // earlier as still missing. Previously invisible because
+        // `check_shape_key_access` used to bail on any `Union` outright,
+        // before Finding E's own generalization started actually
+        // checking one; not fixing this here would leave a real,
+        // newly-surfaced false positive live. Update every member the
+        // same way, bailing (via `?`) if any single one can't be
+        // updated, same conservative "all or nothing" spirit as
+        // everywhere else in this function.
+        Type::Union(members) => {
+            let mut updated = Vec::with_capacity(members.len());
+            for m in members {
+                updated.push(write_index_into(m, idx, value_ty.clone())?);
+            }
+            Some(
+                updated
+                    .into_iter()
+                    .reduce(union_types)
+                    .unwrap_or(Type::Mixed),
+            )
+        }
         _ => None,
     }
 }

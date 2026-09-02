@@ -908,6 +908,87 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 12 Finding E: a real, pre-existing gap found by making
+    // check_shape_key_access Union-aware and re-checking the real
+    // corpus - PiwigoInfosSender::send's own $piwigoInfos becomes a real
+    // Union of two differently-shaped ArrayShapes across an if/else (one
+    // branch's own nested field differs from the other's), and a later
+    // flat write into that Union silently updated no member at all,
+    // leaving a key written one line earlier still reported missing by a
+    // very next nested write's own "does this key exist" check.
+    // Positive precision check (not just "no false positive"): `Mixed` is
+    // never flagged against anything (this project's own "don't guess"
+    // leniency), so a test only asserting an empty diagnostic list here
+    // would pass whether or not `$value` was ever given its real, precise
+    // `string` type. Passing it to an `int`-only parameter instead makes
+    // the fix's own effect directly observable: a real mismatch is only
+    // reported once `$value` is actually inferred as `string`.
+    #[test]
+    fn foreach_over_a_homogeneous_array_shape_infers_the_shared_field_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): int { return $n; }
+            function test(): void {
+                $versions = ['current' => 'a', 'latest' => 'b'];
+                foreach ($versions as $key => $value) {
+                    needsInt($value);
+                }
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected $value to be inferred as string (and flagged against needsInt): {d:?}"
+        );
+    }
+
+    #[test]
+    fn a_flat_write_into_a_union_of_array_shapes_updates_every_member() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(bool $cond): void {
+                $info = ['a' => 1];
+                if ($cond) {
+                    $info['b'] = 'x';
+                } else {
+                    $info['c'] = 'y';
+                }
+                $info['file_extensions'] = [];
+                $info['file_extensions']['jpg'] = 3;
+                echo $info['file_extensions']['jpg'];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Phase 12 (unplanned follow-on): the real `PiwigoInfosSender::send`
+    // shape - a `Union`-typed container (built across an `if`/`else`) whose
+    // very first write to a brand-new key is itself a *nested* append
+    // (`$info['updates'][] = ...`), never a flat `$info['updates'] = [];`
+    // first. `check_assignment_target`'s `Index` arm used to route the
+    // inner `$info['updates']` sub-expression through `check_expr`, which
+    // wrongly checked it as a genuine read via `check_shape_key_access` -
+    // masked before Finding E made that function actually inspect a
+    // `Union` instead of bailing on it outright.
+    #[test]
+    fn a_nested_append_creating_a_brand_new_key_on_a_union_typed_container_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function test(bool $cond): void {
+                if ($cond) {
+                    $info = ['a' => 1];
+                } else {
+                    $info = ['b' => 2];
+                }
+                $info['updates'][] = 'x';
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn overwriting_an_existing_key_via_index_assignment_updates_its_tracked_type() {
         let d = diagnostics_for(
@@ -2009,6 +2090,47 @@ mod tests {
         assert_eq!(
             union_types(Type::Float, Type::IntLiteral(0)),
             Type::Union(vec![Type::Float, Type::IntLiteral(0)])
+        );
+    }
+
+    // Phase 12 (unplanned follow-on): a real hang, found via `gdb` on a
+    // hung `check-project` process, not guessed - `merge_scopes` (one
+    // `union_types` call per `if`/`else`) and `write_index_into`'s own
+    // `Union` arm both feed into `union_types`, which had no cap on how
+    // many distinct members it would accumulate. A real corpus function
+    // with many sequential branches assigning genuinely distinct array
+    // shapes to the same variable grew that variable's own union member
+    // count combinatorially once `Type::Union` values stopped collapsing
+    // to `Mixed` at the first read/write (Finding E's own `Union([matched,
+    // empty])` unconditional `preg_match` shape). Simulates that same
+    // shape directly: 20 pairwise-distinct one-field `ArrayShape`s folded
+    // through `union_types` one at a time, exactly the access pattern
+    // `merge_scopes` uses across many sequential branches.
+    #[test]
+    fn union_types_caps_runaway_member_growth_instead_of_hanging() {
+        let result = (0..20)
+            .map(|i| Type::ArrayShape(vec![(i.to_string(), Type::Int, false)]))
+            .reduce(union_types)
+            .unwrap();
+        assert_eq!(
+            result,
+            Type::Mixed,
+            "expected the cap to collapse a >12-member union to Mixed, got {result:?}"
+        );
+    }
+
+    // The cap must not misfire on the common, small case real code
+    // actually produces - a handful of genuinely distinct branch types
+    // stays a precise `Union`, not `Mixed`.
+    #[test]
+    fn union_types_below_the_cap_still_builds_a_precise_union() {
+        let result = [Type::Int, Type::String, Type::Bool, Type::Null]
+            .into_iter()
+            .reduce(union_types)
+            .unwrap();
+        assert_eq!(
+            result,
+            Type::Union(vec![Type::Int, Type::String, Type::Bool, Type::Null])
         );
     }
 

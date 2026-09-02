@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, merge_scopes, purge_stale_narrowing_for};
+use crate::checker::{Checker, Locals, merge_scopes, purge_stale_narrowing_for, union_types};
 use crate::docblock;
 use crate::types::Type;
 
@@ -291,8 +291,33 @@ impl<'a> Checker<'a> {
                 // bind them (to the subject's known element type, when
                 // it's a homogeneous array) before checking anything that
                 // could reference them.
+                //
+                // Phase 12 (unplanned follow-on): a `Type::ArrayShape`
+                // subject used to fall straight to the `Mixed` catch-all,
+                // discarding real, known field types - a real corpus false
+                // positive this surfaced: `MaintenanceActionDispatcher::
+                // dispatch`'s `foreach ($versions as $key => $value) {
+                // $versions[$key] = preg_replace(..., $value); }`, where
+                // every field of `$versions` is actually a plain `string`.
+                // With `$value` inferred as `Mixed`, `preg_replace`'s own
+                // stub (which returns a broader type for a
+                // statically-unknown subject) leaked an `array<string>`
+                // possibility into `$versions`'s own re-widened element
+                // type that stuck around once Finding E's `Union`-awareness
+                // stopped silently collapsing it. Joining every field's own
+                // type (the same "give the reader every field's type is at
+                // least possible" idea `write_index_into`'s own dynamic-key
+                // write branch already uses) is real, if narrow, precision:
+                // exact when every field shares one type (the common case
+                // this false positive came from), still sound but coarser
+                // when they don't.
                 let element_ty = match subject_ty {
                     Type::Array(inner) => *inner,
+                    Type::ArrayShape(fields) => fields
+                        .into_iter()
+                        .map(|(_, ty, _)| ty)
+                        .reduce(union_types)
+                        .unwrap_or(Type::Mixed),
                     _ => Type::Mixed,
                 };
                 if let Some(k) = key {

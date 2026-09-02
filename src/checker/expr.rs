@@ -2303,6 +2303,25 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
     }
 }
 
+/// A defensive cap on how many distinct members `union_types` will ever
+/// materialize into a real `Type::Union`, mirroring the `MAX_GROUP_DEPTH`/
+/// `MAX_EXPR_DEPTH` precedent (Phase 20). Collapsing to `Mixed` past this
+/// point is a stable fixed point (`union_types(Mixed, _) == Mixed` is this
+/// function's own first special case below), so a variable that blows past
+/// the cap once stays collapsed rather than being recomputed on every
+/// subsequent merge. Found necessary by a real hang, not guessed: `gdb`
+/// caught a `check-project` run spinning inside `Type::eq`, called from
+/// `union_types`, called from `merge_scopes` (`checker/control_flow.rs`,
+/// once per `if`/`else`) and from `write_index_into`'s own `Union` arm
+/// (`checker/assignment.rs`, Phase 12 Finding E). Once Finding E made
+/// `Type::Union` "stick" across reads/writes instead of immediately
+/// collapsing to `Mixed`, a real corpus function with many sequential and
+/// nested branches assigning genuinely distinct array shapes to the same
+/// variable grew that variable's own union member count combinatorially -
+/// each subsequent `contains`-based dedup scan below (and each member's own
+/// recursive `PartialEq`) growing right along with it.
+const MAX_UNION_MEMBERS: usize = 12;
+
 /// Union of two types for a scope-merge join point - flattens nested
 /// unions and keeps `Mixed` "unknown" rather than let it compose into a
 /// falsely-precise-looking Union (same principle as the ternary inference).
@@ -2351,6 +2370,9 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         Some(base) => !present_bases.contains(&base),
         None => true,
     });
+    if members.len() > MAX_UNION_MEMBERS {
+        return Type::Mixed;
+    }
     if members.len() == 1 {
         members.into_iter().next().unwrap()
     } else {
