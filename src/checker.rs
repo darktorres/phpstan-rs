@@ -1657,6 +1657,107 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 12 Finding D: preg_match_all - both PREG_PATTERN_ORDER (the
+    // real default) and PREG_SET_ORDER, both confirmed against a real
+    // PHP interpreter before implementing.
+    #[test]
+    fn preg_match_all_pattern_order_types_each_group_as_an_array_of_strings() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                preg_match_all('/(a)(b)?/', $subject, $matches);
+                needsInt($matches[1]);
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("needsInt") && x.message.contains("array<string>")),
+            "expected an argument-type mismatch naming array<string>, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn preg_match_all_pattern_order_always_populates_every_key_never_optional() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match_all('/(a)(b)?/', $subject, $matches);
+                // Group 2 is optional in a single match, but
+                // PREG_PATTERN_ORDER always includes its own key
+                // (possibly as an empty array) - reading it should never
+                // be flagged as "no such key".
+                echo count($matches[2]);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_all_set_order_reuses_the_single_match_shape_per_entry() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function f($subject): void {
+                preg_match_all('/(a)(b)?/', $subject, $matches, PREG_SET_ORDER);
+                foreach ($matches as $oneMatch) {
+                    needsString($oneMatch[1]);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_all_set_order_reading_a_genuinely_absent_group_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match_all('/(a)(b)?/', $subject, $matches, PREG_SET_ORDER);
+                foreach ($matches as $oneMatch) {
+                    echo $oneMatch[5];
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("no key '5'")),
+            "expected a 'no such key' diagnostic, got: {d:?}"
+        );
+    }
+
+    #[test]
+    fn preg_match_all_set_order_composes_with_offset_capture() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                preg_match_all('/(a)/', $subject, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+                foreach ($matches as $oneMatch) {
+                    needsInt($oneMatch[1][1]);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_all_with_a_pattern_this_parser_bails_on_stays_mixed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match_all('/(?(1)a|b)/', $subject, $matches);
+                echo $matches[99];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn preg_match_with_a_pattern_this_parser_bails_on_stays_mixed() {
         let d = diagnostics_for(

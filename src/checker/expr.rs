@@ -278,6 +278,42 @@ impl<'a> Checker<'a> {
                     purge_stale_narrowing_for(locals, matches_name);
                     locals.insert(matches_name.clone(), shape);
                 }
+                // Phase 12 Finding D: `preg_match_all`'s by-ref
+                // `$matches` shape - a sibling special case to
+                // `preg_match`'s own above, sharing the same pattern-
+                // parsing/flag-parsing/leaf-type machinery but building a
+                // structurally different shape (`PREG_PATTERN_ORDER`, the
+                // real default, groups results by capture group across
+                // every match; `PREG_SET_ORDER` groups them by match,
+                // reusing `preg_match_matches_shape` unchanged for each
+                // entry). Placed after `check_args`, same reasoning as
+                // Finding A/B/C just above.
+                if resolved_name.as_deref() == Some("preg_match_all")
+                    && resolved.get(1).copied().flatten().is_some()
+                    && let Some(pattern_arg) = resolved.first().copied().flatten()
+                    && let Some(matches_arg) = resolved.get(2).copied().flatten()
+                    && let ExprKind::Variable(matches_name) = &matches_arg.kind
+                    && let Some(pattern_str) = literal_string_value(pattern_arg)
+                    && let Some(groups) = regex_groups::parse_capture_groups(pattern_str)
+                    && let Some(flags) = resolved
+                        .get(3)
+                        .copied()
+                        .flatten()
+                        .map_or(Some(PregFlags::default()), |e| parse_preg_flags(e, true))
+                {
+                    let leaf = preg_leaf_type(flags.offset_capture);
+                    let shape = if flags.set_order {
+                        Type::Array(Box::new(preg_match_matches_shape(
+                            &groups,
+                            &leaf,
+                            flags.unmatched_as_null,
+                        )))
+                    } else {
+                        preg_match_all_pattern_order_shape(&groups, &leaf, flags.unmatched_as_null)
+                    };
+                    purge_stale_narrowing_for(locals, matches_name);
+                    locals.insert(matches_name.clone(), shape);
+                }
                 // Reuses the `resolved_name`/`sig` already resolved above
                 // - the same lookup `infer_expr`'s own `Call` arm would
                 // otherwise redundantly redo from scratch.
@@ -2453,6 +2489,49 @@ fn preg_match_matches_shape(
             && !fields.iter().any(|(n, _, _)| n == name)
         {
             fields.push((name.clone(), ty, optional));
+        }
+    }
+    Type::ArrayShape(fields)
+}
+
+/// Builds `preg_match_all`'s own `$matches` shape for its default
+/// `PREG_PATTERN_ORDER` mode - structurally different from
+/// `preg_match_matches_shape`'s single-match shape: confirmed directly
+/// against a live PHP interpreter that *every* key (`0`, each group
+/// number, each name) is always present, as an *array* of the leaf type,
+/// regardless of match count (a genuine zero-match call still populates
+/// every key with an empty array, not the whole thing collapsing to
+/// `[]`), and a group that doesn't participate in one particular match
+/// still gets a slot in that key's own array (`''` normally, or `null`
+/// under `PREG_UNMATCHED_AS_NULL`) rather than an entirely missing
+/// element. So no field is ever `optional` at the top level here, and a
+/// group's own `optional` flag only ever affects the *element* type
+/// nested inside its array (when combined with `PREG_UNMATCHED_AS_NULL`),
+/// never whether the top-level key itself is present.
+fn preg_match_all_pattern_order_shape(
+    groups: &[regex_groups::RegexCaptureGroup],
+    leaf: &Type,
+    unmatched_as_null: bool,
+) -> Type {
+    let element_ty = |optional: bool| {
+        if optional && unmatched_as_null {
+            union_types(leaf.clone(), Type::Null)
+        } else {
+            leaf.clone()
+        }
+    };
+    let mut fields = vec![(
+        "0".to_string(),
+        Type::Array(Box::new(element_ty(false))),
+        false,
+    )];
+    for g in groups {
+        let arr_ty = Type::Array(Box::new(element_ty(g.optional)));
+        fields.push((g.number.to_string(), arr_ty.clone(), false));
+        if let Some(name) = &g.name
+            && !fields.iter().any(|(n, _, _)| n == name)
+        {
+            fields.push((name.clone(), arr_ty, false));
         }
     }
     Type::ArrayShape(fields)
