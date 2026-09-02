@@ -2115,6 +2115,41 @@ mod tests {
     }
 
     #[test]
+    fn stdclass_dynamic_property_reads_are_never_flagged_as_undefined() {
+        // Phase 34 Finding D: real shape, FilesystemHelperTest/LangTest -
+        // a Pest test double capturing an error message via a dynamic
+        // property on a plain `new stdClass()`.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): string {
+                $capture = new stdClass();
+                $capture->lastMessage = 'hi';
+                return $capture->lastMessage;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn stdclass_undefined_method_calls_are_still_flagged() {
+        // The control case proving Finding D's exemption is property-
+        // access-only, not a blanket carve-out - an undefined *method*
+        // call on stdClass is a real fatal error real PHPStan still
+        // flags too.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): void {
+                $c = new stdClass();
+                $c->someMethod();
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("someMethod"), "got: {d:?}");
+    }
+
+    #[test]
     fn compound_assignment_to_an_undefined_property_is_flagged_as_a_read() {
         // `+=` reads the current value before writing the new one, so
         // (unlike a plain `=`) the property really does need to already
@@ -4804,10 +4839,16 @@ mod tests {
 
     #[test]
     fn closure_bind_still_flags_a_real_bug_inside_the_bound_closure() {
+        // A plain empty class, not `stdClass` - Phase 34 Finding D
+        // exempts `stdClass` specifically from undefined-property
+        // checking (real PHP's own "arbitrary property bag" class), so
+        // this test needs an ordinary class to still prove `$this`-
+        // rebinding is actually checked.
         let d = diagnostics_for(
             r#"<?php
+            class Empty4841 {}
             function test(): void {
-                Closure::bind(function () { return $this->totallyUndefinedVar; }, new \stdClass());
+                Closure::bind(function () { return $this->totallyUndefinedVar; }, new Empty4841());
             }
         "#,
         );

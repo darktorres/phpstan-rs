@@ -924,8 +924,19 @@ impl<'a> Checker<'a> {
                 // extension, which resolves by the base's type) - a
                 // disclosed, evidence-free simplification.
                 let is_pest_this = matches!(&base.kind, ExprKind::Variable(name) if name == "this");
+                // Phase 34 Finding D: `stdClass` (a real, registered,
+                // zero-property class in the vendored stubs -
+                // `Core/Core_c.php`'s own `class stdClass {}`) is PHP's
+                // canonical "arbitrary property bag" - real PHP (and
+                // real PHPStan) never flag a dynamic property read or
+                // write on it, by design. Scoped to *this* property-
+                // access call site only, not `member_confirmed_missing`
+                // itself, which two method-call checks below also share
+                // - an undefined *method* call on `stdClass` is still a
+                // real fatal error real PHPStan also flags.
                 if self.member_confirmed_missing(&base_ty, |c| {
-                    self.registry.lookup_property(c, prop).is_some()
+                    c == "stdClass"
+                        || self.registry.lookup_property(c, prop).is_some()
                         || self.registry.lookup_method(c, "__get").is_some()
                         || (is_pest_this && self.pest_hook_properties.contains(prop.as_str()))
                 }) {
