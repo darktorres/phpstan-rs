@@ -1,10 +1,11 @@
 use crate::ast::*;
 use crate::checker::{
     CheckArgsCall, Checker, Locals, TemplateBindings, body_contains_yield, is_language_construct,
-    is_real_variable_key, is_superglobal, literal_string_key, merge_scopes, narrow_type_excluding,
-    narrowing_key, purge_stale_narrowing_for, resolve_call_args,
+    is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
+    narrow_type_excluding, narrowing_key, purge_stale_narrowing_for, resolve_call_args,
 };
 use crate::pest_config;
+use crate::regex_groups;
 use crate::registry::FunctionSig;
 use crate::types::{self, Type};
 
@@ -161,6 +162,27 @@ impl<'a> Checker<'a> {
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
                 self.predefine_byref_or_unknown_args(sig, args, &resolved, locals);
+                // Phase 12 Finding A: `preg_match`'s by-ref `$matches`
+                // shape, scoped to the common 3-argument literal-pattern
+                // form (no `$flags` argument yet - a later finding).
+                // Overrides the generic widening
+                // `predefine_byref_or_unknown_args` just did above,
+                // rather than replacing it - anything outside this
+                // scope keeps that call's own (Mixed-or-widened)
+                // fallback unchanged.
+                if resolved_name.as_deref() == Some("preg_match")
+                    && resolved.get(1).copied().flatten().is_some()
+                    && resolved.get(3).copied().flatten().is_none()
+                    && let Some(pattern_arg) = resolved.first().copied().flatten()
+                    && let Some(matches_arg) = resolved.get(2).copied().flatten()
+                    && let ExprKind::Variable(matches_name) = &matches_arg.kind
+                    && let Some(pattern_str) = literal_string_value(pattern_arg)
+                    && let Some(groups) = regex_groups::parse_capture_groups(pattern_str)
+                {
+                    let shape = preg_match_matches_shape(&groups);
+                    purge_stale_narrowing_for(locals, matches_name);
+                    locals.insert(matches_name.clone(), shape);
+                }
                 // Finding 1: `it`/`test`/`describe`/`beforeEach`/
                 // `afterEach`/`beforeAll`/`afterAll` rebind `$this` inside
                 // their closure/arrow-fn argument at runtime (Pest's own
@@ -2357,6 +2379,36 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
         ExprKind::Grouping(inner) => contains_json_throw_on_error(inner),
         _ => false,
     }
+}
+
+/// The type of one matched group's "leaf" value in `preg_match`'s own
+/// `$matches` shape - plain `string` for now (Finding B adds a
+/// `PREG_OFFSET_CAPTURE`-aware parameterization).
+fn preg_leaf_type() -> Type {
+    Type::String
+}
+
+/// Builds `preg_match`'s own `$matches` shape from a pattern's parsed
+/// capture groups (`regex_groups::parse_capture_groups`): field `"0"` is
+/// always present (the whole match); each group gets a numbered field
+/// with `optional: group.optional`; a named group gets an *additional*
+/// field under its own name with identical type/optionality (real PHP
+/// places both the numeric and named key in `$matches`). Skips adding a
+/// named field whose name is already present - real PCRE allows the same
+/// group name on two different alternation branches without the `J`
+/// modifier (`(?<x>a)|(?<x>b)` is ordinary, valid PCRE), which would
+/// otherwise produce a shape with a duplicated field.
+fn preg_match_matches_shape(groups: &[regex_groups::RegexCaptureGroup]) -> Type {
+    let mut fields = vec![("0".to_string(), preg_leaf_type(), false)];
+    for g in groups {
+        fields.push((g.number.to_string(), preg_leaf_type(), g.optional));
+        if let Some(name) = &g.name
+            && !fields.iter().any(|(n, _, _)| n == name)
+        {
+            fields.push((name.clone(), preg_leaf_type(), g.optional));
+        }
+    }
+    Type::ArrayShape(fields)
 }
 
 /// `curl_getinfo($ch, CONSTANT)`'s own real per-option return type - a

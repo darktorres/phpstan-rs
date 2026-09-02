@@ -1482,6 +1482,138 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 12 Finding A: preg_match's by-ref $matches shape - a real
+    // PCRE-structure parser (never a matching engine), scoped to the
+    // common 3-argument, literal-pattern form.
+    #[test]
+    fn preg_match_required_group_is_accepted_as_a_string_parameter() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function f($subject): void {
+                preg_match('/(a)(b)?/', $subject, $matches);
+                needsString($matches[1]);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_reading_a_genuinely_absent_group_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match('/(a)(b)?/', $subject, $matches);
+                echo $matches[5];
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("no key '5'")),
+            "expected a 'no such key' diagnostic, got: {d:?}"
+        );
+    }
+
+    // A "reads $matches[1]/[5] in the impossible branch" version of this
+    // test wouldn't actually discriminate whether narrowing happened:
+    // `infer_expr`'s `Index` arm falls back to `Mixed` for `Type::Never`
+    // just as readily as for a real `ArrayShape`, so no diagnostic either
+    // way. Passing `$matches` itself to a parameter requiring an
+    // incompatible type is the real, discriminating test - `Never` is
+    // vacuously assignable to anything (so no diagnostic proves the
+    // branch really was narrowed to it), while an ordinary `ArrayShape`
+    // is not (so a diagnostic there proves the optional case correctly
+    // *isn't* over-optimistically narrowed).
+    #[test]
+    fn preg_match_array_key_exists_false_branch_narrows_a_required_group_to_never() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                preg_match('/(a)(b)?/', $subject, $matches);
+                if (! array_key_exists('1', $matches)) {
+                    needsInt($matches);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_array_key_exists_false_branch_does_not_narrow_an_optional_group() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                preg_match('/(a)(b)?/', $subject, $matches);
+                if (! array_key_exists('2', $matches)) {
+                    needsInt($matches);
+                }
+            }
+        "#,
+        );
+        assert!(
+            !d.is_empty(),
+            "expected a diagnostic proving the optional group wasn't narrowed to Never, got none"
+        );
+    }
+
+    #[test]
+    fn preg_match_named_group_is_readable_by_number_and_by_name() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function f($subject): void {
+                preg_match('/(?<year>\d+)/', $subject, $matches);
+                needsString($matches[1]);
+                needsString($matches['year']);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_with_a_dynamic_pattern_stays_mixed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($pattern, $subject): void {
+                preg_match($pattern, $subject, $matches);
+                echo $matches[99];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_with_a_flags_argument_stays_mixed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match('/(a)/', $subject, $matches, PREG_OFFSET_CAPTURE);
+                echo $matches[99];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_with_a_pattern_this_parser_bails_on_stays_mixed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match('/(?(1)a|b)/', $subject, $matches);
+                echo $matches[99];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn curl_getinfo_redirect_url_infers_string_or_false() {
         let d = diagnostics_for(

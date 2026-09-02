@@ -19,6 +19,7 @@ pub mod parser;
 pub mod pest_config;
 pub mod php_stubs;
 pub mod project;
+pub mod regex_groups;
 pub mod registry;
 pub mod token;
 pub mod types;
