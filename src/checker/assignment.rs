@@ -262,6 +262,16 @@ impl<'a> Checker<'a> {
     /// a genuinely *optional* field is not flagged either - that's a
     /// possibly-undefined-index warning, a different (and noisier) check
     /// this prototype doesn't attempt.
+    ///
+    /// Phase 12 Finding E: also handles a `Type::Union` of `ArrayShape`s
+    /// (e.g. `preg_match`'s own `$matches`, unioned with an empty shape
+    /// for the no-match case) - present in *any* member is enough not to
+    /// flag, generalizing the same per-shape `optional`-field leniency
+    /// above across the whole `Union` rather than only within one shape.
+    /// A member that isn't an `ArrayShape` at all (`Mixed`, or anything
+    /// else) means "don't know" for at least part of the type, so the
+    /// whole check backs off, the same leniency already granted a single
+    /// unknown array type.
     pub(crate) fn check_shape_key_access(
         &mut self,
         base: &Expr,
@@ -269,13 +279,28 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         label: &str,
     ) {
-        let Type::ArrayShape(fields) = self.infer_expr(base, locals) else {
-            return;
-        };
         let Some(key) = literal_string_key(idx) else {
             return;
         };
-        if fields.iter().any(|(name, _, _)| *name == key) {
+        let ty = self.infer_expr(base, locals);
+        let members: Vec<Type> = match ty {
+            Type::Union(m) => m,
+            other => vec![other],
+        };
+        let shapes: Vec<&Vec<(String, Type, bool)>> = members
+            .iter()
+            .filter_map(|m| match m {
+                Type::ArrayShape(fields) => Some(fields),
+                _ => None,
+            })
+            .collect();
+        if shapes.is_empty() || shapes.len() != members.len() {
+            return;
+        }
+        if shapes
+            .iter()
+            .any(|fields| fields.iter().any(|(name, _, _)| *name == key))
+        {
             return;
         }
         self.report(

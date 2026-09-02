@@ -1,5 +1,9 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, literal_string_key, union_types};
+use crate::checker::{
+    Checker, Locals, literal_string_key, literal_string_value, preg_match_matches_shape,
+    union_types,
+};
+use crate::regex_groups;
 use crate::types::{Type, is_subtype};
 
 impl<'a> Checker<'a> {
@@ -9,6 +13,28 @@ impl<'a> Checker<'a> {
     /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
     /// anything else leaves `locals` untouched rather than guess.
     pub(crate) fn apply_narrowing(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
+        // Phase 12 Finding E: `preg_match(...)` (bare, or compared
+        // against a literal 0/1) doesn't otherwise match any existing
+        // narrowing shape below, so this doesn't shadow anything -
+        // verified directly, not assumed: the `Binary(op, l, r)` arm
+        // further down *does* also run afterward for a comparison form,
+        // dispatching to `apply_equality_narrowing`, but that function's
+        // own `narrowing_key(l)`/`narrowing_key(r)` calls have no arm for
+        // `ExprKind::Call` at all, so it's a genuine no-op for this
+        // shape, not a silent double-narrowing.
+        if let Some((pattern_arg, matches_arg, true_means_matched)) = preg_match_condition(cond)
+            && let ExprKind::Variable(matches_name) = &matches_arg.kind
+            && let Some(pattern_str) = literal_string_value(pattern_arg)
+            && let Some(groups) = regex_groups::parse_capture_groups(pattern_str)
+        {
+            let narrowed = if branch_true == true_means_matched {
+                preg_match_matches_shape(&groups, &Type::String, false)
+            } else {
+                Type::ArrayShape(vec![])
+            };
+            purge_stale_narrowing_for(locals, matches_name);
+            locals.insert(matches_name.clone(), narrowed);
+        }
         match &cond.kind {
             // `&&` narrows the "both true" branch by composing each side
             // in order (the right operand's own narrowing can rely on the
@@ -577,6 +603,88 @@ pub(crate) fn is_real_variable_key(key: &str) -> bool {
         .next()
         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Recognizes `cond` as testing whether a `preg_match` call found a
+/// match - bare (`if (preg_match(...))`) or compared against a literal
+/// `0`/`1` in a way that unambiguously distinguishes "matched" from "not
+/// matched". Deliberately excludes `!== false`/`=== false`: `preg_match`'s
+/// return is `int|false`, and `false` doesn't distinguish a real "no
+/// match" (`0`) from an actual error - where real PHP leaves `$matches`
+/// completely *unchanged* from before the call (confirmed directly
+/// against a live interpreter: a malformed pattern with a pre-existing
+/// `$m` left `$m` untouched), a third state this project has no way to
+/// represent (it isn't "the matched shape" or "empty," it's "whatever it
+/// was before this statement") - the same imprecision real PHPStan's own
+/// extensions accept, not something this closes either.
+///
+/// Only **strict** `===`/`!==` against exactly 0 or 1 are recognized -
+/// PHP's *loose* `==`/`!=` would make `preg_match(...) == 0` ambiguous
+/// between "no match" (`0`) and "error" (`false`, which loosely equals
+/// `0` - confirmed directly: `false == 0` is `true` in PHP). `== 1`/`!= 1`
+/// happen to still be safe even loosely (`false == 1` is `false`), but a
+/// real grep of every `preg_match(_all)?(...)` comparison across this
+/// project's own verification corpus found zero uses of loose `==`/`!=`
+/// at all - every real comparison is already strict - so dropping loose
+/// comparison recognition entirely costs no real coverage.
+///
+/// Scoped to plain `preg_match` (not `preg_match_all`, which needs none
+/// of this - see Finding D), to no-`$flags` callers (mirrors this same
+/// scope in `checker/expr.rs`'s own wiring), and to **positional**
+/// arguments only - `Arg` carries its own `name: Option<String>` for a
+/// named argument, and a bare positional destructure alone could
+/// *misidentify* which expression is which under reordered named
+/// arguments (`preg_match(subject: $s, pattern: $p, matches: $m)` would
+/// otherwise bind `pattern` to what's actually `$s`), so any named
+/// argument bails rather than guessing.
+///
+/// Returns `(pattern_arg, matches_arg, branch_true_means_matched)`.
+fn preg_match_condition(cond: &Expr) -> Option<(&Expr, &Expr, bool)> {
+    fn as_preg_match_args(e: &Expr) -> Option<&[Arg]> {
+        match &e.kind {
+            ExprKind::Call(callee, args) => match &callee.kind {
+                ExprKind::Name(name) if name == "preg_match" => Some(args),
+                _ => None,
+            },
+            ExprKind::Grouping(inner) => as_preg_match_args(inner),
+            _ => None,
+        }
+    }
+    // A real `fn`, not a closure - a closure can't express the
+    // higher-ranked lifetime this needs (called once with `args`
+    // borrowed from `cond` directly, once with `call_args` borrowed from
+    // `l`/`r`; a closure infers one fixed lifetime that can't satisfy
+    // both call sites).
+    fn extract(args: &[Arg], matched: bool) -> Option<(&Expr, &Expr, bool)> {
+        let [pattern, subject, matches] = args else {
+            return None;
+        };
+        if pattern.name.is_some() || subject.name.is_some() || matches.name.is_some() {
+            return None;
+        }
+        Some((&pattern.value, &matches.value, matched))
+    }
+    if let Some(args) = as_preg_match_args(cond) {
+        return extract(args, true); // bare truthy: true branch = matched
+    }
+    let ExprKind::Binary(op, l, r) = &cond.kind else {
+        return None;
+    };
+    let (call_args, lit_side) = match (as_preg_match_args(l), as_preg_match_args(r)) {
+        (Some(a), _) => (a, r),
+        (_, Some(a)) => (a, l),
+        _ => return None,
+    };
+    let ExprKind::Literal(Literal::Int(lit)) = &lit_side.kind else {
+        return None;
+    };
+    match (op, lit) {
+        (BinOp::Identical, 1) => extract(call_args, true),
+        (BinOp::NotIdentical, 1) => extract(call_args, false),
+        (BinOp::Identical, 0) => extract(call_args, false),
+        (BinOp::NotIdentical, 0) => extract(call_args, true),
+        _ => None,
+    }
 }
 
 /// Drops every `locals` entry that depended on `key`'s pre-reassignment

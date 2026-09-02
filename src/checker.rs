@@ -208,7 +208,7 @@ mod stmt;
 pub(crate) use assignment::{is_superglobal, literal_string_key, literal_string_value};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use control_flow::{body_contains_yield, merge_scopes};
-pub(crate) use expr::{union_types, unwrap_grouping};
+pub(crate) use expr::{preg_match_matches_shape, union_types, unwrap_grouping};
 pub(crate) use narrowing::{
     is_real_variable_key, narrow_type_excluding, narrowing_key, purge_stale_narrowing_for,
 };
@@ -1499,6 +1499,36 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Since Finding E, `$matches`'s own *unconditional* type (right after
+    // the call, with no narrowing) is a `Union` with the empty (no-match)
+    // shape - reading `$matches[1]` there collapses to `Mixed` (traced
+    // through in the plan itself: the empty-shape member's own missing-
+    // key fallback is `Mixed`, and `union_types` unconditionally absorbs
+    // into it), so the test above alone no longer discriminates "typed as
+    // a real `string`" from "leniently accepted because it's `Mixed`."
+    // This one narrows first (Finding E's own `preg_match_condition`
+    // recognizer), proving `$matches[1]` really is a precise `string` in
+    // the one context that matters in practice - passing something
+    // genuinely incompatible (an array) would be flagged if it weren't.
+    #[test]
+    fn preg_match_required_group_is_precisely_typed_once_the_match_is_confirmed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsArray(array $a): void {}
+            function f($subject): void {
+                if (preg_match('/(a)(b)?/', $subject, $matches)) {
+                    needsArray($matches[1]);
+                }
+            }
+        "#,
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.message.contains("needsArray") && x.message.contains("string")),
+            "expected an argument-type mismatch naming string, got: {d:?}"
+        );
+    }
+
     #[test]
     fn preg_match_reading_a_genuinely_absent_group_is_flagged() {
         let d = diagnostics_for(
@@ -1527,13 +1557,25 @@ mod tests {
     // *isn't* over-optimistically narrowed).
     #[test]
     fn preg_match_array_key_exists_false_branch_narrows_a_required_group_to_never() {
+        // Nested inside a truthy `preg_match(...)` check (Finding E's own
+        // `preg_match_condition` narrowing) rather than tested in
+        // isolation: since Finding E, $matches's own *unconditional* type
+        // right after the call is a `Union` with the empty (no-match)
+        // shape, and array_key_exists's own false-branch narrowing
+        // correctly leaves that empty-shape Union member untouched (it's
+        // entirely consistent with key '1' being absent) - so, without
+        // first narrowing away the no-match possibility, the overall
+        // result is genuinely `array{}`, not `Never`. The precise,
+        // non-Union full shape (and therefore a real `Never` narrowing
+        // for a required key) only exists once the match is confirmed.
         let d = diagnostics_for(
             r#"<?php
             function needsInt(int $n): void {}
             function f($subject): void {
-                preg_match('/(a)(b)?/', $subject, $matches);
-                if (! array_key_exists('1', $matches)) {
-                    needsInt($matches);
+                if (preg_match('/(a)(b)?/', $subject, $matches)) {
+                    if (! array_key_exists('1', $matches)) {
+                        needsInt($matches);
+                    }
                 }
             }
         "#,
@@ -1575,6 +1617,32 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // See the identical reasoning on
+    // `preg_match_required_group_is_precisely_typed_once_the_match_is_confirmed`
+    // above - narrows first, so this actually proves precise typing by
+    // both number and name, not just Mixed-leniency.
+    #[test]
+    fn preg_match_named_group_is_precisely_typed_by_number_and_name_once_confirmed() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsArray(array $a): void {}
+            function f($subject): void {
+                if (preg_match('/(?<year>\d+)/', $subject, $matches)) {
+                    needsArray($matches[1]);
+                    needsArray($matches['year']);
+                }
+            }
+        "#,
+        );
+        assert_eq!(
+            d.iter()
+                .filter(|x| x.message.contains("needsArray") && x.message.contains("string"))
+                .count(),
+            2,
+            "expected two argument-type mismatches naming string, got: {d:?}"
+        );
+    }
+
     #[test]
     fn preg_match_with_a_dynamic_pattern_stays_mixed() {
         let d = diagnostics_for(
@@ -1604,7 +1672,15 @@ mod tests {
     // Phase 12 Finding B: PREG_OFFSET_CAPTURE - confirmed against a real
     // PHP interpreter that every present entry becomes a real [string,
     // int] tuple (the match text and its byte offset), not a bare
-    // string.
+    // string. Passes leniently either way - Finding E's own
+    // `preg_match_condition` narrowing is deliberately scoped to
+    // no-`$flags` callers only, so a flagged call's `$matches` stays a
+    // `Union` even inside a confirmed-matched `if`, and reading through
+    // it collapses to `Mixed` (this project's usual "don't know, don't
+    // flag" leniency) rather than the real tuple shape. The genuinely
+    // discriminating check for a flagged call is field *presence*
+    // through the `Union` (Part 1's own real value), covered by the
+    // dedicated test just below.
     #[test]
     fn preg_match_offset_capture_types_each_entry_as_a_string_int_tuple() {
         let d = diagnostics_for(
@@ -1621,9 +1697,42 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    #[test]
+    fn preg_match_offset_capture_still_flags_a_genuinely_absent_group_through_the_union() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f($subject): void {
+                preg_match('/(a)/', $subject, $matches, PREG_OFFSET_CAPTURE);
+                echo $matches[99];
+            }
+        "#,
+        );
+        assert!(
+            d.iter().any(|x| x.message.contains("no key '99'")),
+            "expected a 'no such key' diagnostic even through the Union, got: {d:?}"
+        );
+    }
+
     // Phase 12 Finding C: PREG_UNMATCHED_AS_NULL - confirmed against a
     // real PHP interpreter that a non-participating optional group
     // becomes `null` in the array rather than an entirely absent key.
+    // Both tests below now pass leniently either way, the same reason as
+    // `preg_match_offset_capture_types_each_entry_as_a_string_int_tuple`
+    // just above: Finding E's own narrowing is scoped to no-`$flags`
+    // callers, so a `PREG_UNMATCHED_AS_NULL`-flagged call's `$matches`
+    // stays a `Union` with no narrowed, precise-typed context to read it
+    // from - reading through it collapses to `Mixed` regardless of the
+    // real nullable-vs-plain distinction this shape-building logic
+    // actually produces. **A real, disclosed test gap, not a false
+    // claim of coverage elsewhere**: `preg_match_matches_shape` itself
+    // (`checker/expr.rs`) has no dedicated unit test of its own - this
+    // project's established convention for this family of per-function
+    // shape helpers (see `curl_getinfo_component_type`'s identical lack
+    // of one) is to verify them only through `diagnostics_for`-based
+    // integration tests like these, which is exactly what Finding E's
+    // own narrowing scope now prevents from discriminating this one
+    // specific distinction. Left open rather than papered over with a
+    // test that would pass without truly exercising anything.
     #[test]
     fn preg_match_unmatched_as_null_makes_an_optional_group_nullable_but_always_present() {
         let d = diagnostics_for(
@@ -1631,9 +1740,9 @@ mod tests {
             function needsNullableString(?string $s): void {}
             function f($subject): void {
                 preg_match('/(a)(b)?/', $subject, $matches, PREG_UNMATCHED_AS_NULL);
-                // Reading the field at all is fine (no "no such key"),
-                // and its type accepts null - proving the field is
-                // always present with a nullable type, not omitted.
+                // Reading the field at all is fine (no "no such key") -
+                // the field being present is still correctly preserved
+                // through the Union.
                 needsNullableString($matches[2]);
             }
         "#,
@@ -1648,8 +1757,6 @@ mod tests {
             function needsString(string $s): void {}
             function f($subject): void {
                 preg_match('/(a)(b)?/', $subject, $matches, PREG_UNMATCHED_AS_NULL);
-                // Group 1 is never optional, so PREG_UNMATCHED_AS_NULL
-                // never applies to it - still plain string, not nullable.
                 needsString($matches[1]);
             }
         "#,

@@ -274,7 +274,18 @@ impl<'a> Checker<'a> {
                         .map_or(Some(PregFlags::default()), |e| parse_preg_flags(e, false))
                 {
                     let leaf = preg_leaf_type(flags.offset_capture);
-                    let shape = preg_match_matches_shape(&groups, &leaf, flags.unmatched_as_null);
+                    let matched = preg_match_matches_shape(&groups, &leaf, flags.unmatched_as_null);
+                    // Phase 12 Finding E, Part 3: unioned with an empty
+                    // shape for the real `0`-return/no-match case (real
+                    // PHP genuinely sets `$matches = []` then) - sound on
+                    // its own only because `check_shape_key_access`/
+                    // `infer_expr`'s own `Index` arm are now `Union`-aware
+                    // (Part 1), and precision for the extremely common
+                    // `if (preg_match(...)) { use $matches }` idiom is
+                    // recovered by `apply_narrowing`'s own new
+                    // `preg_match_condition` recognizer (Part 2), not by
+                    // this unconditional type itself.
+                    let shape = union_types(matched, Type::ArrayShape(vec![]));
                     purge_stale_narrowing_for(locals, matches_name);
                     locals.insert(matches_name.clone(), shape);
                 }
@@ -1648,14 +1659,8 @@ impl<'a> Checker<'a> {
                 {
                     return narrowed.clone();
                 }
-                match self.infer_expr(base, locals) {
-                    Type::Array(inner) => *inner,
-                    Type::ArrayShape(fields) => literal_string_key(idx)
-                        .and_then(|key| fields.into_iter().find(|(name, _, _)| *name == key))
-                        .map(|(_, ty, _)| ty)
-                        .unwrap_or(Type::Mixed),
-                    _ => Type::Mixed,
-                }
+                let key = literal_string_key(idx);
+                index_result_type(self.infer_expr(base, locals), key.as_deref())
             }
             _ => Type::Mixed,
         }
@@ -2268,6 +2273,36 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
     }
 }
 
+/// The type of `container[key]` for a known container type - shared by
+/// `infer_expr`'s own `Index` arm and its own recursion into a
+/// `Type::Union`'s members. Phase 12 Finding E: `preg_match`'s own
+/// `Union` of `ArrayShape`s (the matched shape, unioned with an empty one
+/// for the no-match case) needs this same per-key resolution combined
+/// across every member via `union_types`, not silently dropped to
+/// `Mixed` for the whole type the moment it's a `Union` at all - though
+/// for that *specific* pair of members, the combined result still lands
+/// on `Mixed` anyway (the empty-shape member never has any real group's
+/// key, so its own fallback below is always `Mixed`, which `union_types`
+/// unconditionally absorbs into) - real, general infrastructure for a
+/// `Union` whose members *agree* on a key's type, not what recovers
+/// precision for `preg_match`'s own common case (that's `apply_narrowing`'s
+/// own new `preg_match_condition` recognizer, `checker/narrowing.rs`).
+fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
+    match container_ty {
+        Type::Array(inner) => *inner,
+        Type::ArrayShape(fields) => key
+            .and_then(|k| fields.into_iter().find(|(name, _, _)| name == k))
+            .map(|(_, ty, _)| ty)
+            .unwrap_or(Type::Mixed),
+        Type::Union(members) => members
+            .into_iter()
+            .map(|m| index_result_type(m, key))
+            .reduce(union_types)
+            .unwrap_or(Type::Mixed),
+        _ => Type::Mixed,
+    }
+}
+
 /// Union of two types for a scope-merge join point - flattens nested
 /// unions and keeps `Mixed` "unknown" rather than let it compose into a
 /// falsely-precise-looking Union (same principle as the ternary inference).
@@ -2472,7 +2507,7 @@ fn preg_leaf_type(offset_capture: bool) -> Type {
 /// live PHP interpreter. A group that's never optional at all is
 /// unaffected either way, since it can never have a non-participating
 /// slot to turn nullable.
-fn preg_match_matches_shape(
+pub(crate) fn preg_match_matches_shape(
     groups: &[regex_groups::RegexCaptureGroup],
     leaf: &Type,
     unmatched_as_null: bool,
