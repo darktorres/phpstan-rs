@@ -1589,12 +1589,68 @@ mod tests {
     }
 
     #[test]
-    fn preg_match_with_a_flags_argument_stays_mixed() {
+    fn preg_match_with_an_unrecognized_flags_expression_stays_mixed() {
         let d = diagnostics_for(
             r#"<?php
             function f($subject): void {
-                preg_match('/(a)/', $subject, $matches, PREG_OFFSET_CAPTURE);
+                preg_match('/(a)/', $subject, $matches, SOME_UNDEFINED_FLAG);
                 echo $matches[99];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Phase 12 Finding B: PREG_OFFSET_CAPTURE - confirmed against a real
+    // PHP interpreter that every present entry becomes a real [string,
+    // int] tuple (the match text and its byte offset), not a bare
+    // string.
+    #[test]
+    fn preg_match_offset_capture_types_each_entry_as_a_string_int_tuple() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                preg_match('/(a)/', $subject, $matches, PREG_OFFSET_CAPTURE);
+                needsString($matches[1][0]);
+                needsInt($matches[1][1]);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Phase 12 Finding C: PREG_UNMATCHED_AS_NULL - confirmed against a
+    // real PHP interpreter that a non-participating optional group
+    // becomes `null` in the array rather than an entirely absent key.
+    #[test]
+    fn preg_match_unmatched_as_null_makes_an_optional_group_nullable_but_always_present() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsNullableString(?string $s): void {}
+            function f($subject): void {
+                preg_match('/(a)(b)?/', $subject, $matches, PREG_UNMATCHED_AS_NULL);
+                // Reading the field at all is fine (no "no such key"),
+                // and its type accepts null - proving the field is
+                // always present with a nullable type, not omitted.
+                needsNullableString($matches[2]);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_unmatched_as_null_does_not_widen_a_required_group() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            function f($subject): void {
+                preg_match('/(a)(b)?/', $subject, $matches, PREG_UNMATCHED_AS_NULL);
+                // Group 1 is never optional, so PREG_UNMATCHED_AS_NULL
+                // never applies to it - still plain string, not nullable.
+                needsString($matches[1]);
             }
         "#,
         );

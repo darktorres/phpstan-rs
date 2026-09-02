@@ -162,27 +162,6 @@ impl<'a> Checker<'a> {
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
                 self.predefine_byref_or_unknown_args(sig, args, &resolved, locals);
-                // Phase 12 Finding A: `preg_match`'s by-ref `$matches`
-                // shape, scoped to the common 3-argument literal-pattern
-                // form (no `$flags` argument yet - a later finding).
-                // Overrides the generic widening
-                // `predefine_byref_or_unknown_args` just did above,
-                // rather than replacing it - anything outside this
-                // scope keeps that call's own (Mixed-or-widened)
-                // fallback unchanged.
-                if resolved_name.as_deref() == Some("preg_match")
-                    && resolved.get(1).copied().flatten().is_some()
-                    && resolved.get(3).copied().flatten().is_none()
-                    && let Some(pattern_arg) = resolved.first().copied().flatten()
-                    && let Some(matches_arg) = resolved.get(2).copied().flatten()
-                    && let ExprKind::Variable(matches_name) = &matches_arg.kind
-                    && let Some(pattern_str) = literal_string_value(pattern_arg)
-                    && let Some(groups) = regex_groups::parse_capture_groups(pattern_str)
-                {
-                    let shape = preg_match_matches_shape(&groups);
-                    purge_stale_narrowing_for(locals, matches_name);
-                    locals.insert(matches_name.clone(), shape);
-                }
                 // Finding 1: `it`/`test`/`describe`/`beforeEach`/
                 // `afterEach`/`beforeAll`/`afterAll` rebind `$this` inside
                 // their closure/arrow-fn argument at runtime (Pest's own
@@ -256,6 +235,48 @@ impl<'a> Checker<'a> {
                             0,
                         );
                     }
+                }
+                // Phase 12 Findings A/B/C: `preg_match`'s by-ref
+                // `$matches` shape, including `PREG_OFFSET_CAPTURE`/
+                // `PREG_UNMATCHED_AS_NULL` recognition - `parse_preg_flags`
+                // bails (`None`) on any other flag, leaving this whole
+                // check inert for it. Overrides the generic widening
+                // `predefine_byref_or_unknown_args` already did above,
+                // rather than replacing it - anything outside this scope
+                // keeps that call's own (Mixed-or-widened) fallback
+                // unchanged. Deliberately placed *after* `check_args`
+                // above, not right after `predefine_byref_or_unknown_args`
+                // like an earlier draft had it - a real bug found by
+                // testing, not just reasoned about: `check_args` checks
+                // whether the *argument* `$matches` is compatible with
+                // the declared `?array<string> $matches` parameter (the
+                // real phpstorm-stubs stub is more specific than the
+                // bare native `?array` hint), and that check needs to see
+                // `$matches`'s own *pre-call* type, not this override's
+                // freshly-computed *post-call* shape - placing this
+                // before `check_args` made every `$matches` shape whose
+                // leaf type isn't plain `string` (Finding B's `[string,
+                // int]` tuple, Finding C's `string|null`) spuriously fail
+                // that check, since Finding A's own all-`string`-leaves
+                // shape had accidentally masked the bug by coincidentally
+                // matching the declared type exactly.
+                if resolved_name.as_deref() == Some("preg_match")
+                    && resolved.get(1).copied().flatten().is_some()
+                    && let Some(pattern_arg) = resolved.first().copied().flatten()
+                    && let Some(matches_arg) = resolved.get(2).copied().flatten()
+                    && let ExprKind::Variable(matches_name) = &matches_arg.kind
+                    && let Some(pattern_str) = literal_string_value(pattern_arg)
+                    && let Some(groups) = regex_groups::parse_capture_groups(pattern_str)
+                    && let Some(flags) = resolved
+                        .get(3)
+                        .copied()
+                        .flatten()
+                        .map_or(Some(PregFlags::default()), |e| parse_preg_flags(e, false))
+                {
+                    let leaf = preg_leaf_type(flags.offset_capture);
+                    let shape = preg_match_matches_shape(&groups, &leaf, flags.unmatched_as_null);
+                    purge_stale_narrowing_for(locals, matches_name);
+                    locals.insert(matches_name.clone(), shape);
                 }
                 // Reuses the `resolved_name`/`sig` already resolved above
                 // - the same lookup `infer_expr`'s own `Call` arm would
@@ -2382,10 +2403,20 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
 }
 
 /// The type of one matched group's "leaf" value in `preg_match`'s own
-/// `$matches` shape - plain `string` for now (Finding B adds a
-/// `PREG_OFFSET_CAPTURE`-aware parameterization).
-fn preg_leaf_type() -> Type {
-    Type::String
+/// `$matches` shape - plain `string` normally, or the real, positional
+/// (not named-field) `[string, int]` tuple `PREG_OFFSET_CAPTURE`
+/// actually produces at runtime (the match text and its byte offset) -
+/// confirmed directly against a live PHP interpreter, not assumed from
+/// PHPStan's own different naming convention for the same idea.
+fn preg_leaf_type(offset_capture: bool) -> Type {
+    if offset_capture {
+        Type::ArrayShape(vec![
+            ("0".to_string(), Type::String, false),
+            ("1".to_string(), Type::Int, false),
+        ])
+    } else {
+        Type::String
+    }
 }
 
 /// Builds `preg_match`'s own `$matches` shape from a pattern's parsed
@@ -2398,17 +2429,87 @@ fn preg_leaf_type() -> Type {
 /// group name on two different alternation branches without the `J`
 /// modifier (`(?<x>a)|(?<x>b)` is ordinary, valid PCRE), which would
 /// otherwise produce a shape with a duplicated field.
-fn preg_match_matches_shape(groups: &[regex_groups::RegexCaptureGroup]) -> Type {
-    let mut fields = vec![("0".to_string(), preg_leaf_type(), false)];
+///
+/// `unmatched_as_null`: `PREG_UNMATCHED_AS_NULL` changes a
+/// non-participating optional group from "entirely absent from the
+/// array" to "always present, as `null`" - confirmed directly against a
+/// live PHP interpreter. A group that's never optional at all is
+/// unaffected either way, since it can never have a non-participating
+/// slot to turn nullable.
+fn preg_match_matches_shape(
+    groups: &[regex_groups::RegexCaptureGroup],
+    leaf: &Type,
+    unmatched_as_null: bool,
+) -> Type {
+    let mut fields = vec![("0".to_string(), leaf.clone(), false)];
     for g in groups {
-        fields.push((g.number.to_string(), preg_leaf_type(), g.optional));
+        let (ty, optional) = if g.optional && unmatched_as_null {
+            (union_types(leaf.clone(), Type::Null), false)
+        } else {
+            (leaf.clone(), g.optional)
+        };
+        fields.push((g.number.to_string(), ty.clone(), optional));
         if let Some(name) = &g.name
             && !fields.iter().any(|(n, _, _)| n == name)
         {
-            fields.push((name.clone(), preg_leaf_type(), g.optional));
+            fields.push((name.clone(), ty, optional));
         }
     }
     Type::ArrayShape(fields)
+}
+
+/// A bitwise-OR-chain flag collector for `preg_match`/`preg_match_all`'s
+/// own `$flags` argument, mirroring `contains_json_throw_on_error`'s own
+/// recursive shape but collecting a small flag struct instead of a single
+/// boolean.
+#[derive(Default, Clone, Copy)]
+struct PregFlags {
+    offset_capture: bool,
+    unmatched_as_null: bool,
+    // Only meaningful for `preg_match_all`; `false` = `PREG_PATTERN_ORDER`
+    // (the real default).
+    set_order: bool,
+}
+
+/// Walks `e` as a `Name` or a `BitOr`/`Grouping` chain of `Name`s,
+/// recognizing exactly `PREG_OFFSET_CAPTURE`/`PREG_UNMATCHED_AS_NULL`
+/// (and, when `allow_order` is set, `PREG_PATTERN_ORDER`/
+/// `PREG_SET_ORDER`). `None` if any leaf name isn't one of these, or if
+/// both `PATTERN_ORDER` and `SET_ORDER` appear together - never guessed.
+fn parse_preg_flags(e: &Expr, allow_order: bool) -> Option<PregFlags> {
+    fn collect<'a>(e: &'a Expr, out: &mut Vec<&'a str>) -> bool {
+        match &e.kind {
+            ExprKind::Name(name) => {
+                out.push(name.trim_start_matches('\\'));
+                true
+            }
+            ExprKind::Binary(BinOp::BitOr, l, r) => collect(l, out) && collect(r, out),
+            ExprKind::Grouping(inner) => collect(inner, out),
+            _ => false,
+        }
+    }
+    let mut names = Vec::new();
+    if !collect(e, &mut names) {
+        return None;
+    }
+    let mut flags = PregFlags::default();
+    let mut order_seen = 0;
+    for name in names {
+        match name {
+            "PREG_OFFSET_CAPTURE" => flags.offset_capture = true,
+            "PREG_UNMATCHED_AS_NULL" => flags.unmatched_as_null = true,
+            "PREG_PATTERN_ORDER" if allow_order => order_seen += 1,
+            "PREG_SET_ORDER" if allow_order => {
+                flags.set_order = true;
+                order_seen += 1;
+            }
+            _ => return None,
+        }
+    }
+    if order_seen > 1 {
+        return None;
+    }
+    Some(flags)
 }
 
 /// `curl_getinfo($ch, CONSTANT)`'s own real per-option return type - a
