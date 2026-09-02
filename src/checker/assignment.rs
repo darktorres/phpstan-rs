@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, narrowing_key, union_types};
+use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
 use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
@@ -86,6 +86,13 @@ impl<'a> Checker<'a> {
         // harmless alongside) the `Variable` arm below, which does the
         // same insert under the identical key for that one case.
         if let Some(key) = narrowing_key(lhs) {
+            // Phase 33 Finding 5: also drop any *deeper* stale entry
+            // rooted at this exact key (`"key->prop"`, `"key[lit]"`) or
+            // that used `key` as a variable subscript elsewhere
+            // (`"other[$key]"`) - real invalidation-on-reassignment,
+            // generalized over any `narrowing_key` shape (bare variable,
+            // property chain, or index chain), not just a bare variable.
+            purge_stale_narrowing_for(locals, &key);
             locals.insert(key, ty.clone());
         }
         match &lhs.kind {
@@ -188,6 +195,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut Locals) {
         if let ExprKind::Variable(name) = &target.kind {
+            purge_stale_narrowing_for(locals, name);
             locals.insert(name.clone(), ty);
         }
     }

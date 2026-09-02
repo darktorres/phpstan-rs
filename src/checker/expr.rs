@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::checker::{
     CheckArgsCall, Checker, Locals, TemplateBindings, body_contains_yield, is_language_construct,
     is_real_variable_key, is_superglobal, literal_string_key, merge_scopes, narrow_type_excluding,
-    narrowing_key, resolve_call_args,
+    narrowing_key, purge_stale_narrowing_for, resolve_call_args,
 };
 use crate::pest_config;
 use crate::registry::FunctionSig;
@@ -474,6 +474,7 @@ impl<'a> Checker<'a> {
                         Type::Null if is_increment => Type::Int,
                         other => other.clone(),
                     };
+                    purge_stale_narrowing_for(locals, name);
                     locals.insert(name.clone(), updated);
                 }
                 self.infer_expr(inner, locals)
@@ -573,6 +574,7 @@ impl<'a> Checker<'a> {
                 self.check_expr(rhs, locals, label);
                 if let ExprKind::Variable(name) = &lhs.kind {
                     let ty = self.infer_binary(op, lhs, rhs, locals);
+                    purge_stale_narrowing_for(locals, name);
                     locals.insert(name.clone(), ty);
                 }
                 Type::Mixed

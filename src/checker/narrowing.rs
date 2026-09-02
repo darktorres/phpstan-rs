@@ -488,8 +488,26 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
             narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
         }
         ExprKind::Index(base, Some(idx)) => {
-            let key = literal_string_key(idx)?;
-            narrowing_key(base).map(|base_key| format!("{base_key}[{key}]"))
+            let base_key = narrowing_key(base)?;
+            match literal_string_key(idx) {
+                Some(key) => Some(format!("{base_key}[{key}]")),
+                // Phase 33 Finding 5: `is_string($this->mirror[$key])`
+                // where `$key` is a variable, not a literal - a `$`-
+                // prefixed marker distinguishes "keyed by this variable's
+                // current value" from a literal key's own text (which
+                // `is_real_variable_key` already treats as synthetic
+                // either way, so this can't be mistaken for a real bare-
+                // variable key). Only sound alongside real invalidation
+                // of this entry whenever `subscript_name` is reassigned -
+                // see `purge_stale_narrowing_for`, wired in everywhere a
+                // bare variable's value can change.
+                None => match &idx.kind {
+                    ExprKind::Variable(subscript_name) => {
+                        Some(format!("{base_key}[${subscript_name}]"))
+                    }
+                    _ => None,
+                },
+            }
         }
         // Phase 23: `is_string($result = expr)` - an assignment nested
         // inside the narrowed expression itself, the common "assign-then-
@@ -544,6 +562,44 @@ pub(crate) fn is_real_variable_key(key: &str) -> bool {
         .next()
         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Drops every `locals` entry that depended on `key`'s pre-reassignment
+/// identity - either because `key` was itself the root a *deeper*
+/// synthetic key was built from (`"key->prop"`, `"key[lit]"` - covers
+/// both a bare-variable root and a full chain root, e.g. reassigning
+/// `$foo->bar` invalidates a stale `"foo->bar->baz"`), or because `key`
+/// (when it's a bare variable name) was used as a *variable subscript*
+/// inside a different chain entirely (`"other[$key]"`, `narrowing_key`'s
+/// own new key shape - never matches for a non-bare-variable `key`,
+/// since a subscript marker only ever wraps a plain variable name).
+///
+/// Phase 33 Finding 5: without this, nothing ever invalidated a stale
+/// composite-key entry when a variable it depends on changed - not just
+/// for a variable-subscript key, but for *any* composite key at all
+/// (reassigning `$foo` left a stale `"foo->bar"` sitting in `locals`
+/// forever). Called from every real call site that can give a bare
+/// variable, property chain, or index chain a new value.
+///
+/// Iterates and removes by key rather than a `retain` call - `Locals`'s
+/// own doc comment (`checker.rs`) only documents `insert`/`remove`/
+/// `entry`/`get`/`contains_key`/`iter` as verified-compatible with
+/// `std::collections::HashMap` on the underlying `imbl` persistent map,
+/// not `retain`.
+pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
+    let base_prop = format!("{key}->");
+    let base_idx = format!("{key}[");
+    let subscript_marker = format!("[${key}]");
+    let stale: Vec<String> = locals
+        .iter()
+        .filter(|(k, _)| {
+            k.starts_with(&base_prop) || k.starts_with(&base_idx) || k.contains(&subscript_marker)
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in stale {
+        locals.remove(&k);
+    }
 }
 
 pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {

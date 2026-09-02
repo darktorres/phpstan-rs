@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::checker::{Checker, Locals, literal_string_value};
+use crate::checker::{Checker, Locals, literal_string_value, purge_stale_narrowing_for};
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -132,6 +132,13 @@ impl<'a> Checker<'a> {
                 Type::Array(_) | Type::ArrayShape(_) => substituted,
                 _ => Type::Mixed,
             };
+            // Phase 33 Finding 5: a by-ref call argument is exactly as
+            // much a "this variable now holds something else" event as a
+            // direct assignment - without this, a stale composite key
+            // rooted at `name` (from narrowing before this call) would
+            // keep answering for whatever the callee may have replaced it
+            // with.
+            purge_stale_narrowing_for(locals, name);
             locals.insert(name.clone(), widened);
         }
     }

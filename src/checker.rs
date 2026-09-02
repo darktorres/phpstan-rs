@@ -209,7 +209,9 @@ pub(crate) use assignment::{is_superglobal, literal_string_key, literal_string_v
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use control_flow::{body_contains_yield, merge_scopes};
 pub(crate) use expr::{union_types, unwrap_grouping};
-pub(crate) use narrowing::{is_real_variable_key, narrow_type_excluding, narrowing_key};
+pub(crate) use narrowing::{
+    is_real_variable_key, narrow_type_excluding, narrowing_key, purge_stale_narrowing_for,
+};
 
 impl<'a> Checker<'a> {
     pub fn new(registry: &'a Registry) -> Self {
@@ -2425,6 +2427,134 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn is_string_narrows_a_variable_subscript_array_index_expression() {
+        // Phase 33 Finding 5: Translator::translate's real shape.
+        let d = diagnostics_for(
+            r#"<?php
+            class Translator {
+                /** @var array<string, string|array<int, string>> */
+                private array $mirror = [];
+
+                public function translate(string $key): string {
+                    $val = $key;
+                    if (is_string($this->mirror[$key])) {
+                        $val = $this->mirror[$key];
+                    }
+                    return $val;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn reassigning_the_subscript_variable_invalidates_the_narrowed_entry() {
+        // The soundness case this finding exists for. `is_int(...)`'s own
+        // non-`Union` narrowing fallback (`narrow_type_to`'s `_ =>
+        // target.clone()`) makes the *stale* entry a confidently-wrong
+        // `int` rather than the correct, unprovable `mixed` a fresh read
+        // would give - `needsString` (not `needsInt`) exposes the
+        // difference: a surviving stale `int` would wrongly fail it,
+        // while a correctly-purged `mixed` is leniently never flagged at
+        // all (this project's own "don't guess" rule for `Mixed`
+        // arguments), so the fix is confirmed by the diagnostic
+        // *disappearing*, not by one appearing.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            /**
+             * @param array<string, mixed> $arr
+             */
+            function handle(array $arr, string $key, string $other): void {
+                if (is_int($arr[$key])) {
+                    $key = $other;
+                    needsString($arr[$key]);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn reassigning_an_intermediate_property_link_invalidates_a_deeper_narrowed_entry() {
+        // Reassigning $foo->bar to a fresh literal that *keeps* key 'k'
+        // (just with a different value type) sidesteps the unrelated
+        // "array{...} has no key" check (`check_shape_key_access` runs
+        // unconditionally, independent of narrowing) while still
+        // exercising this fix directly: without it, the stale
+        // `int`-narrowed `"foo->bar[k]"` entry would still win over the
+        // real, freshly-reassigned `'newstring'`, wrongly reporting no
+        // mismatch at all against `needsInt`.
+        let d = diagnostics_for(
+            r#"<?php
+            class Foo {
+                /** @var array<string, mixed> */
+                public array $bar = [];
+            }
+            function needsInt(int $n): void {}
+            function handle(Foo $foo): void {
+                if (is_int($foo->bar['k'])) {
+                    $foo->bar = ['k' => 'newstring'];
+                    needsInt($foo->bar['k']);
+                }
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("newstring"), "got: {d:?}");
+    }
+
+    #[test]
+    fn a_by_ref_call_argument_invalidates_a_stale_narrowed_index_entry() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @param array<string, mixed> $arr
+             */
+            function widenIt(array &$arr): void {}
+            function needsString(string $s): void {}
+            /**
+             * @param array<string, mixed> $arr
+             */
+            function handle(array $arr): void {
+                if (is_int($arr['k'])) {
+                    widenIt($arr);
+                    needsString($arr['k']);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn reassigning_an_unrelated_variable_does_not_purge_narrowing() {
+        // The mirror-image control for the three tests above: since a
+        // correctly-purged `mixed` is leniently never flagged, "no
+        // diagnostic" alone wouldn't prove anything was preserved -
+        // asserting the mismatch *still fires* is what proves the real
+        // `int` narrowing survived the unrelated assignment intact.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsString(string $s): void {}
+            /**
+             * @param array<string, mixed> $arr
+             */
+            function handle(array $arr, string $key): void {
+                if (is_int($arr[$key])) {
+                    $unrelated = 5;
+                    needsString($arr[$key]);
+                }
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("int"), "got: {d:?}");
     }
 
     #[test]

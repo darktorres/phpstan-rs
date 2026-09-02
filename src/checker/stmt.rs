@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, merge_scopes};
+use crate::checker::{Checker, Locals, merge_scopes, purge_stale_narrowing_for};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -488,6 +488,7 @@ impl<'a> Checker<'a> {
                                 multiple.iter().map(|t| self.resolve_name_expr(t)).collect(),
                             ),
                         };
+                        purge_stale_narrowing_for(&mut catch_locals, var);
                         catch_locals.insert(var.clone(), ty);
                     }
                     self.check_block(&c.body, &mut catch_locals, declared_return, label);
@@ -531,6 +532,7 @@ impl<'a> Checker<'a> {
                         .as_ref()
                         .map(|e| self.check_expr(e, locals, label))
                         .unwrap_or(Type::Mixed);
+                    purge_stale_narrowing_for(locals, name);
                     locals.insert(name.clone(), ty);
                 }
             }
