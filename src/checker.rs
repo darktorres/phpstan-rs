@@ -1689,6 +1689,59 @@ mod tests {
         );
     }
 
+    // --- Task 1c: trailing-vs-interior optional field presence/value ---
+
+    #[test]
+    fn preg_match_an_interior_optional_group_is_always_present_not_optional() {
+        // Group 2 is optional (via `?`) but *interior* - group 3, after
+        // it, is required, so real PCRE can never omit $matches[2]
+        // entirely (confirmed live: `preg_match('/(a)(b)?(c)/', 'ac', $m)`
+        // gives `$m = [0=>'ac', 1=>'a', 2=>'', 3=>'c']`). Using the same
+        // established technique as `preg_match_array_key_exists_false_
+        // branch_narrows_a_required_group_to_never` above: if the false
+        // branch of `array_key_exists('2', ...)` narrows `$matches` to
+        // `Never` (vacuously assignable to anything), the field is
+        // correctly modeled as always-present.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(a)(b)?(c)/', $subject, $matches)) {
+                    if (! array_key_exists('2', $matches)) {
+                        needsInt($matches);
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn preg_match_a_trailing_optional_group_keeps_its_own_optional_field() {
+        // Same shape as the interior case above, but group 2 here really
+        // is the pattern's own last group (trailing) - today's existing,
+        // unaffected-by-Task-1c behavior: the field can genuinely be
+        // absent, so `array_key_exists`'s false branch must *not* narrow
+        // `$matches` to `Never`.
+        let d = diagnostics_for(
+            r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(a)(b)?/', $subject, $matches)) {
+                    if (! array_key_exists('2', $matches)) {
+                        needsInt($matches);
+                    }
+                }
+            }
+        "#,
+        );
+        assert!(
+            !d.is_empty(),
+            "expected a diagnostic proving the trailing optional group wasn't narrowed to Never, got none"
+        );
+    }
+
     #[test]
     fn preg_match_named_group_is_readable_by_number_and_by_name() {
         let d = diagnostics_for(

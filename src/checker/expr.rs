@@ -2611,7 +2611,16 @@ pub(crate) fn preg_match_matches_shape(
     unmatched_as_null: bool,
 ) -> Type {
     let mut fields = vec![("0".to_string(), leaf.clone(), false)];
-    for g in groups {
+    // Only a group within the *trailing* run of all-optional groups (from
+    // the pattern's own last group backward) can ever be entirely absent
+    // from `$matches` - real PCRE only ever truncates the array from its
+    // own tail, confirmed live: `preg_match('/(a)(b)?(c)/', 'ac', $m)`
+    // gives `$m = [0=>'ac', 1=>'a', 2=>'', 3=>'c']`, never omitting
+    // `$m[2]`. An interior optional group (something required still
+    // follows it) is always present instead, as `''` when it didn't
+    // itself capture.
+    let trailing_optional_count = groups.iter().rev().take_while(|g| g.optional).count();
+    for (i, g) in groups.iter().enumerate() {
         // Set only by `build_matched_shape`'s own alternation-variant
         // builder, for a group known to sit *before* the variant's own
         // matched branch - always present, forced to the empty string,
@@ -2628,11 +2637,34 @@ pub(crate) fn preg_match_matches_shape(
             }
             continue;
         }
+        let is_trailing_optional = i >= groups.len() - trailing_optional_count;
+        let is_last_group = i == groups.len() - 1;
         let base = group_leaf_type(leaf, &g.literal_values);
-        let (ty, optional) = if g.optional && unmatched_as_null {
+        let (leaf_ty, optional) = if g.optional && unmatched_as_null {
             (union_types(base, Type::Null), false)
+        } else if is_trailing_optional {
+            (base, g.optional) // today's existing, already-correct behavior
         } else {
-            (base, g.optional)
+            (base, false) // interior - always present
+        };
+        // `''` is possible for any optional group except the absolute
+        // last, independent of the trailing/interior split above - a
+        // later trailing-optional group capturing something still
+        // back-fills an earlier one with `''` too (confirmed live via
+        // `/(x)(?:(a)|(b))/` matching `"xb"`: `$m = [0=>'xb', 1=>'x',
+        // 2=>'', 3=>'b']`). Scoped to a plain `string` leaf only: real
+        // PCRE's own tuple shape for this under `PREG_OFFSET_CAPTURE` is
+        // commonly documented as `['', -1]`, but that hasn't been
+        // checked directly the way every other fact here has, so this
+        // stays unapplied rather than guessed when `leaf` isn't exactly
+        // `Type::String`. A no-op in the overwhelmingly common no-flags
+        // case anyway (`union_types(String, StringLiteral(""))` already
+        // collapses back to plain `String`) - only observable once
+        // literal enumeration narrows `base` below plain `String`.
+        let ty = if g.optional && !is_last_group && !unmatched_as_null && leaf == &Type::String {
+            union_types(leaf_ty, Type::StringLiteral(String::new()))
+        } else {
+            leaf_ty
         };
         fields.push((g.number.to_string(), ty.clone(), optional));
         if let Some(name) = &g.name
