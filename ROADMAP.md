@@ -29,13 +29,13 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 773 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 35.
+- Test suite: 815 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 12's preg_match work.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
-  **249 (current, Phase 35)**.
+  249 (Phase 35) -> **241 (current, Phase 12's preg_match work)**.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -50,14 +50,22 @@ Every phase not listed here is DONE (see history below). These are the
 phases with real, concrete open work:
 
 **Phase 12 - Bespoke per-function/method type extensions (PARTIAL).**
-Only remaining item: **`preg_match`/`preg_match_all`** by-ref `$matches`
-shape inference from the pattern's own capture groups. Blocked on real
-PCRE-aware parsing - no suitable Rust PCRE crate exists without a C
-dependency, and Rust's own `regex` crate is a different-enough regex
-flavor (no backreferences, different edge cases) to silently produce
-wrong answers on real PCRE patterns. Everything else originally scoped
-to this phase (`array_map`/`filter`/`reduce`, `sprintf`/`printf`, the
-`array_column` family, `is_*` narrowing predicates) shipped.
+`preg_match`/`preg_match_all`'s by-ref `$matches` shape now ships
+(Findings A-E): a hand-rolled PCRE *structure* parser
+(`src/regex_groups.rs`) that never executes a pattern, only parses its
+capturing-group/alternation/quantifier structure - the same principle
+real PHPStan's own `RegexGroupParser` uses, so no PCRE-compatible regex
+engine was ever actually needed. Covers the base shape,
+`PREG_OFFSET_CAPTURE`, `PREG_UNMATCHED_AS_NULL`, `preg_match_all`'s
+`PATTERN_ORDER`/`SET_ORDER`, and closing the unconditional no-match case
+via a `Union` with narrowing recovery on the checked `if (preg_match(...))`
+idiom. Stays PARTIAL for one remaining, deliberately deferred item: real
+PHPStan's own literal-string-enumeration (`(cat|dog)` -> `'cat'|'dog'`,
+not generic `string`) and single-optional-group tagged-union
+representation - a different *kind* of feature (general literal-value
+tracking through alternation/quantification), comparable in size to
+Phase 14, not a natural extension of the structure-parsing mechanism
+above. See the Known limitations table.
 
 **Phase 13 - Narrowing precision and remaining false-positive causes
 (PLANNED).** Open items:
@@ -144,7 +152,7 @@ comments.
 
 | Limitation | Phase |
 | --- | --- |
-| Bespoke per-function/method type extensions still missing: `preg_match`'s by-ref `$matches` shape | 12 |
+| `preg_match`'s by-ref `$matches` shape doesn't enumerate a constant-only group's literal values (`(cat\|dog)` infers `string`, not `'cat'\|'dog'`), or build a single-optional-group tagged union the way real PHPStan's `RegexArrayShapeMatcher` does | 12 |
 | Traits checked standalone, without their eventual host class's shape | 13 |
 | `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed | 13 |
 | `always_terminates` doesn't recognize a terminating `switch`/`try`/`match` | 13 |
@@ -162,6 +170,51 @@ comments.
 
 ### Known but not yet scheduled to any phase
 
+- **`union_types` caps at `MAX_UNION_MEMBERS` (12) and collapses to
+  `Mixed` past it**, rather than generalizing same-shaped `ArrayShape`s
+  (merging shapes that share a key set into one shape with unioned field
+  types, the way real PHPStan does) - see Phase 12's completed-history
+  entry above for the real hang that found this and why the cap, not
+  generalization, was the fix that landed. A real precision loss for any
+  variable that accumulates more than 12 genuinely distinct shapes across
+  sequential/nested branches, not just for `preg_match`'s own `$matches`.
+  No phase scheduled yet - a candidate for whichever future round tackles
+  array-shape generalization.
+- **A class's own type-checking completeness depends on whether *that
+  exact file* is itself one of the files passed to `check-project`, not
+  just reachable as context** - a real, confirmed, and still-unexplained
+  correctness bug, found via this same Phase 12 corpus re-check (not
+  guessed): `Piwigo\Controller\Api\Categories\CategoryUpdateController::
+  __invoke` infers `$update`'s type completely differently depending on
+  invocation scope. Checking `src/Piwigo/Controller/Api/Categories/
+  CategoryUpdateController.php` alone (or its whole containing directory)
+  gives the correct 8-member `Union` (matching direct hand-tracing of its
+  three independent `if ($input->visible/name/comment !== null)` guards,
+  half of which genuinely include a `'visible'` key). Adding
+  `src/Piwigo/Category/Projection/Category.php` (the `instanceof Category`
+  target this function itself narrows `$category` against, a few lines
+  above `$update` is even built) to the *same* invocation changes the
+  computed union to 4 members and *silently drops every variant that
+  includes `'visible'`* - confirmed deterministic (reproduced 3x, not
+  HashMap-iteration-order noise) and narrowed via directory/file
+  bisection to specifically that one file's presence-or-absence in the
+  invocation's own file list, not corpus size or ordering in general.
+  Leading, unverified hypothesis (not yet confirmed by reading the actual
+  registry-population code path): whether a referenced class like
+  `Category` is "checked" vs merely "loaded for context" changes how
+  completely its own property/method info gets registered, which could
+  make `instanceof Category` narrowing (or the later `$category->visible`
+  property read) behave differently depending on that completeness -
+  consistent with the observed symptom, but not confirmed as the actual
+  mechanism. Left as a named, real, unresolved bug for a dedicated future
+  session (needs its own root-cause trace through `registry.rs`'s class
+  population, not a quick fix alongside Phase 12) - surfaced one false
+  positive so far (`CategoryUpdateController.php:96:29`, "no key
+  'visible'" on `unset($updateFields['visible'])`), but the underlying
+  mechanism could affect *any* class referenced via `instanceof` whose own
+  file isn't part of a given `check-project` invocation's explicit file
+  list, which is concerning enough to flag prominently rather than folding
+  quietly into a single-diagnostic note.
 - **phpstorm-stubs' interleaved-multiple-parameter-list shape isn't
   recognized.** Some stubs (`pg_query_params`, `pg_query`, several
   others) declare *two full parameter lists* under the same parameter
@@ -408,19 +461,105 @@ Six ordered stages, each its own commit:
 
 ## Phase 12 - Bespoke per-function/method type extensions - PARTIAL
 
-See **Open phases** above for what's left (`preg_match`). Shipped:
-`array_map`/`array_filter`/`array_reduce` (a two-pass mechanism binding
-the *other* argument's element type into a closure's own body-inference
-before computing its return type - generic template unification alone
-can't do this for an untyped closure param); `sprintf`/`printf` format-
-string validation against literal arguments (found and fixed a real
-unguarded panic in the `array_filter` special case, and a missing
+See **Open phases** above for what's left (`preg_match`'s remaining
+literal-enumeration/tagged-union precision). Shipped: `array_map`/
+`array_filter`/`array_reduce` (a two-pass mechanism binding the *other*
+argument's element type into a closure's own body-inference before
+computing its return type - generic template unification alone can't do
+this for an untyped closure param); `sprintf`/`printf` format-string
+validation against literal arguments (found and fixed a real unguarded
+panic in the `array_filter` special case, and a missing
 `non-negative-int` pseudo-type along the way: fixing the latter alone
 dropped the full corpus 48496 -> 48243); `array_column`/`array_combine`/
 `array_fill`/`array_fill_keys`/`array_chunk`; `is_array`/`is_string`/
 `is_int`/`is_callable` narrowing predicates (`class_exists`/`in_array`/
 `method_exists`-style existence checks deliberately excluded - they
-check "does this exist," not "what type is this value now").
+check "does this exist," not "what type is this value now"); and
+(unplanned follow-on) `preg_match`/`preg_match_all`'s by-ref `$matches`
+shape, via a new structure-only PCRE parser
+(`src/regex_groups.rs`) - see **Open phases** above for the full
+breakdown and the one item still deferred.
+
+This same follow-on found and fixed a real, pre-existing gap in
+`write_index_into` (`checker/assignment.rs`): it had no `Type::Union`
+arm at all, silently leaving a `Union`-typed container's write untracked
+(traced live to `PiwigoInfosSender::send`). Fixing that - combined with
+`preg_match`'s own new `Union([matched, empty])` unconditional shape
+(Finding E) making `Type::Union` values "stick" through reads and writes
+instead of collapsing to `Mixed` at the first opportunity - surfaced a
+second, more serious real hang: `merge_scopes` (`checker/control_flow.rs`,
+run once per `if`/`else`) and `write_index_into`'s new `Union` arm both
+call `union_types`, which had no cap on how many distinct members it
+would accumulate. A real corpus function with many sequential/nested
+branches assigning genuinely distinct array shapes to the same variable
+grew that variable's own union member count combinatorially, each
+merge's `contains`-based dedup scan (and each member's own recursive
+`PartialEq`) growing right along with it - confirmed by attaching `gdb`
+to the hung process and reading the actual stack (`Type::eq` called from
+`union_types` called from `merge_scopes`/`write_index_into`), not
+guessed. Fixed with a defensive `MAX_UNION_MEMBERS` cap in `union_types`
+(`checker/expr.rs`) collapsing to `Mixed` past 12 members - the same
+`MAX_GROUP_DEPTH`/`MAX_EXPR_DEPTH` widening-for-termination precedent
+Phase 20 already established, and a stable fixed point (`union_types`
+already treats `Mixed` as absorbing, so a variable that trips the cap
+once stays collapsed rather than re-paying the cost every subsequent
+merge).
+
+**Known follow-up, deliberately not attempted here**: this cap is the
+*minimal correct* fix for the termination risk, not the *most precise*
+one. Real PHPStan instead **generalizes** same-shaped array types -
+several `ArrayShape`s that share the same key set get merged into one
+shape with unioned field types, rather than kept as separate union
+members - which would preserve real precision for exactly the
+many-branches-same-variable pattern that trips this cap today, instead
+of falling back to `Mixed`. Building that generalization is a
+meaningfully-sized feature in its own right (deciding when two shapes
+are "the same shape family," merging their fields correctly) - the same
+scope class as the already-deferred Phase 14 (refinement/accessory
+types), not a small tweak to land alongside an unrelated hang fix. Left
+as a real, named future item: replace/augment the hard `MAX_UNION_MEMBERS`
+cap with shape generalization by shared key-set before falling back to
+`Mixed`.
+
+The same corpus re-check (frozen-corpus count 249 -> 241) found and fixed
+two more real, pre-existing gaps along the way, both surfaced by Finding
+E's `Union`-awareness the same way `write_index_into`'s own gap was:
+
+- **`check_assignment_target`'s `Index` arm only exempted the outermost
+  key of a write target from `check_shape_key_access`'s "does this key
+  exist" check, not any index nested *inside* that target's own base.**
+  `$piwigoInfos['updates'][] = [...]` (`PiwigoInfosSender::send`, a real,
+  first-time nested append with no prior flat `$piwigoInfos['updates'] =
+  [];`) routed its own inner `$piwigoInfos['updates']` sub-expression
+  through `check_expr` as a genuine read, wrongly flagging "no key
+  'updates'" the moment `$piwigoInfos`'s `Union`-typed shape started being
+  inspected for real. Fixed by recursing through
+  `check_assignment_target` itself (not `check_expr`) whenever a write
+  target's own base is *another* `Index`, generalizing the existing
+  single-level exemption over any nesting depth - the same way
+  `bind_assignment_target`'s own `Index` arm already does for the write
+  side. Also fixed a second, identical-shape false positive this same bug
+  caused (`StatsPageRenderer::getMonthStats`, "no key 'month'").
+- **`foreach`'s own element-type inference only ever handled a plain
+  `Type::Array` subject, falling to `Mixed` for a `Type::ArrayShape`
+  one**, discarding real, known per-field types. Real corpus impact
+  (`MaintenanceActionDispatcher::dispatch`): `foreach ($versions as $key
+  => $value) { $versions[$key] = preg_replace(..., $value); }` over a
+  `$versions` shape whose fields are all plainly `string` - with `$value`
+  inferred as `Mixed`, `preg_replace`'s own subject-dependent stub
+  returned a broader type that leaked an `array<string>` possibility into
+  `$versions`'s own dynamic-key-write-widened type, which then stuck
+  around (rather than silently collapsing) once `Union` values stopped
+  being bailed on immediately. Fixed by joining every field's own type
+  (`union_types`-folded) when the `foreach` subject is a `Type::ArrayShape`
+  - exact when every field shares one type (the common case both this bug
+  and the fix target), still sound but coarser when they don't.
+
+One further diagnostic traced to an **already-tracked** limitation, not a
+new bug: `DerivativeImage::build`'s `getByType()` argument mismatch
+(`int|string` where `string` is expected) comes from `array_keys()`'s own
+lack of a real key-type parameter, the existing `Type::Array` key-type row
+in the Known limitations table above (tracked under Phase 15).
 
 ## Phase 13 - Narrowing precision and remaining false-positive causes - PLANNED
 
