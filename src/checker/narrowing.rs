@@ -87,6 +87,45 @@ impl<'a> Checker<'a> {
                                 self.current_narrowed_type(&single_arg.value, &key, locals);
                             locals.insert(key, narrow_type_excluding(&current, &Type::Null));
                         }
+                    } else if name == "is_numeric" {
+                        // Phase 32 Finding G: deliberately its own arm,
+                        // not a `narrowing_type_for_predicate` table entry
+                        // - that table's single target type feeds *both*
+                        // directions through the same dispatch below,
+                        // which is sound for `is_scalar`/`is_string`/etc.
+                        // (a string is unconditionally scalar/a-string
+                        // either way) but not for `is_numeric`, where a
+                        // string only *sometimes* qualifies: excluding a
+                        // shared "int|float|string" target on the false
+                        // branch would wrongly drop `String` entirely,
+                        // even though a genuinely non-numeric string
+                        // (`"hello"`) is exactly the ordinary case that
+                        // makes `!is_numeric` true. The two directions
+                        // need different exclusion sets instead.
+                        let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                        let narrowed = if branch_true {
+                            // Bool/True/False/Null can never satisfy
+                            // is_numeric - unconditionally safe to drop.
+                            // String and any numeric type are left
+                            // untouched (a string might still be
+                            // numeric-looking; this project has no
+                            // numeric-string type to narrow down to).
+                            [Type::Bool, Type::True, Type::False, Type::Null]
+                                .into_iter()
+                                .fold(current, |acc, excluded| {
+                                    narrow_type_excluding(&acc, &excluded)
+                                })
+                        } else {
+                            // Int/Float are unconditionally numeric, so
+                            // failing is_numeric proves the value wasn't
+                            // one - nothing else can be dropped this way.
+                            [Type::Int, Type::Float]
+                                .into_iter()
+                                .fold(current, |acc, excluded| {
+                                    narrow_type_excluding(&acc, &excluded)
+                                })
+                        };
+                        locals.insert(key, narrowed);
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         let narrowed = if branch_true {

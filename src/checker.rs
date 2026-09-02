@@ -4737,6 +4737,63 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 32 Finding G, real shape: `PasswordController::resetPassword`'s
+    // `$user_id = (bool) $reset_password_key_result ? ... :
+    // $this->resetPasswordCode();` (both branches `false|int`) then `if (!
+    // is_numeric($user_id)) { return false; }` before `UserId::from
+    // ($user_id)` (expects plain `int`).
+    #[test]
+    fn is_numeric_narrows_the_true_branch_by_excluding_bool_and_null() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int|false $x */
+            function f($x): int {
+                if (is_numeric($x)) {
+                    return $x;
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // The unsoundness a shared-target table entry would have introduced
+    // (see this arm's own doc comment): `is_numeric`'s true branch must
+    // *not* drop `String`, since a numeric-looking string still satisfies
+    // it.
+    #[test]
+    fn is_numeric_leaves_string_untouched_in_the_true_branch() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int|string $x */
+            function f($x): int|string {
+                if (is_numeric($x)) {
+                    return $x;
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn is_numeric_false_branch_narrows_by_excluding_int_and_float() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int|string $x */
+            function f($x): string {
+                if (! is_numeric($x)) {
+                    return $x;
+                }
+                return '';
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn equality_narrows_a_literal_array_index_expression() {
         let d = diagnostics_for(
