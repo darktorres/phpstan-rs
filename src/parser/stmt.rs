@@ -233,6 +233,7 @@ impl Parser {
                     consts.push(ClassConst {
                         name,
                         value,
+                        doc_comment: None,
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),

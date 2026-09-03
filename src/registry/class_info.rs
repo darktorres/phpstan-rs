@@ -206,10 +206,34 @@ impl ClassInfo {
             }
         }
 
+        // A `@var` immediately above a `const` declaration (a real,
+        // common convention for pinning a `const array`'s own element
+        // type more precisely than either its native hint - not even
+        // kept past parsing - or `infer_const_type`'s own literal-value
+        // inference can, e.g. `@var list<class-string<MiddlewareInterface>>`
+        // on a `public const array X = [Foo::class, ...]`) wins over the
+        // inferred type the same way a property's own `@var` already
+        // does above - only when actually present, so a plain, undocumented
+        // const keeps exactly `infer_const_type`'s existing inference.
         let consts = c
             .consts
             .iter()
-            .map(|cc| (cc.name.clone(), infer_const_type(&cc.value)))
+            .map(|cc| {
+                let doc_ty = cc
+                    .doc_comment
+                    .as_deref()
+                    .map(docblock::parse)
+                    .and_then(|d| d.var_type.clone());
+                let ty = match doc_ty {
+                    Some(doc_ty) => {
+                        let ty = types::parse_type_string(&doc_ty);
+                        let ty = mark_template_params(ty, &template_set);
+                        resolve_names_in_type(ty, ctx)
+                    }
+                    None => infer_const_type(&cc.value),
+                };
+                (cc.name.clone(), ty)
+            })
             .collect();
 
         // `@extends`/`@implements` generic args (Phase 10.5) - an

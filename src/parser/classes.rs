@@ -232,6 +232,7 @@ impl Parser {
                     consts.push(ClassConst {
                         name: cname,
                         value,
+                        doc_comment: doc.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),
@@ -684,6 +685,7 @@ impl Parser {
                     consts.push(ClassConst {
                         name: cname,
                         value,
+                        doc_comment: doc.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),

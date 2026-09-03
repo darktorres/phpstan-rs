@@ -198,6 +198,14 @@ pub struct UseImport {
 pub struct ClassConst {
     pub name: String,
     pub value: Expr,
+    // A real, common PHPDoc convention for pinning a `const array`'s own
+    // element type more precisely than its native declaration ever can
+    // (e.g. `@var list<class-string<MiddlewareInterface>>` on a `public
+    // const array X = [...]`) - `None` for a const with no doc comment
+    // directly above it (the common case) or one parsed via the rarer
+    // top-level (non-class) `const` statement path, which doesn't thread
+    // a doc comment through at all.
+    pub doc_comment: Option<String>,
     pub span: Span,
 }
 
