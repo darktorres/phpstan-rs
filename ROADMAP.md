@@ -30,7 +30,7 @@ cited in both halves so either can be cross-referenced from the other.
 ## Headline numbers
 
 - Test suite: 978 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's eighteenth round.
+  `main.rs` unit tests, all passing as of Phase 14.5's nineteenth round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
@@ -40,7 +40,8 @@ cited in both halves so either can be cross-referenced from the other.
   -> 253 -> 221 -> 219 -> 197 -> 188 -> 182 -> 158 -> 147 (Phase 14.5's
   first fourteen rounds) -> 144 (Phase 14.5's fifteenth round) -> 97
   (Phase 14.5's sixteenth round) -> 83 (Phase 14.5's seventeenth round)
-  -> **81 (current, Phase 14.5's eighteenth round)**. The 211 -> 1115
+  -> 81 (Phase 14.5's eighteenth round) -> **79 (current, Phase 14.5's
+  nineteenth round)**. The 211 -> 1115
   jump was a
   real, confirmed *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
@@ -421,6 +422,26 @@ comments.
     just a case this project hasn't traced to ground truth well enough
     yet to be confident replicating the exact same leniency here
     wouldn't cost real precision elsewhere.
+- **An anonymous class (`new class implements Foo { ... }`) always
+  infers as `Mixed`** - it isn't indexed into the registry under any
+  stable name, so nothing else can look its members up even if its own
+  type said otherwise. A nineteenth-round attempt tried a narrow
+  shortcut around this (alias the instance to whichever single
+  `extends`/`implements` target it names, reusing that name's own
+  already-registered members instead of inventing anything new) and
+  confirmed, via a real corpus re-check, that it's unsound: the
+  overwhelmingly common real use of an anonymous class in a *test* file
+  is a "spy" - implementing some interface but also declaring its own
+  extra instrumentation properties/methods a test later reads directly
+  (`$spyTransport->captured`, real shape) - which the shortcut's
+  aliased interface-only type doesn't have, turning every one of those
+  reads into a new "undefined property" false positive (+11 across 4
+  files, worse than the 4 real fixes it found). Reverted. A real fix
+  needs what the shortcut tried to avoid: registering the anonymous
+  class's own full declaration (members, `extends`/`implements`, the
+  works) under *some* stable-enough synthetic name, the same way a
+  named class already is - a real, if narrowly-scoped, register-a-class
+  feature, not a type-inference tweak.
 - **phpstorm-stubs' interleaved-multiple-parameter-list shape isn't
   recognized.** Some stubs (`pg_query_params`, `pg_query`, several
   others) declare *two full parameter lists* under the same parameter
@@ -1745,6 +1766,30 @@ limitations** above for both (real `strtotime()` accuracy needing
 PHPStan to literally execute PHP's own `strtotime()` at analysis time;
 a DQL `SELECT`'s own column list determining a query result's real
 shape).
+
+**A nineteenth round** (81 -> 79) found two more bespoke per-function
+return-type extensions, plus one real attempted fix reverted after a
+corpus re-check showed it unsound - see **Known limitations** above
+for the reverted anonymous-class-aliasing attempt and why it doesn't
+work:
+
+- **`version_compare()`'s 2-argument form always returns `int`, never
+  `bool`.** The real stub declares `int|bool` unconditionally (both
+  PHP-version-gated overloads agree), but real PHPStan's own
+  `VersionCompareFunctionDynamicReturnTypeExtension` narrows based
+  purely on whether the 3rd `$operator` argument is syntactically
+  *present* at all, regardless of its own value. Real shape
+  (`CalendarBase::buildNextPrev`'s own `static fn (string $a, string
+  $b): int => version_compare($a, $b)`).
+- **`array_search()` on a *list*-typed haystack can only ever find an
+  `int` key.** The real stub declares `string|int|false`
+  unconditionally - this project's own `Type::Array` has no key-type
+  parameter at all (a known, sizable open gap), so it can't generally
+  narrow the key-type half the way real PHPStan's own dedicated
+  extension (delegating to the haystack type's own `searchArray()`)
+  does, but a list's own keys are always sequential integers by
+  definition, a real, narrower special case already trackable without
+  any key-type machinery. Real shape (`pageAssetsTestIndexOf`).
 
 ## Phase 20 - Performance & robustness - DONE
 
