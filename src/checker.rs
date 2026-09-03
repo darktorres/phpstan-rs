@@ -9683,6 +9683,52 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found a static property
+    // (`self::$prop !== null`) had no narrowing key at all - only an
+    // instance property's `->` chain was handled. Real Piwigo test code
+    // (BrowserTestHelpers::adminSessionCookies) relies on exactly this.
+    #[test]
+    fn a_static_property_is_narrowed_by_an_equality_check_too() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Cache1 {
+                private static ?string $value = null;
+                public static function get(): string {
+                    if (self::$value !== null) {
+                        return self::$value;
+                    }
+                    return self::$value = 'computed';
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn reassigning_a_static_property_after_narrowing_it_does_not_leave_the_stale_narrowed_type_behind()
+     {
+        let d = diagnostics_for(
+            r#"<?php
+            class Cache2 {
+                private static ?string $value = null;
+                public static function reset(): int {
+                    if (self::$value !== null) {
+                        self::$value = null;
+                        return strlen(self::$value);
+                    }
+                    return 0;
+                }
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected the stale narrowed type to be purged: {d:?}"
+        );
+    }
+
     #[test]
     fn isset_false_branch_is_not_narrowed() {
         let d = diagnostics_for(

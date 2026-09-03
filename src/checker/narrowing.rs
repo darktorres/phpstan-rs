@@ -580,6 +580,19 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         ExprKind::PropertyAccess(base, prop, _) => {
             narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
         }
+        // A round of Piwigo-corpus bucketing found a static property
+        // (`self::$adminSessionCookies !== null`) had no narrowing key at
+        // all - only an instance property's `->` chain was handled above.
+        // Scoped to a real static property specifically (the parser's own
+        // `$`-prefixed `member` encoding, distinguishing it from a class
+        // constant or `Foo::class`) - both this arm and the generic
+        // write-side purge-and-update in `bind_assignment_target` key off
+        // `narrowing_key` uniformly, so a later `self::$prop = ...`
+        // correctly invalidates/replaces this same entry with no
+        // additional wiring needed.
+        ExprKind::StaticAccess(class_name, member) if member.starts_with('$') => {
+            Some(format!("{class_name}::{member}"))
+        }
         ExprKind::Index(base, Some(idx)) => {
             let base_key = narrowing_key(base)?;
             match literal_string_key(idx) {

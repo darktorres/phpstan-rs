@@ -997,6 +997,15 @@ impl<'a> Checker<'a> {
                 if member == "{dynamic}" {
                     return Type::Mixed;
                 }
+                // A static property (`self::$prop`) can be narrowed the
+                // same way an instance property already is - check for a
+                // locally-narrowed override before the undefined-property
+                // check/registry lookup below.
+                if member.starts_with('$')
+                    && let Some(narrowed) = locals.get(&format!("{class_name}::{member}"))
+                {
+                    return narrowed.clone();
+                }
                 let Some(class) = self.resolve_static_class_name(class_name) else {
                     return Type::Mixed;
                 };
@@ -1631,6 +1640,15 @@ impl<'a> Checker<'a> {
                         Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
                         None => Type::String,
                     };
+                }
+                // A static property (`self::$prop`) can be narrowed the
+                // same way an instance property already is above - check
+                // for a locally-narrowed override before falling back to
+                // its own declared type.
+                if member.starts_with('$')
+                    && let Some(narrowed) = locals.get(&format!("{class_name}::{member}"))
+                {
+                    return narrowed.clone();
                 }
                 self.resolve_static_class_name(class_name)
                     .and_then(|class| match member.strip_prefix('$') {
