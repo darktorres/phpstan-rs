@@ -784,7 +784,12 @@ related gaps in `src/checker/narrowing.rs`, bundled because they're all
 "the narrowing engine only handles specific hardcoded shapes" rather
 than a general mechanism: (a) no comparison-outcome/range API for
 `<`/`>`/`<=`/`>=` at all (the only `Gt`/`GtEq` arm is the narrow
-`count($x) > 0` special case, confirmed by reading `infer_binary`); (b)
+`count($x) > 0` special case, confirmed by reading `infer_binary`) -
+`Type::IntRange(Option<i64>, Option<i64>)` already exists in
+`src/types.rs`, so this API should be built as range arithmetic on top
+of the existing variant rather than a new representation (cross-check
+against Phase 51's `IntegerRangeType` completion work before starting,
+so the two phases don't each reinvent the same range arithmetic); (b)
 no truth table for loose `==`/`!=` between differing scalar kinds; (c)
 no subtracted/negated-type (`T&~U`) representation, so `!$x instanceof
 Foo` on a non-union type is dropped entirely instead of recorded; (d)
@@ -837,12 +842,21 @@ access to a private static property (consumed at
 Separately, no call site (as opposed to declaration site) ever checks
 caller-context-vs-declared-visibility for a *method* call either
 (`src/checker/expr.rs`'s `MethodCall`/`StaticCall` arms, ~382-526/
-923-1010, do existence and arg-checking but never visibility gating -
-this needs threading "what class is the calling code currently inside"
-through to every call site, a genuinely new capability, not an
-extension of existing logic). Both are the same missing primitive ("is
-this access legal from here") applied to two member kinds - merge into
-one phase.
+923-1010, do existence and arg-checking but never visibility gating).
+**Correction, verified against the current source**: threading "what
+class is the calling code currently inside" through to a call site is
+*not* new plumbing to build - `self.current_class`/`self.current_method`
+(`src/checker.rs:131-137`) already exist, are already set on every
+function/method entry and restored on exit, and are already consulted
+this exact way by `check_property_assignment`'s readonly-write check
+(`src/checker/assignment.rs:~260-263`, comparing `current_class`
+against the declaring owner) - a directly analogous sibling check, not
+a new capability. The real remaining work is narrower than originally
+scoped: (a) a visibility field on `PropertySig` (and an equivalent on
+`FunctionSig` for methods), and (b) the comparison logic at the four
+read/write/call sites reusing the existing context fields. Both halves
+are still the same missing primitive ("is this access legal from
+here") applied to two member kinds - merge into one phase.
 
 Unlocks `AccessPrivatePropertyThroughStaticRule`, `AccessPropertiesCheck`/
 `Rule`/`InAssignRule`, `AccessStaticPropertiesCheck`/`Rule`/`InAssignRule`,
@@ -959,12 +973,24 @@ static/readonly/hook/visibility/final/native-type-variance mismatches
 on property override). Unlocks `MethodParameterComparisonHelper`,
 `MethodVisibilityComparisonHelper`, `MethodPrototypeFinder`,
 `MethodSignatureRule`, `OverridingMethodRule`, `ParentMethodHelper`,
-`OverridingPropertyRule`. Prerequisite: Phase 57's property visibility
-field and `is_final`/`is_abstract` fields on `PropertyDecl` (needed for
-the property half); Phase 37's attribute AST support (for the
-`#[Override]` sub-check specifically only). Size: L for the method half
-(extends already-working logic), XL for the property half (needs three
-other phases first) - ship the method half first as its own milestone.
+`OverridingPropertyRule`. **Prerequisite check, corrected**: the
+method half has *no* hard prerequisite and can start immediately -
+`check_method_overrides` already exists and just needs decomposing.
+The property half's real blockers are narrower than this phase
+originally claimed: `PropertyDecl` (`src/ast.rs:~149`) already carries
+a `visibility` field from parsing, so *that* part is not a blocker;
+what's genuinely missing is (a) `is_final`/`is_abstract` on
+`PropertyDecl`/`PropertySig` - not currently in scope for *any* phase,
+a real gap this phase should probably just absorb itself rather than
+wait on - and (b) Phase 57's registry-side `PropertySig` visibility
+field specifically for comparing a property against an *ancestor
+class's* declaration (a same-file AST field alone can't do a
+cross-class comparison). Phase 37's attribute AST support remains a
+real prerequisite, but only for the `#[Override]` sub-check
+specifically. Size: L for the method half (extends already-working
+logic, ship first as its own milestone), M-L for the property half
+(narrower than originally scoped, given the AST already has
+visibility).
 
 **Phase 65 - Declaration-site modifier-consistency + constructor-shape
 checks (NEW, PLANNED).** A batch of small, independent boolean-flag-
