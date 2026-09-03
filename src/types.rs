@@ -289,6 +289,42 @@ fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     parts
 }
 
+/// PHPStan's own conditional return type syntax: `($param is SomeType ?
+/// TrueType : FalseType)` - real PHPStan evaluates this per call site,
+/// binding `$param`'s own actual argument; this project has no
+/// per-call-site type-expression evaluation at all. Previously, the
+/// DNF-group unwrap right above this function's own caller silently
+/// mis-parsed the whole expression as an ordinary intersection group,
+/// mangling it into nonsense (`$param`/`is`/etc. each getting treated as
+/// class-name fragments, then namespace-qualified into garbage like
+/// `Piwigo\Mail\$action`). Takes the safe, imprecise-but-correct answer
+/// instead: the union of both branches, matching "can't evaluate, don't
+/// guess which one" the same way this project's other unevaluable-
+/// expression leniency already works elsewhere. Requires the literal
+/// `is`/`?`/`:` tokens at the top level (`split_top_level`'s own
+/// bracket-depth tracking) so this never misfires on an ordinary DNF
+/// group, which has no ternary syntax at all.
+fn try_parse_conditional_type(s: &str) -> Option<Type> {
+    let q_parts = split_top_level(s, '?');
+    let [cond, branches] = q_parts.as_slice() else {
+        return None;
+    };
+    if !cond.contains(" is ") {
+        return None;
+    }
+    let c_parts = split_top_level(branches, ':');
+    let [true_branch, false_branch] = c_parts.as_slice() else {
+        return None;
+    };
+    let true_ty = parse_type_string(true_branch);
+    let false_ty = parse_type_string(false_branch);
+    Some(if true_ty == false_ty {
+        true_ty
+    } else {
+        Type::Union(vec![true_ty, false_ty])
+    })
+}
+
 /// `array{name: string, age?: int}` - PHPDoc's structural array shape.
 /// Field values can themselves be full type strings (unions, generics,
 /// nested shapes), so each is re-run through `parse_type_string`.
@@ -427,6 +463,9 @@ fn parse_type_atom(s: &str) -> Type {
     // as a single union member; just strip the parens and parse what's
     // inside as the intersection it has to be.
     if let Some(inner) = s.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+        if let Some(conditional) = try_parse_conditional_type(inner) {
+            return conditional;
+        }
         return parse_type_string(inner);
     }
 
@@ -1743,6 +1782,30 @@ mod tests {
         assert_eq!(members.len(), 2);
         assert!(matches!(&members[0], Type::Intersection(parts) if parts.len() == 2));
         assert_eq!(members[1], Type::Null);
+    }
+
+    // A round of Piwigo-corpus bucketing found real PHPStan's own
+    // conditional return type syntax (`@return ($action is 'send' ?
+    // list<string> : list<UserMailNotification>)`,
+    // NotificationByMailSender's own real shape) fell into the DNF-group
+    // unwrap right above and got mangled into a nonsense, namespace-
+    // qualified "class name" - this project can't evaluate the
+    // condition per call site, so it takes the union of both branches
+    // instead, matching this project's usual "can't evaluate, don't
+    // guess which one" leniency.
+    #[test]
+    fn conditional_return_type_syntax_unions_both_branches() {
+        let ty = parse_type_string("($action is 'send' ? list<string> : list<int>)");
+        let Type::Union(members) = ty else {
+            panic!("expected a union of both branches, got {ty:?}");
+        };
+        assert_eq!(members.len(), 2);
+    }
+
+    #[test]
+    fn conditional_return_type_syntax_collapses_identical_branches() {
+        let ty = parse_type_string("($action is 'send' ? list<string> : list<string>)");
+        assert_eq!(ty, parse_type_string("list<string>"));
     }
 
     // Phase 30, real shape: Doctrine DBAL's own `@param Closure(self):T
