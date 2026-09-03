@@ -71,6 +71,38 @@ impl<'a> Checker<'a> {
                     locals.insert(key, narrow_type_to(&current, &target_ty));
                 }
             }
+            // A round of Piwigo-corpus bucketing found a real, common
+            // idiom this project's own "Known limitations" already
+            // named as needing "its own sizable narrowing-engine
+            // feature": `if ((! is_int($a) && ! is_string($a)) || (!
+            // is_int($b) && ! is_string($b)) || ...) { continue; }`
+            // (real shape, `CommentRepository::findAllWithConditions`/
+            // `findList`, 7 sites) - narrowing several *different*
+            // variables at once through one combined condition. Turned
+            // out not to need that: the `Or ... if !branch_true` arm
+            // just above already decomposes an arbitrarily-long `||`
+            // chain into independent per-leaf `apply_narrowing` calls
+            // (De Morgan on the *outer* `||`) - each landing here, on
+            // exactly one `&&`-of-negated-predicates leaf, one variable
+            // at a time. The only missing piece was teaching `&&`'s own
+            // false branch to finish the same De Morgan step one level
+            // down: `!(!is_int($v) && !is_string($v))` is `is_int($v)
+            // || is_string($v)`, which `and_chain_narrowing_target`
+            // computes by reusing `or_chain_narrowing_target` on each
+            // un-negated leaf directly (double negation), then this
+            // arm narrows exactly the way the sibling `Or ... if
+            // branch_true` arm above already does for a literal `||`.
+            // Every leaf here is independent (a different key each),
+            // so no "different keys in one condition" support was
+            // needed at this level at all - each And-term simply lands
+            // on its own call to this same arm, mutating the one
+            // shared `locals` for its own key only.
+            ExprKind::Binary(BinOp::And, ..) if !branch_true => {
+                if let Some((key, target_ty, repr_expr)) = and_chain_narrowing_target(cond) {
+                    let current = self.current_narrowed_type(repr_expr, &key, locals);
+                    locals.insert(key, narrow_type_to(&current, &target_ty));
+                }
+            }
             // Deliberately `===`/`!==` only, not `==`/`!=` - a loose
             // comparison matches PHP's own type-juggling table (`0 ==
             // false`, `0 == null`, `"0" == 0`, ...), a much wider set of
@@ -860,6 +892,27 @@ fn or_chain_narrowing_target(cond: &Expr) -> Option<(String, Type, &Expr)> {
             let target_ty = narrowing_type_for_predicate(name)?;
             Some((key, target_ty, &single_arg.value))
         }
+        _ => None,
+    }
+}
+
+/// `and_chain_narrowing_target`'s own counterpart of `or_chain_
+/// narrowing_target`, for the shape De Morgan turns *into* one:
+/// `!(!is_int($v) && !is_string($v))` is `is_int($v) || is_string($v)`,
+/// so every leaf here must itself be a negated predicate call
+/// (`Unary(Not, ...)`) - un-negating it and handing the inner
+/// expression straight to `or_chain_narrowing_target` is exactly that
+/// double-negation, reusing its identical per-leaf predicate-table
+/// lookup and same-key union logic rather than duplicating either.
+fn and_chain_narrowing_target(cond: &Expr) -> Option<(String, Type, &Expr)> {
+    match &cond.kind {
+        ExprKind::Binary(BinOp::And, l, r) => {
+            let (lk, lt, le) = and_chain_narrowing_target(l)?;
+            let (rk, rt, _) = and_chain_narrowing_target(r)?;
+            (lk == rk).then(|| (lk, union_types(lt, rt), le))
+        }
+        ExprKind::Grouping(inner) => and_chain_narrowing_target(inner),
+        ExprKind::Unary(UnaryOp::Not, inner) => or_chain_narrowing_target(inner),
         _ => None,
     }
 }

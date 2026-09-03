@@ -985,6 +985,32 @@ fn or_of_predicates_on_different_keys_narrows_neither() {
 }
 
 #[test]
+fn or_of_and_of_negated_predicates_on_different_keys_narrows_each_independently() {
+    // Real shape: CommentRepository::findAllWithConditions/findList (7
+    // sites) - previously undiagnosed as needing "its own sizable
+    // narrowing-engine feature" (multi-variable compound-boolean
+    // narrowing). Each `||` leaf is `!isA($v) && !isB($v)` for a
+    // *different* $v - De Morgan on the outer `||`'s false branch
+    // (already handled) decomposes to one independent `&&`-false-branch
+    // narrowing per leaf (newly handled), each touching only its own
+    // key, so no cross-key reasoning is actually needed here at all.
+    let d = diagnostics_for(
+        r#"<?php
+            function wantsThree(int|string $a, int|string $b, bool|int $c): void {}
+            function handle(mixed $commentId, mixed $imageId, mixed $validated): void {
+                if ((! is_int($commentId) && ! is_string($commentId))
+                    || (! is_int($imageId) && ! is_string($imageId))
+                    || (! is_bool($validated) && ! is_int($validated))) {
+                    return;
+                }
+                wantsThree($commentId, $imageId, $validated);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn assert_instanceof_narrows_for_the_rest_of_the_block() {
     // Real shape: vendor/pestphp/pest-plugin-mutate's own
     // AbstractFunctionCallUnwrapMutator::mutate() does exactly this -
