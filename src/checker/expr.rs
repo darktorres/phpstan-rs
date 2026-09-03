@@ -3365,14 +3365,24 @@ fn preg_match_all_pattern_order_shape(
             base
         }
     };
+    // Every one of these per-key match arrays is itself always real,
+    // sequentially-int-keyed (one slot per match, 0..match_count-1) -
+    // verified via dumpType() that real PHPStan types each as a genuine
+    // `list<T>`, not merely `array<T>`.
+    let list_of = |elem: Type| {
+        Type::Intersection(vec![
+            Type::Array(Box::new(elem)),
+            Type::Accessory(AccessoryKind::ArrayList),
+        ])
+    };
     let mut fields = vec![(
         "0".to_string(),
-        Type::Array(Box::new(element_ty(leaf.clone(), false))),
+        list_of(element_ty(leaf.clone(), false)),
         false,
     )];
     for g in groups {
         let base = group_leaf_type(leaf, &g.literal_values);
-        let arr_ty = Type::Array(Box::new(element_ty(base, g.optional)));
+        let arr_ty = list_of(element_ty(base, g.optional));
         fields.push((g.number.to_string(), arr_ty.clone(), false));
         if let Some(name) = &g.name
             && !fields.iter().any(|(n, _, _)| n == name)

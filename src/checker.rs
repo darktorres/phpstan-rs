@@ -2348,11 +2348,13 @@ mod tests {
         );
         // Phase 12 (literal enumeration): group 1's own content is the
         // constant `a`, so its per-match array element is now the
-        // literal `'a'`, not generic `string`.
+        // literal `'a'`, not generic `string`. Corpus round: each group's
+        // own match array is itself always a real `list<T>` (verified via
+        // dumpType()), not merely `array<T>`.
         assert!(
             d.iter()
-                .any(|x| x.message.contains("needsInt") && x.message.contains("array<'a'>")),
-            "expected an argument-type mismatch naming array<'a'>, got: {d:?}"
+                .any(|x| x.message.contains("needsInt") && x.message.contains("list<'a'>")),
+            "expected an argument-type mismatch naming list<'a'>, got: {d:?}"
         );
     }
 
