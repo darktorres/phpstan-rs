@@ -30,7 +30,7 @@ cited in both halves so either can be cross-referenced from the other.
 ## Headline numbers
 
 - Test suite: 978 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's sixteenth round.
+  `main.rs` unit tests, all passing as of Phase 14.5's seventeenth round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
@@ -38,8 +38,9 @@ cited in both halves so either can be cross-referenced from the other.
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
   -> 253 -> 221 -> 219 -> 197 -> 188 -> 182 -> 158 -> 147 (Phase 14.5's
-  first fourteen rounds) -> 144 (Phase 14.5's fifteenth round) -> **97
-  (current, Phase 14.5's sixteenth round)**. The 211 -> 1115 jump was a
+  first fourteen rounds) -> 144 (Phase 14.5's fifteenth round) -> 97
+  (Phase 14.5's sixteenth round) -> **83 (current, Phase 14.5's
+  seventeenth round)**. The 211 -> 1115 jump was a
   real, confirmed *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
@@ -354,14 +355,42 @@ comments.
   *means*, not just tolerating references to one) remain unparsed -
   still real, open work under Phase 36 below if a future gap ever needs
   the alias's own precise type rather than blanket leniency.
-- **No mechanism for multi-variable compound-boolean narrowing** - a
-  single `||`-of-`&&`-of-negations condition narrowing several different
-  variables at once (`if ((!is_int($a) && !is_string($a)) || (!is_int
-  ($b) && !is_string($b))) { continue; }`) isn't recognized at all; the
-  existing `Or`-tree handling only unions branches narrowing the *same*
-  key. Confirmed real (`CommentRepository.php`'s own
-  `findAllWithConditions`/`findList`, 7 sites, Phase 13) - its own
-  sizable narrowing-engine feature.
+- ~~No mechanism for multi-variable compound-boolean narrowing~~
+  **fixed, Phase 14.5's seventeenth round** - turned out not to need
+  the "sizable narrowing-engine feature" this entry originally expected:
+  `and_chain_narrowing_target` (a new De Morgan-aware counterpart of
+  the existing `or_chain_narrowing_target`) plus a new `&&`-false-branch
+  `apply_narrowing` arm was enough, since the existing `Or`-false-branch
+  recursion already decomposes an arbitrarily-long `||` chain into
+  independent per-leaf calls with no cross-key reasoning needed at all.
+- **No mechanism for narrowing correlated across two *separate*
+  variables/statements** - real PHPStan tracks this via its own
+  `ConditionalExpressionHolder` machinery; this project has nothing
+  equivalent. Two distinct shapes, both confirmed real and repeated
+  enough (9 diagnostics total across 5 files, as of the seventeenth
+  round) to name together, though probably not fixable by the same
+  single mechanism:
+  - A boolean flag assigned exactly a condition expression
+    (`$flag = ($x === null || $x === 0);`), later checked bare or
+    negated (`if (! $flag) { /* $x is knowably non-null/non-zero here
+    */ }`) - real shape, `CategoryService::setCatStatusWithinTransaction`/
+    `createVirtualCategory` (3 sites). Would need tracking, for a
+    boolean-typed local, which condition expression it was assigned
+    from - genuinely hard to thread safely through this project's own
+    `Locals` (an immutable, structurally-shared map chosen specifically
+    for O(1)-clone branch/loop merging, Phase 20 Finding B; a parallel
+    mutable side-channel would need its own correct branch-merge and
+    reassignment-invalidation semantics duplicated from scratch, not
+    free the way `Locals` itself gets it).
+  - Two variables assigned together in the same `if`/`else` branch,
+    where narrowing one (typically via `instanceof`/`!== null`) should
+    imply the other's own nullability too - real shape,
+    `UploadService::addUploadedFile`'s own `$dup_detect_lock_conn`/
+    `$dup_detect_lock_name` pair (the corpus's own comment there
+    explicitly says "PHPStan proves this itself"), and
+    `RateService::rate`'s `$userAnonymous`/`$savedAnonymousId` pair
+    (further complicated by both being captured into a closure by
+    value, so any correlation would need to survive that boundary too).
 - **phpstorm-stubs' interleaved-multiple-parameter-list shape isn't
   recognized.** Some stubs (`pg_query_params`, `pg_query`, several
   others) declare *two full parameter lists* under the same parameter
@@ -1599,6 +1628,64 @@ a *different* boolean flag variable set in the same branch (real
 PHPStan's own conditional-expression-holder tracking - this project
 only tracks a single variable's own certain-vs-maybe-defined state, not
 cross-variable correlation).
+
+**A seventeenth round** (97 -> 83) found four independent bugs, one of
+which closed a Known-limitations item open since Phase 13:
+
+- **Multi-variable compound-boolean narrowing** - real, common idiom
+  (`CommentRepository::findAllWithConditions`/`findList`, 7 sites):
+  `if ((! is_int($a) && ! is_string($a)) || (! is_int($b) && ! is_string
+  ($b)) || ...) { continue; }`, narrowing several *different* variables
+  through one combined condition. Turned out not to need the "sizable
+  narrowing-engine feature" this had been tracked as needing: the
+  existing `Or ... if !branch_true` arm already decomposes an
+  arbitrarily-long `||` chain into independent per-leaf calls (De
+  Morgan on the *outer* `||`) - each landing on exactly one
+  `&&`-of-negated-predicates leaf, one variable at a time. The only
+  missing piece was a new `and_chain_narrowing_target`, teaching `&&`'s
+  own false branch to finish the same De Morgan step one level down
+  (`!(!is_int($v) && !is_string($v))` is `is_int($v) || is_string($v)`)
+  by reusing the existing `or_chain_narrowing_target` on each
+  un-negated leaf directly.
+- **`while (true)`/`for (;true;)` retry loops flagged as possibly
+  falling off the function's own end.** `always_terminates` had no case
+  for `While`/`For` at all - real shape: `NotificationController::
+  findAvailableFeedId`/`AdvisorySessionLock::acquirePostgres`/
+  `NotificationByMailService::findAvailableCheckKey` (find-a-free-key
+  retry loops), `HttpClientService::guardedRequest` (a redirect-
+  following retry loop). New `is_truthy_literal`/`stmt_contains_break`
+  helpers, deliberately conservative about `break` (any found anywhere
+  in the body, even one targeting a different nested loop/switch,
+  counts as "might exit on its own" - only ever misses a
+  simplification, never wrongly concludes termination).
+- **A class const's own concatenated value fell to `Mixed`.** Real
+  shape: `Core\AppInfo::URL = 'https://' . self::DOMAIN;` -
+  `infer_const_type` has no class context to resolve what `self::
+  DOMAIN` actually is, but real PHP string concatenation always
+  produces a `string` regardless of either operand's own type - sound
+  information available without resolving anything.
+- **`$x ?? null` collapsed a `Mixed` `$x` down to provably-`null`.**
+  `widen_coalesce_result` trusted the literal `Type::Null` r_ty as-is,
+  but `$x ?? null` is a real no-op (if `$x` is null the result is null
+  either way, otherwise it's exactly `$x`) - its own type must be `$x`'s
+  own unnarrowed type. Real shape: `BatchManagerGlobalRequest::
+  fromArrays`'s `$post['selection'] ?? null` on an unshaped `array`
+  (hence `Mixed`), silently collapsed to `null` well before the very
+  next `is_array(...)` check on it ever ran. Three existing unit tests
+  turned out to have unknowingly built their own "narrows nothing"
+  setup on top of this exact bug (an unshaped-array-index coalesce
+  happened to produce a `Null` this checker's own return-type check
+  could catch, purely as a side effect of the bug) - rewritten to use a
+  directly nullable parameter instead, testing the intended narrowing
+  behavior on its own terms.
+
+Also found, named, and deliberately deferred to a future round rather
+than chased now: a second, distinct correlated-narrowing gap (9
+diagnostics across 5 files) - see **Known limitations** above for the
+two shapes found (a boolean flag assigned exactly a condition
+expression, and two variables always assigned together in the same
+branch) and why neither is a quick fix on top of this project's own
+`Locals` design.
 
 ## Phase 20 - Performance & robustness - DONE
 
