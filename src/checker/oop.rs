@@ -207,7 +207,7 @@ impl<'a> Checker<'a> {
             let Some(own_sig) = info.methods.get(&m.function.name) else {
                 continue;
             };
-            let Some((_, ancestor_sig)) = self
+            let Some((ancestor_owner, ancestor_sig)) = self
                 .registry
                 .lookup_ancestor_method_with_owner(fqn, &m.function.name)
             else {
@@ -236,17 +236,32 @@ impl<'a> Checker<'a> {
                 if own_param.ty == Type::Mixed || ancestor_param.ty == Type::Mixed {
                     continue;
                 }
-                if !self
-                    .registry
-                    .is_assignable(&ancestor_param.ty, &own_param.ty)
-                {
+                // A bare `self`/`static` in either signature means "an
+                // instance of the class that actually declared it", not
+                // some shared, comparable-by-name sentinel - `self` in
+                // `fqn`'s own override and `self` in `ancestor_owner`'s
+                // declaration usually name two *different* concrete
+                // classes. `is_assignable`/`is_subtype` have no rule at
+                // all for a concrete `Object` satisfying a still-bare
+                // `SelfRef` (only the reverse - `self` satisfying a
+                // concrete class - is handled), so a real, correct
+                // override typing its own parameter `self` (a `final`
+                // class implementing an interface that (redundantly, but
+                // validly) re-declares the same concrete class by name)
+                // was flagged as narrowing what's actually the exact
+                // same type. Resolving both sides first, same as any
+                // other pseudo-type use, fixes this without weakening
+                // the check for a genuine narrowing.
+                let own_ty = self.resolve_pseudo(&own_param.ty, fqn);
+                let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty, &ancestor_owner);
+                if !self.registry.is_assignable(&ancestor_ty, &own_ty) {
                     self.report(fqn.to_string(), format!(
                             "{fqn}::{}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
                             m.function.name,
                             i + 1,
                             own_param.name,
-                            own_param.ty,
-                            ancestor_param.ty
+                            own_ty,
+                            ancestor_ty
                         ), m.span, 0);
                 }
             }
