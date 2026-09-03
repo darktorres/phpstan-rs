@@ -168,6 +168,30 @@ impl ClassInfo {
             }
         }
 
+        // `@property`/`@property-read`/`@property-write Type $name`
+        // (Phase 13 Finding D) - magic properties with no real declared
+        // field. Only fills a name this class doesn't already declare
+        // for real - a real property/promoted param always wins, since
+        // the tag exists to add virtual members, not override real ones.
+        // `@property-write`'s own write-only direction isn't separately
+        // enforced (no existing "write-only" checking mechanism to hook
+        // into, and no corpus evidence calling for one) - treated the
+        // same as a plain `@property` (readable and writable).
+        if let Some(doc) = &class_doc {
+            for tag in &doc.properties {
+                properties.entry(tag.name.clone()).or_insert_with(|| {
+                    let ty = types::parse_type_string(&tag.ty);
+                    let ty = mark_template_params(ty, &template_set);
+                    let ty = resolve_names_in_type(ty, ctx);
+                    PropertySig {
+                        ty,
+                        is_static: false,
+                        is_readonly: tag.readable && !tag.writable,
+                    }
+                });
+            }
+        }
+
         let consts = c
             .consts
             .iter()

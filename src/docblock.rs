@@ -57,6 +57,19 @@ pub struct DocBlock {
     // kept (each one names which interface it applies to via its own
     // leading type name).
     pub implements: Vec<String>,
+    // `@property`/`@property-read`/`@property-write Type $name` (Phase
+    // 13 Finding D) - magic properties, typically backed by `__get`/
+    // `__set`, declared on a class's own docblock rather than a real
+    // field. A class can declare many, so every tag is kept.
+    pub properties: Vec<PropertyTag>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PropertyTag {
+    pub name: String,
+    pub ty: String,
+    pub readable: bool,
+    pub writable: bool,
 }
 
 pub fn parse(raw: &str) -> DocBlock {
@@ -142,6 +155,24 @@ pub fn parse(raw: &str) -> DocBlock {
                         .and_then(|t| t.strip_prefix('$'))
                     {
                         block.var_name = Some(name.to_string());
+                    }
+                }
+            }
+            "property" | "property-read" | "property-write" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    let remainder = rest[ty.len()..].trim_start();
+                    if let Some(name) = remainder
+                        .split_whitespace()
+                        .next()
+                        .and_then(|t| t.strip_prefix('$'))
+                    {
+                        block.properties.push(PropertyTag {
+                            name: name.to_string(),
+                            ty: ty.to_string(),
+                            readable: tag != "property-write",
+                            writable: tag != "property-read",
+                        });
                     }
                 }
             }
@@ -278,6 +309,46 @@ mod tests {
     fn a_documented_variadic_param_s_ellipsis_prefixed_name_is_still_recognized() {
         let block = parse("/** @param int ...$nums */");
         assert_eq!(block.params.get("nums"), Some(&"int".to_string()));
+    }
+
+    #[test]
+    fn parses_property_property_read_and_property_write_tags() {
+        let block = parse(
+            r#"/**
+             * @property int $magic
+             * @property-read string $ro
+             * @property-write bool $wo
+             */"#,
+        );
+        assert_eq!(
+            block.properties,
+            vec![
+                PropertyTag {
+                    name: "magic".to_string(),
+                    ty: "int".to_string(),
+                    readable: true,
+                    writable: true,
+                },
+                PropertyTag {
+                    name: "ro".to_string(),
+                    ty: "string".to_string(),
+                    readable: true,
+                    writable: false,
+                },
+                PropertyTag {
+                    name: "wo".to_string(),
+                    ty: "bool".to_string(),
+                    readable: false,
+                    writable: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_malformed_property_tag_with_no_name_is_skipped() {
+        let block = parse("/** @property int */");
+        assert!(block.properties.is_empty());
     }
 
     #[test]

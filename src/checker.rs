@@ -9636,6 +9636,67 @@ mod tests {
         assert!(d[0].message.contains("undefined property"), "got: {d:?}");
     }
 
+    // Phase 13 Finding D: real shape from `vendor/php-openapi/openapi`'s
+    // own `OpenApi` class, which declares `@property Paths $paths` (a
+    // magic property backed by `__get`/`__set`, no real declared field).
+    #[test]
+    fn a_class_level_property_tag_lets_the_magic_property_be_read() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Paths {}
+            /**
+             * @property Paths $paths
+             */
+            class OpenApi {}
+            function f(OpenApi $o): Paths { return $o->paths; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_class_level_property_tag_is_inherited_by_a_subclass() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @property int $magic
+             */
+            class Base {}
+            class Sub extends Base {}
+            function f(Sub $s): int { return $s->magic; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_real_declared_property_wins_over_a_same_named_property_tag() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @property string $x
+             */
+            class A { public int $x = 0; }
+            function f(A $a): int { return $a->x; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_property_read_tag_flags_an_attempted_write() {
+        let d = diagnostics_for(
+            r#"<?php
+            /**
+             * @property-read int $x
+             */
+            class A {}
+            function f(A $a): void { $a->x = 1; }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
     #[test]
     fn intersection_typed_receiver_accepts_a_method_found_on_any_member() {
         let d = diagnostics_for(
