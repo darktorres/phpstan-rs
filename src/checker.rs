@@ -3860,6 +3860,90 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // The same corpus recheck's largest remaining bucket: array_merge()
+    // combining several list<T>-typed arrays, real Piwigo code
+    // (`array_merge(['a', 'b'], someListReturningCall())`). Verified
+    // against real PHPStan's own dumpType(): merging only list-like
+    // arguments stays a list; merging in even one plain array<T> degrades
+    // list-ness for the whole result but keeps the element-type union.
+    #[test]
+    fn array_merge_of_two_lists_stays_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<string> $a
+             *  @param list<string> $b
+             *  @return list<string>
+             */
+            function f($a, $b): array {
+                return array_merge($a, $b);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_merge_of_a_list_and_a_plain_array_degrades_to_a_plain_array_not_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<string> $a
+             *  @param array<string> $b
+             *  @return list<string>
+             */
+            function f($a, $b): array {
+                return array_merge($a, $b);
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected the list-ness mismatch to still be flagged: {d:?}"
+        );
+    }
+
+    #[test]
+    fn array_merge_with_a_literal_array_argument_produces_a_non_empty_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<string> $a
+             *  @return non-empty-list<string>
+             */
+            function f($a): array {
+                return array_merge(['x', 'y'], $a);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Found by the corpus recheck after the fix above landed: real Piwigo
+    // code (`Logger::__construct`) merges a property's own default
+    // `array{...}` shape with a caller-supplied options shape via
+    // array_merge(), then reassigns the property with the merged result -
+    // `$this->options = array_merge($this->options, $options)`. Verified
+    // against real PHPStan's own dumpType(): merging two known shapes
+    // does the same key-renumbering/overwrite merge a spread array
+    // literal does, producing a precise merged shape rather than
+    // degrading to a generic array.
+    #[test]
+    fn array_merge_of_two_known_shapes_produces_a_precise_merged_shape() {
+        let d = diagnostics_for(
+            r#"<?php
+            class C {
+                /** @var array{a?: int, b?: string} */
+                private array $opts = ['a' => 1, 'b' => 'x'];
+
+                /** @param array{a?: int, b?: string} $x */
+                public function __construct(array $x) {
+                    $this->opts = array_merge($this->opts, $x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn a_literal_element_before_a_spread_list_makes_the_result_a_non_empty_list() {
         let d = diagnostics_for(

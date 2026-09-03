@@ -1804,18 +1804,14 @@ impl<'a> Checker<'a> {
                 if !degraded {
                     match &value_ty {
                         Type::ArrayShape(inner_fields) => {
-                            for (k, t, _) in inner_fields {
-                                let key = if is_canonical_int_key(k) {
-                                    let assigned = next_index.to_string();
-                                    next_index += 1;
-                                    assigned
-                                } else {
-                                    k.clone()
-                                };
-                                match fields.iter_mut().find(|(fk, _, _)| *fk == key) {
-                                    Some(field) => field.1 = t.clone(),
-                                    None => fields.push((key, t.clone(), false)),
-                                }
+                            for (k, t, opt) in inner_fields {
+                                Self::merge_shape_field(
+                                    &mut fields,
+                                    &mut next_index,
+                                    k,
+                                    t.clone(),
+                                    *opt,
+                                );
                             }
                         }
                         _ => degraded = true,
@@ -1887,6 +1883,32 @@ impl<'a> Checker<'a> {
             members.pop().unwrap()
         } else {
             Type::Intersection(members)
+        }
+    }
+
+    /// Shared by a spread array literal and `array_merge()`'s own bespoke
+    /// special case - both apply the identical real-PHP merge rule
+    /// verified via dumpType(): a source field's canonical int key gets
+    /// renumbered sequentially into the target (`next_index`); any other
+    /// key is kept and fully overwrites a same-named target field
+    /// verbatim, its own optional flag included.
+    fn merge_shape_field(
+        fields: &mut Vec<(String, Type, bool)>,
+        next_index: &mut i64,
+        key: &str,
+        ty: Type,
+        optional: bool,
+    ) {
+        let resolved_key = if is_canonical_int_key(key) {
+            let assigned = next_index.to_string();
+            *next_index += 1;
+            assigned
+        } else {
+            key.to_string()
+        };
+        match fields.iter_mut().find(|(fk, _, _)| *fk == resolved_key) {
+            Some(field) => *field = (resolved_key, ty, optional),
+            None => fields.push((resolved_key, ty, optional)),
         }
     }
 
@@ -2133,6 +2155,73 @@ impl<'a> Checker<'a> {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
                     return strip_accessory_markers(arr_ty);
+                }
+            }
+            // A round of Piwigo-corpus bucketing after Phase 14 found this
+            // was the single largest remaining false-positive source:
+            // `array_merge(['a', 'b'], someListReturningCall())`, real
+            // code combining several list<T>-typed arrays into one, a
+            // common idiom now that list<T> is checked strictly. Verified
+            // via dumpType(): merging only list-like arguments stays a
+            // list (a literal, non-empty argument makes it a
+            // non-empty-list); merging in even one plain, unproven
+            // `array<T>` degrades list-ness for the whole result, same as
+            // a spread array literal's own degrade rule above - but the
+            // element-type union is still tracked precisely either way.
+            // General key-aware shape merging (`array_merge($shape, ...)`)
+            // is real PHPStan's own much richer behavior and deliberately
+            // not attempted here, matching Phase 14's own decision to
+            // leave array_merge itself unaudited beyond this.
+            "array_merge" if !args.is_empty() => {
+                let arg_types: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.infer_expr(&a.value, locals))
+                    .collect();
+                // When every argument's own exact fields are known
+                // (`array{...}`, e.g. merging a property's own default
+                // shape with a caller-supplied options shape), merge them
+                // field-by-field via the same rule a spread array literal
+                // uses - verified via dumpType() that array_merge follows
+                // the identical key rule (canonical int keys renumbered,
+                // other keys overwritten by the later argument).
+                if arg_types.iter().all(|t| matches!(t, Type::ArrayShape(_))) {
+                    let mut fields: Vec<(String, Type, bool)> = Vec::new();
+                    let mut next_index: i64 = 0;
+                    for arg_ty in &arg_types {
+                        if let Type::ArrayShape(inner) = arg_ty {
+                            for (k, t, opt) in inner {
+                                Self::merge_shape_field(
+                                    &mut fields,
+                                    &mut next_index,
+                                    k,
+                                    t.clone(),
+                                    *opt,
+                                );
+                            }
+                        }
+                    }
+                    return Type::ArrayShape(fields);
+                }
+                if arg_types.iter().all(Self::is_array_like) {
+                    let all_list = arg_types.iter().all(Self::is_list_like);
+                    let any_non_empty = arg_types.iter().any(Self::is_known_non_empty_array);
+                    let elem_ty = arg_types
+                        .iter()
+                        .filter_map(Self::array_element_type)
+                        .reduce(union_types)
+                        .unwrap_or(Type::Mixed);
+                    let mut members = vec![Type::Array(Box::new(elem_ty))];
+                    if all_list {
+                        members.push(Type::Accessory(AccessoryKind::ArrayList));
+                    }
+                    if any_non_empty {
+                        members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                    }
+                    return if members.len() == 1 {
+                        members.pop().unwrap()
+                    } else {
+                        Type::Intersection(members)
+                    };
                 }
             }
             // Both fill every slot with the same, already-known $value -
