@@ -29,30 +29,32 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 935 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 939 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
-  875 (Phase 14's closing round) -> 453 (Phase 14.5's first round) -> 434
-  (Phase 14.5's second round) -> **397 (current, Phase 14.5's closing
-  round)**. The 211 -> 1115 jump was a real, confirmed *increase*, not a
-  regression: `list<T>`/`non-empty-array<T>` now match real PHPStan's
-  own strictness rather than this project's usual leniency default, a
-  deliberate, explicitly confirmed choice given 1575 first-party `list<`
-  occurrences. Phase 14.5's three rounds then closed most of the
+  875 (Phase 14's closing round) -> 453 -> 434 -> 397 (Phase 14.5's first
+  three rounds) -> **296 (current, Phase 14.5's closing round)**. The
+  211 -> 1115 jump was a real, confirmed *increase*, not a regression:
+  `list<T>`/`non-empty-array<T>` now match real PHPStan's own strictness
+  rather than this project's usual leniency default, a deliberate,
+  explicitly confirmed choice given 1575 first-party `list<`
+  occurrences. Phase 14.5's four rounds then closed most of the
   resulting gap: nearly all of it turned out to be this project's own
   type-inference gaps (spread array literals, `array_merge` including
   its own spread-argument form, PHP 8.4 property hooks,
   `preg_match_all`'s per-group arrays, array-append widening - the
   single most common accumulator idiom in PHP, the `sort()` family's own
-  dynamic type-specifying extensions, `$x !== []` narrowing, a
-  `try`/`catch` scope-merge gap, a missing `Union` arm in the core
-  array-type helpers, and `glob()`/`explode()`'s own dynamic-return-type
-  extensions) rather than genuine corpus-side `@return list<T>`
-  overclaims.
+  dynamic type-specifying extensions, `$x !== []`/static-property
+  narrowing, a `try`/`catch` scope-merge gap, a missing `Union` arm in
+  the core array-type helpers, `glob()`/`explode()`'s own
+  dynamic-return-type extensions, and - by far the single largest fix of
+  any round - a method-override return-type check that compared
+  docblock-refined types instead of native ones) rather than genuine
+  corpus-side `@return list<T>` overclaims.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -1013,6 +1015,43 @@ foundational one:
   verified via `dumpType()` (even for a non-literal `$separator` - there
   is no other way it can return fewer than 1 element). Real Piwigo code
   (`GeneratedFileErrorMapper::lines`) relies on exactly this.
+
+**A fourth round** (397 -> 296) found two gaps unrelated to `list<T>`
+itself - both pre-existing, surfaced only because `list<T>` becoming a
+real, distinguishable type made them consequential for the first time:
+
+- **`check_method_overrides`'s own return-type check compared the
+  *docblock-refined* return type on both sides**, wrongly flagging any
+  override that faithfully keeps the ancestor's own native type while
+  the ancestor's docblock separately narrowed it further - real PHP
+  itself only enforces override-compatibility (Liskov) on the native
+  signature, and by default so does real PHPStan
+  (`checkPhpDocMethodSignatures` is off unless a project opts in,
+  confirmed neither Piwigo's own `phpstan.neon` nor this project's own
+  corpus config does, and confirmed directly against real PHPStan with
+  the exact shape found). `FunctionSig` gained `return_type_native:
+  Type`, computed alongside the existing docblock-merged `return_type`
+  and threaded through `merge`/`substitute_class_templates`; the check
+  now compares this native-only view on both sides instead. By far the
+  single largest fix of any round so far: 397 -> 302 diagnostics on its
+  own, all of them real - dozens of Piwigo `*View` classes each
+  implementing a shared rendering interface's own
+  `pageAssets()`/`exposedStrings()`, correctly matching the interface's
+  native `: array` while the interface's docblock alone said `list<T>`.
+  A companion test now confirms a genuine native-level incompatibility
+  is still caught - this check had no positive-case coverage at all
+  before.
+- **A static property (`self::$prop`) had no narrowing key at all** -
+  only an instance property's `->` chain was handled, so `if
+  (self::$prop !== null) { return self::$prop; }` never narrowed away
+  `null`. Neither `infer_expr`'s nor `check_expr`'s own `StaticAccess`
+  handling consulted `locals` for a narrowed override the way
+  `PropertyAccess` already does, even once `narrowing_key` recognized
+  the shape - both fixed the same way `PropertyAccess` already works;
+  the write side needed no separate wiring, since the generic
+  purge-and-update in `bind_assignment_target` already keys off
+  `narrowing_key` uniformly. Real Piwigo test code
+  (`BrowserTestHelpers::adminSessionCookies`) relies on exactly this.
 
 ## Phase 20 - Performance & robustness - DONE
 
