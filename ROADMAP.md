@@ -29,16 +29,16 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 959 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's thirteenth round.
+- Test suite: 960 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 14.5's fourteenth round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
-  -> 253 -> 221 -> 219 -> 197 -> 188 -> 182 (Phase 14.5's first twelve
-  rounds) -> **158 (current, Phase 14.5's thirteenth round)**. The 211 -> 1115 jump was a real, confirmed
+  -> 253 -> 221 -> 219 -> 197 -> 188 -> 182 -> 158 (Phase 14.5's first
+  thirteen rounds) -> **147 (current, Phase 14.5's fourteenth round)**. The 211 -> 1115 jump was a real, confirmed
   *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
@@ -1283,6 +1283,25 @@ fixed for in Phase 14 itself:
   (...) as ...)` sites elsewhere, each feeding a `list<string>`-typed
   sink. By far the largest single fix of this round: 24 locations at
   once.
+
+**A fourteenth round** (158 -> 147) found a real, general unsoundness
+bug in equality narrowing, unrelated to Phase 14's own accessory types
+- the `===` counterpart of the `!==`-exclusion bug Phase 12 already
+fixed once for the opposite direction:
+
+- **`narrow_type_to`'s non-`Union` fallback unconditionally returned
+  the comparison target's own type, discarding `original` even when it
+  was already narrower.** Real corpus shape (`PictureController::
+  __invoke`): `$image_id` (a definite `int`) compared `===` against
+  `getRefererImageId()` (`int|null`) inside an `if`/`else` that never
+  reassigns `$image_id` at all - the pre-existing code still silently
+  widened `$image_id` itself to `int|null` on the true branch, purely
+  as a side effect of evaluating the comparison, corrupting every
+  downstream use for the rest of the method (11 separate call sites all
+  fed by the one corrupted variable). Fixed by keeping `original`
+  unchanged whenever it's already a subtype of `target`, falling back
+  to `target` only when *it's* the narrower side (the literal-narrowing
+  case, `$x === 'foo'`, this fallback exists for).
 
 ## Phase 20 - Performance & robustness - DONE
 
