@@ -920,6 +920,45 @@ fn range_with_single_char_string_bounds_is_a_non_empty_list_of_string() {
 }
 
 #[test]
+fn preg_split_with_a_non_literal_pattern_is_a_list_of_string_or_false() {
+    // Real corpus shape (UploadDuplicatesController::split): a
+    // non-literal pattern/subject still splits into sequential integer
+    // keys - phpstorm-stubs' own bare `string[]|false` return type
+    // gives up that list-ness entirely.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return list<string> */
+            function split(string $pattern, string $subject): array {
+                $list = preg_split($pattern, $subject, -1, PREG_SPLIT_NO_EMPTY);
+                if ($list === false) {
+                    throw new Exception('failed');
+                }
+                return $list;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn preg_split_without_no_empty_has_a_plain_string_element_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $x */
+            function wantsIntList(array $x): void {}
+            function f(string $pattern, string $subject): void {
+                $list = preg_split($pattern, $subject);
+                if ($list === false) {
+                    throw new Exception('failed');
+                }
+                wantsIntList($list);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
 fn array_unshift_on_an_already_list_like_argument_preserves_list_ness() {
     let d = diagnostics_for(
         r#"<?php

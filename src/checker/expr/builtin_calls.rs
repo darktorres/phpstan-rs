@@ -75,6 +75,41 @@ impl<'a> Checker<'a> {
                     ]);
                 }
             }
+            // `preg_split()`'s own real stub (phpstorm-stubs' `@return
+            // string[]|false` - the bare shorthand-array syntax, no
+            // list-ness) gives up exactly the same real information real
+            // PHPStan's own dedicated `PregSplitDynamicReturnTypeExtension`
+            // computes: splitting a string always produces sequential
+            // integer keys starting at 0, a real list, for any pattern/
+            // subject (literal or not) - real PHPStan only bothers
+            // constant-folding the *literal* case for maximum precision,
+            // but its own fallback for the general (non-literal) case,
+            // the only one worth modeling here, is exactly `list<string>
+            // |false>` (`list<non-empty-string>|false` when
+            // `PREG_SPLIT_NO_EMPTY` is one of the flags - checked the
+            // same lenient bitwise-or-chain-of-names way `parse_preg_
+            // flags` already does for `preg_match`, just without needing
+            // that function's own stricter "every flag must be
+            // recognized" requirement, since an unrecognized flag
+            // doesn't change list-ness/non-emptiness either way here).
+            "preg_split" if (2..=4).contains(&args.len()) => {
+                let no_empty = args
+                    .get(3)
+                    .is_some_and(|a| contains_flag_name(&a.value, "PREG_SPLIT_NO_EMPTY"));
+                let elem = if no_empty {
+                    Type::Intersection(vec![
+                        Type::String,
+                        Type::Accessory(AccessoryKind::NonEmptyString),
+                    ])
+                } else {
+                    Type::String
+                };
+                let list_ty = Type::Intersection(vec![
+                    Type::Array(Box::new(elem)),
+                    Type::Accessory(AccessoryKind::ArrayList),
+                ]);
+                return union_types(list_ty, Type::False);
+            }
             // Scoped to the common 2-arg single-array form - the real
             // function is variadic (multiple arrays); a 3+-arg call falls
             // through to the generic path below, unchanged.
@@ -740,6 +775,25 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+/// Whether `target` (a bare `PREG_*`-style constant name) appears
+/// anywhere in `e`'s own `BitOr`/`Grouping` chain - a lenient scan,
+/// unlike `parse_preg_flags`'s own stricter "every leaf must be a
+/// recognized name" requirement: an unrecognized flag alongside
+/// `target` doesn't change what this is used for (`preg_split`'s own
+/// list-ness/non-emptiness), so there's no need to reject the whole
+/// expression over one, just answer "is `target` definitely one of
+/// them" for whatever it does recognize.
+fn contains_flag_name(e: &Expr, target: &str) -> bool {
+    match &e.kind {
+        ExprKind::Name(name) => name.trim_start_matches('\\') == target,
+        ExprKind::Binary(BinOp::BitOr, l, r) => {
+            contains_flag_name(l, target) || contains_flag_name(r, target)
+        }
+        ExprKind::Grouping(inner) => contains_flag_name(inner, target),
+        _ => false,
     }
 }
 
