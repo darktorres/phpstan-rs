@@ -1572,6 +1572,31 @@ mod tests {
         assert_eq!(d.len(), 1, "expected the broad type to still apply: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found the native stub's own
+    // plain `string|false` was the single largest non-array-related
+    // false-positive source: real PHPStan's own dynamic-return-type
+    // extension always returns a real non-falsy-string on success
+    // (verified via dumpType()), letting the common `$jar = tempnam(...);
+    // if ($jar === false) { throw ...; }` idiom feed a
+    // non-empty-string-typed sink afterward.
+    #[test]
+    fn tempnam_on_success_narrows_to_a_non_falsy_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-empty-string $path */
+            function sink(string $path): void {}
+            function f(): void {
+                $jar = tempnam(sys_get_temp_dir(), 'x');
+                if ($jar === false) {
+                    throw new RuntimeException('x');
+                }
+                sink($jar);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     // Only the array-stripping half of mb_convert_encoding()'s own real
     // (more involved) dynamic extension is implemented - evidenced via
     // `CharsetHelper::convertCharset`'s own real shape.

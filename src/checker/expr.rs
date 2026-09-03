@@ -2367,6 +2367,24 @@ impl<'a> Checker<'a> {
                     return Type::Union(vec![Type::String, Type::False]);
                 }
             }
+            // A round of Piwigo-corpus bucketing found this was the
+            // single largest non-array-related false-positive source: the
+            // native stub declares a plain `string|false`, but real
+            // PHPStan carries its own dynamic-return-type extension here
+            // - verified via dumpType() that a successful call always
+            // returns a real non-falsy-string, never ''/'0' - a common
+            // idiom being the exact site that broke without this: `$jar =
+            // tempnam(...); if ($jar === false) { throw ...; }` then
+            // passing `$jar` on to a `non-empty-string`-typed sink.
+            "tempnam" if args.len() == 2 => {
+                return Type::Union(vec![
+                    Type::Intersection(vec![
+                        Type::String,
+                        Type::Accessory(AccessoryKind::NonFalsyString),
+                    ]),
+                    Type::False,
+                ]);
+            }
             // Same family, subject at index 1 - not evidenced directly in
             // this corpus, but identical mechanism and real stub shape
             // (`preg_replace_callback_array(array $pattern, array|string
