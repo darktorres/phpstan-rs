@@ -503,6 +503,21 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // The real stub declares `version_compare(string, string,
+            // ?string $operator): int|bool` unconditionally (both PHP-
+            // version-gated overloads agree on this) - real PHPStan's
+            // own `VersionCompareFunctionDynamicReturnTypeExtension`
+            // narrows based purely on whether the 3rd `$operator`
+            // argument is syntactically *present* at all, regardless of
+            // its own value: present means the real return is `bool`
+            // (or `bool|null` pre-8.0, not modeled here - no corpus
+            // evidence for it), absent means it's always exactly one of
+            // `-1`/`0`/`1`, never `bool`. Scoped to the 2-argument form
+            // (real corpus shape: `static fn (string $a, string $b): int
+            // => version_compare($a, $b)`) - the 3-argument form falls
+            // through to the generic, already-correct-if-loose `int|bool`
+            // stub type unchanged.
+            "version_compare" if args.len() == 2 => return Type::Int,
             // Phase 32 Finding D: the real stub declares `microtime(bool
             // $as_float = false): string|float` unconditionally - real
             // PHPStan's own `MicrotimeFunctionReturnTypeExtension` narrows

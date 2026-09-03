@@ -169,6 +169,41 @@ fn microtime_with_a_non_literal_bool_keeps_todays_generic_union() {
     );
 }
 
+// Real corpus shape (CalendarBase::buildNextPrev's own `static fn
+// (string $a, string $b): int => version_compare($a, $b)`): the real
+// stub declares `version_compare(...): int|bool` unconditionally
+// (both PHP-version-gated overloads agree), but the 3rd $operator
+// argument's mere *presence* - not its value - is what actually
+// determines whether the real return is `bool` or always exactly
+// `int`.
+#[test]
+fn version_compare_without_an_operator_infers_plain_int() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $a, string $b): int {
+                return version_compare($a, $b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn version_compare_with_an_operator_keeps_todays_generic_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $a, string $b): int {
+                return version_compare($a, $b, '>=');
+            }
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "expected the generic int|bool union to still apply: {d:?}"
+    );
+}
+
 // Phase 32 Finding J: json_encode(...): string|false - passing
 // JSON_THROW_ON_ERROR makes a real failure throw instead of
 // returning false.
