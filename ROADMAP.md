@@ -140,14 +140,6 @@ comments.
   `$x !== ''` - both real, but low-value (a rare reversed idiom; a rare
   redundant double-guard pattern) with no corpus evidence calling for
   them.
-- **`StmtKind::Try`'s `catch` clauses each get their own scope clone
-  that's never merged back after the whole `try`/`catch`/`finally`** -
-  only `body`'s own mutated state survives (`checker/stmt.rs`). Real,
-  but produces a false *negative* (an under-narrowed type after the
-  block), not a false positive - undetectable by diffing corpus
-  diagnostics the way most findings in this project are confirmed, so
-  it needs its own, differently-shaped verification approach before a
-  fix is designed.
 - **Doctrine's `EntityManager::getReference()`'s real generic signature
   (`@template T of object`, `@param class-string<T> $entityName`,
   `@return T|null`) lives only on the interface it implements**

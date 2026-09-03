@@ -10138,6 +10138,56 @@ mod tests {
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
+
+    // A round of Piwigo-corpus bucketing found a catch clause's own
+    // ending state was discarded entirely after the whole try/catch -
+    // `locals` only ever kept the try body's own final state, matching
+    // this project's own documented "no scope merge back after try/
+    // catch" limitation. Real shape: `$body = null; try { ...; } catch
+    // (...) { $body = "x"; }` then using `$body` afterward.
+    #[test]
+    fn a_variable_assigned_only_inside_a_catch_clause_is_visible_after_the_try_catch() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-empty-string $x */
+            function sink(string $x): void {}
+            function f(): void {
+                $body = 'default';
+                try {
+                    riskyCall();
+                } catch (\Throwable $e) {
+                    $body = 'from catch';
+                }
+                sink($body);
+            }
+            function riskyCall(): void {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_catch_clause_that_always_returns_is_excluded_from_the_post_try_merge() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-empty-string $x */
+            function sink(string $x): void {}
+            function f(): string {
+                $body = 'default';
+                try {
+                    riskyCall();
+                } catch (\Throwable $e) {
+                    return 'error';
+                }
+                sink($body);
+                return $body;
+            }
+            function riskyCall(): void {}
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     // Finding 37 from the architecture audit - array destructuring bound
     // nothing in a `foreach` value position, and a nested destructuring
     // pattern bound nothing even in a plain assignment; checking the

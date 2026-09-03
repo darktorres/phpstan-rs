@@ -475,6 +475,24 @@ impl<'a> Checker<'a> {
                 finally,
             } => {
                 self.check_block(body, locals, declared_return, label);
+                let try_end_locals = locals.clone();
+                let try_terminates = body
+                    .last()
+                    .is_some_and(|s| self.always_terminates(s, &try_end_locals));
+                // Every reachable state after the whole try/catch - the
+                // try body's own full-completion state, plus each catch
+                // clause's own ending state (a variable a catch clause
+                // assigns, like `$body = ...;`, previously vanished
+                // entirely here: `locals` kept only the try body's own
+                // state, discarding every catch's, matching every other
+                // control-flow join this checker already does for
+                // if/else - a branch that always terminates is excluded
+                // from the merge exactly the same way there too).
+                let mut end_states: Vec<Locals> = if try_terminates {
+                    Vec::new()
+                } else {
+                    vec![try_end_locals]
+                };
                 for c in catches {
                     // Scoped to this catch block only, in its own clone
                     // rather than the shared `locals` - matches real PHP
@@ -521,6 +539,19 @@ impl<'a> Checker<'a> {
                         catch_locals.insert(var.clone(), ty);
                     }
                     self.check_block(&c.body, &mut catch_locals, declared_return, label);
+                    if !c
+                        .body
+                        .last()
+                        .is_some_and(|s| self.always_terminates(s, &catch_locals))
+                    {
+                        end_states.push(catch_locals);
+                    }
+                }
+                if let Some(first) = end_states.first().cloned() {
+                    *locals = end_states
+                        .into_iter()
+                        .skip(1)
+                        .fold(first, |acc, s| merge_scopes(&acc, &s));
                 }
                 if let Some(f) = finally {
                     self.check_block(f, locals, declared_return, label);
