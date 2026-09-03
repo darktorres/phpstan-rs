@@ -418,6 +418,46 @@ fn array_column_falls_back_safely_without_a_known_shape_or_literal_key() {
 }
 
 #[test]
+fn array_column_on_an_unshaped_row_array_still_produces_a_list() {
+    // Real corpus shape (ExtensionLifecycleTest::findMigrationVersions):
+    // a raw DB-fetch row type (`array<string, mixed>`, no shape at all)
+    // still has array_column()'s own real list-ness (a fresh, always-
+    // sequential result array) even though there's no specific field
+    // type to extract - the row's own uniform (here Mixed) element type
+    // is the best available answer, and `Array(Mixed)`'s own existing
+    // leniency lets that satisfy a more specific declared element type.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<string> $x */
+            function wantsList(array $x): void {}
+            /** @param list<array<string, mixed>> $rows */
+            function f(array $rows): void {
+                wantsList(array_column($rows, 'version'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_column_with_an_index_key_does_not_gain_list_ness() {
+    // The 3-argument form uses $index_key's own column values as the
+    // result's keys - not necessarily sequential integers - so it must
+    // not gain the same list marker the 2-argument form does.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<string> $x */
+            function wantsList(array $x): void {}
+            /** @param list<array{id: string, name: string}> $rows */
+            function f(array $rows): void {
+                wantsList(array_column($rows, 'name', 'id'));
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
 fn array_map_array_filter_and_array_reduce_fall_back_safely_for_shapes_they_do_not_special_case() {
     // A non-closure callback (a variable, not introspectable), a
     // 3+-arg multi-array call, a callback with more than one param,

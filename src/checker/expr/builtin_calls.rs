@@ -460,12 +460,47 @@ impl<'a> Checker<'a> {
                 }
             }
             "array_column" if args.len() == 2 || args.len() == 3 => {
-                if let Some(Type::ArrayShape(fields)) =
+                if let Some(row_ty) =
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
-                    && let Some(key) = literal_string_key(&args[1].value)
-                    && let Some((_, field_ty, _)) = fields.into_iter().find(|(n, _, _)| *n == key)
                 {
-                    return Type::Array(Box::new(field_ty));
+                    // A shaped row (`array{version: string, ...}`) looks
+                    // up the one named field; an unshaped row
+                    // (`array<string, mixed>`, the common real shape for
+                    // a raw DB-fetch row with no further refinement)
+                    // has no per-key precision to offer at all, so every
+                    // column read is simply the row's own uniform
+                    // element type - still real, useful information
+                    // (even when that's `Mixed`) that the row-shape-only
+                    // arm below used to give up on entirely.
+                    let field_ty = match &row_ty {
+                        Type::ArrayShape(fields) => literal_string_key(&args[1].value)
+                            .and_then(|key| fields.iter().find(|(n, _, _)| *n == key))
+                            .map(|(_, ty, _)| ty.clone()),
+                        _ if Self::is_array_like(&row_ty) => Self::array_element_type(&row_ty),
+                        _ => None,
+                    };
+                    if let Some(field_ty) = field_ty {
+                        let arr_ty = Type::Array(Box::new(field_ty));
+                        // A real Piwigo-corpus round found the
+                        // 2-argument form (no `$index_key`) missing its
+                        // own real list-ness entirely: `array_column()`
+                        // always builds a brand-new array with fresh
+                        // sequential integer keys starting at 0,
+                        // regardless of the input array's own keys - a
+                        // genuine list. The 3-argument form uses
+                        // `$index_key`'s own column values as the
+                        // result's keys instead, which generally aren't
+                        // sequential integers, so it deliberately keeps
+                        // today's plain, unmarked `Array`.
+                        return if args.len() == 2 {
+                            Type::Intersection(vec![
+                                arr_ty,
+                                Type::Accessory(AccessoryKind::ArrayList),
+                            ])
+                        } else {
+                            arr_ty
+                        };
+                    }
                 }
             }
             // Phase 32 Finding D: the real stub declares `microtime(bool
