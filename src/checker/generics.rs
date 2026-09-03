@@ -342,6 +342,25 @@ impl<'a> Checker<'a> {
     /// `class` actually declares `sig` (from `lookup_method_with_owner`/
     /// `lookup_property_with_owner`) - `class` itself when it's not
     /// inherited.
+    ///
+    /// Scoped to only the names `owner`'s own class docblock actually
+    /// declares as templates. `types::substitute_template`'s own fallback
+    /// for a name absent from `bindings` is `Type::Mixed`, correct for a
+    /// genuinely class-level template referenced with no or fewer type
+    /// arguments than it declares (e.g. a bare `Collection` with no `<T>`
+    /// at all), but a real Piwigo-corpus round found this wiping out every
+    /// method's own separate template too the moment it was called on a
+    /// non-generic class (a method's own generic identity-style function,
+    /// declared entirely on its own docblock, on a class with zero
+    /// templates of its own). That class has zero class-level templates,
+    /// so `bindings` was always empty, and this substitution runs first
+    /// (per this function's own doc comment above), replacing the
+    /// method's own bare template name with `Mixed` before
+    /// `infer_call_return_type`'s later, correct per-call-argument pass
+    /// ever got a chance to bind it for real. `class_scope` restricts
+    /// substitution to names genuinely in `owner`'s own template list,
+    /// leaving any other name (a method's own, unrelated to the class)
+    /// completely untouched for that later pass to resolve.
     pub(crate) fn substitute_class_templates(
         &self,
         sig: &FunctionSig,
@@ -350,18 +369,64 @@ impl<'a> Checker<'a> {
         owner: &str,
     ) -> FunctionSig {
         let bindings = self.class_template_bindings(class, type_args, owner);
+        let class_scope: HashSet<String> = self
+            .registry
+            .classes
+            .get(owner)
+            .map(|info| info.templates.iter().cloned().collect())
+            .unwrap_or_default();
+        let subst = |ty: &Type| substitute_scoped(ty, &bindings, &class_scope);
         FunctionSig {
             params: sig
                 .params
                 .iter()
                 .map(|p| ParamSig {
-                    ty: types::substitute_template(&p.ty, &bindings),
+                    ty: subst(&p.ty),
                     ..p.clone()
                 })
                 .collect(),
-            return_type: types::substitute_template(&sig.return_type, &bindings),
-            return_type_native: types::substitute_template(&sig.return_type_native, &bindings),
+            return_type: subst(&sig.return_type),
+            return_type_native: subst(&sig.return_type_native),
         }
+    }
+}
+
+/// Same structural walk as `types::substitute_template`, except a
+/// `TemplateParam` name outside `scope` is left completely untouched
+/// instead of defaulting to `Mixed` - see `substitute_class_templates`'s
+/// own doc comment for why that distinction matters.
+fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &HashSet<String>) -> Type {
+    match ty {
+        Type::TemplateParam(name) => {
+            if scope.contains(name) {
+                bindings.get(name).cloned().unwrap_or(Type::Mixed)
+            } else {
+                ty.clone()
+            }
+        }
+        Type::Array(inner) => Type::Array(Box::new(substitute_scoped(inner, bindings, scope))),
+        Type::ClassString(inner) => {
+            Type::ClassString(Box::new(substitute_scoped(inner, bindings, scope)))
+        }
+        Type::Union(members) => Type::Union(
+            members
+                .iter()
+                .map(|m| substitute_scoped(m, bindings, scope))
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .iter()
+                .map(|m| substitute_scoped(m, bindings, scope))
+                .collect(),
+        ),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .iter()
+                .map(|(k, t, opt)| (k.clone(), substitute_scoped(t, bindings, scope), *opt))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }
 
