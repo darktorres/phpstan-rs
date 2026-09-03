@@ -458,6 +458,49 @@ fn array_column_with_an_index_key_does_not_gain_list_ness() {
 }
 
 #[test]
+fn array_search_on_a_list_haystack_narrows_to_int_or_false() {
+    // Real corpus shape (pageAssetsTestIndexOf): a list's own keys are
+    // always sequential integers by definition, so searching one can
+    // only ever find an `int` key (or `false`), never `string` - the
+    // real stub's own unconditional `string|int|false` return type
+    // doesn't know this.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<string> $haystack */
+            function indexOf(array $haystack, string $needle): int {
+                $index = array_search($needle, $haystack, true);
+                if ($index === false) {
+                    throw new RuntimeException('not found');
+                }
+                return $index;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_search_on_a_non_list_haystack_keeps_todays_generic_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<string, string> $haystack */
+            function indexOf(array $haystack, string $needle): int {
+                $index = array_search($needle, $haystack, true);
+                if ($index === false) {
+                    throw new RuntimeException('not found');
+                }
+                return $index;
+            }
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "expected the generic string|int union to still apply: {d:?}"
+    );
+}
+
+#[test]
 fn array_map_array_filter_and_array_reduce_fall_back_safely_for_shapes_they_do_not_special_case() {
     // A non-closure callback (a variable, not introspectable), a
     // 3+-arg multi-array call, a callback with more than one param,

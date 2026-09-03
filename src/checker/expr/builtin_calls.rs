@@ -503,6 +503,27 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // The real stub declares `array_search(mixed, array, bool):
+            // string|int|false` unconditionally - this project's own
+            // `Type::Array` has no key-type parameter at all (a known,
+            // sizable open gap - see Known limitations), so this can't
+            // generally narrow the key-type half the way real PHPStan's
+            // own `ArraySearchFunctionDynamicReturnTypeExtension`
+            // (delegating to the haystack array type's own `searchArray()`)
+            // does - but a *list*-typed haystack is a real, narrower
+            // special case this project already tracks precisely
+            // without any key-type machinery at all: a list's own keys
+            // are always sequential integers by definition, so
+            // searching one can only ever find an `int` key (or
+            // `false`), never `string`. Real corpus shape
+            // (`array_search($needle, $haystack, true)` on a `list<string>`
+            // haystack, narrowed to `int` after the caller's own
+            // `$index === false` guard).
+            "array_search" if args.len() >= 2 => {
+                if Checker::is_list_like(&self.infer_expr(&args[1].value, locals)) {
+                    return union_types(Type::Int, Type::False);
+                }
+            }
             // The real stub declares `version_compare(string, string,
             // ?string $operator): int|bool` unconditionally (both PHP-
             // version-gated overloads agree on this) - real PHPStan's
