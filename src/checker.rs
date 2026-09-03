@@ -1471,6 +1471,27 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Round 13 of the Piwigo corpus cleanup: array_keys() always
+    // returns a real list (sequentially re-keyed from zero, verified via
+    // dumpType()) regardless of whether the input's own keys were
+    // already sequential - real corpus shape:
+    // `ShimClassGenerator::renderClass(array_keys($filters), ...)`
+    // where `renderClass()`'s own parameter is `list<string>`-typed.
+    #[test]
+    fn array_keys_result_is_a_real_list_not_just_a_plain_array() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<string> $xs */
+            function needsList(array $xs): void {}
+            /** @param array<string, callable> $filters */
+            function f(array $filters): void {
+                needsList(array_keys($filters));
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn array_fill_and_array_fill_keys_infer_the_fill_value_s_type() {
         let d = diagnostics_for(

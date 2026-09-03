@@ -2413,6 +2413,11 @@ impl<'a> Checker<'a> {
             // int at the point the array was built, so this mirrors that
             // per-key, folding into a real `int|string` union only when
             // the shape's own keys are genuinely mixed.
+            // Round 13: verified via dumpType() - array_keys() always
+            // returns a real list (sequentially re-keyed from zero),
+            // regardless of whether the input array's own keys were
+            // already sequential - the same "always list<V>" shape
+            // array_values() already gets above.
             "array_keys" if args.len() == 1 => {
                 let arg_ty = self.infer_expr(&args[0].value, locals);
                 if let Type::ArrayShape(fields) = &arg_ty {
@@ -2427,7 +2432,10 @@ impl<'a> Checker<'a> {
                         })
                         .reduce(union_types)
                         .unwrap_or(Type::String);
-                    return Type::Array(Box::new(key_ty));
+                    return Type::Intersection(vec![
+                        Type::Array(Box::new(key_ty)),
+                        Type::Accessory(AccessoryKind::ArrayList),
+                    ]);
                 }
                 // The native stub's own `@return int[]|string[]` is real
                 // but useless without this project's own key-type
@@ -2440,7 +2448,10 @@ impl<'a> Checker<'a> {
                 // Matches this project's own usual "don't know, don't
                 // guess beyond Mixed" default for an unprovable key type.
                 if Self::is_array_like(&arg_ty) {
-                    return Type::Array(Box::new(Type::Mixed));
+                    return Type::Intersection(vec![
+                        Type::Array(Box::new(Type::Mixed)),
+                        Type::Accessory(AccessoryKind::ArrayList),
+                    ]);
                 }
             }
             "array_column" if args.len() == 2 || args.len() == 3 => {
