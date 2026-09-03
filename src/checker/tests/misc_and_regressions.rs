@@ -334,6 +334,29 @@ fn a_negative_typed_class_constant_infers_its_real_int_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real Piwigo corpus bug (Bootstrap\RequestPipeline::DEFAULT_MIDDLEWARE):
+// ClassConst never carried its own doc comment at all, so a `@var
+// list<...>` directly above a `public const array X = [...]` was
+// silently dropped, falling back to whatever infer_const_type could
+// read off the literal alone (a plain, unshaped `array`).
+#[test]
+fn a_var_tag_on_a_class_const_pins_its_declared_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            final class Registry {
+                /**
+                 * @var list<string>
+                 */
+                public const array NAMES = ['a', 'b'];
+            }
+            /** @param list<string> $x */
+            function wantsList(array $x): void {}
+            wantsList(Registry::NAMES);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn calling_an_undefined_function_is_flagged() {
     let d = diagnostics_for("<?php totallyMadeUpFunction();");

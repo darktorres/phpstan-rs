@@ -187,3 +187,53 @@ fn a_param_type_wrapped_across_multiple_lines_still_finds_the_variable_name() {
         Some(&"array{id: int, name: string}".to_string())
     );
 }
+
+#[test]
+fn phpstan_prefixed_return_and_param_win_over_the_plain_tag_regardless_of_order() {
+    // Real Doctrine ORM/DBAL convention: a loose native-friendly
+    // @return/@param alongside a more precise @phpstan-return/-param
+    // meant for this tool specifically.
+    let block = parse(
+        r#"/**
+         * @return array
+         * @phpstan-return list<string>
+         * @phpstan-param int $count
+         * @param string $count
+         */"#,
+    );
+    assert_eq!(block.return_type, Some("list<string>".to_string()));
+    assert_eq!(block.params.get("count"), Some(&"int".to_string()));
+}
+
+#[test]
+fn phpstan_template_extends_and_implements_are_recognized() {
+    let block = parse(
+        r#"/**
+         * @phpstan-template T of object
+         * @phpstan-extends Collection<T>
+         * @phpstan-implements Iterable<T>
+         */"#,
+    );
+    assert_eq!(block.templates, vec!["T".to_string()]);
+    assert_eq!(block.template_bounds.get("T"), Some(&"object".to_string()));
+    assert_eq!(block.extends, Some("Collection<T>".to_string()));
+    assert_eq!(block.implements, vec!["Iterable<T>".to_string()]);
+}
+
+#[test]
+fn a_real_phpstan_conditional_return_type_is_skipped_rather_than_parsed_into_garbage() {
+    // Doctrine DBAL's own DriverManager::getConnection() - `T` is never
+    // meant to be resolved by this project's own simple parser; leaving
+    // `return_type` unset (falling back to the native hint elsewhere)
+    // is the correct "doesn't parse this" behavior, not a bogus class
+    // name built from whatever balanced-parens token happened to be
+    // grabbed.
+    let block = parse(
+        r#"/**
+         * @template T of Connection
+         * @param Params $params
+         * @phpstan-return ($params is array{wrapperClass: class-string<T>} ? T : Connection)
+         */"#,
+    );
+    assert_eq!(block.return_type, None);
+}

@@ -638,6 +638,69 @@ fn foreach_mutating_its_own_subject_via_the_loop_key_does_not_regress() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real Piwigo corpus bug: an unassigned superglobal defaulted to
+// Type::Mixed rather than Array(Mixed) - real phpstorm-stubs' own
+// bootstrap file declares $_SESSION with a literal `= []`, which real
+// PHPStan generalizes to a bare `array`. Because widen_coalesce_
+// result's "keep the left side's real array type" rule only fires for
+// an already-known Type::Array, a Mixed left side let `??=` collapse
+// to the literal empty shape, flagging the very next unset() as
+// targeting a key that provably doesn't exist.
+#[test]
+fn a_superglobal_coalesce_assign_does_not_collapse_to_an_empty_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                $_SESSION ??= [];
+                unset($_SESSION['some_key']);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Real Piwigo corpus bug: isset()/empty()'s own direct argument went
+// through the ordinary check_expr, so isset($shaped['maybe_missing'])
+// hit the same check_shape_key_access a bare read would - even though
+// probing a possibly-absent key is exactly what isset()/empty() are
+// for, and real PHP/PHPStan never flag it.
+#[test]
+fn isset_and_empty_on_a_shape_s_missing_key_are_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array{a: string} $x */
+            function f(array $x): bool {
+                return isset($x['b']) || empty($x['c']);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Real Piwigo corpus bug (test-double-recording idiom): a closure's
+// own `use (&$x)` mutation never wrote back to the declaring scope,
+// so `$x`'s type at a later read site stayed frozen at whatever it
+// was *before* the closure literal.
+#[test]
+fn a_closure_s_byref_use_mutation_is_visible_after_the_closure_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            function invoke(callable $cb): void {
+                $cb();
+            }
+            function f(): string {
+                $seen = [];
+                $record = function () use (&$seen): void {
+                    $seen[] = 'x';
+                };
+                invoke($record);
+                return $seen[0];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Finding 31 from the architecture audit - a bare `return;`, and
 // falling off the end of the function body with no `return` at all,
 // were never checked against a non-nullable, non-void declared

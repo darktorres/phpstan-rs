@@ -869,3 +869,106 @@ fn a_by_ref_parameter_declared_wider_than_array_falls_back_to_mixed_not_the_full
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn array_map_over_a_union_from_a_conditional_append_still_produces_a_list() {
+    // Same real corpus shape as sort()'s own identical test above,
+    // but through array_map's own list-preserving `rewrap_with_
+    // accessory_markers` - previously only recognized an `Intersection`-
+    // shaped input, silently dropping list-ness the moment the input
+    // came from a control-flow merge (`array{}|list<T>`) instead of a
+    // single literal/return.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return list<int> */
+            function f(bool $flag): array {
+                $x = [];
+                if ($flag) {
+                    foreach (['1', '2'] as $s) {
+                        $x[] = $s;
+                    }
+                }
+                return array_map(intval(...), $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn range_with_int_bounds_is_a_non_empty_list_of_int() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $x */
+            function wantsList(array $x): void {}
+            wantsList(range(1, 10));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn range_with_single_char_string_bounds_is_a_non_empty_list_of_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<string> $x */
+            function wantsList(array $x): void {}
+            wantsList(range('a', 'z'));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_unshift_on_an_already_list_like_argument_preserves_list_ness() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return list<string> */
+            function f(string $head): array {
+                $chain = [];
+                array_unshift($chain, $head);
+                return $chain;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_push_on_a_non_list_argument_does_not_falsely_gain_list_ness() {
+    // A real array_push on an arbitrary-keyed array doesn't turn it
+    // into a list - only appends fresh integer keys past the existing
+    // max, so this must fall through to the generic widening rather
+    // than the array_push/array_unshift special case.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return list<string> */
+            function f(): array {
+                $x = ['a' => 'foo'];
+                array_push($x, 'bar');
+                return $x;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("return type mismatch")),
+        "expected a return-type mismatch, got: {d:?}"
+    );
+}
+
+#[test]
+fn array_shift_on_a_list_preserves_list_ness_but_not_non_emptiness() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param list<int> $x
+             * @return list<int>
+             */
+            function f(array $x): array {
+                array_shift($x);
+                return $x;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

@@ -903,3 +903,37 @@ fn a_covariant_template_in_a_constructor_parameter_is_exempt() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn a_method_s_own_template_still_binds_on_a_non_generic_class() {
+    // Real Piwigo corpus bug (Piwigo\PluginConfig\EventDispatcher, a
+    // plain PSR-14-style class with zero class-level templates of its
+    // own): substitute_class_templates ran first and always defaulted
+    // an unbound TemplateParam to Mixed, wiping out the method's own
+    // separate @template before infer_call_return_type's later,
+    // correct per-call-argument pass ever got to bind it - regardless
+    // of whether the enclosing class was generic at all.
+    let d = diagnostics_for(
+        r#"<?php
+            class EventDispatcher {
+                /**
+                 * @template T of object
+                 * @param T $event
+                 * @return T
+                 */
+                public function dispatch(object $event): object {
+                    return $event;
+                }
+            }
+            final class RenderTagName {
+                public function __construct(public string $tagName) {}
+            }
+            function needsString(string $s): void {}
+            function f(EventDispatcher $d): void {
+                $result = $d->dispatch(new RenderTagName('x'));
+                needsString($result->tagName);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

@@ -560,6 +560,33 @@ fn a_method_narrowing_an_inherited_parameter_type_is_flagged() {
 }
 
 #[test]
+fn a_final_class_s_own_self_typed_override_is_not_a_narrowing() {
+    // Real Piwigo corpus bug (Admin\Image\ImageBackend implements
+    // ImageInterface, whose own compose() parameter is declared by the
+    // *concrete implementing class's own name*, not an abstraction -
+    // an unusual but valid interface shape): `self` inside the
+    // concrete class and that same concrete class name are provably
+    // identical types, but neither is_assignable/is_subtype has a rule
+    // for a concrete Object satisfying a still-bare SelfRef (only the
+    // reverse direction is handled) - both the override's own `self`
+    // and the ancestor's own declared type need resolving before
+    // comparison, not just one.
+    let d = diagnostics_for(
+        r#"<?php
+            interface ImageInterface {
+                public function compose(ImageBackend $overlay): bool;
+            }
+            final class ImageBackend implements ImageInterface {
+                public function compose(self $overlay): bool {
+                    return true;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn a_method_widening_an_inherited_parameter_type_is_not_flagged() {
     let d = diagnostics_for(
         r#"<?php
