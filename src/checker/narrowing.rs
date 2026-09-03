@@ -253,7 +253,8 @@ impl<'a> Checker<'a> {
                 {
                     let resolved = self.resolve_name_expr(class_name);
                     if branch_true {
-                        locals.insert(key, resolved);
+                        let current = self.current_narrowed_type(inner, &key, locals);
+                        locals.insert(key, narrow_instanceof_true(&current, &resolved));
                     } else {
                         let current = self.current_narrowed_type(inner, &key, locals);
                         locals.insert(key, narrow_type_excluding(&current, &resolved));
@@ -880,6 +881,62 @@ fn or_chain_narrowing_target(cond: &Expr) -> Option<(String, Type, &Expr)> {
 /// fallback already unconditionally trusts `target` regardless of
 /// `original`'s own content, so there's nothing for `is_subtype` to
 /// usefully change there.
+/// `instanceof`'s own true-branch narrowing - deliberately not
+/// `narrow_type_to` above, which unconditionally trusts `target` for a
+/// non-`Union` `original`. That's correct for a scalar predicate
+/// (`is_int($x)` on `int|string` needs nothing more than plain `int` -
+/// mutually exclusive scalar types can't combine), but wrong for
+/// `instanceof` against an unrelated *sibling* interface/class: `$view:
+/// View` (an interface), `if ($view instanceof HasPageAssets)` (a
+/// second, unrelated interface neither extending nor implementing the
+/// other) needs `View&HasPageAssets`, not bare `HasPageAssets` -
+/// discarding `View` entirely lost real information a caller elsewhere
+/// still needed, a real corpus bug (`Template\Renderer::render`'s own
+/// three independent, sequential `instanceof` checks on the same `View
+/// $view` parameter). Only builds a real `Intersection` when neither
+/// side is already a sub/supertype of the other - the common down-cast
+/// (`Base` narrowed to a known `Child`) and nullable-narrowing
+/// (`?Foo` narrowed to `Foo`) cases both still resolve to a single
+/// class/interface exactly as before.
+fn narrow_instanceof_true(current: &Type, target: &Type) -> Type {
+    if is_subtype(target, current) {
+        return target.clone();
+    }
+    if is_subtype(current, target) {
+        return current.clone();
+    }
+    // Only combined into a real Intersection when every branch of
+    // `current` is itself provably object-like - anything else (`Mixed`,
+    // or a scalar/array type that could never actually satisfy a true
+    // `instanceof` in the first place, a sign this project's own
+    // upstream inference already went wrong somewhere *else*) falls back
+    // to the simpler "just trust the checked class" behavior instead of
+    // risking compounding an unrelated bug into a nonsensical type like
+    // `null&ImageId`. Found live: `$id = is_array($row) ? ($row['id'] ??
+    // null) : null;` was itself mis-inferred as bare `Null` (a real,
+    // separate gap, not narrowed away here) - this guard is what kept
+    // this fix's own regression check from compounding that into
+    // exactly this nonsense. Recurses through `Union`/`Intersection` so
+    // a *second*, independent `instanceof` check against the same
+    // variable (real shape: `Template\Renderer::render`'s own three
+    // sequential checks) still combines correctly once the first check's
+    // own merge has already turned `current` into a real union of
+    // object-like branches.
+    if is_object_like(current) {
+        Type::Intersection(vec![current.clone(), target.clone()])
+    } else {
+        target.clone()
+    }
+}
+
+fn is_object_like(ty: &Type) -> bool {
+    match ty {
+        Type::Object(..) => true,
+        Type::Union(members) | Type::Intersection(members) => members.iter().all(is_object_like),
+        _ => false,
+    }
+}
+
 pub(crate) fn narrow_type_to(original: &Type, target: &Type) -> Type {
     match original {
         Type::Union(members) => {

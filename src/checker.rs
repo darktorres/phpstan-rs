@@ -4464,6 +4464,128 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found instanceof's own true
+    // branch unconditionally replaced the checked variable's type with
+    // just the target class/interface, discarding whatever it was
+    // already known to be - correct for the common down-cast (a known
+    // parent narrowed to a known child) or nullable-narrowing (?Foo
+    // narrowed to Foo) shape, but wrong when the target is an unrelated
+    // *sibling* interface: real Piwigo code (Template\Renderer::render)
+    // takes a single `View $view` parameter through three independent,
+    // sequential `if ($view instanceof SomeOtherInterface)` checks -
+    // each one was discarding the fact that `$view` is still a `View`,
+    // so a later use of `$view` as a plain `View` (unconditionally,
+    // after all three checks) saw a nonsensical accumulated union of
+    // bare, unrelated interfaces instead.
+    #[test]
+    fn instanceof_against_an_unrelated_interface_keeps_the_original_type_too() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface View {}
+            interface HasPageAssets {}
+            function needsView(View $v): void {}
+            function f(View $view): void {
+                if ($view instanceof HasPageAssets) {
+                    // no-op
+                }
+                needsView($view);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn instanceof_against_an_unrelated_interface_also_narrows_to_the_new_interface() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface View {}
+            interface HasPageAssets { public function pageAssets(): array; }
+            function f(View $view): void {
+                if ($view instanceof HasPageAssets) {
+                    $view->pageAssets();
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Regression test for a real bug caught while implementing the fix
+    // above: when the pre-narrowing type is something that could never
+    // actually be `instanceof` anything at all (`Null`, a scalar, ... -
+    // itself a sign of a real, separate upstream inference gap, not
+    // narrowed here), building a real Intersection out of it produces
+    // nonsense like `null&ImageId` - worse than the old, simpler
+    // behavior. Falls back to trusting the checked class alone whenever
+    // the pre-narrowing type isn't a plain, single already-known class/
+    // interface.
+    #[test]
+    fn instanceof_true_on_a_provably_non_object_type_does_not_build_a_nonsense_intersection() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Widget15 { public int $value = 0; }
+            /** @param null $x */
+            function f($x): int {
+                if ($x instanceof Widget15) {
+                    return $x->value;
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Real shape: Template\Renderer::render's own three independent,
+    // sequential instanceof checks on the same View $view parameter -
+    // after the first check's own if/no-else merge turns $view into a
+    // real Union of object-like branches, a *second* instanceof check
+    // against an unrelated interface must still combine correctly, not
+    // fall back to bare-trust-the-target the moment current stops being
+    // a single plain Object.
+    #[test]
+    fn a_second_independent_instanceof_check_still_combines_after_the_first_ones_own_merge() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface View2 {}
+            interface HasPageAssets2 {}
+            interface ExposesPageData2 { public function exposedPageData(): array; }
+            function needsView(View2 $v): void {}
+            function f(View2 $view): void {
+                if ($view instanceof HasPageAssets2) {
+                    // no-op
+                }
+                if ($view instanceof ExposesPageData2) {
+                    $view->exposedPageData();
+                }
+                needsView($view);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn instanceof_narrowing_down_a_class_hierarchy_still_replaces_the_type_entirely() {
+        // The common down-cast case must keep working exactly as before -
+        // no spurious Cat&Animal intersection when Cat already IS-A
+        // Animal.
+        let d = diagnostics_for(
+            r#"<?php
+            class Animal {}
+            class Cat extends Animal { public function meow(): string { return "meow"; } }
+            function f(Animal $animal): string {
+                if ($animal instanceof Cat) {
+                    return $animal->meow();
+                }
+                return "";
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn instanceof_false_branch_drops_the_checked_class_from_a_union() {
         // Phase 33 Finding 1: BrowserTestHelpers::dbEscape's real shape.
