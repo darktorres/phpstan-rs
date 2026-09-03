@@ -609,12 +609,15 @@ impl<'a> Lexer<'a> {
     /// the other side). An open-ended range (`from` only, still valid in
     /// the latest PHP) is a real, current parameter and is left alone, as
     /// is one that already has a real default - both fall back to an
-    /// ordinary attribute-only skip. Deliberately conservative about
-    /// *where* this attribute appears: if a `{`/`;` turns up before a
-    /// parameter delimiter, this isn't a single parameter fragment at all
-    /// (most commonly the same attribute gating an entire method, e.g.
-    /// `DateTime::__construct`'s 5.5-8.2 overload) - left completely
-    /// untouched in that case too.
+    /// ordinary attribute-only skip. Whether this attribute gates a
+    /// single parameter or a *whole* function/method declaration (real
+    /// shape: `DateTimeImmutable::__construct`'s `to: '8.2'`/`from:
+    /// '8.3'` pair) is checked before attempting the parameter-fragment
+    /// scan at all, via `upcoming_is_function_declaration` - see
+    /// `skip_whole_versioned_declaration`'s own doc comment for that
+    /// case (Round 15 of the Piwigo corpus cleanup - previously left
+    /// completely untouched, wrongly letting a superseded declaration's
+    /// return type merge into the modern one's).
     fn skip_stub_availability_attribute(&mut self) {
         self.pos += "#[PhpStormStubsElementAvailable(".len();
         let attr_args_start = self.pos;
@@ -638,6 +641,26 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
         }
         if !is_closed_range {
+            return;
+        }
+        // Round 15 of the Piwigo corpus cleanup: this same attribute also
+        // gates a *whole* function/method declaration (real shape:
+        // `version_compare()`'s own two full declarations, one
+        // `to: '7.4'` returning `int|bool|null`, one `from: '8.0'`
+        // returning `int|bool`; `DateTimeImmutable::__construct`'s
+        // `to: '8.2'`/`from: '8.3'` pair) - previously left completely
+        // untouched (this function's own doc comment used to document
+        // that as deliberate), so both declarations reached the parser
+        // as ordinary, unconditional signatures and got unioned together
+        // by the registry's own "second unconditional declaration merges
+        // onto the first" real-overload handling, wrongly reintroducing
+        // the pre-8.0 `null` return into a target this project otherwise
+        // always treats as PHP 8.0+. A closed range (`to:` - superseded
+        // on the modern PHP version this project models) gating a whole
+        // declaration should leave no trace at all, the same principle
+        // already applied to a closed-range *parameter* below.
+        if self.upcoming_is_function_declaration() {
+            self.skip_whole_versioned_declaration();
             return;
         }
 
@@ -674,6 +697,92 @@ impl<'a> Lexer<'a> {
         // (a closing delimiter is left for the real tokenizer to see).
         if self.peek() == b',' {
             self.pos += 1;
+        }
+    }
+
+    /// Whether the attribute just consumed by `skip_stub_availability_attribute`
+    /// gates a whole function/method declaration rather than a single
+    /// parameter - real PHP only allows `public`/`private`/`protected`/
+    /// `static`/`abstract`/`final` modifiers (in any combination) before
+    /// the `function` keyword itself at this position; a parameter
+    /// fragment can never start with any of them.
+    fn upcoming_is_function_declaration(&self) -> bool {
+        let mut p = self.pos;
+        loop {
+            while p < self.src.len() && (self.src[p] as char).is_ascii_whitespace() {
+                p += 1;
+            }
+            let word_start = p;
+            while p < self.src.len() && (self.src[p] as char).is_ascii_alphabetic() {
+                p += 1;
+            }
+            if p == word_start {
+                return false;
+            }
+            match std::str::from_utf8(&self.src[word_start..p]) {
+                Ok("public" | "private" | "protected" | "static" | "abstract" | "final") => {}
+                Ok("function") => return true,
+                _ => return false,
+            }
+        }
+    }
+
+    /// Skips an entire closed-range-superseded function/method
+    /// declaration (modifiers, `function`, name, parameter list, return
+    /// type) up through its own terminator - either a bare `;` (an
+    /// abstract/interface method, no body) or a balanced `{...}` body.
+    /// `;` can never appear inside the parameter list itself (not even
+    /// in a default value - PHP has no expression form that contains a
+    /// bare `;`), so a simple paren-depth counter is enough to tell the
+    /// declaration's own terminator apart from one inside the parameter
+    /// list's parens.
+    fn skip_whole_versioned_declaration(&mut self) {
+        let mut paren_depth = 0i32;
+        loop {
+            if self.pos >= self.src.len() {
+                return;
+            }
+            match self.peek() {
+                b'\'' | b'"' => self.skip_string_literal(),
+                b'(' => {
+                    paren_depth += 1;
+                    self.pos += 1;
+                }
+                b')' => {
+                    paren_depth -= 1;
+                    self.pos += 1;
+                }
+                b';' if paren_depth <= 0 => {
+                    self.pos += 1;
+                    return;
+                }
+                b'{' if paren_depth <= 0 => {
+                    self.skip_balanced_braces();
+                    return;
+                }
+                _ => self.pos += 1,
+            }
+        }
+    }
+
+    /// String-aware skip from an opening `{` (the current byte) through
+    /// its matching `}`.
+    fn skip_balanced_braces(&mut self) {
+        self.pos += 1;
+        let mut depth = 1i32;
+        while depth > 0 && self.pos < self.src.len() {
+            match self.peek() {
+                b'\'' | b'"' => self.skip_string_literal(),
+                b'{' => {
+                    depth += 1;
+                    self.pos += 1;
+                }
+                b'}' => {
+                    depth -= 1;
+                    self.pos += 1;
+                }
+                _ => self.pos += 1,
+            }
         }
     }
 
@@ -1573,14 +1682,60 @@ mod tests {
     }
 
     #[test]
-    fn closed_range_stub_attribute_gating_a_whole_method_is_left_untouched() {
+    fn closed_range_stub_attribute_gating_a_whole_method_is_dropped_entirely() {
+        // Round 15 of the Piwigo corpus cleanup: a closed range (`to:`)
+        // gating a whole method - real shape:
+        // `DateTimeImmutable::__construct`'s `to: '8.2'`/`from: '8.3'`
+        // pair - is superseded on the PHP version this project models,
+        // same as a closed-range *parameter*, and must leave no trace at
+        // all rather than surviving as an ordinary, unconditional
+        // declaration (which the registry would then wrongly merge
+        // return types with the real, modern declaration).
         let src = "<?php class C { #[PhpStormStubsElementAvailable(from: '5.5', to: '8.2')]\n\
+                   public function __construct($datetime = \"now\") {} }";
+        let with_attr = Lexer::new(src).tokenize();
+        let empty_class = Lexer::new("<?php class C { }").tokenize();
+        assert_eq!(with_attr, empty_class);
+    }
+
+    #[test]
+    fn open_ended_stub_attribute_gating_a_whole_method_is_kept() {
+        // The counterpart to the above - an open range (`from` only,
+        // still valid on the latest PHP) gating a whole method is the
+        // real, current declaration and must survive unchanged.
+        let src = "<?php class C { #[PhpStormStubsElementAvailable(from: '8.3')]\n\
                    public function __construct($datetime = \"now\") {} }";
         let with_attr = Lexer::new(src).tokenize();
         let without_attr =
             Lexer::new("<?php class C { public function __construct($datetime = \"now\") {} }")
                 .tokenize();
         assert_eq!(with_attr, without_attr);
+    }
+
+    #[test]
+    fn closed_range_stub_attribute_gating_a_whole_abstract_method_is_dropped_entirely() {
+        // The `;`-terminated (no body) shape - an interface/abstract
+        // method declaration - must be recognized as a whole-declaration
+        // terminator too, not just a `{...}` body.
+        let src = "<?php interface I { #[PhpStormStubsElementAvailable(to: '7.4')]\n\
+                   public function old(string $x); }";
+        let with_attr = Lexer::new(src).tokenize();
+        let empty_interface = Lexer::new("<?php interface I { }").tokenize();
+        assert_eq!(with_attr, empty_interface);
+    }
+
+    #[test]
+    fn closed_range_stub_attribute_gating_a_whole_free_function_is_dropped_entirely() {
+        // The real version_compare() shape: two whole *free function*
+        // declarations (not methods), the closed-range one superseded.
+        let src = "<?php #[PhpStormStubsElementAvailable(to: '7.4')]\n\
+                   function version_compare(string $a, string $b): ?bool {}\n\
+                   #[PhpStormStubsElementAvailable(from: '8.0')]\n\
+                   function version_compare(string $a, string $b): bool {}";
+        let toks = Lexer::new(src).tokenize();
+        let expected =
+            Lexer::new("<?php function version_compare(string $a, string $b): bool {}").tokenize();
+        assert_eq!(toks, expected);
     }
 
     // Phase 24: `#[LanguageLevelTypeAware]` - a real shape from
