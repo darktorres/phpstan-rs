@@ -764,6 +764,15 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         "is_float" | "is_double" => Some(Type::Float),
         "is_bool" | "is_boolean" => Some(Type::Bool),
         "is_array" => Some(Type::Array(Box::new(Type::Mixed))),
+        // Phase 13 Finding B: `is_countable($x)` is true for exactly
+        // `array|Countable` - the only real corpus call site
+        // (`SectionPopulator::computeMetaRobots`) guards `count($x)`
+        // with it, a correct PHP 8+ idiom (`count()` on anything else is
+        // a `TypeError`).
+        "is_countable" => Some(Type::Union(vec![
+            Type::Array(Box::new(Type::Mixed)),
+            Type::Object("Countable".to_string(), Vec::new()),
+        ])),
         "is_null" => Some(Type::Null),
         "is_object" => Some(Type::Object("object".to_string(), Vec::new())),
         "is_callable" => Some(Type::Callable),

@@ -3343,6 +3343,44 @@ mod tests {
         assert!(d[0].message.contains("needsInt"), "got: {d:?}");
     }
 
+    // Phase 13 Finding B: real shape from
+    // `SectionPopulator::computeMetaRobots`'s own
+    // `is_countable($page_tag_ids) and count($page_tag_ids) > 1` -
+    // `count()` on anything but `array|Countable` is a real PHP 8+
+    // `TypeError`, and `is_countable` wasn't in
+    // `narrowing_type_for_predicate` at all.
+    #[test]
+    fn is_countable_narrows_a_possibly_null_value_before_count() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): int {
+                $tags = null;
+                if (is_countable($tags) and count($tags) > 1) {
+                    return count($tags);
+                }
+                return 0;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn is_countable_false_branch_excludes_array_and_countable() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param int|array<int> $x */
+            function f($x): int {
+                if (! is_countable($x)) {
+                    return $x;
+                }
+                return count($x);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn instanceof_narrows_to_the_checked_class() {
         let d = diagnostics_for(
