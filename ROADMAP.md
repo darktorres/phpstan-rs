@@ -29,34 +29,36 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 946 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 951 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
-  875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287
-  (Phase 14.5's first five rounds) -> **285 (current, Phase 14.5's
+  875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
+  (Phase 14.5's first six rounds) -> **253 (current, Phase 14.5's
   closing round)**. The 211 -> 1115 jump was a real, confirmed
   *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
-  1575 first-party `list<` occurrences. Phase 14.5's six rounds then
+  1575 first-party `list<` occurrences. Phase 14.5's seven rounds then
   closed most of the resulting gap: nearly all of it turned out to be
   this project's own type-inference gaps (spread array literals,
   `array_merge` including its own spread-argument form, PHP 8.4
   property hooks, `preg_match_all`'s per-group arrays, array-append
-  widening - the single most common accumulator idiom in PHP, the
-  `sort()` family's own dynamic type-specifying extensions, `$x !==
-  []`/static-property narrowing, a `try`/`catch` scope-merge gap, a
-  missing `Union` arm in the core array-type helpers, `glob()`/
-  `explode()`'s own dynamic-return-type extensions, a mis-parsed
-  conditional-return-type docblock, a real `instanceof` narrowing bug
-  unrelated to `list<T>` itself, and - by far the single largest fix of
-  any round - a method-override return-type check that compared
-  docblock-refined types instead of native ones) rather than genuine
-  corpus-side `@return list<T>` overclaims.
+  widening, a first-class callable used as `array_map`'s own callback,
+  two more real `array_filter()` extensions - together the single most
+  common accumulator/transform idioms in PHP, the `sort()` family's own
+  dynamic type-specifying extensions, `$x !== []`/static-property
+  narrowing, a `try`/`catch` scope-merge gap, a missing `Union` arm in
+  the core array-type helpers, `glob()`/`explode()`'s own
+  dynamic-return-type extensions, a mis-parsed conditional-return-type
+  docblock, a real `instanceof` narrowing bug unrelated to `list<T>`
+  itself, and - by far the single largest fix of any round - a
+  method-override return-type check that compared docblock-refined
+  types instead of native ones) rather than genuine corpus-side
+  `@return list<T>` overclaims.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -1118,6 +1120,36 @@ tied to `list<T>` at all:
   building an intersection out of it would only compound that into
   worse nonsense (found live, while verifying this exact fix: a
   mis-inferred bare `Null` intersected into `null&ImageId`).
+
+**A seventh round** (285 -> 253) found the corpus's biggest remaining
+idiom gap:
+
+- **A first-class callable (`intval(...)`, `TagId::from(...)`, PHP
+  8.1) used as `array_map`'s own callback was completely unrecognized**
+  - `infer_closure_return_with_param_overrides` only matched an
+    `ArrowFn`/`Closure` literal, falling to its own `_ => None` for
+    anything else, discarding both the mapped element type and any
+    list-ness/non-emptiness the input already had. An extremely common
+    idiom in this corpus: `array_map(intval(...), ...)` alone is 76
+    first-party call sites, over 140 total across several native
+    functions and static factories. Resolves the wrapped call's own
+    signature (a plain function, a static method, or an instance
+    method) and binds `param_overrides` against its declared parameter
+    types the same way `infer_call_return_type` already does for an
+    ordinary call - including `resolve_pseudo` for a static factory
+    returning `self`/`static` (`TagId::tryFrom(): ?self`), caught live
+    while verifying this fix as a real regression against a related
+    corpus location.
+  - Re-verifying that fix's own corpus diff surfaced two more real,
+    separately-recognized `array_filter()` extensions this project
+    didn't have yet: an `instanceof`-shaped filter callback (`fn ($v):
+    bool => $v instanceof Target`) narrows the retained element type to
+    `Target` specifically, not just strips `Null`; and `array_filter()`
+    with no callback at all - real PHP's own default, dropping every
+    falsy element - is exactly `narrow_type_excluding_falsy`'s own job
+    (already shared with `!empty($x)`'s narrowing), stripping both `0`
+    and `null` for an `int|null` element type, not just `null`. Both
+    verified via `dumpType()`.
 
 ## Phase 20 - Performance & robustness - DONE
 
