@@ -323,8 +323,12 @@ impl<'a> Checker<'a> {
                     self.check_final_class_extension(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
                     self.check_trait_conflicts(&fqn, c.span);
-                    for m in &c.methods {
-                        self.check_function(&m.function, Some(&fqn), m.is_static);
+                    if c.kind == ClassKind::Trait {
+                        self.check_trait_methods(&fqn, c);
+                    } else {
+                        for m in &c.methods {
+                            self.check_function(&m.function, Some(&fqn), m.is_static);
+                        }
                     }
                 }
                 StmtKind::EnumDecl(e) => {
@@ -346,6 +350,55 @@ impl<'a> Checker<'a> {
             self.diagnostics.truncate(diagnostics_before);
             self.saw_dynamic_var_construct = false;
         }
+    }
+
+    /// Phase 13 Finding E: a trait's own method bodies are checked once
+    /// per class that `use`s it, not standalone - `flatten_traits`
+    /// (`registry.rs`) already merges a trait's own methods/properties
+    /// into every using class's own `ClassInfo` before checking starts,
+    /// so re-checking with `current_class` set to a real host's FQN
+    /// means every existing lookup (`lookup_method`/`lookup_property`)
+    /// transparently sees that host's true member set - a trait method
+    /// calling `$this->hostOnlyMethod()` is valid PHP (the trait's
+    /// author expects any using class to provide it), but false-
+    /// positived as "undefined method" when checked standalone. A trait
+    /// with no user anywhere in the project (an orphaned/library trait)
+    /// still gets checked standalone exactly as before - a real
+    /// regression otherwise, since today's behavior checks every
+    /// trait's body unconditionally.
+    fn check_trait_methods(&mut self, fqn: &str, c: &ClassDecl) {
+        let hosts = self.registry.classes_using_trait(fqn);
+        let contexts: Vec<String> = if hosts.is_empty() {
+            vec![fqn.to_string()]
+        } else {
+            hosts
+        };
+        let start = self.diagnostics.len();
+        for host in contexts {
+            for m in &c.methods {
+                self.check_function(&m.function, Some(&host), m.is_static);
+            }
+        }
+        // A trait used by 2+ classes gets checked 2+ times - a
+        // genuinely host-independent bug in the trait's own body (no
+        // `$this->...` involved at all) would otherwise be reported
+        // once per host, since diagnostics are only ever sorted, never
+        // deduplicated elsewhere. A real host-specific finding (missing
+        // on one host but not another) survives this, since its own
+        // message genuinely differs per host. This local sort exists
+        // only to bring duplicates adjacent for `dedup_by` (which only
+        // ever removes consecutive matches) - the final, whole-program
+        // sort downstream of `check_program` reorders everything
+        // correctly regardless of this block's own local order.
+        self.diagnostics[start..].sort_by(|a, b| {
+            (a.span.start.line, a.span.start.col, &a.message).cmp(&(
+                b.span.start.line,
+                b.span.start.col,
+                &b.message,
+            ))
+        });
+        self.diagnostics
+            .dedup_by(|a, b| a.span == b.span && a.message == b.message);
     }
 
     /// Looks up this exact declaration's own resolved signature in the
@@ -5789,6 +5842,99 @@ mod tests {
             trait Combined { use Greets; public function extra(): int { return 1; } }
             class Foo { use Combined; }
             function test(Foo $f): string { return $f->greet(); }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Phase 13 Finding E: a trait method calling $this->hostOnlyMethod()
+    // is valid PHP (the trait's author expects any using class to
+    // provide it) - checked standalone (current_class bound to the
+    // trait's own FQN), this always false-positived as "undefined
+    // method".
+    #[test]
+    fn a_trait_method_calling_a_host_only_method_is_not_flagged_when_the_host_declares_it() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait Greeter {
+                public function greet(): string { return $this->name(); }
+            }
+            class Person {
+                use Greeter;
+                public function name(): string { return "Alice"; }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_trait_method_calling_a_host_only_method_is_flagged_for_a_sibling_host_missing_it() {
+        // Proves per-host re-checking, not "checked once (against
+        // whichever host happens to run first) and reused" - the same
+        // trait, used by two classes, must be checked once per host.
+        let d = diagnostics_for(
+            r#"<?php
+            trait Greeter {
+                public function greet(): string { return $this->name(); }
+            }
+            class Person {
+                use Greeter;
+                public function name(): string { return "Alice"; }
+            }
+            class Robot {
+                use Greeter;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("undefined method"), "got: {d:?}");
+    }
+
+    #[test]
+    fn a_host_independent_trait_bug_is_reported_once_not_once_per_host() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait Broken {
+                public function boom(): int { return thisFunctionDoesNotExist(); }
+            }
+            class A { use Broken; }
+            class B { use Broken; }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "expected the duplicate to be deduped: {d:?}");
+    }
+
+    #[test]
+    fn an_unused_trait_is_still_checked_standalone() {
+        let d = diagnostics_for(
+            r#"<?php
+            trait Orphaned {
+                public function boom(): int { return thisFunctionDoesNotExist(); }
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "an unused trait must still be checked: {d:?}");
+    }
+
+    #[test]
+    fn a_trait_used_only_by_another_trait_is_checked_against_the_real_final_host() {
+        // `Inner` is used only by `Outer` (itself a trait), never
+        // directly by any real class - `Inner`'s own $this->name() must
+        // still resolve against Concrete, the real, final host, not
+        // against `Outer` (which is itself just as host-unaware).
+        let d = diagnostics_for(
+            r#"<?php
+            trait Inner {
+                public function greet(): string { return $this->name(); }
+            }
+            trait Outer {
+                use Inner;
+            }
+            class Concrete {
+                use Outer;
+                public function name(): string { return "x"; }
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");

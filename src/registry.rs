@@ -495,6 +495,36 @@ impl Registry {
         false
     }
 
+    /// Every real class/enum that ends up composing `trait_fqn`, walking
+    /// past any intermediate *trait* user rather than stopping at direct
+    /// `uses` alone (Phase 13 Finding E) - `flatten_traits` merges a used
+    /// trait's own methods into the *user's* method map, never the other
+    /// way around, so a trait used only by another trait (`trait B { ... }
+    /// trait A { use B; } class X { use A; }`) still needs `B` checked
+    /// against `X`, the real, final host - checking it against `A` alone
+    /// would see exactly the same host-unaware member set `A` itself has.
+    pub(crate) fn classes_using_trait(&self, trait_fqn: &str) -> Vec<String> {
+        let mut result = Vec::new();
+        let mut stack = vec![trait_fqn.to_string()];
+        let mut seen = HashSet::new();
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            for (name, info) in &self.classes {
+                if !info.uses.iter().any(|u| u == &current) {
+                    continue;
+                }
+                if info.kind == ClassKind::Trait {
+                    stack.push(name.clone());
+                } else {
+                    result.push(name.clone());
+                }
+            }
+        }
+        result
+    }
+
     /// Walks `class`'s own `extends` (*and* `implements`, so an
     /// interface-typed receiver's own multi-parent `extends` chain and a
     /// class's declared-but-not-overridden interface methods both
