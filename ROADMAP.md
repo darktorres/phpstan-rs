@@ -74,49 +74,142 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Open phases
 
-Every phase not listed here is DONE (see history below). These are the
-phases with real, concrete open work:
+Every phase not listed here is DONE (see history below). This section was
+rewritten wholesale after an exhaustive, file-by-file audit (no sampling)
+of every file phpstan-rs could plausibly need to match under
+`vendor/phpstan-src/src/Rules/` (463 files - 600 total minus 129
+auto-generated `RuleErrors/RuleError<N>.php` builder-pattern permutation
+classes and 8 trivial `RuleError`-family marker interfaces, both
+confirmed by direct inspection to carry no unique check logic) and
+`vendor/phpstan-src/src/Type/` (392 files, all in scope) - 855 files
+total, each individually read and classified as implemented/partial/
+missing/not_applicable against this project's own `src/`. The audit ran
+as two chained Workflow-tool passes (`.claude/workflows/phpstan-parity.js`
+for an initial sampled pass, `.claude/workflows/phpstan-full-parity.js`
+for the exhaustive one whose findings this section is built from) with
+the full raw per-file results, root-cause clustering, and phase-sequence
+draft kept alongside the scripts in
+`.claude/workflows/phpstan-full-parity.result.json`.
 
-**Phase 15 - Broader rule catalog (PLANNED).** No rules yet in:
-`DeadCode` (unreachable code past an always-terminating statement,
-always-true/false conditions, unused private methods/constants),
-`Comparison` (`match`/`switch` exhaustiveness, strict-comparison-of-
-incompatible-types, always-true/false `in_array`/`array_key_exists`
-checks), `Exceptions` (needs a real throw-type model this project
-doesn't have at all - not even a `FunctionSig`-level "what can this
-throw" field), and visibility/abstract-method-completeness enforcement.
-Also carries three narrower, still-open gaps: `continue N`'s own level
-argument is parsed but never consulted; `Type::Array` has no key-type
-parameter (`foreach`'s own `$key`, or a `preg_match` by-ref `$matches`
-element, is always `Mixed` - this is the same root cause Phase 35 just
-ran into again, seven phases after it was first tracked here); `goto`/
-`label` form no control-flow-graph edge, so a backward `goto` could make
-an `always_terminates`/narrowing conclusion unsound.
+Of 855 files: 27 already have a real phpstan-rs equivalent
+(`implemented`), roughly 130 are partially covered, about 490 are
+genuinely missing, and about 208 are `not_applicable` - PHPStan's own
+plugin-extension interfaces, DI-container wiring, playground/website-only
+rules, BC-promise self-protection for its own `PHPStan\*` namespace, or
+PHP-runtime/XML-shell-out techniques with no faithful Rust port. The
+"Won't-port" reasoning for those is recorded in the Known limitations
+section below (under Permanent design boundaries), so they aren't
+rediscovered as false gaps later.
+
+Phases below are numbered to double as a rough dependency/priority
+order for anything added past Phase 46 - lower numbers are closer to
+foundational, higher numbers are further out on the dependency graph or
+lower real-world value. A compact tier summary:
+
+```text
+Foundational (do first):    47 -> 48 -> 38 -> 37 -> 49
+Type-system structural:     50 -> 51 -> 52 -> 53 -> 54 -> 55
+PHPDoc (existing, expanded): 36 -> 56
+Exceptions (existing):       42
+Purity (existing):           41
+Rule-catalog batch:          57 -> 58 -> 59 -> 60 -> 61 -> 62 -> 43
+                              -> 63 -> 64 -> 65 -> 66 -> 67 -> 68 -> 15
+                              -> 69 -> 70 -> 71
+Regex:                       46 (confirmed unchanged) || 72 (independent)
+Stdlib batches:               73 (needs 50) -> 74 -> 75 -> 76 -> 77
+                              -> 78 (low priority) -> 79 -> 80 -> 81
+Opportunistic infra
+(fold into a consumer,
+ don't schedule alone):      82, 83, 84
+Untouched by this audit
+(tooling/API-consumer,
+ not Rules/Type-shaped):     16, 17, 18, 19, 39, 40, 44, 45
+```
+
+**Phase 15 - Unreachable-code and constant-condition rule catalog
+(PLANNED, refocused).** Originally a catch-all naming `DeadCode`,
+`Comparison`, `Exceptions`, visibility, `continue N`'s level argument,
+`Type::Array`'s missing key type, and `goto`/`label` CFG edges in one
+paragraph. The exhaustive audit found each of those deserves its own
+phase with its own much larger unlock list than a shared paragraph
+implied, so this phase now narrowly covers what's left after splitting
+the rest out: `DeadCode`/`Comparison`'s core rule catalog. Visibility
+moved to Phase 57, `Type::Array`'s key type to Phase 50, and the
+exception/throw-type model was already tracked separately at Phase 42
+(`continue N`'s level argument and `goto`/`label` CFG edges remain
+open, unclaimed by any phase below - see Known limitations).
+
+Most of the underlying primitives this phase needs already exist and
+are simply never surfaced as a diagnostic - sequence it as four
+gradually-shippable pieces: (1) **unreachable-statement-after-
+terminating-code** (`UnreachableStatementRule`) - `always_terminates()`
+(`src/checker/control_flow.rs`) already exists and is exercised for
+narrowing merges; this is essentially wiring plus a diagnostic call,
+S effort, do first. (2) **constant-boolean-condition detection** -
+`Type::True`/`Type::False` literal variants already exist; build one
+shared "is this expression's type a constant bool -> report" helper and
+wire it at the ~13 call sites real PHPStan covers separately
+(`BooleanAndConstantConditionRule`, `BooleanNotConstantConditionRule`,
+`BooleanOrConstantConditionRule`, `ConstantLooseComparisonRule`,
+`DoWhileLoopConstantConditionRule`, `ElseIfConstantConditionRule`,
+`IfConstantConditionRule`, `LogicalXorConstantConditionRule`,
+`NumberComparisonOperatorsConstantConditionRule`,
+`StrictComparisonOfDifferentTypesRule`,
+`TernaryOperatorConstantConditionRule`,
+`WhileLoopAlwaysFalseConditionRule`/`AlwaysTrueConditionRule`,
+`UsageOfVoidMatchExpressionRule`) - `control_flow.rs`'s
+`is_truthy_literal()`/`stmt_contains_break()` already detect the exact
+`while(true)`-no-break shape PHPStan's own while-loop rules cover.
+(3) **match/switch dead-arm and exhaustiveness** (`MatchExpressionRule`,
+`SwitchConditionRule`) builds on (2)'s comparison primitive plus new
+enum-exhaustiveness reasoning (benefits from, but doesn't strictly need,
+Phase 79's enum-case singleton type). (4) **impossible-instanceof**
+(`ImpossibleInstanceOfRule`) needs a paired always-true/false detector
+layered on the existing `narrow_instanceof_true` narrowing logic (Phase
+55 sharpens this further with subtracted-type support). Also folds in
+`ImpossibleCheckTypeHelper`/`FunctionCallRule`/`MethodCallRule`/
+`StaticMethodCallRule` (redundant `is_string($x)` where `$x` is already
+known-`string`, etc.) and `ImpossibleInArrayHaystackFiniteTypesRule` -
+these are genuinely part of Phase 55's narrowing-engine generalization
+(the predicate-table extension), cross-referenced there rather than
+duplicated. Size: S (item 1) -> L (items 2-3) -> L (item 4).
 
 **Phase 16 - CI-friendly output formats (PLANNED).** No JSON/checkstyle/
 junit/etc. output. Realistic starting subset: `json` (most universally
 consumable) plus `checkstyle` or `junit`. Needs real source positions to
 be useful beyond plain text - Phase 11 already shipped those, so this is
-otherwise unblocked.
+otherwise unblocked. Unaffected by the exhaustive audit (not a PHPStan
+Rules/Type-shaped feature - PHPStan's own output formatters live outside
+`src/Rules`/`src/Type`) beyond one dependency worth noting: Phase 47's
+diagnostic-identifier work is a natural prerequisite for a JSON format
+a CI tool would actually want to consume (a stable per-check identifier
+per finding, not just a message string).
 
 **Phase 17 - LSP hover/go-to-definition (PLANNED).** Needs a
 position-keyed lookup index - today's `Registry`/`Project` lookups are
 all name-keyed. `src/lsp.rs`'s existing hand-rolled JSON-RPC loop
 (`run_loop`) is otherwise ready to extend with `textDocument/hover`/
-`textDocument/definition`.
+`textDocument/definition`. Unaffected by the exhaustive audit (tooling,
+not a Rules/Type-shaped feature).
 
 **Phase 18 - Extension/plugin API (PLANNED).** Deliberately last and
 least concrete - premature before Phases 12-15 give this project enough
 built-in rules/type-extensions that a third party would actually want to
 add to, rather than just use. Unrelated to Phase 40 below - Phase 40 is
 about checking PHP code that consumes *real PHPStan's own* API, not
-about phpstan-rs exposing one of its own.
+about phpstan-rs exposing one of its own. Unaffected by the exhaustive
+audit - notably, the audit's own "won't-port" list is dominated by
+PHPStan's *own* plugin-extension interfaces (`Dynamic*ReturnTypeExtension`,
+`*TypeSpecifyingExtension`, etc.), confirming this project's own
+match-arm-based architecture has no structural need for an equivalent
+internal seam even once it grows an external-facing API.
 
 **Phase 19 - Fuzz testing (NOT STARTED).** Name and rough intent only:
 `arbitrary` + `cargo-fuzz` for the lexer/parser (a malformed-input crash
 is a real, if narrow, risk the corpus-testing approach can't rule out),
 `proptest` for `types.rs`'s subtyping logic (reflexivity, transitivity).
-Both dev-only. Deliberately deferred behind Phases 11-15.
+Both dev-only. Deliberately deferred behind Phases 11-15. Unaffected by
+the exhaustive audit (dev-tooling, not a Rules/Type-shaped feature).
 
 **Phase 36 - PHPDoc tag ecosystem expansion (PARTIAL).** `docblock.rs`'s
 tag matcher was exact literal-string matching (`match tag { "param" =>
@@ -128,36 +221,74 @@ already supported - **fixed in Phase 14.5's sixteenth round**, as a
 second, override-priority pass over the same tag list, covering
 `@phpstan-param`/`-return`/`-var`/`-template`/`-template-covariant`/
 `-template-contravariant`/`-extends`/`-implements`. Every other tag
-below remains open. New tags still needed: `@method`/`@mixin`/`@phpstan-type` (synthesized into
+below remains open.
+
+The exhaustive audit independently arrived at every one of this phase's
+already-named sub-items across five separate audit categories,
+confirming the scope was already correctly bounded, and adds concrete
+unlocks per tag for tracking: `@method`/`@mixin` (synthesized into
 `ClassInfo`'s `methods`/`properties` maps the same way enum
-`cases()`/`value`/`name` already are, Phase 9 - `@phpstan-type` itself
-needs four real pieces: global config-level aliases, `@phpstan-import-type
-... from ...`, circular-alias detection, and duplicate-name checks
-against real classes/other local aliases/imports/globals);
-`@phpstan-require-extends`/`-implements`/`@phpstan-sealed`/
-`@phpstan-consistent-constructor` (validated once per declaration, the
-same shape `check_generic_bounds` already uses for `@extends`/
-`@implements` bounds, Phase 10.5); `@phpstan-assert`/`-if-true`/
-`-if-false`/`@phpstan-self-out`/`@phpstan-this-out` (a self-contained
-declaration-consistency check - real PHPStan's own `AssertRuleHelper`
-doesn't touch narrowing either, just validates the tag against the
-parameter's own declared type); `@readonly` (the documentation-only
-convention, parallel to the native `is_readonly` already tracked);
-`@param-immediately-invoked-callable`/`@param-later-invoked-callable`/
-`@param-closure-this`; an enumerated `@phpstan-*` tag whitelist for typo
-detection; and a validation layer for the already-shipped inline `@var`
-(Phase 35's `inline_var_annotation`, confirmed to unconditionally
-overwrite the tracked type with no validation against the real
-expression type at all). (`@property`/`@property-read`/
-`@property-write` shipped separately, Phase 13 Finding D - out of this
-phase's scope.)
+`cases()`/`value`/`name` already are, Phase 9) unlock `MethodTagCheck`/
+`Rule`/`TraitRule`/`TraitUseRule`, `MixinCheck`/`Rule`/`TraitRule`/
+`TraitUseRule`, and (nested-template sub-case) `MethodTagTemplateTypeCheck`/
+`Rule`/`TraitRule`. The `@property`/`@property-read`/`@property-write`
+*validation* half is a genuine bright spot found by the audit: parsing
+and inference already ship (Phase 13 Finding D); only the diagnostic
+layer (`PropertyTagCheck`/`Rule`/`TraitRule`/`TraitUseRule`) is missing -
+cheapest item in the whole phase, do it first. `@phpstan-type`/
+`@phpstan-import-type` (global config-level aliases, circular-alias
+detection, duplicate-name checks) unlock `LocalTypeAliasesCheck`/`Rule`/
+`TraitAliasesRule`/`TraitUseAliasesRule`, `TypeAlias`, `TypeAliasResolver`,
+`UsefulTypeAliasResolver`. `@phpstan-require-extends`/`-implements`/
+`@phpstan-sealed` (validated once per declaration, the same shape
+`check_generic_bounds` already uses for `@extends`/`@implements` bounds,
+Phase 10.5) unlock `RequireExtendsRule`/`Check`, `RequireImplementsRule`,
+`RequireExtendsDefinitionClassRule`/`TraitRule`,
+`RequireImplementsDefinitionClassRule`/`TraitRule`,
+`SealedDefinitionClassRule`/`TraitRule`. `@phpstan-consistent-constructor`
+unlocks `ConsistentConstructorHelper`, `ConsistentConstructorDeclarationRule`,
+`ConsistentConstructorRule`, plus the related constructor-return-type
+check (`ConstructorReturnTypeRule`) and `NewStaticRule`/
+`NewStaticInAbstractClassStaticMethodRule` (both need Phase 48's
+symbol-existence/self-static-distinction work too). `@phpstan-assert`/
+`-if-true`/`-if-false` (a self-contained declaration-consistency check -
+real PHPStan's own `AssertRuleHelper` doesn't touch narrowing either,
+just validates the tag against the parameter's own declared type)
+unlock `AssertRuleHelper`, `FunctionAssertRule`, `MethodAssertRule`.
+`@phpstan-self-out` unlocks `IncompatibleSelfOutTypeRule`. `@readonly`
+(the documentation-only convention, parallel to the native `is_readonly`
+already tracked) unlocks `MissingReadOnlyByPhpDocPropertyAssignRule`,
+`ReadOnlyByPhpDocPropertyAssignRule`, `ReadOnlyByPhpDocPropertyRule`.
+Inline `@var` validation (Phase 35's `inline_var_annotation`, confirmed
+to unconditionally overwrite the tracked type with no validation against
+the real expression type) unlocks `VarTagChangedExpressionTypeRule`,
+`VarTagTypeRuleHelper`, `WrongVariableNameInVarTagRule` - another bright
+spot: the narrowing side-effect already works, only the error-reporting
+half is missing. An enumerated `@phpstan-*` tag whitelist for typo
+detection remains open too.
+
+**New sub-items the audit surfaces that this phase's text didn't
+previously name**: `@throws` tag parsing itself is *also* needed here
+for a self-contained "is the tag's type a `Throwable` subtype" check
+(`InvalidThrowsPhpDocValueRule`), distinct from the full throw-type
+model tracked at Phase 42 - can ship early;
+`@param-immediately-invoked-callable`/`-later-invoked-callable`
+(`IncompatibleParamImmediatelyInvokedCallableRule`) and
+`@param-closure-this` are standalone, S-effort items with no dependency
+on anything else in this phase.
+
+**Recommendation.** Split into two waves when executed: Wave A = tag
+parsing only (cheap, unlocks synthesized-member inference the way
+`@property` already benefits from it); Wave B = the validation/
+diagnostic layer on top (per-tag rules above) - this mirrors the pattern
+that already worked for `@property` in this codebase.
 
 **Phase 37 - Attribute (`#[...]`) AST support (PLANNED).**
 `#[Attribute(...)]` is lexed and thrown away entirely
 (`Lexer::skip_whitespace_and_comments`) - real attribute content is
 never available anywhere in this project, only two narrowly
-special-cased stub-generation attributes get lexer-level text
-splicing (`#[PhpStormStubsElementAvailable]`, `#[LanguageLevelTypeAware]`).
+special-cased stub-generation attributes get lexer-level text splicing
+(`#[PhpStormStubsElementAvailable]`, `#[LanguageLevelTypeAware]`).
 Needs a real lexer-level fix (emit tokens for `#[`, the name, `(`,
 args, `,`, `]` instead of skipping the span, reusing the existing
 string-aware bracket-depth-counting logic those two special cases
@@ -167,6 +298,23 @@ declaration site that can carry one (`ClassDecl`/`MethodDecl`/
 closures/arrow functions), and checker-side attribute-class-existence
 and target-validity checking, plus a `#[NoDiscard]` marker.
 
+The exhaustive audit confirms this is the single most cross-cutting gap
+in the whole codebase - it independently surfaced as an identical,
+already-verified-real (`attr_groups`/`AttrGroup` confirmed absent from
+`ast.rs`/`parser/classes.rs`) blocker in **six** separate audit
+categories, and its consolidated unlock list spans nearly every
+declaration kind: `AttributesCheck`, `ClassAttributesRule`,
+`ClassConstantAttributesRule`, `NonClassAttributeClassRule`,
+`TraitAttributeClassRule`, `TraitAttributesRule`, `PropertyAttributesRule`,
+`PropertyHookAttributesRule`, `EnumCaseAttributesRule`,
+`MethodAttributesRule`, `ParamAttributesRule`, `FunctionAttributesRule`,
+`ClosureAttributesRule`, `ArrowFunctionAttributesRule`,
+`ConstantAttributesRule`, `CallToMethodStatementWithNoDiscardRule`,
+`CallToStaticMethodStatementWithNoDiscardRule`,
+`CallToFunctionStatementWithNoDiscardRule`. Prerequisite for the
+`#[Override]`/`#[ReturnTypeWillChange]` half of Phase 64's
+override-compatibility rewrite.
+
 **Phase 38 - Target-PHP-version configuration (PLANNED).** No
 `php_version` setting exists anywhere (`config.rs`/CLI) - every "X only
 supported on PHP Y.Z and later" portability check is unbuildable
@@ -175,6 +323,15 @@ precedent of `strict_mixed_arrays` (Phase 11 Stage 5: `config.rs` field
 -> CLI flag -> `Project` setter), plus a small `PhpFeature -> (u8, u8)`
 table.
 
+The exhaustive audit found this is already correctly scoped, but is a
+**recurring blocker** across four other audit categories - worth
+resequencing earlier than its number implies, since it gates the
+version-gate half of `FinalConstantRule`, `NativeTypedClassConstantRule`,
+`ConstantAttributesRule`, `DeprecatedCastRule`, `VoidCastRule`,
+`BacktickRule`, `UnsetCastRule`, `ArrayUnpackingRule`, `ReadOnlyClassRule`,
+`ConstantsInTraitsRule`, `InvalidPromotedPropertiesRule`,
+`NoncapturingCatchRule`, and `ThrowExpressionRule`.
+
 **Phase 39 - Deprecated-symbol usage warnings (PLANNED).**
 `@deprecated` is parsed-past and discarded (confirmed - it only appears
 in a `docblock.rs` test fixture, never consumed). New generalized
@@ -182,6 +339,11 @@ in a `docblock.rs` test fixture, never consumed). New generalized
 `lookup_property`'s already-centralized lookup machinery, switching the
 predicate from "not found -> error" to "found, but deprecated -> warn,"
 once `FunctionSig`/`PropertySig` gain a `deprecated: bool` field.
+Unaffected by the exhaustive audit's own unlock lists (real PHPStan's
+own `@deprecated` enforcement isn't organized as a dedicated `Rules/`
+category the way the audited categories were - it's threaded through
+individual rules elsewhere) - the scope above stands as originally
+written.
 
 **Phase 40 - PHPStan-API-usage checks (PLANNED).** Checks PHP code that
 consumes `phpstan/phpstan` itself as a Composer library (third-party
@@ -193,7 +355,13 @@ vendor-directory file-path check; `@api`/`@api-do-not-implement`
 recognized via Phase 36's own tag infrastructure; gated behind
 detecting a `phpstan/extension-installer`/`phpstan/phpstan` dependency
 in the analyzed project's own `composer.json` (mirrors the real
-Pest-config-detection precedent, Phase 21).
+Pest-config-detection precedent, Phase 21). The exhaustive audit's own
+`Api/*` findings (`ApiClassConstFetchRule`, `ApiMethodCallRule`, etc.,
+11 items) were all classified `not_applicable` for phpstan-rs *itself*,
+since they gate on referencing PHPStan's own `PHPStan\*` namespace, which
+this project has none of. This phase remains the mirror-image, correct
+feature: checking *other* PHP code that consumes real PHPStan's API,
+not phpstan-rs protecting its own.
 
 **Phase 41 - Purity / side-effect model (PLANNED).** No purity/
 impurity tracking exists anywhere in `src/`. Needs an impure-point
@@ -207,8 +375,37 @@ static/global access, ...; each a real category from PHPStan's own
 a tagged-pure function against its own real impure points. The "unused
 result of a pure call" rule family additionally needs *transitive*
 purity across the call graph - a fixed-point pass over the
-already-fully-indexed `Registry` (Phase 7), not new Collectors-style
-infrastructure.
+already-fully-indexed `Registry` (Phase 7).
+
+The exhaustive audit found the same gap independently in two more
+categories and confirms this phase's scope should absorb both rather
+than spawning separate phases: a 12-item *function/method/constructor
+purity tracking* cluster (`CallToConstructorStatementWithoutImpurePointsRule`,
+`CallToFunctionStatementWithoutImpurePointsRule`,
+`CallToMethodStatementWithoutImpurePointsRule`,
+`CallToStaticMethodStatementWithoutImpurePointsRule`,
+`ConstructorWithoutImpurePointsCollector`,
+`FunctionWithoutImpurePointsCollector`, `MethodWithoutImpurePointsCollector`,
+`PossiblyPureCallTransitivePurityResolver`,
+`PossiblyPureFuncCallCollector`/`MethodCallCollector`/`NewCollector`/
+`StaticCallCollector`), plus a *possibly-impure tip* decoration
+(`PossiblyImpureTipHelper`, needs Phase 47's diagnostic-tip field); and
+`FunctionPurityCheck`/`PureFunctionRule`/`PureMethodRule` (the
+`@phpstan-pure`-tag-vs-actual-impure-points validation itself) plus a
+**simpler, distinct** statement-level "no side effect at all" family
+(`CallToConstructorStatementWithoutSideEffectsRule`,
+`CallToMethodStatementWithoutSideEffectsRule`,
+`CallToStaticMethodStatementWithoutSideEffectsRule`,
+`CallToFunctionStatementWithoutSideEffectsRule`) that needs no purity
+model at all - just "does this call have zero observable effect." Also
+folds in `NoopRule` (bare no-op expression statement - not previously
+named anywhere in this roadmap, same "does this statement do anything"
+root question). **Recommendation.** Stage as: (1) `NoopRule` + the four
+`WithoutSideEffectsRule`s [M effort, ships fast, no purity model
+needed], (2) the full impure-point classification + Collector-based
+transitive purity resolution [XL, the real architectural work - also
+needs Phase 82's Collector/cross-file aggregation architecture for the
+transitive half specifically].
 
 **Phase 42 - Checked-exception / throw-type model (PLANNED).**
 `FunctionSig` has no `throws` field at all - the same gap Phase 15
@@ -219,6 +416,52 @@ collecting `throw` statements and transitively unioning every called
 function's own `throws`. Only the "missing checked exception"/
 "throw-type covariance"/"too-wide throw type" rule family needs an
 opt-in flag; the "throws void but explicitly throws" family doesn't.
+
+The exhaustive audit found the *same* gap independently in three more
+categories and confirms this phase's scope should absorb all of them:
+an 11-item `*ThrowsRule`/`*ThrowTypeRule` family
+(`CatchWithUnthrownExceptionRule`, `MethodThrowTypeCovarianceRule`,
+`MissingCheckedExceptionInFunctionThrowsRule`/`InMethodThrowsRule`,
+`ThrowsVoidFunctionWithExplicitThrowPointRule`/`VoidMethodWithExplicitThrowPointRule`,
+`TooWideFunctionThrowTypeRule`/`MethodThrowTypeRule`,
+`DefaultExceptionTypeResolver`); the per-callee dispatch layer once the
+base model exists (`DynamicFunctionThrowTypeExtension`/
+`DynamicMethodThrowTypeExtension`/`DynamicStaticMethodThrowTypeExtension`);
+and a whole *no throw-type/`@throws` tracking subsystem* cluster in
+`src/Type/Php/*` - 16 unlocks (`ArrayCombineFunctionThrowTypeExtension`,
+`AssertThrowTypeExtension`, `DateTimeConstructorThrowTypeExtension`,
+`DateTimeModifyMethodThrowTypeExtension`, `DateTimeSubMethodThrowTypeExtension`,
+`DateTimeZoneConstructorThrowTypeExtension`,
+`DomDocumentCreateElementDynamicThrowTypeExtension`,
+`DsMapDynamicMethodThrowTypeExtension`, `FilterVarThrowTypeExtension`,
+`IntdivThrowTypeExtension`, `JsonThrowTypeExtension`,
+`ReflectionClassConstructorThrowTypeExtension`,
+`ReflectionFunctionConstructorThrowTypeExtension`,
+`ReflectionMethodConstructorThrowTypeExtension`,
+`ReflectionPropertyConstructorThrowTypeExtension`,
+`VersionCompareFunctionDynamicThrowTypeExtension` - `json_encode`'s
+`JSON_THROW_ON_ERROR` bit-detection already exists and is reused for
+return-type false-stripping, so the hardest per-callee logic is partly
+built already). `@throws` tag parsing itself can ship early and
+separately under Phase 36 (`InvalidThrowsPhpDocValueRule`, a
+self-contained Throwable-subtype check).
+
+**Also self-contained and shippable independently, ahead of the full
+model**: `ExprKind::Throw` (`src/checker/expr.rs:652-655`) never calls
+the `Throwable`-subtype check that `StmtKind::Throw` already does - a
+pure code-sharing fix (S effort) unlocking `ThrowExprTypeRule` with zero
+new infrastructure; do this first, inside this phase, before the rest.
+Also folds in `OverwrittenExitPointByFinallyRule` (finally-block
+exit-point overwrite detection) as a closely related but separable
+M-effort addition reusing the existing try/catch/finally CFG merge in
+`StmtKind::Try`. **Recommendation.** Sequence: (1) `ThrowExprTypeRule`
+fix [S], (2) `@throws` tag + Throwable-subtype check [S-M], (3)
+`ThrowPoint` collection primitive [unlocks the dead-catch half of
+`CatchWithUnthrownExceptionRule` immediately - do this before the full
+checked-exceptions convention, since dead-catch detection is high-signal
+and opt-in-checked-exceptions is comparatively niche], (4) the rest of
+the `*ThrowsRule` family, (5) the dynamic per-callee throw-type
+extensions.
 
 **Phase 43 - Property-hook checker validation (PLANNED).** PHP 8.4
 property hooks are fully parsed (`PropertyDecl.hooks`, and
@@ -236,15 +479,36 @@ interpreter to delegate to, so it needs the real RFC semantics
 reimplemented directly: virtual iff no hook body ever references the
 property's own backing storage.
 
+The exhaustive audit confirms this scope and adds concrete unlocks:
+`ExistingClassesInPropertyHookTypehintsRule`,
+`GetNonVirtualPropertyHookReadRule`, `SetNonVirtualPropertyHookAssignRule`,
+`SetPropertyHookParameterRule` (a bright spot - the hook's declared
+parameter type, `PropertySig::set_ty`, is already captured and reused
+for write-checking; only validating it against the property's own type
+at the declaration site is missing), `ReadingWriteOnlyPropertiesRule`.
+**Also requires**, as an explicit dependency the audit surfaces that
+this phase's text didn't previously name: property mutability/hook
+metadata (`readonly`/`private(set)`) needs to exist on `PropertySig`
+(Phase 57) before `PropertyVarianceRule` can run (properties don't
+currently participate in variance checking at all - a *readonly*
+property typed `T` is actually a legitimate covariant-safe position,
+per this document's own "Known limitations" entry) and before the
+`UnsetRule` hooked-property sub-diagnostic can be built.
+
 **Phase 44 - `@phpstan-ignore` inline suppression (PLANNED).** Only
 whole-file baseline suppression exists today (Phase 11). Real PHPStan's
 `@phpstan-ignore-line`/`-next-line` are simple line markers, but bare
 `@phpstan-ignore` takes a real comma-separated identifier list (each
 optionally followed by a parenthesized comment) matching against a
 diagnostic's own stable identifier - which `Diagnostic` doesn't have at
-all today (just `location`/`message`/`span`/`level`). Worth retrofitting
-regardless of this phase, since CI output formats (Phase 16) and
-finer-grained baselines both want stable identifiers too.
+all today (just `location`/`message`/`span`/`level`). The exhaustive
+audit's `Ignore/` category findings (`IgnoreParseErrorRule`) fold into
+Phase 56's grammar-level PHPDoc parser work instead of here (parse-error
+recovery is a parser concern); this phase's own suppression-matching
+logic is unaffected. Its stated prerequisite is now concretely tracked
+as Phase 47 (diagnostic identifier & metadata infrastructure) rather
+than an unscheduled "worth retrofitting regardless" note - build Phase
+47 first.
 
 **Phase 45 - Declared-vs-actual-narrowest-type inference
 (TooWideTypehints) (PLANNED).** No mechanism compares a declared type
@@ -257,6 +521,27 @@ produces one); and independently-toggled nested/recursive narrowing
 too, not just the top level) - needs a real parallel-tree-walk utility
 over `Type`, not a byproduct of `infer_expr`.
 
+The exhaustive audit confirms and splits this into two concrete
+sub-clusters: a **return/property variant** - unions every function/
+method/closure/arrow-function's actual return statements, or a
+property's actual assignments, and compares that union against the
+declared type (needs a new narrow-declared-vs-observed-union helper in
+`src/types.rs`, consumed from function/method/closure/property-
+assignment analysis in `src/checker/*.rs`) - unlocking
+`TooWideArrowFunctionReturnTypehintRule`, `TooWideClosureReturnTypehintRule`,
+`TooWideFunctionReturnTypehintRule`, `TooWideMethodReturnTypehintRule`,
+`TooWidePropertyTypeRule`, `TooWideTypeCheck` (L effort, medium value -
+more a type-hygiene nit than a correctness-bug catcher, but a
+well-defined, self-contained feature once the comparison helper
+exists); and a **`@param-out` variant** - phpstan-rs has no `@param-out`
+PHPDoc tag concept at all (confirmed absent from `docblock.rs`/
+`registry.rs`), a harder prerequisite than the return-type variant since
+there's no declared out-type to even compare against, needing new tag
+support plus `src/checker/control_flow.rs` execution-end/return-scope
+tracking - unlocking `TooWideFunctionParameterOutTypeRule`,
+`TooWideMethodParameterOutTypeRule`, `TooWideParameterOutTypeCheck` (L
+effort, low value - `@param-out` is rare in real-world PHP).
+
 **Phase 46 - PCRE pattern-validity checking (PLANNED).** Real
 PHPStan's `RegularExpressionPatternRule` flags a genuinely malformed
 regex pattern. `regex_groups.rs` (Phase 12) deliberately doesn't do
@@ -266,6 +551,700 @@ not for catching real syntax errors. This project's first C dependency
 (`pcre2` bindings) - Rust's own `regex` crate is a different-enough
 flavor to give wrong answers on real PCRE patterns. Needs its own
 build-time/vendoring story and a vendored-vs-system-dependency decision.
+The exhaustive audit's `arrays-cast-operators-regex` category
+independently arrived at the identical cluster with identical
+reasoning - **no changes to this phase's scope, just confirmation.**
+(`preg_quote()` delimiter cross-checking, a separate small finding from
+the same audit category, is folded into Phase 71's small-builtin-checks
+batch instead, since it needs no PCRE validation of its own.)
+
+**Phase 47 - Diagnostic identifier & metadata infrastructure (NEW,
+PLANNED).** `Diagnostic` (`src/checker.rs:71`) is a flat 4-field struct,
+just `{location, message, span, level}`, populated via ad hoc struct
+literals/`format!()` calls scattered across `src/checker/*.rs`, with no
+identifier field, no tip/canned-tip helper, no metadata bag, no
+`nonIgnorable` flag, and no `fixNode`/auto-fix support, and no fluent
+builder to assemble any of it consistently (the Rust equivalent of
+`RuleErrorBuilder`). This is what real PHPStan's `@phpstan-ignore
+<identifier>` matches against, what CI output formats (Phase 16) want
+for machine consumption, and what lets a "possibly impure" tip (see
+Phase 41) be appended to a constant-condition diagnostic without a
+second diagnostic. The core struct change is small; real parity requires
+threading an identifier convention through dozens of existing
+call-sites and deciding a Rust-idiomatic builder API. Prerequisite for
+Phase 44 (`@phpstan-ignore`, which already names this as a blocker),
+Phase 16 (CI output formats), and Phase 41's possibly-impure tip
+decoration. Size: M.
+
+**Phase 48 - Symbol-existence validation pipeline (classes, functions,
+use-imports, typehints) (NEW, PLANNED).** `resolve_name_expr`
+(`src/checker/resolve.rs:39`) unconditionally returns
+`Type::Object(name, ..)` regardless of whether the class exists, and
+`resolve_type_hint` (`src/checker/resolve.rs:53`) silently accepts a
+typo'd class name in a param/return/property type unless that name is
+*also* used at a `new` or call site elsewhere - confirmed by reading
+both functions directly. Build the missing "does this name actually
+resolve" primitive once (`ClassKind` is already tracked per class,
+`src/ast.rs:213-218`, and the registry can already resolve a name to a
+`ClassInfo` - this is checker wiring reusing existing data, not a new
+data model), then wire it into every site that currently trusts a name
+blindly: `use`/`use function`/`use const`/group-use validation,
+catch-clause types, `extends`/`implements`/`instanceof`/trait-use
+targets, and - the single highest-value application - parameter/
+return/property type hints.
+
+This is the highest real-world-value item in the entire audit -
+typo'd/missing class references are one of PHPStan's most common
+catches, and it surfaced as an independent blocker in *seven* separate
+audit categories. Consolidated unlock list: `ExistingNamesInUseRule`,
+`ExistingNamesInGroupUseRule`, `CaughtExceptionExistenceRule`,
+`ExistingClassInClassExtendsRule` (partially done already -
+`check_final_class_extension`, `src/checker/oop.rs:16-34`, implements
+this rule's final-class-extension sub-check using this same registry
+data), `ExistingClassesInClassImplementsRule`,
+`ExistingClassesInEnumImplementsRule`, `ExistingClassesInInterfaceExtendsRule`,
+`ExistingClassInInstanceOfRule`, `ExistingClassInTraitUseRule`,
+`ExistingClassesInTypehintsRule`, `ExistingClassesInPropertiesRule`,
+`ExistingClassesInArrowFunctionTypehintsRule`,
+`ExistingClassesInClosureTypehintsRule`,
+`ExistingClassesInPropertyHookTypehintsRule`, `ClassConstantRule`,
+`ClassNameCheck`/`ClassCaseSensitivityCheck`/`ClassForbiddenNameCheck`
+(case-sensitivity + leaked-prefix checks fold in cheaply once the
+lookup exists). A fuller version of this same primitive - a centralized
+"resolve a type, split union/intersection members, collect per-class
+existence errors while respecting `class_exists()`/`interface_exists()`
+guards, tag each with a usage-location-specific message + identifier"
+pipeline matching PHPStan's `RuleLevelHelper::findTypeToCheck` +
+`ClassNameUsageLocation` taxonomy - is a stretch goal on top of this
+phase's MVP; it additionally needs Phase 36's attribute/assert/
+template/sealed/mixin/requireExtends/requireImplements tag parsing to
+reach several of PHPStan's ~27 usage-location kinds, and unlocks
+`ClassNameNodePair`, `ClassNameUsageLocation`, `FoundTypeResult`, and
+`RuleLevelHelper`'s `findTypeToCheck()` half. Prerequisite for
+`InstantiationRule`'s remaining trait/enum-instantiation cases and
+several Phase 15-adjacent items. Size: L for the MVP, XL for the
+full `RuleLevelHelper`-equivalent pipeline.
+
+**Phase 49 - Call-argument binding generalization (named args, spread,
+by-ref legality) (NEW, PLANNED).** `check_args`
+(`src/checker/calls.rs:262`) implements only the MVP: positional arity
+plus a per-positional type check. Extend it with named-argument handling
+(unknown/duplicate/positional-after-named), unpacked/spread arguments,
+and by-ref target legality - the last needs the same "does this access
+chain contain a nullsafe operator" walk `NullsafeCheck` provides in real
+PHPStan, which this project has never built despite already tracking
+nullsafe elsewhere. Unlocks `FunctionCallParametersCheck`,
+`NullsafeCheck`. Prerequisite for attribute constructor-argument
+validation (Phase 37). Size: L - one of the highest-value gaps found;
+named-argument and by-ref misuse are common in modern PHP.
+
+**Phase 50 - `Type::Array` key-type and general offset/shape engine
+(NEW, PLANNED).** `Type::Array(Box<Type>)` carries only a value type -
+no key type - and `Type::ArrayShape` (`Vec<(String, Type, bool)>`) has
+no distinct int-vs-string key typing, no `isList` tri-state field, no
+"unsealed"/open-shape tracking, and no per-operation return-type
+overrides (slice/splice/chunk/flip/reverse/search/shift/pop/
+intersectKey/fillKeys/mergeWith/etc. - roughly 30-40 of them in real
+PHPStan) to propagate shape/list-ness/non-emptiness through builtin
+array calls; array functions are typed generically instead of
+consulting the input's own shape/accessory markers. This is explicitly
+named in this document's own former Phase 15 as a recurring gap ("the
+same root cause Phase 35 just ran into again, seven phases after it was
+first tracked here") - the exhaustive audit shows it's now the blocker
+for a much larger rule set than that one-line mention implied, warranting
+promotion to its own phase.
+
+Consolidated unlocks: `NonexistentOffsetInArrayDimFetchCheck`/`Rule`,
+`ArrayDestructuringRule`, `AllowedArrayKeysTypes`,
+`InvalidKeyInArrayDimFetchRule`, `InvalidKeyInArrayItemRule`,
+`HasOffsetType`, `HasOffsetValueType`, `OffsetAccessAssignOpRule`,
+`OffsetAccessAssignmentRule`, `ConstantArrayType`,
+`ConstantArrayTypeBuilder`, `OversizedArrayType`, `OversizedArrayBuilder`,
+`AccessoryArrayListType`, `NonEmptyArrayType`, plus (as direct Phase-73
+consumers) `ArrayChangeKeyCaseFunctionReturnTypeExtension`,
+`ArrayFlipFunctionReturnTypeExtension`, `ArrayFillKeysFunctionReturnTypeExtension`,
+`ArrayRandFunctionReturnTypeExtension`, `ArrayCountValuesDynamicReturnTypeExtension`,
+`ArraySearchFunctionDynamicReturnTypeExtension`, `ArrayFindKeyFunctionReturnTypeExtension`,
+`ArrayIntersectKeyFunctionReturnTypeExtension`,
+`ArrayKeyExistsFunctionTypeSpecifyingExtension`,
+`UnsafeArrayStringKeyCastingTraverser`. `src/types.rs`'s `Type::Array`
+variant and `Type::ArrayShape` definition, `AccessoryKind::ArrayList`,
+and `src/checker/expr.rs`'s `infer_array_literal_type`/
+`infer_spread_array_literal_type` are the concrete call sites. Size: XL,
+a data-model change touching every array-construction and
+array-subtyping call site in the checker, but array manipulation
+preserving or destroying list-ness/non-emptiness is extremely common in
+real PHP code, making this high-value despite the size.
+
+**Phase 51 - `Type` coercion/cast method surface + `IntegerRangeType`
+completion (NEW, PLANNED).** `Type` has no `toInteger()`/`toFloat()`/
+`toString()`/`toBoolean()`/`toArrayKey()`-style coercion methods at all;
+every conversion is done ad hoc per call site (`src/checker/expr.rs`
+Cast arm, Echo/print handling, `~`/`-` unary). Pair this with completing
+`IntegerRangeType` arithmetic (`shift()`, range-preserving `**`,
+`toAbsoluteNumber()`/`toBitwiseNotType()` bound preservation) since
+both are the same "give `Type` a real coercion API" root cause.
+Unlocks `InvalidCastRule`, `EchoRule`, `PrintRule`,
+`InvalidPartOfEncapsedStringRule`, plus the `IntegerRangeType`-consumer
+extensions (`AbsFunctionDynamicReturnTypeExtension`,
+`StrlenFunctionReturnTypeExtension`, `RandomIntFunctionReturnTypeExtension`,
+`CountFunctionReturnTypeExtension`, `HrtimeFunctionReturnTypeExtension`),
+`StrvalFamilyFunctionReturnTypeExtension`,
+`SetTypeFunctionTypeSpecifyingExtension`. Size: L - the single
+most-cited systemic gap in the `core-types` audit category; nearly
+every scalar `Type`'s "partial" status traces back to this.
+
+**Phase 52 - Invalid-operand-combination (`ErrorType`) concept for
+operators (NEW, PLANNED).** `infer_binary`/unary-operator arms always
+compute a best-effort, permissive result and never treat an operand
+pairing as an outright type error - confirmed structurally, since
+`ExprKind::Cast`/`Binary`/`Unary` and the inc/dec arms only ever compute
+a resulting type and never call `self.report(...)`, and `infer_binary`
+is an `&self` method that cannot report diagnostics even if someone
+wanted to add one without refactoring its signature. Add an
+`ErrorType`-equivalent concept (14 raw `Type::Mixed` fallback sites in
+`core-types` currently mask this - no distinct "resolution failed"
+sentinel exists) plus an operand-validity matrix, consulted from
+binary/comparison/unary arms. Unlocks `InvalidBinaryOperationRule`,
+`InvalidComparisonOperationRule`, `InvalidUnaryOperationRule`,
+`InvalidIncDecOperationRule`. Size: L - high value; array+object,
+string-array comparisons, `~` on an array/object are common
+real fatal-adjacent bugs.
+
+**Phase 53 - Structural Callable/Closure signature type + contextual
+closure-parameter typing (NEW, PLANNED).** `Type::Callable`
+(`src/types.rs:48`) is a bare marker with no parameter list, return
+type, purity, or template map, and every closure-literal expression
+(`src/checker/expr.rs`, ~lines 1342/1379/1470/1509) infers the flat
+`Object("Closure", [])` marker, discarding the closure's own PHPDoc/
+inferred signature entirely. Once a real structural type exists, wire
+it into higher-order builtins (`array_map`/`array_filter`/`usort`/
+`array_walk`/`preg_replace_callback`) so a closure's body is actually
+*checked* with contextually-injected parameter types - today
+`infer_closure_return_with_param_overrides` only uses the override to
+compute the outer call's return type, never to type-check the closure
+body itself, so a bug inside an `array_map` callback (e.g. calling an
+undefined method on `$item`) is never caught today. Unlocks
+`CallableType`, `ClosureType`, `CallableTypeHelper`,
+`CallableAssertionsHelper`, `FunctionParameterClosureTypeExtension`,
+`ArrayFilterParameterClosureTypeExtension`,
+`ArrayMapParameterClosureTypeExtension`, `ArrayWalkParameterClosureTypeExtension`,
+`PregReplaceCallbackClosureTypeExtension`, `ArrayFilterFunctionReturnTypeExtension`,
+`ArrayFilterFunctionReturnTypeHelper`, `CallCallablesRule`,
+`FunctionCallableRule`'s remaining dynamic-callee gap,
+`DynamicMethodReturnTypeExtension`, `DynamicReturnTypeExtensionRegistry`,
+`DynamicStaticMethodReturnTypeExtension`. Size: XL - high value; the
+contextual-injection half is a real, currently-reachable source of
+missed bugs, not a nicety.
+
+**Phase 54 - Generic template richness (`TemplateParam` bound/scope/
+variance rewrite) (NEW, PLANNED).** `Type::TemplateParam(String)`
+(`src/types.rs:~60`) is a bare name with no bound, scope, variance, or
+default - one flat placeholder standing in for ~19 of PHPStan's
+bound-specific `Template*Type` subclasses plus the `TemplateType`
+interface/trait. An unbound template can never be used as its own
+bound's type (indexed as an array, compared as a bool, treated as its
+bound's object methods) prior to substitution; it just becomes an
+opaque name until `class_template_bindings`/`substitute_template`
+resolve it. Add a `bound: Box<Type>` field (plus scope/variance/
+default), rewrite `substitute_template`/`class_template_bindings`/
+`check_variance` (`src/checker/generics.rs`) to compose variance
+through nested generics instead of the current flat class-level
+`covariant_templates`/`contravariant_templates` name-sets, and add
+`@template T = Default` PHPDoc parsing (currently silently dropped).
+
+This is the single largest cluster by class count in the whole audit -
+PHPStan splits "template bound to X" into ~19 concrete subclasses where
+phpstan-rs uses one variant. Unlocks the 19-class `Template*Type`
+family (`TemplateArrayType`, `TemplateBooleanType`,
+`TemplateConstantArrayType`, `TemplateConstantIntegerType`,
+`TemplateConstantStringType`, `TemplateFloatType`,
+`TemplateGenericObjectType`, `TemplateIntegerType`,
+`TemplateIntersectionType`, `TemplateIterableType`, `TemplateKeyOfType`,
+`TemplateMixedType`, `TemplateNullType`, `TemplateObjectShapeType`,
+`TemplateObjectType`, `TemplateObjectWithoutClassType`,
+`TemplateStringType`, `TemplateUnionType`, plus `TemplateType`/
+`TemplateTypeTrait`/`TemplateTypeStrategy`), `TemplateTypeVariance`,
+`TemplateTypeVarianceMap`, `TemplateTypeMap`, `TemplateTypeHelper`,
+`TemplateTypeFactory`, `TemplateTypeScope`, `VarianceCheck`,
+`MethodSignatureVarianceRule`, `FunctionSignatureVarianceRule`,
+`PropertyVarianceRule`, `ClassAncestorsRule`, `GenericAncestorsCheck`,
+`GenericObjectTypeCheck`, `InterfaceAncestorsRule`,
+`CrossCheckInterfacesHelper`, `GenericStaticType` (`static` losing its
+own generic type arguments in generic classes). `TemplateKeyOfType`/
+`TemplateObjectShapeType` specifically also need Phase 80's `key-of<T>`/
+`object{...}` PHPDoc syntax as a prerequisite; everything else in this
+phase is independent of it. Size: XL - a genuine algorithmic rewrite,
+not incremental wiring, but real-world value is high for
+generic-collection-heavy codebases (arg-count mismatches, fluent-builder
+`static` returns).
+
+**Phase 55 - Narrowing-engine generalization (NEW, PLANNED).** Four
+related gaps in `src/checker/narrowing.rs`, bundled because they're all
+"the narrowing engine only handles specific hardcoded shapes" rather
+than a general mechanism: (a) no comparison-outcome/range API for
+`<`/`>`/`<=`/`>=` at all (the only `Gt`/`GtEq` arm is the narrow
+`count($x) > 0` special case, confirmed by reading `infer_binary`); (b)
+no truth table for loose `==`/`!=` between differing scalar kinds; (c)
+no subtracted/negated-type (`T&~U`) representation, so `!$x instanceof
+Foo` on a non-union type is dropped entirely instead of recorded; (d)
+`apply_narrowing` fires only for hardcoded top-level shapes (if/while
+conditions, a bare `assert()`, two literal `count()` patterns) rather
+than a general recursive walk of any truthy-evaluated sub-expression, so
+`assert()` nested in `&&`, or `count($x)` inside a plain `if
+(count($x))`, fails to narrow today. Also extend
+`narrowing_type_for_predicate`'s single-arg fixed-target-type table to
+handle multi-arg/argument-derived targets (`is_a`, `class_exists`,
+`str_contains`) - and add the trivial one-line `is_iterable` entry
+first, within this phase, as a quick win.
+
+Unlocks `ImpossibleCheckTypeHelper`/`FunctionCallRule`/`MethodCallRule`/
+`StaticMethodCallRule`, `ImpossibleInArrayHaystackFiniteTypesRule`,
+`ConstantNumericComparisonTypeTrait`, `UndecidedComparisonTypeTrait`,
+`ConstantScalarTypeTrait`, `SubstractableTypeTrait`,
+`AssertFunctionTypeSpecifyingExtension`, `PregMatchTypeSpecifyingExtension`,
+`CountFunctionTypeSpecifyingExtension`, `IsIterableFunctionTypeSpecifyingExtension`,
+`ClassExistsFunctionTypeSpecifyingExtension`, `IsAFunctionTypeSpecifyingExtension`,
+`IsSubclassOfFunctionTypeSpecifyingExtension`, `StrContainingTypeSpecifyingExtension`,
+`StrlenFunctionTypeSpecifyingExtension`. Size: XL - high value;
+redundant/impossible checks left over from refactors are a very common,
+high-signal real-world finding, and this fix compounds across every
+existing narrowing rule too (each currently fails inside `&&`/nested
+conditions).
+
+**Phase 56 - Grammar-level PHPDoc parser rewrite (NEW, PLANNED).**
+`docblock.rs` is a lenient, best-effort line/regex tokenizer that
+silently drops anything it doesn't recognize, unlike real PHPStan's
+recoverable-error grammar parser which produces an explicit
+`InvalidTagValueNode`. This is architectural, not a bugfix, and every
+Phase 36 sub-item would ideally build on it rather than duplicate ad
+hoc error handling - but it is not a hard blocker for any of them (they
+can each add their own narrow validation first). Unlocks
+`InvalidPHPStanDocTagRule`, `InvalidPhpDocTagValueRule`,
+`IgnoreParseErrorRule` (the `@phpstan-ignore` parse-error sub-case, once
+Phase 44's suppression matching exists to consume it). **Recommendation.**
+Sequence optionally, either just before or interleaved with Phase 36's
+Wave B - not a hard prerequisite, but doing it first avoids rework.
+Size: XL.
+
+**Phase 57 - Property/method/constant visibility enforcement (NEW,
+PLANNED).** `PropertySig` (`src/registry/class_info.rs`) carries only
+`ty`/`is_static`/`is_readonly`/`set_ty` - no visibility field at all -
+so no checker code anywhere can enforce private/protected access,
+asymmetric `private(set)`/`protected(set)`, or LSB-unsafe `static::`
+access to a private static property (consumed at
+`src/checker/expr.rs:1089`/`:1013`, `src/checker/assignment.rs:231`).
+Separately, no call site (as opposed to declaration site) ever checks
+caller-context-vs-declared-visibility for a *method* call either
+(`src/checker/expr.rs`'s `MethodCall`/`StaticCall` arms, ~382-526/
+923-1010, do existence and arg-checking but never visibility gating -
+this needs threading "what class is the calling code currently inside"
+through to every call site, a genuinely new capability, not an
+extension of existing logic). Both are the same missing primitive ("is
+this access legal from here") applied to two member kinds - merge into
+one phase.
+
+Unlocks `AccessPrivatePropertyThroughStaticRule`, `AccessPropertiesCheck`/
+`Rule`/`InAssignRule`, `AccessStaticPropertiesCheck`/`Rule`/`InAssignRule`,
+`MethodCallCheck`, `StaticMethodCallCheck`, `StaticMethodCallableRule`,
+`CallPrivateMethodThroughStaticRule`, `AccessPrivateConstantThroughStaticRule`,
+`ClassConstantRule` (visibility half). The undefined-property/undefined-
+method detection these rules also cover is already implemented - the
+gap is purely the visibility layer on top. Size: L - highest-value
+cluster found in the `properties-enum-whitespace` audit category;
+private/protected access violations are one of the most common
+real-world PHP mistakes.
+
+**Phase 58 - `MissingTypehintCheck` completeness battery (level-6
+family) (NEW, PLANNED).** No `MissingTypehintCheck`-equivalent exists
+anywhere: no detection of implicit-mixed parameters/returns, bare
+`iterable`/`array` with no value type, non-generic use of a generic
+class, or `callable` with no signature - for any declaration kind
+(function, method, closure, arrow-fn, property, class constant).
+Unlocks `MissingClassConstantTypehintRule`, `MissingMethodParameterTypehintRule`,
+`MissingMethodReturnTypehintRule`, `MissingPropertyTypehintRule`,
+`MissingFunctionParameterTypehintRule`, `MissingFunctionReturnTypehintRule`.
+Size: L - build the generic `Type`-tree walker once, apply it at five
+declaration-kind call sites. High value for teams targeting
+PHPStan-level-6-equivalent strictness; not a correctness-bug catcher,
+more a completeness nudge.
+
+**Phase 59 - Unused-symbol detection subsystem (NEW, PLANNED).**
+phpstan-rs has no dead-code/unused-variable-usage-scanning category at
+all. Build one variable/member-usage walker (with the
+`func_get_args()`/`compact()`/`get_defined_vars()`/dynamic-variable-name
+escape hatches that force "treat everything as used"), then apply it to
+four sites: function/method parameters, closure `use()` captures, and
+private class members (constants/methods/properties). Unlocks
+`UnusedConstructorParametersRule`, `UnusedClosureUsesRule`,
+`UnusedPrivateConstantRule`, `UnusedPrivateMethodRule`,
+`UnusedPrivatePropertyRule` (the property variant additionally needs 5
+distinct read/write messages and `@phpstan-always-read`/`-written` tag
+support). Size: L - code-cleanliness signal rather than a
+correctness-bug catcher for the parameter/closure-use half, but the
+unused-private-member half is a very common, high-signal real finding
+after refactors.
+
+**Phase 60 - Isset/empty/nullsafe existence-probe reversal (NEW,
+PLANNED).** `is_existence_probe`/`check_expr_quiet_root`
+(`src/checker/expr.rs:195-224`) deliberately suppress "offset doesn't
+exist" diagnostics inside `isset()`/`empty()`/`??` - a real, tested
+design choice, not an oversight. Build the *other* half real PHPStan
+has: a diagnostic that fires when the probed expression's statically-
+known type proves the check is pointless (`isset($x)` where `$x` is
+never null; `?->` on a never-null receiver). Unlocks `EmptyRule`,
+`IssetRule`, `NullCoalesceRule`, `NullsafeMethodCallRule`,
+`NullsafePropertyFetchRule`. Size: M - strong effort-to-value ratio;
+the harder architectural half (quiet-root suppression through nested
+chains) is already built, only a type-to-message mapping remains, and
+`isset($x)`-on-never-null is a very common real finding.
+
+**Phase 61 - Return-statement / control-flow completeness (NEW,
+PLANNED).** Two related gaps in return-path analysis: (a) nothing
+compares a function/method's fall-through-without-return status against
+its declared/PHPDoc return type (void/never/mixed exemptions, Generator
+`TReturn` via yield) even though `always_terminates()` already exists
+and is exercised for narrowing merges; (b) `never`-typed functions that
+actually reach a `return`, and "value returned from a void function,"
+have no dedicated diagnostic path (`stmt.rs`'s Return handling funnels
+everything through one generic mismatch path). Unlocks `MissingReturnRule`
+(wiring it to the declared return type), `FunctionReturnTypeCheck`'s
+never/void completeness half. Size: M - cheap-for-value; reuses an
+existing, exercised analysis rather than building new, and forgetting a
+`return` is a very common real bug.
+
+**Phase 62 - Uninitialized-property / constructor dataflow (NEW,
+PLANNED).** No `ConstructorsHelper`-equivalent exists: nothing tracks
+which properties every constructor path (including the parent-
+constructor chain) is guaranteed to initialize before a premature read.
+Also sharpen `check_property_assignment`'s current one-condition
+readonly-write approximation (`current_class==owner &&
+current_method=="__construct"`) with real per-constructor dataflow:
+uninitialized-at-end-of-constructor detection, `__unserialize`/`__clone`
+recognition, double-assignment-in-clone detection. Unlocks
+`UninitializedPropertyRule`, `MissingReadOnlyPropertyAssignRule`,
+`ReadOnlyPropertyAssignRule`. Size: XL - real cross-method dataflow
+(every constructor's CFG plus every read site across the parent chain),
+but rated among the highest-value gaps in the audit; uninitialized
+typed properties are a very common real PHP error class, especially
+under `strict_types`.
+
+**Phase 63 - Duplicate-declaration scans (NEW, PLANNED).** No scan
+exists for redeclared enum cases/constants/properties/methods within
+one class/trait body (real value here is narrower than it sounds - PHP
+itself fatals on a literal same-body duplicate; this mainly catches
+duplicate enum cases and trait-composition collisions PHP does *not*
+reject at parse time), nor for a same-file case-insensitive collision
+between a class's own declarations and its `use`-alias imports, nor for
+duplicate top-level function declarations (the registry's
+`FxHashMap<String, FunctionSig>` silently last-write-wins). Unlocks
+`DuplicateDeclarationHelper`/`Rule`, `DuplicateTraitDeclarationRule`,
+`UsedNamesRule`, `DuplicateFunctionDeclarationRule`. Size: M - low-to-
+medium value individually; batched because they're all small,
+independent name-collision scans with no type-system dependency.
+(Whole-*project* duplicate-class-name detection is a separate, lower-
+priority item - see Phase 83.)
+
+**Phase 64 - Override-compatibility check rewrite (methods +
+properties) (NEW, PLANNED).** `check_method_overrides`
+(`src/checker/oop.rs:177-307`) is one simplified function checking only
+native parameter contravariance/return covariance; it never compares
+visibility, never detects missing/extra/variadic/by-ref parameter
+mismatches, and its ancestor lookup has no interface-first priority or
+trait-abstract-method special case. Decompose it into PHPStan's
+`MethodParameterComparisonHelper`/`MethodVisibilityComparisonHelper`/
+`MethodPrototypeFinder` shape, and add the *equivalent* check that
+doesn't exist at all today for properties (`OverridingPropertyRule`:
+static/readonly/hook/visibility/final/native-type-variance mismatches
+on property override). Unlocks `MethodParameterComparisonHelper`,
+`MethodVisibilityComparisonHelper`, `MethodPrototypeFinder`,
+`MethodSignatureRule`, `OverridingMethodRule`, `ParentMethodHelper`,
+`OverridingPropertyRule`. Prerequisite: Phase 57's property visibility
+field and `is_final`/`is_abstract` fields on `PropertyDecl` (needed for
+the property half); Phase 37's attribute AST support (for the
+`#[Override]` sub-check specifically only). Size: L for the method half
+(extends already-working logic), XL for the property half (needs three
+other phases first) - ship the method half first as its own milestone.
+
+**Phase 65 - Declaration-site modifier-consistency + constructor-shape
+checks (NEW, PLANNED).** A batch of small, independent boolean-flag-
+combination checks the parser currently accepts leniently where real
+PHP would fatal at compile time (phpstan-rs's own parser is more
+permissive than the PHP engine): abstract-in-non-abstract-class,
+private-abstract, final-private, interface-method-visibility,
+constructor declaring a return type, `$this` reassignment/`global`/
+`static`-declaration, reserved class-constant name `class`, class-
+constant `final`/visibility/native-type modifiers not currently tracked
+on `ClassConst`. Unlocks `AbstractMethodInNonAbstractClassRule`,
+`AbstractPrivateMethodRule`, `FinalPrivateMethodRule`,
+`MethodVisibilityInInterfaceRule`, `ConstructorReturnTypeRule`,
+`ClassAsClassConstantRule`, `FinalConstantRule`, `FinalPrivateConstantRule`,
+`NativeTypedClassConstantRule`, `InvalidVariableAssignRule`,
+`ThisInGlobalStatementRule`, `ThisInStaticStatementRule`. Size: S-M per
+item; batched as one phase since none has any shared blocker beyond
+Phase 38's PhpVersion gate for two of the const-modifier sub-checks.
+
+**Phase 66 - Enum sanity, ancestor-check wiring, and template-rejection
+completion (NEW, PLANNED).** Extend `check_enum_case_values`
+(`src/checker/oop.rs:94-121`, which already correctly detects duplicate
+backing values - the hardest sub-check) with the five remaining
+structural checks: constructor/destructor/magic-method bans, native
+`cases()`/`from()`/`tryFrom()` redeclaration ban, backing-type-must-be-
+int-or-string, `Serializable` ban, value-presence/type consistency.
+Also wire `check_class_generic_bounds` into the `StmtKind::EnumDecl` arm
+(`src/checker.rs:337`, currently gated to `ClassDecl` only at line 324 -
+a pure wiring gap) and reject `@template` tags on enums outright (enums
+can't be generic). Unlocks the `EnumSanityRule` remainder,
+`EnumTemplateTypeRule`, `EnumAncestorsRule`. Size: M - cheap wins; the
+hardest logic already exists or is a one-line wiring fix.
+
+**Phase 67 - `@internal` restricted-usage engine (NEW, PLANNED).** No
+stage parses or stores `@internal`, and no dispatch mechanism compares
+an accessed symbol's declaring namespace against the call site's
+namespace at any of the ~8 access-site shapes (method/static-method/
+property/static-property/constant/function calls, first-class-
+callables, `(string)`-cast-triggers-`__toString`). Unlocks a 16-item
+family: `RestrictedInternalClassConstantUsageExtension`,
+`RestrictedInternalClassNameUsageExtension`,
+`RestrictedInternalFunctionUsageExtension`,
+`RestrictedInternalMethodUsageExtension`,
+`RestrictedInternalPropertyUsageExtension`, `RestrictedInternalUsageHelper`,
+`RestrictedClassConstantUsageRule`, `RestrictedFunctionCallableUsageRule`/
+`UsageRule`, `RestrictedMethodCallableUsageRule`/`UsageRule`,
+`RestrictedPropertyUsageRule`, `RestrictedStaticMethodCallableUsageRule`/
+`UsageRule`, `RestrictedStaticPropertyUsageRule`,
+`RestrictedUsageOfDeprecatedStringCastRule`. Size: L - one tag + one
+namespace-comparison dispatched at ~8 call-site shapes, no new
+type-system concepts needed despite the large unlock count. Value is
+medium: matters most for library/framework authors, less for
+application codebases like this project's own Piwigo corpus.
+
+**Phase 68 - `array_filter`/`array_values`/duplicate-key no-op
+diagnostics (NEW, PLANNED).** Two cheap wins where the hard inference
+work is *already done* and only diagnostic emission is missing:
+`infer_array_literal_type` already detects duplicate literal-array keys
+for overwrite-semantics correctness but discards the fact;
+`array_filter`/`array_values`' precise return-type inference (falsy-
+narrowing, list-ness via `AccessoryKind::ArrayList`) already computes
+everything needed to detect a no-op call (already-list, all-truthy,
+empty input). Unlocks `DuplicateKeysInLiteralArraysRule`,
+`ArrayFilterRule`, `ArrayValuesRule`. Size: S - best effort-to-value
+ratio in the whole array/cast audit category; do this early and
+cheaply, independent of Phase 50's `Type::Array` rewrite.
+
+**Phase 69 - printf/sprintf/scanf format-string family completion
+(NEW, PLANNED).** `parse_format_specifiers`/`format_specifier_accepts`/
+`check_format_string_call` (`src/checker/calls.rs:376,468,529`) already
+implement a real, working subset for `sprintf`/`printf` - ordered
+specifiers only. Extend with positional (`%N$`) specifiers, width/
+precision `*` sub-placeholders, a strict-vs-castable matching mode,
+`scanf`-style placeholder counting, and wire the existing engine into
+`vprintf`/`vsprintf`/`fprintf`/`sscanf`/`fscanf`. Unlocks
+`PrintfArrayParametersRule`, `PrintfHelper`, `PrintfParameterTypeRule`,
+`PrintfParametersRule`, `PrintfPlaceholder`. Size: L - high value;
+printf-family placeholder/argument mismatches are one of the most
+common real bug classes PHPStan catches, and the existing sprintf/
+printf coverage proves the approach already works.
+
+**Phase 70 - Generator/yield type modeling (NEW, PLANNED).** No
+`Generator<K, V, TSend, TReturn>` type shape exists; `yield`/`yield
+from` (`src/checker/expr.rs:656-680`) both return `Type::Mixed`
+unconditionally and are never compared against the enclosing function's
+declared return type. Add the generic shape and wire it into key/
+value/`TSend` checking plus yield-outside-a-function/wrong-return-type
+validation. Unlocks `YieldFromTypeRule`, `YieldInGeneratorRule`,
+`YieldTypeRule`. Size: L.
+
+**Phase 71 - Small self-contained builtin checks batch (`call_user_func`,
+`random_int`, `preg_quote`, and others) (NEW, PLANNED).** Batch of
+small, independent builtin-specific checks with no shared architectural
+blocker: `call_user_func()`/`call_user_func_array()` argument-
+reordering-and-recheck against the target callable; `random_int()`
+min>max ordering; `filter_var()`'s `FILTER_NULL_ON_FAILURE`/
+`FILTER_THROW_ON_FAILURE` flag-conflict; `define()`'s ignored third
+argument; `preg_quote()` delimiter cross-checking (soft-benefits from
+Phase 72's pattern-argument-extraction helper); function-name case-
+insensitivity + `function_exists()`-guard suppression for the existing
+undefined-function check; useless-return-value builtins (`var_export`/
+`print_r`/`highlight_string`). Size: M overall (each item S).
+
+**Phase 72 - Regex capture-group inference extensions (distinct from,
+not blocked by, Phase 46) (NEW, PLANNED).** Two additive improvements
+to `regex_groups.rs`'s Scanner that are about *type precision for
+`$matches`*, not pattern *validity* (so independent of Phase 46's PCRE-
+validation work): (a) a tri-state fallback for non-enumerable capture
+groups (`(\d+)` -> `numeric-string`, `([a-z]+)` -> `non-empty-string`,
+instead of degrading to plain `string`) plus `(?|...)` branch-reset and
+`x`-modifier support; (b) resolving a statically-foldable `Concat`
+pattern argument (e.g. `'/^' . $prefix . '$/'`) instead of only
+matching `ExprKind::Literal(String)` in `literal_string_value()`.
+Unlocks improvements to `RegexAstWalkResult`, `RegexCapturingGroup`,
+`RegexGroupParser`, `RegexGroupWalkResult`, `RegexNonCapturingGroup`,
+`RegexExpressionHelper`. Size: M+S - high value; `preg_match()`
+`$matches` shape typing is high-frequency, and a non-literal group
+(extremely common: `(\d+)`) currently silently degrades.
+
+**Phase 73 - Array/string stdlib function coverage, batch 1
+(key-type-dependent) (NEW, PLANNED).** Extensions that specifically
+need Phase 50's array key-type work first: `array_change_key_case`,
+`array_flip`, `array_fill_keys`, `array_rand`, `array_count_values`,
+`array_search` (key precision), `array_find_key`, `array_intersect_key`,
+`array_key_exists` narrowing. Prerequisite: Phase 50. Size: L.
+
+**Phase 74 - Array/string stdlib function coverage, batch 2
+(independent of key-type work) (NEW, PLANNED).** Everything else in
+the array-function long tail with no shared blocker beyond "write the
+match arm": generalize the existing `array_unique` "return an
+`ArrayType` from arg 0" pattern to its 16 sibling functions in
+PHPStan's `ArgumentBasedFunctionReturnTypeExtension` list (`array_diff*`,
+`array_udiff*`, `array_intersect*`, `array_uintersect*`);
+`array_pop`/`array_shift`'s own expression-result type (the by-ref side
+is already solved, only the call's own value is missing);
+`array_splice`/`array_replace`/`array_pad` (can reuse `array_merge`'s
+existing field-merge logic); the six array-pointer/position accessors
+(`current`/`next`/`prev`/`reset`/`end`/`key`/`array_key_first`/
+`array_key_last`); PHP 8.4's `array_find`/`array_find_key`/`array_any`/
+`array_all` (currently not even stub-registered). Size: M (batch of
+many S-effort items with a uniform pattern).
+
+**Phase 75 - String accessory-type extensions (case-tracking) + related
+string function coverage (NEW, PLANNED).** Add `Lowercase`/`Uppercase`/
+`DecimalIntegerString` `AccessoryKind` variants (currently only
+`NonEmptyString`/`NonFalsyString`/`LiteralString`/`NumericString`
+exist), then wire `strtolower()`/`strtoupper()`'s dynamic return type to
+produce the new case-tracked types, and extend `str_pad`/`str_repeat`/
+`substr`/`trim`/`ltrim`/`strrev`/`parse_str` accordingly. Separately:
+literal-string inference from string concatenation (currently
+`literal-string` only comes from an explicit PHPDoc annotation, never
+inferred - this defeats the feature's main real-world use,
+SQL-injection-safety checking on functions like `PDO::query`). Unlocks
+`StrCaseFunctionsReturnTypeExtension`, `StrrevFunctionReturnTypeExtension`,
+`TrimFunctionDynamicReturnTypeExtension`, `LtrimFunctionReturnTypeExtension`,
+`StrPadFunctionReturnTypeExtension`, `StrRepeatFunctionReturnTypeExtension`,
+`SubstrDynamicReturnTypeExtension`, `ParseStrParameterOutTypeExtension`,
+plus `AccessoryLiteralStringType`'s concatenation-inference gap. Size: M.
+
+**Phase 76 - `filter_var`/`filter_input` subsystem (NEW, PLANNED).** A
+whole self-contained subsystem with zero coverage today:
+`FILTER_VALIDATE_*`/`FILTER_SANITIZE_*` constant-to-type mapping table,
+`FILTER_NULL_ON_FAILURE`/`FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY`
+flag logic, literal-value coercion rules. Unlocks
+`FilterFunctionReturnTypeHelper`, `FilterInputDynamicReturnTypeExtension`,
+`FilterVarArrayDynamicReturnTypeExtension`, `FilterVarDynamicReturnTypeExtension`.
+Size: L - common in real-world form/input-handling code, the kind of
+code this project's own Piwigo corpus work has been targeting.
+
+**Phase 77 - Misc built-in-class/runtime-capability modeling batch
+(NEW, PLANNED).** Batch several independent, lower-value stdlib-
+modeling gaps: `get_class`/`get_called_class`/`get_parent_class`/
+`gettype`/`get_debug_type` (late-static-binding + runtime-string
+mapping tables); `date()`/`idate()` format-character-to-type table
+(static, no runtime simulation needed - unlike the DateTime/DOM/
+SimpleXML cluster in Phase 78); hardcoded constant-array-shape tables
+for `curl_getinfo` (extend the existing ~20-entry table to the full
+~75), `stat`/`dio_stat`, `pathinfo`, `parse_url`, `sscanf`; runtime-
+capability-list snapshots for `hash_algos()`, `openssl_get_cipher_methods()`,
+`mb_list_encodings()`; Reflection-class modeling in the registry;
+`SimpleXMLElement` magic-property resolution. Size: M - low individual
+value; batch to amortize planning overhead, skip or deprioritize unless
+a corpus surfaces heavy Reflection/XML/hash usage.
+
+**Phase 78 - DateTime/DateInterval/DOM/SimpleXML literal-probing (NEW,
+PLANNED, low priority).** Real PHPStan validates these by constructing
+the actual PHP object (`DateInterval`, `DOMDocument`, `SimpleXMLElement`)
+at analysis time and observing whether it throws - phpstan-rs has no
+embedded PHP runtime or XML parser to replicate this. Would need a
+hand-written relative-date-string parser and/or XML validator from
+scratch. Flagged as low-priority/possibly-permanent-boundary rather
+than concretely scheduled - several of the underlying PHPStan classes
+(`DateIntervalConstructorThrowTypeExtension`,
+`SimpleXMLElementConstructorThrowTypeExtension`) were independently
+marked `not_applicable` elsewhere in the audit for the identical "no
+PHP runtime to shell out to" reason (see Won't-port list). Size: XL,
+low value.
+
+**Phase 79 - Enum-case singleton type + `BackedEnum::from()` narrowing
+(NEW, PLANNED).** Enum case fetches resolve through the generic
+`lookup_const` path today, producing plain `Type::Object(fqn, [])` with
+no per-case singleton identity - `->name` is generic string not a
+literal, `->value` is a coarse union of all cases rather than the exact
+per-case value. Add a real per-case type, then use it to narrow
+`::from()`/`::tryFrom()` to the exact matching case. Unlocks
+`EnumCaseObjectType`, `BackedEnumFromMethodDynamicReturnTypeExtension`.
+Benefits from (not strictly blocked by) Phase 55's subtracted-type work
+for match-exhaustiveness-quality narrowing. Size: L - enums are
+idiomatic in PHP 8.1+ codebases.
+
+**Phase 80 - Object-shape/`key-of<T>`/conditional-return-type PHPDoc
+syntax (NEW, PLANNED).** `docblock.rs` deliberately skips conditional-
+return-type syntax (`($subject is Target ? If : Else)` - a tested,
+deliberate design choice, not an oversight, per this document's own
+Permanent design boundaries) and never parses `object{...}` shapes or
+`key-of<T>`/`value-of<T>` pseudo-types. Add a deferred-resolution
+mechanism to `Type` plus parsing for all three syntaxes. Unlocks
+`ConditionalType`, `ConditionalTypeForParameter`, `KeyOfType`,
+`ValueOfType`, `OffsetAccessType`, `LateResolvableType`,
+`ClassConstantAccessType`. Prerequisite for the `TemplateKeyOfType`/
+`TemplateObjectShapeType` bound kinds in Phase 54. Size: XL - the
+single biggest coherent missing PHPDoc subsystem by item count;
+conditional return types are common in real stubs and increasingly in
+user `is_*()`-predicate code.
+
+**Phase 81 - Object-operator overloading dispatch (GMP/`BcMath\Number`)
+(NEW, PLANNED).** `infer_binary` and unary-op inference assume plain
+numeric operands throughout; add a class-name-keyed dispatch hook for
+the two built-in classes that overload `+`/`-`/`*`/`/`/`**`/`%`/
+comparisons. Unlocks `GmpOperatorTypeSpecifyingExtension`,
+`GmpUnaryOperatorTypeSpecifyingExtension`,
+`BcMathNumberOperatorTypeSpecifyingExtension`,
+`BcMathNumberUnaryOperatorTypeSpecifyingExtension`. Size: M, low value -
+GMP/BcMath are rare in typical application corpora.
+
+**Phase 82 - Collector / cross-file aggregation architecture
+(opportunistic infrastructure, do not schedule standalone) (NEW,
+PLANNED).** phpstan-rs is a single-process, file-by-file, eager-
+diagnostic checker with no two-phase Collector-then-aggregate pass.
+Blocks a handful of specifically low-value rules:
+`ConstantConditionInTraitCollector`/`Helper`/`Rule` (dedup a trait's
+constant-condition diagnostic across using classes),
+`FunctionCallConstantConditionCollector`/`Helper`/`Rule`,
+`TraitDeclarationCollector`/`TraitUseCollector`/`NotAnalysedTraitRule`
+(unused-trait detection), `NamedArgumentParameterMethodCallsCollector`/
+`OverridingMethodRenamesParameterCollector`/
+`MethodCallWithPossiblyRenamedNamedArgumentRule`. Also a **soft**
+prerequisite for Phase 41's transitive-purity resolution.
+**Recommendation.** Do not schedule this on its own merits - every
+cluster that needs it independently notes it's XL cost for a narrow/
+low-value payoff. Build it only when Phase 41's transitive-resolution
+half is actually being tackled, and let that phase absorb the cost.
+Size: XL, low standalone value.
+
+**Phase 83 - Whole-project duplicate class-name detection (NEW,
+PLANNED, low priority).** The registry is a single global
+name -> `ClassInfo` map with documented last-write-wins semantics
+(`checker.rs:~98` explicitly calls this an accepted simplification in
+the *opposite* direction - silently pick one rather than flag). Tracking
+multiple declarations per name project-wide cuts against the core
+registry design. Unlocks `DuplicateClassDeclarationRule`.
+**Recommendation.** Low priority; real but rare (a stray duplicate class
+in a legacy tree). Size: XL, low value.
+
+**Phase 84 - `RuleLevelHelper`-equivalent configurable type-acceptance +
+tri-state-with-reasons architecture (NEW, PLANNED, low priority).**
+`is_assignable`/`is_subtype` return plain `bool` today with no
+`checkNullables`/`checkUnionTypes`/`checkExplicitMixed`-style
+configurability toggles and no tri-state (`Yes`/`No`/`Maybe`)-with-
+reasons result - PHPStan's whole `accepts()`/`isSuperTypeOf()` double-
+dispatch protocol is built around `AcceptsResult`/`IsSuperTypeOfResult`/
+`TypeResult` objects that thread reasons through every comparison, with
+no phpstan-rs analog (`src/types.rs`'s `is_subtype`, ~line 779;
+`src/registry.rs`'s `is_assignable`). Architectural, touches every call
+site. Unlocks `AcceptsResult`, `IsSuperTypeOfResult`, `TypeResult`.
+**Recommendation.** Improves diagnostic *explanation* quality more than
+it catches new bugs (the "maybe" case already collapses to a concrete
+answer somewhere in the match arms today). Low priority - schedule only
+if diagnostic-message quality becomes a stated goal. Size: XL,
+low-medium value.
 
 ## Known limitations
 
@@ -278,22 +1257,59 @@ comments.
 | Limitation | Phase |
 | --- | --- |
 | PHP 8.5's pipe operator (`BinOp::Pipe`) always infers `Mixed` - needs new infrastructure to resolve an arbitrary callable expression to its own return type, which this project has nowhere yet | 13 |
-| Broader rule catalog (`DeadCode`, `Comparison`/exhaustiveness, `Exceptions`, visibility/abstract-method completeness) | 15 |
+| `DeadCode`/`Comparison` rule catalog (unreachable-after-terminating-code, constant-condition, match/switch exhaustiveness, impossible-instanceof) - narrowed from a broader catch-all after the exhaustive audit split visibility and `Type::Array`'s key type out to their own phases | 15 |
 | `continue N`'s own level argument is parsed and stored but never consulted (`break N`'s own level is, since Phase 29) | 15 |
-| `Type::Array` has no key-type parameter - a `foreach`'s own `$key`, `array_keys()`'s precise result, or a `preg_match` by-ref `$matches` element, is always `Mixed`/imprecise regardless of how precisely-keyed the real array is. Surfaced repeatedly: Phase 29 (a loop key), Phase 31 (`array_keys()`, partially closed for the literal-shape case only), Phase 32 (the generic fallback), Phase 35 (a repository call finally being checked at all) | 15 |
 | No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
 | No LSP hover/go-to-definition | 17 |
 | No extension/plugin API | 18 |
-| `#[...]` attributes are lexed and discarded, never becoming real AST nodes (only two narrowly special-cased stub-generation attributes get lexer-level text splicing) | 37 |
-| No target-PHP-version config, so no "X only supported on PHP Y.Z+" portability check is possible | 38 |
+| `#[...]` attributes are lexed and discarded, never becoming real AST nodes (only two narrowly special-cased stub-generation attributes get lexer-level text splicing) - confirmed the single most cross-cutting gap in the codebase, independently blocking six audit categories | 37 |
+| No target-PHP-version config, so no "X only supported on PHP Y.Z+" portability check is possible - confirmed as a recurring blocker across four more audit categories | 38 |
 | `@deprecated` is parsed-past and discarded; no restricted/deprecated-symbol-usage warnings | 39 |
 | No checking of PHP code that consumes real PHPStan's own API for `@api`-boundary violations | 40 |
 | No purity/impurity tracking anywhere | 41 |
 | `FunctionSig` has no `throws` field; no checked-exception/throw-type model | 42 |
 | PHP 8.4 property hook bodies are parsed but never type-checked (Phase 14.5's `set_ty` fix only makes property-write checking hook-aware, not hook bodies themselves) | 43 |
 | Only whole-file baseline suppression exists; no `@phpstan-ignore` inline suppression, and `Diagnostic` has no stable per-check identifier at all | 44 |
-| No declared-vs-actual-narrowest-type inference (`TooWideTypehints`) | 45 |
+| No declared-vs-actual-narrowest-type inference (`TooWideTypehints`) - confirmed to split into a return/property variant and a rarer `@param-out` variant | 45 |
 | No PCRE pattern-validity checking - `regex_groups.rs` (Phase 12) deliberately doesn't validate, only extracts structure | 46 |
+| `Diagnostic` (`checker.rs:71`) has no identifier/tip/metadata fields or fluent builder | 47 |
+| `resolve_name_expr`/`resolve_type_hint` never check whether a referenced class/function/use-import actually exists - the single highest real-world-value gap found by the exhaustive audit | 48 |
+| `check_args` (`calls.rs:262`) has no named-argument, spread-argument, or by-ref-target-legality handling | 49 |
+| `Type::Array` has no key-type parameter, and `Type::ArrayShape` has no int-vs-string key typing or unsealed-shape tracking - a `foreach`'s own `$key`, `array_keys()`'s precise result, or a `preg_match` by-ref `$matches` element, is always `Mixed`/imprecise regardless of how precisely-keyed the real array is. Surfaced repeatedly: Phase 29 (a loop key), Phase 31 (`array_keys()`, partially closed for the literal-shape case only), Phase 32 (the generic fallback), Phase 35 (a repository call finally being checked at all) | 50 |
+| `Type` has no coercion/cast method surface (`toInteger`/`toString`/etc.); `IntegerRangeType` arithmetic is incomplete | 51 |
+| No invalid-operand-combination (`ErrorType`) concept - `infer_binary`/unary arms always compute a best-effort result and never flag an outright type error | 52 |
+| `Type::Callable` is a bare marker with no signature; closures passed to higher-order builtins are never contextually type-checked against their own body | 53 |
+| `Type::TemplateParam` carries no bound/scope/variance/default - a bounded `@template T of X` collapses to opaque `Mixed` after substitution instead of `X` | 54 |
+| No comparison-outcome API for `<`/`>`/`<=`/`>=`, no loose-`==` truth table, no subtracted/negated-type tracking, and `apply_narrowing` only fires for hardcoded top-level shapes, not nested/nested-boolean sub-expressions | 55 |
+| `docblock.rs` is a lenient regex tokenizer, not a recoverable-error grammar parser - malformed tag values pass through silently instead of producing a diagnosable error node | 56 |
+| `PropertySig` has no visibility field at all, and no call site checks caller-context-vs-declared-visibility for method calls either | 57 |
+| No `MissingTypehintCheck`-equivalent completeness battery (implicit-mixed params/returns, bare `iterable`/`array`, non-generic use of a generic class) | 58 |
+| No unused-parameter/closure-use/private-member detection anywhere | 59 |
+| No "this `isset()`/`empty()`/`?->` check is statically provably redundant" diagnostic (the suppression half already exists and is deliberate) | 60 |
+| Fall-through-without-`return` is never compared against a declared/PHPDoc return type despite `always_terminates()` already existing | 61 |
+| No constructor-dataflow tracking for uninitialized typed/readonly properties across the parent-constructor chain | 62 |
+| No duplicate-declaration scan within a class/trait body, or for duplicate top-level function declarations | 63 |
+| `check_method_overrides` (`oop.rs:177-307`) never compares visibility or detects missing/extra/variadic/by-ref parameter mismatches; no property-override-compatibility check exists at all | 64 |
+| Several PHP-fatal-in-practice declaration combinations (abstract-in-non-abstract-class, final-private, interface-method-visibility, `$this` reassignment, reserved constant name `class`, ...) are accepted leniently by the parser with no checker-side rejection | 65 |
+| `check_enum_case_values` covers only duplicate backing values, not the five other structural enum-sanity checks; `check_class_generic_bounds` isn't wired to `EnumDecl` at all | 66 |
+| No `@internal`-tag parsing or namespace-boundary usage restriction anywhere | 67 |
+| `infer_array_literal_type` already detects duplicate literal-array keys and `array_filter`/`array_values`'s own no-op-call conditions but never reports either | 68 |
+| `sprintf`/`printf` format-string checking (`calls.rs:376,468,529`) has no positional (`%N$`) specifiers, `*` width/precision, or `scanf`/`vprintf`/`fprintf`/`sscanf`/`fscanf` coverage | 69 |
+| No `Generator<K,V,TSend,TReturn>` type shape; `yield`/`yield from` always return `Mixed` and are never checked against the enclosing function's declared type | 70 |
+| No `call_user_func`/`call_user_func_array` argument-reordering recheck, `random_int()` ordering check, or several other small self-contained builtin checks | 71 |
+| `regex_groups.rs`'s capture-group inference has no tri-state fallback for non-enumerable groups and doesn't resolve a statically-foldable concatenated pattern | 72 |
+| `array_change_key_case`/`array_flip`/`array_fill_keys`/`array_rand`/`array_count_values`/key-precise `array_search` are unimplemented, blocked on Phase 50 | 73 |
+| The `array_diff`/`array_intersect` family, `array_pop`/`array_shift`'s own return value, `array_splice`/`array_replace`/`array_pad`, array-pointer accessors, and PHP 8.4's `array_find`/`array_any`/`array_all` are unimplemented | 74 |
+| No `Lowercase`/`Uppercase`/`DecimalIntegerString` accessory string kinds; literal-string is never inferred from concatenation (undermines SQL-injection-safety-style checking) | 75 |
+| `filter_var`/`filter_input` have zero dynamic-return-type coverage | 76 |
+| `get_class`/`gettype`/`date()` format tables, `curl_getinfo`'s ~75-entry constant table (only ~20 covered), Reflection/`SimpleXMLElement` modeling are all thin or absent | 77 |
+| No PHP-runtime/XML simulation for `DateTime`/`DateInterval`/`DOM`/`SimpleXMLElement` literal-argument validation - likely a permanent boundary, see Won't-port below | 78 |
+| Enum cases have no per-case singleton identity type; `::from()`/`::tryFrom()` never narrow to the matching case | 79 |
+| Conditional PHPDoc return-type syntax, `object{...}` shapes, and `key-of<T>`/`value-of<T>` are entirely unparsed | 80 |
+| `infer_binary`/unary inference has no per-class operator-overload dispatch (GMP, `BcMath\Number`) | 81 |
+| No Collector-style two-phase cross-file aggregation pass (fold into Phase 41 when tackled, not standalone) | 82 |
+| No whole-project duplicate-class-name detection (registry is single global last-write-wins by design) | 83 |
+| `is_assignable`/`is_subtype` return plain `bool`, no tri-state-with-reasons result architecture | 84 |
 
 ### Known but not yet scheduled to any phase
 
@@ -470,6 +1486,34 @@ comments.
   variable first (`$need_generate = ($x === false or ...); ... if (!
   $need_generate) { /* uses $x narrowed */ }`,
   `ImageDerivativeController::__invoke`, same round). No phase scheduled.
+- **A long tail of smaller `core-types`/`type-misc`/`php-dynamic-
+  extensions` precision gaps**, surfaced by the exhaustive audit but
+  each too narrow to warrant its own phase - grouped here rather than
+  itemized past this point (the full per-file reasoning for each is in
+  `.claude/workflows/phpstan-full-parity.result.json`, not silently
+  dropped): no `NameScope`/`FileTypeMapper`-style per-location caching
+  architecture; `IntersectionType` doesn't delegate a general
+  `object&object`/`callable&array` combination; `static`/`$this`
+  late-binding is a bare marker with no attached class binding;
+  `ConstFetch`/user-defined-`define()`-constant type tracking doesn't
+  exist; no `BenevolentUnionType` concept; no per-class method-return-
+  type override table for extending a built-in class; a default
+  parameter value doesn't influence unbound `@template` inference; no
+  `HasMethodType`/`HasPropertyType`-style structural capability
+  assertion exists for dynamic-member narrowing outside `ArrayShape`;
+  `class-string<T>`'s own `instanceof`/`is_a()` and sealed-hierarchy
+  narrowing is unmodeled; `TypeCombinator` has no general `intersect()`/
+  `remove()` (only a small hand-rolled `union_types` subset) and no
+  generic recursive `Type`-tree traverse/map combinator exists anywhere
+  for other callers to reuse; `UnionType`'s `describe()` has no
+  deterministic member sort order and `VerbosityLevel` has one fixed
+  detail level; `NeverType`/`ConstantScalarType`/`ExponentiateHelper`/
+  `FiniteTypeSet`/`RecursionGuard` each have a narrow, independent
+  precision or ergonomics gap versus their real-PHPStan counterpart.
+  None of these block a specific missing rule the way the phased items
+  above do - they'd mostly improve inference precision or diagnostic
+  quality at the margins. Revisit if a future corpus round traces a
+  real false positive/negative back to one of them specifically.
 
 ### Permanent design boundaries (not phase-tracked - not planned, by choice)
 
@@ -518,6 +1562,77 @@ comments.
   evidenced real-world shape) is supported; a tag directly on the header
   would need to affect the loop body's own checking and was deliberately
   left unsupported rather than shipped half-working.
+
+The exhaustive 855-file audit behind the Open phases rewrite above
+additionally classified ~208 PHPStan `Rules`/`Type` files as
+`not_applicable` - no sensible Rust-rewrite target, not a missed gap.
+The individually-argued reasoning for every one of them lives in
+`.claude/workflows/phpstan-full-parity.result.json`; the recurring
+patterns, for the record:
+
+- **PHPStan's own BC-promise and reflection-migration machinery**
+  (`Api/*`, 11 items - `ApiClassConstFetchRule`, `ApiMethodCallRule`,
+  etc., plus `GetTemplateTypeRule` and the PHP-parser-v4-migration
+  rules) - every one of these gates on the analyzed code referencing
+  classes literally inside PHPStan's own `PHPStan\*` namespace under a
+  `vendor/` directory; phpstan-rs is a Rust binary with no such PHP
+  namespace of its own for analyzed code to misuse. (Phase 40, above,
+  is the correct mirror-image feature - checking code that *consumes*
+  real PHPStan's API - and remains scheduled.)
+- **`Playground/*`** (11 items - `ArrayDimCastRule`, `FunctionNeverRule`,
+  `NoPhpCodeRule`, `PromoteParameterRule`, etc.) - registered only in
+  phpstan.org's separate issue-bot service (confirmed via
+  `vendor/phpstan-src/conf/*.neon`), never the CLI analyzer real
+  PHPStan ships.
+- **DI/plugin-architecture wrapper classes with zero logic of their
+  own**: `DirectRegistry`/`LazyRegistry`/`Registry`/`Rule`, `RuleErrors/`'s
+  129 auto-generated `RuleError<N>` builder-pattern permutation classes
+  (confirmed by direct inspection - pure combinatorial codegen, no
+  unique check logic; excluded from the audit's 855-file count for the
+  same reason) and the 8 trivial `RuleError`-family marker interfaces,
+  `AlwaysUsedClassConstantsExtension`/`AlwaysUsedMethodExtension`, the
+  ~10 `*TypeSpecifyingExtension`+`Registry` pairs and
+  `*ParameterClosureThisExtension`/`ParameterOutTypeExtension`
+  interfaces, and the `Traits/*` interface-boilerplate-avoidance stubs
+  (`NonArrayTypeTrait`, `NonCallableTypeTrait`, `NonGeneralizableTypeTrait`,
+  `NonGenericTypeTrait`, `NonRemoveableTypeTrait`, `TypeWithClassName`,
+  `TypeTraverserCallable`, `CompoundType`, `JustNullableTypeTrait`, and
+  siblings) - phpstan-rs has no DI container or plugin model and no
+  per-type-kind class hierarchy needing default no-op methods; every
+  check is a hardcoded Rust function/match arm, so there is no seam
+  these interfaces would fill. **Caveat**: `NonGeneralizableTypeTrait`'s
+  own notes concede PHPStan's `generalize()` (loop-fixpoint type
+  widening for control-flow stabilization) has no counterpart anywhere
+  in phpstan-rs - a real, narrow gap hiding behind this not-applicable
+  label, and a candidate for folding into Phase 55 if a corpus surfaces
+  it.
+- **PHP-runtime/XML-shell-out techniques with no faithful Rust port**:
+  `DateIntervalConstructorThrowTypeExtension`,
+  `DateIntervalCreateFromDateStringThrowTypeExtension`,
+  `SimpleXMLElementConstructorThrowTypeExtension` - PHPStan validates
+  these by literally constructing the real PHP object at analysis time
+  (it runs inside PHP itself); phpstan-rs embeds no PHP runtime. The
+  *format-table* half of `DateTime`/`date()` handling (Phase 77) remains
+  genuinely portable and stays scheduled; see also Phase 78, scheduled
+  but flagged low-priority for the same underlying reason. The two
+  already-documented `strtotime()`/raw-SQL-column-shape gaps above are
+  the same root cause, reconfirmed by this audit, not newly found.
+- **Sealed-hierarchy extension point** (`AllowedSubTypesRule`) - inert
+  even in stock PHPStan without third-party configuration; no natural
+  home in phpstan-rs's architecture.
+- **`ClassNameUsageLocationCreateIdentifierDynamicReturnTypeExtension`**
+  - exists solely for PHPStan's own dogfooding self-analysis; no
+  general-PHP-analysis meaning.
+- **`InnerFunctionRule`** - phpstan-rs *intentionally* does the opposite
+  of this rule (it recurses into and checks nested named-function
+  declarations, an explicit in-repo design choice citing the common
+  `function_exists()`-guarded polyfill idiom). Replicating PHPStan's
+  restriction here would be a regression, not a gap.
+- **`EnumCaseOutsideEnumRule`** - structurally impossible in
+  phpstan-rs's AST shape (`EnumCase` only ever exists as a field of
+  `EnumDecl.cases`, never a free-floating node).
+- **`ReadWritePropertiesExtension`** - third-party DI extension-point
+  interface; no plugin architecture to attach it to.
 
 ---
 
