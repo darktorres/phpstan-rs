@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::checker::{Checker, Locals, literal_string_value, purge_stale_narrowing_for};
+use crate::checker::{
+    Checker, Locals, literal_string_value, purge_stale_narrowing_for, union_types,
+};
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -123,6 +125,59 @@ impl<'a> Checker<'a> {
                     }
                     "asort" | "arsort" | "ksort" | "krsort" | "uasort" | "uksort" | "natsort"
                     | "natcasesort" => continue,
+                    // A Piwigo-corpus round found this same "generic
+                    // widening loses list-ness" gap for the other real,
+                    // common by-ref array mutators: `array_push`/
+                    // `array_unshift` always append/prepend at least one
+                    // real value, so a list-like (or empty, per
+                    // `Checker::is_list_like`'s existing "array{}
+                    // satisfies list<T> vacuously" rule) `$array` stays a
+                    // list afterward, now provably non-empty - element
+                    // type widens to include whatever was actually
+                    // pushed. Deliberately not attempting a non-list-like
+                    // input (a real `array_push` on one keeps whatever
+                    // odd key structure it already had, appending fresh
+                    // integer keys past the existing max - not a
+                    // "becomes a list" case at all) - falls through to
+                    // the generic declared-type widening below unchanged.
+                    "array_push" | "array_unshift" if Checker::is_list_like(&current) => {
+                        if let Some(elem_ty) = Checker::array_element_type(&current) {
+                            let pushed_ty = args[1..]
+                                .iter()
+                                .map(|a| self.infer_expr(&a.value, locals))
+                                .reduce(union_types);
+                            let combined_elem = match pushed_ty {
+                                Some(pushed_ty) => union_types(elem_ty, pushed_ty),
+                                None => elem_ty,
+                            };
+                            let members = vec![
+                                Type::Array(Box::new(combined_elem)),
+                                Type::Accessory(types::AccessoryKind::ArrayList),
+                                Type::Accessory(types::AccessoryKind::NonEmptyArray),
+                            ];
+                            purge_stale_narrowing_for(locals, name);
+                            locals.insert(name.clone(), Type::Intersection(members));
+                            continue;
+                        }
+                    }
+                    // `array_shift`/`array_pop` remove an element rather
+                    // than adding one - list-ness survives the same way
+                    // (both reindex/leave sequential integer keys
+                    // sequential), but non-emptiness doesn't: removing
+                    // the one remaining element of a single-element list
+                    // leaves `[]`, so any existing non-empty marker is
+                    // deliberately dropped rather than carried through.
+                    "array_shift" | "array_pop" if Checker::is_list_like(&current) => {
+                        if let Some(elem_ty) = Checker::array_element_type(&current) {
+                            let members = vec![
+                                Type::Array(Box::new(elem_ty)),
+                                Type::Accessory(types::AccessoryKind::ArrayList),
+                            ];
+                            purge_stale_narrowing_for(locals, name);
+                            locals.insert(name.clone(), Type::Intersection(members));
+                            continue;
+                        }
+                    }
                     _ => {}
                 }
             }
