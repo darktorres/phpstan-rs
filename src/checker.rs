@@ -9548,6 +9548,41 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found Doctrine's own
+    // AbstractQuery::getResult() native stub declares a bare `mixed`
+    // return with no docblock refinement at all - real PHPStan's own
+    // phpstan-doctrine extension gives it a much richer, query-builder-
+    // aware entity type this project can't replicate, but the narrower
+    // fact that a non-indexBy()'d query's own result is always a real,
+    // sequentially-keyed list is real and bounded (verified via
+    // dumpType(); zero indexBy() call sites anywhere in this corpus).
+    // Real Piwigo code (TagRepository::findAllTags and many others)
+    // relies on exactly this via array_map(self::toProjection(...),
+    // $entities).
+    #[test]
+    fn doctrine_query_get_result_is_a_real_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            namespace Doctrine\ORM;
+            abstract class AbstractQuery {
+                public function getResult(): mixed { return []; }
+            }
+            class Query extends AbstractQuery {}
+
+            namespace App;
+            use Doctrine\ORM\Query;
+            class Repo1 {
+                public function __construct(private Query $q) {}
+                /** @return list<int> */
+                public function test(): array {
+                    return $this->q->getResult();
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn a_bound_argument_that_s_an_unregistered_class_is_never_flagged() {
         // Real bug found on the real Piwigo corpus: real phpstan/phpstan

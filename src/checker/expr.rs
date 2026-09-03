@@ -483,6 +483,9 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let result = match &recv_class {
+                    Some((class, _)) if is_doctrine_query_get_result(self, class, method) => {
+                        doctrine_query_result_list_type()
+                    }
                     Some((class, _)) => sig
                         .as_ref()
                         .map(|s| {
@@ -1592,6 +1595,11 @@ impl<'a> Checker<'a> {
                 // being looked up on either way.
                 let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::Null);
                 let result = match recv_ty {
+                    Type::Object(class, _)
+                        if is_doctrine_query_get_result(self, &class, method) =>
+                    {
+                        doctrine_query_result_list_type()
+                    }
                     Type::Object(class, type_args) => self
                         .registry
                         .lookup_method_with_owner(&class, method)
@@ -3234,6 +3242,32 @@ fn is_canonical_int_key(key: &str) -> bool {
 /// exactly the default-matching case (omitted, or explicitly `false`).
 fn is_false_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(false)))
+}
+
+/// Whether `class::$method()` is Doctrine's own `AbstractQuery::getResult()`
+/// (or an override/inheritor of it, e.g. `Query::getResult()`) - the native
+/// stub declares a bare `mixed` return with no docblock refinement at all.
+/// Real PHPStan's own `phpstan-doctrine` extension gives this a much
+/// richer, query-builder-aware entity type (full DQL SELECT/FROM
+/// introspection, tracking `indexBy()` too) this project has no way to
+/// replicate - a sizable feature on its own - but the narrower, still
+/// real and bounded fact it always proves is worth having on its own:
+/// a non-`indexBy()`'d query's own result is always a real,
+/// sequentially-keyed list, confirmed via dumpType(). Zero `indexBy()`
+/// call sites exist anywhere in this corpus, the one case that would
+/// break this simplification.
+fn is_doctrine_query_get_result(checker: &Checker<'_>, class: &str, method: &str) -> bool {
+    method == "getResult"
+        && checker
+            .registry
+            .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery")
+}
+
+fn doctrine_query_result_list_type() -> Type {
+    Type::Intersection(vec![
+        Type::Array(Box::new(Type::Mixed)),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ])
 }
 
 fn is_var_named(e: &Expr, name: &str) -> bool {
