@@ -1682,6 +1682,27 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Same family as tempnam() above: the native stub declares a bare
+    // array|false, but real PHPStan's own dynamic-return-type extension
+    // always returns a real list<string> on success, verified via
+    // dumpType(). Real Piwigo test code (StructuralTest's own
+    // findCallSitesInRootPhpFiles) narrows away false via `$paths !==
+    // false ? $paths : []` and relies on the result being a real
+    // list<string>.
+    #[test]
+    fn glob_on_success_is_a_real_list_of_strings() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return list<string> */
+            function f(string $pattern): array {
+                $paths = glob($pattern);
+                return $paths !== false ? $paths : [];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     // Only the array-stripping half of mb_convert_encoding()'s own real
     // (more involved) dynamic extension is implemented - evidenced via
     // `CharsetHelper::convertCharset`'s own real shape.

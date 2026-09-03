@@ -2494,6 +2494,23 @@ impl<'a> Checker<'a> {
                     Type::False,
                 ]);
             }
+            // Same family as tempnam() above - the native stub declares a
+            // bare `array|false`, but real PHPStan's own dynamic-return-
+            // type extension always returns a real `list<string>` on
+            // success, confirmed via dumpType(). Real Piwigo code
+            // (StructuralTest's own findCallSitesInRootPhpFiles/
+            // findCallSitesInBinFiles) narrows away `false` via `$paths
+            // !== false ? $paths : []` and then relies on the result
+            // being a real `list<string>` of file paths.
+            "glob" if matches!(args.len(), 1..=2) => {
+                return Type::Union(vec![
+                    Type::Intersection(vec![
+                        Type::Array(Box::new(Type::String)),
+                        Type::Accessory(AccessoryKind::ArrayList),
+                    ]),
+                    Type::False,
+                ]);
+            }
             // Same family, subject at index 1 - not evidenced directly in
             // this corpus, but identical mechanism and real stub shape
             // (`preg_replace_callback_array(array $pattern, array|string
