@@ -29,20 +29,24 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 905 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14's closing round.
+- Test suite: 918 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
-  **875 (current, Phase 14's closing round)** - a real, confirmed
-  *increase* over Phase 13's own 211, not a regression: `list<T>`/
-  `non-empty-array<T>` now match real PHPStan's own strictness rather
-  than this project's usual leniency default, a deliberate, explicitly
-  confirmed choice given 1575 first-party `list<` occurrences - the
-  large majority of the new diagnostics are genuine `@return list<T>`
-  declarations whose method body only provably returns `array<T>`.
+  875 (Phase 14's closing round) -> **453 (current, Phase 14.5's closing
+  round)**. The 211 -> 1115 jump was a real, confirmed *increase*, not a
+  regression: `list<T>`/`non-empty-array<T>` now match real PHPStan's
+  own strictness rather than this project's usual leniency default, a
+  deliberate, explicitly confirmed choice given 1575 first-party `list<`
+  occurrences. Phase 14.5 then closed most of the resulting gap: nearly
+  all of it turned out to be this project's own type-inference gaps
+  (spread array literals, `array_merge`, PHP 8.4 property hooks,
+  `preg_match_all`'s per-group arrays, and above all array-append
+  widening - the single most common accumulator idiom in PHP) rather
+  than genuine corpus-side `@return list<T>` overclaims.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -119,12 +123,15 @@ comments.
   stay aliased to plain `string`** (Phase 14) - each names "a string
   believed to hold a specific kind of identifier," with no literal-
   based or narrowing-based way for this project to ever verify content.
-- **`array_merge`'s own key-renumbering isn't tracked for list/non-empty
-  markers** (Phase 14) - real PHP renumbers integer keys across *all*
-  arguments together, a genuinely more complex, multi-argument-
-  dependent rule than `array_map`/`array_filter`/`array_slice`/etc.
-  (all covered); left for a future pass along with every other stdlib
-  array function beyond the six Phase 14 covers.
+- **`array_merge` only tracks list/non-empty markers and shape-merging
+  when its arguments are uniformly known-shaped or uniformly list-like**
+  (Phase 14.5) - a *mix* of a known `array{...}` shape and a plain,
+  unproven `array<T>` argument still degrades to a generic element-type
+  union rather than real PHPStan's own full key-aware merge across all
+  arguments together; every other stdlib array function beyond the
+  seven Phase 14/14.5 cover (`array_values`/`array_filter`/
+  `array_map`/`array_combine`/`array_slice`/`array_reverse`/
+  `array_unique`, plus `array_merge` itself) remains untouched.
 - **Two narrower narrowing gaps found while building Phase 14's own
   sources, deliberately left unfixed for now**: the reversed comparison
   `0 < count($x)` (only `count($x) > 0`/`count($x) >= 1` narrow); and
@@ -834,6 +841,79 @@ before continuing to build the rest of the phase on top of it. Task 7's
 own array-destructuring fixes then resolved a large share of that
 (1115 -> 875), the rest left as real, uncorrected signal about the
 corpus's own type-precision gaps rather than individually triaged here.
+
+## Phase 14.5 (unplanned) - list<T> false-positive cleanup - DONE
+
+A round of bucketing the Piwigo corpus by normalized message shape (the
+same Phase 22 methodology) against Phase 14's own 875-diagnostic
+closing figure, on the premise that "real, uncorrected signal about the
+corpus's own type-precision gaps" deserved actual triage rather than
+staying an assumption. It mostly wasn't the corpus - five real gaps in
+this project's own type inference, each verified against real
+PHPStan's own `dumpType()` before being fixed:
+
+- **A spread array literal** (`[...findA(), ...findB()]`) gave up
+  entirely, always inferring bare `Array(Mixed)`. Now tracks list-ness/
+  shape precision through: two `list<T>`-typed spread sources stay a
+  `list<T>`; a plain `array<T>` source degrades list-ness for the whole
+  result; a spread source with fully-known fields (an `ArrayShape`)
+  merges field-by-field (canonical int keys renumbered, others kept and
+  overwritten) rather than degrading - real code building one value
+  from another's own `toArray()` shape plus an extra field
+  (`UserInfoWithThemeName::toArray()`).
+- **`array_merge()`** fell through to its bare `array` native stub,
+  discarding all precision. Now merges two known `array{...}` shapes
+  field-by-field via the same rule the spread literal above uses
+  (shared via a new `merge_shape_field` helper - `Logger::__construct`
+  merging a property's own default options shape with a caller-supplied
+  one); merges list-like arguments into a `list<T>`; degrades to a
+  plain `array<T>` the moment one argument is an unproven plain array.
+  General key-aware shape merging when arguments are a *mix* of known
+  shapes and plain arrays remains unhandled, along with every other
+  stdlib array function beyond the six Phase 14 already covers.
+- **A PHP 8.4 property hook's own `set(Type $value)`** was never
+  consulted at all - a property write was always checked against the
+  property's own declared type, even when an explicit `set` hook
+  deliberately accepts a wider native type and coerces internally
+  before the real assignment (`CurrentConfig`'s own
+  `apiKeyDuration`/`chmodValue`/`defaultFiltersViews`/`filterPages`/
+  `randomIndexRedirect`). `PropertySig` gained `set_ty: Option<Type>`,
+  populated from the hook's own native parameter type hint (its doc
+  comment isn't captured by the parser at all, so no `@param` is
+  available - not needed here, since every corpus case already
+  declares a wide-enough native hint on its own).
+- **`tempnam()`** carries its own real PHPStan dynamic-return-type
+  extension beyond its plain `string|false` native stub - a successful
+  call always returns a real `non-falsy-string`, confirmed via
+  `dumpType()`. The common `$jar = tempnam(...); if ($jar === false) {
+  throw ...; }` idiom feeding a `non-empty-string`-typed sink afterward
+  was the single largest non-array-related false-positive bucket.
+- **`preg_match_all`'s own per-group match array** (`$matches[N]`) was
+  built as a plain `Array`, never marked list-like, despite always
+  being real, sequentially int-keyed from 0 (one slot per match) -
+  confirmed via `dumpType()`.
+- **Array-append (`$arr[] = value`) onto an already list-like
+  container** (including a freshly-empty `[]` literal) unconditionally
+  dropped list-ness, treating a real append exactly like an arbitrary
+  dynamic-key write. Real PHP's own append semantics always assign the
+  next sequential int key, so the result stays a real, now-provably-
+  non-empty list - confirmed via `dumpType()`. This is the single most
+  common accumulator idiom in PHP (`$result = []; foreach (...) {
+  $result[] = ...; } return $result;`), and by far the largest single
+  fix of this round: 771 -> 453 diagnostics on its own.
+
+Every fix was verified via the same location-based diff this project
+always uses (a removed diagnostic's location sampled and traced back to
+its real cause; a new location individually investigated before being
+accepted) - across all five fixes, only two genuinely new locations
+ever appeared (both immediately investigated and fixed as part of the
+same round: the spread-literal fix's own field-merge gap, and the
+array_merge fix's own shape-merge gap), and zero remained unexplained
+at the end.
+
+The "array_merge's own key-renumbering isn't tracked" item in **Known
+limitations** below is updated to reflect what this round actually
+closed versus what's still open.
 
 ## Phase 20 - Performance & robustness - DONE
 
