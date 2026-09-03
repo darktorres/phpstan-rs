@@ -29,32 +29,33 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 941 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 946 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
-  875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 (Phase
-  14.5's first four rounds) -> **287 (current, Phase 14.5's closing
-  round)**. The 211 -> 1115 jump was a real, confirmed *increase*, not a
-  regression: `list<T>`/`non-empty-array<T>` now match real PHPStan's
-  own strictness rather than this project's usual leniency default, a
-  deliberate, explicitly confirmed choice given 1575 first-party `list<`
-  occurrences. Phase 14.5's five rounds then closed most of the
-  resulting gap: nearly all of it turned out to be this project's own
-  type-inference gaps (spread array literals, `array_merge` including
-  its own spread-argument form, PHP 8.4 property hooks,
-  `preg_match_all`'s per-group arrays, array-append widening - the
-  single most common accumulator idiom in PHP, the `sort()` family's own
-  dynamic type-specifying extensions, `$x !== []`/static-property
-  narrowing, a `try`/`catch` scope-merge gap, a missing `Union` arm in
-  the core array-type helpers, `glob()`/`explode()`'s own
-  dynamic-return-type extensions, a mis-parsed conditional-return-type
-  docblock, and - by far the single largest fix of any round - a
-  method-override return-type check that compared docblock-refined
-  types instead of native ones) rather than genuine
+  875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287
+  (Phase 14.5's first five rounds) -> **285 (current, Phase 14.5's
+  closing round)**. The 211 -> 1115 jump was a real, confirmed
+  *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
+  match real PHPStan's own strictness rather than this project's usual
+  leniency default, a deliberate, explicitly confirmed choice given
+  1575 first-party `list<` occurrences. Phase 14.5's six rounds then
+  closed most of the resulting gap: nearly all of it turned out to be
+  this project's own type-inference gaps (spread array literals,
+  `array_merge` including its own spread-argument form, PHP 8.4
+  property hooks, `preg_match_all`'s per-group arrays, array-append
+  widening - the single most common accumulator idiom in PHP, the
+  `sort()` family's own dynamic type-specifying extensions, `$x !==
+  []`/static-property narrowing, a `try`/`catch` scope-merge gap, a
+  missing `Union` arm in the core array-type helpers, `glob()`/
+  `explode()`'s own dynamic-return-type extensions, a mis-parsed
+  conditional-return-type docblock, a real `instanceof` narrowing bug
+  unrelated to `list<T>` itself, and - by far the single largest fix of
+  any round - a method-override return-type check that compared
+  docblock-refined types instead of native ones) rather than genuine
   corpus-side `@return list<T>` overclaims.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
@@ -1091,6 +1092,32 @@ out-of-scope limitation rather than fixing it piecemeal:
   docblock-narrowed sink - confirmed directly against real PHPStan that
   it does not flag this (and confirmed it does flag the identical shape
   the moment the interface relationship is removed).
+
+**A sixth round** (287 -> 285) found a real, subtle narrowing bug not
+tied to `list<T>` at all:
+
+- **`instanceof`'s own true branch unconditionally replaced the checked
+  variable's type with just the target class/interface**, discarding
+  whatever it was already known to be - correct for the common
+  down-cast (a known parent narrowed to a known child) or nullable-
+  narrowing (`?Foo` narrowed to `Foo`) shape, but wrong when the target
+  is an unrelated *sibling* interface: real Piwigo code
+  (`Template\Renderer::render`) takes a single `View $view` parameter
+  through three independent, sequential `if ($view instanceof
+  SomeOtherInterface)` checks, each discarding the fact that `$view` is
+  still a `View` - a later plain-`View` use after all three checks saw
+  a nonsensical accumulated union of bare, unrelated interfaces
+  instead. `narrow_instanceof_true` now only replaces the type outright
+  when the target is already a sub/supertype of the current one (the
+  common cases, unchanged); otherwise it builds a real `Intersection`,
+  but only when the current type is itself provably object-like
+  (recursing through `Union`/`Intersection`, so a *second* independent
+  check still combines correctly after the first one's own if/no-else
+  merge) - a provably non-object premise (`Null`, a scalar, ...) is a
+  sign of a real, separate upstream inference bug elsewhere, and
+  building an intersection out of it would only compound that into
+  worse nonsense (found live, while verifying this exact fix: a
+  mis-inferred bare `Null` intersected into `null&ImageId`).
 
 ## Phase 20 - Performance & robustness - DONE
 
