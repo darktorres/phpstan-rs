@@ -29,16 +29,20 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 877 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 13's closing round.
+- Test suite: 905 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 14's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
-  249 (Phase 35) -> 240 -> 239 (Phase 12's closing round) -> **211
-  (current, Phase 13's closing round: `getenv()`'s dynamic return type
-  alone closed 26 diagnostics, `is_countable()` narrowing and `BinOp::
-  Div` precision one more each)**.
+  249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
+  **875 (current, Phase 14's closing round)** - a real, confirmed
+  *increase* over Phase 13's own 211, not a regression: `list<T>`/
+  `non-empty-array<T>` now match real PHPStan's own strictness rather
+  than this project's usual leniency default, a deliberate, explicitly
+  confirmed choice given 1575 first-party `list<` occurrences - the
+  large majority of the new diagnostics are genuine `@return list<T>`
+  declarations whose method body only provably returns `array<T>`.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -51,15 +55,6 @@ cited in both halves so either can be cross-referenced from the other.
 
 Every phase not listed here is DONE (see history below). These are the
 phases with real, concrete open work:
-
-**Phase 14 - Refinement/accessory types (PLANNED).** `non-empty-string`/
-`non-empty-array`/etc. alias straight to their unrefined base type
-instead of being tracked precisely. Design: a new `Type::Refined(Box
-<Type>, RefinementKind)` (or an `Intersection`-with-marker, mirroring
-real PHPStan's own `Accessory*Type` design), threaded through
-`is_subtype`/`is_assignable` so a refined type stays assignable to its
-own base type one-way, plus a few real narrowing sources (a non-empty
-string literal, `trim()`'s known-safe cases, a `!empty($x)` guard).
 
 **Phase 15 - Broader rule catalog (PLANNED).** No rules yet in:
 `DeadCode` (unreachable code past an always-terminating statement,
@@ -111,8 +106,6 @@ comments.
 | Limitation | Phase |
 | --- | --- |
 | PHP 8.5's pipe operator (`BinOp::Pipe`) always infers `Mixed` - needs new infrastructure to resolve an arbitrary callable expression to its own return type, which this project has nowhere yet | 13 |
-| Refinement/accessory types (`non-empty-string`, `non-empty-array`, `int<min, max>` ranges, ...) aliased to their base type, not tracked precisely | 14 |
-| No `Type::FloatLiteral` variant - a real float literal always widens straight to plain `Float` (unlike `IntLiteral`/`StringLiteral`), so a PHPDoc float-literal-union type (`1.5\|2.5`) rejects every value, valid or not | 14 |
 | Broader rule catalog (`DeadCode`, `Comparison`/exhaustiveness, `Exceptions`, visibility/abstract-method completeness) | 15 |
 | `continue N`'s own level argument is parsed and stored but never consulted (`break N`'s own level is, since Phase 29) | 15 |
 | `Type::Array` has no key-type parameter - a `foreach`'s own `$key`, `array_keys()`'s precise result, or a `preg_match` by-ref `$matches` element, is always `Mixed`/imprecise regardless of how precisely-keyed the real array is. Surfaced repeatedly: Phase 29 (a loop key), Phase 31 (`array_keys()`, partially closed for the literal-shape case only), Phase 32 (the generic fallback), Phase 35 (a repository call finally being checked at all) | 15 |
@@ -122,6 +115,24 @@ comments.
 
 ### Known but not yet scheduled to any phase
 
+- **`callable-string`/`trait-string`/`interface-string`/`enum-string`
+  stay aliased to plain `string`** (Phase 14) - each names "a string
+  believed to hold a specific kind of identifier," with no literal-
+  based or narrowing-based way for this project to ever verify content.
+- **`array_merge`'s own key-renumbering isn't tracked for list/non-empty
+  markers** (Phase 14) - real PHP renumbers integer keys across *all*
+  arguments together, a genuinely more complex, multi-argument-
+  dependent rule than `array_map`/`array_filter`/`array_slice`/etc.
+  (all covered); left for a future pass along with every other stdlib
+  array function beyond the six Phase 14 covers.
+- **Two narrower narrowing gaps found while building Phase 14's own
+  sources, deliberately left unfixed for now**: the reversed comparison
+  `0 < count($x)` (only `count($x) > 0`/`count($x) >= 1` narrow); and
+  `!empty($x)` doesn't further upgrade an already-`non-empty-string`
+  value to the stronger `non-falsy-string` inside a nested check after
+  `$x !== ''` - both real, but low-value (a rare reversed idiom; a rare
+  redundant double-guard pattern) with no corpus evidence calling for
+  them.
 - **`StmtKind::Try`'s `catch` clauses each get their own scope clone
   that's never merged back after the whole `try`/`catch`/`finally`** -
   only `body`'s own mutated state survives (`checker/stmt.rs`). Real,
@@ -736,6 +747,93 @@ compound-boolean narrowing) - see the Known limitations table and
 Corpus count: 239 -> 213 (Finding A) -> 212 (Finding B) -> 211 (Finding
 C) -> 211 (Findings D and E, unchanged as expected). Zero regressions at
 any step.
+
+## Phase 14 - Refinement/accessory types - DONE
+
+Real PHPStan's own representation (confirmed by reading `vendor/
+phpstan-src/src/Type/Accessory/*.php` directly): a *string* refinement
+is `IntersectionType([StringType, AccessoryXType])`; an *array*
+refinement (`list`/`non-empty-array`) is `IntersectionType([ArrayType,
+AccessoryArrayListType/NonEmptyArrayType])`; an *int* range
+(`positive-int`, `int<min, max>`, ...) is its own standalone
+`IntegerRangeType`, not an accessory. Built by reusing this project's
+existing `Type::Intersection` variant (PHP 8.1 intersection types)
+rather than inventing a new mechanism - its `is_subtype`/`is_assignable`
+rules already generalized correctly for a marker-plus-base shape.
+
+New `Type` variants: `IntRange(Option<i64>, Option<i64>)` (fully
+replaces `Int`'s own range, the same relationship `IntLiteral` has to
+`Int`); `FloatLiteral(f64)` (mirrors `IntLiteral`/`StringLiteral` for a
+PHPDoc float-literal union); `Accessory(AccessoryKind)` (`NonEmptyString`/
+`NonFalsyString`/`LiteralString`/`NumericString`/`ArrayList`/
+`NonEmptyArray`, only ever meaningful inside an `Intersection`).
+`parse_type_keyword_or_class` now constructs these instead of aliasing
+every refinement pseudo-type to its plain base; `callable-string`/
+`trait-string`/`interface-string`/`enum-string` stay aliased (no
+verifiable content to attach a real type to).
+
+Four narrowing sources added, each verified against real PHPStan's own
+`dumpType()`: `$x !== ''` narrows a `string` to `non-empty-string`;
+`!empty($x)` narrows a `string` to `non-falsy-string` (not merely
+non-empty - `empty()` is also false for `'0'`) and an `array` to
+`non-empty-array`; `count($x) > 0`/`count($x) >= 1` also narrow an
+`array` to `non-empty-array`; `is_numeric($x)` narrows a `string` to
+`numeric-string`, unblocking its own already-shipped narrowing code
+(Phase 32 Finding G), which had documented itself as blocked on this
+exact type not existing yet. ROADMAP's own prior suggestion that
+`trim()` had a "known-safe case" worth narrowing on was checked
+directly and found empirically false - trimming can strip an already-
+non-empty string down to `""` regardless of its input.
+
+**The largest real risk turned out to be structural, not conceptual**:
+grepping every direct `Type::Array`/`Type::ArrayShape` pattern match in
+the checker found 25 real call sites that stopped recognizing a
+`list<T>`/`non-empty-array<T>` value as an array at all the moment it
+became a real `Intersection` instead of plain `Array(T)` - confirmed
+live (`foreach` over a `list<T>`-typed variable silently inferred
+`Mixed`). Fixed via two shared helpers (`array_element_type`,
+`is_array_like`) adopted across `foreach`, the array-union `+`
+operator, `??`'s own array-widening, dynamic-key array writes and
+destructuring assignment, `sprintf`'s own format-string check (an
+active regression in already-shipped bug-catching, not just missed
+precision), and by-ref argument widening - most of the remaining 25
+sites already recursed into `Intersection` generically via an existing
+`Union` sibling arm and needed no change at all, confirmed by reading
+rather than assumed. A second, more severe version of the same class of
+bug was caught by the corpus re-check itself: `registry::is_assignable`
+was missing the same dedicated Intersection-vs-Intersection rule
+`types::is_subtype` got, so its own generic dispatch intercepted a
+same-shaped pair (even `list<string>` vs `list<string>`) before ever
+reaching the correct logic - unfixed, this alone inflated the corpus
+count to 1861 before the real, intended ~875 was reached.
+
+Six bespoke array-function special cases, each verified via
+`dumpType()`: `array_values` (new - always `list<V>`, any input shape),
+`array_unique` (new - never preserves list-ness), `array_filter`/
+`array_combine` (existing - now explicitly strip any accessory marker
+instead of passing it through unchanged), `array_map`/`array_slice`/
+`array_reverse` (the latter two new - preserve the input's own markers
+with default arguments only, confirmed to break with `preserve_keys:
+true`). `array_merge` and every other stdlib array function beyond
+these six are left untracked - a real, open-ended surface with no
+bounded stopping point.
+
+**A deliberate, explicitly confirmed decision, not a default**: a plain
+`Type::Array(_)` - even with a known element type - never satisfies
+`list<T>`/`non-empty-array<T>`, matching real PHPStan's own confirmed
+strictness (verified live: even a known-element `int[]` fails a
+`list<int>` sink) rather than this project's usual leniency-for-
+uncertainty default. Confirmed corpus-scale, not theoretical, before
+the decision was made: `list<` appears 1575 times across 463 first-
+party files. The corpus re-check after this decision landed showed
+exactly the scale of impact predicted - 211 -> 1115 diagnostics, the
+large majority real `@return list<T>` declarations whose method body
+only provably returns `array<T>` - explicitly reviewed and confirmed as
+the accepted, correct outcome of the decision, not a regression,
+before continuing to build the rest of the phase on top of it. Task 7's
+own array-destructuring fixes then resolved a large share of that
+(1115 -> 875), the rest left as real, uncorrected signal about the
+corpus's own type-precision gaps rather than individually triaged here.
 
 ## Phase 20 - Performance & robustness - DONE
 
