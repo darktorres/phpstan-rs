@@ -1378,6 +1378,33 @@ mod tests {
         assert!(d[0].message.contains("needsInts"), "got: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found the native stub's own
+    // literal `@return int[]|string[]` became a real regression once
+    // `array_element_type` gained a `Union` arm (below): a plain,
+    // non-literal array<string, V> argument (not a literal shape, so the
+    // dedicated case above doesn't apply) fell through to that stub
+    // verbatim, surfacing `int|string` for every reader of a key -
+    // opcache-preload.php's own `foreach (array_keys($classMap) as
+    // $symbol) { str_starts_with($symbol, ...); }` was real corpus code
+    // this broke. This project has no key-type tracking at all
+    // (a known, tracked limitation) - falls back to its own usual
+    // `Mixed` key-type default instead of the stub's own misleadingly
+    // precise-sounding answer.
+    #[test]
+    fn array_keys_on_a_plain_array_falls_back_to_a_mixed_key_type_not_int_or_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array<string, string> $classMap */
+            function f(array $classMap): void {
+                foreach (array_keys($classMap) as $symbol) {
+                    str_starts_with($symbol, 'x');
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn array_fill_and_array_fill_keys_infer_the_fill_value_s_type() {
         let d = diagnostics_for(
@@ -3958,6 +3985,63 @@ mod tests {
         assert_eq!(d.len(), 3, "got: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found real PHPStan's own
+    // array_filter() extension recognizes an explicit null-check callback
+    // (`fn ($v) => $v !== null`) and strips Null from the retained
+    // element type, not just its usual accessory-marker stripping -
+    // verified via dumpType(). Real Piwigo code (GalleryController)
+    // builds `$page_items` exactly this way.
+    #[test]
+    fn array_filter_with_an_explicit_null_check_arrow_fn_strips_null_from_the_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array<int|null> $x
+             *  @return array<int>
+             */
+            function f(array $x): array {
+                return array_filter($x, static fn (?int $v): bool => $v !== null);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_filter_with_an_explicit_null_check_closure_strips_null_from_the_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array<int|null> $x
+             *  @return array<int>
+             */
+            function f(array $x): array {
+                return array_filter($x, static function (?int $v): bool {
+                    return $v !== null;
+                });
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_filter_with_an_unrelated_callback_does_not_strip_null() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array<int|null> $x
+             *  @return array<int>
+             */
+            function f(array $x): array {
+                return array_filter($x, static fn (?int $v): bool => $v !== 0);
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected null to still survive an unrelated filter: {d:?}"
+        );
+    }
+
     #[test]
     fn array_slice_and_array_reverse_preserve_list_ness_only_with_default_preserve_keys() {
         let d = diagnostics_for(
@@ -4158,6 +4242,84 @@ mod tests {
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // A round of Piwigo-corpus bucketing found `array_element_type`/
+    // `is_array_like`/`is_list_like`/`is_known_non_empty_array` had no
+    // `Type::Union` arm at all - the single most common way a real
+    // variable's type actually arrives here: a control-flow merge
+    // (`$x = []; if (...) { foreach (...) { $x[] = ...; } }` leaves `$x`
+    // a Union of the "0 iterations" `array{}` branch and the "≥1" real
+    // list branch). Every one of `sort()`, `array_merge()`, `foreach`,
+    // etc. silently stopped recognizing such a value as an array at all,
+    // the same class of regression Phase 14's own Task 7 audit exists to
+    // prevent - just for `Union` instead of `Intersection`.
+    #[test]
+    fn sort_still_reindexes_to_a_list_when_the_input_is_a_union_from_a_conditional_append() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return list<string> */
+            function f(bool $flag): array {
+                $x = [];
+                if ($flag) {
+                    foreach (['a', 'b'] as $s) {
+                        $x[] = $s;
+                    }
+                }
+                sort($x);
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_element_type_union_arm_does_not_collapse_to_mixed_via_an_empty_branch() {
+        // The regression this fix could easily introduce: folding an
+        // empty ArrayShape branch's own degenerate `Mixed` element type
+        // into the union would collapse the *whole* merged element type
+        // down to `Mixed`, discarding the real element type the
+        // non-empty branch actually has.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return list<int> */
+            function f(bool $flag): array {
+                $x = [];
+                if ($flag) {
+                    $x[] = 1;
+                }
+                sort($x);
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_union_with_a_non_array_member_does_not_get_wrongly_upgraded_to_a_list() {
+        // `array_element_type`'s new Union arm must require *every*
+        // member to be array-like - a `list<int>|null` has no sensible
+        // single "element type," so sort() falls back to its own
+        // ordinary (imprecise, but safe) declared-parameter-type
+        // widening instead of wrongly claiming the result is a list.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int>|null $x
+             *  @return list<int>
+             */
+            function f($x): array {
+                sort($x);
+                return $x;
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected the fallback array(mixed) to still mismatch list<int>: {d:?}"
+        );
     }
 
     #[test]

@@ -1932,6 +1932,11 @@ impl<'a> Checker<'a> {
                 .iter()
                 .enumerate()
                 .all(|(i, (k, _, _))| k == &i.to_string()),
+            // Every branch of a control-flow-merged `Union` must itself
+            // be list-like - an `ArrayShape([])` branch (the common
+            // "0 iterations" case) already satisfies this vacuously via
+            // the `ArrayShape` arm above.
+            Type::Union(members) => members.iter().all(Self::is_list_like),
             _ => false,
         }
     }
@@ -1945,6 +1950,10 @@ impl<'a> Checker<'a> {
                 members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
             }
             Type::ArrayShape(fields) => !fields.is_empty(),
+            // Non-empty only if *every* branch is - a possibly-empty
+            // branch (an `ArrayShape([])`, the common "0 iterations"
+            // case) means the merged value isn't provably non-empty.
+            Type::Union(members) => members.iter().all(Self::is_known_non_empty_array),
             _ => false,
         }
     }
@@ -1995,6 +2004,36 @@ impl<'a> Checker<'a> {
             // `array_chunk`/`array_column`) silently stopped recognizing
             // such a value as an array at all.
             Type::Intersection(members) => members.iter().find_map(Self::array_element_type),
+            // A round of Piwigo-corpus bucketing found this was missing
+            // the single most common way a real variable's type actually
+            // arrives here: a `Union` of array-like branches from a
+            // control-flow merge (`$x = []; if (...) { foreach (...) {
+            // $x[] = ...; } }` - the "0 iterations" branch stays
+            // `array{}`, the "≥1" branch becomes a real list, and an
+            // `if`/loop join leaves `$x` a `Union` of the two). A
+            // genuinely empty `ArrayShape` member contributes no real
+            // element-type constraint (it holds zero elements in that
+            // branch) and is skipped rather than folded in as `Mixed`,
+            // which would otherwise collapse the *whole* merged element
+            // type down to `Mixed` the moment any branch was ever empty.
+            // Only defined when every other member is itself array-like -
+            // a `list<T>|null` union has no sensible single "element
+            // type" to report.
+            Type::Union(members) => {
+                let mut elem_types = Vec::new();
+                for m in members {
+                    if matches!(m, Type::ArrayShape(fields) if fields.is_empty()) {
+                        continue;
+                    }
+                    elem_types.push(Self::array_element_type(m)?);
+                }
+                Some(
+                    elem_types
+                        .into_iter()
+                        .reduce(union_types)
+                        .unwrap_or(Type::Mixed),
+                )
+            }
             _ => None,
         }
     }
@@ -2002,11 +2041,14 @@ impl<'a> Checker<'a> {
     /// Phase 14: whether `ty` is array-shaped at all - for sites that
     /// only need "is this even an array," not the unwrapped element
     /// type `array_element_type` above provides. Sees through a
-    /// `list<T>`/`non-empty-array<T>`-typed value the same way.
+    /// `list<T>`/`non-empty-array<T>`-typed value the same way, and
+    /// through a `Union` of such values (the same control-flow-merge
+    /// shape `array_element_type`'s own `Union` arm above handles).
     pub(crate) fn is_array_like(ty: &Type) -> bool {
         matches!(ty, Type::Array(_) | Type::ArrayShape(_))
             || matches!(ty, Type::Intersection(members)
                 if members.iter().any(|m| matches!(m, Type::Array(_) | Type::ArrayShape(_))))
+            || matches!(ty, Type::Union(members) if members.iter().all(Self::is_array_like))
     }
 
     /// Phase 12's bespoke per-function return-type extensions (real
@@ -2072,7 +2114,11 @@ impl<'a> Checker<'a> {
                     // non-empty array - verified via dumpType() that
                     // neither marker survives, so they're stripped
                     // rather than passed through unchanged.
-                    return strip_accessory_markers(arr_ty);
+                    let stripped = strip_accessory_markers(arr_ty);
+                    if args.len() >= 2 && is_null_filter_callback(&args[1].value) {
+                        return strip_null_from_array_element(stripped);
+                    }
+                    return stripped;
                 }
             }
             // array_reduce(array $array, callable $callback, mixed
@@ -2311,7 +2357,8 @@ impl<'a> Checker<'a> {
             // per-key, folding into a real `int|string` union only when
             // the shape's own keys are genuinely mixed.
             "array_keys" if args.len() == 1 => {
-                if let Type::ArrayShape(fields) = self.infer_expr(&args[0].value, locals) {
+                let arg_ty = self.infer_expr(&args[0].value, locals);
+                if let Type::ArrayShape(fields) = &arg_ty {
                     let key_ty = fields
                         .iter()
                         .map(|(k, _, _)| {
@@ -2324,6 +2371,19 @@ impl<'a> Checker<'a> {
                         .reduce(union_types)
                         .unwrap_or(Type::String);
                     return Type::Array(Box::new(key_ty));
+                }
+                // The native stub's own `@return int[]|string[]` is real
+                // but useless without this project's own key-type
+                // tracking (`Type::Array` has no key-type parameter at
+                // all, a known limitation) - falling through to it
+                // verbatim surfaced `int|string` for every reader of the
+                // result, a real regression once `array_element_type`
+                // gained its own `Union` arm (below) and started actually
+                // resolving it instead of silently giving up at `Mixed`.
+                // Matches this project's own usual "don't know, don't
+                // guess beyond Mixed" default for an unprovable key type.
+                if Self::is_array_like(&arg_ty) {
+                    return Type::Array(Box::new(Type::Mixed));
                 }
             }
             "array_column" if args.len() == 2 || args.len() == 3 => {
@@ -3029,6 +3089,53 @@ fn is_canonical_int_key(key: &str) -> bool {
 /// exactly the default-matching case (omitted, or explicitly `false`).
 fn is_false_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(false)))
+}
+
+fn is_var_named(e: &Expr, name: &str) -> bool {
+    matches!(&e.kind, ExprKind::Variable(n) if n == name)
+}
+
+fn is_null_literal(e: &Expr) -> bool {
+    matches!(&e.kind, ExprKind::Literal(Literal::Null))
+}
+
+/// Recognizes exactly the callback shape real PHPStan's own
+/// `array_filter` extension does for an explicit null check: `fn ($v) =>
+/// $v !== null` (or `null !== $v`), as an arrow function or a closure
+/// whose only statement is the equivalent `return` - verified via
+/// dumpType(). Deliberately narrow, matching this project's own "verify
+/// the exact shape, then implement exactly that" convention rather than
+/// a general boolean-expression evaluator.
+fn is_null_filter_callback(e: &Expr) -> bool {
+    fn is_not_null_check(body: &Expr, param: &str) -> bool {
+        matches!(&body.kind, ExprKind::Binary(BinOp::NotIdentical, l, r)
+            if (is_var_named(l, param) && is_null_literal(r))
+                || (is_var_named(r, param) && is_null_literal(l)))
+    }
+    match &e.kind {
+        ExprKind::ArrowFn { params, body, .. } => {
+            matches!(params.as_slice(), [p] if is_not_null_check(body, &p.name))
+        }
+        ExprKind::Closure { params, body, .. } => match (params.as_slice(), body.as_slice()) {
+            ([p], [stmt]) => {
+                matches!(&stmt.kind, StmtKind::Return(Some(ret_expr)) if is_not_null_check(ret_expr, &p.name))
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// `array_filter`'s own explicit-null-filter callback (recognized by
+/// `is_null_filter_callback` above) strips `Null` from the retained
+/// element type, not just the accessory markers every `array_filter`
+/// call already loses (`strip_accessory_markers`) - verified via
+/// dumpType().
+fn strip_null_from_array_element(ty: Type) -> Type {
+    match ty {
+        Type::Array(elem) => Type::Array(Box::new(narrow_type_excluding(&elem, &Type::Null))),
+        other => other,
+    }
 }
 
 /// Phase 14: drops any `Accessory` marker from `ty`, collapsing an
