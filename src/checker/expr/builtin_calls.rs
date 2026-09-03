@@ -36,6 +36,45 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Type {
         match name {
+            // `range()`'s own real stub (phpstorm-stubs' `@return array` -
+            // no refinement at all) gives no list-ness/element-type
+            // information whatsoever, but real PHPStan special-cases this
+            // function (its own `RangeFunctionReturnTypeExtension`): a
+            // real `range($low, $high)` call always walks `$low` to
+            // `$high` inclusive with sequential integer keys starting at
+            // 0 - genuinely a list, and never empty (even `range(5, 5)`
+            // produces `[5]`) - regardless of whether the bounds are
+            // literals this project could evaluate exactly. Scoped to
+            // int and single-character-string bounds (the two real
+            // corpus shapes - `range(1000, 1999)`, character-range
+            // idioms) with no 3rd `$step` argument (a non-default step
+            // can skip past `$high` without reaching it exactly, which
+            // doesn't change list-ness/non-emptiness but isn't needed by
+            // any real call site yet) - anything else falls through to
+            // the generic path below, unchanged.
+            "range" if args.len() == 2 => {
+                let elem = match (
+                    &self.infer_expr(&args[0].value, locals),
+                    &self.infer_expr(&args[1].value, locals),
+                ) {
+                    (Type::Int | Type::IntLiteral(_), Type::Int | Type::IntLiteral(_)) => {
+                        Some(Type::Int)
+                    }
+                    (Type::StringLiteral(a), Type::StringLiteral(b))
+                        if a.chars().count() == 1 && b.chars().count() == 1 =>
+                    {
+                        Some(Type::String)
+                    }
+                    _ => None,
+                };
+                if let Some(elem) = elem {
+                    return Type::Intersection(vec![
+                        Type::Array(Box::new(elem)),
+                        Type::Accessory(AccessoryKind::ArrayList),
+                        Type::Accessory(AccessoryKind::NonEmptyArray),
+                    ]);
+                }
+            }
             // Scoped to the common 2-arg single-array form - the real
             // function is variadic (multiple arrays); a 3+-arg call falls
             // through to the generic path below, unchanged.
