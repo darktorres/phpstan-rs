@@ -3,6 +3,7 @@ use crate::checker::{
     CheckArgsCall, Checker, Locals, TemplateBindings, body_contains_yield, is_language_construct,
     is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
     narrow_type_excluding, narrowing_key, purge_stale_narrowing_for, resolve_call_args,
+    superglobal_default_type,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -191,6 +192,19 @@ impl<'a> Checker<'a> {
                 // has - `it('...', $variableHoldingAClosure)` falls
                 // through to plain check_expr, unrebound.
                 let is_this_binding_call = matches!(&callee.kind, ExprKind::Name(name) if pest_config::is_this_binding_call(name));
+                // `isset($x['maybe_missing'])`/`empty($x['maybe_missing'])`
+                // are exactly PHP's own sanctioned way to safely probe a
+                // possibly-absent array key/property/variable - real PHP
+                // raises no notice either way, and real PHPStan explicitly
+                // never flags an "offset doesn't exist"-style diagnostic
+                // for either construct's own direct argument(s), the same
+                // "root of this expression chain isn't checked for
+                // existence" leniency `check_expr_quiet_root` already
+                // grants `??`'s left side. Scoped to these two names only,
+                // matched on the *original* (pre-resolution) name exactly
+                // like `is_language_construct` itself, since neither is a
+                // real, resolvable function call.
+                let is_existence_probe = matches!(&callee.kind, ExprKind::Name(name) if name == "isset" || name == "empty");
                 for a in args {
                     if is_this_binding_call
                         && matches!(
@@ -205,6 +219,8 @@ impl<'a> Checker<'a> {
                             label,
                             this_ty,
                         );
+                    } else if is_existence_probe {
+                        self.check_expr_quiet_root(&a.value, locals, label);
                     } else {
                         self.check_expr(&a.value, locals, label);
                     }
@@ -570,7 +586,10 @@ impl<'a> Checker<'a> {
                         0,
                     );
                 }
-                locals.get(name).cloned().unwrap_or(Type::Mixed)
+                locals
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| superglobal_default_type(name))
             }
             ExprKind::Unary(
                 op @ (UnaryOp::PreInc | UnaryOp::PostInc | UnaryOp::PreDec | UnaryOp::PostDec),
@@ -1447,7 +1466,10 @@ impl<'a> Checker<'a> {
                 Literal::Bool(false) => Type::False,
                 Literal::Null => Type::Null,
             },
-            ExprKind::Variable(name) => locals.get(name).cloned().unwrap_or(Type::Mixed),
+            ExprKind::Variable(name) => locals
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| superglobal_default_type(name)),
             ExprKind::Grouping(inner) | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
             // A closure/arrow-fn literal, and first-class-callable syntax
             // (`strlen(...)`, `$obj->method(...)`), all produce a real

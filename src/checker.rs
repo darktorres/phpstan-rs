@@ -205,7 +205,9 @@ mod oop;
 mod resolve;
 mod stmt;
 
-pub(crate) use assignment::{is_superglobal, literal_string_key, literal_string_value};
+pub(crate) use assignment::{
+    is_superglobal, literal_string_key, literal_string_value, superglobal_default_type,
+};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use control_flow::{body_contains_yield, merge_scopes};
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};

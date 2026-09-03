@@ -363,6 +363,30 @@ pub(crate) fn is_superglobal(name: &str) -> bool {
     )
 }
 
+/// A superglobal's own type, read *before* any real assignment to it
+/// appears in this function's own `locals` - real phpstorm-stubs' own
+/// `superglobals/_superglobals.php` bootstrap file declares every one of
+/// these (bar `argc`) with a literal `= []` assignment, which is exactly
+/// what real PHPStan's own global-variable seeding generalizes to a bare
+/// `array`, never `null`/`mixed`. Reusing the generic `Type::Mixed`
+/// fallback here (as if a superglobal's pre-assignment type were
+/// "unknown/could be anything") broke `$_SESSION ??= [];` specifically:
+/// `widen_coalesce_result`'s own "keep the left side's real array type
+/// instead of collapsing to the empty-shape fallback" rule only fires
+/// for an already-known `Type::Array`, so a `Mixed` left side collapsed
+/// `??=`'s result to the literal `array{}`, then flagged the very next
+/// `unset($_SESSION['some_key'])` as targeting a key that provably
+/// doesn't exist. Scoped to exactly the real declared type: `Array(Mixed)`
+/// for the eight always-array superglobals, `Int` for `argc` (never `[]`
+/// in the stub at all).
+pub(crate) fn superglobal_default_type(name: &str) -> Type {
+    match name {
+        "argc" => Type::Int,
+        _ if is_superglobal(name) => Type::Array(Box::new(Type::Mixed)),
+        _ => Type::Mixed,
+    }
+}
+
 /// Extracts a shape-lookup key from a literal index expression - `'name'`
 /// or a bare int (PHP array keys are always stringified/int-normalized
 /// internally, so both forms are compared the same way here). A
