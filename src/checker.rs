@@ -1703,6 +1703,25 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // The vendored stub's own `@return string[]|false` reflects PHP 7's
+    // behavior for an empty $separator - PHP 8+ throws a ValueError there
+    // instead, so real PHPStan drops |false entirely and always answers
+    // non-empty-list<string>, verified via dumpType() (even for a
+    // non-literal $separator). Real Piwigo code
+    // (GeneratedFileErrorMapper::lines) relies on exactly this.
+    #[test]
+    fn explode_always_returns_a_non_empty_list_never_false() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return non-empty-list<string> */
+            function f(string $sep, string $s): array {
+                return explode($sep, $s);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     // Only the array-stripping half of mb_convert_encoding()'s own real
     // (more involved) dynamic extension is implemented - evidenced via
     // `CharsetHelper::convertCharset`'s own real shape.

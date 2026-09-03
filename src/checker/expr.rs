@@ -2494,6 +2494,22 @@ impl<'a> Checker<'a> {
                     Type::False,
                 ]);
             }
+            // The vendored stub's own `@return string[]|false` reflects
+            // PHP 7's behavior for an empty `$separator` - PHP 8+ throws a
+            // `ValueError` there instead of returning `false` at all, so
+            // real PHPStan's own dynamic-return-type extension drops
+            // `|false` entirely and always answers `non-empty-list<string>`
+            // - verified via dumpType(), even for a non-literal
+            // `$separator` (there's no other way `explode()` can return
+            // fewer than 1 element). Real Piwigo code
+            // (GeneratedFileErrorMapper::lines) relies on exactly this.
+            "explode" if matches!(args.len(), 2..=3) => {
+                return Type::Intersection(vec![
+                    Type::Array(Box::new(Type::String)),
+                    Type::Accessory(AccessoryKind::ArrayList),
+                    Type::Accessory(AccessoryKind::NonEmptyArray),
+                ]);
+            }
             // Same family as tempnam() above - the native stub declares a
             // bare `array|false`, but real PHPStan's own dynamic-return-
             // type extension always returns a real `list<string>` on
