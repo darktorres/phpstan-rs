@@ -919,7 +919,13 @@ fn is_known_single_value(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Null | Type::True | Type::False | Type::IntLiteral(_) | Type::StringLiteral(_)
-    )
+    ) ||
+    // Found by a round of Piwigo-corpus bucketing: `$x !== []` (the same
+    // idiom `$x !== ''` already gets, Phase 14) never excluded the empty
+    // shape at all - an empty array literal is exactly as exhaustively
+    // single-valued as `''`/a literal int, just structural rather than a
+    // scalar `Type` variant.
+    matches!(ty, Type::ArrayShape(fields) if fields.is_empty())
 }
 
 pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
@@ -954,6 +960,15 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
                 Type::String,
                 Type::Accessory(AccessoryKind::NonEmptyString),
             ])
+        }
+        // `$x !== []` on a plain `array`/`list` - the same idiom as the
+        // `String` arm above, verified against real PHPStan's own
+        // dumpType(): both a plain `array<T>` and an already-`list<T>`
+        // upgrade to their own non-empty form. Shares `upgrade_array_to_
+        // non_empty` with `!empty($x)`/`count($x) > 0` so the three
+        // "prove this array is non-empty" paths can't drift apart.
+        Type::Array(_) | Type::Intersection(_) if matches!(excluded, Type::ArrayShape(fields) if fields.is_empty()) => {
+            upgrade_array_to_non_empty(original)
         }
         other if other == excluded => Type::Never,
         other => other.clone(),

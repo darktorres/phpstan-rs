@@ -52,6 +52,7 @@ impl<'a> Checker<'a> {
     /// written at.
     pub(crate) fn predefine_byref_or_unknown_args(
         &self,
+        call_name: Option<&str>,
         sig: Option<&FunctionSig>,
         args: &[Arg],
         resolved: &[Option<&Expr>],
@@ -91,6 +92,39 @@ impl<'a> Checker<'a> {
             if !locals.contains_key(name) {
                 locals.insert(name.clone(), Type::Mixed);
                 continue;
+            }
+            // A round of Piwigo-corpus bucketing found the sort() family's
+            // own real PHPStan dynamic type-specifying extensions weren't
+            // modeled at all - every one fell into the generic widening
+            // below, which discards precision down to the declared
+            // `array &$array`/`array &$arg` param type regardless of what
+            // the function actually does to it. Verified via dumpType():
+            // sort/rsort/usort/shuffle always reindex their by-ref
+            // argument to a real list, preserving the input's own element
+            // type (and non-emptiness, when already known); asort/arsort/
+            // ksort/krsort/uasort/uksort/natsort/natcasesort preserve the
+            // exact key structure - and so the exact type - unchanged.
+            if let Some(fn_name) = call_name {
+                let current = locals.get(name).cloned().unwrap_or(Type::Mixed);
+                match fn_name {
+                    "sort" | "rsort" | "usort" | "shuffle" => {
+                        if let Some(elem_ty) = Checker::array_element_type(&current) {
+                            let mut members = vec![
+                                Type::Array(Box::new(elem_ty)),
+                                Type::Accessory(types::AccessoryKind::ArrayList),
+                            ];
+                            if Checker::is_known_non_empty_array(&current) {
+                                members.push(Type::Accessory(types::AccessoryKind::NonEmptyArray));
+                            }
+                            purge_stale_narrowing_for(locals, name);
+                            locals.insert(name.clone(), Type::Intersection(members));
+                            continue;
+                        }
+                    }
+                    "asort" | "arsort" | "ksort" | "krsort" | "uasort" | "uksort" | "natsort"
+                    | "natcasesort" => continue,
+                    _ => {}
+                }
             }
             // Phase 22 Finding 3: an *already-defined* variable passed
             // by-ref was previously left untouched entirely (only an

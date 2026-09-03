@@ -3602,6 +3602,46 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found `$x !== []` (the array
+    // equivalent of the string idiom just above) was never handled at
+    // all - `is_known_single_value` didn't recognize an empty array
+    // literal as exhaustively single-valued the way it already does a
+    // literal string/int - verified against real PHPStan's own
+    // dumpType() for both a plain array and an already-list-typed value.
+    #[test]
+    fn not_equal_empty_array_narrows_to_non_empty_array() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink(array $x): void {}
+            /** @param array<int> $x */
+            function f(array $x): void {
+                if ($x !== []) {
+                    sink($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn not_equal_empty_array_narrows_an_already_typed_list_to_non_empty() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-empty-list<int> $x */
+            function sink(array $x): void {}
+            /** @param list<int> $x */
+            function f(array $x): void {
+                if ($x !== []) {
+                    sink($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty() {
         // empty() is also false for '0' - real PHPStan narrows !empty($x)
@@ -3806,6 +3846,76 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found the generic by-ref-widening
+    // rule above discarded real precision for the sort() family - each
+    // fell into the generic "trust the declared param type" widening,
+    // which is only the plain `array &$array` stub for every one of
+    // these. Verified against real PHPStan's own dumpType(): sort/rsort/
+    // usort/shuffle always reindex to a real list; asort/arsort/ksort/
+    // krsort/uasort/uksort/natsort/natcasesort preserve the exact key
+    // structure unchanged.
+    #[test]
+    fn sort_reindexes_an_already_typed_array_to_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array<string, int> $x
+             *  @return list<int>
+             */
+            function f(array $x): array {
+                sort($x);
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn usort_and_shuffle_also_reindex_to_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array<string, int> $a
+             *  @return list<int>
+             */
+            function f(array $a): array {
+                usort($a, static fn (int $x, int $y): int => $x <=> $y);
+                return $a;
+            }
+            /** @param array<string, int> $b
+             *  @return list<int>
+             */
+            function g(array $b): array {
+                shuffle($b);
+                return $b;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn asort_and_ksort_preserve_the_exact_type_unchanged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array{a: int, b: string} $x
+             *  @return array{a: int, b: string}
+             */
+            function f(array $x): array {
+                asort($x);
+                return $x;
+            }
+            /** @param array{a: int, b: string} $y
+             *  @return array{a: int, b: string}
+             */
+            function g(array $y): array {
+                ksort($y);
+                return $y;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn array_values_always_narrows_to_a_list_even_from_a_non_list_input() {
         let d = diagnostics_for(
@@ -3996,6 +4106,27 @@ mod tests {
              */
             function f($a): array {
                 return array_merge(['x', 'y'], $a);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Found by a later round of corpus bucketing: array_merge(...$x) - a
+    // spread *argument*, not a spread array-literal item - was treated as
+    // if the whole array-of-arrays were one merge argument, giving
+    // list<list<int>> instead of list<int>. Real Piwigo code
+    // (SearchService::searchAllwords) flattens a word=>list<int> map's
+    // own values this way. Verified via dumpType().
+    #[test]
+    fn array_merge_of_a_spread_argument_flattens_one_level() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array<string, list<int>> $byWord
+             *  @return list<int>
+             */
+            function f(array $byWord): array {
+                return array_merge(...array_values($byWord));
             }
         "#,
         );

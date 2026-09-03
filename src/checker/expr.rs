@@ -161,7 +161,13 @@ impl<'a> Checker<'a> {
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
-                self.predefine_byref_or_unknown_args(sig, args, &resolved, locals);
+                self.predefine_byref_or_unknown_args(
+                    resolved_name.as_deref(),
+                    sig,
+                    args,
+                    &resolved,
+                    locals,
+                );
                 // Finding 1: `it`/`test`/`describe`/`beforeEach`/
                 // `afterEach`/`beforeAll`/`afterAll` rebind `$this` inside
                 // their closure/arrow-fn argument at runtime (Pest's own
@@ -423,7 +429,7 @@ impl<'a> Checker<'a> {
                     .as_ref()
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
-                self.predefine_byref_or_unknown_args(sig.as_ref(), args, &resolved, locals);
+                self.predefine_byref_or_unknown_args(None, sig.as_ref(), args, &resolved, locals);
                 for a in args {
                     self.check_expr(&a.value, locals, label);
                 }
@@ -819,7 +825,7 @@ impl<'a> Checker<'a> {
                 let resolved = ctor_sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
-                self.predefine_byref_or_unknown_args(ctor_sig, args, &resolved, locals);
+                self.predefine_byref_or_unknown_args(None, ctor_sig, args, &resolved, locals);
                 for a in args {
                     self.check_expr(&a.value, locals, label);
                 }
@@ -895,7 +901,7 @@ impl<'a> Checker<'a> {
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
-                self.predefine_byref_or_unknown_args(sig, args, &resolved, locals);
+                self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
                 // Finding 49: `Closure::bind($closure, $newThis, $scope)`
                 // makes `$this` (and, for private/protected access, the
                 // calling scope) available inside a closure that
@@ -1933,7 +1939,7 @@ impl<'a> Checker<'a> {
     /// Whether `ty` is already provably non-empty - a real
     /// `non-empty-array<T>`/`non-empty-list<T>`, or a non-empty
     /// `ArrayShape` literal.
-    fn is_known_non_empty_array(ty: &Type) -> bool {
+    pub(crate) fn is_known_non_empty_array(ty: &Type) -> bool {
         match ty {
             Type::Intersection(members) => {
                 members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
@@ -2184,7 +2190,15 @@ impl<'a> Checker<'a> {
                 // uses - verified via dumpType() that array_merge follows
                 // the identical key rule (canonical int keys renumbered,
                 // other keys overwritten by the later argument).
-                if arg_types.iter().all(|t| matches!(t, Type::ArrayShape(_))) {
+                // A spread argument (`array_merge(...$listOfLists)`, a
+                // real corpus pattern flattening a word=>list<int> map's
+                // own values - `SearchService::searchAllwords`) expands
+                // to however many arrays that value itself holds at
+                // runtime, not one merge argument shaped like the
+                // array-of-arrays itself - never eligible for the
+                // fixed-arity precise shape merge below.
+                let has_spread = args.iter().any(|a| a.spread);
+                if !has_spread && arg_types.iter().all(|t| matches!(t, Type::ArrayShape(_))) {
                     let mut fields: Vec<(String, Type, bool)> = Vec::new();
                     let mut next_index: i64 = 0;
                     for arg_ty in &arg_types {
@@ -2202,12 +2216,47 @@ impl<'a> Checker<'a> {
                     }
                     return Type::ArrayShape(fields);
                 }
-                if arg_types.iter().all(Self::is_array_like) {
-                    let all_list = arg_types.iter().all(Self::is_list_like);
-                    let any_non_empty = arg_types.iter().any(Self::is_known_non_empty_array);
-                    let elem_ty = arg_types
-                        .iter()
-                        .filter_map(Self::array_element_type)
+                let mut elem_types: Vec<Type> = Vec::new();
+                let mut all_list = true;
+                let mut any_non_empty = false;
+                let mut all_known_array_like = true;
+                for (arg, arg_ty) in args.iter().zip(&arg_types) {
+                    if arg.spread {
+                        // Each element of the spread source is one of the
+                        // arrays actually being merged - its own element
+                        // type is one level further down than the spread
+                        // source's own element type. List-ness/non-
+                        // emptiness aren't provable this way (an unknown
+                        // number of arrays, of unknown emptiness).
+                        match Checker::array_element_type(arg_ty) {
+                            Some(inner_ty) => {
+                                if !Self::is_list_like(&inner_ty) {
+                                    all_list = false;
+                                }
+                                match Checker::array_element_type(&inner_ty) {
+                                    Some(t) => elem_types.push(t),
+                                    None => all_known_array_like = false,
+                                }
+                            }
+                            None => all_known_array_like = false,
+                        }
+                    } else if Self::is_array_like(arg_ty) {
+                        if !Self::is_list_like(arg_ty) {
+                            all_list = false;
+                        }
+                        if Self::is_known_non_empty_array(arg_ty) {
+                            any_non_empty = true;
+                        }
+                        if let Some(t) = Checker::array_element_type(arg_ty) {
+                            elem_types.push(t);
+                        }
+                    } else {
+                        all_known_array_like = false;
+                    }
+                }
+                if all_known_array_like {
+                    let elem_ty = elem_types
+                        .into_iter()
                         .reduce(union_types)
                         .unwrap_or(Type::Mixed);
                     let mut members = vec![Type::Array(Box::new(elem_ty))];
