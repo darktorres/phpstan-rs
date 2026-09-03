@@ -29,24 +29,27 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 918 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 926 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
-  875 (Phase 14's closing round) -> **453 (current, Phase 14.5's closing
-  round)**. The 211 -> 1115 jump was a real, confirmed *increase*, not a
-  regression: `list<T>`/`non-empty-array<T>` now match real PHPStan's
-  own strictness rather than this project's usual leniency default, a
-  deliberate, explicitly confirmed choice given 1575 first-party `list<`
-  occurrences. Phase 14.5 then closed most of the resulting gap: nearly
-  all of it turned out to be this project's own type-inference gaps
-  (spread array literals, `array_merge`, PHP 8.4 property hooks,
-  `preg_match_all`'s per-group arrays, and above all array-append
-  widening - the single most common accumulator idiom in PHP) rather
-  than genuine corpus-side `@return list<T>` overclaims.
+  875 (Phase 14's closing round) -> 453 (Phase 14.5's first round) ->
+  **434 (current, Phase 14.5's closing round)**. The 211 -> 1115 jump was
+  a real, confirmed *increase*, not a regression: `list<T>`/
+  `non-empty-array<T>` now match real PHPStan's own strictness rather
+  than this project's usual leniency default, a deliberate, explicitly
+  confirmed choice given 1575 first-party `list<` occurrences. Phase
+  14.5's two rounds then closed most of the resulting gap: nearly all of
+  it turned out to be this project's own type-inference gaps (spread
+  array literals, `array_merge` including its own spread-argument form,
+  PHP 8.4 property hooks, `preg_match_all`'s per-group arrays,
+  array-append widening - the single most common accumulator idiom in
+  PHP, the `sort()` family's own dynamic type-specifying extensions,
+  `$x !== []` narrowing, and a `try`/`catch` scope-merge gap) rather than
+  genuine corpus-side `@return list<T>` overclaims.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -906,6 +909,55 @@ at the end.
 The "array_merge's own key-renumbering isn't tracked" item in **Known
 limitations** below is updated to reflect what this round actually
 closed versus what's still open.
+
+**A second round** (453 -> 434) found three more gaps, two of them
+surfaced only *because* the first round's own increased precision made
+them reachable for the first time:
+
+- **The `sort()` family's own real dynamic type-specifying extensions**
+  weren't modeled - the generic by-ref-widening rule (Phase 22 Finding
+  3) always overwrote a variable's tracked type with the callee's own
+  declared parameter type, correct for a real mutation but wrong here,
+  since every one of these natively declares a plain `array &$array`
+  regardless of what it actually does. Verified via `dumpType()`:
+  `sort`/`rsort`/`usort`/`shuffle` always reindex to a real list,
+  preserving the input's own element type; `asort`/`arsort`/`ksort`/
+  `krsort`/`uasort`/`uksort`/`natsort`/`natcasesort` preserve the exact
+  key structure - and so the exact type - unchanged. An extremely
+  common idiom (117 first-party files); this fix alone was 453 -> 442.
+- **`$x !== []` never excluded the empty shape at all** - the sort()
+  fix's own re-verification surfaced it: `is_known_single_value` didn't
+  recognize an empty array literal as exhaustively single-valued the
+  way it already does a literal string/int. Fixed by extending it, plus
+  a `narrow_type_excluding` arm sharing `upgrade_array_to_non_empty`
+  with `!empty($x)`/`count($x) > 0`.
+- **`array_merge(...$listOfLists)`** - a spread *argument*, not a
+  spread array-literal item - was treated as if the whole array-of-
+  arrays were one merge argument, giving `list<list<int>>` instead of
+  the real `list<int>` (`SearchService::searchAllwords` flattening a
+  `word=>list<int>` map's own values). Fixed by unwrapping one level for
+  a spread argument specifically.
+- **A `catch` clause's own ending state was discarded entirely** after
+  the whole `try`/`catch` - `locals` only ever kept the try body's own
+  final state (`$body = null; try { ...; } catch (...) { $body = "x";
+  }` then reading `$body` afterward, real `RedirectServiceTest` code).
+  Fixed the same way every other control-flow join in this checker
+  works: merge the try body's own full-completion state with each catch
+  clause's, excluding a branch that always terminates - the same
+  if/else guard-clause treatment. This ROADMAP had tracked the missing
+  merge as a real gap but assumed it only produced a false *negative*,
+  undetectable via corpus diffing; found instead to be a real,
+  corpus-confirmed false-positive cause too, and removed from **Known
+  limitations** below.
+
+Three more new locations surfaced along the way, each individually
+traced rather than assumed: two are real, latent true positives the
+round's own improved precision newly surfaced (one already covered by
+the "no multi-variable compound-boolean narrowing" limitation below;
+one confirmed matching real PHPStan's own behavior directly) - both
+accepted, neither a phpstan-rs bug; the third (the malformed-looking
+`array_merge(...$listOfLists)` output) was the spread-argument bug
+above, fixed rather than accepted.
 
 ## Phase 20 - Performance & robustness - DONE
 
