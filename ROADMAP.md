@@ -29,20 +29,20 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 939 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 941 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
-  875 (Phase 14's closing round) -> 453 -> 434 -> 397 (Phase 14.5's first
-  three rounds) -> **296 (current, Phase 14.5's closing round)**. The
-  211 -> 1115 jump was a real, confirmed *increase*, not a regression:
-  `list<T>`/`non-empty-array<T>` now match real PHPStan's own strictness
-  rather than this project's usual leniency default, a deliberate,
-  explicitly confirmed choice given 1575 first-party `list<`
-  occurrences. Phase 14.5's four rounds then closed most of the
+  875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 (Phase
+  14.5's first four rounds) -> **287 (current, Phase 14.5's closing
+  round)**. The 211 -> 1115 jump was a real, confirmed *increase*, not a
+  regression: `list<T>`/`non-empty-array<T>` now match real PHPStan's
+  own strictness rather than this project's usual leniency default, a
+  deliberate, explicitly confirmed choice given 1575 first-party `list<`
+  occurrences. Phase 14.5's five rounds then closed most of the
   resulting gap: nearly all of it turned out to be this project's own
   type-inference gaps (spread array literals, `array_merge` including
   its own spread-argument form, PHP 8.4 property hooks,
@@ -51,9 +51,10 @@ cited in both halves so either can be cross-referenced from the other.
   dynamic type-specifying extensions, `$x !== []`/static-property
   narrowing, a `try`/`catch` scope-merge gap, a missing `Union` arm in
   the core array-type helpers, `glob()`/`explode()`'s own
-  dynamic-return-type extensions, and - by far the single largest fix of
-  any round - a method-override return-type check that compared
-  docblock-refined types instead of native ones) rather than genuine
+  dynamic-return-type extensions, a mis-parsed conditional-return-type
+  docblock, and - by far the single largest fix of any round - a
+  method-override return-type check that compared docblock-refined
+  types instead of native ones) rather than genuine
   corpus-side `@return list<T>` overclaims.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
@@ -148,15 +149,28 @@ comments.
   `$x !== ''` - both real, but low-value (a rare reversed idiom; a rare
   redundant double-guard pattern) with no corpus evidence calling for
   them.
-- **Doctrine's `EntityManager::getReference()`'s real generic signature
+- **An overriding method's own parameter doesn't inherit a stricter
+  ancestor/interface docblock refinement it doesn't redeclare itself** -
+  Doctrine's `EntityManager::getReference()`'s real generic signature
   (`@template T of object`, `@param class-string<T> $entityName`,
-  `@return T|null`) lives only on the interface it implements**
-  (`EntityManagerInterface`) - the concrete class's own method has no
+  `@return T|null`) lives only on the interface it implements
+  (`EntityManagerInterface`); the concrete class's own method has no
   docblock at all, so this project's method-signature resolution never
   sees the generic bound, falling back to `mixed|null`. Confirmed real
   (`ActivityRepository.php:123`, `CommentRepository.php:80`, Phase 13).
-  Fixing it properly means real interface-to-implementation PHPDoc
-  inheritance for generics, a sizable feature on its own.
+  A non-generic instance of the identical gap (Phase 14.5's own fifth
+  round): a delegating "spy" wrapper's own `getTagsContentTitle(array
+  $tags)` (no local docblock) passing `$tags` straight through to
+  `$this->inner->getTagsContentTitle($tags)`, where the *interface*
+  separately narrows the same parameter to `list<array>` - confirmed
+  directly against real PHPStan that it does NOT flag this (verified
+  false the moment the interface relationship is removed), meaning real
+  PHPStan really does resolve an overriding method's own parameter type
+  against the closest ancestor's docblock when the override doesn't
+  provide its own, not just its native hint. Fixing either shape
+  properly means real interface-to-implementation PHPDoc inheritance
+  for method signatures generally (params and returns, generic or not),
+  a sizable feature on its own - not attempted piecemeal per shape.
 - **No mechanism for multi-variable compound-boolean narrowing** - a
   single `||`-of-`&&`-of-negations condition narrowing several different
   variables at once (`if ((!is_int($a) && !is_string($a)) || (!is_int
@@ -1052,6 +1066,31 @@ real, distinguishable type made them consequential for the first time:
   purge-and-update in `bind_assignment_target` already keys off
   `narrowing_key` uniformly. Real Piwigo test code
   (`BrowserTestHelpers::adminSessionCookies`) relies on exactly this.
+
+**A fifth round** (296 -> 287) found one real parser gap, plus
+confirmed a second real instance of an already-documented, deliberately
+out-of-scope limitation rather than fixing it piecemeal:
+
+- **Real PHPStan's own conditional return type syntax** (`@return
+  ($param is SomeType ? TrueType : FalseType)`) fell into the DNF-group
+  (`(Countable&Iterator)`) unwrap and got mangled into nonsense - the
+  whole ternary text, including the literal `$param`/`is` tokens, got
+  treated as an ordinary class name and then namespace-qualified into
+  garbage. This project has no per-call-site type-expression evaluation
+  to actually pick a branch, so `try_parse_conditional_type` now
+  recognizes the shape (the literal `is`/`?`/`:` tokens at the top
+  level) and takes the union of both branches instead - collapsing to a
+  single type when they happen to be identical. Real shape:
+  `NotificationByMailSender`'s own `@return ($action is 'send' ?
+  list<string> : list<UserMailNotification>)`.
+- Confirmed a second, non-generic real instance of the already-tracked
+  "no interface-to-implementation PHPDoc inheritance" limitation (see
+  **Known limitations** below, updated) rather than attempting a
+  piecemeal fix: a delegating "spy" wrapper's own parameter (no local
+  docblock) passing straight through to the interface's own
+  docblock-narrowed sink - confirmed directly against real PHPStan that
+  it does not flag this (and confirmed it does flag the identical shape
+  the moment the interface relationship is removed).
 
 ## Phase 20 - Performance & robustness - DONE
 
