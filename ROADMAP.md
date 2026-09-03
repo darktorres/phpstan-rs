@@ -29,27 +29,30 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 926 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 935 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
-  875 (Phase 14's closing round) -> 453 (Phase 14.5's first round) ->
-  **434 (current, Phase 14.5's closing round)**. The 211 -> 1115 jump was
-  a real, confirmed *increase*, not a regression: `list<T>`/
-  `non-empty-array<T>` now match real PHPStan's own strictness rather
-  than this project's usual leniency default, a deliberate, explicitly
-  confirmed choice given 1575 first-party `list<` occurrences. Phase
-  14.5's two rounds then closed most of the resulting gap: nearly all of
-  it turned out to be this project's own type-inference gaps (spread
-  array literals, `array_merge` including its own spread-argument form,
-  PHP 8.4 property hooks, `preg_match_all`'s per-group arrays,
-  array-append widening - the single most common accumulator idiom in
-  PHP, the `sort()` family's own dynamic type-specifying extensions,
-  `$x !== []` narrowing, and a `try`/`catch` scope-merge gap) rather than
-  genuine corpus-side `@return list<T>` overclaims.
+  875 (Phase 14's closing round) -> 453 (Phase 14.5's first round) -> 434
+  (Phase 14.5's second round) -> **397 (current, Phase 14.5's closing
+  round)**. The 211 -> 1115 jump was a real, confirmed *increase*, not a
+  regression: `list<T>`/`non-empty-array<T>` now match real PHPStan's
+  own strictness rather than this project's usual leniency default, a
+  deliberate, explicitly confirmed choice given 1575 first-party `list<`
+  occurrences. Phase 14.5's three rounds then closed most of the
+  resulting gap: nearly all of it turned out to be this project's own
+  type-inference gaps (spread array literals, `array_merge` including
+  its own spread-argument form, PHP 8.4 property hooks,
+  `preg_match_all`'s per-group arrays, array-append widening - the
+  single most common accumulator idiom in PHP, the `sort()` family's own
+  dynamic type-specifying extensions, `$x !== []` narrowing, a
+  `try`/`catch` scope-merge gap, a missing `Union` arm in the core
+  array-type helpers, and `glob()`/`explode()`'s own dynamic-return-type
+  extensions) rather than genuine corpus-side `@return list<T>`
+  overclaims.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -958,6 +961,58 @@ one confirmed matching real PHPStan's own behavior directly) - both
 accepted, neither a phpstan-rs bug; the third (the malformed-looking
 `array_merge(...$listOfLists)` output) was the spread-argument bug
 above, fixed rather than accepted.
+
+**A third round** (434 -> 397) found one foundational gap plus three
+more bespoke stdlib functions, again mostly surfaced by fixing the
+foundational one:
+
+- **`array_element_type`/`is_array_like`/`is_list_like`/
+  `is_known_non_empty_array` had no `Type::Union` arm at all** - the
+  single most common way a real variable's type actually arrives: a
+  control-flow merge (`$x = []; if (...) { foreach (...) { $x[] = ...;
+  } }` leaves `$x` a `Union` of the "0 iterations" `array{}` branch and
+  the "≥1" real list branch). Every one of `sort()`/`array_merge()`/
+  `foreach`/etc. silently stopped recognizing such a value as an array
+  at all - the same class of regression Phase 14's own Task 7 audit
+  exists to prevent, just for `Union` instead of `Intersection`. An
+  empty `ArrayShape` branch contributes no real element-type constraint
+  and is skipped in the merge rather than folded in as its own
+  degenerate `Mixed` (which would otherwise collapse the *whole* merged
+  element type down to `Mixed` the moment any branch was ever empty).
+  Found via `LatteTemplateFiles::discover`'s own real if+foreach+append+
+  `sort()` pattern.
+- This fix's own re-verification found the identical pattern it fixes
+  elsewhere, twice: **`array_keys()`'s native stub declares `@return
+  int[]|string[]`** - real but useless without this project's own
+  key-type tracking (`Type::Array` has no key-type parameter at all, a
+  known limitation, Phase 15). Previously harmless (`array_element_type`
+  gave up entirely on the resulting `Union`), the fix above made it
+  start resolving to a real `int|string`, surfacing as a regression
+  everywhere a caller read one of the keys (`opcache-preload.php`'s own
+  `foreach (array_keys($classMap) as $symbol) { str_starts_with($symbol,
+  ...); }`, real corpus code). Falls back to this project's own usual
+  `Mixed` key-type default for a non-literal array argument instead of
+  the stub's own misleadingly precise answer. **`array_filter()`'s own
+  explicit null-check callback** (`fn ($v) => $v !== null`) is a real,
+  separately-recognized PHPStan extension that strips `Null` from the
+  retained element type, not just the accessory markers every
+  `array_filter` call already loses - verified via `dumpType()`. Real
+  Piwigo code (`GalleryController`) builds its own page-items list
+  exactly this way.
+- **`glob()`** carries its own real dynamic-return-type extension beyond
+  its plain `array|false` native stub - a successful call always
+  returns a real `list<string>`, confirmed via `dumpType()`
+  (`StructuralTest`'s own `findCallSitesInRootPhpFiles`/
+  `findCallSitesInBinFiles`, narrowing away `false` via `$paths !==
+  false ? $paths : []`).
+- **`explode()`** never actually returns `false` at all on a modern PHP
+  target - the vendored stub's own `@return string[]|false` reflects PHP
+  7's behavior for an empty `$separator`; PHP 8+ throws a `ValueError`
+  there instead. Real PHPStan's own dynamic-return-type extension drops
+  `|false` entirely and always answers `non-empty-list<string>`,
+  verified via `dumpType()` (even for a non-literal `$separator` - there
+  is no other way it can return fewer than 1 element). Real Piwigo code
+  (`GeneratedFileErrorMapper::lines`) relies on exactly this.
 
 ## Phase 20 - Performance & robustness - DONE
 
