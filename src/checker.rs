@@ -8358,6 +8358,37 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Round 14 of the Piwigo corpus cleanup: `narrow_type_to`'s own
+    // non-Union fallback unconditionally returned the comparison
+    // target's type, discarding a narrower `original` - a real
+    // unsoundness bug on the *true* branch of `===`, the opposite
+    // direction from the `!==`-exclusion bug above. Real corpus shape
+    // (`PictureController::__invoke`, minimized here): `$image_id`
+    // (a definite `int`) compared `===` against `getRefererImageId()`
+    // (`int|null`) inside an unrelated `if`/`else` that never reassigns
+    // `$image_id` - the pre-existing code widened `$image_id` itself to
+    // `int|null` on the true branch, corrupting every downstream use for
+    // the rest of the function even though neither branch ever assigns
+    // to it.
+    #[test]
+    fn identical_to_a_broader_typed_value_does_not_widen_the_narrower_side() {
+        let d = diagnostics_for(
+            r#"<?php
+            class ImageId {
+                public static function from(int $value): self { return new self(); }
+            }
+            function getRefererImageId(): ?int { return null; }
+            function f(int $image_id): void {
+                if (getRefererImageId() === $image_id) {
+                    // no-op - neither branch reassigns $image_id
+                }
+                ImageId::from($image_id);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     // Real, general bug found via a Phase 12 corpus re-check (minimized
     // from `HtmlServiceTestFatalErrorCaller::call`): `check_expr`'s own
     // `Ternary` arm wrote `merge_scopes(then_locals, else_locals)` back

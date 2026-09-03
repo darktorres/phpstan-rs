@@ -951,6 +951,20 @@ pub(crate) fn narrow_type_to(original: &Type, target: &Type) -> Type {
                 _ => Type::Union(kept),
             }
         }
+        // Round 14 of the Piwigo corpus cleanup: a real, general
+        // unsoundness bug - blindly returning `target` discarded
+        // `original` even when `original` was already narrower, wrongly
+        // *widening* it. Real corpus shape: `$image_id === $this->
+        // sessionService->getRefererImageId()`, where `$image_id` is a
+        // definite `int` and `getRefererImageId()` returns `int|null` -
+        // the pre-existing code overwrote `$image_id` itself with the
+        // broader `int|null` inside the `===` true branch, corrupting
+        // every downstream use for the rest of the method. If `original`
+        // is already at least as narrow as `target`, real equality
+        // proves nothing new about it - keep it unchanged; only fall
+        // back to `target` when it's the narrower side (the literal-
+        // narrowing case this fallback exists for, `$x === 'foo'`).
+        _ if is_subtype(original, target) => original.clone(),
         _ => target.clone(),
     }
 }
