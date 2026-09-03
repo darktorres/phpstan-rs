@@ -2,7 +2,8 @@ use crate::ast::*;
 use crate::checker::{
     CheckArgsCall, Checker, Locals, TemplateBindings, body_contains_yield, is_language_construct,
     is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
-    narrow_type_excluding, narrowing_key, purge_stale_narrowing_for, resolve_call_args,
+    narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to, narrowing_key,
+    purge_stale_narrowing_for, resolve_call_args,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -2133,8 +2134,38 @@ impl<'a> Checker<'a> {
                     // neither marker survives, so they're stripped
                     // rather than passed through unchanged.
                     let stripped = strip_accessory_markers(arr_ty);
-                    if args.len() >= 2 && is_null_filter_callback(&args[1].value) {
-                        return strip_null_from_array_element(stripped);
+                    if args.len() >= 2 {
+                        if is_null_filter_callback(&args[1].value) {
+                            return strip_null_from_array_element(stripped);
+                        }
+                        // A round of Piwigo-corpus bucketing found the
+                        // same real PHPStan extension for an
+                        // `instanceof`-shaped filter callback (`fn ($v):
+                        // bool => $v instanceof Target`) - narrows the
+                        // retained element type to `Target` specifically
+                        // (not just strips `Null`: an `A|B|null` element
+                        // type filtered by `instanceof B` keeps only `B`,
+                        // not `A` too), verified via dumpType(). Real
+                        // Piwigo code
+                        // (`BatchManagerGlobalPageRenderer::render`)
+                        // filters a `list<TagId|null>` from
+                        // `array_map(TagId::tryFrom(...), ...)` down to a
+                        // real `list<TagId>` this way.
+                        if let Some(class_name) = is_instanceof_filter_callback(&args[1].value) {
+                            let target = self.resolve_name_expr(class_name);
+                            return narrow_array_element_type_to(stripped, &target);
+                        }
+                    } else {
+                        // No callback at all - real PHP's own default
+                        // behavior, dropping every falsy element - is
+                        // exactly `narrow_type_excluding_falsy`'s own
+                        // job, verified via dumpType() (`list<TagId|null>`
+                        // -> `list<TagId>`; `list<int|null>` ->
+                        // `list<non-zero-int>`, stripping both `0` and
+                        // `null`, not just `null`). Real Piwigo code
+                        // (`TusUploadCompletionService::completePhoto`)
+                        // relies on exactly the object|null case.
+                        return narrow_array_element_type_excluding_falsy(stripped);
                     }
                     return stripped;
                 }
@@ -2715,6 +2746,69 @@ impl<'a> Checker<'a> {
                     _ => None,
                 }
             }
+            // A round of Piwigo-corpus bucketing found a first-class
+            // callable (`intval(...)`, `TagId::from(...)`, PHP 8.1) used
+            // as `array_map`'s own callback fell to this function's own
+            // `_ => None` fallback, discarding every bit of precision
+            // (both list-ness/non-emptiness *and* the mapped element
+            // type) the array_map special case above this one otherwise
+            // provides - an extremely common idiom in this corpus (over
+            // 140 first-party call sites: `array_map(intval(...), ...)`
+            // alone is 76). Resolves the wrapped call's own signature and
+            // binds `param_overrides` against its declared parameter
+            // types the same way `infer_call_return_type` already does
+            // for an ordinary call, just without real argument
+            // expressions to read types from.
+            ExprKind::FirstClassCallable(inner) => {
+                // `class` is the owner to resolve a `self`/`static`
+                // pseudo-return through (`TagId::tryFrom(...): ?self`) -
+                // absent for a plain function, which can't return either.
+                let (sig, class) = match &inner.kind {
+                    ExprKind::Call(callee, _) => match &callee.kind {
+                        ExprKind::Name(name) => {
+                            let (primary, fallback) =
+                                self.name_ctx.resolve_function_candidates(name);
+                            let sig = self.registry.lookup_function(&primary).or_else(|| {
+                                fallback
+                                    .as_deref()
+                                    .and_then(|g| self.registry.lookup_function(g))
+                            });
+                            (sig, None)
+                        }
+                        _ => (None, None),
+                    },
+                    ExprKind::StaticCall(class_name, method, _) => {
+                        match self.resolve_static_class_name(class_name) {
+                            Some(class) => {
+                                let sig = self.registry.lookup_method(&class, method);
+                                (sig, Some(class))
+                            }
+                            None => (None, None),
+                        }
+                    }
+                    ExprKind::MethodCall(recv, method, _, _) => {
+                        match self.infer_expr(recv, locals) {
+                            Type::Object(class, _) => {
+                                let sig = self.registry.lookup_method(&class, method);
+                                (sig, Some(class))
+                            }
+                            _ => (None, None),
+                        }
+                    }
+                    _ => (None, None),
+                };
+                sig.map(|s| {
+                    let mut bindings: TemplateBindings = TemplateBindings::default();
+                    for (param, ty) in s.params.iter().zip(param_overrides) {
+                        types::bind_template_param(&param.ty, ty, &mut bindings);
+                    }
+                    let substituted = types::substitute_template(&s.return_type, &bindings);
+                    match &class {
+                        Some(class) => self.resolve_pseudo(&substituted, class),
+                        None => substituted,
+                    }
+                })
+            }
             _ => None,
         }
     }
@@ -3185,6 +3279,61 @@ fn is_null_filter_callback(e: &Expr) -> bool {
 fn strip_null_from_array_element(ty: Type) -> Type {
     match ty {
         Type::Array(elem) => Type::Array(Box::new(narrow_type_excluding(&elem, &Type::Null))),
+        other => other,
+    }
+}
+
+/// Recognizes real PHPStan's own other recognized `array_filter` callback
+/// shape: `fn ($v): bool => $v instanceof Target` (or the equivalent
+/// single-statement closure) - returns `Target`'s own raw name string,
+/// for the caller to resolve. Shares `is_not_null_check`'s own
+/// arrow-fn/closure traversal shape via a local nested helper, same
+/// narrow, "verify the exact shape" scope as `is_null_filter_callback`
+/// above.
+fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
+    fn as_instanceof_class<'a>(body: &'a Expr, param: &str) -> Option<&'a str> {
+        match &body.kind {
+            ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name))
+                if is_var_named(inner, param) =>
+            {
+                Some(class_name.as_str())
+            }
+            _ => None,
+        }
+    }
+    match &e.kind {
+        ExprKind::ArrowFn { params, body, .. } => match params.as_slice() {
+            [p] => as_instanceof_class(body, &p.name),
+            _ => None,
+        },
+        ExprKind::Closure { params, body, .. } => match (params.as_slice(), body.as_slice()) {
+            ([p], [stmt]) => match &stmt.kind {
+                StmtKind::Return(Some(ret_expr)) => as_instanceof_class(ret_expr, &p.name),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `array_filter`'s own `instanceof`-filter callback (recognized by
+/// `is_instanceof_filter_callback` above) narrows the retained element
+/// type to `target` specifically - verified via dumpType().
+fn narrow_array_element_type_to(ty: Type, target: &Type) -> Type {
+    match ty {
+        Type::Array(elem) => Type::Array(Box::new(narrow_type_to(&elem, target))),
+        other => other,
+    }
+}
+
+/// `array_filter($x)` with no callback at all - real PHP's own default,
+/// dropping every falsy element - shares the exact same falsy-exclusion
+/// rule `!empty($x)`'s own narrowing already uses, verified via
+/// dumpType().
+fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
+    match ty {
+        Type::Array(elem) => Type::Array(Box::new(narrow_type_excluding_falsy(&elem))),
         other => other,
     }
 }

@@ -216,7 +216,8 @@ pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
 #[cfg(test)]
 pub(crate) use expr::generalize_by_key_set;
 pub(crate) use narrowing::{
-    is_real_variable_key, narrow_type_excluding, narrowing_key, purge_stale_narrowing_for,
+    is_real_variable_key, narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to,
+    narrowing_key, purge_stale_narrowing_for,
 };
 
 impl<'a> Checker<'a> {
@@ -1216,6 +1217,71 @@ mod tests {
             function needsStrings(array $xs): void {}
             $mapped = array_map(fn(int $x): string => (string) $x, [1, 2, 3]);
             needsStrings($mapped);
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // A round of Piwigo-corpus bucketing found a first-class callable
+    // (`intval(...)`, PHP 8.1) used as array_map's own callback was
+    // completely unrecognized, discarding both the mapped element type
+    // and any list-ness/non-emptiness the input already had - an
+    // extremely common idiom in this corpus (76 first-party call sites
+    // for `array_map(intval(...), ...)` alone).
+    #[test]
+    fn array_map_resolves_a_first_class_callable_to_a_native_function() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return non-empty-list<int> */
+            function f(): array {
+                return array_map(intval(...), explode(',', '1,2,3'));
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_map_resolves_a_first_class_callable_to_a_static_method() {
+        let d = diagnostics_for(
+            r#"<?php
+            class TagId16 {
+                private function __construct(public int $value) {}
+                public static function from(int $value): self { return new self($value); }
+            }
+            /** @param list<int> $ids
+             *  @return list<TagId16>
+             */
+            function f(array $ids): array {
+                return array_map(TagId16::from(...), $ids);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Regression test for a real bug caught while implementing the fix
+    // above: a static factory returning `self` (`TagId::tryFrom(...):
+    // ?self`) resolved to the literal, un-substituted `self|null`
+    // instead of the real concrete class - every other call site that
+    // resolves a method's return type runs it through resolve_pseudo
+    // afterward, and this new one needed the same treatment.
+    #[test]
+    fn array_map_resolves_a_first_class_callables_own_self_return_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            class TagId17 {
+                private function __construct(public int $value) {}
+                public static function tryFrom(mixed $value): ?self {
+                    return is_int($value) ? new self($value) : null;
+                }
+            }
+            /** @param list<mixed> $values
+             *  @return list<TagId17|null>
+             */
+            function f(array $values): array {
+                return array_map(TagId17::tryFrom(...), $values);
+            }
         "#,
         );
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
@@ -4080,6 +4146,57 @@ mod tests {
             1,
             "expected null to still survive an unrelated filter: {d:?}"
         );
+    }
+
+    // A round of Piwigo-corpus bucketing found real PHPStan's own other
+    // recognized array_filter() extension: an instanceof-shaped filter
+    // callback (`fn ($v): bool => $v instanceof Target`) narrows the
+    // retained element type to Target specifically, not just strips
+    // Null - verified via dumpType(). Real Piwigo code
+    // (BatchManagerGlobalPageRenderer::render) filters a
+    // list<TagId|null> (from array_map(TagId::tryFrom(...), ...)) down
+    // to a real list<TagId> this way.
+    #[test]
+    fn array_filter_with_an_instanceof_callback_narrows_the_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            class TagId18 {}
+            class OtherId18 {}
+            /** @param array<TagId18|OtherId18|null> $x
+             *  @return array<TagId18>
+             */
+            function f(array $x): array {
+                return array_filter($x, static fn (mixed $v): bool => $v instanceof TagId18);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // A round of Piwigo-corpus bucketing found real PHPStan's own
+    // no-callback array_filter() default was left completely untouched
+    // (only the accessory markers were stripped, element type unchanged)
+    // - real PHP's own default drops every falsy element, exactly what
+    // narrow_type_excluding_falsy (already shared with `!empty($x)`'s
+    // own narrowing) already computes - verified via dumpType()
+    // (list<TagId|null> -> list<TagId>; list<int|null> -> a real
+    // non-zero-int, stripping both 0 and null, not just null). Real
+    // Piwigo code (TusUploadCompletionService::completePhoto) relies on
+    // exactly the object|null case.
+    #[test]
+    fn array_filter_with_no_callback_drops_every_falsy_element() {
+        let d = diagnostics_for(
+            r#"<?php
+            class TagId19 {}
+            /** @param array<TagId19|null> $x
+             *  @return array<TagId19>
+             */
+            function f(array $x): array {
+                return array_filter($x);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
     #[test]
