@@ -29,16 +29,16 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 856 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 12's closing round
-  (literal enumeration, tagged unions, array-shape generalization).
+- Test suite: 877 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 13's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
-  249 (Phase 35) -> 240 -> **239 (current, Phase 12's closing round: the
-  `union_types` array-shape-generalization follow-up removed a
-  `SiteUpdateSubController` false positive)**.
+  249 (Phase 35) -> 240 -> 239 (Phase 12's closing round) -> **211
+  (current, Phase 13's closing round: `getenv()`'s dynamic return type
+  alone closed 26 diagnostics, `is_countable()` narrowing and `BinOp::
+  Div` precision one more each)**.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -51,33 +51,6 @@ cited in both halves so either can be cross-referenced from the other.
 
 Every phase not listed here is DONE (see history below). These are the
 phases with real, concrete open work:
-
-**Phase 13 - Narrowing precision and remaining false-positive causes
-(PLANNED).** Open items:
-- Ternary conditions don't narrow their own branches (`infer_expr`'s
-  `Ternary` arm checks both branches against the same un-narrowed
-  `locals` an `if`/`while` would fork).
-- A batch of `src/`-level findings audited only at the pattern level,
-  never individually traced: `explode`/`substr`/`strtotime`/
-  `strip_tags`/`strrpos`-style `string, string|false`/`string,
-  string|null` mismatches, `count()` argument mismatches against
-  `array|Countable`, and several `__construct()`/setter argument
-  mismatches. **Caveat added during this rewrite**: some or all of the
-  `explode`/`substr`-shaped ones may already be resolved by Phase 24's
-  `#[LanguageLevelTypeAware]` fix - not re-verified, so don't assume
-  this batch is still fully live without re-bucketing first.
-- Traits checked standalone, with no knowledge of the eventual host
-  class's own members.
-- `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed
-  at all.
-- `always_terminates` doesn't recognize `switch`/`try`/`match` as
-  terminating even when every branch does.
-- `for`/`foreach`/`switch`/`try` bodies share one unforked, unnarrowed
-  scope (only `if`/`while` fork `locals` per branch today).
-- Array-literal element types aren't tracked (`[1, 2, 3]` always infers
-  `Array(Mixed)`).
-- `BinOp::Div` and PHP 8.5's `|>` pipe operator both always infer
-  `Mixed`.
 
 **Phase 14 - Refinement/accessory types (PLANNED).** `non-empty-string`/
 `non-empty-array`/etc. alias straight to their unrefined base type
@@ -137,12 +110,7 @@ comments.
 
 | Limitation | Phase |
 | --- | --- |
-| Traits checked standalone, without their eventual host class's shape | 13 |
-| `@property`/`@property-read`/`@property-write` PHPDoc tags not parsed | 13 |
-| `always_terminates` doesn't recognize a terminating `switch`/`try`/`match` | 13 |
-| `for`/`foreach`/`switch`/`try` share one unforked, unnarrowed scope | 13 |
-| Array-literal element types not tracked (`Array(Mixed)` always) | 13 |
-| Integer division and PHP 8.5's pipe operator (`BinOp::Div`/`Pipe`) always infer `Mixed` | 13 |
+| PHP 8.5's pipe operator (`BinOp::Pipe`) always infers `Mixed` - needs new infrastructure to resolve an arbitrary callable expression to its own return type, which this project has nowhere yet | 13 |
 | Refinement/accessory types (`non-empty-string`, `non-empty-array`, `int<min, max>` ranges, ...) aliased to their base type, not tracked precisely | 14 |
 | No `Type::FloatLiteral` variant - a real float literal always widens straight to plain `Float` (unlike `IntLiteral`/`StringLiteral`), so a PHPDoc float-literal-union type (`1.5\|2.5`) rejects every value, valid or not | 14 |
 | Broader rule catalog (`DeadCode`, `Comparison`/exhaustiveness, `Exceptions`, visibility/abstract-method completeness) | 15 |
@@ -154,6 +122,31 @@ comments.
 
 ### Known but not yet scheduled to any phase
 
+- **`StmtKind::Try`'s `catch` clauses each get their own scope clone
+  that's never merged back after the whole `try`/`catch`/`finally`** -
+  only `body`'s own mutated state survives (`checker/stmt.rs`). Real,
+  but produces a false *negative* (an under-narrowed type after the
+  block), not a false positive - undetectable by diffing corpus
+  diagnostics the way most findings in this project are confirmed, so
+  it needs its own, differently-shaped verification approach before a
+  fix is designed.
+- **Doctrine's `EntityManager::getReference()`'s real generic signature
+  (`@template T of object`, `@param class-string<T> $entityName`,
+  `@return T|null`) lives only on the interface it implements**
+  (`EntityManagerInterface`) - the concrete class's own method has no
+  docblock at all, so this project's method-signature resolution never
+  sees the generic bound, falling back to `mixed|null`. Confirmed real
+  (`ActivityRepository.php:123`, `CommentRepository.php:80`, Phase 13).
+  Fixing it properly means real interface-to-implementation PHPDoc
+  inheritance for generics, a sizable feature on its own.
+- **No mechanism for multi-variable compound-boolean narrowing** - a
+  single `||`-of-`&&`-of-negations condition narrowing several different
+  variables at once (`if ((!is_int($a) && !is_string($a)) || (!is_int
+  ($b) && !is_string($b))) { continue; }`) isn't recognized at all; the
+  existing `Or`-tree handling only unions branches narrowing the *same*
+  key. Confirmed real (`CommentRepository.php`'s own
+  `findAllWithConditions`/`findList`, 7 sites, Phase 13) - its own
+  sizable narrowing-engine feature.
 - **phpstorm-stubs' interleaved-multiple-parameter-list shape isn't
   recognized.** Some stubs (`pg_query_params`, `pg_query`, several
   others) declare *two full parameter lists* under the same parameter
@@ -641,7 +634,7 @@ pseudo-type parsing), with a short follow-on afterward to have this
 phase's own literal-vs-plain dispatch use those types instead of falling
 back to `string` in the non-literal case.
 
-## Phase 13 - Narrowing precision and remaining false-positive causes - PLANNED
+## Phase 13 - Narrowing precision and remaining false-positive causes - DONE
 
 Three real, independent namespace/pseudo-type resolution bugs found and
 fixed via a direct audit, 2026-08-30 (each had been silently live for an
@@ -660,7 +653,89 @@ with the 5 residual "not found" cases traced to two understood, accepted
 edge cases: first-party code under a non-`src/` PSR-4 root, and
 Composer's own bootstrap `ClassLoader` which is structurally invisible
 to any of the four autoload mechanisms this feature reads).
-Everything else scoped to this phase is still open - see above.
+**Closing round, 2026-09-02**: every remaining item on this phase's own
+list was checked directly against current code and the live frozen
+corpus (239 diagnostics) before any fix was designed - most turned out
+to already be fixed in earlier phases, with this list simply never
+updated: ternary branch narrowing (`check_expr`/`infer_expr`'s own
+`Ternary` arms, correct since Phase 8), `always_terminates` recognizing
+`switch`/`try`/`match` (fully implemented since Phase 8), `for`/
+`foreach`/`switch` sharing one unforked scope (false - all three already
+fork/narrow per-branch, Phase 29), and array-literal element types not
+tracked (false - `infer_array_literal_type` already builds a full
+`ArrayShape`, since Phase 8).
+
+Five real findings shipped:
+
+- **Finding A - `getenv()`'s dynamic return type.** The real stub
+  declares `getenv(): array|string|false` unconditionally; real PHP only
+  returns `array` for a truly zero-argument call, and only `string|
+  false` when `$name` is a real, non-null string (verified against real
+  PHPStan's own `dumpType()`, including the easy-to-get-wrong
+  `getenv(null)`/`getenv(local_only: true)` cases, both of which stay
+  broad). Traced every `getenv(` call site in the corpus by its actual
+  data flow: 26 of 239 diagnostics shared this one root cause (21
+  named-argument sites, 5 zero-argument `array_merge(getenv(), ...)`
+  sites) - by far the largest single fix of this round, and the same
+  root cause behind both `strtotime` sites and both `count()`-adjacent
+  sites this phase's own "batch" item had named.
+- **Finding B - `is_countable()`** missing from the narrowing-predicate
+  table, closing a real `count()`-argument false positive
+  (`SectionPopulator::computeMetaRobots`, the only real corpus call
+  site).
+- **Finding C - `BinOp::Div`** hardcoded `Type::Mixed`; real PHPStan
+  gives `int|float` unconditionally unless `float` is provably involved
+  (verified via `dumpType()`, including the fully-unknown-operand case).
+  Not diagnostic-count-neutral by design (today's `Mixed` was silently
+  compatible with everything, so no real division site had ever been
+  type-checked before) - one site dropped as a bonus
+  (`IntroSubController.php:598`'s own `filesize: mixed` field, fed by a
+  division result that used to be silently `Mixed`).
+- **Finding D - `@property`/`@property-read`/`@property-write`**
+  class-level PHPDoc tags, entirely unparsed until now. Structurally
+  identical to the already-parsed `@var Type $name`; wired into the same
+  property map real fields use, so existing inheritance-aware lookups
+  pick it up for free. `vendor/php-openapi/openapi`'s own `OpenApi`
+  class declares `@property Paths $paths` - confirmed via a minimal
+  repro that this specific corpus diagnostic (`tools/
+  openapi-generate-input-dto.php:95`) still doesn't clear even with this
+  fix, traced to a separate, pre-existing gap: the receiving variable's
+  own type is a `SpecObjectInterface|OpenApi` union (from a library
+  author's plain `@return` fallback for tools that don't parse
+  `@phpstan-return T` generics, which this project doesn't), and the
+  interface half of that union genuinely has no `$paths` of its own - a
+  real "every union member needs the member" correctness rule, not a
+  bug this fix could have closed. The feature itself is real and
+  verified via four new tests.
+- **Finding E - trait method bodies checked once per using class**, not
+  standalone. `flatten_traits` already merges a trait's own members into
+  every using class before checking starts, so no lookup logic needed to
+  change - only *which context* a trait's methods are checked under. A
+  new `Registry::classes_using_trait` walks past intermediate trait
+  users too (a trait used only by another trait still resolves against
+  the real, final class). A trait used by 2+ classes now gets checked
+  2+ times, so a host-independent bug in its own body is deduped by
+  `(span, message)` rather than reported once per host; an orphaned/
+  library trait with no real user still gets checked standalone, exactly
+  as before. **Lowest confidence of the five**: zero traits exist
+  anywhere in this corpus, so verified only via six new tests, never
+  against real corpus behavior.
+
+Confirmed real but deliberately left open, each named precisely rather
+than left in a vague "batch": `BinOp::Pipe` (zero corpus usage, needs new
+callable-resolution infrastructure); `StmtKind::Try`'s own catch-merge
+gap (a false negative, not detectable by corpus diffing); a cluster of
+`__construct()` mismatches individually traced to three already-tracked/
+documented boundaries (`array_keys()`'s key-type imprecision, Phase 15;
+a local `@phpstan-type` alias, a permanent design boundary) plus two
+genuinely new gaps (Doctrine's `EntityManager::getReference()` generics
+living only on its interface; `CommentRepository`'s own multi-variable
+compound-boolean narrowing) - see the Known limitations table and
+"Known but not yet scheduled" list above for all of these.
+
+Corpus count: 239 -> 213 (Finding A) -> 212 (Finding B) -> 211 (Finding
+C) -> 211 (Findings D and E, unchanged as expected). Zero regressions at
+any step.
 
 ## Phase 20 - Performance & robustness - DONE
 
