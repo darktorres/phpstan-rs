@@ -3498,6 +3498,138 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 14 Task 6: narrowing sources for the new refinement types,
+    // each verified against real PHPStan's own dumpType().
+    #[test]
+    fn not_equal_empty_string_narrows_to_non_empty_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function needsNonEmpty(): void {}
+            /** @param non-empty-string $x */
+            function sink($x): void {}
+            function f(string $x): void {
+                if ($x !== '') {
+                    sink($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty() {
+        // empty() is also false for '0' - real PHPStan narrows !empty($x)
+        // to non-falsy-string, not just non-empty-string.
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $x): void {
+                if (!empty($x)) {
+                    sink($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn not_empty_on_an_array_narrows_to_non_empty_array() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function f(array $x): void {
+                if (!empty($x)) {
+                    sink($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn count_greater_than_zero_narrows_to_non_empty_array() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function f(array $x): void {
+                if (count($x) > 0) {
+                    sink($x);
+                }
+            }
+            function g(array $x): void {
+                if (count($x) >= 1) {
+                    sink($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn is_numeric_narrows_a_plain_string_to_numeric_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param numeric-string $x */
+            function sink($x): void {}
+            function f(string $x): void {
+                if (is_numeric($x)) {
+                    sink($x);
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn is_numeric_false_branch_leaves_a_string_unchanged() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param numeric-string $x */
+            function sink($x): void {}
+            function f(string $x): void {
+                if (!is_numeric($x)) {
+                    return;
+                }
+                sink($x);
+            }
+            function g(string $x): void {
+                if (is_numeric($x)) {
+                    return;
+                }
+                sink($x);
+            }
+        "#,
+        );
+        // g() must still be flagged: the false branch is plain string,
+        // not numeric-string.
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
+    #[test]
+    fn a_literal_argument_satisfies_a_literal_string_parameter_a_plain_string_does_not() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param literal-string $x */
+            function sink($x): void {}
+            function f(): void {
+                sink("hello");
+            }
+            function g(string $x): void {
+                sink($x);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
     // Phase 13 Finding C: verified against real PHPStan's own dumpType() -
     // `/` gives `int|float` unconditionally whenever it can't prove
     // `float` is involved, `float` whenever it can.

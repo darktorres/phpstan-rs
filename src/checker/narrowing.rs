@@ -3,7 +3,7 @@ use crate::checker::{
     Checker, Locals, build_matched_shape, literal_string_key, literal_string_value, union_types,
 };
 use crate::regex_groups;
-use crate::types::{Type, is_subtype};
+use crate::types::{AccessoryKind, Type, is_subtype};
 
 impl<'a> Checker<'a> {
     /// Narrows `locals` in place based on `cond` being true (`branch_true`)
@@ -83,6 +83,22 @@ impl<'a> Checker<'a> {
                 if is_eq || is_neq {
                     let matches_when_true = if is_eq { branch_true } else { !branch_true };
                     self.apply_equality_narrowing(l, r, locals, matches_when_true);
+                } else if branch_true
+                    && let ExprKind::Call(callee, args) = &l.kind
+                    && let ExprKind::Name(name) = &callee.kind
+                    && name == "count"
+                    && let [single_arg] = args.as_slice()
+                    && let Some(key) = narrowing_key(&single_arg.value)
+                    && let ExprKind::Literal(Literal::Int(n)) = &r.kind
+                    && ((matches!(op, BinOp::Gt) && *n == 0)
+                        || (matches!(op, BinOp::GtEq) && *n == 1))
+                {
+                    // Phase 14: `count($x) > 0`/`count($x) >= 1` proves
+                    // `$x` non-empty - scoped to exactly this shape with
+                    // `count(...)` on the left (the verified real idiom);
+                    // the reversed form (`0 < count($x)`) isn't handled.
+                    let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                    locals.insert(key, upgrade_array_to_non_empty(&current));
                 }
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
@@ -152,15 +168,19 @@ impl<'a> Checker<'a> {
                         let narrowed = if branch_true {
                             // Bool/True/False/Null can never satisfy
                             // is_numeric - unconditionally safe to drop.
-                            // String and any numeric type are left
-                            // untouched (a string might still be
-                            // numeric-looking; this project has no
-                            // numeric-string type to narrow down to).
-                            [Type::Bool, Type::True, Type::False, Type::Null]
+                            // A kept String (bare, or inside the
+                            // resulting Union) is upgraded to
+                            // numeric-string (Phase 14 - verified
+                            // against real PHPStan's own dumpType():
+                            // `string $x` under is_numeric($x) narrows
+                            // to plain numeric-string, `mixed $x`
+                            // narrows to int|float|numeric-string).
+                            let excluded = [Type::Bool, Type::True, Type::False, Type::Null]
                                 .into_iter()
                                 .fold(current, |acc, excluded| {
                                     narrow_type_excluding(&acc, &excluded)
-                                })
+                                });
+                            upgrade_string_to_numeric(&excluded)
                         } else {
                             // Int/Float are unconditionally numeric, so
                             // failing is_numeric proves the value wasn't
@@ -785,12 +805,10 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         // site in this project already does.
         "is_resource" => Some(Type::Object("resource".to_string(), Vec::new())),
         // `is_scalar($x)` is true for exactly `int|float|string|bool` -
-        // unlike `is_numeric` (which this project deliberately doesn't
-        // narrow at all, since real PHPStan's own `int|float|numeric-
-        // string` result has no representation here and approximating
-        // with `int|float` would wrongly exclude the equally-common
-        // numeric-string case), `is_scalar`'s real set is exactly these
-        // four concrete types with no such gap.
+        // unlike `is_numeric` (its own dedicated arm above, not a plain
+        // table entry here, since a string only *sometimes* qualifies),
+        // `is_scalar`'s real set is exactly these four concrete types
+        // with no such conditional gap.
         "is_scalar" => Some(Type::Union(vec![
             Type::Int,
             Type::Float,
@@ -906,17 +924,36 @@ fn is_known_single_value(ty: &Type) -> bool {
 
 pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
     match original {
+        // Recurses into `narrow_type_excluding` for each kept member,
+        // rather than just cloning it, so a `String`/`Array` member
+        // found *inside* a `Union` gets the same Phase 14 accessory
+        // upgrade a bare one does below - behavior-preserving for every
+        // other existing caller, since a member that doesn't hit a new
+        // arm still falls through to the same `other.clone()` it
+        // reached directly before.
         Type::Union(members) => {
             let kept: Vec<Type> = members
                 .iter()
                 .filter(|m| !is_subtype(m, excluded))
-                .cloned()
+                .map(|m| narrow_type_excluding(m, excluded))
                 .collect();
             match kept.len() {
                 0 => Type::Never,
                 1 => kept.into_iter().next().unwrap(),
                 _ => Type::Union(kept),
             }
+        }
+        // Phase 14: `$x !== ''` on a plain `string` - verified against
+        // real PHPStan's own dumpType(). Deliberately not extended to an
+        // already-Intersection-refined value (e.g. upgrading an existing
+        // `non-empty-string` to `non-falsy-string` inside a nested
+        // `!empty($x)` check) - a real gap, but a rare, redundant
+        // double-guard pattern with no corpus evidence.
+        Type::String if *excluded == Type::StringLiteral(String::new()) => {
+            Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NonEmptyString),
+            ])
         }
         other if other == excluded => Type::Never,
         other => other.clone(),
@@ -970,17 +1007,23 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
 }
 
 /// Narrows `original` by excluding every falsy member this project can
-/// represent (`Null`, `False`) - used for a bare truthiness check
-/// (`if ($x)`) and `empty($x)`'s own truthy branch. Real PHP's full falsy
-/// set also includes `0`/`0.0`/`""`/`"0"`/an empty array, but those aren't
-/// independently representable as excludable members of a `Union` today.
+/// represent - used for a bare truthiness check (`if ($x)`) and
+/// `empty($x)`'s own truthy branch. Phase 14 extends the falsy set from
+/// just `Null`/`False` to the full real set (`IntLiteral(0)`,
+/// `StringLiteral("")`/`StringLiteral("0")`, an empty `ArrayShape`) and
+/// upgrades a *kept* bare `String`/`Array` to its own accessory-refined
+/// form (`non-falsy-string`/`non-empty-array` - `empty()` is false for
+/// `'0'` too, not merely non-empty, verified against real PHPStan's own
+/// dumpType()). Recurses through `Union` members and drops any that
+/// resolve to `Never`, rather than pre-filtering and cloning separately -
+/// simpler than maintaining two parallel "is this falsy" checks.
 pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {
     match original {
         Type::Union(members) => {
             let kept: Vec<Type> = members
                 .iter()
-                .filter(|m| !matches!(m, Type::Null | Type::False))
-                .cloned()
+                .map(narrow_type_excluding_falsy)
+                .filter(|t| *t != Type::Never)
                 .collect();
             match kept.len() {
                 0 => Type::Never,
@@ -988,7 +1031,56 @@ pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {
                 _ => Type::Union(kept),
             }
         }
-        Type::Null | Type::False => Type::Never,
+        Type::Null | Type::False | Type::IntLiteral(0) => Type::Never,
+        Type::StringLiteral(s) if s.is_empty() || s == "0" => Type::Never,
+        Type::ArrayShape(fields) if fields.is_empty() => Type::Never,
+        Type::String => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonFalsyString),
+        ]),
+        Type::Array(_) => upgrade_array_to_non_empty(original),
         other => other.clone(),
+    }
+}
+
+/// Shared by `narrow_type_excluding_falsy`'s own `Array` arm above and
+/// the `count($x) > 0` narrowing below, so the two "prove this array is
+/// non-empty" paths can't drift apart. Handles both a bare `Type::Array`
+/// and an already-`Intersection([Array(_), Accessory(ArrayList)])` value
+/// (a `list<T>`) - upgrading the latter to `non-empty-list<T>` rather
+/// than leaving it unchanged - and avoids adding a duplicate
+/// `NonEmptyArray` member if one is already present.
+/// Phase 14: backs `is_numeric($x)`'s own true-branch narrowing above -
+/// upgrades a kept `String`, bare or found inside a `Union`, to
+/// `numeric-string`. The false branch is intentionally left alone (a
+/// string that fails `is_numeric()` is still validly just `String`).
+fn upgrade_string_to_numeric(ty: &Type) -> Type {
+    match ty {
+        Type::String => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NumericString),
+        ]),
+        Type::Union(members) => {
+            Type::Union(members.iter().map(upgrade_string_to_numeric).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn upgrade_array_to_non_empty(ty: &Type) -> Type {
+    match ty {
+        Type::Array(inner) => Type::Intersection(vec![
+            Type::Array(inner.clone()),
+            Type::Accessory(AccessoryKind::NonEmptyArray),
+        ]),
+        Type::Intersection(members)
+            if members.iter().any(|m| matches!(m, Type::Array(_)))
+                && !members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray)) =>
+        {
+            let mut members = members.clone();
+            members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+            Type::Intersection(members)
+        }
+        _ => ty.clone(),
     }
 }
