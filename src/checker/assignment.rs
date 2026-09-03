@@ -147,8 +147,13 @@ impl<'a> Checker<'a> {
                         self.bind_assignment_target(&item.value, element_ty, locals);
                     }
                 }
-                Type::Array(inner) => {
-                    let element_ty = (**inner).clone();
+                // Phase 14: `Self::array_element_type` also sees through
+                // an `Intersection`-wrapped `list<T>`/`non-empty-
+                // array<T>` - without it, destructuring one
+                // (`[$a, $b] = $listTypedVar`) silently lost its real
+                // element type down to `Mixed`.
+                Type::Array(_) | Type::Intersection(_) => {
+                    let element_ty = Self::array_element_type(&ty).unwrap_or(Type::Mixed);
                     for item in items {
                         self.bind_assignment_target(&item.value, element_ty.clone(), locals);
                     }
@@ -436,6 +441,19 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
                     .reduce(union_types)
                     .unwrap_or(Type::Mixed),
             )
+        }
+        // Phase 14: a `list<T>`/`non-empty-array<T>`-typed container is a
+        // real `Intersection([Array(T), Accessory(_)])` now - without
+        // this arm it fell to the `_ => None` bail below, leaving the
+        // container's own tracked type stale after a write instead of
+        // widening it the same way a plain `Array(T)` already does.
+        // Deliberately drops any `Accessory` marker on the result - a
+        // dynamic-key write can't preserve a list's own sequential-key
+        // guarantee generically, the same reasoning `array_filter`'s own
+        // marker-stripping fix uses.
+        Type::Intersection(members) => {
+            let inner = members.iter().find_map(Checker::array_element_type)?;
+            Some(Type::Array(Box::new(union_types(value_ty, inner))))
         }
         _ => None,
     }

@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, merge_scopes, purge_stale_narrowing_for, union_types};
+use crate::checker::{Checker, Locals, merge_scopes, purge_stale_narrowing_for};
 use crate::docblock;
 use crate::types::Type;
 
@@ -311,15 +311,13 @@ impl<'a> Checker<'a> {
                 // exact when every field shares one type (the common case
                 // this false positive came from), still sound but coarser
                 // when they don't.
-                let element_ty = match subject_ty {
-                    Type::Array(inner) => *inner,
-                    Type::ArrayShape(fields) => fields
-                        .into_iter()
-                        .map(|(_, ty, _)| ty)
-                        .reduce(union_types)
-                        .unwrap_or(Type::Mixed),
-                    _ => Type::Mixed,
-                };
+                // Phase 14: `Self::array_element_type` also sees through
+                // an `Intersection`-wrapped `list<T>`/`non-empty-
+                // array<T>` - without it, `foreach` over one of those
+                // silently inferred `Mixed` for the loop variable, a
+                // real, confirmed regression (one of the most common
+                // constructs in real PHP).
+                let element_ty = Self::array_element_type(&subject_ty).unwrap_or(Type::Mixed);
                 if let Some(k) = key {
                     self.bind_simple_target(k, Type::Mixed, locals);
                     self.check_expr(k, locals, label);

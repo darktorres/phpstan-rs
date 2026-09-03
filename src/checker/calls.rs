@@ -128,9 +128,16 @@ impl<'a> Checker<'a> {
             // exactly this function's own pre-existing behavior for the
             // undefined-variable case above.
             let substituted = types::substitute_template(&param.ty, &HashMap::new());
-            let widened = match substituted {
-                Type::Array(_) | Type::ArrayShape(_) => substituted,
-                _ => Type::Mixed,
+            // Phase 14: `Checker::is_array_like` also trusts a `list<T>`/
+            // `non-empty-array<T>`-declared by-ref parameter (a real
+            // `Intersection` now) - without it, this fell into the same
+            // "anything else" `Mixed` catch-all a wider declared `Union`/
+            // `Object` already deliberately does, discarding real,
+            // already-available precision.
+            let widened = if Checker::is_array_like(&substituted) {
+                substituted
+            } else {
+                Type::Mixed
             };
             // Phase 33 Finding 5: a by-ref call argument is exactly as
             // much a "this variable now holds something else" event as a
@@ -431,12 +438,15 @@ pub(crate) fn parse_format_specifiers(fmt: &str) -> Option<Vec<char>> {
 /// either a fatal error or the literal, useless string `"Array"` in real
 /// PHP, never a legitimate value.
 pub(crate) fn format_specifier_accepts(spec: char, arg_ty: &Type) -> bool {
+    // Phase 14: `Checker::is_array_like` also recognizes a `list<T>`/
+    // `non-empty-array<T>`-typed argument (a real `Intersection` now) -
+    // without it, this silently stopped catching the exact real bug it
+    // exists to catch for any refined-array argument.
     match spec {
-        'b' | 'c' | 'd' | 'e' | 'E' | 'f' | 'F' | 'g' | 'G' | 'o' | 'u' | 'x' | 'X' => !matches!(
-            arg_ty,
-            Type::Array(_) | Type::ArrayShape(_) | Type::Object(_, _)
-        ),
-        's' => !matches!(arg_ty, Type::Array(_) | Type::ArrayShape(_)),
+        'b' | 'c' | 'd' | 'e' | 'E' | 'f' | 'F' | 'g' | 'G' | 'o' | 'u' | 'x' | 'X' => {
+            !Checker::is_array_like(arg_ty) && !matches!(arg_ty, Type::Object(_, _))
+        }
+        's' => !Checker::is_array_like(arg_ty),
         _ => true,
     }
 }

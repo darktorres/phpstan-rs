@@ -7,7 +7,7 @@ use crate::checker::{
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::FunctionSig;
-use crate::types::{self, Type};
+use crate::types::{self, AccessoryKind, Type};
 
 impl<'a> Checker<'a> {
     /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks
@@ -1803,8 +1803,25 @@ impl<'a> Checker<'a> {
                     .reduce(union_types)
                     .unwrap_or(Type::Mixed),
             ),
+            // Phase 14: a `list<T>`/`non-empty-array<T>`-typed value is a
+            // real `Intersection([Array(T), Accessory(_)])` now, not
+            // plain `Array(T)` - without this, every one of this
+            // function's own callers (`array_map`/`array_reduce`/
+            // `array_chunk`/`array_column`) silently stopped recognizing
+            // such a value as an array at all.
+            Type::Intersection(members) => members.iter().find_map(Self::array_element_type),
             _ => None,
         }
+    }
+
+    /// Phase 14: whether `ty` is array-shaped at all - for sites that
+    /// only need "is this even an array," not the unwrapped element
+    /// type `array_element_type` above provides. Sees through a
+    /// `list<T>`/`non-empty-array<T>`-typed value the same way.
+    pub(crate) fn is_array_like(ty: &Type) -> bool {
+        matches!(ty, Type::Array(_) | Type::ArrayShape(_))
+            || matches!(ty, Type::Intersection(members)
+                if members.iter().any(|m| matches!(m, Type::Array(_) | Type::ArrayShape(_))))
     }
 
     /// Phase 12's bespoke per-function return-type extensions (real
@@ -1838,15 +1855,19 @@ impl<'a> Checker<'a> {
             // function is variadic (multiple arrays); a 3+-arg call falls
             // through to the generic path below, unchanged.
             "array_map" if args.len() == 2 => {
-                if let Some(elem_ty) =
-                    Self::array_element_type(&self.infer_expr(&args[1].value, locals))
+                let input_ty = self.infer_expr(&args[1].value, locals);
+                if let Some(elem_ty) = Self::array_element_type(&input_ty)
                     && let Some(mapped) = self.infer_closure_return_with_param_overrides(
                         &args[0].value,
                         &[elem_ty],
                         locals,
                     )
                 {
-                    return Type::Array(Box::new(mapped));
+                    // Phase 14: mapping never changes key structure or
+                    // element count, so any Accessory marker (list-ness/
+                    // non-emptiness) the input had survives onto the
+                    // result - verified via dumpType().
+                    return rewrap_with_accessory_markers(mapped, &input_ty);
                 }
             }
             // Filtering never transforms elements, so the result is
@@ -1860,8 +1881,13 @@ impl<'a> Checker<'a> {
             // fine and must not be indexed into blindly.
             "array_filter" if !args.is_empty() => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if matches!(arr_ty, Type::Array(_) | Type::ArrayShape(_)) {
-                    return arr_ty;
+                if Self::is_array_like(&arr_ty) {
+                    // Phase 14: filtering can both leave gaps in a
+                    // list's own sequential keys and empty out a
+                    // non-empty array - verified via dumpType() that
+                    // neither marker survives, so they're stripped
+                    // rather than passed through unchanged.
+                    return strip_accessory_markers(arr_ty);
                 }
             }
             // array_reduce(array $array, callable $callback, mixed
@@ -1895,8 +1921,61 @@ impl<'a> Checker<'a> {
             // array_filter above.
             "array_combine" if args.len() == 2 => {
                 let values_ty = self.infer_expr(&args[1].value, locals);
-                if matches!(values_ty, Type::Array(_) | Type::ArrayShape(_)) {
-                    return values_ty;
+                if Self::is_array_like(&values_ty) {
+                    // Phase 14: the result is keyed by $keys, not
+                    // $values's own keys - verified via dumpType() that
+                    // any Accessory marker $values carried doesn't
+                    // survive, so it's stripped here too.
+                    return strip_accessory_markers(values_ty);
+                }
+            }
+            // Phase 14: two new special cases, real precision rather
+            // than regression-avoidance - both preserve list-ness/
+            // non-emptiness through to their result when called with
+            // their own default arguments (verified via dumpType()),
+            // but not with `preserve_keys: true` (confirmed to
+            // genuinely break list-ness - original indices survive, no
+            // longer sequential from zero - so deliberately not handled
+            // here, matching real PHPStan's own behavior).
+            "array_slice"
+                if matches!(args.len(), 2..=3)
+                    || (args.len() == 4 && is_false_literal(&args[3].value)) =>
+            {
+                let input_ty = self.infer_expr(&args[0].value, locals);
+                if let Some(elem_ty) = Self::array_element_type(&input_ty) {
+                    return rewrap_with_accessory_markers(elem_ty, &input_ty);
+                }
+            }
+            "array_reverse"
+                if args.len() == 1 || (args.len() == 2 && is_false_literal(&args[1].value)) =>
+            {
+                let input_ty = self.infer_expr(&args[0].value, locals);
+                if let Some(elem_ty) = Self::array_element_type(&input_ty) {
+                    return rewrap_with_accessory_markers(elem_ty, &input_ty);
+                }
+            }
+            // Phase 14: verified via dumpType() to *always* return
+            // list<V>, regardless of whether the input was already
+            // list-shaped (re-sequencing every key from zero is exactly
+            // what array_values does) - no existing special case here
+            // before this.
+            "array_values" if args.len() == 1 => {
+                if let Some(elem_ty) =
+                    Self::array_element_type(&self.infer_expr(&args[0].value, locals))
+                {
+                    return Type::Intersection(vec![
+                        Type::Array(Box::new(elem_ty)),
+                        Type::Accessory(AccessoryKind::ArrayList),
+                    ]);
+                }
+            }
+            "array_unique" if !args.is_empty() => {
+                // Phase 14: removing a duplicate can leave a gap in the
+                // surviving sequential keys - verified via dumpType()
+                // that list-ness doesn't survive.
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if Self::is_array_like(&arr_ty) {
+                    return strip_accessory_markers(arr_ty);
                 }
             }
             // Both fill every slot with the same, already-known $value -
@@ -2237,8 +2316,17 @@ impl<'a> Checker<'a> {
     /// bug, left for a future pass if one turns up.
     fn widen_coalesce_result(&self, l: &Expr, r_ty: Type, locals: &Locals) -> Type {
         let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::Null);
-        match (&l_ty, &r_ty) {
-            (Type::Array(_), Type::ArrayShape(_)) => l_ty,
+        // Phase 14: still scoped to exactly `Type::Array` on the left,
+        // matching this function's own documented, deliberately narrow
+        // boundary (an ArrayShape on the left stays uncovered, same as
+        // before) - only widened to also recognize a `list<T>`/
+        // `non-empty-array<T>`-typed left side (a real `Intersection`
+        // now), which would otherwise lose its real type here the exact
+        // same way a plain `Type::Array` used to.
+        let l_is_array = matches!(l_ty, Type::Array(_))
+            || matches!(&l_ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(_))));
+        match &r_ty {
+            Type::ArrayShape(_) if l_is_array => l_ty,
             _ => r_ty,
         }
     }
@@ -2270,9 +2358,11 @@ impl<'a> Checker<'a> {
                 // per-key result type isn't something `Type::Array`/
                 // `Type::ArrayShape` can express precisely today, so
                 // `Array(Mixed)` is the honest answer.
-                if matches!(lt, Type::Array(_) | Type::ArrayShape(_))
-                    && matches!(rt, Type::Array(_) | Type::ArrayShape(_))
-                {
+                // Phase 14: `is_array_like` sees through a `list<T>`/
+                // `non-empty-array<T>`-typed operand too - without it, a
+                // `list<T> + list<T>` silently fell through to numeric
+                // addition instead of array union.
+                if Self::is_array_like(&lt) && Self::is_array_like(&rt) {
                     return Type::Array(Box::new(Type::Mixed));
                 }
                 if lt == Type::Float || rt == Type::Float {
@@ -2619,6 +2709,48 @@ fn is_canonical_int_key(key: &str) -> bool {
     !key.is_empty()
         && key.bytes().all(|b| b.is_ascii_digit())
         && (key == "0" || !key.starts_with('0'))
+}
+
+/// Phase 14: whether `e` is the literal `false` - used to scope
+/// `array_slice`/`array_reverse`'s own `$preserve_keys` argument to
+/// exactly the default-matching case (omitted, or explicitly `false`).
+fn is_false_literal(e: &Expr) -> bool {
+    matches!(&e.kind, ExprKind::Literal(Literal::Bool(false)))
+}
+
+/// Phase 14: drops any `Accessory` marker from `ty`, collapsing an
+/// Intersection back to its own plain base - used by array functions
+/// that can't guarantee they preserve list-ness/non-emptiness
+/// (`array_filter`/`array_combine`/`array_unique`).
+fn strip_accessory_markers(ty: Type) -> Type {
+    match ty {
+        Type::Intersection(members) => members
+            .into_iter()
+            .find(|m| !matches!(m, Type::Accessory(_)))
+            .unwrap_or(Type::Mixed),
+        other => other,
+    }
+}
+
+/// Phase 14: rewraps `mapped_elem` in whatever `Accessory` markers
+/// `input_ty` had - list-ness/non-emptiness are unaffected by mapping/
+/// slicing/reversing with default arguments (none of which change key
+/// structure or element count) - used by `array_map`/`array_slice`/
+/// `array_reverse`'s own "preserve the input's own markers" cases.
+fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
+    match input_ty {
+        Type::Intersection(members) => {
+            let mut result = vec![Type::Array(Box::new(mapped_elem))];
+            result.extend(
+                members
+                    .iter()
+                    .filter(|m| matches!(m, Type::Accessory(_)))
+                    .cloned(),
+            );
+            Type::Intersection(result)
+        }
+        _ => Type::Array(Box::new(mapped_elem)),
+    }
 }
 
 /// Removes any `Array`/`ArrayShape` member from `ty` - the array-ish

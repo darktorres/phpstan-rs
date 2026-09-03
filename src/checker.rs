@@ -3630,6 +3630,167 @@ mod tests {
         assert_eq!(d.len(), 1, "got: {d:?}");
     }
 
+    // Phase 14 Task 7: the array-destructuring regression risk gets its
+    // own direct, dedicated coverage - the live repro this round's own
+    // review found broken (foreach over a list<T>-typed variable
+    // silently inferring Mixed) and its siblings.
+    #[test]
+    fn foreach_over_a_list_typed_variable_still_infers_the_real_element_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $x */
+            function f($x): void {
+                foreach ($x as $item) {
+                    needsInt($item);
+                }
+            }
+            function needsInt(int $x): int { return $x; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn adding_two_list_typed_arrays_still_uses_array_union_not_numeric_addition() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $a
+             *  @param list<int> $b
+             *  @return array<int>
+             */
+            function f($a, $b): array {
+                return $a + $b;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_element_type_callers_still_work_given_a_list_typed_argument() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $x */
+            function f($x): void {
+                foreach (array_map(fn($v) => $v + 1, $x) as $v) {
+                    needsInt($v);
+                }
+                foreach (array_chunk($x, 2) as $chunk) {
+                    foreach ($chunk as $v) {
+                        needsInt($v);
+                    }
+                }
+                needsInt(array_reduce($x, fn($carry, $v) => $carry + $v, 0));
+            }
+            function needsInt(int $x): int { return $x; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn sprintf_percent_d_is_still_flagged_for_a_list_typed_argument() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $x */
+            function f($x): void {
+                sprintf('%d', $x);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("list<int>"), "got: {d:?}");
+    }
+
+    #[test]
+    fn a_by_ref_call_with_a_list_typed_declared_parameter_still_widens_precisely() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $x */
+            function mutates(array &$x): void {}
+            function f(): void {
+                $items = [];
+                mutates($items);
+                foreach ($items as $item) {
+                    needsInt($item);
+                }
+            }
+            function needsInt(int $x): int { return $x; }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_values_always_narrows_to_a_list_even_from_a_non_list_input() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param array<string, int> $x
+             *  @return list<int>
+             */
+            function f($x): array {
+                return array_values($x);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn array_filter_array_combine_and_array_unique_no_longer_claim_the_result_is_still_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $x
+             *  @return list<int>
+             */
+            function usingFilter($x): array {
+                return array_filter($x);
+            }
+            /** @param list<int> $x
+             *  @return list<int>
+             */
+            function usingCombine($x): array {
+                return array_combine($x, $x);
+            }
+            /** @param list<int> $x
+             *  @return list<int>
+             */
+            function usingUnique($x): array {
+                return array_unique($x);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 3, "got: {d:?}");
+    }
+
+    #[test]
+    fn array_slice_and_array_reverse_preserve_list_ness_only_with_default_preserve_keys() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $x
+             *  @return list<int>
+             */
+            function sliceDefault($x): array {
+                return array_slice($x, 1);
+            }
+            /** @param list<int> $x
+             *  @return list<int>
+             */
+            function reverseDefault($x): array {
+                return array_reverse($x);
+            }
+            /** @param list<int> $x
+             *  @return list<int>
+             */
+            function slicePreserveKeys($x): array {
+                return array_slice($x, 1, null, true);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].location.contains("slicePreserveKeys"), "got: {d:?}");
+    }
+
     // Phase 13 Finding C: verified against real PHPStan's own dumpType() -
     // `/` gives `int|float` unconditionally whenever it can't prove
     // `float` is involved, `float` whenever it can.
