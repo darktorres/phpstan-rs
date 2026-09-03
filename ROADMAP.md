@@ -30,7 +30,7 @@ cited in both halves so either can be cross-referenced from the other.
 ## Headline numbers
 
 - Test suite: 978 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's seventeenth round.
+  `main.rs` unit tests, all passing as of Phase 14.5's eighteenth round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
@@ -39,8 +39,9 @@ cited in both halves so either can be cross-referenced from the other.
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
   -> 253 -> 221 -> 219 -> 197 -> 188 -> 182 -> 158 -> 147 (Phase 14.5's
   first fourteen rounds) -> 144 (Phase 14.5's fifteenth round) -> 97
-  (Phase 14.5's sixteenth round) -> **83 (current, Phase 14.5's
-  seventeenth round)**. The 211 -> 1115 jump was a
+  (Phase 14.5's sixteenth round) -> 83 (Phase 14.5's seventeenth round)
+  -> **81 (current, Phase 14.5's eighteenth round)**. The 211 -> 1115
+  jump was a
   real, confirmed *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
@@ -391,6 +392,35 @@ comments.
     `RateService::rate`'s `$userAnonymous`/`$savedAnonymousId` pair
     (further complicated by both being captured into a closure by
     value, so any correlation would need to survive that boundary too).
+- **Two structurally-infeasible-without-embedding-PHP-or-a-SQL-parser
+  gaps**, investigated during the eighteenth round and confirmed real
+  rather than assumed:
+  - `strtotime()`'s own real accuracy comes from real PHPStan's
+    `StrtotimeFunctionReturnTypeExtension` *literally calling PHP's own
+    `strtotime()`* on a constant-string argument at analysis time
+    (PHPStan runs inside PHP itself, so it can) to fold the exact
+    result, narrowing away the `int|false` union's `false` member only
+    when the literal genuinely parses. A pure-Rust reimplementation
+    would need either a full clone of PHP's own famously permissive
+    relative-date grammar or shelling out to a real PHP binary -
+    neither proportionate to the four real corpus call sites this
+    causes (`date()`/`gmdate()` fed a `strtotime()` result directly).
+  - A raw SQL/DQL query string's own `SELECT` column list determines
+    a result row's real shape (which fields exist, and often their
+    real type - `COUNT(...)` is an integer, a joined entity column is
+    whatever that column's own type is), but neither this project nor,
+    as far as a query-builder call site is concerned, real PHPStan
+    itself parses SQL/DQL text to recover that - confirmed by tracing
+    `TagRepository::findCommonTags`'s own `$row['counter']` (from a
+    `COUNT(...) AS counter` DQL select) back to `Doctrine\ORM\
+    AbstractQuery::getResult()`'s own declared return type, `mixed`,
+    with no shape information at all. Real PHPStan must be accepting
+    this the same lenient "an unshaped/`mixed` value satisfies a more
+    specific declared type" way this project's own `Array(Mixed)`
+    leniency already does - not a gap in narrowing/inference at all,
+    just a case this project hasn't traced to ground truth well enough
+    yet to be confident replicating the exact same leniency here
+    wouldn't cost real precision elsewhere.
 - **phpstorm-stubs' interleaved-multiple-parameter-list shape isn't
   recognized.** Some stubs (`pg_query_params`, `pg_query`, several
   others) declare *two full parameter lists* under the same parameter
@@ -1686,6 +1716,35 @@ two shapes found (a boolean flag assigned exactly a condition
 expression, and two variables always assigned together in the same
 branch) and why neither is a quick fix on top of this project's own
 `Locals` design.
+
+**An eighteenth round** (83 -> 81) found two more bespoke per-function
+return-type extensions missing the same "real stub gives no list-ness"
+shape several earlier rounds already fixed for other functions:
+
+- **`preg_split()`'s own real stub is a bare `@return string[]|false`**
+  - no list-ness at all, unlike real PHPStan's own dedicated
+  `PregSplitDynamicReturnTypeExtension`: splitting a string always
+  produces sequential integer keys starting at 0, for any pattern/
+  subject, literal or not. Added matching real PHPStan's own fallback
+  (non-literal-argument) case exactly: `list<string>|false`, refined
+  to `list<non-empty-string>|false` when `PREG_SPLIT_NO_EMPTY` is one
+  of the flags.
+- **`array_column()`'s own existing special case only recognized a
+  *shaped* row type**, falling through to the generic (unmarked) path
+  for the far more common real shape: an unshaped row (`array<string,
+  mixed>`, a raw DB-fetch row with no further refinement). Extended to
+  also read an unshaped row's own uniform element type directly
+  (mirrors real PHPStan's own `ArrayColumnHelper::getReturnValueType`)
+  - even a bare `Mixed` element type is real, useful information once
+  the existing `Array(Mixed)` leniency lets it satisfy a more specific
+  declared element type.
+
+Also investigated and confirmed genuinely out of reach without
+embedding a PHP interpreter or a SQL/DQL parser - see **Known
+limitations** above for both (real `strtotime()` accuracy needing
+PHPStan to literally execute PHP's own `strtotime()` at analysis time;
+a DQL `SELECT`'s own column list determining a query result's real
+shape).
 
 ## Phase 20 - Performance & robustness - DONE
 
