@@ -1447,6 +1447,78 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 13 Finding A: getenv()'s real stub is unconditionally
+    // `array|string|false`, but a truly zero-argument call only ever
+    // returns `array`, and a call with a real, non-null `$name` only
+    // ever returns `string|false`.
+    #[test]
+    fn getenv_with_a_literal_name_narrows_to_string_or_false() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): string|false {
+                return getenv('X');
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn getenv_with_no_arguments_narrows_to_a_plain_array() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): array {
+                return getenv();
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn getenv_with_an_explicit_null_name_keeps_the_broad_type() {
+        // A real, live PHP fact confirmed against real PHPStan too:
+        // `getenv(null)` returns the full environment array, exactly
+        // like the zero-argument call - it must NOT get the
+        // plain-`array` answer, and must NOT narrow to `string|false`.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): string|false {
+                return getenv(null);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "expected the broad type to still apply: {d:?}");
+    }
+
+    #[test]
+    fn getenv_with_a_local_only_named_argument_keeps_the_broad_type() {
+        // `getenv(local_only: true)` leaves `$name` at its own `null`
+        // default (confirmed against real PHPStan's own dumpType()) -
+        // `args.is_empty()` is false here, so this must not get the
+        // plain-`array` answer either.
+        let d = diagnostics_for(
+            r#"<?php
+            function f(): string|false {
+                return getenv(local_only: true);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "expected the broad type to still apply: {d:?}");
+    }
+
+    #[test]
+    fn getenv_with_a_possibly_null_name_keeps_the_broad_type() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(?string $name): string|false {
+                return getenv($name);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "expected the broad type to still apply: {d:?}");
+    }
+
     // Only the array-stripping half of mb_convert_encoding()'s own real
     // (more involved) dynamic extension is implemented - evidenced via
     // `CharsetHelper::convertCharset`'s own real shape.

@@ -2013,6 +2013,35 @@ impl<'a> Checker<'a> {
                     return Type::String;
                 }
             }
+            // Phase 13 Finding A: the real stub declares `getenv(?string
+            // $name = null, bool $local_only = false): array|string|false`
+            // unconditionally, but real PHP only ever returns `array` for
+            // a truly zero-argument call, and only ever returns
+            // `string|false` when `$name` is a real, non-null string -
+            // confirmed against real PHPStan's own `dumpType()` for every
+            // shape that matters, including the two easy-to-get-wrong
+            // ones: `getenv(null)` and `getenv(local_only: true)` (a named
+            // arg that leaves `$name` at its own `null` default) both
+            // still return the full, broad type, same as real PHPStan.
+            // `args.is_empty()` must be checked on the raw call syntax,
+            // before any named/positional resolution - resolving `name`
+            // to `None` also happens for `getenv(local_only: true)`,
+            // which must NOT get the plain-`array` answer.
+            "getenv" => {
+                if args.is_empty() {
+                    return Type::Array(Box::new(Type::String));
+                }
+                let resolved = resolve_call_args(args, &sig.params);
+                if let Some(name_ty) = resolved
+                    .first()
+                    .copied()
+                    .flatten()
+                    .map(|e| self.infer_expr(e, locals))
+                    && types::is_subtype(&name_ty, &Type::String)
+                {
+                    return Type::Union(vec![Type::String, Type::False]);
+                }
+            }
             // Same family, subject at index 1 - not evidenced directly in
             // this corpus, but identical mechanism and real stub shape
             // (`preg_replace_callback_array(array $pattern, array|string
