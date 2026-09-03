@@ -29,16 +29,16 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 960 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's fourteenth round.
+- Test suite: 963 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 14.5's fifteenth round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
-  -> 253 -> 221 -> 219 -> 197 -> 188 -> 182 -> 158 (Phase 14.5's first
-  thirteen rounds) -> **147 (current, Phase 14.5's fourteenth round)**. The 211 -> 1115 jump was a real, confirmed
+  -> 253 -> 221 -> 219 -> 197 -> 188 -> 182 -> 158 -> 147 (Phase 14.5's
+  first fourteen rounds) -> **144 (current, Phase 14.5's fifteenth round)**. The 211 -> 1115 jump was a real, confirmed
   *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
@@ -222,6 +222,23 @@ comments.
   arguments" diagnostics as of Phase 8.5 (re-confirmed still present,
   not yet fixed, as of Phase 24). No phase has been scheduled for this -
   a candidate for a future round if it turns out to matter in practice.
+- **No cross-branch correlation for a repeated identical condition on a
+  never-reassigned variable.** Real shape found in Phase 14.5's
+  fifteenth round (`UploadService::addUploadedFile`): an outer `if
+  (isset($image_id)) {...} else { $dbnow = ...; ... }` merges `$dbnow`
+  back to `string|null` after the `else` branch (correctly - the
+  `isset($image_id)` branch never touches it), but a *second*,
+  textually-later `if (isset($image_id)) {...} else { ...uses $dbnow...
+  }` on the exact same never-reassigned `$image_id` is - in real PHP
+  semantics - guaranteed to re-enter the same branch, so `$dbnow` is
+  still definitely a `string` there. This project has no mechanism for
+  correlating two separate conditions on the same variable across a
+  merge boundary this way; a close relative of the compound-boolean gap
+  above, but present even for a single condition checked twice, and
+  present too when the condition is stored in an intermediate boolean
+  variable first (`$need_generate = ($x === false or ...); ... if (!
+  $need_generate) { /* uses $x narrowed */ }`,
+  `ImageDerivativeController::__invoke`, same round). No phase scheduled.
 
 ### Permanent design boundaries (not phase-tracked - not planned, by choice)
 
@@ -1302,6 +1319,32 @@ fixed once for the opposite direction:
   unchanged whenever it's already a subtype of `target`, falling back
   to `target` only when *it's* the narrower side (the literal-narrowing
   case, `$x === 'foo'`, this fallback exists for).
+
+**A fifteenth round** (147 -> 144) found a real lexer-level gap in how
+phpstorm-stubs' own PHP-version-gating attribute is handled, unrelated
+to narrowing or accessory types:
+
+- **`#[PhpStormStubsElementAvailable]` can gate a whole function/method
+  declaration, not just a single parameter - previously left completely
+  untouched.** Real shape: `version_compare()`'s own stub carries two
+  full declarations side by side, one closed-range (`to: '7.4'`,
+  returning `int|bool|null`) and one open-range (`from: '8.0'`,
+  returning `int|bool`) - both reached the parser as ordinary,
+  unconditional signatures and got unioned together by the registry's
+  own "second unconditional declaration merges onto the first"
+  real-overload handling (Phase 32 Finding C), wrongly reintroducing the
+  pre-8.0 `null` return into a target this project always models as PHP
+  8.0+. Fixed with two new lexer helpers, `upcoming_is_function_
+  declaration`/`skip_whole_versioned_declaration`, applying the same
+  "a closed range is superseded, drop it entirely" principle the
+  existing parameter-level handling already had, generalized to a whole
+  declaration's own `;`-terminator or balanced `{...}` body.
+  Investigated after finding `usleep()`'s own `@param int<0,max>`
+  refinement is real but confirmed, via a direct `dumpType()`/argument
+  check against real PHPStan, to never actually be enforced for
+  argument-type checking even at `--level max` - a separate, narrower
+  stdlib-specific PHPStan quirk left alone rather than chased (1
+  diagnostic, high uncertainty about a safe general fix).
 
 ## Phase 20 - Performance & robustness - DONE
 
