@@ -6797,6 +6797,32 @@ mod tests {
         assert!(d[0].message.contains("is not compatible"), "got: {d:?}");
     }
 
+    // Round 10 of the Piwigo corpus cleanup: 22 first-party value objects
+    // (ImageId, TagId, UserId, ...) each implement a shared interface
+    // declaring `tryFrom(mixed $value): ?static` and override it with
+    // `?self` on their own `final` class - confirmed against real PHPStan
+    // 2.2.8 to be a legitimate override (a `final` class's `self` and
+    // `static` are always the same concrete type). `resolve_type` builds
+    // `?static` as `Union([StaticRef, Null])`, not its own `StaticRef`
+    // variant, so the pre-existing bare-`StaticRef` escape hatch above
+    // missed this extremely common nullable shape entirely.
+    #[test]
+    fn overriding_a_nullable_static_return_with_a_nullable_self_return_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface NumericId15 {
+                public static function tryFrom(mixed $value): ?static;
+            }
+            final class ImageId15 implements NumericId15 {
+                public static function tryFrom(mixed $value): ?self {
+                    return null;
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn overriding_a_final_method_is_flagged() {
         let d = diagnostics_for(

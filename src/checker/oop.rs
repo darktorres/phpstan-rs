@@ -277,7 +277,7 @@ impl<'a> Checker<'a> {
             // exactly matching the interface's own native signature).
             if own_sig.return_type_native != Type::Mixed
                 && ancestor_sig.return_type_native != Type::Mixed
-                && ancestor_sig.return_type_native != Type::StaticRef
+                && !ancestor_return_uses_static(&ancestor_sig.return_type_native)
                 && !self.registry.is_assignable(
                     &own_sig.return_type_native,
                     &ancestor_sig.return_type_native,
@@ -289,6 +289,21 @@ impl<'a> Checker<'a> {
                     ), m.span, 0);
             }
         }
+    }
+}
+
+/// Whether an ancestor's native return type invokes the `static`
+/// covariance escape hatch documented above `check_method_overrides`'s own
+/// return-type check - either bare (`copy(): static`) or nullable
+/// (`tryFrom(): ?static`, the shape every `NumericId`-family value object's
+/// interface actually uses). `resolve_type` builds `?static` as a plain
+/// two-member `Union` with `StaticRef`, never its own dedicated type, so a
+/// bare `!= Type::StaticRef` check misses it entirely.
+fn ancestor_return_uses_static(ty: &Type) -> bool {
+    match ty {
+        Type::StaticRef => true,
+        Type::Union(members) => members.contains(&Type::StaticRef),
+        _ => false,
     }
 }
 
