@@ -29,7 +29,7 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 951 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 952 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
@@ -37,28 +37,29 @@ cited in both halves so either can be cross-referenced from the other.
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
-  (Phase 14.5's first six rounds) -> **253 (current, Phase 14.5's
-  closing round)**. The 211 -> 1115 jump was a real, confirmed
+  -> 253 (Phase 14.5's first seven rounds) -> **221 (current, Phase
+  14.5's closing round)**. The 211 -> 1115 jump was a real, confirmed
   *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
-  1575 first-party `list<` occurrences. Phase 14.5's seven rounds then
+  1575 first-party `list<` occurrences. Phase 14.5's eight rounds then
   closed most of the resulting gap: nearly all of it turned out to be
   this project's own type-inference gaps (spread array literals,
   `array_merge` including its own spread-argument form, PHP 8.4
   property hooks, `preg_match_all`'s per-group arrays, array-append
   widening, a first-class callable used as `array_map`'s own callback,
-  two more real `array_filter()` extensions - together the single most
-  common accumulator/transform idioms in PHP, the `sort()` family's own
-  dynamic type-specifying extensions, `$x !== []`/static-property
-  narrowing, a `try`/`catch` scope-merge gap, a missing `Union` arm in
-  the core array-type helpers, `glob()`/`explode()`'s own
-  dynamic-return-type extensions, a mis-parsed conditional-return-type
-  docblock, a real `instanceof` narrowing bug unrelated to `list<T>`
-  itself, and - by far the single largest fix of any round - a
-  method-override return-type check that compared docblock-refined
-  types instead of native ones) rather than genuine corpus-side
-  `@return list<T>` overclaims.
+  two more real `array_filter()` extensions, Doctrine's own
+  `Query::getResult()` typing as bare `mixed` - together the single most
+  common accumulator/transform/repository idioms in this corpus, the
+  `sort()` family's own dynamic type-specifying extensions, `$x !==
+  []`/static-property narrowing, a `try`/`catch` scope-merge gap, a
+  missing `Union` arm in the core array-type helpers, `glob()`/
+  `explode()`'s own dynamic-return-type extensions, a mis-parsed
+  conditional-return-type docblock, a real `instanceof` narrowing bug
+  unrelated to `list<T>` itself, and - by far the single largest fix of
+  any round - a method-override return-type check that compared
+  docblock-refined types instead of native ones) rather than genuine
+  corpus-side `@return list<T>` overclaims.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   1,021 diagnostics as of Phase 24. Not re-measured every round since -
   the scoped frozen corpus above is the round-over-round regression
@@ -1150,6 +1151,27 @@ idiom gap:
     (already shared with `!empty($x)`'s narrowing), stripping both `0`
     and `null` for an `int|null` element type, not just `null`. Both
     verified via `dumpType()`.
+
+**An eighth round** (253 -> 221) found the corpus's single most
+repeated remaining pattern:
+
+- **Doctrine's `AbstractQuery::getResult()` declares a bare `mixed`
+  return with no docblock refinement at all.** Real PHPStan's own
+  `phpstan-doctrine` extension gives it a much richer, query-builder-
+  aware entity type (full DQL SELECT/FROM introspection, tracking
+  `indexBy()` too) this project has no way to replicate - a sizable
+  feature on its own - but the narrower, still real and bounded fact it
+  always proves is worth having by itself: a non-`indexBy()`'d query's
+  own result is always a real, sequentially-keyed list, confirmed via
+  `dumpType()` (zero `indexBy()` call sites exist anywhere in this
+  corpus, the one case that would break this simplification). Nearly
+  every repository class in this corpus follows the identical shape
+  (`$entities = $qb->getQuery()->getResult(); return
+  array_map(self::toProjection(...), $entities);`), and `getResult()`
+  previously typing as plain `mixed` meant `array_map`'s own special
+  case (needing an array-like input to activate at all) never even
+  engaged - by far the single most repeated remaining false-positive
+  cause of any round.
 
 ## Phase 20 - Performance & robustness - DONE
 
