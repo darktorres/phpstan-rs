@@ -1732,12 +1732,12 @@ impl<'a> Checker<'a> {
     /// field by at all - degrading to the honest `Array(Mixed)` for
     /// those specific cases, matching the status quo everywhere else.
     pub(crate) fn infer_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
+        if items.iter().any(|item| item.spread) {
+            return self.infer_spread_array_literal_type(items, locals);
+        }
         let mut fields: Vec<(String, Type, bool)> = Vec::new();
         let mut next_index: i64 = 0;
         for item in items {
-            if item.spread {
-                return Type::Array(Box::new(Type::Mixed));
-            }
             let key = match &item.key {
                 None => {
                     let k = next_index.to_string();
@@ -1762,6 +1762,163 @@ impl<'a> Checker<'a> {
             }
         }
         Type::ArrayShape(fields)
+    }
+
+    /// A spread item (`[...$a, ...$b]`) can be tracked precisely as long
+    /// as every spread source's own exact fields are known (an
+    /// `ArrayShape`) - real PHP's own array-unpacking semantics
+    /// (verified via `dumpType()`): a spread `ArrayShape`'s canonical int
+    /// keys get renumbered sequentially into the result, exactly the same
+    /// as a plain positional item; its non-canonical (string, or a
+    /// non-sequential int) keys are kept and overwrite verbatim, the same
+    /// `is_canonical_int_key` rule `infer_array_literal_type`'s own
+    /// int-key handling already applies. `UserInfoWithThemeName::toArray()`
+    /// (`[...$this->userInfo->toArray(), 'theme_name' => $this->themeName]`)
+    /// is exactly this shape - merging two known shapes into one, not
+    /// combining unknown-length arrays.
+    ///
+    /// The moment any spread source's fields *aren't* known this way (a
+    /// plain `array<T>`/`list<T>`), the whole literal degrades to the
+    /// coarser "element type plus list/non-empty markers" level instead -
+    /// and every field already collected before that point degrades with
+    /// it, keeping only its value type, not its specific key. Verified via
+    /// `dumpType()`: `['x' => 1, ...$plainArray]` on a plain `array<int>`
+    /// dumps as `non-empty-array<int>`, not a shape retaining `'x'`.
+    /// Spreading two `list<T>`s stays a `list<T>`; a plain `array<T>`
+    /// source (list-ness unproven) degrades list-ness for the whole
+    /// result, matching `[...$list, ...$plainArray] -> array<T>` (not
+    /// `list<T>`) exactly. A plain, unkeyed element always guarantees the
+    /// result is non-empty; a spread source only does if it's itself
+    /// provably non-empty.
+    fn infer_spread_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
+        let mut fields: Vec<(String, Type, bool)> = Vec::new();
+        let mut next_index: i64 = 0;
+        let mut degraded = false;
+        let mut elem_types: Vec<Type> = Vec::new();
+        let mut list_safe = true;
+        let mut known_non_empty = false;
+
+        for item in items {
+            let value_ty = self.infer_expr(&item.value, locals);
+            if item.spread {
+                if !degraded {
+                    match &value_ty {
+                        Type::ArrayShape(inner_fields) => {
+                            for (k, t, _) in inner_fields {
+                                let key = if is_canonical_int_key(k) {
+                                    let assigned = next_index.to_string();
+                                    next_index += 1;
+                                    assigned
+                                } else {
+                                    k.clone()
+                                };
+                                match fields.iter_mut().find(|(fk, _, _)| *fk == key) {
+                                    Some(field) => field.1 = t.clone(),
+                                    None => fields.push((key, t.clone(), false)),
+                                }
+                            }
+                        }
+                        _ => degraded = true,
+                    }
+                }
+                if degraded {
+                    elem_types.push(Self::array_element_type(&value_ty).unwrap_or(Type::Mixed));
+                    if !Self::is_list_like(&value_ty) {
+                        list_safe = false;
+                    }
+                    if Self::is_known_non_empty_array(&value_ty) {
+                        known_non_empty = true;
+                    }
+                }
+            } else {
+                if !degraded {
+                    match &item.key {
+                        None => {
+                            let key = next_index.to_string();
+                            next_index += 1;
+                            match fields.iter_mut().find(|(fk, _, _)| *fk == key) {
+                                Some(field) => field.1 = value_ty.clone(),
+                                None => fields.push((key, value_ty.clone(), false)),
+                            }
+                        }
+                        Some(k) => match &k.kind {
+                            ExprKind::Literal(Literal::String(s)) => {
+                                match fields.iter_mut().find(|(fk, _, _)| fk == s) {
+                                    Some(field) => field.1 = value_ty.clone(),
+                                    None => fields.push((s.clone(), value_ty.clone(), false)),
+                                }
+                            }
+                            ExprKind::Literal(Literal::Int(n)) => {
+                                next_index = next_index.max(n + 1);
+                                let key = n.to_string();
+                                match fields.iter_mut().find(|(fk, _, _)| *fk == key) {
+                                    Some(field) => field.1 = value_ty.clone(),
+                                    None => fields.push((key, value_ty.clone(), false)),
+                                }
+                            }
+                            _ => degraded = true,
+                        },
+                    }
+                }
+                elem_types.push(value_ty);
+                known_non_empty = true;
+                if item.key.is_some() {
+                    list_safe = false;
+                }
+            }
+        }
+
+        if !degraded {
+            return Type::ArrayShape(fields);
+        }
+        elem_types.extend(fields.into_iter().map(|(_, t, _)| t));
+        let elem_ty = elem_types
+            .into_iter()
+            .reduce(union_types)
+            .unwrap_or(Type::Mixed);
+        let mut members = vec![Type::Array(Box::new(elem_ty))];
+        if list_safe {
+            members.push(Type::Accessory(AccessoryKind::ArrayList));
+        }
+        if known_non_empty {
+            members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+        }
+        if members.len() == 1 {
+            members.pop().unwrap()
+        } else {
+            Type::Intersection(members)
+        }
+    }
+
+    /// Whether `ty` is already provably int-key-sequential from zero - a
+    /// real `list<T>`/`non-empty-list<T>`, or an `ArrayShape` whose own
+    /// keys happen to be canonical and sequential. Shares the exact
+    /// `is_subtype`-side rule for an `ArrayShape` against
+    /// `Accessory::ArrayList` rather than re-deriving it.
+    fn is_list_like(ty: &Type) -> bool {
+        match ty {
+            Type::Intersection(members) => {
+                members.contains(&Type::Accessory(AccessoryKind::ArrayList))
+            }
+            Type::ArrayShape(fields) => fields
+                .iter()
+                .enumerate()
+                .all(|(i, (k, _, _))| k == &i.to_string()),
+            _ => false,
+        }
+    }
+
+    /// Whether `ty` is already provably non-empty - a real
+    /// `non-empty-array<T>`/`non-empty-list<T>`, or a non-empty
+    /// `ArrayShape` literal.
+    fn is_known_non_empty_array(ty: &Type) -> bool {
+        match ty {
+            Type::Intersection(members) => {
+                members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
+            }
+            Type::ArrayShape(fields) => !fields.is_empty(),
+            _ => false,
+        }
     }
 
     /// A generic function's return type may mention its own `@template`

@@ -3791,6 +3791,90 @@ mod tests {
         assert!(d[0].location.contains("slicePreserveKeys"), "got: {d:?}");
     }
 
+    // A new round of Piwigo-corpus bucketing surfaced `infer_array_literal_type`
+    // giving up entirely (falling to bare `Array(Mixed)`) on any array
+    // literal containing a spread element - the real, common shape being
+    // `[...findA(), ...findB()]`, combining several `list<T>`-returning
+    // helpers into one. Verified against real PHPStan's own dumpType():
+    // spreading two `list<T>`s stays a `list<T>`; spreading a `list<T>`
+    // alongside a plain `array<T>` degrades to plain `array<T>` (not a
+    // list); a leading literal element makes the whole thing non-empty.
+    #[test]
+    fn spreading_two_lists_into_an_array_literal_still_produces_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $a
+             *  @param list<int> $b
+             *  @return list<int>
+             */
+            function f($a, $b): array {
+                return [...$a, ...$b];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn spreading_a_list_and_a_plain_array_degrades_to_a_plain_array_not_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $a
+             *  @param array<int> $b
+             *  @return list<int>
+             */
+            function f($a, $b): array {
+                return [...$a, ...$b];
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected the list-ness mismatch to still be flagged: {d:?}"
+        );
+    }
+
+    // Found by the corpus recheck after the fix above landed: real Piwigo
+    // code (`UserInfoWithThemeName::toArray()`) spreads another object's
+    // own precisely-known `toArray()` shape and adds one more field -
+    // `[...$this->userInfo->toArray(), 'theme_name' => $x]`. Verified
+    // against real PHPStan's own dumpType(): spreading a shape with only
+    // non-canonical (string) keys merges those keys in verbatim, keeping
+    // the whole literal a precise shape rather than degrading to a
+    // generic array.
+    #[test]
+    fn spreading_a_known_shape_and_adding_a_field_still_produces_a_precise_shape() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @return array{a: int, b: string} */
+            function inner(): array {
+                return ['a' => 1, 'b' => 'x'];
+            }
+            /** @return array{a: int, b: string, c: bool} */
+            function outer(): array {
+                return [...inner(), 'c' => true];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_literal_element_before_a_spread_list_makes_the_result_a_non_empty_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<int> $a
+             *  @return non-empty-list<int>
+             */
+            function f($a): array {
+                return [1, ...$a];
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     // Phase 13 Finding C: verified against real PHPStan's own dumpType() -
     // `/` gives `int|float` unconditionally whenever it can't prove
     // `float` is involved, `float` whenever it can.
