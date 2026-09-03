@@ -1609,6 +1609,32 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Round 11 of the Piwigo corpus cleanup: `preg_replace`/`str_replace`'s
+    // subject-dependent special case gated on a bare `== Type::String`,
+    // which stopped matching the instant Phase 14 made a narrowed
+    // "provably non-empty" string a real `Intersection([String,
+    // Accessory(NonEmptyString)])` instead of plain `String` - the exact
+    // shape `Lang::load()`'s own `if ($source_file === '') { return
+    // false; }` guard produces for every use of `$source_file` afterward.
+    #[test]
+    fn preg_replace_narrows_to_string_when_the_subject_is_a_narrowed_non_empty_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(string $subject): string {
+                if ($subject === '') {
+                    return '';
+                }
+                $result = preg_replace('/a/', 'b', $subject);
+                if ($result === null) {
+                    return '';
+                }
+                return $result;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
     #[test]
     fn str_replace_falls_back_to_the_generic_path_for_a_non_string_subject() {
         // Scoped to "subject is exactly Type::String" - a Mixed subject

@@ -2472,10 +2472,16 @@ impl<'a> Checker<'a> {
             // `$subject` itself is one - real PHPStan special-cases this
             // via its own hand-written dynamic return type extension, not
             // from the stub signature alone. Scoped to "subject is
-            // exactly `Type::String`" - anything else (`Mixed`, a union, a
-            // real array) correctly keeps today's existing behavior.
+            // string-like" (`types::is_subtype` against `Type::String`,
+            // not a bare `==`) - a `Mixed`, a union, or a real array
+            // correctly keeps today's existing behavior, but so does a
+            // Phase 14 accessory-refined subject (`non-empty-string`
+            // parses to `Intersection([String, Accessory(_)])`, which a
+            // bare `== Type::String` silently stopped matching - a real
+            // corpus regression caught in round 11, `Lang::load()`'s own
+            // `$source_file !== ''`-narrowed subject).
             "str_replace" | "str_ireplace" if args.len() == 3 || args.len() == 4 => {
-                if self.infer_expr(&args[2].value, locals) == Type::String {
+                if types::is_subtype(&self.infer_expr(&args[2].value, locals), &Type::String) {
                     return Type::String;
                 }
             }
@@ -2486,7 +2492,11 @@ impl<'a> Checker<'a> {
             // `array` member, rather than hardcoding the nullability this
             // project doesn't otherwise know for certain.
             "preg_replace" | "preg_replace_callback" | "preg_filter"
-                if args.len() >= 3 && self.infer_expr(&args[2].value, locals) == Type::String =>
+                if args.len() >= 3
+                    && types::is_subtype(
+                        &self.infer_expr(&args[2].value, locals),
+                        &Type::String,
+                    ) =>
             {
                 let resolved = resolve_call_args(args, &sig.params);
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
