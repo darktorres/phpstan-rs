@@ -209,6 +209,18 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
             ExprKind::Literal(Literal::Float(_)) => Type::Float,
             _ => Type::Mixed,
         },
+        // A round of Piwigo-corpus bucketing found this real, common
+        // shape (`AppInfo::URL = 'https://' . self::DOMAIN;`) - a
+        // const's own value referencing *another* const via `self::`
+        // can't be resolved here at all (this function has no class
+        // context, and no registry to look the other const up in even
+        // if it did), but real PHP string concatenation always
+        // produces a `string` regardless of either operand's own type,
+        // so this is sound information even without resolving anything
+        // - unlike falling back to `Mixed` below, which silently
+        // widened every array literal/argument this const then fed
+        // into.
+        ExprKind::Binary(crate::ast::BinOp::Concat, ..) => Type::String,
         _ => Type::Mixed,
     }
 }

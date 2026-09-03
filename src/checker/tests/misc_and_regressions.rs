@@ -334,6 +334,33 @@ fn a_negative_typed_class_constant_infers_its_real_int_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real Piwigo corpus bug (Core\AppInfo::URL = 'https://' . self::DOMAIN):
+// a class const's own value referencing another const via a
+// concatenation fell to Mixed in infer_const_type - real PHP string
+// concatenation always produces a `string` regardless of either
+// operand's own type, information available without resolving what
+// self::DOMAIN's own value actually is.
+#[test]
+fn a_class_constant_whose_value_is_a_concatenation_infers_as_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            final class AppInfo {
+                public const string DOMAIN = 'example.com';
+                public const string URL = 'https://' . self::DOMAIN;
+            }
+            /** @param array<string> $urls */
+            function wantsStringArray(array $urls): void {}
+            function f(): void {
+                wantsStringArray([
+                    'HOME' => AppInfo::URL,
+                    'WIKI' => AppInfo::URL . '/doc',
+                ]);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Real Piwigo corpus bug (Bootstrap\RequestPipeline::DEFAULT_MIDDLEWARE):
 // ClassConst never carried its own doc comment at all, so a `@var
 // list<...>` directly above a `public const array X = [...]` was
