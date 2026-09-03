@@ -19,6 +19,16 @@ pub struct ParamSig {
 pub struct FunctionSig {
     pub params: Vec<ParamSig>,
     pub return_type: Type,
+    // The return type the *native* signature alone declares, ignoring any
+    // `@return` docblock refinement - real PHP only ever enforces
+    // override-compatibility (Liskov) at this native level, and by
+    // default so does real PHPStan (`checkPhpDocMethodSignatures` is off
+    // unless a project opts in, confirmed neither Piwigo's own
+    // `phpstan.neon` nor this project's own corpus config does).
+    // `check_method_overrides`'s own return-type check is the only
+    // reader - every other consumer of a function's return type wants
+    // the docblock-refined `return_type` above instead.
+    pub return_type_native: Type,
 }
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -301,9 +311,14 @@ impl FunctionSig {
         let return_type = mark_template_params(return_type, &template_names);
         let return_type = resolve_names_in_type(return_type, ctx);
 
+        let return_type_native = resolve_type(None, f.return_type.as_deref());
+        let return_type_native = mark_template_params(return_type_native, &template_names);
+        let return_type_native = resolve_names_in_type(return_type_native, ctx);
+
         FunctionSig {
             params,
             return_type,
+            return_type_native,
         }
     }
 
@@ -315,6 +330,7 @@ impl FunctionSig {
     /// declaration wins on conflict" convention.
     pub(crate) fn merge(self, other: FunctionSig) -> FunctionSig {
         let return_type = union_types(self.return_type, other.return_type);
+        let return_type_native = union_types(self.return_type_native, other.return_type_native);
         let len = self.params.len().max(other.params.len());
         let mut self_params = self.params.into_iter();
         let mut other_params = other.params.into_iter();
@@ -358,6 +374,7 @@ impl FunctionSig {
         FunctionSig {
             params,
             return_type,
+            return_type_native,
         }
     }
 }

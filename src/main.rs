@@ -749,6 +749,7 @@ mod tests {
                 },
             ],
             return_type: types::Type::Bool,
+            return_type_native: types::Type::Bool,
         };
         assert_eq!(
             format_signature("f", &sig),

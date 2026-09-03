@@ -360,6 +360,7 @@ impl<'a> Checker<'a> {
                 })
                 .collect(),
             return_type: types::substitute_template(&sig.return_type, &bindings),
+            return_type_native: types::substitute_template(&sig.return_type_native, &bindings),
         }
     }
 }

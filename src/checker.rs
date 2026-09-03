@@ -6512,6 +6512,52 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found this check compared the
+    // *docblock-refined* return type on both sides, wrongly flagging an
+    // override that faithfully keeps the ancestor's own native `array`
+    // while the ancestor's docblock separately narrowed it further
+    // (`list<...>`) - real PHP itself only enforces override-
+    // compatibility on the native signature, and by default so does real
+    // PHPStan (`checkPhpDocMethodSignatures` is off unless a project
+    // opts in - confirmed directly against real PHPStan with this exact
+    // shape). Real corpus shape: several `HtmlRenderingInterface` test
+    // fakes each declaring `getCatBreadcrumb(): array`, exactly matching
+    // the interface's own native signature, while the interface's
+    // *docblock* separately says `@return list<array{...}>`.
+    #[test]
+    fn an_override_matching_only_the_ancestors_native_return_type_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            interface HasBreadcrumb13 {
+                /** @return list<array{id: string, name: string}> */
+                public function getCatBreadcrumb(string $x): array;
+            }
+            class FakeRenderer13 implements HasBreadcrumb13 {
+                public function getCatBreadcrumb(string $x): array {
+                    return [];
+                }
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    // Companion to the fix above: a genuine *native*-level incompatible
+    // override (widening `int` to `string`, a real PHP fatal error) must
+    // still be caught - this check has no other positive-case coverage
+    // confirming it fires at all.
+    #[test]
+    fn an_override_genuinely_widening_the_native_return_type_is_still_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Base14 { public function make(): int { return 1; } }
+            class Sub14 extends Base14 { public function make(): string { return "x"; } }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert!(d[0].message.contains("is not compatible"), "got: {d:?}");
+    }
+
     #[test]
     fn overriding_a_final_method_is_flagged() {
         let d = diagnostics_for(

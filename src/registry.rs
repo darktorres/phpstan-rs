@@ -1341,6 +1341,7 @@ mod tests {
             FunctionSig {
                 params: vec![],
                 return_type: Type::Bool,
+                return_type_native: Type::Bool,
             },
         )]);
         assert_eq!(r.functions["strlen"].return_type, Type::Int);

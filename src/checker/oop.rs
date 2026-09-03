@@ -261,12 +261,27 @@ impl<'a> Checker<'a> {
             // `Ds\Collection::copy(): static` and its own subclasses'
             // `copy(): Vector`/`copy(): Stack`/...) is always exactly
             // what real PHP allows, never a real incompatibility.
-            if own_sig.return_type != Type::Mixed
-                && ancestor_sig.return_type != Type::Mixed
-                && ancestor_sig.return_type != Type::StaticRef
-                && !self
-                    .registry
-                    .is_assignable(&own_sig.return_type, &ancestor_sig.return_type)
+            // Checked at the *native* level only (ignoring any `@return`
+            // docblock refinement on either side) - real PHP itself only
+            // ever enforces override-compatibility on the native
+            // signature, and by default so does real PHPStan
+            // (`checkPhpDocMethodSignatures` is off unless a project
+            // explicitly opts in - confirmed neither Piwigo's own corpus
+            // config nor this project's own does). Using the merged,
+            // docblock-aware `return_type` here wrongly flagged every
+            // override that faithfully keeps the ancestor's own native
+            // `array` while the ancestor's *interface* had separately
+            // narrowed it to `list<...>` via docblock alone - a real
+            // corpus false positive (several `HtmlRenderingInterface`
+            // test fakes each declaring `getCatBreadcrumb(): array`,
+            // exactly matching the interface's own native signature).
+            if own_sig.return_type_native != Type::Mixed
+                && ancestor_sig.return_type_native != Type::Mixed
+                && ancestor_sig.return_type_native != Type::StaticRef
+                && !self.registry.is_assignable(
+                    &own_sig.return_type_native,
+                    &ancestor_sig.return_type_native,
+                )
             {
                 self.report(fqn.to_string(), format!(
                         "{fqn}::{}() return type {} is not compatible with the inherited return type {}",
