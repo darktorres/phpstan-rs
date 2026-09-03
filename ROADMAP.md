@@ -29,8 +29,8 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 963 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's fifteenth round.
+- Test suite: 978 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 14.5's sixteenth round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
@@ -38,8 +38,9 @@ cited in both halves so either can be cross-referenced from the other.
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
   -> 253 -> 221 -> 219 -> 197 -> 188 -> 182 -> 158 -> 147 (Phase 14.5's
-  first fourteen rounds) -> **144 (current, Phase 14.5's fifteenth round)**. The 211 -> 1115 jump was a real, confirmed
-  *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
+  first fourteen rounds) -> 144 (Phase 14.5's fifteenth round) -> **97
+  (current, Phase 14.5's sixteenth round)**. The 211 -> 1115 jump was a
+  real, confirmed *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
   1575 first-party `list<` occurrences. Phase 14.5's eight rounds then
@@ -114,15 +115,17 @@ is a real, if narrow, risk the corpus-testing approach can't rule out),
 `proptest` for `types.rs`'s subtyping logic (reflexivity, transitivity).
 Both dev-only. Deliberately deferred behind Phases 11-15.
 
-**Phase 36 - PHPDoc tag ecosystem expansion (PLANNED).** `docblock.rs`'s
-tag matcher is exact literal-string matching (`match tag { "param" =>
+**Phase 36 - PHPDoc tag ecosystem expansion (PARTIAL).** `docblock.rs`'s
+tag matcher was exact literal-string matching (`match tag { "param" =>
 ..., "return" => ..., ... }`) with no `@phpstan-`-prefix handling at
 all, so the `@phpstan-param`/`@phpstan-var`/etc. spelling (a real,
 documented convention - see the Doctrine-corpus finding in Known
-limitations below) is silently dropped for every tag, including ones
-already supported. Fix that first, before adding anything else, so
-every following addition gets both spellings for free. New tags
-needed: `@method`/`@mixin`/`@phpstan-type` (synthesized into
+limitations below) was silently dropped for every tag, including ones
+already supported - **fixed in Phase 14.5's sixteenth round**, as a
+second, override-priority pass over the same tag list, covering
+`@phpstan-param`/`-return`/`-var`/`-template`/`-template-covariant`/
+`-template-contravariant`/`-extends`/`-implements`. Every other tag
+below remains open. New tags still needed: `@method`/`@mixin`/`@phpstan-type` (synthesized into
 `ClassInfo`'s `methods`/`properties` maps the same way enum
 `cases()`/`value`/`name` already are, Phase 9 - `@phpstan-type` itself
 needs four real pieces: global config-level aliases, `@phpstan-import-type
@@ -334,34 +337,23 @@ comments.
   properly means real interface-to-implementation PHPDoc inheritance
   for method signatures generally (params and returns, generic or not),
   a sizable feature on its own - not attempted piecemeal per shape.
-- **`@phpstan-return`/`@phpstan-param`/`@phpstan-var` (a real,
-  documented PHPStan convention letting a plain `@return`/`@param`/
-  `@var` stay simple/IDE-friendly while its `@phpstan-`-prefixed twin
-  gives PHPStan itself a more precise type) aren't recognized at all** -
-  confirmed extremely common in the vendored Doctrine ORM/DBAL alone
-  (91 files use at least one). A round of Piwigo-corpus bucketing
-  prototyped support for these tags (making `@phpstan-return`/
-  `@phpstan-param`/`@phpstan-var` win over their plain counterpart
-  regardless of tag order) and confirmed it fixes a real, repeated
-  false positive (`EntityRepository::find(): @return object|null` +
-  `@phpstan-return ?T`, previously read as plain `object` everywhere a
-  repository's own `find()` call flowed through) - but reverted it
-  after the corpus re-check showed a larger regression than the fix's
-  own win (+36 vs. the 14 it removed): Doctrine's own
-  `@phpstan-type Params = array{...}` (a *separate* PHPStan feature,
-  file/class-scoped type aliases, `@phpstan-import-type` too) is not
-  parsed either, so a `@phpstan-param`/`@phpstan-return` referencing
-  one of these aliases (`Params`, `WrapperParameterTypeArray`) got
-  read as a bogus, unresolvable class-name reference instead of falling
-  back to the plain tag's own (looser but at least correct) type. Real
-  PHPStan's own `Params` alias definition itself also uses further
-  unsupported syntax (`key-of<self::DRIVER_MAP>`, a nested alias
-  reference to `OverrideParams`), so implementing alias resolution
-  alone wouldn't fully close this - fixing either half properly means
-  real `@phpstan-type`/`@phpstan-import-type` alias tracking (class/
-  file-scoped, potentially nested) as its own feature, not a narrow
-  patch, and the `@phpstan-return`/`@phpstan-param`/`@phpstan-var` work
-  should be re-attempted alongside it rather than separately.
+- ~~`@phpstan-return`/`@phpstan-param`/`@phpstan-var` aren't recognized
+  at all~~ **fixed, Phase 14.5's sixteenth round** - see that round's
+  own write-up below for what actually closed this without needing the
+  full `@phpstan-type`/`@phpstan-import-type` alias-tracking feature a
+  ninth-round attempt (below) had concluded was a hard prerequisite:
+  rather than parsing alias definitions at all, an unresolvable `Object`
+  class name on the *expected* side of a compatibility check now
+  degrades to "compatible with anything" (excluding the real `object`
+  pseudo-type), the same "don't guess, don't false-positive" philosophy
+  `Registry::is_assignable` already applies elsewhere - an alias
+  reference and a genuine unresolvable-class typo are indistinguishable
+  to this project either way, and treating both leniently costs nothing
+  a real corpus re-check didn't already confirm safe. `@phpstan-type`/
+  `@phpstan-import-type` themselves (actually resolving what an alias
+  *means*, not just tolerating references to one) remain unparsed -
+  still real, open work under Phase 36 below if a future gap ever needs
+  the alias's own precise type rather than blanket leniency.
 - **No mechanism for multi-variable compound-boolean narrowing** - a
   single `||`-of-`&&`-of-negations condition narrowing several different
   variables at once (`if ((!is_int($a) && !is_string($a)) || (!is_int
@@ -1378,10 +1370,12 @@ repeated remaining pattern:
   cause of any round.
 
 **A ninth round** attempted `@phpstan-return`/`@phpstan-param`/
-`@phpstan-var` support (see **Known limitations** below - reverted
-after its own corpus re-check showed a larger regression than its win,
-a separate, real `@phpstan-type` alias-tracking gap it exposed rather
-than caused), then landed one real, smaller fix:
+`@phpstan-var` support (reverted after its own corpus re-check showed a
+larger regression than its win, a separate, real `@phpstan-type`
+alias-tracking gap it exposed rather than caused - closed properly,
+via a narrower fix than either round assumed would be needed, in Phase
+14.5's sixteenth round; see **Known limitations** below for what that
+turned out to be), then landed one real, smaller fix:
 
 - **`vendor/composer/ClassLoader.php` - Composer's own bootstrap
   loader class - is never listed in any of the generated autoload maps
@@ -1504,6 +1498,107 @@ to narrowing or accessory types:
   argument-type checking even at `--level max` - a separate, narrower
   stdlib-specific PHPStan quirk left alone rather than chased (1
   diagnostic, high uncertainty about a safe general fix).
+
+**A sixteenth round** (144 -> 97) bucketed by normalized message shape
+as usual and found eight independent bugs, two of which (docblock tags,
+generic template scoping) turned out to be root causes behind a large
+fraction of the round's whole `list<T>`/`array<T>` bucket rather than
+one-off fixes each:
+
+- **`docblock.rs` never recognized a `@phpstan-`-prefixed sibling of
+  `@param`/`@return`/`@var`/`@template*`/`@extends`/`@implements`** - a
+  real, common convention (582/437/186 occurrences of the first three
+  alone across this project's own vendored corpus, mostly Doctrine
+  ORM/DBAL's own stubs) for giving PHPStan a more precise type than a
+  native/plain-doc signature carries for other tooling, e.g.
+  `EntityRepository::findBy()`'s native `@return array` staying loose
+  while `@phpstan-return list<T>` carries the real generic type. Added
+  as a second, override-priority pass over the same tag list (Phase
+  36's own first item, done ahead of that phase's remaining tags).
+  Surfaced two more real gaps once real corpus code exercised it for
+  the first time: Doctrine's own `@phpstan-param`/`@phpstan-return`
+  routinely name a local `@phpstan-type` alias this project doesn't
+  parse at all (`Registry::is_assignable` now treats an `Object` on the
+  expected side as compatible with anything when that name isn't a
+  real registered class, excluding the native `object` pseudo-type),
+  and `DriverManager::getConnection()`'s `@phpstan-return` is a real
+  PHPStan conditional return type this module's own doc comment already
+  disclaims parsing - now actually skipped rather than parsed into a
+  garbage type.
+- **A method's own `@template` collapsed to `Mixed` on any non-generic
+  class.** `substitute_class_templates` (class-level template
+  substitution) always ran before `infer_call_return_type`'s separate
+  per-call-argument binding for a method's *own* template - correct
+  when both scopes exist, but its `bindings` map was always empty for a
+  class with zero templates of its own, and `types::substitute_
+  template`'s fallback for an unbound name is `Mixed`, wiping out the
+  method's own template before the second, correct pass ever ran. Real
+  shape: a plain PSR-14-style `EventDispatcher::dispatch()` with its
+  own `@template T of object`. New `class_scope` restricts substitution
+  to names actually declared by the owning class, leaving any other
+  name untouched for the later pass.
+- **`rewrap_with_accessory_markers` (array_map's "preserve the input's
+  own list-ness" helper) only recognized an `Intersection`-shaped
+  input**, silently dropping both markers when the input arrived as a
+  `Union` from a control-flow merge (`$x = []; if (...) { foreach (...)
+  { $x[] = ...; } }`) instead - the same shape `array_element_type`
+  already handles, just missing here.
+- **`array_push`/`array_unshift`/`array_shift`/`array_pop` fell into
+  the generic by-ref widening**, which discards list-ness/non-emptiness
+  down to a bare `array` - unlike the already-modeled `sort()` family,
+  nothing recognized that these four preserve list-ness (the first two
+  also gaining provable non-emptiness) when the argument was already
+  list-like beforehand.
+- **`range()`'s own real stub is a bare `@return array`** - no
+  refinement at all, unlike real PHPStan's own dedicated
+  `RangeFunctionReturnTypeExtension`. Added as a bespoke per-function
+  extension (int and single-character-string bounds only, matching
+  real corpus shapes) alongside `array_map`/`array_filter`/etc.
+- **`ClassConst` never carried its own doc comment** - a `@var
+  list<...>` directly above a `public const array X = [...]` (a real
+  way to pin a const array's element type more precisely than either
+  its native hint, not even kept past parsing, or the literal value's
+  own inferred type) was silently dropped. Threaded through the same
+  `take_doc_comment()` the member-parsing loop already captures for
+  properties/methods.
+- **An unassigned superglobal defaulted to `Type::Mixed`, not `array`**
+  - real phpstorm-stubs' own bootstrap file declares `$_SESSION`/etc.
+  with a literal `= []`. Because `widen_coalesce_result`'s "keep the
+  left side's real array type" rule only recognized an already-known
+  `Type::Array`, `$_SESSION ??= [];` collapsed to the literal `array{}`,
+  flagging the very next `unset()` as targeting a key that provably
+  doesn't exist.
+- **`isset()`/`empty()`'s own direct argument went through the
+  ordinary `check_expr`**, hitting the same `check_shape_key_access` a
+  bare read would - even though probing a possibly-absent key is
+  exactly what both constructs are for. Routed through the existing
+  `check_expr_quiet_root` (already used for `??`'s own left side)
+  instead.
+- **A closure's own `use (&$x)` mutation never wrote back to the
+  declaring scope.** Real shape: `$seen = []; $client = new
+  MockHttpClient(function (...) use (&$seen) { $seen[] = [...]; });
+  ...; $seen[0]` (a test-double-recording idiom) - `$seen`'s type at
+  the read site stayed frozen at whatever it was *before* the closure
+  literal. Every `by_ref` use now writes `union_types(pre-closure type,
+  closure body's own final type)` back into the outer scope.
+- **A method override's own `self`/`static` was never resolved before
+  the Liskov parameter-narrowing check.** Real shape: a `final class
+  ImageBackend implements ImageInterface`, whose interface names the
+  concrete class directly (`compose(ImageBackend $overlay)`) and whose
+  own override re-declares it as `self` - provably the same type, but
+  `is_assignable`/`is_subtype` have no rule for a concrete `Object`
+  satisfying a still-bare `SelfRef`. Both sides now go through the
+  existing `resolve_pseudo` first.
+
+Two real, evidenced gaps deliberately deferred rather than chased (1-2
+diagnostics each, needing genuinely new machinery disproportionate to
+the count): a `method_exists($x, 'foo')` truthy guard narrowing `$x` to
+allow the guarded call (real PHPStan's own `HasMethod` accessory type,
+no equivalent here); and a possibly-undefined variable correlated with
+a *different* boolean flag variable set in the same branch (real
+PHPStan's own conditional-expression-holder tracking - this project
+only tracks a single variable's own certain-vs-maybe-defined state, not
+cross-variable correlation).
 
 ## Phase 20 - Performance & robustness - DONE
 
