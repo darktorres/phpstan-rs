@@ -29,7 +29,7 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 952 unit tests (`src/`) + 26 CLI integration tests + 3
+- Test suite: 953 unit tests (`src/`) + 26 CLI integration tests + 3
   `main.rs` unit tests, all passing as of Phase 14.5's closing round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
@@ -37,8 +37,8 @@ cited in both halves so either can be cross-referenced from the other.
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
-  -> 253 (Phase 14.5's first seven rounds) -> **221 (current, Phase
-  14.5's closing round)**. The 211 -> 1115 jump was a real, confirmed
+  -> 253 -> 221 (Phase 14.5's first eight rounds) -> **219 (current,
+  Phase 14.5's closing round)**. The 211 -> 1115 jump was a real, confirmed
   *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
@@ -1200,6 +1200,27 @@ repeated remaining pattern:
   case (needing an array-like input to activate at all) never even
   engaged - by far the single most repeated remaining false-positive
   cause of any round.
+
+**A ninth round** attempted `@phpstan-return`/`@phpstan-param`/
+`@phpstan-var` support (see **Known limitations** below - reverted
+after its own corpus re-check showed a larger regression than its win,
+a separate, real `@phpstan-type` alias-tracking gap it exposed rather
+than caused), then landed one real, smaller fix:
+
+- **`vendor/composer/ClassLoader.php` - Composer's own bootstrap
+  loader class - is never listed in any of the generated autoload maps
+  at all** (it's what *runs* them, a real chicken-and-egg case:
+  `vendor/autoload.php` requires it directly, before the classmap/
+  PSR-4 mechanisms it reads even exist), so this project's own
+  vendor-context discovery (which only reads those generated maps)
+  never found it. Real code occasionally constructs it directly for
+  its own plugin/dynamic-autoloading needs (real Piwigo code:
+  `PluginRegistry`/`ThemeRegistry`, each registering an installed
+  plugin's own PSR-4 mapping via a fresh `new ClassLoader()`), and
+  every one of those call sites was flagged as an unknown class.
+  Present unconditionally whenever `vendor/composer/` exists at all, so
+  always worth loading for context the same way every other generated
+  file this project already reads is.
 
 ## Phase 20 - Performance & robustness - DONE
 
