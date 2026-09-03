@@ -942,6 +942,64 @@ mod tests {
         );
     }
 
+    // A round of Piwigo-corpus bucketing found the array-append-widening
+    // path (Phase 22) built a plain `Array`, never a real `list<T>`, even
+    // though real PHP's own append semantics always assign the next
+    // sequential int key - verified via dumpType(): a single append onto
+    // an already-list-like container (including a freshly-empty `[]`)
+    // stays a real, now-provably-non-empty list.
+    #[test]
+    fn appending_onto_a_freshly_empty_array_produces_a_non_empty_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-empty-list<string> $x */
+            function sink(array $x): void {}
+            function f(string $a): void {
+                $content = [];
+                $content[] = $a;
+                sink($content);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn appending_onto_an_already_typed_list_stays_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<string> $x
+             *  @return non-empty-list<string>
+             */
+            function f(array $x): array {
+                $x[] = 'y';
+                return $x;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_dynamic_key_write_does_not_claim_the_result_is_still_a_list() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param list<string> $x
+             *  @return list<string>
+             */
+            function f(array $x, string $key): array {
+                $x[$key] = 'y';
+                return $x;
+            }
+        "#,
+        );
+        assert_eq!(
+            d.len(),
+            1,
+            "expected the list-ness mismatch to still be flagged: {d:?}"
+        );
+    }
+
     #[test]
     fn a_nested_write_through_a_dynamically_keyed_array_grows_its_element_shape() {
         // Real shape: CalendarMonthly::buildMonthCalendar builds $items

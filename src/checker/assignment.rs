@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
-use crate::types::{self, Type};
+use crate::types::{self, AccessoryKind, Type};
 
 impl<'a> Checker<'a> {
     /// The actual variable-binding side effect of an assignment - lives in
@@ -400,7 +400,25 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
                 let widened = fields.iter().fold(value_ty, |acc, (_, field_ty, _)| {
                     union_types(acc, field_ty.clone())
                 });
-                Some(Type::Array(Box::new(widened)))
+                // A real append (`$arr[] = value`, `idx` itself absent -
+                // not merely a dynamic, non-literal key) onto a container
+                // that was already provably list-like (including a
+                // freshly-empty shape, `[]`) always assigns the next
+                // sequential int key, so the result stays a real,
+                // now-provably-non-empty list - verified via dumpType().
+                // A dynamic key write falls through this same branch (it
+                // isn't a literal string key either) but must NOT get the
+                // marker - an arbitrary key could easily not be
+                // sequential.
+                if idx.is_none() && Checker::is_list_like(container_ty) {
+                    Some(Type::Intersection(vec![
+                        Type::Array(Box::new(widened)),
+                        Type::Accessory(AccessoryKind::ArrayList),
+                        Type::Accessory(AccessoryKind::NonEmptyArray),
+                    ]))
+                } else {
+                    Some(Type::Array(Box::new(widened)))
+                }
             }
         },
         // Already widened past a literal shape (by an earlier append/
@@ -452,14 +470,25 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
         // real `Intersection([Array(T), Accessory(_)])` now - without
         // this arm it fell to the `_ => None` bail below, leaving the
         // container's own tracked type stale after a write instead of
-        // widening it the same way a plain `Array(T)` already does.
-        // Deliberately drops any `Accessory` marker on the result - a
-        // dynamic-key write can't preserve a list's own sequential-key
+        // widening it the same way a plain `Array(T)` already does. A
+        // dynamic-key write drops any `Accessory` marker on the result -
+        // an arbitrary key can't preserve a list's own sequential-key
         // guarantee generically, the same reasoning `array_filter`'s own
-        // marker-stripping fix uses.
+        // marker-stripping fix uses - but a real append (`idx` absent)
+        // onto an already-list-marked container keeps it a list, now
+        // provably non-empty (verified via dumpType()).
         Type::Intersection(members) => {
             let inner = members.iter().find_map(Checker::array_element_type)?;
-            Some(Type::Array(Box::new(union_types(value_ty, inner))))
+            let widened = union_types(value_ty, inner);
+            if idx.is_none() && members.contains(&Type::Accessory(AccessoryKind::ArrayList)) {
+                Some(Type::Intersection(vec![
+                    Type::Array(Box::new(widened)),
+                    Type::Accessory(AccessoryKind::ArrayList),
+                    Type::Accessory(AccessoryKind::NonEmptyArray),
+                ]))
+            } else {
+                Some(Type::Array(Box::new(widened)))
+            }
         }
         _ => None,
     }

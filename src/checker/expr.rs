@@ -1917,7 +1917,7 @@ impl<'a> Checker<'a> {
     /// keys happen to be canonical and sequential. Shares the exact
     /// `is_subtype`-side rule for an `ArrayShape` against
     /// `Accessory::ArrayList` rather than re-deriving it.
-    fn is_list_like(ty: &Type) -> bool {
+    pub(crate) fn is_list_like(ty: &Type) -> bool {
         match ty {
             Type::Intersection(members) => {
                 members.contains(&Type::Accessory(AccessoryKind::ArrayList))
