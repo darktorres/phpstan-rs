@@ -64,8 +64,24 @@ pub fn discover_vendor_context(project_dir: &Path) -> ComposerContext {
     // what should be a quiet "skip this source of context" degrade.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let ctx = discover_inner(&composer_dir, &vendor_dir, &base_dir);
+    let mut ctx = discover_inner(&composer_dir, &vendor_dir, &base_dir);
     std::panic::set_hook(default_hook);
+
+    // Composer's own bootstrap loader class - unlike every other file
+    // this function discovers, it's never listed in any of the generated
+    // autoload maps at all (it's what *runs* them, a real chicken-and-
+    // egg case: `vendor/autoload.php` requires it directly, before the
+    // classmap/PSR-4 mechanisms it reads even exist). Present
+    // unconditionally whenever `vendor/composer/` exists at all, so
+    // always worth loading for context - real code occasionally
+    // constructs it directly for its own plugin/dynamic-autoloading
+    // needs (confirmed live: Piwigo's own `PluginRegistry`/
+    // `ThemeRegistry`, registering each installed plugin's own PSR-4
+    // mapping via a fresh `new ClassLoader()`).
+    let class_loader = composer_dir.join("ClassLoader.php");
+    if class_loader.is_file() {
+        ctx.files.push(class_loader);
+    }
     ctx
 }
 
@@ -341,6 +357,38 @@ return array(
         let src_dir = std::fs::canonicalize(dir.path().join("vendor/acme/lib/src")).unwrap();
         assert_eq!(ctx.files, vec![foo]);
         assert_eq!(ctx.dirs, vec![src_dir]);
+    }
+
+    // A round of Piwigo-corpus bucketing found real code that constructs
+    // Composer's own bootstrap loader directly (`new
+    // \Composer\Autoload\ClassLoader()`, a real plugin-autoloading idiom)
+    // was flagged as an unknown class - `vendor/composer/ClassLoader.php`
+    // is never listed in any of the generated autoload maps at all (it's
+    // what *runs* them), so it needs its own, separate, unconditional
+    // inclusion.
+    #[test]
+    fn always_includes_composers_own_class_loader_file() {
+        let dir = TempDir::new("class_loader");
+        dir.write("composer.json", "{}");
+        dir.write(
+            "vendor/composer/ClassLoader.php",
+            "<?php namespace Composer\\Autoload; class ClassLoader {}",
+        );
+        dir.write(
+            "vendor/composer/autoload_classmap.php",
+            r#"<?php
+return array();
+"#,
+        );
+
+        let ctx = discover_vendor_context(dir.path());
+        let class_loader =
+            std::fs::canonicalize(dir.path().join("vendor/composer/ClassLoader.php")).unwrap();
+        assert!(
+            ctx.files.contains(&class_loader),
+            "expected ClassLoader.php in {:?}",
+            ctx.files
+        );
     }
 
     #[test]
