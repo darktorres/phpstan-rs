@@ -98,14 +98,49 @@ pub fn parse(raw: &str) -> DocBlock {
         }
     }
 
+    // Real PHPStan recognizes a `@phpstan-`-prefixed sibling of `@param`/
+    // `@return`/`@var`/`@template*`/`@extends`/`@implements` as a more
+    // precise, PHPStan-only override of the same information - a common
+    // convention (582/437/186 occurrences of `@phpstan-param`/`-return`/
+    // `-var` alone across this project's own vendored corpus, mostly
+    // Doctrine's own stubs, e.g. `EntityRepository::findBy()`'s native
+    // `@return` staying the loose `array` an IDE/other tools understand
+    // while `@phpstan-return list<T>` carries the precise generic type)
+    // meant to coexist with a plainer tag for non-PHPStan tooling, not
+    // replace it outright. Two passes over the same tag list - plain tags
+    // first, then `@phpstan-*` ones with the prefix stripped, reusing the
+    // exact same per-tag logic - gives the override its right-to-win
+    // regardless of which one the docblock happens to write first.
     for line in &tag_lines {
         let Some(tag_body) = line.strip_prefix('@') else {
+            continue;
+        };
+        if tag_body.starts_with("phpstan-") {
+            continue;
+        }
+        let mut parts = tag_body.splitn(2, char::is_whitespace);
+        let tag = parts.next().unwrap_or("");
+        let rest = parts.next().unwrap_or("").trim();
+        apply_tag(&mut block, tag, rest);
+    }
+    for line in &tag_lines {
+        let Some(tag_body) = line.strip_prefix('@') else {
+            continue;
+        };
+        let Some(tag_body) = tag_body.strip_prefix("phpstan-") else {
             continue;
         };
         let mut parts = tag_body.splitn(2, char::is_whitespace);
         let tag = parts.next().unwrap_or("");
         let rest = parts.next().unwrap_or("").trim();
+        apply_tag(&mut block, tag, rest);
+    }
 
+    block
+}
+
+fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
+    {
         match tag {
             "param" => {
                 // Convention is `Type $name description...`.
@@ -140,7 +175,21 @@ pub fn parse(raw: &str) -> DocBlock {
             }
             "return" => {
                 let ty = take_type_token(rest);
-                if !ty.is_empty() {
+                // This module's own doc comment already disclaims
+                // conditional return types (`($param is Foo ? Bar : Baz)`,
+                // real PHPStan syntax Doctrine DBAL's own
+                // `DriverManager::getConnection()` uses) as needing real
+                // per-call-site binding this project doesn't do - but
+                // before `@phpstan-return` support existed, no real
+                // `@return` in this project's corpus ever actually used
+                // one, so nothing enforced that disclaimer. `take_type_token`
+                // has no notion of the `is`/`?`/`:` conditional-type
+                // grammar; it just grabs the whole balanced-parens token,
+                // which `types::parse_type_string` then can't meaningfully
+                // parse either - leaving `return_type` unset (rather than
+                // a garbage type) is what "doesn't parse" actually has to
+                // mean once a real conditional expression reaches here.
+                if !ty.is_empty() && !ty.starts_with("($") {
                     block.return_type = Some(ty.to_string());
                 }
             }
@@ -178,7 +227,9 @@ pub fn parse(raw: &str) -> DocBlock {
             }
             "template" => {
                 if let Some((name, bound)) = parse_template_tag(rest) {
-                    block.templates.push(name.clone());
+                    if !block.templates.contains(&name) {
+                        block.templates.push(name.clone());
+                    }
                     if let Some(bound) = bound {
                         block.template_bounds.insert(name, bound);
                     }
@@ -190,7 +241,9 @@ pub fn parse(raw: &str) -> DocBlock {
             // to vary in.
             "template-covariant" => {
                 if let Some((name, bound)) = parse_template_tag(rest) {
-                    block.templates.push(name.clone());
+                    if !block.templates.contains(&name) {
+                        block.templates.push(name.clone());
+                    }
                     if let Some(bound) = bound {
                         block.template_bounds.insert(name.clone(), bound);
                     }
@@ -199,7 +252,9 @@ pub fn parse(raw: &str) -> DocBlock {
             }
             "template-contravariant" => {
                 if let Some((name, bound)) = parse_template_tag(rest) {
-                    block.templates.push(name.clone());
+                    if !block.templates.contains(&name) {
+                        block.templates.push(name.clone());
+                    }
                     if let Some(bound) = bound {
                         block.template_bounds.insert(name.clone(), bound);
                     }
@@ -221,8 +276,6 @@ pub fn parse(raw: &str) -> DocBlock {
             _ => {}
         }
     }
-
-    block
 }
 
 /// Parses `@template`'s own body: `T` alone, or `T of Bound` (a bound can

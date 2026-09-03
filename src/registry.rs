@@ -868,6 +868,22 @@ impl Registry {
                     }
                 })
             }
+            // Same unresolved-`@phpstan-type`-alias leniency as the
+            // Object-vs-Object arm above, generalized to every other
+            // `sub` shape: Doctrine DBAL's own `DriverManager::
+            // getConnection(Params $params)` is called with a real array
+            // *literal* (an `ArrayShape`) at nearly every real call site,
+            // never an actual `Params`-named object - only the
+            // Object-vs-Object arm's leniency would leave those failing
+            // just the same way. Excludes the real `object` pseudo-type
+            // (PHP's own native `object` hint - already handled, and
+            // correctly strict, in the dedicated arm above): unlike a
+            // genuinely-unresolvable alias name, `object` means exactly
+            // "some real object instance" and a plain array/string/etc.
+            // is correctly never one.
+            (_, Type::Object(name, _)) if name != "object" && !self.classes.contains_key(name) => {
+                true
+            }
             _ => types::is_subtype(sub, sup),
         }
     }

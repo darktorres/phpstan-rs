@@ -744,6 +744,16 @@ fn strip_accessory_markers(ty: Type) -> Type {
 /// slicing/reversing with default arguments (none of which change key
 /// structure or element count) - used by `array_map`/`array_slice`/
 /// `array_reverse`'s own "preserve the input's own markers" cases.
+///
+/// A Piwigo-corpus round found `input_ty` arriving here as a `Union` just
+/// as often as an `Intersection` - `$x = []; if (...) { foreach (...) {
+/// $x[] = ...; } }` control-flow-merges to `array{}|list<T>`, which is
+/// still every bit as list-like as a bare `list<T>` (`Checker::is_list_like`
+/// already recognizes this exact shape), but the original `Intersection`-
+/// only match silently dropped both markers the moment the input came from
+/// a merge rather than a single literal/return - verified via a direct
+/// repro (`array_map` over such a variable losing `list<>`-ness on its
+/// result).
 fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
     match input_ty {
         Type::Intersection(members) => {
@@ -755,6 +765,20 @@ fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
                     .cloned(),
             );
             Type::Intersection(result)
+        }
+        Type::Union(_) => {
+            let mut result = vec![Type::Array(Box::new(mapped_elem))];
+            if Checker::is_list_like(input_ty) {
+                result.push(Type::Accessory(AccessoryKind::ArrayList));
+            }
+            if Checker::is_known_non_empty_array(input_ty) {
+                result.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+            }
+            if result.len() > 1 {
+                Type::Intersection(result)
+            } else {
+                result.remove(0)
+            }
         }
         _ => Type::Array(Box::new(mapped_elem)),
     }
