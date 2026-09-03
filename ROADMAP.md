@@ -29,16 +29,16 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 953 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's closing round.
+- Test suite: 954 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 14.5's tenth round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
-  -> 253 -> 221 (Phase 14.5's first eight rounds) -> **219 (current,
-  Phase 14.5's closing round)**. The 211 -> 1115 jump was a real, confirmed
+  -> 253 -> 221 -> 219 (Phase 14.5's first nine rounds) -> **197
+  (current, Phase 14.5's tenth round)**. The 211 -> 1115 jump was a real, confirmed
   *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
@@ -1221,6 +1221,22 @@ than caused), then landed one real, smaller fix:
   Present unconditionally whenever `vendor/composer/` exists at all, so
   always worth loading for context the same way every other generated
   file this project already reads is.
+
+**A tenth round** (219 -> 197) found one bug affecting every value
+object in the corpus's own `Common\ValueObject` family at once:
+
+- **`check_method_overrides`'s `static`-covariance escape hatch only
+  recognized a bare `Type::StaticRef`, missing the far more common
+  nullable shape.** Every `ImageId`/`TagId`/`UserId`/... value object
+  implements a shared `NumericId` interface declaring `tryFrom(mixed
+  $value): ?static`, and overrides it with `?self` on its own `final`
+  class - confirmed directly against real PHPStan 2.2.8 to be a
+  legitimate override (a `final` class's `self` and `static` always
+  name the same concrete type; the same override on a non-`final` class
+  is correctly rejected). `resolve_type` builds `?static` as a plain
+  `Union([StaticRef, Null])`, never its own dedicated type, so the
+  equality check silently never fired for any of the 22 affected
+  classes. Fixed by looking for `StaticRef` inside a `Union` too.
 
 ## Phase 20 - Performance & robustness - DONE
 
