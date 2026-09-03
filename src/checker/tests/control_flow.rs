@@ -855,6 +855,64 @@ fn a_function_ending_in_a_try_catch_that_both_return_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus shapes (NotificationController::findAvailableFeedId,
+// AdvisorySessionLock::acquirePostgres, NotificationByMailService::
+// findAvailableCheckKey, all `while (true) { ...; if (...) { return
+// $x; } }` find-a-free-key/retry loops) - `always_terminates` had no
+// case for `While`/`For` at all, so a function ending in one of these
+// (with no `break` anywhere in the loop body) was incorrectly flagged
+// as possibly falling off the end.
+#[test]
+fn a_while_true_loop_with_no_break_and_a_return_inside_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): string {
+                while (true) {
+                    $key = 'x';
+                    if ($key !== 'y') {
+                        return $key;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_for_loop_with_a_true_condition_and_no_break_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): string {
+                for ($i = 0; true; $i++) {
+                    if ($i > 3) {
+                        return 'x';
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_while_true_loop_with_a_reachable_break_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $c): string {
+                while (true) {
+                    if ($c) {
+                        return 'x';
+                    }
+                    break;
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("got null"), "got: {d:?}");
+}
+
 // A round of Piwigo-corpus bucketing found a catch clause's own
 // ending state was discarded entirely after the whole try/catch -
 // `locals` only ever kept the try body's own final state, matching

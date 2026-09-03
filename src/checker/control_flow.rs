@@ -71,6 +71,32 @@ impl<'a> Checker<'a> {
                             .is_some_and(|s| self.always_terminates(s, locals))
                     })
             }
+            // A round of Piwigo-corpus bucketing found `while (true) {
+            // ...; if (...) { return $x; } }` (real shape,
+            // `NotificationController::findAvailableFeedId`, a
+            // find-a-free-key retry loop) flagged as possibly falling
+            // off the function's own end - a literal `true`/non-zero
+            // condition never lets the loop exit by itself, so the only
+            // way past it at all is whatever `return`/`throw` inside
+            // its body runs, exactly what `always_terminates` already
+            // exists to recognize for every other construct.
+            // Deliberately conservative about `break`: any `Break`
+            // statement *anywhere* in the body - even one that actually
+            // targets a different, nested loop/switch - counts as "this
+            // loop might exit on its own," never wrongly concluding
+            // termination. `goto`/`label` share the same theoretical
+            // gap `always_terminates` already has everywhere else (see
+            // Phase 15's own note on this).
+            StmtKind::While { cond, body } => is_truthy_literal(cond) && !stmt_contains_break(body),
+            // Same idiom, `for`'s own real spelling: `for ($i = 0; true;
+            // $i++) { ... }` (real shape, `HttpClientService::
+            // guardedRequest`, a redirect-following retry loop) - a
+            // `for` with no condition at all (`for (;;)`) is PHP's own
+            // "no condition means always true," same real semantics as
+            // an explicit truthy literal.
+            StmtKind::For { cond, body, .. } => {
+                cond.last().is_none_or(is_truthy_literal) && !stmt_contains_break(body)
+            }
             _ => false,
         }
     }
@@ -184,4 +210,31 @@ fn stmt_contains_yield(stmt: &Stmt) -> bool {
         _ => false,
     };
     own || stmt_children(stmt).into_iter().any(stmt_contains_yield)
+}
+
+/// Real PHP's own two spellings for "this condition is always true":
+/// the literal `true`, and any non-zero integer literal (`while (1)`,
+/// a real, common pre-`true`-keyword-idiom carryover). Deliberately not
+/// attempting anything symbolic beyond a bare literal - a variable or
+/// expression that merely *evaluates* to a truthy constant isn't
+/// something this checker tracks precisely enough to trust here.
+fn is_truthy_literal(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Literal(Literal::Bool(true)) => true,
+        ExprKind::Literal(Literal::Int(n)) => *n != 0,
+        _ => false,
+    }
+}
+
+/// Whether `stmt` contains a `break` anywhere in its own subtree,
+/// including inside a nested loop/switch that statement doesn't
+/// unqualified-`break` out of at all - deliberately conservative in the
+/// same direction `always_terminates`'s own `while (true)` case needs:
+/// treating any `break` found anywhere as "this loop might exit on its
+/// own" only ever causes a missed simplification, never a wrong
+/// termination conclusion, so there's no need to track which specific
+/// loop/switch a given `break`'s own level actually targets.
+fn stmt_contains_break(stmt: &Stmt) -> bool {
+    matches!(stmt.kind, StmtKind::Break(_))
+        || stmt_children(stmt).into_iter().any(stmt_contains_break)
 }
