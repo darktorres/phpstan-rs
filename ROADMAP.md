@@ -29,16 +29,16 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 955 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's eleventh round.
+- Test suite: 958 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 14.5's twelfth round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
-  -> 253 -> 221 -> 219 -> 197 (Phase 14.5's first ten rounds) -> **188
-  (current, Phase 14.5's eleventh round)**. The 211 -> 1115 jump was a real, confirmed
+  -> 253 -> 221 -> 219 -> 197 -> 188 (Phase 14.5's first eleven rounds)
+  -> **182 (current, Phase 14.5's twelfth round)**. The 211 -> 1115 jump was a real, confirmed
   *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
@@ -1255,6 +1255,19 @@ types:
   Fixed by switching both gates to `types::is_subtype(..., &Type::
   String)`, which already generalizes correctly across `Intersection`
   and literal string types without needing a new special case.
+
+**A twelfth round** (188 -> 182) closed a real gap Phase 14 opened
+rather than one it broke - `BinOp::Concat` had never inferred anything
+beyond plain `Type::String` at all:
+
+- **String concatenation with a non-falsy operand is itself always
+  non-falsy.** Verified via `dumpType()`: `$a . 'suffix'` (any `$a`) and
+  `'prefix' . $a` both dump as `non-falsy-string`, since a concatenation
+  containing a known non-empty, non-`'0'` substring can never itself be
+  empty or exactly `'0'`. Real corpus shape: `sys_get_temp_dir() . '/'`,
+  `dirname(...) . '/backups/'`, `'.' . $ext`, each feeding a PHPUnit
+  `assertStringStartsWith()`/`assertStringEndsWith()` whose stub
+  declares its needle as `non-empty-string`.
 
 ## Phase 20 - Performance & robustness - DONE
 
