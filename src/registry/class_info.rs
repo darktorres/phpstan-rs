@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
+use crate::ast::{
+    ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, PropertyDecl, TraitAlias, Visibility,
+};
 use crate::docblock::{self, DocBlock};
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, infer_const_type, mark_template_params,
@@ -14,6 +16,14 @@ pub struct PropertySig {
     pub ty: Type,
     pub is_static: bool,
     pub is_readonly: bool,
+    // PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook
+    // can accept a wider type than the property's own backing/read type
+    // (`public array $x { set(array $value) { $this->x =
+    // sanitize($value); } }` - the hook does its own coercion inside the
+    // body before the real assignment). `None` when there's no hook, or
+    // the hook uses an implicit `set { ... }` with no parameter list at
+    // all - a write then still checks against `ty` as before.
+    pub set_ty: Option<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,12 +140,14 @@ impl ClassInfo {
                 );
                 let ty = mark_template_params(ty, &template_set);
                 let ty = resolve_names_in_type(ty, ctx);
+                let set_ty = property_hook_set_type(p, &template_set, ctx);
                 (
                     p.name.clone(),
                     PropertySig {
                         ty,
                         is_static: p.is_static,
                         is_readonly: p.is_readonly,
+                        set_ty,
                     },
                 )
             })
@@ -163,6 +175,7 @@ impl ClassInfo {
                         ty,
                         is_static: false,
                         is_readonly: p.promoted_readonly,
+                        set_ty: None,
                     },
                 );
             }
@@ -187,6 +200,7 @@ impl ClassInfo {
                         ty,
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,
+                        set_ty: None,
                     }
                 });
             }
@@ -382,6 +396,7 @@ impl ClassInfo {
                 ty: Type::String,
                 is_static: false,
                 is_readonly: false,
+                set_ty: None,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -419,6 +434,7 @@ impl ClassInfo {
                     ty: value_ty,
                     is_static: false,
                     is_readonly: false,
+                    set_ty: None,
                 },
             );
         }
@@ -531,4 +547,29 @@ impl ClassInfo {
         }
         self
     }
+}
+
+/// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can
+/// accept a wider type than the property's own backing/read type - a real
+/// Piwigo pattern (`CurrentConfig`'s own `apiKeyDuration`/`chmodValue`/
+/// `defaultFiltersViews`/etc.): `public array $x { set(array $value) {
+/// $this->x = sanitize($value); } }` does its own coercion inside the hook
+/// body before the real assignment ever happens. A property write is
+/// checked against this parameter's own native type when present - the
+/// hook's own doc comment (if any) isn't captured by the parser at all
+/// (out of scope, same as the rest of a hook body), so only the native
+/// type hint is available, which is exactly what every corpus case above
+/// already declares. No hook, or an implicit `set { ... }` with no
+/// parameter list, returns `None` - the property's own type stays the
+/// write sink, unchanged.
+fn property_hook_set_type(
+    p: &PropertyDecl,
+    template_set: &HashSet<String>,
+    ctx: &NameContext,
+) -> Option<Type> {
+    let (param, _) = p.hooks.as_ref()?.set.as_ref()?;
+    let param = param.as_ref()?;
+    let ty = resolve_type(None, param.type_hint.as_deref());
+    let ty = mark_template_params(ty, template_set);
+    Some(resolve_names_in_type(ty, ctx))
 }

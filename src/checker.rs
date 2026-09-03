@@ -6239,6 +6239,51 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // A round of Piwigo-corpus bucketing found real PHP 8.4 property hooks
+    // (`CurrentConfig`'s own `apiKeyDuration`/`chmodValue`/etc.) whose
+    // `set(Type $value)` hook deliberately accepts a wider type than the
+    // property's own backing/read type, coercing internally before the
+    // real assignment - a write must be checked against the hook's own
+    // parameter type, not the property's declared type.
+    #[test]
+    fn a_property_hooks_wider_set_parameter_type_is_the_real_write_sink() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Config1 {
+                /** @var list<string> */
+                public array $names = ['a'] {
+                    set(array $value) {
+                        $this->names = array_values($value);
+                    }
+                }
+            }
+            function f(Config1 $c, array $raw): void {
+                $c->names = $raw;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_property_hooks_narrower_set_parameter_type_is_still_enforced() {
+        let d = diagnostics_for(
+            r#"<?php
+            class Config2 {
+                public int $level = 0 {
+                    set(int $value) {
+                        $this->level = $value;
+                    }
+                }
+            }
+            function f(Config2 $c, string $bad): void {
+                $c->level = $bad;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
     #[test]
     fn writing_an_ordinary_mutable_property_is_not_flagged() {
         let d = diagnostics_for(

@@ -269,7 +269,13 @@ impl<'a> Checker<'a> {
             );
         }
         let bindings = self.class_template_bindings(&class, &type_args, &owner);
-        let expected = types::substitute_template(&prop_sig.ty, &bindings);
+        // A PHP 8.4 `set(Type $value)` property hook can accept a wider
+        // type than the property's own backing type (it does its own
+        // coercion inside the hook body) - a write is checked against
+        // that hook's own parameter type when one exists, not the
+        // property's read type.
+        let write_ty = prop_sig.set_ty.as_ref().unwrap_or(&prop_sig.ty);
+        let expected = types::substitute_template(write_ty, &bindings);
         let expected = self.resolve_pseudo(&expected, &class);
         let actual = self.infer_expr(rhs, locals);
         if actual == Type::Mixed || self.registry.is_assignable(&actual, &expected) {
