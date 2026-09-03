@@ -175,6 +175,34 @@ comments.
   properly means real interface-to-implementation PHPDoc inheritance
   for method signatures generally (params and returns, generic or not),
   a sizable feature on its own - not attempted piecemeal per shape.
+- **`@phpstan-return`/`@phpstan-param`/`@phpstan-var` (a real,
+  documented PHPStan convention letting a plain `@return`/`@param`/
+  `@var` stay simple/IDE-friendly while its `@phpstan-`-prefixed twin
+  gives PHPStan itself a more precise type) aren't recognized at all** -
+  confirmed extremely common in the vendored Doctrine ORM/DBAL alone
+  (91 files use at least one). A round of Piwigo-corpus bucketing
+  prototyped support for these tags (making `@phpstan-return`/
+  `@phpstan-param`/`@phpstan-var` win over their plain counterpart
+  regardless of tag order) and confirmed it fixes a real, repeated
+  false positive (`EntityRepository::find(): @return object|null` +
+  `@phpstan-return ?T`, previously read as plain `object` everywhere a
+  repository's own `find()` call flowed through) - but reverted it
+  after the corpus re-check showed a larger regression than the fix's
+  own win (+36 vs. the 14 it removed): Doctrine's own
+  `@phpstan-type Params = array{...}` (a *separate* PHPStan feature,
+  file/class-scoped type aliases, `@phpstan-import-type` too) is not
+  parsed either, so a `@phpstan-param`/`@phpstan-return` referencing
+  one of these aliases (`Params`, `WrapperParameterTypeArray`) got
+  read as a bogus, unresolvable class-name reference instead of falling
+  back to the plain tag's own (looser but at least correct) type. Real
+  PHPStan's own `Params` alias definition itself also uses further
+  unsupported syntax (`key-of<self::DRIVER_MAP>`, a nested alias
+  reference to `OverrideParams`), so implementing alias resolution
+  alone wouldn't fully close this - fixing either half properly means
+  real `@phpstan-type`/`@phpstan-import-type` alias tracking (class/
+  file-scoped, potentially nested) as its own feature, not a narrow
+  patch, and the `@phpstan-return`/`@phpstan-param`/`@phpstan-var` work
+  should be re-attempted alongside it rather than separately.
 - **No mechanism for multi-variable compound-boolean narrowing** - a
   single `||`-of-`&&`-of-negations condition narrowing several different
   variables at once (`if ((!is_int($a) && !is_string($a)) || (!is_int
