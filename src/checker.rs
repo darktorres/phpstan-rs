@@ -2558,6 +2558,70 @@ mod tests {
         );
     }
 
+    // Phase 14: the same absorption idea, for an accessory-refined
+    // string/array and an IntRange - an unknown branch genuinely might
+    // be empty/out of range, so the refined member can't survive next
+    // to its own separately-present, unrefined base.
+    #[test]
+    fn union_types_collapses_a_non_empty_string_into_an_already_present_string() {
+        let non_empty = Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(types::AccessoryKind::NonEmptyString),
+        ]);
+        assert_eq!(union_types(Type::String, non_empty), Type::String);
+    }
+
+    #[test]
+    fn union_types_collapses_a_list_into_an_already_present_array() {
+        let list_ty = Type::Intersection(vec![
+            Type::Array(Box::new(Type::Int)),
+            Type::Accessory(types::AccessoryKind::ArrayList),
+        ]);
+        assert_eq!(
+            union_types(Type::Array(Box::new(Type::Int)), list_ty),
+            Type::Array(Box::new(Type::Int))
+        );
+    }
+
+    #[test]
+    fn union_types_collapses_an_int_range_into_an_already_present_int() {
+        assert_eq!(
+            union_types(Type::Int, Type::IntRange(Some(1), None)),
+            Type::Int
+        );
+    }
+
+    #[test]
+    fn union_types_collapses_a_float_literal_into_an_already_present_float() {
+        assert_eq!(
+            union_types(Type::Float, Type::FloatLiteral(1.5)),
+            Type::Float
+        );
+    }
+
+    #[test]
+    fn union_types_does_not_collapse_a_real_class_intersection() {
+        // Guards Phase 14's own absorption fix: a genuine, unrelated
+        // multi-class intersection (no Accessory member at all) must
+        // never be treated as "more specific than its own base type" -
+        // Countable&Iterator sitting next to bare Countable in the same
+        // union are both real, independent possibilities.
+        let intersection = Type::Intersection(vec![
+            Type::Object("Countable".to_string(), Vec::new()),
+            Type::Object("Iterator".to_string(), Vec::new()),
+        ]);
+        assert_eq!(
+            union_types(
+                Type::Object("Countable".to_string(), Vec::new()),
+                intersection.clone()
+            ),
+            Type::Union(vec![
+                Type::Object("Countable".to_string(), Vec::new()),
+                intersection
+            ])
+        );
+    }
+
     // Phase 12 (unplanned follow-on): a real hang, found via `gdb` on a
     // hung `check-project` process, not guessed - `merge_scopes` (one
     // `union_types` call per `if`/`else`) and `write_index_into`'s own

@@ -801,6 +801,20 @@ impl Registry {
             (Type::ClassString(a), Type::ClassString(b)) => self.is_assignable(a, b),
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
+            // Phase 14: mirrors `types::is_subtype`'s own dedicated
+            // Intersection-vs-Intersection rule, and for the same reason
+            // - without it, this function's own generic `(Intersection,
+            // _) => any(...)` rule below intercepts a same-shaped pair
+            // (e.g. `list<string>` checked against a `list<string>`-
+            // typed parameter) first and gets it wrong, since it only
+            // asks whether one *bare* member of `sub` alone satisfies
+            // the whole `sup` intersection, never whether `sub`'s own
+            // combination does - a severe, real regression confirmed via
+            // a full corpus re-check (211 -> 1861 diagnostics) before
+            // this fix landed.
+            (Type::Intersection(_), Type::Intersection(sup_members)) => {
+                sup_members.iter().all(|m| self.is_assignable(sub, m))
+            }
             (Type::Intersection(members), _) => members.iter().any(|m| self.is_assignable(m, sup)),
             (_, Type::Intersection(members)) => members.iter().all(|m| self.is_assignable(sub, m)),
             // Deliberately more lenient here than types::is_subtype's pure

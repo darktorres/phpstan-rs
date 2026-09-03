@@ -60,6 +60,35 @@ pub enum Type {
     TemplateParam(String),
     Union(Vec<Type>),
     Intersection(Vec<Type>),
+    // Phase 14: a `T` range constrained to `[min, max]` (either bound
+    // `None` = unbounded) - `positive-int` = `IntRange(Some(1), None)`,
+    // `int<0, 255>` = `IntRange(Some(0), Some(255))`. Fully replaces
+    // `Int`'s own range, the same relationship `IntLiteral` has to
+    // `Int` - never wrapped in an `Intersection`.
+    IntRange(Option<i64>, Option<i64>),
+    // Mirrors `IntLiteral`/`StringLiteral` for a real float literal
+    // (`1.5`) appearing in a PHPDoc union (`1.5|2.5`) - a real float
+    // literal in code still infers plain `Float` (no runtime-value
+    // reasoning); this is purely for a PHPDoc-written literal.
+    FloatLiteral(f64),
+    // Only ever meaningful as a member of a `Type::Intersection`
+    // alongside its own base type (`String` or `Array(_)`) - a bare
+    // `Accessory(_)` outside an `Intersection` never appears by
+    // construction.
+    Accessory(AccessoryKind),
+}
+
+// Phase 14: mirrors real PHPStan's own `Accessory*Type` family
+// (`vendor/phpstan-src/src/Type/Accessory/*.php`) - each kind only ever
+// appears wrapped in a `Type::Intersection` alongside its own base type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessoryKind {
+    NonEmptyString,
+    NonFalsyString,
+    LiteralString,
+    NumericString,
+    ArrayList,
+    NonEmptyArray,
 }
 
 impl fmt::Display for Type {
@@ -110,11 +139,83 @@ impl fmt::Display for Type {
                 write!(f, "{}", parts.join("|"))
             }
             Type::Intersection(members) => {
+                if let Some(name) = describe_accessory_intersection(members) {
+                    return write!(f, "{name}");
+                }
                 let parts: Vec<String> = members.iter().map(Type::to_string).collect();
                 write!(f, "{}", parts.join("&"))
             }
+            Type::IntRange(min, max) => write!(
+                f,
+                "int<{}, {}>",
+                min.map_or("min".to_string(), |n| n.to_string()),
+                max.map_or("max".to_string(), |n| n.to_string()),
+            ),
+            Type::FloatLiteral(n) => write!(f, "{n}"),
+            Type::Accessory(kind) => write!(f, "{}", accessory_kind_name(*kind)),
         }
     }
+}
+
+fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
+    match kind {
+        AccessoryKind::NonEmptyString => "non-empty-string",
+        AccessoryKind::NonFalsyString => "non-falsy-string",
+        AccessoryKind::LiteralString => "literal-string",
+        AccessoryKind::NumericString => "numeric-string",
+        AccessoryKind::ArrayList => "list",
+        AccessoryKind::NonEmptyArray => "non-empty-array",
+    }
+}
+
+/// Recognizes the canonical `[base, Accessory(kind), ...]` shapes
+/// `parse_type_keyword_or_class` constructs (Phase 14) and renders them
+/// as PHPStan's own atomic pseudo-type name, rather than the generic
+/// `&`-joined form `Type::Intersection`'s own `Display` otherwise uses
+/// (correct for a real user intersection like `Countable&Iterator`, but
+/// wrong - `"string&non-empty-string"` - for an accessory-refined one).
+/// Checks for the *presence* of each member independently, not an exact
+/// positional slice pattern, so a semantically-identical intersection
+/// built in a different member order still renders correctly. Returns
+/// `None` for anything that doesn't match a known shape (most commonly
+/// a real class intersection), leaving the generic `&`-joined fallback
+/// in place.
+fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
+    let has = |k: AccessoryKind| members.contains(&Type::Accessory(k));
+    if let Some(elem) = members.iter().find_map(|m| match m {
+        Type::Array(e) => Some(e.as_ref()),
+        _ => None,
+    }) {
+        let elem_str = if *elem == Type::Mixed {
+            String::new()
+        } else {
+            format!("<{elem}>")
+        };
+        return match (
+            has(AccessoryKind::ArrayList),
+            has(AccessoryKind::NonEmptyArray),
+        ) {
+            (true, true) => Some(format!("non-empty-list{elem_str}")),
+            (true, false) => Some(format!("list{elem_str}")),
+            (false, true) => Some(format!("non-empty-array{elem_str}")),
+            (false, false) => None,
+        };
+    }
+    if members.contains(&Type::String) {
+        return match (
+            has(AccessoryKind::NonEmptyString),
+            has(AccessoryKind::NonFalsyString),
+            has(AccessoryKind::LiteralString),
+            has(AccessoryKind::NumericString),
+        ) {
+            (_, true, false, false) => Some("non-falsy-string".to_string()),
+            (true, false, false, false) => Some("non-empty-string".to_string()),
+            (false, false, true, false) => Some("literal-string".to_string()),
+            (false, false, false, true) => Some("numeric-string".to_string()),
+            _ => None,
+        };
+    }
+    None
 }
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,
@@ -379,6 +480,12 @@ fn parse_type_atom(s: &str) -> Type {
     if let Ok(n) = s.parse::<i64>() {
         return Type::IntLiteral(n);
     }
+    // Phase 14: mirrors the int-literal case just above, for a real
+    // float literal (`1.5|2.5`) - checked after the int case so an
+    // integer-looking string is still caught as `IntLiteral` first.
+    if let Ok(f) = s.parse::<f64>() {
+        return Type::FloatLiteral(f);
+    }
 
     // PHPDoc's `Type[]` array shorthand (`int[]`, even `string[][]`) has no
     // native-hint equivalent, but reusing this parser for doc-comment types
@@ -430,35 +537,75 @@ fn parse_type_atom(s: &str) -> Type {
 /// relative one, silently mis-qualifying it as
 /// `CurrentNamespace\Doctrine\ORM\QueryBuilder` - found via real code in
 /// this project's own verification corpus.
+/// Parses one bound of an `int<min, max>` range - real PHPStan's own
+/// `"min"`/`"max"` keywords mean unbounded on that side (`Some(None)`),
+/// a plain integer literal is a real bound (`Some(Some(n))`). A
+/// malformed bound (neither) is `None` - distinct from "unbounded" so
+/// the caller can fall back to plain `Type::Int` instead of silently
+/// treating garbage as an open range.
+fn parse_int_bound(s: &str) -> Option<Option<i64>> {
+    match s {
+        "min" | "max" => Some(None),
+        s => s.parse().ok().map(Some),
+    }
+}
+
 fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]) -> Type {
     match bare.to_ascii_lowercase().as_str() {
-        // `positive-int`/`negative-int`/`non-zero-int`/`non-negative-int`/
-        // `non-positive-int` are real, widely-used PHPStan-ecosystem
-        // refinement pseudo-types (a constrained subset of `int`, the
-        // same relationship `list` has to `array`) - without this they
-        // fell through to the generic-user-class branch below and got
-        // treated as a literal class reference, then (once namespace
-        // resolution existed) nonsensically namespace-qualified.
-        // `non-negative-int` specifically was a real, previously-missed
-        // gap here: confirmed live via real code in this project's own
-        // vendor/ corpus (`sebastianbergmann/php-code-coverage`), found
-        // only once Phase 12's sprintf() format-string check started
-        // comparing its resolved type against `%d` and got a bogus
-        // `Vendor\Namespace\non-negative-int` object instead of `Int`.
-        "int" | "integer" | "positive-int" | "negative-int" | "non-zero-int"
-        | "non-negative-int" | "non-positive-int" => Type::Int,
+        // Phase 14: `int<min, max>` and its named shorthands are real
+        // ranges now, not aliased to plain `Int` - `IntRange` fully
+        // replaces `Int`'s own range, the same relationship `IntLiteral`
+        // has to `Int`. `int`/`integer` additionally read `generic_args`
+        // when present (`int<0, 255>`, already structurally parsed as
+        // generic args today) - a malformed bound falls back to plain
+        // `Type::Int` rather than guessing.
+        "int" | "integer" => match generic_args {
+            [min, max] => match (parse_int_bound(min), parse_int_bound(max)) {
+                (Some(min), Some(max)) => Type::IntRange(min, max),
+                _ => Type::Int,
+            },
+            _ => Type::Int,
+        },
+        "positive-int" => Type::IntRange(Some(1), None),
+        "negative-int" => Type::IntRange(None, Some(-1)),
+        "non-negative-int" => Type::IntRange(Some(0), None),
+        "non-positive-int" => Type::IntRange(None, Some(0)),
+        // Real PHPStan represents this as a union of two ranges, not its
+        // own type (confirmed via dumpType()) - composed the same way.
+        "non-zero-int" => Type::Union(vec![
+            Type::IntRange(None, Some(-1)),
+            Type::IntRange(Some(1), None),
+        ]),
         "float" | "double" => Type::Float,
-        // Same story as the int refinements above, for string: real,
-        // common PHPStan/Psalm-ecosystem refinement pseudo-types (real
-        // volume seen in a live corpus: 2263 `non-empty-string`
-        // occurrences alone across Piwigo's own vendor/ tree), not
-        // separately modeled here beyond falling back to plain `string` -
-        // `class-string`'s own optional `<Foo>` generic argument (`a
-        // string holding Foo's fully-qualified name`) is similarly just
-        // dropped rather than tracked.
-        "string" | "non-empty-string" | "non-falsy-string" | "truthy-string" | "literal-string"
-        | "numeric-string" | "callable-string" | "trait-string" | "interface-string"
-        | "enum-string" => Type::String,
+        // Phase 14: the four accessory-refined string pseudo-types are
+        // now real `Intersection([String, Accessory(_)])` types, mirroring
+        // real PHPStan's own `IntersectionType([StringType,
+        // AccessoryXType])` representation. `callable-string`/
+        // `trait-string`/`interface-string`/`enum-string` stay aliased
+        // to plain `string`: each names "a string believed to hold a
+        // specific kind of identifier," with no literal-based or
+        // narrowing-based way for this project to ever verify content -
+        // `class-string`'s own optional `<Foo>` generic argument is
+        // similarly just dropped rather than tracked.
+        "non-empty-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString),
+        ]),
+        "non-falsy-string" | "truthy-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonFalsyString),
+        ]),
+        "literal-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::LiteralString),
+        ]),
+        "numeric-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NumericString),
+        ]),
+        "string" | "callable-string" | "trait-string" | "interface-string" | "enum-string" => {
+            Type::String
+        }
         // Unlike its string-refinement neighbors above, `class-string<T>`
         // carries a real, template-bindable inner type when given one -
         // needed for `@template R of Base` / `@param class-string<R> $x`
@@ -495,24 +642,38 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "void" => Type::Void,
         "mixed" => Type::Mixed,
         "never" | "noreturn" => Type::Never,
-        // `array<V>` / `iterable<V>` / `list<V>` and `array<K, V>` (key
-        // type discarded - keyed array subtyping isn't modeled) all
-        // resolve to our existing homogeneous Array(value) representation;
-        // no args is bare `array`. `list`/`non-empty-array`/`non-empty-list`
-        // are real, widely-used PHPStan-ecosystem refinement pseudo-types
-        // (arrays with extra guarantees this project doesn't separately
-        // track) - without these cases they fell through to the
-        // generic-user-class branch below and got treated as a literal
-        // class reference, then nonsensically namespace-qualified.
-        // `class-string-map<TKey, TValue>` (Doctrine's own refinement of
-        // `array<class-string<TKey>, TValue>`) fits the same "2-arg
-        // generic, key discarded, value survives" shape the rest of this
-        // arm already handles.
-        "array" | "list" | "non-empty-array" | "class-string-map" => match generic_args.len() {
+        // `array<V>` / `iterable<V>` and `array<K, V>` (key type
+        // discarded - keyed array subtyping isn't modeled) resolve to
+        // our existing homogeneous Array(value) representation; no args
+        // is bare `array`. `class-string-map<TKey, TValue>` (Doctrine's
+        // own refinement of `array<class-string<TKey>, TValue>`) fits
+        // the same "2-arg generic, key discarded, value survives" shape.
+        "array" | "class-string-map" => match generic_args.len() {
             0 => Type::Array(Box::new(Type::Mixed)),
             1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
             _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
         },
+        // Phase 14: `list`/`non-empty-array`/`non-empty-list` are now
+        // real `Intersection([Array(_), Accessory(_)])` types, mirroring
+        // real PHPStan's own `IntersectionType([ArrayType,
+        // AccessoryArrayListType/NonEmptyArrayType])` representation -
+        // `elem_ty` computed the same "0/1/2-arg generic" way `array`
+        // itself already is above.
+        "list" | "non-empty-array" | "non-empty-list" => {
+            let elem_ty = match generic_args.len() {
+                0 => Type::Mixed,
+                1 => parse_type_string(generic_args[0]),
+                _ => parse_type_string(generic_args[1]),
+            };
+            let mut members = vec![Type::Array(Box::new(elem_ty))];
+            if bare != "non-empty-array" {
+                members.push(Type::Accessory(AccessoryKind::ArrayList));
+            }
+            if bare != "list" {
+                members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+            }
+            Type::Intersection(members)
+        }
         // Unlike its neighbors above, `iterable` is real PHP's own native
         // type hint (not a PHPDoc-only pseudo-type), defined as exactly
         // `array|Traversable` - a broader type than `array`, not a
@@ -531,11 +692,6 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 Type::Object("Traversable".to_string(), Vec::new()),
             ])
         }
-        "non-empty-list" => match generic_args.len() {
-            0 => Type::Array(Box::new(Type::Mixed)),
-            1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
-            _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
-        },
         // Deliberately not conflated - a native `Closure $fn` and a
         // native `callable $fn` are different, if this project doesn't
         // reflect that: `Closure` is a concrete class only a real
@@ -595,10 +751,72 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // always accepted wherever a float is declared (int-to-float
         // widening - explicit, load-bearing language behavior).
         (Type::Int | Type::IntLiteral(_), Type::Float) => true,
+        (Type::FloatLiteral(_), Type::Float) => true,
+
+        // Phase 14: `int<min, max>` ranges. `IntRange` fully replaces
+        // `Int`'s own range (the same relationship `IntLiteral` has to
+        // `Int`), so an `IntLiteral`/narrower `IntRange` widens to it
+        // the same way a literal widens to its own base type.
+        (Type::IntLiteral(n), Type::IntRange(min, max)) => {
+            min.is_none_or(|m| *n >= m) && max.is_none_or(|m| *n <= m)
+        }
+        (Type::IntRange(sub_min, sub_max), Type::IntRange(sup_min, sup_max)) => {
+            sup_min.is_none_or(|m| sub_min.is_some_and(|s| s >= m))
+                && sup_max.is_none_or(|m| sub_max.is_some_and(|s| s <= m))
+        }
+        (Type::IntRange(_, _), Type::Int) => true,
+        (Type::IntRange(_, _), Type::Float) => true,
+
+        // Phase 14: string/array accessory kinds. A literal directly
+        // proves or disproves each kind from its own exact value - no
+        // guessing. Only a real, structurally-provable `ArrayShape` (or
+        // a value from a known list-producing source, e.g.
+        // `array_values()`) can ever prove `ArrayList`/`NonEmptyArray` -
+        // a plain `Type::Array(_)` (even with a known element type)
+        // deliberately never satisfies either, matching real PHPStan's
+        // own confirmed strictness (a `list<int>`-typed parameter
+        // rejects even a known-element `int[]` argument).
+        (Type::StringLiteral(s), Type::Accessory(AccessoryKind::NonEmptyString)) => !s.is_empty(),
+        (Type::StringLiteral(s), Type::Accessory(AccessoryKind::NonFalsyString)) => {
+            !s.is_empty() && s != "0"
+        }
+        (Type::StringLiteral(_), Type::Accessory(AccessoryKind::LiteralString)) => true,
+        (Type::StringLiteral(s), Type::Accessory(AccessoryKind::NumericString)) => {
+            is_numeric_string_literal(s)
+        }
+        // Real containment between kinds: every non-falsy string is
+        // non-empty; no other pair implies another.
+        (
+            Type::Accessory(AccessoryKind::NonFalsyString),
+            Type::Accessory(AccessoryKind::NonEmptyString),
+        ) => true,
+        (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::NonEmptyArray)) => {
+            !fields.is_empty()
+        }
+        (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::ArrayList)) => fields
+            .iter()
+            .enumerate()
+            .all(|(i, (k, _, _))| k == &i.to_string()),
 
         (Type::Union(members), _) => members.iter().all(|m| is_subtype(m, sup)),
         (_, Type::Union(members)) => members.iter().any(|m| is_subtype(sub, m)),
 
+        // An intersection-vs-intersection pair needs its own rule, not
+        // just the two generic ones below composed together: `sub`
+        // satisfies `sup` as a whole only if it satisfies *every* one of
+        // `sup`'s own members (checked via `is_subtype(sub, m)`, which
+        // still correctly uses "any one of sub's own members satisfies
+        // this single target" for each). Without this, e.g.
+        // `non-falsy-string` (`Intersection([String, NonFalsyString])`)
+        // failed to prove itself a subtype of `non-empty-string`
+        // (`Intersection([String, NonEmptyString])`) even though every
+        // non-falsy string genuinely is non-empty: the generic `(sub is
+        // Intersection) => any(...)` rule alone only checks whether one
+        // *bare* member of `sub` satisfies the whole `sup` intersection,
+        // never whether `sub`'s own combination does.
+        (Type::Intersection(_), Type::Intersection(sup_members)) => {
+            sup_members.iter().all(|m| is_subtype(sub, m))
+        }
         (Type::Intersection(members), _) => members.iter().any(|m| is_subtype(m, sup)),
         (_, Type::Intersection(members)) => members.iter().all(|m| is_subtype(sub, m)),
 
@@ -638,6 +856,37 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
 
         _ => false,
     }
+}
+
+/// A practical approximation of PHP's real numeric-string grammar, not
+/// a byte-exact port - matches this project's existing "approximation,
+/// not full grammar" convention already used for `is_scalar`. Trims
+/// leading/trailing whitespace (real PHP's own numeric-string leniency)
+/// then accepts an optional sign, digits, an optional single `.` with
+/// more digits, and an optional exponent.
+fn is_numeric_string_literal(s: &str) -> bool {
+    let s = s.trim();
+    let s = s.strip_prefix(['+', '-']).unwrap_or(s);
+    if s.is_empty() {
+        return false;
+    }
+    let (mantissa, exponent) = match s.split_once(['e', 'E']) {
+        Some((m, e)) => (m, Some(e)),
+        None => (s, None),
+    };
+    let mantissa_ok = match mantissa.split_once('.') {
+        Some((int_part, frac_part)) => {
+            !(int_part.is_empty() && frac_part.is_empty())
+                && int_part.bytes().all(|b| b.is_ascii_digit())
+                && frac_part.bytes().all(|b| b.is_ascii_digit())
+        }
+        None => !mantissa.is_empty() && mantissa.bytes().all(|b| b.is_ascii_digit()),
+    };
+    let exponent_ok = exponent.is_none_or(|e| {
+        let e = e.strip_prefix(['+', '-']).unwrap_or(e);
+        !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit())
+    });
+    mantissa_ok && exponent_ok
 }
 
 /// Unifies a template-bearing param type against an actual argument type,
@@ -803,33 +1052,38 @@ mod tests {
     }
 
     #[test]
-    fn list_is_treated_as_an_array_alias_not_a_class_reference() {
+    fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
         // A real, widely-used PHPStan-ecosystem pseudo-type (nikic/php-parser's
         // own `@return list<ClassMethod>` is exactly this shape) - without
         // this, "list" fell through to the generic-user-class branch and
-        // got treated as a literal class named "list".
+        // got treated as a literal class named "list". Phase 14: now a
+        // real Intersection([Array(_), Accessory(ArrayList)]), not a
+        // plain Array alias.
         assert_eq!(
             parse_type_string("list<int>"),
-            Type::Array(Box::new(Type::Int))
+            Type::Intersection(vec![
+                Type::Array(Box::new(Type::Int)),
+                Type::Accessory(AccessoryKind::ArrayList),
+            ])
         );
         assert_eq!(
             parse_type_string("list"),
-            Type::Array(Box::new(Type::Mixed))
+            Type::Intersection(vec![
+                Type::Array(Box::new(Type::Mixed)),
+                Type::Accessory(AccessoryKind::ArrayList),
+            ])
         );
     }
 
     #[test]
-    fn string_refinement_pseudo_types_are_treated_as_plain_string() {
-        // Real, common PHPStan/Psalm-ecosystem refinement types (real
-        // volume seen in a live corpus: 2263 non-empty-string occurrences
-        // alone) - without this they fell through to the generic-user-class
+    fn string_refinement_pseudo_types_with_no_verifiable_content_stay_plain_string() {
+        // `callable-string`/`class-string`/`trait-string`/
+        // `interface-string`/`enum-string` each name "a string believed
+        // to hold a specific kind of identifier," with no literal-based
+        // or narrowing-based way for this project to ever verify content -
+        // without this they fell through to the generic-user-class
         // branch and got treated as literal class references.
         for name in [
-            "non-empty-string",
-            "non-falsy-string",
-            "truthy-string",
-            "literal-string",
-            "numeric-string",
             "callable-string",
             "class-string",
             "trait-string",
@@ -838,6 +1092,46 @@ mod tests {
         ] {
             assert_eq!(parse_type_string(name), Type::String, "for {name}");
         }
+    }
+
+    #[test]
+    fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_types() {
+        // Phase 14: real, common PHPStan/Psalm-ecosystem refinement types
+        // (real volume seen in a live corpus: 3402 non-empty-string
+        // occurrences alone) - each is a literal-provable fact about a
+        // string's content, mirroring real PHPStan's own
+        // Intersection([StringType, AccessoryXType]) representation.
+        assert_eq!(
+            parse_type_string("non-empty-string"),
+            Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NonEmptyString)
+            ])
+        );
+        for name in ["non-falsy-string", "truthy-string"] {
+            assert_eq!(
+                parse_type_string(name),
+                Type::Intersection(vec![
+                    Type::String,
+                    Type::Accessory(AccessoryKind::NonFalsyString)
+                ]),
+                "for {name}"
+            );
+        }
+        assert_eq!(
+            parse_type_string("literal-string"),
+            Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::LiteralString)
+            ])
+        );
+        assert_eq!(
+            parse_type_string("numeric-string"),
+            Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NumericString)
+            ])
+        );
     }
 
     #[test]
@@ -863,16 +1157,53 @@ mod tests {
     }
 
     #[test]
-    fn int_refinement_pseudo_types_are_treated_as_plain_int() {
-        for name in [
-            "positive-int",
-            "negative-int",
-            "non-zero-int",
-            "non-negative-int",
-            "non-positive-int",
-        ] {
-            assert_eq!(parse_type_string(name), Type::Int, "for {name}");
-        }
+    fn int_refinement_pseudo_types_are_real_int_ranges() {
+        // Phase 14: each is a real IntRange now, mirroring real
+        // PHPStan's own standalone IntegerRangeType.
+        assert_eq!(
+            parse_type_string("positive-int"),
+            Type::IntRange(Some(1), None)
+        );
+        assert_eq!(
+            parse_type_string("negative-int"),
+            Type::IntRange(None, Some(-1))
+        );
+        assert_eq!(
+            parse_type_string("non-negative-int"),
+            Type::IntRange(Some(0), None)
+        );
+        assert_eq!(
+            parse_type_string("non-positive-int"),
+            Type::IntRange(None, Some(0))
+        );
+        // Verified via dumpType(): real PHPStan represents this as a
+        // union of two ranges, not its own type.
+        assert_eq!(
+            parse_type_string("non-zero-int"),
+            Type::Union(vec![
+                Type::IntRange(None, Some(-1)),
+                Type::IntRange(Some(1), None),
+            ])
+        );
+    }
+
+    #[test]
+    fn int_range_generic_syntax_parses() {
+        assert_eq!(
+            parse_type_string("int<0, 255>"),
+            Type::IntRange(Some(0), Some(255))
+        );
+        assert_eq!(
+            parse_type_string("int<min, 10>"),
+            Type::IntRange(None, Some(10))
+        );
+        assert_eq!(
+            parse_type_string("int<0, max>"),
+            Type::IntRange(Some(0), None)
+        );
+        // A malformed bound falls back to plain Int rather than
+        // silently treating garbage as an unbounded side.
+        assert_eq!(parse_type_string("int<garbage, 10>"), Type::Int);
     }
 
     #[test]
@@ -909,18 +1240,28 @@ mod tests {
     }
 
     #[test]
-    fn array_refinement_pseudo_types_are_treated_as_plain_array() {
+    fn array_refinement_pseudo_types_are_real_accessory_intersections() {
+        // Phase 14: real Intersection([Array(_), Accessory(_)]) types
+        // now, mirroring real PHPStan's own representation.
         assert_eq!(
             parse_type_string("non-empty-array<int>"),
-            Type::Array(Box::new(Type::Int))
+            Type::Intersection(vec![
+                Type::Array(Box::new(Type::Int)),
+                Type::Accessory(AccessoryKind::NonEmptyArray),
+            ])
         );
         assert_eq!(
             parse_type_string("non-empty-list<string>"),
-            Type::Array(Box::new(Type::String))
+            Type::Intersection(vec![
+                Type::Array(Box::new(Type::String)),
+                Type::Accessory(AccessoryKind::ArrayList),
+                Type::Accessory(AccessoryKind::NonEmptyArray),
+            ])
         );
         // Doctrine's own refinement of `array<class-string<TKey>, TValue>`
         // - the key type (including its own nested generic) is discarded,
-        // same as a plain `array<K, V>`'s key already is.
+        // same as a plain `array<K, V>`'s key already is. Not a Phase 14
+        // accessory type at all - unaffected, still plain Array.
         assert_eq!(
             parse_type_string("class-string-map<Foo, int>"),
             Type::Array(Box::new(Type::Int))
@@ -1049,12 +1390,13 @@ mod tests {
     #[test]
     fn array_shape_with_positional_int_range_fields_parses() {
         let shape = parse_type_string("array{int<0, 255>, int<0, 255>, int<0, 255>}");
+        // Phase 14: each field is a real IntRange now, not plain Int.
         assert_eq!(
             shape,
             Type::ArrayShape(vec![
-                ("0".to_string(), Type::Int, false),
-                ("1".to_string(), Type::Int, false),
-                ("2".to_string(), Type::Int, false),
+                ("0".to_string(), Type::IntRange(Some(0), Some(255)), false),
+                ("1".to_string(), Type::IntRange(Some(0), Some(255)), false),
+                ("2".to_string(), Type::IntRange(Some(0), Some(255)), false),
             ])
         );
     }
@@ -1169,6 +1511,129 @@ mod tests {
     }
 
     #[test]
+    fn int_range_subtype_rules() {
+        let positive = Type::IntRange(Some(1), None);
+        assert!(is_subtype(&Type::IntLiteral(5), &positive));
+        assert!(!is_subtype(&Type::IntLiteral(0), &positive));
+        assert!(!is_subtype(&Type::IntLiteral(-1), &positive));
+        assert!(is_subtype(&positive, &Type::Int));
+        assert!(is_subtype(&positive, &Type::Float));
+        assert!(!is_subtype(&Type::Int, &positive));
+
+        let narrow = Type::IntRange(Some(1), Some(10));
+        assert!(is_subtype(&narrow, &positive));
+        assert!(!is_subtype(&positive, &narrow));
+        let unbounded_below = Type::IntRange(None, Some(10));
+        assert!(!is_subtype(&unbounded_below, &positive));
+    }
+
+    #[test]
+    fn string_accessory_subtype_rules() {
+        let non_empty = Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString),
+        ]);
+        let non_falsy = Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonFalsyString),
+        ]);
+        assert!(is_subtype(
+            &Type::StringLiteral("a".to_string()),
+            &non_empty
+        ));
+        assert!(!is_subtype(&Type::StringLiteral(String::new()), &non_empty));
+        assert!(is_subtype(
+            &Type::StringLiteral("0".to_string()),
+            &non_empty
+        ));
+        assert!(!is_subtype(
+            &Type::StringLiteral("0".to_string()),
+            &non_falsy
+        ));
+        assert!(is_subtype(
+            &Type::StringLiteral("a".to_string()),
+            &non_falsy
+        ));
+        // Every non-falsy string is non-empty, not vice versa.
+        assert!(is_subtype(&non_falsy, &non_empty));
+        assert!(!is_subtype(&non_empty, &non_falsy));
+
+        let literal = Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::LiteralString),
+        ]);
+        assert!(is_subtype(
+            &Type::StringLiteral("anything".to_string()),
+            &literal
+        ));
+        assert!(!is_subtype(&Type::String, &literal));
+
+        let numeric = Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NumericString),
+        ]);
+        assert!(is_subtype(
+            &Type::StringLiteral("123".to_string()),
+            &numeric
+        ));
+        assert!(is_subtype(
+            &Type::StringLiteral(" -1.5e3 ".to_string()),
+            &numeric
+        ));
+        assert!(!is_subtype(
+            &Type::StringLiteral("abc".to_string()),
+            &numeric
+        ));
+
+        // A plain, unprovable String never satisfies any of these.
+        assert!(!is_subtype(&Type::String, &non_empty));
+    }
+
+    #[test]
+    fn array_accessory_subtype_rules() {
+        // Scoped to `Array(Mixed)` as the intersection's own base member
+        // deliberately: `is_subtype`'s own pre-existing, unrelated
+        // `(ArrayShape(_), Array(b)) => matches!(**b, Mixed)` rule is
+        // already conservative about a *specific*-element `Array(b)`
+        // (that per-field check is `is_assignable`'s own job, not
+        // `is_subtype`'s) - using `Array(Mixed)` here isolates the new
+        // accessory logic from that pre-existing, unrelated asymmetry.
+        let list_ty = Type::Intersection(vec![
+            Type::Array(Box::new(Type::Mixed)),
+            Type::Accessory(AccessoryKind::ArrayList),
+        ]);
+        let non_empty_ty = Type::Intersection(vec![
+            Type::Array(Box::new(Type::Mixed)),
+            Type::Accessory(AccessoryKind::NonEmptyArray),
+        ]);
+        let list_shape = Type::ArrayShape(vec![
+            ("0".to_string(), Type::IntLiteral(1), false),
+            ("1".to_string(), Type::IntLiteral(2), false),
+        ]);
+        assert!(is_subtype(&list_shape, &list_ty));
+        assert!(is_subtype(&list_shape, &non_empty_ty));
+
+        let gapped_shape = Type::ArrayShape(vec![
+            ("0".to_string(), Type::IntLiteral(1), false),
+            ("2".to_string(), Type::IntLiteral(2), false),
+        ]);
+        assert!(!is_subtype(&gapped_shape, &list_ty));
+        assert!(is_subtype(&gapped_shape, &non_empty_ty));
+
+        let empty_shape = Type::ArrayShape(vec![]);
+        assert!(!is_subtype(&empty_shape, &non_empty_ty));
+
+        // Real PHPStan's own confirmed strictness: a plain Array(_),
+        // even with a known element type, never satisfies list<T>/
+        // non-empty-array<T> - only a real, provable ArrayShape does.
+        assert!(!is_subtype(&Type::Array(Box::new(Type::Int)), &list_ty));
+        assert!(!is_subtype(
+            &Type::Array(Box::new(Type::Int)),
+            &non_empty_ty
+        ));
+    }
+
+    #[test]
     fn substitute_template_recurses_into_array_and_intersection_types() {
         // Coverage measurement found substitute_template's Array and
         // Intersection arms had zero executions - every existing
@@ -1218,6 +1683,55 @@ mod tests {
         assert_eq!(parse_type_string("?string").to_string(), "string|null");
         assert_eq!(parse_type_string("int|string").to_string(), "int|string");
         assert_eq!(parse_type_string("array").to_string(), "array");
+    }
+
+    #[test]
+    fn accessory_intersections_display_as_their_canonical_phpstan_name() {
+        assert_eq!(
+            parse_type_string("non-empty-string").to_string(),
+            "non-empty-string"
+        );
+        assert_eq!(
+            parse_type_string("non-falsy-string").to_string(),
+            "non-falsy-string"
+        );
+        assert_eq!(
+            parse_type_string("literal-string").to_string(),
+            "literal-string"
+        );
+        assert_eq!(
+            parse_type_string("numeric-string").to_string(),
+            "numeric-string"
+        );
+        assert_eq!(parse_type_string("list<int>").to_string(), "list<int>");
+        assert_eq!(parse_type_string("list").to_string(), "list");
+        assert_eq!(
+            parse_type_string("non-empty-array<int>").to_string(),
+            "non-empty-array<int>"
+        );
+        assert_eq!(
+            parse_type_string("non-empty-list<int>").to_string(),
+            "non-empty-list<int>"
+        );
+    }
+
+    #[test]
+    fn a_real_class_intersection_still_displays_amp_joined() {
+        assert_eq!(
+            parse_type_string("Countable&Iterator").to_string(),
+            "Countable&Iterator"
+        );
+    }
+
+    #[test]
+    fn int_range_and_float_literal_display() {
+        assert_eq!(parse_type_string("positive-int").to_string(), "int<1, max>");
+        assert_eq!(parse_type_string("int<0, 255>").to_string(), "int<0, 255>");
+        assert_eq!(
+            parse_type_string("int<min, 10>").to_string(),
+            "int<min, 10>"
+        );
+        assert_eq!(parse_type_string("1.5").to_string(), "1.5");
     }
 
     #[test]

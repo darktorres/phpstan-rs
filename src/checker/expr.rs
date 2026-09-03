@@ -2388,6 +2388,14 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
             .map(|m| index_result_type(m, key))
             .reduce(union_types)
             .unwrap_or(Type::Mixed),
+        // Phase 14: a `list<T>`/`non-empty-array<T>`-typed value is a
+        // real `Intersection([Array(T), Accessory(_)])` now, not plain
+        // `Array(T)` - without this, indexing into one (`$listArg[0]`)
+        // silently fell to `Mixed` below.
+        Type::Intersection(members) => members
+            .into_iter()
+            .find_map(|m| Checker::array_element_type(&m))
+            .unwrap_or(Type::Mixed),
         _ => Type::Mixed,
     }
 }
@@ -2450,9 +2458,21 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
     // after the ternary. Snapshotting which base types are present
     // first, rather than checking `members` from inside its own
     // `retain` closure (which Rust's borrow checker won't allow).
+    // Phase 14: extended to `Array`/`Float` alongside the original
+    // `Int`/`String`/`Bool` - `literal_base_type` can now also produce
+    // an `Array(_)` base (an accessory-refined `list<T>`/`non-empty-
+    // array<T>`) or `Float` (a `FloatLiteral`), and this filter has to
+    // actually recognize those as "a base type present in this union"
+    // or the new absorption arms in `literal_base_type` would never
+    // find a match to absorb into.
     let present_bases: Vec<Type> = members
         .iter()
-        .filter(|m| matches!(m, Type::Int | Type::String | Type::Bool))
+        .filter(|m| {
+            matches!(
+                m,
+                Type::Int | Type::String | Type::Bool | Type::Array(_) | Type::Float
+            )
+        })
         .cloned()
         .collect();
     members.retain(|m| match literal_base_type(m) {
@@ -2550,6 +2570,19 @@ fn literal_base_type(t: &Type) -> Option<Type> {
         Type::IntLiteral(_) => Some(Type::Int),
         Type::StringLiteral(_) => Some(Type::String),
         Type::True | Type::False => Some(Type::Bool),
+        Type::FloatLiteral(_) => Some(Type::Float),
+        Type::IntRange(_, _) => Some(Type::Int),
+        // Phase 14: scoped to intersections that actually carry an
+        // `Accessory` member, so a genuine, unrelated multi-class
+        // intersection (`Countable&Iterator`) is never affected - only
+        // this plan's own accessory-refined intersections should ever
+        // be treated as "more specific than their own base type."
+        Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Accessory(_))) => {
+            members
+                .iter()
+                .find(|m| !matches!(m, Type::Accessory(_)))
+                .cloned()
+        }
         _ => None,
     }
 }
