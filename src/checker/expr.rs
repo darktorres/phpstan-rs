@@ -1314,6 +1314,31 @@ impl<'a> Checker<'a> {
                     &closure_label,
                 );
                 self.current_function_is_generator = previous_generator_flag;
+                // A `use (&$x)` capture is a real reference - any
+                // mutation the closure body makes to `$x` is visible in
+                // the *declaring* scope too, from the closure literal's
+                // own point onward (conservatively: real PHP doesn't
+                // guarantee the closure is ever actually called, or
+                // called only once, so this widens rather than replaces
+                // outright - `union_types` with the pre-closure type
+                // covers "never called" the same way an `if` without an
+                // `else` already does for its own branch). A real
+                // Piwigo-corpus round found this missing entirely
+                // (`$seen = []; $client = new MockHttpClient(function (...)
+                // use (&$seen) { $seen[] = [...]; }); ...; $seen[0]`
+                // - a real, common test-double-recording idiom) - without
+                // it, every by-ref-captured variable's outer type stayed
+                // frozen at whatever it was *before* the closure literal,
+                // regardless of what the closure body's own checked
+                // effects on `closure_locals` actually were.
+                for u in uses {
+                    if !u.by_ref {
+                        continue;
+                    }
+                    let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    let mutated = closure_locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    locals.insert(u.name.clone(), union_types(original, mutated));
+                }
                 Type::Object("Closure".to_string(), Vec::new())
             }
             ExprKind::ArrowFn {
