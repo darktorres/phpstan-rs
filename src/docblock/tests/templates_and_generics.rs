@@ -1,0 +1,86 @@
+//! Tests for parsing `@template*`, `@extends`, and `@implements` docblock tags.
+use super::super::*;
+
+#[test]
+fn parses_extends_with_generic_args() {
+    let block = parse("/** @extends Collection<int> */");
+    assert_eq!(block.extends, Some("Collection<int>".to_string()));
+}
+
+#[test]
+fn parses_multiple_implements_tags() {
+    let block = parse(
+        r#"/**
+         * @implements Iterator<int, string>
+         * @implements Countable<int>
+         */"#,
+    );
+    assert_eq!(
+        block.implements,
+        vec![
+            "Iterator<int, string>".to_string(),
+            "Countable<int>".to_string()
+        ]
+    );
+}
+
+#[test]
+fn generic_type_with_comma_and_space_is_not_truncated() {
+    let block = parse("/** @param array<int, User> $users */");
+    assert_eq!(
+        block.params.get("users"),
+        Some(&"array<int, User>".to_string())
+    );
+}
+
+#[test]
+fn parses_template_name() {
+    let block = parse(
+        r#"/**
+         * @template T
+         * @param T $value
+         * @return T
+         */"#,
+    );
+    assert_eq!(block.templates, vec!["T".to_string()]);
+    assert_eq!(block.params.get("value"), Some(&"T".to_string()));
+    assert_eq!(block.return_type, Some("T".to_string()));
+}
+
+#[test]
+fn parses_bounded_template_name_and_its_bound() {
+    let block = parse("/** @template T of \\Countable */");
+    assert_eq!(block.templates, vec!["T".to_string()]);
+    assert_eq!(
+        block.template_bounds.get("T"),
+        Some(&"\\Countable".to_string())
+    );
+}
+
+#[test]
+fn a_template_with_no_bound_has_no_bound_entry() {
+    let block = parse("/** @template T */");
+    assert_eq!(block.templates, vec!["T".to_string()]);
+    assert!(!block.template_bounds.contains_key("T"));
+}
+
+#[test]
+fn parses_a_union_bound() {
+    let block = parse("/** @template T of Foo|Bar */");
+    assert_eq!(block.template_bounds.get("T"), Some(&"Foo|Bar".to_string()));
+}
+
+#[test]
+fn parses_covariant_and_contravariant_template_tags() {
+    let block = parse(
+        r#"/**
+         * @template-covariant TOut
+         * @template-contravariant TIn of Bound
+         */"#,
+    );
+    assert_eq!(block.templates, vec!["TOut".to_string(), "TIn".to_string()]);
+    assert!(block.covariant_templates.contains("TOut"));
+    assert!(!block.contravariant_templates.contains("TOut"));
+    assert!(block.contravariant_templates.contains("TIn"));
+    assert_eq!(block.template_bounds.get("TIn"), Some(&"Bound".to_string()));
+}

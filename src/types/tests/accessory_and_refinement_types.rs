@@ -1,0 +1,302 @@
+//! Accessory and refinement pseudo-types (list, class-string, int ranges, array shapes, etc.).
+use super::super::*;
+
+#[test]
+fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
+    // A real, widely-used PHPStan-ecosystem pseudo-type (nikic/php-parser's
+    // own `@return list<ClassMethod>` is exactly this shape) - without
+    // this, "list" fell through to the generic-user-class branch and
+    // got treated as a literal class named "list". Phase 14: now a
+    // real Intersection([Array(_), Accessory(ArrayList)]), not a
+    // plain Array alias.
+    assert_eq!(
+        parse_type_string("list<int>"),
+        Type::Intersection(vec![
+            Type::Array(Box::new(Type::Int)),
+            Type::Accessory(AccessoryKind::ArrayList),
+        ])
+    );
+    assert_eq!(
+        parse_type_string("list"),
+        Type::Intersection(vec![
+            Type::Array(Box::new(Type::Mixed)),
+            Type::Accessory(AccessoryKind::ArrayList),
+        ])
+    );
+}
+
+#[test]
+fn string_refinement_pseudo_types_with_no_verifiable_content_stay_plain_string() {
+    // `callable-string`/`class-string`/`trait-string`/
+    // `interface-string`/`enum-string` each name "a string believed
+    // to hold a specific kind of identifier," with no literal-based
+    // or narrowing-based way for this project to ever verify content -
+    // without this they fell through to the generic-user-class
+    // branch and got treated as literal class references.
+    for name in [
+        "callable-string",
+        "class-string",
+        "trait-string",
+        "interface-string",
+        "enum-string",
+    ] {
+        assert_eq!(parse_type_string(name), Type::String, "for {name}");
+    }
+}
+
+#[test]
+fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_types() {
+    // Phase 14: real, common PHPStan/Psalm-ecosystem refinement types
+    // (real volume seen in a live corpus: 3402 non-empty-string
+    // occurrences alone) - each is a literal-provable fact about a
+    // string's content, mirroring real PHPStan's own
+    // Intersection([StringType, AccessoryXType]) representation.
+    assert_eq!(
+        parse_type_string("non-empty-string"),
+        Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString)
+        ])
+    );
+    for name in ["non-falsy-string", "truthy-string"] {
+        assert_eq!(
+            parse_type_string(name),
+            Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NonFalsyString)
+            ]),
+            "for {name}"
+        );
+    }
+    assert_eq!(
+        parse_type_string("literal-string"),
+        Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::LiteralString)
+        ])
+    );
+    assert_eq!(
+        parse_type_string("numeric-string"),
+        Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NumericString)
+        ])
+    );
+}
+
+#[test]
+fn class_string_with_a_generic_argument_is_tracked_precisely() {
+    assert_eq!(
+        parse_type_string("class-string<Foo>"),
+        Type::ClassString(Box::new(Type::Object("Foo".to_string(), Vec::new())))
+    );
+    // Two or more args isn't real PHPStan syntax - falls back to plain
+    // string rather than guessing which one is meant.
+    assert_eq!(parse_type_string("class-string<Foo, Bar>"), Type::String);
+}
+
+#[test]
+fn int_refinement_pseudo_types_are_real_int_ranges() {
+    // Phase 14: each is a real IntRange now, mirroring real
+    // PHPStan's own standalone IntegerRangeType.
+    assert_eq!(
+        parse_type_string("positive-int"),
+        Type::IntRange(Some(1), None)
+    );
+    assert_eq!(
+        parse_type_string("negative-int"),
+        Type::IntRange(None, Some(-1))
+    );
+    assert_eq!(
+        parse_type_string("non-negative-int"),
+        Type::IntRange(Some(0), None)
+    );
+    assert_eq!(
+        parse_type_string("non-positive-int"),
+        Type::IntRange(None, Some(0))
+    );
+    // Verified via dumpType(): real PHPStan represents this as a
+    // union of two ranges, not its own type.
+    assert_eq!(
+        parse_type_string("non-zero-int"),
+        Type::Union(vec![
+            Type::IntRange(None, Some(-1)),
+            Type::IntRange(Some(1), None),
+        ])
+    );
+}
+
+#[test]
+fn int_range_generic_syntax_parses() {
+    assert_eq!(
+        parse_type_string("int<0, 255>"),
+        Type::IntRange(Some(0), Some(255))
+    );
+    assert_eq!(
+        parse_type_string("int<min, 10>"),
+        Type::IntRange(None, Some(10))
+    );
+    assert_eq!(
+        parse_type_string("int<0, max>"),
+        Type::IntRange(Some(0), None)
+    );
+    // A malformed bound falls back to plain Int rather than
+    // silently treating garbage as an unbounded side.
+    assert_eq!(parse_type_string("int<garbage, 10>"), Type::Int);
+}
+
+#[test]
+fn array_refinement_pseudo_types_are_real_accessory_intersections() {
+    // Phase 14: real Intersection([Array(_), Accessory(_)]) types
+    // now, mirroring real PHPStan's own representation.
+    assert_eq!(
+        parse_type_string("non-empty-array<int>"),
+        Type::Intersection(vec![
+            Type::Array(Box::new(Type::Int)),
+            Type::Accessory(AccessoryKind::NonEmptyArray),
+        ])
+    );
+    assert_eq!(
+        parse_type_string("non-empty-list<string>"),
+        Type::Intersection(vec![
+            Type::Array(Box::new(Type::String)),
+            Type::Accessory(AccessoryKind::ArrayList),
+            Type::Accessory(AccessoryKind::NonEmptyArray),
+        ])
+    );
+    // Doctrine's own refinement of `array<class-string<TKey>, TValue>`
+    // - the key type (including its own nested generic) is discarded,
+    // same as a plain `array<K, V>`'s key already is. Not a Phase 14
+    // accessory type at all - unaffected, still plain Array.
+    assert_eq!(
+        parse_type_string("class-string-map<Foo, int>"),
+        Type::Array(Box::new(Type::Int))
+    );
+}
+
+#[test]
+fn array_shape_parses_required_and_optional_fields() {
+    let shape = parse_type_string("array{name: string, age?: int}");
+    assert_eq!(
+        shape,
+        Type::ArrayShape(vec![
+            ("name".to_string(), Type::String, false),
+            ("age".to_string(), Type::Int, true),
+        ])
+    );
+}
+
+#[test]
+fn array_shape_field_can_itself_be_a_union() {
+    let shape = parse_type_string("array{value: int|string}");
+    assert_eq!(
+        shape,
+        Type::ArrayShape(vec![(
+            "value".to_string(),
+            Type::Union(vec![Type::Int, Type::String]),
+            false
+        )])
+    );
+}
+
+#[test]
+fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
+    // `...<K, V>` (PHPStan/Psalm's "this shape may carry other,
+    // unlisted keys too" marker - not modeled, same as other
+    // accessory/refinement types this project skips) has no `:` in
+    // it - found on real code that this used to make the field loop's
+    // `?` propagate a None out of the whole function, silently
+    // failing the ENTIRE shape parse (falling through to treating
+    // `array{...}` as a literal, then namespace-mangled, class name)
+    // over one unmodeled marker, discarding every real field
+    // alongside it.
+    let shape = parse_type_string("array{items: int, ...<string, mixed>}");
+    assert_eq!(
+        shape,
+        Type::ArrayShape(vec![("items".to_string(), Type::Int, false)])
+    );
+    // A bare `...` (no generic args) is valid too.
+    let shape2 = parse_type_string("array{items: int, ...}");
+    assert_eq!(
+        shape2,
+        Type::ArrayShape(vec![("items".to_string(), Type::Int, false)])
+    );
+}
+
+// Phase 33 Finding 3: a positional (unkeyed) field - real, valid
+// PHPStan/Psalm tuple syntax - used to fail the *entire* shape's parse
+// (`split_once(':')?` had nothing to split), falling through to a
+// bogus, unparsed class-name `Object`. Numbered the same way
+// `infer_array_literal_type` numbers a real array literal's own
+// positional elements, so both end up structurally identical.
+#[test]
+fn array_shape_with_positional_fields_numbers_them_like_a_real_array_literal() {
+    let shape = parse_type_string("array{int, string}");
+    assert_eq!(
+        shape,
+        Type::ArrayShape(vec![
+            ("0".to_string(), Type::Int, false),
+            ("1".to_string(), Type::String, false),
+        ])
+    );
+}
+
+// The real `idcUploadSizedPhoto` shape this finding exists for.
+#[test]
+fn array_shape_with_positional_int_range_fields_parses() {
+    let shape = parse_type_string("array{int<0, 255>, int<0, 255>, int<0, 255>}");
+    // Phase 14: each field is a real IntRange now, not plain Int.
+    assert_eq!(
+        shape,
+        Type::ArrayShape(vec![
+            ("0".to_string(), Type::IntRange(Some(0), Some(255)), false),
+            ("1".to_string(), Type::IntRange(Some(0), Some(255)), false),
+            ("2".to_string(), Type::IntRange(Some(0), Some(255)), false),
+        ])
+    );
+}
+
+#[test]
+fn array_shape_mixing_explicit_int_keys_and_named_keys_still_parses_correctly() {
+    let shape = parse_type_string("array{0: int, name: string}");
+    assert_eq!(
+        shape,
+        Type::ArrayShape(vec![
+            ("0".to_string(), Type::Int, false),
+            ("name".to_string(), Type::String, false),
+        ])
+    );
+}
+
+// Regression guard: Translator::toDictionaryEntry's real
+// @return array{domain: string, plural-forms: string, ...} - found by
+// the full corpus re-check after this fix first shipped, since a
+// hyphenated bare key was already accepted before any key-shape
+// validation existed at all, and `looks_like_shape_key`'s first
+// version wrongly rejected it, misclassifying the field as
+// positional.
+#[test]
+fn array_shape_with_a_hyphenated_bare_key_still_parses_as_keyed() {
+    let shape = parse_type_string("array{domain: string, plural-forms: string}");
+    assert_eq!(
+        shape,
+        Type::ArrayShape(vec![
+            ("domain".to_string(), Type::String, false),
+            ("plural-forms".to_string(), Type::String, false),
+        ])
+    );
+}
+
+// A positional field whose own type contains a colon (a callable
+// shape's return type) must not be mis-split at that internal colon.
+#[test]
+fn array_shape_with_a_positional_closure_field_is_not_split_at_its_own_colon() {
+    let shape = parse_type_string("array{Closure(int): string, int}");
+    assert_eq!(
+        shape,
+        Type::ArrayShape(vec![
+            ("0".to_string(), Type::Callable, false),
+            ("1".to_string(), Type::Int, false),
+        ])
+    );
+}

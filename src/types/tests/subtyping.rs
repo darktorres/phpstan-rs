@@ -1,0 +1,210 @@
+//! Subtype relation checks between `Type` values.
+use super::super::*;
+
+#[test]
+fn class_string_is_interchangeable_with_plain_string_both_ways() {
+    let cs = Type::ClassString(Box::new(Type::Object("Foo".to_string(), Vec::new())));
+    assert!(is_subtype(&cs, &Type::String));
+    assert!(is_subtype(&Type::String, &cs));
+    assert!(is_subtype(&Type::StringLiteral("Foo".to_string()), &cs));
+    assert!(is_subtype(&cs, &cs));
+    let cs_other = Type::ClassString(Box::new(Type::Object("Bar".to_string(), Vec::new())));
+    assert!(!is_subtype(&cs, &cs_other));
+}
+
+#[test]
+fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
+    let shape = parse_type_string("array{name: string}");
+    assert!(is_subtype(&shape, &Type::Array(Box::new(Type::Mixed))));
+    assert!(!is_subtype(&Type::Array(Box::new(Type::Mixed)), &shape));
+}
+
+#[test]
+fn literal_is_subtype_of_its_general_type() {
+    assert!(is_subtype(&Type::IntLiteral(5), &Type::Int));
+    assert!(!is_subtype(&Type::Int, &Type::IntLiteral(5)));
+}
+
+#[test]
+fn everything_is_subtype_of_mixed() {
+    assert!(is_subtype(&Type::String, &Type::Mixed));
+    assert!(is_subtype(
+        &Type::Object("Foo".to_string(), Vec::new()),
+        &Type::Mixed
+    ));
+}
+
+#[test]
+fn never_is_subtype_of_everything() {
+    assert!(is_subtype(&Type::Never, &Type::String));
+    assert!(is_subtype(&Type::Never, &Type::Mixed));
+}
+
+#[test]
+fn union_subtype_rules() {
+    let small = Type::Union(vec![Type::Int, Type::String]);
+    let big = Type::Union(vec![Type::Int, Type::String, Type::Bool]);
+    assert!(is_subtype(&small, &big));
+    assert!(!is_subtype(&big, &small));
+    assert!(is_subtype(&Type::String, &small));
+}
+
+#[test]
+fn intersection_subtype_rules() {
+    // Coverage measurement found both Intersection arms of is_subtype
+    // had zero executions (registry::is_assignable's own, separate
+    // Intersection handling was covered independently).
+    let both = Type::Intersection(vec![Type::Int, Type::String]);
+    // sub is the intersection: satisfies any one of its members.
+    assert!(is_subtype(&both, &Type::Int));
+    assert!(is_subtype(&both, &Type::String));
+    assert!(!is_subtype(&both, &Type::Bool));
+    // sup is the intersection: must satisfy every member at once - a
+    // plain Int alone doesn't also satisfy "and a String".
+    assert!(!is_subtype(&Type::Int, &both));
+}
+
+#[test]
+fn true_and_false_literals_are_subtypes_of_bool() {
+    assert!(is_subtype(&Type::True, &Type::Bool));
+    assert!(is_subtype(&Type::False, &Type::Bool));
+}
+
+#[test]
+fn int_range_subtype_rules() {
+    let positive = Type::IntRange(Some(1), None);
+    assert!(is_subtype(&Type::IntLiteral(5), &positive));
+    assert!(!is_subtype(&Type::IntLiteral(0), &positive));
+    assert!(!is_subtype(&Type::IntLiteral(-1), &positive));
+    assert!(is_subtype(&positive, &Type::Int));
+    assert!(is_subtype(&positive, &Type::Float));
+    assert!(!is_subtype(&Type::Int, &positive));
+
+    let narrow = Type::IntRange(Some(1), Some(10));
+    assert!(is_subtype(&narrow, &positive));
+    assert!(!is_subtype(&positive, &narrow));
+    let unbounded_below = Type::IntRange(None, Some(10));
+    assert!(!is_subtype(&unbounded_below, &positive));
+}
+
+#[test]
+fn string_accessory_subtype_rules() {
+    let non_empty = Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::NonEmptyString),
+    ]);
+    let non_falsy = Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::NonFalsyString),
+    ]);
+    assert!(is_subtype(
+        &Type::StringLiteral("a".to_string()),
+        &non_empty
+    ));
+    assert!(!is_subtype(&Type::StringLiteral(String::new()), &non_empty));
+    assert!(is_subtype(
+        &Type::StringLiteral("0".to_string()),
+        &non_empty
+    ));
+    assert!(!is_subtype(
+        &Type::StringLiteral("0".to_string()),
+        &non_falsy
+    ));
+    assert!(is_subtype(
+        &Type::StringLiteral("a".to_string()),
+        &non_falsy
+    ));
+    // Every non-falsy string is non-empty, not vice versa.
+    assert!(is_subtype(&non_falsy, &non_empty));
+    assert!(!is_subtype(&non_empty, &non_falsy));
+
+    let literal = Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::LiteralString),
+    ]);
+    assert!(is_subtype(
+        &Type::StringLiteral("anything".to_string()),
+        &literal
+    ));
+    assert!(!is_subtype(&Type::String, &literal));
+
+    let numeric = Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::NumericString),
+    ]);
+    assert!(is_subtype(
+        &Type::StringLiteral("123".to_string()),
+        &numeric
+    ));
+    assert!(is_subtype(
+        &Type::StringLiteral(" -1.5e3 ".to_string()),
+        &numeric
+    ));
+    assert!(!is_subtype(
+        &Type::StringLiteral("abc".to_string()),
+        &numeric
+    ));
+
+    // A plain, unprovable String never satisfies any of these.
+    assert!(!is_subtype(&Type::String, &non_empty));
+}
+
+#[test]
+fn array_accessory_subtype_rules() {
+    // Scoped to `Array(Mixed)` as the intersection's own base member
+    // deliberately: `is_subtype`'s own pre-existing, unrelated
+    // `(ArrayShape(_), Array(b)) => matches!(**b, Mixed)` rule is
+    // already conservative about a *specific*-element `Array(b)`
+    // (that per-field check is `is_assignable`'s own job, not
+    // `is_subtype`'s) - using `Array(Mixed)` here isolates the new
+    // accessory logic from that pre-existing, unrelated asymmetry.
+    let list_ty = Type::Intersection(vec![
+        Type::Array(Box::new(Type::Mixed)),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ]);
+    let non_empty_ty = Type::Intersection(vec![
+        Type::Array(Box::new(Type::Mixed)),
+        Type::Accessory(AccessoryKind::NonEmptyArray),
+    ]);
+    let list_shape = Type::ArrayShape(vec![
+        ("0".to_string(), Type::IntLiteral(1), false),
+        ("1".to_string(), Type::IntLiteral(2), false),
+    ]);
+    assert!(is_subtype(&list_shape, &list_ty));
+    assert!(is_subtype(&list_shape, &non_empty_ty));
+
+    let gapped_shape = Type::ArrayShape(vec![
+        ("0".to_string(), Type::IntLiteral(1), false),
+        ("2".to_string(), Type::IntLiteral(2), false),
+    ]);
+    assert!(!is_subtype(&gapped_shape, &list_ty));
+    assert!(is_subtype(&gapped_shape, &non_empty_ty));
+
+    let empty_shape = Type::ArrayShape(vec![]);
+    assert!(!is_subtype(&empty_shape, &non_empty_ty));
+
+    // Real PHPStan's own confirmed strictness: a plain Array(_),
+    // even with a known element type, never satisfies list<T>/
+    // non-empty-array<T> - only a real, provable ArrayShape does.
+    assert!(!is_subtype(&Type::Array(Box::new(Type::Int)), &list_ty));
+    assert!(!is_subtype(
+        &Type::Array(Box::new(Type::Int)),
+        &non_empty_ty
+    ));
+}
+
+#[test]
+fn nullable_string_accepts_null_and_string() {
+    let nullable_string = parse_type_string("?string");
+    assert!(is_subtype(&Type::Null, &nullable_string));
+    assert!(is_subtype(&Type::String, &nullable_string));
+    assert!(!is_subtype(&Type::Int, &nullable_string));
+}
+
+#[test]
+fn array_subtyping_is_covariant_on_value_type() {
+    let ints = Type::Array(Box::new(Type::Int));
+    let mixed_arr = Type::Array(Box::new(Type::Mixed));
+    assert!(is_subtype(&ints, &mixed_arr));
+    assert!(!is_subtype(&mixed_arr, &ints));
+}

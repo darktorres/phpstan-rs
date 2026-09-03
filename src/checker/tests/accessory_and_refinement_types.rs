@@ -1,0 +1,434 @@
+//! Union collapsing, readonly/property hooks, literal/accessory refinement types.
+
+use super::super::*;
+use super::helpers::*;
+
+// Phase 32 Finding L: exact type equality is the wrong tool for "is
+// this the kind of thing being narrowed" - both `narrow_type_to`/
+// `narrow_type_excluding` (member filtering) and `union_types`
+// (member dedup at construction time) used plain `==`/`!=`.
+
+#[test]
+fn union_types_collapses_a_string_literal_into_an_already_present_string() {
+    assert_eq!(
+        union_types(Type::String, Type::StringLiteral("".to_string())),
+        Type::String
+    );
+}
+
+#[test]
+fn union_types_collapses_an_int_literal_into_an_already_present_int() {
+    assert_eq!(union_types(Type::Int, Type::IntLiteral(0)), Type::Int);
+}
+
+// The float-widening pitfall this fix deliberately avoids: `is_subtype
+// (IntLiteral(0), Float)` is `true` (PHP's int-to-float argument
+// coercion), but that's an *assignability* fact, not a "this value's
+// representation is already covered" one - an `IntLiteral` sitting
+// next to an unrelated `Float` member must not be silently dropped.
+#[test]
+fn union_types_does_not_collapse_an_int_literal_into_an_unrelated_float() {
+    assert_eq!(
+        union_types(Type::Float, Type::IntLiteral(0)),
+        Type::Union(vec![Type::Float, Type::IntLiteral(0)])
+    );
+}
+
+// Phase 14: the same absorption idea, for an accessory-refined
+// string/array and an IntRange - an unknown branch genuinely might
+// be empty/out of range, so the refined member can't survive next
+// to its own separately-present, unrefined base.
+#[test]
+fn union_types_collapses_a_non_empty_string_into_an_already_present_string() {
+    let non_empty = Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(types::AccessoryKind::NonEmptyString),
+    ]);
+    assert_eq!(union_types(Type::String, non_empty), Type::String);
+}
+
+#[test]
+fn union_types_collapses_a_list_into_an_already_present_array() {
+    let list_ty = Type::Intersection(vec![
+        Type::Array(Box::new(Type::Int)),
+        Type::Accessory(types::AccessoryKind::ArrayList),
+    ]);
+    assert_eq!(
+        union_types(Type::Array(Box::new(Type::Int)), list_ty),
+        Type::Array(Box::new(Type::Int))
+    );
+}
+
+#[test]
+fn union_types_collapses_an_int_range_into_an_already_present_int() {
+    assert_eq!(
+        union_types(Type::Int, Type::IntRange(Some(1), None)),
+        Type::Int
+    );
+}
+
+#[test]
+fn union_types_collapses_a_float_literal_into_an_already_present_float() {
+    assert_eq!(
+        union_types(Type::Float, Type::FloatLiteral(1.5)),
+        Type::Float
+    );
+}
+
+#[test]
+fn union_types_does_not_collapse_a_real_class_intersection() {
+    // Guards Phase 14's own absorption fix: a genuine, unrelated
+    // multi-class intersection (no Accessory member at all) must
+    // never be treated as "more specific than its own base type" -
+    // Countable&Iterator sitting next to bare Countable in the same
+    // union are both real, independent possibilities.
+    let intersection = Type::Intersection(vec![
+        Type::Object("Countable".to_string(), Vec::new()),
+        Type::Object("Iterator".to_string(), Vec::new()),
+    ]);
+    assert_eq!(
+        union_types(
+            Type::Object("Countable".to_string(), Vec::new()),
+            intersection.clone()
+        ),
+        Type::Union(vec![
+            Type::Object("Countable".to_string(), Vec::new()),
+            intersection
+        ])
+    );
+}
+
+// Phase 12 (unplanned follow-on): a real hang, found via `gdb` on a
+// hung `check-project` process, not guessed - `merge_scopes` (one
+// `union_types` call per `if`/`else`) and `write_index_into`'s own
+// `Union` arm both feed into `union_types`, which had no cap on how
+// many distinct members it would accumulate. A real corpus function
+// with many sequential branches assigning genuinely distinct array
+// shapes to the same variable grew that variable's own union member
+// count combinatorially once `Type::Union` values stopped collapsing
+// to `Mixed` at the first read/write (Finding E's own `Union([matched,
+// empty])` unconditional `preg_match` shape). Simulates that same
+// shape directly: 20 pairwise-distinct one-field `ArrayShape`s folded
+// through `union_types` one at a time, exactly the access pattern
+// `merge_scopes` uses across many sequential branches.
+#[test]
+fn union_types_caps_runaway_member_growth_instead_of_hanging() {
+    let result = (0..20)
+        .map(|i| Type::ArrayShape(vec![(i.to_string(), Type::Int, false)]))
+        .reduce(union_types)
+        .unwrap();
+    assert_eq!(
+        result,
+        Type::Mixed,
+        "expected the cap to collapse a >12-member union to Mixed, got {result:?}"
+    );
+}
+
+// The cap must not misfire on the common, small case real code
+// actually produces - a handful of genuinely distinct branch types
+// stays a precise `Union`, not `Mixed`.
+#[test]
+fn union_types_below_the_cap_still_builds_a_precise_union() {
+    let result = [Type::Int, Type::String, Type::Bool, Type::Null]
+        .into_iter()
+        .reduce(union_types)
+        .unwrap();
+    assert_eq!(
+        result,
+        Type::Union(vec![Type::Int, Type::String, Type::Bool, Type::Null])
+    );
+}
+
+// The two tests above exercise `generalize_by_key_set` directly;
+// this one confirms `union_types` itself actually calls it - built as
+// a single `union_types(pre_built_union_of_12, one_more_shape)` call
+// (not a `.reduce()` chain) specifically so only *one* generalization
+// pass happens, matching what `generalize_by_key_set`'s own
+// standalone tests already prove that pass does.
+#[test]
+fn union_types_itself_generalizes_before_collapsing_to_mixed() {
+    let first_twelve = Type::Union(
+        (0..12)
+            .map(|i| {
+                let value = if i % 2 == 0 { Type::True } else { Type::False };
+                Type::ArrayShape(vec![("x".to_string(), value, false)])
+            })
+            .collect(),
+    );
+    // A genuinely new value, distinct from every one of the first 12
+    // (which only alternate True/False) - `union_types`'s own
+    // existing dedup (`!members.contains(&other)`) would otherwise
+    // silently no-op adding a 13th member that already exists,
+    // masking whether generalization ran at all.
+    let thirteenth = Type::ArrayShape(vec![("x".to_string(), Type::Null, false)]);
+    let result = union_types(first_twelve, thirteenth);
+    match result {
+        Type::ArrayShape(fields) => {
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].0, "x");
+        }
+        other => panic!(
+            "expected union_types to generalize down to one merged ArrayShape, got {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn a_literal_argument_satisfies_a_literal_string_parameter_a_plain_string_does_not() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param literal-string $x */
+            function sink($x): void {}
+            function f(): void {
+                sink("hello");
+            }
+            function g(string $x): void {
+                sink($x);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn writing_a_readonly_property_from_outside_its_declaring_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Point1 {
+                public function __construct(public readonly int $x, public readonly int $y) {}
+            }
+            function mutateReadonly(Point1 $p): void { $p->x = 5; }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("Point1::$x is readonly")),
+        "expected a readonly-write diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn writing_a_readonly_property_from_a_non_constructor_method_of_its_own_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Immutable {
+                public function __construct(public readonly int $v) {}
+                public function bump(): void { $this->v = $this->v + 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("Immutable::$v is readonly")),
+        "expected a readonly-write diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_readonly_property_is_not_flagged_by_its_own_promotion() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Point1 {
+                public function __construct(public readonly int $x, public readonly int $y) {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn writing_a_readonly_property_inside_its_own_constructor_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Widget14 {
+                public readonly int $a;
+                public function __construct() { $this->a = 1; }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A round of Piwigo-corpus bucketing found real PHP 8.4 property hooks
+// (`CurrentConfig`'s own `apiKeyDuration`/`chmodValue`/etc.) whose
+// `set(Type $value)` hook deliberately accepts a wider type than the
+// property's own backing/read type, coercing internally before the
+// real assignment - a write must be checked against the hook's own
+// parameter type, not the property's declared type.
+#[test]
+fn a_property_hooks_wider_set_parameter_type_is_the_real_write_sink() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Config1 {
+                /** @var list<string> */
+                public array $names = ['a'] {
+                    set(array $value) {
+                        $this->names = array_values($value);
+                    }
+                }
+            }
+            function f(Config1 $c, array $raw): void {
+                $c->names = $raw;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_property_hooks_narrower_set_parameter_type_is_still_enforced() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Config2 {
+                public int $level = 0 {
+                    set(int $value) {
+                        $this->level = $value;
+                    }
+                }
+            }
+            function f(Config2 $c, string $bad): void {
+                $c->level = $bad;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn writing_an_ordinary_mutable_property_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Ok3 {
+                public int $mutable = 0;
+                public function change(): void { $this->mutable = 5; }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Finding 33 from the architecture audit - `iterable` was parsed as
+// plain `array`, silently dropping its `|Traversable` half.
+
+#[test]
+fn iterable_accepts_a_real_traversable_not_just_an_array() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(iterable $items): void {
+                foreach ($items as $item) { echo $item; }
+            }
+            function test(): void {
+                f(new ArrayIterator([1, 2, 3]));
+                f([1, 2, 3]);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn iterable_still_rejects_a_genuinely_non_iterable_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(iterable $items): void {}
+            function test(): void { f("not iterable"); }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn iterable_traversable_half_is_not_namespace_mangled() {
+    // Regression test for a real bug caught while implementing this
+    // fix: the synthesized `Traversable` half of `iterable` is this
+    // project's own internal desugaring, not something the
+    // programmer wrote as a class reference - it must stay global
+    // regardless of the current namespace, the same way the native
+    // `object` hint already does.
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            function f(iterable $items): void {
+                foreach ($items as $item) { echo $item; }
+            }
+            function test(): void { f(new \ArrayIterator([1, 2, 3])); }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Finding 34 from the architecture audit - array-key/scalar/numeric/
+// resource pseudo-types weren't recognized, silently falling through
+// to a bogus literal class reference.
+
+#[test]
+fn array_key_accepts_both_string_and_int() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array-key $key */
+            function f($key): void {}
+            function test(): void { f("hello"); f(42); }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_key_still_rejects_a_genuinely_wrong_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array-key $key */
+            function f($key): void {}
+            function test(): void { f([1, 2]); }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn resource_pseudo_type_matches_across_namespaces() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            /** @param resource $handle */
+            function useHandle($handle): void {}
+
+            namespace {
+                /** @param resource $h */
+                function passthrough($h): void { \App\useHandle($h); }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Finding 41 from the architecture audit (integer-literal half only -
+// the float-literal half needs a new Type::FloatLiteral variant,
+// deferred as lower priority per the plan) - PHPStan-style
+// literal-integer union types (`1|2|3`) rejected every value,
+// including genuinely valid ones, because a bare integer in a type
+// string fell through to a bogus literal-class-reference fallback.
+
+#[test]
+fn literal_integer_union_type_accepts_a_genuinely_valid_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param 1|2|3 $level */
+            function f($level): void {}
+            function test(): void { f(2); }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn literal_integer_union_type_still_rejects_a_genuinely_invalid_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param 1|2|3 $level */
+            function f($level): void {}
+            function test(): void { f(5); }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}

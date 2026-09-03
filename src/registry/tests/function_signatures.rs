@@ -1,0 +1,382 @@
+//! Function and method signature resolution, including phpdoc typing and override merging.
+
+use super::super::*;
+use super::helpers::*;
+
+#[test]
+fn the_object_type_hint_is_not_namespace_qualified() {
+    // `object` is a PHP-reserved word - no real class can ever be
+    // named that, so `Type::Object("object")` (parse_type_string's
+    // own sentinel for the native `object` type hint) must never be
+    // resolved as if it were a genuine class reference.
+    let r = build_registry(
+        r#"<?php
+            namespace App\Some\Deep\Namespace_;
+            class Foo {
+                public function bar(): object { return new \stdClass(); }
+            }"#,
+    );
+    let sig = r
+        .lookup_method("App\\Some\\Deep\\Namespace_\\Foo", "bar")
+        .unwrap();
+    assert_eq!(
+        sig.return_type,
+        Type::Object("object".to_string(), Vec::new())
+    );
+}
+
+#[test]
+fn a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced() {
+    // Real, previously-live bug found via real code in this
+    // project's own verification corpus (a `Doctrine\ORM\QueryBuilder`
+    // union member written as `\Doctrine\ORM\QueryBuilder`, i.e.
+    // "absolute, from the global namespace" - real PHP syntax): the
+    // leading `\` used to be stripped before `resolve_names_in_type`
+    // ever saw it (inside `types::parse_type_atom`, purely as part of
+    // computing a bare name for keyword matching), losing the "already
+    // fully qualified, don't touch" signal - every absolute reference
+    // containing a `\` then got silently mis-qualified as if it were
+    // namespace-relative (`App\Doctrine\ORM\QueryBuilder` instead of
+    // the real `Doctrine\ORM\QueryBuilder`).
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            class Foo {
+                public function bar(\Doctrine\ORM\QueryBuilder $qb): void {}
+            }"#,
+    );
+    let sig = r.lookup_method("App\\Foo", "bar").unwrap();
+    assert_eq!(
+        sig.params[0].ty,
+        Type::Object("Doctrine\\ORM\\QueryBuilder".to_string(), Vec::new())
+    );
+}
+
+#[test]
+fn phpdoc_types_an_otherwise_untyped_function() {
+    let r = build_registry(
+        r#"<?php
+            /**
+             * @param int $x
+             * @return int
+             */
+            function double($x) { return $x * 2; }
+        "#,
+    );
+    let sig = &r.functions["double"];
+    assert_eq!(sig.params[0].ty, Type::Int);
+    assert_eq!(sig.return_type, Type::Int);
+}
+
+// Finding A (Phase 32): phpstorm-stubs represents "this parameter
+// changed across PHP versions" as the same conceptual parameter
+// declared twice, each gated by its own `#[PhpStormStubsElementAvailable]`
+// attribute - real PHP can't have two same-named parameters in one
+// function, so a duplicate name reaching `FunctionSig::from_decl` is
+// unconditionally this versioning artifact. Real shape: `pg_query`'s
+// `$connection`.
+#[test]
+fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
+    let r = build_registry(
+        r#"<?php
+            function pg_query(
+                #[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] $connection = null,
+                #[PhpStormStubsElementAvailable(from: '8.0')] \PgSql\Connection $connection,
+                string $query
+            ) {}
+        "#,
+    );
+    let sig = &r.functions["pg_query"];
+    assert_eq!(sig.params.len(), 2, "the legacy duplicate must be dropped");
+    assert_eq!(sig.params[0].name, "connection");
+    assert_eq!(
+        sig.params[0].ty,
+        Type::Object("PgSql\\Connection".to_string(), Vec::new()),
+        "the surviving type must be the modern (second) occurrence's, not the legacy (first, untyped) one"
+    );
+    assert_eq!(sig.params[1].name, "query");
+    assert_eq!(sig.params[1].ty, Type::String);
+}
+
+// Real shape: `SQLite3::open`'s `$flags`/`$encryptionKey`, two
+// separate duplicated pairs in the same parameter list.
+#[test]
+fn two_separate_duplicated_parameter_pairs_both_collapse() {
+    let r = build_registry(
+        r#"<?php
+            function sqlite3_open(
+                string $filename,
+                #[PhpStormStubsElementAvailable(from: '5.3', to: '5.6')] $flags = 6,
+                #[PhpStormStubsElementAvailable(from: '5.3', to: '5.6')] $encryptionKey = '',
+                #[PhpStormStubsElementAvailable(from: '7.0')] int $flags = 0,
+                #[PhpStormStubsElementAvailable(from: '7.0')] string $encryptionKey = ''
+            ) {}
+        "#,
+    );
+    let sig = &r.functions["sqlite3_open"];
+    assert_eq!(sig.params.len(), 3);
+    assert_eq!(sig.params[1].name, "flags");
+    assert_eq!(sig.params[1].ty, Type::Int);
+    assert_eq!(sig.params[2].name, "encryptionKey");
+    assert_eq!(sig.params[2].ty, Type::String);
+}
+
+// Real shape: `fsockopen`'s duplicated `$port` - the duplicate that
+// actually broke argument binding (Finding A's own motivating case),
+// since it isn't the last parameter.
+#[test]
+fn a_duplicated_parameter_in_the_middle_of_the_list_doesn_t_shift_later_ones() {
+    let r = build_registry(
+        r#"<?php
+            function fsockopen(
+                string $hostname,
+                #[PhpStormStubsElementAvailable(from: '5.3', to: '7.0')] int $port = -1,
+                #[PhpStormStubsElementAvailable(from: '7.1')] int $port = -1,
+                &$error_code = null,
+                &$error_message = null,
+                ?float $timeout = null
+            ) {}
+        "#,
+    );
+    let sig = &r.functions["fsockopen"];
+    assert_eq!(sig.params.len(), 5);
+    assert_eq!(
+        sig.params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["hostname", "port", "error_code", "error_message", "timeout"]
+    );
+}
+
+#[test]
+fn a_function_with_no_duplicate_parameters_is_unaffected() {
+    let r = build_registry(r#"<?php function f(int $a, string $b) {}"#);
+    let sig = &r.functions["f"];
+    assert_eq!(sig.params.len(), 2);
+    assert_eq!(sig.params[0].name, "a");
+    assert_eq!(sig.params[1].name, "b");
+}
+
+// Finding B (Phase 32): a `LanguageLevelTypeAware` parameter override
+// loses to a competing legacy `@param` docblock tag, since the
+// override was only ever injected as a native type hint - `resolve_type`
+// treats a matching `@param` tag as authoritative over the native hint.
+// Real shape: `ini_set`'s `@param string $value` next to a native
+// `#[LanguageLevelTypeAware(['8.1' => 'string|int|float|bool|null'],
+// default: 'string')] $value`.
+#[test]
+fn a_language_level_type_aware_override_wins_over_a_matching_stale_param_tag() {
+    let r = build_registry(
+        r#"<?php
+            /**
+             * @param string $option
+             * @param string $value
+             * @return string|false
+             */
+            function ini_set($option, #[LanguageLevelTypeAware(['8.1' => 'string|int|float|bool|null'], default: 'string')] $value) {}
+        "#,
+    );
+    assert_eq!(
+        r.functions["ini_set"].params[1].ty,
+        Type::Union(vec![
+            Type::String,
+            Type::Int,
+            Type::Float,
+            Type::Bool,
+            Type::Null,
+        ]),
+        "the modern override must win over the stale '@param string' tag"
+    );
+}
+
+// Real shape: `finfo_file`'s doc type is `resource`; before Finding B,
+// this collapsed to `Type::Mixed` (a *worse* failure than `ini_set`'s,
+// since `resolve_type`'s own `resource`-stripping fires on the
+// never-overridden stale doc type) rather than resolving to the
+// override at all.
+#[test]
+fn a_language_level_type_aware_override_wins_even_when_the_stale_doc_type_is_resource() {
+    let r = build_registry(
+        r#"<?php
+            class finfo {}
+            /**
+             * @param resource $finfo
+             * @return string|false
+             */
+            function finfo_file(#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')] $finfo, string $filename) {}
+        "#,
+    );
+    assert_eq!(
+        r.functions["finfo_file"].params[0].ty,
+        Type::Object("finfo".to_string(), Vec::new())
+    );
+}
+
+// The boundary-crossing guard's own regression test: `later`'s
+// override must not be spliced onto `earlier`'s unrelated docblock
+// just because it's the nearest one found by an unbounded backward
+// scan - `later` has no doc comment of its own, so the override must
+// fall back to the native-hint-only path instead.
+#[test]
+fn an_override_is_not_spliced_onto_an_unrelated_earlier_declaration_s_docblock() {
+    let r = build_registry(
+        r#"<?php
+            /** @param resource $x */
+            function earlier($x) {}
+            function later(#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')] $finfo) {}
+        "#,
+    );
+    assert_eq!(
+        r.functions["earlier"].params[0].ty,
+        Type::Object("resource".to_string(), Vec::new()),
+        "earlier's own docblock must be untouched by later's override"
+    );
+    assert_eq!(
+        r.functions["later"].params[0].ty,
+        Type::Object("finfo".to_string(), Vec::new()),
+        "later's override must still win via the native-hint-only path"
+    );
+}
+
+// Finding I (Phase 32): `resolve_type`'s docblock-vs-native
+// reconciliation generalizes Phase 23's `resource`-specific staleness
+// check into one rule via `is_subtype` - a real, present, non-`object`
+// native hint is authoritative about what's possible; any docblock
+// member incompatible with it can never actually happen. Real shape:
+// `imagesx`'s native `int` vs. a stale `@return int|false` doc (the
+// GD-object migration dropped `false` from the native hint without
+// the doc ever being updated).
+#[test]
+fn a_stale_false_member_is_dropped_when_the_native_hint_no_longer_allows_it() {
+    let r = build_registry(
+        r#"<?php
+            /** @return int|false */
+            function imagesx(): int {}
+        "#,
+    );
+    assert_eq!(r.functions["imagesx"].return_type, Type::Int);
+}
+
+// A native hint that itself keeps `false` must *not* have it stripped
+// from the doc - proof this isn't now unconditionally dropping `false`,
+// only when the native hint disallows it.
+#[test]
+fn a_false_member_the_native_hint_still_allows_is_kept() {
+    let r = build_registry(
+        r#"<?php
+            /** @return int|false */
+            function f(): int|false {}
+        "#,
+    );
+    assert_eq!(
+        r.functions["f"].return_type,
+        Type::Union(vec![Type::Int, Type::False])
+    );
+}
+
+// A `mixed`-native case must still trust the doc fully, now via the
+// general `is_subtype(_, Type::Mixed)` rule falling out for free
+// rather than a dedicated `mixed`/`object` branch.
+#[test]
+fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
+    let r = build_registry(
+        r#"<?php
+            /** @return resource|false */
+            function f(): mixed {}
+        "#,
+    );
+    assert_eq!(
+        r.functions["f"].return_type,
+        Type::Union(vec![
+            Type::Object("resource".to_string(), Vec::new()),
+            Type::False
+        ])
+    );
+}
+
+// Found via a full corpus re-check after first shipping Finding I as
+// a bare `is_subtype(member, native_ty)` filter: `is_subtype`'s own
+// `Object` handling is name-equality only (no class hierarchy), so a
+// doc type naming a real subclass of a more generic native return
+// hint - the actual real corpus shape, a Doctrine-repository-typed
+// service declaring a native `EntityRepository` return with a doc
+// type naming the real concrete repository subclass - was wrongly
+// treated as "incompatible" and discarded in favor of the generic
+// native type, a real regression across dozens of real call sites.
+// Scoped back to exactly the one class-name case this project can
+// prove reliably (a literal `resource` doc member) - any other class
+// name must always be kept.
+#[test]
+fn a_doc_type_naming_a_real_subclass_of_the_native_hint_is_not_discarded() {
+    let r = build_registry(
+        r#"<?php
+            class EntityRepository {}
+            class ActivityRepository extends EntityRepository {}
+            class ActivityService {
+                /** @return ActivityRepository */
+                private function getRepository(): EntityRepository {
+                    return new ActivityRepository();
+                }
+            }
+        "#,
+    );
+    assert_eq!(
+        r.classes["ActivityService"].methods["getRepository"].return_type,
+        Type::Object("ActivityRepository".to_string(), Vec::new())
+    );
+}
+
+#[test]
+fn phpdoc_wins_over_a_conflicting_native_hint() {
+    let r = build_registry(
+        r#"<?php
+            /**
+             * @param int[] $items
+             */
+            function f(array $items) {}
+        "#,
+    );
+    assert_eq!(
+        r.functions["f"].params[0].ty,
+        Type::Array(Box::new(Type::Int))
+    );
+}
+
+#[test]
+fn phpdoc_types_an_otherwise_untyped_property() {
+    let r = build_registry(
+        r#"<?php
+            class Box {
+                /** @var int */
+                public $value;
+            }
+        "#,
+    );
+    assert_eq!(r.lookup_property("Box", "value").unwrap().ty, Type::Int);
+}
+
+#[test]
+fn phpdoc_types_a_promoted_constructor_property_via_param_tag() {
+    let r = build_registry(
+        r#"<?php
+            class Point {
+                /**
+                 * @param int[] $coords
+                 */
+                public function __construct(public $coords) {}
+            }
+        "#,
+    );
+    assert_eq!(
+        r.lookup_property("Point", "coords").unwrap().ty,
+        Type::Array(Box::new(Type::Int))
+    );
+}
+
+#[test]
+fn missing_doc_comment_falls_back_to_native_hint() {
+    let r = build_registry(r#"<?php function f(string $s): string { return $s; }"#);
+    assert_eq!(r.functions["f"].params[0].ty, Type::String);
+    assert_eq!(r.functions["f"].return_type, Type::String);
+}

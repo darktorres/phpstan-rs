@@ -1,0 +1,331 @@
+//! Class/interface/trait hierarchy: inheritance, trait flattening, member and property lookup.
+
+use super::super::*;
+use super::helpers::*;
+
+#[test]
+fn class_info_records_its_own_kind_and_final_abstract_readonly_members() {
+    let r = build_registry(
+        r#"<?php
+            interface Iface {}
+            abstract class Base {
+                abstract public function required(): void;
+                final public function locked(): void {}
+                public readonly int $id;
+            }
+            "#,
+    );
+    let iface = r.classes.get("Iface").unwrap();
+    assert_eq!(iface.kind, ClassKind::Interface);
+
+    let base = r.classes.get("Base").unwrap();
+    assert_eq!(base.kind, ClassKind::Class);
+    assert!(base.is_abstract);
+    assert!(!base.is_final);
+    assert!(base.abstract_methods.contains("required"));
+    assert!(base.final_methods.contains("locked"));
+    assert!(base.properties.get("id").unwrap().is_readonly);
+}
+
+#[test]
+fn a_final_private_method_is_not_recorded_as_final() {
+    // A `private` method isn't part of a class's inherited/
+    // overridable surface at all in real PHP - `final` on one is
+    // inert as far as override-compatibility checking goes.
+    let r = build_registry(
+        r#"<?php
+            class Base { final private function __clone() {} }
+            "#,
+    );
+    let base = r.classes.get("Base").unwrap();
+    assert!(!base.final_methods.contains("__clone"));
+}
+
+#[test]
+fn a_trait_using_another_trait_is_flattened_transitively() {
+    let r = build_registry(
+        r#"<?php
+            trait Greets { public function greet(): string { return "hi"; } }
+            trait Combined { use Greets; public function extra(): int { return 1; } }
+            class Foo { use Combined; }
+            "#,
+    );
+    let foo = r.classes.get("Foo").unwrap();
+    assert!(foo.methods.contains_key("greet"));
+    assert!(foo.methods.contains_key("extra"));
+}
+
+#[test]
+fn a_three_level_trait_chain_is_flattened_transitively() {
+    let r = build_registry(
+        r#"<?php
+            trait A2 { public function m1(): int { return 1; } }
+            trait B2 { use A2; public function m2(): int { return 2; } }
+            trait C2 { use B2; public function m3(): int { return 3; } }
+            class Deep { use C2; }
+            "#,
+    );
+    let deep = r.classes.get("Deep").unwrap();
+    assert!(deep.methods.contains_key("m1"));
+    assert!(deep.methods.contains_key("m2"));
+    assert!(deep.methods.contains_key("m3"));
+}
+
+#[test]
+fn a_trait_as_alias_registers_the_method_under_its_new_name_too() {
+    let r = build_registry(
+        r#"<?php
+            trait A { public function hello(): string { return "A"; } }
+            trait B { public function hello(): string { return "B"; } }
+            class C {
+                use A, B {
+                    A::hello insteadof B;
+                    B::hello as helloB;
+                }
+            }
+            "#,
+    );
+    let c = r.classes.get("C").unwrap();
+    assert!(c.methods.contains_key("hello"));
+    assert!(c.methods.contains_key("helloB"));
+}
+
+#[test]
+fn an_unqualified_trait_as_alias_resolves_against_the_used_trait() {
+    let r = build_registry(
+        r#"<?php
+            trait X { public function greet(): string { return "x"; } }
+            class Y {
+                use X {
+                    greet as greetAlias;
+                }
+            }
+            "#,
+    );
+    let y = r.classes.get("Y").unwrap();
+    assert!(y.methods.contains_key("greet"));
+    assert!(y.methods.contains_key("greetAlias"));
+}
+
+#[test]
+fn class_consts_are_registered_and_typed_from_their_literal_value() {
+    let r = build_registry(
+        r#"<?php
+            class Config {
+                const NAME = "app";
+                const MAX = 10;
+            }"#,
+    );
+    assert_eq!(
+        r.lookup_const("Config", "NAME"),
+        Some(&Type::StringLiteral("app".to_string()))
+    );
+    assert_eq!(r.lookup_const("Config", "MAX"), Some(&Type::IntLiteral(10)));
+    assert_eq!(r.lookup_const("Config", "MISSING"), None);
+}
+
+#[test]
+fn class_consts_are_inherited_through_extends() {
+    let r = build_registry(
+        r#"<?php
+            class Base { const KIND = "base"; }
+            class Derived extends Base {}"#,
+    );
+    assert_eq!(
+        r.lookup_const("Derived", "KIND"),
+        Some(&Type::StringLiteral("base".to_string()))
+    );
+}
+
+#[test]
+fn transitive_class_inheritance() {
+    let r = build_registry(
+        r#"<?php
+            interface Shape {}
+            abstract class BaseShape implements Shape {}
+            class Circle extends BaseShape {}
+        "#,
+    );
+    assert!(r.is_subclass_of("Circle", "BaseShape"));
+    assert!(r.is_subclass_of("Circle", "Shape"));
+    assert!(!r.is_subclass_of("BaseShape", "Circle"));
+}
+
+#[test]
+fn interface_extending_multiple_interfaces() {
+    let r = build_registry(
+        r#"<?php
+            interface A {}
+            interface B {}
+            interface C extends A, B {}
+            class Impl implements C {}
+        "#,
+    );
+    assert!(r.is_subclass_of("Impl", "A"));
+    assert!(r.is_subclass_of("Impl", "B"));
+}
+
+#[test]
+fn method_lookup_walks_up_extends_chain() {
+    let r = build_registry(
+        r#"<?php
+            class Base { public function greet(): string { return "hi"; } }
+            class Sub extends Base {}
+        "#,
+    );
+    let sig = r.lookup_method("Sub", "greet").expect("inherited method");
+    assert_eq!(sig.return_type.to_string(), "string");
+}
+
+#[test]
+fn declared_property_type_is_tracked() {
+    let r = build_registry(
+        r#"<?php
+            class Box { public int $value = 0; }
+        "#,
+    );
+    assert_eq!(r.lookup_property("Box", "value").unwrap().ty, Type::Int);
+}
+
+#[test]
+fn constructor_promotion_registers_a_property() {
+    let r = build_registry(
+        r#"<?php
+            class Point {
+                public function __construct(private int $x, public string $label) {}
+            }
+        "#,
+    );
+    assert_eq!(r.lookup_property("Point", "x").unwrap().ty, Type::Int);
+    assert_eq!(
+        r.lookup_property("Point", "label").unwrap().ty,
+        Type::String
+    );
+}
+
+#[test]
+fn trait_methods_and_properties_are_flattened_in() {
+    let r = build_registry(
+        r#"<?php
+            trait Greets {
+                public string $greeting = "hi";
+                public function greet(): string { return "hi"; }
+            }
+            class Person {
+                use Greets;
+            }
+        "#,
+    );
+    assert_eq!(
+        r.lookup_method("Person", "greet").unwrap().return_type,
+        Type::String
+    );
+    assert_eq!(
+        r.lookup_property("Person", "greeting").unwrap().ty,
+        Type::String
+    );
+}
+
+#[test]
+fn trait_flattening_works_across_namespaced_classes() {
+    // Every existing trait-flattening test uses bare (non-namespaced)
+    // PHP - exactly the blind spot that let a real Phase 7
+    // invalidation regression through undetected (a bare-name lookup
+    // silently found nothing once real code's names became FQNs).
+    // flatten_traits iterates self.classes (FQN-keyed) and resolves
+    // each class's own `uses` list (also FQN, via ClassInfo::from_decl's
+    // ctx.resolve) to look trait method/property tables up by - both
+    // sides need to actually agree for this to find anything at all.
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            trait Greets {
+                public string $greeting = "hi";
+                public function greet(): string { return "hi"; }
+            }
+            class Person {
+                use Greets;
+            }
+        "#,
+    );
+    assert_eq!(
+        r.lookup_method("App\\Person", "greet").unwrap().return_type,
+        Type::String
+    );
+    assert_eq!(
+        r.lookup_property("App\\Person", "greeting").unwrap().ty,
+        Type::String
+    );
+}
+
+#[test]
+fn trait_flattening_also_works_for_enums_not_just_classes() {
+    // Coverage measurement found ClassInfo::from_enum_decl's `uses`
+    // closure (resolving an enum's own `use SomeTrait;`) had zero
+    // test executions - enums can use traits in real PHP, and
+    // flatten_traits/lookup_method don't distinguish a class's
+    // ClassInfo from an enum's, but nothing had actually proven an
+    // enum's trait methods flatten in correctly until now.
+    let r = build_registry(
+        r#"<?php
+            trait Greets {
+                public function greet(): string { return "hi"; }
+            }
+            enum Status {
+                use Greets;
+                case Active;
+            }
+        "#,
+    );
+    assert_eq!(
+        r.lookup_method("Status", "greet").unwrap().return_type,
+        Type::String
+    );
+}
+
+#[test]
+fn trait_used_before_its_declaration_still_resolves() {
+    // PHP resolves `use` at compile time, not top-to-bottom - a trait
+    // declared later in the file must still flatten in correctly.
+    let r = build_registry(
+        r#"<?php
+            class Person {
+                use Greets;
+            }
+            trait Greets {
+                public function greet(): string { return "hi"; }
+            }
+        "#,
+    );
+    assert!(r.lookup_method("Person", "greet").is_some());
+}
+
+#[test]
+fn class_method_overrides_trait_method_of_same_name() {
+    let r = build_registry(
+        r#"<?php
+            trait Greets {
+                public function greet(): string { return "generic"; }
+            }
+            class Person {
+                use Greets;
+                public function greet(): int { return 1; }
+            }
+        "#,
+    );
+    assert_eq!(
+        r.lookup_method("Person", "greet").unwrap().return_type,
+        Type::Int
+    );
+}
+
+#[test]
+fn property_lookup_walks_up_extends_chain() {
+    let r = build_registry(
+        r#"<?php
+            class Base { public string $name = ""; }
+            class Sub extends Base {}
+        "#,
+    );
+    assert_eq!(r.lookup_property("Sub", "name").unwrap().ty, Type::String);
+}

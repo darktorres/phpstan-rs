@@ -1,0 +1,15 @@
+mod accessory_and_refinement_types;
+mod arity_and_signatures;
+mod array_functions;
+mod array_literals_and_shapes;
+mod closures_and_callables;
+mod control_flow;
+mod doctrine_and_stdlib_specials;
+mod enums;
+mod generics_and_templates;
+mod helpers;
+mod misc_and_regressions;
+mod narrowing;
+mod oop_overrides_and_inheritance;
+mod preg_and_regex;
+mod string_functions;
