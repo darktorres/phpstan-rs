@@ -675,8 +675,10 @@ fn instanceof_false_branch_against_an_unrelated_class_leaves_the_type_untouched(
 #[test]
 fn in_array_strict_narrows_the_true_branch_to_the_haystacks_literal_union() {
     // Phase 33 Finding 2: CatPermSubmitRequest::fromArray's real
-    // shape - $post['status'] ?? null infers Type::Null (not Mixed),
-    // so this exercises narrow_type_to's non-Union fallback too.
+    // shape - $post['status'] ?? null infers Mixed (an unshaped
+    // `array`'s own element type; see widen_coalesce_result's own
+    // `?? null` no-op case), so this exercises narrow_type_to's
+    // non-Union fallback too.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -692,15 +694,38 @@ fn in_array_strict_narrows_the_true_branch_to_the_haystacks_literal_union() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus shape (BatchManagerGlobalRequest::fromArrays):
+// `$x ?? null` is a real no-op - if `$x` is null the result is null
+// either way, and otherwise it's exactly `$x` - so its own type must
+// be exactly `$x`'s own (unnarrowed) type, not the literal `Type::Null`
+// `widen_coalesce_result` used to trust as the fallback's own type
+// whenever the right side was a bare `null`. That silently collapsed
+// an unshaped array read (`$post['selection'] ?? null`, `$post: array`
+// with no shape, hence `Mixed`) down to provably-null, so a later
+// `is_array(...)` check on it - genuinely checking a real `Mixed`
+// value - never had a chance to actually narrow anything.
 #[test]
-fn in_array_without_the_strict_flag_narrows_nothing() {
+fn coalesce_with_a_null_fallback_keeps_the_left_sides_own_type() {
     let d = diagnostics_for(
         r#"<?php
             /**
              * @param array<array-key, mixed> $post
+             * @param array<mixed> $default
              */
-            function fromArray(array $post): string {
-                $status_raw = $post['status'] ?? null;
+            function f(array $post, array $default): array {
+                $selection_raw = $post['selection'] ?? null;
+                return is_array($selection_raw) ? $selection_raw : $default;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn in_array_without_the_strict_flag_narrows_nothing() {
+    let d = diagnostics_for(
+        r#"<?php
+            function fromArray(?string $status_raw): string {
                 $status = in_array($status_raw, ['public', 'private']) ? $status_raw : '';
                 return $status;
             }
@@ -714,11 +739,7 @@ fn in_array_without_the_strict_flag_narrows_nothing() {
 fn in_array_strict_with_a_non_literal_haystack_element_narrows_nothing() {
     let d = diagnostics_for(
         r#"<?php
-            /**
-             * @param array<array-key, mixed> $post
-             */
-            function fromArray(array $post, string $other): string {
-                $status_raw = $post['status'] ?? null;
+            function fromArray(?string $status_raw, string $other): string {
                 $status = in_array($status_raw, [$other, 'public'], true) ? $status_raw : '';
                 return $status;
             }
@@ -970,12 +991,7 @@ fn or_of_predicates_on_different_keys_narrows_neither() {
     let d = diagnostics_for(
         r#"<?php
             function needsString(string $s): void {}
-            /**
-             * @param array<string, mixed> $arr
-             */
-            function handle(array $arr): void {
-                $x = $arr['x'] ?? null;
-                $y = $arr['y'] ?? null;
+            function handle(?int $x, ?string $y): void {
                 $x = is_int($x) || is_string($y) ? $x : 0;
                 needsString($x);
             }

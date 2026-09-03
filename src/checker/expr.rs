@@ -2304,6 +2304,21 @@ impl<'a> Checker<'a> {
     /// containing one) - no corpus evidence either occurs, same class of
     /// bug, left for a future pass if one turns up.
     fn widen_coalesce_result(&self, l: &Expr, r_ty: Type, locals: &Locals) -> Type {
+        // `$x ?? null` is a real, if unusual, no-op: if `$x` is null the
+        // result is null either way, and otherwise the result is
+        // exactly `$x` itself - so its own type is exactly `$x`'s own
+        // type, unnarrowed, not the literal `r_ty` (`Type::Null`) this
+        // function otherwise trusts as the fallback's own type. A round
+        // of Piwigo-corpus bucketing found this collapsing an
+        // unshaped-array element read (`$post['selection'] ?? null`,
+        // `$post: array` with no shape, so `Mixed`) all the way down to
+        // bare `Type::Null` - real corpus code checks the *original*
+        // expression with `is_array($selection_raw)` immediately after,
+        // which should still be checking a real `Mixed`, not a value
+        // this checker had already convinced itself could only be null.
+        if r_ty == Type::Null {
+            return self.infer_expr(l, locals);
+        }
         let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::Null);
         // Phase 14: still scoped to exactly `Type::Array` on the left,
         // matching this function's own documented, deliberately narrow
