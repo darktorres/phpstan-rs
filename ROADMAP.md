@@ -104,13 +104,162 @@ all name-keyed. `src/lsp.rs`'s existing hand-rolled JSON-RPC loop
 **Phase 18 - Extension/plugin API (PLANNED).** Deliberately last and
 least concrete - premature before Phases 12-15 give this project enough
 built-in rules/type-extensions that a third party would actually want to
-add to, rather than just use.
+add to, rather than just use. Unrelated to Phase 40 below - Phase 40 is
+about checking PHP code that consumes *real PHPStan's own* API, not
+about phpstan-rs exposing one of its own.
 
 **Phase 19 - Fuzz testing (NOT STARTED).** Name and rough intent only:
 `arbitrary` + `cargo-fuzz` for the lexer/parser (a malformed-input crash
 is a real, if narrow, risk the corpus-testing approach can't rule out),
 `proptest` for `types.rs`'s subtyping logic (reflexivity, transitivity).
 Both dev-only. Deliberately deferred behind Phases 11-15.
+
+**Phase 36 - PHPDoc tag ecosystem expansion (PLANNED).** `docblock.rs`'s
+tag matcher is exact literal-string matching (`match tag { "param" =>
+..., "return" => ..., ... }`) with no `@phpstan-`-prefix handling at
+all, so the `@phpstan-param`/`@phpstan-var`/etc. spelling (a real,
+documented convention - see the Doctrine-corpus finding in Known
+limitations below) is silently dropped for every tag, including ones
+already supported. Fix that first, before adding anything else, so
+every following addition gets both spellings for free. New tags
+needed: `@method`/`@mixin`/`@phpstan-type` (synthesized into
+`ClassInfo`'s `methods`/`properties` maps the same way enum
+`cases()`/`value`/`name` already are, Phase 9 - `@phpstan-type` itself
+needs four real pieces: global config-level aliases, `@phpstan-import-type
+... from ...`, circular-alias detection, and duplicate-name checks
+against real classes/other local aliases/imports/globals);
+`@phpstan-require-extends`/`-implements`/`@phpstan-sealed`/
+`@phpstan-consistent-constructor` (validated once per declaration, the
+same shape `check_generic_bounds` already uses for `@extends`/
+`@implements` bounds, Phase 10.5); `@phpstan-assert`/`-if-true`/
+`-if-false`/`@phpstan-self-out`/`@phpstan-this-out` (a self-contained
+declaration-consistency check - real PHPStan's own `AssertRuleHelper`
+doesn't touch narrowing either, just validates the tag against the
+parameter's own declared type); `@readonly` (the documentation-only
+convention, parallel to the native `is_readonly` already tracked);
+`@param-immediately-invoked-callable`/`@param-later-invoked-callable`/
+`@param-closure-this`; an enumerated `@phpstan-*` tag whitelist for typo
+detection; and a validation layer for the already-shipped inline `@var`
+(Phase 35's `inline_var_annotation`, confirmed to unconditionally
+overwrite the tracked type with no validation against the real
+expression type at all). (`@property`/`@property-read`/
+`@property-write` shipped separately, Phase 13 Finding D - out of this
+phase's scope.)
+
+**Phase 37 - Attribute (`#[...]`) AST support (PLANNED).**
+`#[Attribute(...)]` is lexed and thrown away entirely
+(`Lexer::skip_whitespace_and_comments`) - real attribute content is
+never available anywhere in this project, only two narrowly
+special-cased stub-generation attributes get lexer-level text
+splicing (`#[PhpStormStubsElementAvailable]`, `#[LanguageLevelTypeAware]`).
+Needs a real lexer-level fix (emit tokens for `#[`, the name, `(`,
+args, `,`, `]` instead of skipping the span, reusing the existing
+string-aware bracket-depth-counting logic those two special cases
+already use), a new `Attribute { name, args }` node parsed onto every
+declaration site that can carry one (`ClassDecl`/`MethodDecl`/
+`PropertyDecl`/`FunctionDecl`/`Param`/`ClassConst`/`EnumCase`, plus
+closures/arrow functions), and checker-side attribute-class-existence
+and target-validity checking, plus a `#[NoDiscard]` marker.
+
+**Phase 38 - Target-PHP-version configuration (PLANNED).** No
+`php_version` setting exists anywhere (`config.rs`/CLI) - every "X only
+supported on PHP Y.Z and later" portability check is unbuildable
+without one. New `php_version: Option<(u8, u8)>`, following the exact
+precedent of `strict_mixed_arrays` (Phase 11 Stage 5: `config.rs` field
+-> CLI flag -> `Project` setter), plus a small `PhpFeature -> (u8, u8)`
+table.
+
+**Phase 39 - Deprecated-symbol usage warnings (PLANNED).**
+`@deprecated` is parsed-past and discarded (confirmed - it only appears
+in a `docblock.rs` test fixture, never consumed). New generalized
+"restricted symbol usage" checker reusing `Registry::lookup_method`/
+`lookup_property`'s already-centralized lookup machinery, switching the
+predicate from "not found -> error" to "found, but deprecated -> warn,"
+once `FunctionSig`/`PropertySig` gain a `deprecated: bool` field.
+
+**Phase 40 - PHPStan-API-usage checks (PLANNED).** Checks PHP code that
+consumes `phpstan/phpstan` itself as a Composer library (third-party
+PHPStan rule/extension authors) for references into `PHPStan\*` that
+aren't marked `@api` - see the Phase 18 note above for why this is a
+different feature. A pure namespace-prefix check (`PHPStan\*` minus
+`PHPStan\PhpDocParser\`/`PHPStan\BetterReflection\`) plus a
+vendor-directory file-path check; `@api`/`@api-do-not-implement`
+recognized via Phase 36's own tag infrastructure; gated behind
+detecting a `phpstan/extension-installer`/`phpstan/phpstan` dependency
+in the analyzed project's own `composer.json` (mirrors the real
+Pest-config-detection precedent, Phase 21).
+
+**Phase 41 - Purity / side-effect model (PLANNED).** No purity/
+impurity tracking exists anywhere in `src/`. Needs an impure-point
+detection pass - a body walk over every function/method/closure
+classifying around 20 real operation kinds (echo, property writes,
+method/function calls, `new`, `include`/`require`, `eval`, superglobal/
+static/global access, ...; each a real category from PHPStan's own
+`ImpurePoint` type, `certain` vs `maybe`) - plus `@phpstan-pure`/
+`@phpstan-impure`/`@phpstan-immutable`/`@phpstan-all-methods-pure`/
+`-impure`/`@pure-unless-callable-is-impure` tag parsing, and validating
+a tagged-pure function against its own real impure points. The "unused
+result of a pure call" rule family additionally needs *transitive*
+purity across the call graph - a fixed-point pass over the
+already-fully-indexed `Registry` (Phase 7), not new Collectors-style
+infrastructure.
+
+**Phase 42 - Checked-exception / throw-type model (PLANNED).**
+`FunctionSig` has no `throws` field at all - the same gap Phase 15
+above already names as its own missing `Exceptions`-category
+prerequisite. Needs `throws: Option<Type>` populated from `@throws`
+(parsed-past today, same as `@deprecated`) plus a real body walk
+collecting `throw` statements and transitively unioning every called
+function's own `throws`. Only the "missing checked exception"/
+"throw-type covariance"/"too-wide throw type" rule family needs an
+opt-in flag; the "throws void but explicitly throws" family doesn't.
+
+**Phase 43 - Property-hook checker validation (PLANNED).** PHP 8.4
+property hooks are fully parsed (`PropertyDecl.hooks`, and
+`Param.hooks` for a promoted constructor parameter's own inline hooks)
+but hook bodies are never type-checked at all - confirmed by this
+project's own doc comment ("no function-like registry entry to check
+them against"). Phase 14.5's `PropertySig.set_ty` fix only makes
+property-*write* checking hook-aware when a `set` hook accepts a wider
+native type; it doesn't check hook bodies themselves. Needs a
+function-like registry entry for each hook body so the checker's
+existing per-statement machinery can walk it, plus "virtual" property
+detection - real PHP determines this via native
+`ReflectionProperty::isVirtual()` at runtime, which this project has no
+interpreter to delegate to, so it needs the real RFC semantics
+reimplemented directly: virtual iff no hook body ever references the
+property's own backing storage.
+
+**Phase 44 - `@phpstan-ignore` inline suppression (PLANNED).** Only
+whole-file baseline suppression exists today (Phase 11). Real PHPStan's
+`@phpstan-ignore-line`/`-next-line` are simple line markers, but bare
+`@phpstan-ignore` takes a real comma-separated identifier list (each
+optionally followed by a parenthesized comment) matching against a
+diagnostic's own stable identifier - which `Diagnostic` doesn't have at
+all today (just `location`/`message`/`span`/`level`). Worth retrofitting
+regardless of this phase, since CI output formats (Phase 16) and
+finer-grained baselines both want stable identifiers too.
+
+**Phase 45 - Declared-vs-actual-narrowest-type inference
+(TooWideTypehints) (PLANNED).** No mechanism compares a declared type
+against the narrowest type a function body/property could ever actually
+produce. Real PHPStan's own version has three distinct pieces: top-level
+union-member narrowing; an independently-toggled bool-narrowing special
+case (`bool` narrows to literal `true`/`false` when the body only ever
+produces one); and independently-toggled nested/recursive narrowing
+(walking declared and actual types in parallel to narrow type arguments
+too, not just the top level) - needs a real parallel-tree-walk utility
+over `Type`, not a byproduct of `infer_expr`.
+
+**Phase 46 - PCRE pattern-validity checking (PLANNED).** Real
+PHPStan's `RegularExpressionPatternRule` flags a genuinely malformed
+regex pattern. `regex_groups.rs` (Phase 12) deliberately doesn't do
+this - it silently bails on anything outside its own understood subset
+rather than validating, the right choice for structure-extraction but
+not for catching real syntax errors. This project's first C dependency
+(`pcre2` bindings) - Rust's own `regex` crate is a different-enough
+flavor to give wrong answers on real PCRE patterns. Needs its own
+build-time/vendoring story and a vendored-vs-system-dependency decision.
 
 ## Known limitations
 
@@ -129,6 +278,16 @@ comments.
 | No CI-friendly output formats (JSON/checkstyle/junit/...) | 16 |
 | No LSP hover/go-to-definition | 17 |
 | No extension/plugin API | 18 |
+| `#[...]` attributes are lexed and discarded, never becoming real AST nodes (only two narrowly special-cased stub-generation attributes get lexer-level text splicing) | 37 |
+| No target-PHP-version config, so no "X only supported on PHP Y.Z+" portability check is possible | 38 |
+| `@deprecated` is parsed-past and discarded; no restricted/deprecated-symbol-usage warnings | 39 |
+| No checking of PHP code that consumes real PHPStan's own API for `@api`-boundary violations | 40 |
+| No purity/impurity tracking anywhere | 41 |
+| `FunctionSig` has no `throws` field; no checked-exception/throw-type model | 42 |
+| PHP 8.4 property hook bodies are parsed but never type-checked (Phase 14.5's `set_ty` fix only makes property-write checking hook-aware, not hook bodies themselves) | 43 |
+| Only whole-file baseline suppression exists; no `@phpstan-ignore` inline suppression, and `Diagnostic` has no stable per-check identifier at all | 44 |
+| No declared-vs-actual-narrowest-type inference (`TooWideTypehints`) | 45 |
+| No PCRE pattern-validity checking - `regex_groups.rs` (Phase 12) deliberately doesn't validate, only extracts structure | 46 |
 
 ### Known but not yet scheduled to any phase
 
