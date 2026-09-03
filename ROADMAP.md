@@ -29,16 +29,16 @@ cited in both halves so either can be cross-referenced from the other.
 
 ## Headline numbers
 
-- Test suite: 954 unit tests (`src/`) + 26 CLI integration tests + 3
-  `main.rs` unit tests, all passing as of Phase 14.5's tenth round.
+- Test suite: 955 unit tests (`src/`) + 26 CLI integration tests + 3
+  `main.rs` unit tests, all passing as of Phase 14.5's eleventh round.
 - Piwigo frozen-corpus diagnostic count - the primary false-positive-hunt
   metric (`phpstan-rs.toml`-scoped, `/home/torres/piwigo17-frozen`) -
   has fallen every round: 2312 (Phase 22 start) -> 1280 -> 1021 -> 792 ->
   732 -> 706 -> 580 -> 532 -> 533 -> 512 -> 508 -> 350 -> 295 -> 270 ->
   249 (Phase 35) -> 240 -> 239 (Phase 12) -> 211 (Phase 13) -> 1115 ->
   875 (Phase 14's closing round) -> 453 -> 434 -> 397 -> 296 -> 287 -> 285
-  -> 253 -> 221 -> 219 (Phase 14.5's first nine rounds) -> **197
-  (current, Phase 14.5's tenth round)**. The 211 -> 1115 jump was a real, confirmed
+  -> 253 -> 221 -> 219 -> 197 (Phase 14.5's first ten rounds) -> **188
+  (current, Phase 14.5's eleventh round)**. The 211 -> 1115 jump was a real, confirmed
   *increase*, not a regression: `list<T>`/`non-empty-array<T>` now
   match real PHPStan's own strictness rather than this project's usual
   leniency default, a deliberate, explicitly confirmed choice given
@@ -1237,6 +1237,24 @@ object in the corpus's own `Common\ValueObject` family at once:
   `Union([StaticRef, Null])`, never its own dedicated type, so the
   equality check silently never fired for any of the 22 affected
   classes. Fixed by looking for `StaticRef` inside a `Union` too.
+
+**An eleventh round** (197 -> 188) found the exact same fragility
+pattern Phase 32 Finding L had already fixed once for `Union`s, this
+time for Phase 14's own new `Intersection`-based string accessory
+types:
+
+- **`str_replace`/`preg_replace`'s subject-dependent special case
+  gated on `subject_type == Type::String` exactly.** Real code very
+  commonly narrows a string first (`if ($source_file === '') { return
+  false; }`, `Lang::load()`'s own real shape), which Phase 14 makes a
+  real `Intersection([String, Accessory(NonEmptyString)])` rather than
+  plain `String` - so the equality check silently stopped firing the
+  moment Phase 14 landed, falling back to the stub's own broad
+  `string|array<string>|null` return and losing precision at every
+  downstream `basename()`/`is_readable()`/`Translator::load()` call.
+  Fixed by switching both gates to `types::is_subtype(..., &Type::
+  String)`, which already generalizes correctly across `Intersection`
+  and literal string types without needing a new special case.
 
 ## Phase 20 - Performance & robustness - DONE
 
