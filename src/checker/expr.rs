@@ -2869,7 +2869,28 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &Locals) -> Type {
         match op {
-            BinOp::Concat => Type::String,
+            // Round 12: verified via dumpType() - concatenating any two
+            // strings where *either* side is provably non-falsy (a real
+            // string literal other than `''`/`'0'`, or already a
+            // `non-falsy-string`) always produces a `non-falsy-string`
+            // result, regardless of the other side's own type - real
+            // corpus shape: `sys_get_temp_dir() . '/'`, `dirname(...) .
+            // '/backups/'`, `'.' . $ext`, each feeding a PHPUnit
+            // `assertStringStartsWith()`/`assertStringEndsWith()` whose
+            // stub declares its needle as `non-empty-string`.
+            BinOp::Concat => {
+                let non_falsy_string = Type::Intersection(vec![
+                    Type::String,
+                    Type::Accessory(AccessoryKind::NonFalsyString),
+                ]);
+                if types::is_subtype(&self.infer_expr(l, locals), &non_falsy_string)
+                    || types::is_subtype(&self.infer_expr(r, locals), &non_falsy_string)
+                {
+                    non_falsy_string
+                } else {
+                    Type::String
+                }
+            }
             BinOp::Eq
             | BinOp::Identical
             | BinOp::NotEq

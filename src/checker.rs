@@ -1635,6 +1635,53 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Round 12: verified via dumpType() - concatenating any string with a
+    // real non-falsy string literal (on either side) always produces a
+    // non-falsy-string, regardless of the other side's own type. Real
+    // corpus shape: `sys_get_temp_dir() . '/'` fed straight into
+    // PHPUnit's `assertStringStartsWith(non-empty-string $prefix, ...)`.
+    #[test]
+    fn concatenating_a_non_falsy_string_literal_on_the_right_narrows_to_non_falsy_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $unknown): void {
+                sink($unknown . '/');
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn concatenating_a_non_falsy_string_literal_on_the_left_narrows_to_non_falsy_string() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $unknown): void {
+                sink('.' . $unknown);
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn concatenating_two_unknown_strings_does_not_falsely_claim_non_falsy() {
+        let d = diagnostics_for(
+            r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $a, string $b): void {
+                sink($a . $b);
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
     #[test]
     fn str_replace_falls_back_to_the_generic_path_for_a_non_string_subject() {
         // Scoped to "subject is exactly Type::String" - a Mixed subject
