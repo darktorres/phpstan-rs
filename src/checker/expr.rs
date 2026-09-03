@@ -2297,9 +2297,23 @@ impl<'a> Checker<'a> {
             BinOp::Mod | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
                 Type::Int
             }
-            // Real PHP division returns int or float depending on the
-            // runtime values, not just their static types - not modeled.
-            BinOp::Div => Type::Mixed,
+            // Phase 13 Finding C: verified against real PHPStan's own
+            // dumpType() - `/` gives `int|float` unconditionally whenever
+            // it can't prove `float` is involved, even for two fully
+            // unknown operands (not only when both are provably `int`),
+            // and `float` whenever either operand is. Mirrors the
+            // Add/Sub/Mul/Pow float-promotion shape directly above,
+            // `Union([Int, Float])` in place of a bare `Int` as the
+            // "float not proven" answer.
+            BinOp::Div => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                if lt == Type::Float || rt == Type::Float {
+                    Type::Float
+                } else {
+                    Type::Union(vec![Type::Int, Type::Float])
+                }
+            }
             BinOp::Coalesce => {
                 let r_ty = self.infer_expr(r, locals);
                 self.widen_coalesce_result(l, r_ty, locals)

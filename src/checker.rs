@@ -3381,6 +3381,49 @@ mod tests {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 
+    // Phase 13 Finding C: verified against real PHPStan's own dumpType() -
+    // `/` gives `int|float` unconditionally whenever it can't prove
+    // `float` is involved, `float` whenever it can.
+    #[test]
+    fn division_of_two_ints_infers_int_or_float() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int $a, int $b): int|float {
+                return $a / $b;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn division_involving_a_float_infers_plain_float() {
+        let d = diagnostics_for(
+            r#"<?php
+            function f(int $a, float $b): float {
+                return $a / $b;
+            }
+        "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn division_of_two_mixed_values_infers_int_or_float_not_mixed() {
+        // Real PHPStan's own unconditional `int|float` applies even for
+        // two fully unknown operands - a declared `int` return must
+        // still be rejected (proving this isn't just falling back to the
+        // old, universally-compatible Mixed).
+        let d = diagnostics_for(
+            r#"<?php
+            function f($a, $b): int {
+                return $a / $b;
+            }
+        "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+    }
+
     #[test]
     fn instanceof_narrows_to_the_checked_class() {
         let d = diagnostics_for(
