@@ -1,5 +1,6 @@
+use crate::ast::Attribute;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, Span, Token};
 
 impl Parser {
     // ---- token stream helpers ----
@@ -212,5 +213,68 @@ impl Parser {
             }
         }
         s
+    }
+
+    /// Phase 37: parses zero or more consecutive `#[Name(args), ...]`
+    /// attribute groups sitting at the current position - real PHP allows
+    /// several bracket groups back-to-back on one declaration
+    /// (`#[A] #[B(1)]`, equivalent to the single group `#[A, B(1)]`), so
+    /// this loops rather than parsing just one. Returns an empty `Vec`
+    /// without consuming anything when the current token isn't
+    /// `AttributeStart` at all - every call site can call this
+    /// unconditionally rather than checking first.
+    pub(crate) fn parse_attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
+        let mut attrs = Vec::new();
+        while self.check(&Token::AttributeStart) {
+            self.advance();
+            loop {
+                let attr_start = self.current_pos();
+                let name = self.parse_qualified_name();
+                let args = if self.check(&Token::LParen) {
+                    self.parse_args()?.0
+                } else {
+                    Vec::new()
+                };
+                attrs.push(Attribute {
+                    name,
+                    args,
+                    span: Span {
+                        start: attr_start,
+                        end: self.previous_end(),
+                    },
+                });
+                // A trailing comma before the closing `]` is valid PHP
+                // (`#[A, B,]`), same as a call's own trailing comma.
+                if !self.eat(&Token::Comma) || self.check(&Token::RBracket) {
+                    break;
+                }
+            }
+            self.expect(&Token::RBracket)?;
+        }
+        Ok(attrs)
+    }
+
+    /// Same as `parse_attributes`, but also preserves a doc comment
+    /// recorded as immediately preceding the attribute group(s) - a doc
+    /// comment normally attaches to whatever real token comes right after
+    /// it (`self.doc_comments` is keyed by that token's index), which
+    /// before this phase was always the declaration itself. With a real
+    /// `#[...]` group now sitting between the two
+    /// (`/** doc */ #[Attr] function f() {}`), the doc comment is keyed to
+    /// the attribute group's own position instead - re-keying it here, to
+    /// wherever parsing the attributes leaves `self.pos`, is what lets the
+    /// declaration parser that follows (which looks up its own doc comment
+    /// via `take_doc_comment()`, unaware any attributes were even there)
+    /// keep finding it unchanged.
+    pub(crate) fn parse_leading_attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
+        if !self.check(&Token::AttributeStart) {
+            return Ok(Vec::new());
+        }
+        let doc = self.doc_comments.remove(&self.pos);
+        let attrs = self.parse_attributes()?;
+        if let Some(doc) = doc {
+            self.doc_comments.insert(self.pos, doc);
+        }
+        Ok(attrs)
     }
 }

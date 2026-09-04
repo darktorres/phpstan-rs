@@ -334,6 +334,17 @@ pub enum Token {
     PipeGt,
     // `${` - starts the older "variable variable" syntax `${expr}`.
     DollarBrace,
+    // `#[` - opens an attribute group (`#[Attribute(...), Other]`). Real
+    // tokens, not skipped: everything between this and the matching `]`
+    // (the attribute's name, `(`, its arguments, `,` between multiple
+    // attributes in one group) is ordinary tokenization from here on, so
+    // the parser can build a real `Attribute` node instead of the content
+    // being thrown away entirely. `#[PhpStormStubsElementAvailable(...)]`
+    // and `#[LanguageLevelTypeAware(...)]` are the two narrow exceptions
+    // (still consumed as raw text by `skip_whitespace_and_comments`, never
+    // reaching the parser as tokens at all) - see that function's own
+    // comment.
+    AttributeStart,
     // A lone `$` not immediately followed by an identifier or `{` - the
     // brace-less variable-variable form (`$$name`, meaning "the variable
     // named by the value of $name", same as `${$name}`).

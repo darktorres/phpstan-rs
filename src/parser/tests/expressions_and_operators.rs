@@ -588,6 +588,63 @@ fn by_reference_arrow_function_still_parses_as_arrow_fn() {
     assert!(matches!(&rhs.kind, ExprKind::ArrowFn { .. }));
 }
 
+// Phase 37: `#[Attr] function () {}` / `#[Attr] static fn() => ...` - the
+// only expression-position shape real PHP allows an attribute group on.
+
+#[test]
+fn an_attributed_closure_expression_carries_its_own_attrs() {
+    let program = parse(r#"<?php $f = #[Pure] function () { return 1; };"#);
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected assignment");
+    };
+    let ExprKind::Closure { attrs, .. } = &rhs.kind else {
+        panic!("expected a Closure, got {:?}", rhs.kind);
+    };
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].name, "Pure");
+}
+
+#[test]
+fn an_attributed_static_arrow_function_carries_its_own_attrs() {
+    let program = parse(r#"<?php $f = #[Pure] static fn($x) => $x;"#);
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected assignment");
+    };
+    let ExprKind::ArrowFn {
+        attrs, is_static, ..
+    } = &rhs.kind
+    else {
+        panic!("expected an ArrowFn, got {:?}", rhs.kind);
+    };
+    assert_eq!(attrs.len(), 1);
+    assert_eq!(attrs[0].name, "Pure");
+    assert!(is_static);
+}
+
+#[test]
+fn a_plain_closure_with_no_attributes_has_an_empty_attrs_list() {
+    let program = parse(r#"<?php $f = function () { return 1; };"#);
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected assignment");
+    };
+    let ExprKind::Closure { attrs, .. } = &rhs.kind else {
+        panic!("expected a Closure, got {:?}", rhs.kind);
+    };
+    assert!(attrs.is_empty());
+}
+
 #[test]
 fn trailing_dot_float_literal_parses() {
     let program = parse(r#"<?php $x = [5., 6.];"#);

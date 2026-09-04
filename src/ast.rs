@@ -1,5 +1,23 @@
 use crate::token::Span;
 
+/// Phase 37: one `Name(args)` entry inside an attribute group
+/// (`#[Name(args), ...]`). `name` is the raw (possibly
+/// namespaced/backslashed) class name exactly as `parse_qualified_name`
+/// reads it, resolved against the
+/// enclosing file's `use` imports the same way any other class-name
+/// reference is (by the checker, not here - this node is deliberately as
+/// dumb as `ClassConst`/`Param`, just structure). `args` reuses the exact
+/// same `Arg` shape a real call's argument list uses (named arguments and
+/// `...spread` included) - an attribute's own arguments are simply an
+/// argument list applied to its constructor at compile time, real PHP's
+/// own grammar doesn't distinguish the two syntactically at all.
+#[derive(Debug, Clone)]
+pub struct Attribute {
+    pub name: String,
+    pub args: Vec<Arg>,
+    pub span: Span,
+}
+
 /// A statement, plus the real source span it occupies - `kind` carries the
 /// actual variant data (renamed from the old bare `Stmt` enum so the two
 /// concerns - "what kind of statement" and "where it is" - stay separate).
@@ -122,6 +140,10 @@ pub struct Param {
     // Boxed because PropertyHooks::set itself embeds a Param - unboxed,
     // Param would have infinite size.
     pub hooks: Option<Box<PropertyHooks>>,
+    // Phase 37: `#[Attr]` groups written directly on this parameter
+    // (`function f(#[SensitiveParameter] string $password) {}`) - empty
+    // for the overwhelming majority of parameters, which have none.
+    pub attrs: Vec<Attribute>,
     pub span: Span,
 }
 
@@ -133,6 +155,11 @@ pub struct FunctionDecl {
     pub body: Vec<Stmt>,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
     pub doc_comment: Option<String>,
+    // Phase 37: `#[Attr]` groups preceding this declaration - shared by a
+    // top-level function and (via `MethodDecl.function`) a class method,
+    // since real PHP attaches attributes to the same source position
+    // either way (before any `public`/`static`/... modifiers).
+    pub attrs: Vec<Attribute>,
     pub span: Span,
 }
 
@@ -158,6 +185,8 @@ pub struct PropertyDecl {
     // with no function-like registry entry to check them against) - out of
     // scope for now, same as FirstClassCallable's args.
     pub hooks: Option<PropertyHooks>,
+    // Phase 37: `#[Attr]` groups preceding this property declaration.
+    pub attrs: Vec<Attribute>,
     pub span: Span,
 }
 
@@ -219,6 +248,11 @@ pub struct ClassConst {
     // top-level (non-class) `const` statement path, which doesn't thread
     // a doc comment through at all.
     pub doc_comment: Option<String>,
+    // Phase 37: `#[Attr]` groups preceding this const declaration - the
+    // same group applies to every name in a comma-separated
+    // `const A = 1, B = 2;` list, mirroring how `visibility`/`doc_comment`
+    // are already cloned onto each one.
+    pub attrs: Vec<Attribute>,
     pub span: Span,
 }
 
@@ -262,6 +296,10 @@ pub struct ClassDecl {
     // before a `function`/property declaration, never before
     // `class`/`interface`/`trait`.
     pub doc_comment: Option<String>,
+    // Phase 37: `#[Attr]` groups preceding this class/interface/trait
+    // declaration (e.g. `#[Attribute(Attribute::TARGET_CLASS)]`, marking
+    // the class itself usable as an attribute).
+    pub attrs: Vec<Attribute>,
     pub span: Span,
 }
 
@@ -271,6 +309,8 @@ pub struct EnumCase {
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
     // one (`case Hearts;`).
     pub value: Option<Expr>,
+    // Phase 37: `#[Attr]` groups preceding this case.
+    pub attrs: Vec<Attribute>,
     pub span: Span,
 }
 
@@ -287,6 +327,8 @@ pub struct EnumDecl {
     pub uses: Vec<String>,
     pub trait_aliases: Vec<TraitAlias>,
     pub resolved_trait_conflicts: Vec<String>,
+    // Phase 37: `#[Attr]` groups preceding this enum declaration.
+    pub attrs: Vec<Attribute>,
     pub span: Span,
 }
 
@@ -496,12 +538,17 @@ pub enum ExprKind {
         is_static: bool,
         by_ref: bool,
         return_type: Option<String>,
+        // Phase 37: `#[Attr]` groups on the closure expression itself
+        // (`$f = #[Foo] function () {};`), not on any of its parameters.
+        attrs: Vec<Attribute>,
     },
     ArrowFn {
         params: Vec<Param>,
         body: Box<Expr>,
         is_static: bool,
         return_type: Option<String>,
+        // Phase 37: see `Closure.attrs` above.
+        attrs: Vec<Attribute>,
     },
     Match {
         subject: Box<Expr>,

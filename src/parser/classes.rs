@@ -85,6 +85,11 @@ impl Parser {
             trait_aliases,
             resolved_trait_conflicts,
             doc_comment: None,
+            // An anonymous class expression has no declaration position of
+            // its own for a `#[Attr]` group to precede - not valid PHP
+            // syntax at all (`new #[Attr] class {}` doesn't parse in real
+            // PHP either).
+            attrs: Vec::new(),
             span: Span {
                 start: decl_start,
                 end: self.previous_end(),
@@ -122,6 +127,12 @@ impl Parser {
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let member_start = self.current_pos();
+            // Phase 37: `#[Attr]` groups precede everything else about a
+            // member (even its visibility/`static`/... modifiers) - parsed
+            // before `take_doc_comment` reads through to whatever's next,
+            // via a wrapper that re-keys a preceding doc comment so it's
+            // still found there unchanged.
+            let attrs = self.parse_leading_attributes()?;
             let doc = self.take_doc_comment();
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
@@ -234,6 +245,7 @@ impl Parser {
                         value,
                         doc_comment: doc.clone(),
                         visibility: visibility.clone(),
+                        attrs: attrs.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),
@@ -250,6 +262,7 @@ impl Parser {
             if self.check(&Token::Keyword(Keyword::Function)) {
                 let mut function = self.parse_function_decl()?;
                 function.doc_comment = doc;
+                function.attrs = attrs;
                 methods.push(MethodDecl {
                     visibility,
                     is_static,
@@ -290,6 +303,7 @@ impl Parser {
                         default,
                         doc_comment: doc.clone(),
                         hooks: Some(hooks),
+                        attrs: attrs.clone(),
                         span: Span {
                             start: prop_start,
                             end: self.previous_end(),
@@ -306,6 +320,7 @@ impl Parser {
                     default,
                     doc_comment: doc.clone(),
                     hooks: None,
+                    attrs: attrs.clone(),
                     span: Span {
                         start: prop_start,
                         end: self.previous_end(),
@@ -420,6 +435,7 @@ impl Parser {
 
             let param = if is_set && self.eat(&Token::LParen) {
                 let param_start = self.previous_end();
+                let attrs = self.parse_attributes()?;
                 let type_hint = self.parse_type_hint()?;
                 let by_ref = self.eat(&Token::Amp);
                 let name = self.expect_variable()?;
@@ -433,6 +449,7 @@ impl Parser {
                     promoted_visibility: None,
                     promoted_readonly: false,
                     hooks: None,
+                    attrs,
                     span: Span {
                         start: param_start,
                         end: self.previous_end(),
@@ -555,6 +572,12 @@ impl Parser {
             trait_aliases,
             resolved_trait_conflicts,
             doc_comment,
+            // Overwritten by `parse_statement`, the only caller that
+            // actually saw any leading `#[Attr]` groups (both of this
+            // function's own call sites are reached only after
+            // `parse_statement` already consumed and stashed them) - see
+            // its own `Token::Keyword(Keyword::Class | ...)` handling.
+            attrs: Vec::new(),
             span: Span {
                 start,
                 end: self.previous_end(),
@@ -596,6 +619,8 @@ impl Parser {
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let member_start = self.current_pos();
+            // Phase 37: see the identical handling in `parse_class_body`.
+            let attrs = self.parse_leading_attributes()?;
             let doc = self.take_doc_comment();
 
             if self.eat(&Token::Keyword(Keyword::Case)) {
@@ -609,6 +634,7 @@ impl Parser {
                 cases.push(EnumCase {
                     name: case_name,
                     value,
+                    attrs,
                     span: Span {
                         start: member_start,
                         end: self.previous_end(),
@@ -688,6 +714,7 @@ impl Parser {
                         value,
                         doc_comment: doc.clone(),
                         visibility: visibility.clone(),
+                        attrs: attrs.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),
@@ -704,6 +731,7 @@ impl Parser {
             if self.check(&Token::Keyword(Keyword::Function)) {
                 let mut function = self.parse_function_decl()?;
                 function.doc_comment = doc;
+                function.attrs = attrs;
                 methods.push(MethodDecl {
                     visibility,
                     is_static,
@@ -735,6 +763,10 @@ impl Parser {
             uses,
             trait_aliases,
             resolved_trait_conflicts,
+            // Overwritten by `parse_statement`, the only caller that saw
+            // any leading `#[Attr]` groups - see `ClassDecl.attrs`'s
+            // identical note in `parse_class_decl`.
+            attrs: Vec::new(),
             span: Span {
                 start,
                 end: self.previous_end(),

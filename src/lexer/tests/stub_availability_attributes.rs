@@ -207,12 +207,34 @@ fn language_level_type_aware_with_no_preceding_doc_comment_is_a_safe_no_op() {
 // logic wasn't string-aware, so an unbalanced `[`/`]` inside an
 // argument string (a completely ordinary regex character class)
 // ended the skip early and corrupted the rest of the parse.
+//
+// Phase 37: a general `#[Attribute(...)]` group is no longer skipped at
+// all - it's real tokens now, so a string literal's own content
+// (including an unbalanced `[`/`]` inside it) is naturally immune to this
+// problem, being just one ordinary `StringLit` token regardless of what
+// bytes it contains. This test now asserts the real tokens survive
+// intact instead of asserting the whole group vanishes.
 
 #[test]
-fn attribute_skip_is_not_fooled_by_an_unbalanced_bracket_in_a_string_argument() {
+fn a_general_attribute_group_is_not_fooled_by_an_unbalanced_bracket_in_a_string_argument() {
     let src = "<?php #[Assert\\Regex('/[^\\]]+/')]\nclass C {}\n";
     let toks = Lexer::new(src).tokenize();
-    // The attribute is skipped entirely - the next real token is the
-    // `class` keyword, not garbage from inside the regex string.
-    assert_eq!(toks[0], Token::Keyword(Keyword::Class));
+    assert_eq!(
+        toks,
+        vec![
+            Token::AttributeStart,
+            Token::Identifier("Assert".to_string()),
+            Token::Backslash,
+            Token::Identifier("Regex".to_string()),
+            Token::LParen,
+            Token::StringLit("/[^\\]]+/".to_string()),
+            Token::RParen,
+            Token::RBracket,
+            Token::Keyword(Keyword::Class),
+            Token::Identifier("C".to_string()),
+            Token::LBrace,
+            Token::RBrace,
+            Token::Eof,
+        ]
+    );
 }

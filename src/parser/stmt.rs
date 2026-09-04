@@ -6,12 +6,23 @@ impl Parser {
     // ---- statements ----
 
     pub(crate) fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        // Captured before any leading `#[Attr]` group(s) are consumed, so
+        // a declaration's own span includes them - matches how `start`
+        // already includes a class's own `abstract`/`final` modifiers.
+        let start = self.current_pos();
+        // Phase 37: only a function/class/interface/trait/enum
+        // declaration below ever actually attaches these (each such arm
+        // assigns `attrs` onto the node it builds) - every other
+        // statement shape just drops them on the floor, the same lenient
+        // "consume and ignore" treatment this parser already gives other
+        // unmodeled constructs found somewhere invalid PHP wouldn't allow
+        // one at all.
+        let attrs = self.parse_leading_attributes()?;
         // A non-destructive peek, not `take_doc_comment()` - a statement
         // that's also a declaration (e.g. a function) consuming its own
         // doc comment for its own `@param`/`@return` tags further down is
         // unaffected, since the peek doesn't remove the map entry.
         let leading_doc_comment = self.doc_comments.get(&self.pos).cloned();
-        let start = self.current_pos();
         let mut stmt = match self.peek().clone() {
             Token::InlineHtml(s) => {
                 self.advance();
@@ -104,12 +115,14 @@ impl Parser {
                 let doc = self.take_doc_comment();
                 let mut f = self.parse_function_decl()?;
                 f.doc_comment = doc;
+                f.attrs = attrs;
                 self.stmt(StmtKind::FunctionDecl(f), start)
             }
             Token::Keyword(Keyword::Class)
             | Token::Keyword(Keyword::Interface)
             | Token::Keyword(Keyword::Trait) => {
-                let c = self.parse_class_decl()?;
+                let mut c = self.parse_class_decl()?;
+                c.attrs = attrs;
                 self.stmt(StmtKind::ClassDecl(c), start)
             }
             // `abstract`/`final`/`readonly` are only reserved as class
@@ -123,7 +136,8 @@ impl Parser {
             Token::Keyword(Keyword::Abstract | Keyword::Final | Keyword::Readonly)
                 if self.looks_like_class_decl() =>
             {
-                let c = self.parse_class_decl()?;
+                let mut c = self.parse_class_decl()?;
+                c.attrs = attrs;
                 self.stmt(StmtKind::ClassDecl(c), start)
             }
             // Like abstract/final/readonly above, `enum` is only reserved
@@ -133,7 +147,8 @@ impl Parser {
             Token::Keyword(Keyword::Enum)
                 if matches!(self.peek_at(1), Token::Identifier(_) | Token::Keyword(_)) =>
             {
-                let e = self.parse_enum_decl()?;
+                let mut e = self.parse_enum_decl()?;
+                e.attrs = attrs;
                 self.stmt(StmtKind::EnumDecl(e), start)
             }
             // `namespace\foo();` - a relative-name expression statement,
@@ -239,6 +254,7 @@ impl Parser {
                         // visibility`'s own doc comment for why `Public`
                         // is a safe, never-actually-consulted default here.
                         visibility: Visibility::Public,
+                        attrs: attrs.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),

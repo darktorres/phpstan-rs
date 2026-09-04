@@ -195,6 +195,49 @@ fn append_param_type_override(doc: &str, name: &str, override_ty: &str) -> Strin
     }
 }
 
+/// Phase 37: the index one past the last token in `tokens` that isn't
+/// part of a trailing, complete `#[Attr(...)]` group - zero or more such
+/// groups are skipped back over, in case several are stacked
+/// (`#[Pure] #[LanguageLevelTypeAware(...)]`, the real phpstorm-stubs
+/// `substr()` shape this exists for). Depth-counts backward the same way
+/// a forward scanner would count `[`/`]` (an attribute group's own
+/// opening `#[` counts as an open, exactly like a plain `[` inside its
+/// arguments would, since both close with the identical `RBracket`
+/// token) - so a nested array-literal argument (`#[ArrayShape([...])]`)
+/// doesn't stop the walk short. Falls back to returning `tokens.len()`
+/// unchanged (skip nothing) if the depth count runs off the start without
+/// balancing - malformed input, not worth guessing at.
+fn skip_trailing_attribute_groups(tokens: &[(Token, Span)]) -> usize {
+    let mut end = tokens.len();
+    while matches!(tokens.get(end.wrapping_sub(1)), Some((Token::RBracket, _))) {
+        let mut depth = 1i32;
+        let mut i = end - 1;
+        loop {
+            if i == 0 {
+                return tokens.len();
+            }
+            i -= 1;
+            match &tokens[i].0 {
+                Token::RBracket => depth += 1,
+                Token::AttributeStart | Token::LBracket => depth -= 1,
+                _ => {}
+            }
+            if depth == 0 {
+                break;
+            }
+        }
+        if !matches!(tokens[i].0, Token::AttributeStart) {
+            // Balanced against a plain `[`, not `#[` - not actually a
+            // trailing attribute group at all (shouldn't happen for a
+            // token stream produced by this lexer, but bail rather than
+            // guess).
+            return tokens.len();
+        }
+        end = i;
+    }
+    end
+}
+
 fn compute_line_starts(src: &[u8]) -> Vec<usize> {
     let mut starts = vec![0];
     for (i, &b) in src.iter().enumerate() {
@@ -299,10 +342,30 @@ impl<'a> Lexer<'a> {
         let mut tokens = Vec::new();
         loop {
             let tok = self.next_token();
-            if let Some(override_ty) = self.pending_return_type_override.take()
-                && let Some((Token::DocComment(doc), _)) = tokens.last_mut()
-            {
-                *doc = append_return_type_override(doc, &override_ty);
+            if let Some(override_ty) = self.pending_return_type_override.take() {
+                // Phase 37: a plain `tokens.last_mut()` check assumed the
+                // doc comment was always the immediately-preceding token -
+                // true before this phase (a generic `#[Attr]` group was
+                // skipped entirely, never becoming a token at all), false
+                // now that one is real, individually-tokenized content:
+                // real corpus proof this isn't hypothetical, phpstorm-
+                // stubs' own `substr()` stub is `/** @return string|false
+                // */ #[Pure] #[LanguageLevelTypeAware(...)] function
+                // substr(...) {}` - `#[Pure]` sits directly between the
+                // doc comment and the special-cased attribute that
+                // actually sets `pending_return_type_override`, hiding the
+                // doc comment from a bare `tokens.last_mut()` look and
+                // silently dropping the override (leaving `substr()` at
+                // its stale pre-8.0 `string|false` return type instead of
+                // the intended modern `string`). Skipping back past any
+                // such trailing attribute group(s) first restores the
+                // original adjacency check's own intent.
+                let end = skip_trailing_attribute_groups(&tokens);
+                if let Some((Token::DocComment(doc), _)) =
+                    end.checked_sub(1).and_then(|i| tokens.get_mut(i))
+                {
+                    *doc = append_return_type_override(doc, &override_ty);
+                }
             }
             if let Some(type_tokens) = self.pending_param_type_tokens.take() {
                 // Synthetic tokens with no real source text of their own -
@@ -397,6 +460,17 @@ impl<'a> Lexer<'a> {
             // treats end-of-inline-html the same as a semicolon boundary.
             self.in_php = false;
             return Token::Semicolon;
+        }
+
+        // Phase 37: a general attribute group - `skip_whitespace_and_
+        // comments` deliberately leaves this un-consumed (see its own
+        // comment) so it reaches here as a real token instead of being
+        // skipped. The two special-cased stub attributes never reach this
+        // point at all - `skip_whitespace_and_comments` fully consumes
+        // them itself before this check ever runs.
+        if self.starts_with("#[") {
+            self.pos += 2;
+            return Token::AttributeStart;
         }
 
         let c = self.peek();
@@ -505,11 +579,15 @@ impl<'a> Lexer<'a> {
     /// closing quote - a raw byte-level bracket/brace-depth counter that
     /// doesn't call this before resuming its own count can be fooled by
     /// an unbalanced `[`/`]`/`{`/`}` inside the string's own content
-    /// (e.g. a regex character class like `'/[^\]]+/'`). Shared by both
-    /// of this lexer's own raw depth-counting scanners that need it
-    /// (the `#[Attribute(...)]` skip, and `{$...}` complex-interpolation
-    /// scanning) rather than duplicating the same fix independently in
-    /// each.
+    /// (e.g. a regex character class like `'/[^\]]+/'`). Shared by every
+    /// one of this lexer's own raw depth-counting scanners that needs it
+    /// (the two special-cased stub attributes' own argument/whole-
+    /// declaration skips, and `{$...}` complex-interpolation scanning)
+    /// rather than duplicating the same fix independently in each. A
+    /// general `#[Attribute(...)]` group no longer needs one of its own at
+    /// all since Phase 37 - it's real tokens now, so a string literal
+    /// inside its arguments is already just one ordinary token, immune to
+    /// this problem by construction.
     fn skip_string_literal(&mut self) {
         self.pos = skip_string_literal_bytes(self.src, self.pos);
     }
@@ -526,28 +604,22 @@ impl<'a> Lexer<'a> {
                     } else if self.starts_with("#[LanguageLevelTypeAware(") {
                         self.skip_language_level_type_aware_attribute();
                     } else if self.starts_with("#[") {
-                        // Attribute like #[Foo(...)] - skip to matching
-                        // ']'. String-aware: an argument string
-                        // containing an unbalanced `[`/`]` (a completely
-                        // ordinary thing to write, e.g. a regex
-                        // character class like `'/[^\]]+/'`) must not
-                        // throw off the depth count.
-                        self.pos += 2;
-                        let mut depth = 1;
-                        while self.pos < self.src.len() && depth > 0 {
-                            match self.peek() {
-                                b'\'' | b'"' => self.skip_string_literal(),
-                                b'[' => {
-                                    depth += 1;
-                                    self.pos += 1;
-                                }
-                                b']' => {
-                                    depth -= 1;
-                                    self.pos += 1;
-                                }
-                                _ => self.pos += 1,
-                            }
-                        }
+                        // Phase 37: a real, general `#[Attribute(...)]`
+                        // group is no longer thrown away here - only the
+                        // two special-cased stub-generation attributes
+                        // above still get raw-text treatment. Breaking out
+                        // of this whitespace/comment loop (without
+                        // consuming `#[` itself) hands control back to
+                        // `next_token`, which emits a real `AttributeStart`
+                        // token for it and lets ordinary tokenization
+                        // (identifiers, `(`, literals, `,`, `]`, ...) take
+                        // over from there - real code, so no separate
+                        // string-aware bracket-depth counter is needed the
+                        // way the old raw-byte skip required: a string
+                        // literal's own content becomes one real token
+                        // regardless of what bracket-like bytes it
+                        // contains.
+                        break;
                     } else {
                         while self.pos < self.src.len()
                             && self.peek() != b'\n'

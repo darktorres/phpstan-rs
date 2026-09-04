@@ -10,6 +10,10 @@ impl Parser {
         let mut params = Vec::new();
         while !self.check(&Token::RParen) {
             let param_start = self.current_pos();
+            // Phase 37: `#[Attr]` groups on a parameter precede everything
+            // else about it, including constructor-promotion visibility
+            // modifiers (`function f(#[Attr] private int $id) {}`).
+            let attrs = self.parse_attributes()?;
             // A visibility modifier here means constructor property
             // promotion (`public function __construct(private int $id) {}`)
             // - `readonly` can appear alongside it but doesn't itself imply
@@ -77,6 +81,7 @@ impl Parser {
                 promoted_visibility,
                 promoted_readonly,
                 hooks,
+                attrs,
                 span: Span {
                     start: param_start,
                     end: self.previous_end(),
@@ -118,6 +123,13 @@ impl Parser {
             // (and thus after the doc comment's position) have already
             // been consumed.
             doc_comment: None,
+            // Overwritten by whichever caller actually saw the leading
+            // `#[Attr]` group(s), if any - same "entered after modifiers"
+            // reasoning as `doc_comment` just above: a top-level function
+            // is reached from `parse_statement`, a method from
+            // `parse_class_body`/`parse_enum_decl`'s own member loops, both
+            // of which parse attributes before dispatching here.
+            attrs: Vec::new(),
             span: Span {
                 start,
                 end: self.previous_end(),

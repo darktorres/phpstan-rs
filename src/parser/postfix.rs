@@ -556,6 +556,26 @@ impl Parser {
                 // extra parameter through 3 more functions for.
                 self.parse_closure_like(true)?
             }
+            // Phase 37: `#[Attr] function () {}` / `#[Attr] static fn()
+            // => ...` - a closure/arrow function preceded by its own
+            // attribute group(s), the only expression-position shape real
+            // PHP allows one on at all. `parse_closure_like`/
+            // `parse_closure`/`parse_arrow_fn` build the node with an
+            // empty `attrs` of their own (they have no idea any attributes
+            // preceded them), overwritten here once the real node comes
+            // back.
+            Token::AttributeStart => {
+                let attrs = self.parse_attributes()?;
+                let is_static = self.eat(&Token::Keyword(Keyword::Static));
+                let mut e = self.parse_closure_like(is_static)?;
+                match &mut e.kind {
+                    ExprKind::Closure { attrs: a, .. } | ExprKind::ArrowFn { attrs: a, .. } => {
+                        *a = attrs;
+                    }
+                    _ => {}
+                }
+                e
+            }
             Token::Keyword(Keyword::Static) => {
                 self.advance();
                 self.expr(ExprKind::Name("static".to_string()), start)
@@ -690,6 +710,12 @@ impl Parser {
                 is_static,
                 by_ref,
                 return_type,
+                // Overwritten by `parse_primary`'s own `AttributeStart`
+                // arm when this closure was actually preceded by one -
+                // `parse_closure`/`parse_closure_like` are entered only
+                // after `static` (if present) has already been consumed,
+                // past where an attribute group would sit.
+                attrs: Vec::new(),
             },
             start,
         ))
@@ -713,6 +739,8 @@ impl Parser {
                 body: Box::new(body),
                 is_static,
                 return_type,
+                // See `Closure`'s identical note in `parse_closure`.
+                attrs: Vec::new(),
             },
             start,
         ))

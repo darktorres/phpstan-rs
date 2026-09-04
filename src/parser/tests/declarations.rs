@@ -451,3 +451,137 @@ fn readonly_class_still_parses_as_a_class() {
     let program = parse(r#"<?php readonly class Foo {}"#);
     assert!(matches!(&program[0].kind, StmtKind::ClassDecl(c) if c.name == "Foo"));
 }
+
+// Phase 37: `#[...]` was previously thrown away entirely by the lexer -
+// these exercise the real `Attribute { name, args }` node now parsed onto
+// every declaration site that can carry one.
+
+#[test]
+fn class_attribute_with_a_named_argument_parses() {
+    let program = parse(r#"<?php #[Entity(table: 'users')] class User {}"#);
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    assert_eq!(c.attrs.len(), 1);
+    assert_eq!(c.attrs[0].name, "Entity");
+    assert_eq!(c.attrs[0].args.len(), 1);
+    assert_eq!(c.attrs[0].args[0].name.as_deref(), Some("table"));
+    assert!(matches!(
+        &c.attrs[0].args[0].value.kind,
+        ExprKind::Literal(Literal::String(s)) if s == "users"
+    ));
+}
+
+#[test]
+fn stacked_attribute_groups_on_a_function_combine_in_source_order() {
+    // Real PHP allows several `#[...]` groups back-to-back on one
+    // declaration - equivalent to one group with all the same names,
+    // comma-separated.
+    let program = parse("<?php #[Pure] #[Deprecated('use bar() instead')] function f() {}");
+    let StmtKind::FunctionDecl(f) = &program[0].kind else {
+        panic!("expected FunctionDecl");
+    };
+    assert_eq!(f.attrs.len(), 2);
+    assert_eq!(f.attrs[0].name, "Pure");
+    assert_eq!(f.attrs[1].name, "Deprecated");
+}
+
+#[test]
+fn a_comma_separated_attribute_group_produces_one_attribute_per_name() {
+    let program = parse("<?php #[Foo, Bar(1, 2)] function f() {}");
+    let StmtKind::FunctionDecl(f) = &program[0].kind else {
+        panic!("expected FunctionDecl");
+    };
+    assert_eq!(f.attrs.len(), 2);
+    assert_eq!(f.attrs[0].name, "Foo");
+    assert!(f.attrs[0].args.is_empty());
+    assert_eq!(f.attrs[1].name, "Bar");
+    assert_eq!(f.attrs[1].args.len(), 2);
+}
+
+#[test]
+fn method_property_const_and_param_attributes_all_parse() {
+    let program = parse(
+        r#"<?php
+            class Widget {
+                #[Column]
+                private int $id;
+
+                #[Since('1.0')]
+                const VERSION = 1;
+
+                #[Route('/widgets')]
+                public function index(#[SensitiveParameter] string $secret): void {}
+            }
+        "#,
+    );
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    assert_eq!(c.properties[0].attrs.len(), 1);
+    assert_eq!(c.properties[0].attrs[0].name, "Column");
+    assert_eq!(c.consts[0].attrs.len(), 1);
+    assert_eq!(c.consts[0].attrs[0].name, "Since");
+    let method = &c.methods[0];
+    assert_eq!(method.function.attrs.len(), 1);
+    assert_eq!(method.function.attrs[0].name, "Route");
+    assert_eq!(method.function.params[0].attrs.len(), 1);
+    assert_eq!(
+        method.function.params[0].attrs[0].name,
+        "SensitiveParameter"
+    );
+}
+
+#[test]
+fn enum_case_attribute_parses() {
+    let program = parse(
+        r#"<?php
+            enum Suit: string {
+                #[Label('Hearts')]
+                case Hearts = 'H';
+            }
+        "#,
+    );
+    let StmtKind::EnumDecl(e) = &program[0].kind else {
+        panic!("expected EnumDecl");
+    };
+    assert_eq!(e.cases[0].attrs.len(), 1);
+    assert_eq!(e.cases[0].attrs[0].name, "Label");
+}
+
+#[test]
+fn a_doc_comment_before_an_attribute_group_still_attaches_to_the_declaration() {
+    // Regression guard: `self.doc_comments` is keyed by token position, so
+    // a real `#[...]` group now sitting between a doc comment and the
+    // declaration it precedes must not make the doc comment invisible to
+    // `take_doc_comment()`.
+    let program = parse(
+        r#"<?php
+            /** Handles a single widget. */
+            #[Entity]
+            class Widget {}
+        "#,
+    );
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    assert_eq!(c.attrs.len(), 1);
+    assert_eq!(
+        c.doc_comment.as_deref(),
+        Some("/** Handles a single widget. */")
+    );
+}
+
+#[test]
+fn a_declaration_with_no_attributes_has_an_empty_attrs_list() {
+    // False-positive guard: ordinary declarations with nothing preceding
+    // them must not somehow pick up a stray attribute.
+    let program = parse("<?php class Plain { public int $x; function f() {} const C = 1; }");
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    assert!(c.attrs.is_empty());
+    assert!(c.properties[0].attrs.is_empty());
+    assert!(c.methods[0].function.attrs.is_empty());
+    assert!(c.consts[0].attrs.is_empty());
+}
