@@ -268,7 +268,7 @@ impl PestConfig {
                     let Some(target) = literal_string_value(&in_arg.value) else {
                         continue;
                     };
-                    let target_path = Path::new(target);
+                    let target_path = Path::new(target.as_ref());
                     let prefix = if target_path.is_absolute() {
                         target_path.to_path_buf()
                     } else {

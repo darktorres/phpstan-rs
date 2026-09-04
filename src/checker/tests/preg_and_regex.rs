@@ -316,10 +316,13 @@ fn preg_match_all_a_constant_group_combined_with_offset_capture_only_narrows_the
     );
 }
 
+// Phase 72: `\d+` is neither a literal sequence nor a top-level
+// alternation, but it *is* now provably a non-empty, digits-only group
+// (the `RegexGroupFallback::NumericString` tri-state fallback) - refined
+// to `numeric-string`, not a wrong or guessed literal, and strictly more
+// precise than the plain `string` this used to degrade to.
 #[test]
-fn preg_match_a_non_constant_group_stays_plain_string() {
-    // `\d+` is neither a literal sequence nor a top-level alternation -
-    // stays today's plain `string`, not a wrong or guessed literal.
+fn preg_match_a_digit_only_group_is_typed_as_numeric_string() {
     let d = diagnostics_for(
         r#"<?php
             function needsInt(int $n): void {}
@@ -332,8 +335,77 @@ fn preg_match_a_non_constant_group_stays_plain_string() {
     );
     assert!(
         d.iter()
+            .any(|x| x.message.contains("needsInt") && x.message.ends_with("numeric-string given")),
+        "expected a numeric-string mismatch, got: {d:?}"
+    );
+}
+
+// A group with a genuinely mixed, non-digit-only character class -
+// `RegexGroupFallback::NonEmptyString` instead: still refined, just to
+// the weaker of the two fallbacks.
+#[test]
+fn preg_match_a_non_digit_non_empty_group_is_typed_as_non_empty_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/([a-z]+)/', $subject, $matches)) {
+                    needsInt($matches[1]);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(
+            |x| x.message.contains("needsInt") && x.message.ends_with("non-empty-string given")
+        ),
+        "expected a non-empty-string mismatch, got: {d:?}"
+    );
+}
+
+// A group that could legitimately be empty (`\d*`) gets neither
+// fallback - false-positive guard: this must NOT be typed as
+// `numeric-string` (an empty string genuinely isn't one), so it stays
+// plain `string`, same as before this phase.
+#[test]
+fn preg_match_a_possibly_empty_digit_group_stays_plain_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(\d*)/', $subject, $matches)) {
+                    needsInt($matches[1]);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
             .any(|x| x.message.contains("needsInt") && x.message.ends_with("string given")),
-        "expected a plain string mismatch, got: {d:?}"
+        "expected a plain string mismatch (not numeric-string), got: {d:?}"
+    );
+}
+
+// A digit-only group already covered by *exact* literal enumeration
+// (Task 1a) must keep using that, never the coarser tri-state fallback -
+// false-positive guard against the fallback accidentally taking
+// priority over a strictly more precise, already-working mechanism.
+#[test]
+fn preg_match_a_literal_digit_group_keeps_its_exact_literal_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(1|2)/', $subject, $matches)) {
+                    needsInt($matches[1]);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("needsInt") && x.message.ends_with("'1'|'2' given")),
+        "expected the exact literal union '1'|'2', got: {d:?}"
     );
 }
 
@@ -788,4 +860,167 @@ fn known_by_ref_output_param_is_not_flagged() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// --- Phase 72 ---
+
+// (b): a statically-foldable `Concat` pattern argument is now resolved
+// by `literal_string_value` itself, so `preg_match`'s own `$matches`
+// shape inference (which already only ever looked at
+// `literal_string_value(pattern_arg)`) picks it up for free.
+#[test]
+fn preg_match_understands_a_statically_foldable_concatenated_pattern() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(' . 'cat|dog' . ')/', $subject, $matches)) {
+                    needsInt($matches[1]);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("needsInt") && x.message.contains("'cat'|'dog'")),
+        "expected an argument-type mismatch naming 'cat'|'dog', got: {d:?}"
+    );
+}
+
+// False-positive guard: a pattern concatenated with a genuine variable
+// operand can never be folded (no access to inferred types here) - the
+// existing "dynamic pattern stays untouched" behavior, unchanged.
+#[test]
+fn preg_match_still_skips_a_pattern_concatenated_with_a_real_variable() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $prefix, $subject): void {
+                preg_match($prefix . '(\d+)/', $subject, $matches);
+                echo $matches[99];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// (a): the `x` (free-spacing) modifier no longer bails the whole parse -
+// unescaped whitespace and `#`-comments between tokens are skipped, the
+// same way real PCRE's own free-spacing mode does (confirmed live
+// against a real PHP interpreter).
+#[test]
+fn preg_match_understands_a_free_spacing_pattern_with_comments() {
+    // The pattern has to appear directly as the call argument, not
+    // through an intermediate variable - `literal_string_value` only
+    // ever looks at the raw `Expr` passed to it, with no access to
+    // inferred types/`Locals` (same reasoning as its own `Concat`
+    // folding, see `checker::assignment::literal_string_value`'s own
+    // doc comment).
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/
+                    (\d+)   # the leading number
+                    \s*
+                    ([a-z]+) # the trailing word
+                /x', $subject, $matches)) {
+                    needsInt($matches[1]);
+                    needsInt($matches[2]);
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 2, "got: {d:?}");
+    assert!(
+        d[0].message.contains("needsInt") && d[0].message.ends_with("numeric-string given"),
+        "expected group 1 as numeric-string, got: {d:?}"
+    );
+    assert!(
+        d[1].message.contains("needsInt") && d[1].message.ends_with("non-empty-string given"),
+        "expected group 2 as non-empty-string, got: {d:?}"
+    );
+}
+
+// False-positive guard: whitespace *inside* a character class stays
+// literal even under `/x` - real PCRE fact - so this pattern's own
+// class genuinely only matches `'a'`/`' '`/`'b'`, never merges into one
+// bigger, wrongly-skipped-whitespace class.
+#[test]
+fn preg_match_free_spacing_mode_still_treats_class_whitespace_as_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/([a b])/x', $subject, $matches)) {
+                    needsInt($matches[1]);
+                }
+            }
+        "#,
+    );
+    // Not digits-only (contains a literal space and letters) and not
+    // provably non-empty via any *other* mechanism this scanner tracks
+    // beyond the class's own known min_len=1 - so it *is* non-empty,
+    // just never a numeric-string.
+    assert!(
+        d.iter().any(
+            |x| x.message.contains("needsInt") && x.message.ends_with("non-empty-string given")
+        ),
+        "expected non-empty-string (never numeric-string), got: {d:?}"
+    );
+}
+
+// (a): `(?|...)` branch-reset - the classic idiom (each branch captures
+// something, reusing the same public group number) still can't be
+// shape-typed (see `parse_capture_groups`'s own doc comment on why),
+// but no longer bails the *whole* parse the way it did before this
+// phase - `$matches` just stays the generic widened fallback, same as
+// any other call this project doesn't confidently understand, rather
+// than every other `preg_match` in the same function file getting no
+// benefit from this scanner at all.
+#[test]
+fn preg_match_branch_reset_with_reused_numbers_safely_stays_untyped() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($subject): void {
+                preg_match('/(?|(\d+)|([a-z]+))/', $subject, $matches);
+                echo $matches[1];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// (a): the narrower, safely-resolvable shape of branch-reset - only one
+// branch (of several) captures anything at all, so no number is ever
+// reused - types correctly, including a group declared *after* the
+// construct renumbering correctly (confirmed live against a real PHP
+// interpreter: `(d)` really is group 2 here, not 3, since no branch of
+// `(?|...)` reaches higher than group 1).
+#[test]
+fn preg_match_branch_reset_with_only_one_capturing_branch_types_correctly() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $n): void {}
+            function f($subject): void {
+                if (preg_match('/(?|(\d+)|x|y)([a-z]+)/', $subject, $matches)) {
+                    needsInt($matches[1]);
+                    needsInt($matches[2]);
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 2, "got: {d:?}");
+    // Group 1 is the branch-reset's own `\d+` - real PCRE fact:
+    // reachable via any of the 3 branches (only one of which actually
+    // captures), so it's optional at the shape level and backfilled with
+    // `''` when a groupless branch ("x"/"y") is the one that matched -
+    // `numeric-string` names its own non-empty contribution either way.
+    assert!(
+        d[0].message.contains("needsInt") && d[0].message.contains("numeric-string"),
+        "expected group 1 (the branch-reset's own \\d+) to mention numeric-string, got: {d:?}"
+    );
+    assert!(
+        d[1].message.contains("needsInt") && d[1].message.ends_with("non-empty-string given"),
+        "expected group 2 ([a-z]+, renumbered correctly to 2) as non-empty-string, got: {d:?}"
+    );
 }

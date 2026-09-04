@@ -526,13 +526,39 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
     }
 }
 
-/// A literal string's own text, or `None` for anything else (a variable,
-/// a concatenation, ...) - unlike `literal_string_key`, this doesn't also
-/// accept/stringify an int literal, since a format string is never
-/// legitimately written as a bare number.
-pub(crate) fn literal_string_value(e: &Expr) -> Option<&str> {
+/// A literal string's own text - or, since Phase 72, a *statically-
+/// foldable* `.`-concatenation of nothing but literal strings (and
+/// parenthesized groupings of the same), folded into one owned value
+/// (e.g. `'/^' . 'abc' . '$/'` folds to `/^abc$/`). `None` for anything
+/// that isn't fully foldable this way (a variable anywhere in the chain,
+/// a non-string literal, ...) - unlike `literal_string_key`, this
+/// doesn't also accept/stringify an int literal, since a format string
+/// is never legitimately written as a bare number. Returns `Cow` rather
+/// than `&str` only because a folded `Concat` needs a freshly-built
+/// owned `String`; the common single-literal case still borrows,
+/// allocation-free, exactly as before this phase.
+///
+/// Deliberately narrower than "fold every constant expression" - a
+/// concatenation with a *variable* operand (even one a caller's own
+/// local-type tracking might know to be a literal-typed value, e.g.
+/// `'/^' . $prefix . '$/'`) is never resolved here, since this function
+/// only ever sees the raw `Expr`, with no access to inferred types or
+/// `Locals`. (An earlier draft of this phase's own roadmap text cited
+/// exactly that shape as the motivating example, which turns out to
+/// describe a different, not-yet-implemented feature - inferred-type-
+/// aware folding - not the *purely syntactic* constant folding this
+/// function performs, mirroring `composer.rs`'s own pre-existing
+/// `eval_concat` precedent for the same "recursively fold a literal-only
+/// concatenation chain" idea.)
+pub(crate) fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
     match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.as_str()),
+        ExprKind::Literal(Literal::String(s)) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        ExprKind::Grouping(inner) => literal_string_value(inner),
+        ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
+            let l = literal_string_value(lhs)?;
+            let r = literal_string_value(rhs)?;
+            Some(std::borrow::Cow::Owned(format!("{l}{r}")))
+        }
         _ => None,
     }
 }

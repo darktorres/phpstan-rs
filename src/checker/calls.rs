@@ -389,7 +389,7 @@ impl<'a> Checker<'a> {
         let Some(fmt) = literal_string_value(&fmt_expr.value) else {
             return;
         };
-        let Some(specs) = parse_format_specifiers(fmt) else {
+        let Some(specs) = parse_format_specifiers(&fmt) else {
             return;
         };
         let provided = &args[1..];

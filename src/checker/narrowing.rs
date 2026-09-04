@@ -24,7 +24,7 @@ impl<'a> Checker<'a> {
         if let Some((pattern_arg, matches_arg, true_means_matched)) = preg_match_condition(cond)
             && let ExprKind::Variable(matches_name) = &matches_arg.kind
             && let Some(pattern_str) = literal_string_value(pattern_arg)
-            && let Some(parsed) = regex_groups::parse_capture_groups(pattern_str)
+            && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
         {
             let narrowed = if branch_true == true_means_matched {
                 build_matched_shape(

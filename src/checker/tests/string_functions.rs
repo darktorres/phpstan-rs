@@ -150,6 +150,38 @@ fn sprintf_flags_too_few_arguments_for_its_own_placeholders() {
     );
 }
 
+// Phase 72: `literal_string_value` now folds a statically-foldable
+// `Concat` chain (every operand a literal, or a parenthesized grouping
+// of one) into one owned string, so a format string built by
+// concatenating nothing but literals is understood exactly the same as
+// if it had been written as one literal to begin with.
+#[test]
+fn sprintf_understands_a_statically_foldable_concatenated_format_string() {
+    let d = diagnostics_for(r#"<?php sprintf('%s and ' . '%s', "only one");"#);
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(
+        d[0].message.contains("expects 2 argument(s), 1 given"),
+        "got: {d:?}"
+    );
+}
+
+// False-positive guard: a concatenation with a genuine variable operand
+// isn't statically foldable at all (this helper never has access to
+// inferred types/`Locals`, only the raw `Expr`) - stays the same "don't
+// know, don't guess" skip as any other dynamic format string, never a
+// wrong guess at the placeholder count.
+#[test]
+fn sprintf_still_skips_a_concatenation_with_a_real_variable_operand() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $suffix) {
+                sprintf('%s and ' . $suffix, "only one");
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn sprintf_does_not_flag_extra_arguments_real_php_just_ignores() {
     let d = diagnostics_for(r#"<?php sprintf("%s", "a", "b", "c");"#);

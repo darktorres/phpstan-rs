@@ -298,7 +298,7 @@ impl<'a> Checker<'a> {
                     && let Some(matches_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(matches_name) = &matches_arg.kind
                     && let Some(pattern_str) = literal_string_value(pattern_arg)
-                    && let Some(parsed) = regex_groups::parse_capture_groups(pattern_str)
+                    && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
                     && let Some(flags) = resolved
                         .get(3)
                         .copied()
@@ -343,7 +343,7 @@ impl<'a> Checker<'a> {
                     && let Some(matches_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(matches_name) = &matches_arg.kind
                     && let Some(pattern_str) = literal_string_value(pattern_arg)
-                    && let Some(parsed) = regex_groups::parse_capture_groups(pattern_str)
+                    && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
                     && let Some(flags) = resolved
                         .get(3)
                         .copied()
