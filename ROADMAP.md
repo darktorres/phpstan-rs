@@ -283,54 +283,68 @@ parsing only (cheap, unlocks synthesized-member inference the way
 diagnostic layer on top (per-tag rules above) - this mirrors the pattern
 that already worked for `@property` in this codebase.
 
-**Phase 37 - Attribute (`#[...]`) AST support (PLANNED).**
-`#[Attribute(...)]` is lexed and thrown away entirely
-(`Lexer::skip_whitespace_and_comments`) - real attribute content is
-never available anywhere in this project, only two narrowly
-special-cased stub-generation attributes get lexer-level text splicing
-(`#[PhpStormStubsElementAvailable]`, `#[LanguageLevelTypeAware]`).
-Needs a real lexer-level fix (emit tokens for `#[`, the name, `(`,
-args, `,`, `]` instead of skipping the span, reusing the existing
-string-aware bracket-depth-counting logic those two special cases
-already use), a new `Attribute { name, args }` node parsed onto every
-declaration site that can carry one (`ClassDecl`/`MethodDecl`/
-`PropertyDecl`/`FunctionDecl`/`Param`/`ClassConst`/`EnumCase`, plus
-closures/arrow functions), and checker-side attribute-class-existence
-and target-validity checking, plus a `#[NoDiscard]` marker.
+**Phase 37 - Attribute (`#[...]`) AST support (PARTIAL).** This
+entry's own status was never updated after an earlier pilot batch
+landed it (commits `65983a0`/`bff7145`) - `#[Attribute(...)]` used to
+be lexed and thrown away entirely (`Lexer::skip_whitespace_and_comments`),
+with only two narrowly special-cased stub-generation attributes
+(`#[PhpStormStubsElementAvailable]`, `#[LanguageLevelTypeAware]`)
+getting lexer-level text splicing.
 
-The exhaustive audit confirms this is the single most cross-cutting gap
-in the whole codebase - it independently surfaced as an identical,
-already-verified-real (`attr_groups`/`AttrGroup` confirmed absent from
-`ast.rs`/`parser/classes.rs`) blocker in **six** separate audit
-categories, and its consolidated unlock list spans nearly every
-declaration kind: `AttributesCheck`, `ClassAttributesRule`,
+**Done**: a real lexer-level fix (`#[` now emits a real
+`AttributeStart` token, falling through to ordinary tokenization for
+the name/args/commas/closing bracket, reusing the existing string-
+aware bracket-depth-counting logic the two special cases above already
+used); a real `Attribute { name, args, span }` node (`ast.rs`) parsed
+onto every declaration site that can carry one (`ClassDecl`/
+`EnumDecl`/`MethodDecl`/`PropertyDecl`/`FunctionDecl`/`Param`/
+`ClassConst`/`EnumCase`, closures/arrow functions); `Checker::
+check_attributes` (`checker/oop.rs`) mirrors real PHPStan's own
+`AttributesCheck` existence half - every `#[Name(...)]` group's `Name`
+must resolve to a real, known class (`attribute.notFound`); and a
+`#[NoDiscard]` marker, wired into `CallToFunctionStatementWithNoDiscardRule`/
+`CallToMethodStatementWithNoDiscardRule`/
+`CallToStaticMethodStatementWithNoDiscardRule`'s own shape
+(`checker/calls.rs`).
+
+**Still open**: target-validity checking - real PHPStan's own
+per-declaration-kind rules (`ClassAttributesRule`,
 `ClassConstantAttributesRule`, `NonClassAttributeClassRule`,
 `TraitAttributeClassRule`, `TraitAttributesRule`, `PropertyAttributesRule`,
 `PropertyHookAttributesRule`, `EnumCaseAttributesRule`,
 `MethodAttributesRule`, `ParamAttributesRule`, `FunctionAttributesRule`,
 `ClosureAttributesRule`, `ArrowFunctionAttributesRule`,
-`ConstantAttributesRule`, `CallToMethodStatementWithNoDiscardRule`,
-`CallToStaticMethodStatementWithNoDiscardRule`,
-`CallToFunctionStatementWithNoDiscardRule`. Prerequisite for the
-`#[Override]`/`#[ReturnTypeWillChange]` half of Phase 64's
-override-compatibility rewrite.
+`ConstantAttributesRule`) each verify an attribute is only used on a
+declaration kind its own `#[\Attribute(Attribute::TARGET_*)]` flags
+actually allow - this project checks existence only, never target
+legality. Prerequisite for the `#[Override]`/`#[ReturnTypeWillChange]`
+half of Phase 64's override-compatibility rewrite either way.
 
-**Phase 38 - Target-PHP-version configuration (PLANNED).** No
-`php_version` setting exists anywhere (`config.rs`/CLI) - every "X only
-supported on PHP Y.Z and later" portability check is unbuildable
-without one. New `php_version: Option<(u8, u8)>`, following the exact
-precedent of `strict_mixed_arrays` (Phase 11 Stage 5: `config.rs` field
--> CLI flag -> `Project` setter), plus a small `PhpFeature -> (u8, u8)`
-table.
+**Phase 38 - Target-PHP-version configuration (DONE).** This entry's
+own status was never updated after an earlier pilot batch landed it
+(commit `6d09f28`) - no `php_version` setting used to exist anywhere
+(`config.rs`/CLI), and every "X only supported on PHP Y.Z and later"
+portability check was unbuildable without one.
 
-The exhaustive audit found this is already correctly scoped, but is a
-**recurring blocker** across four other audit categories - worth
-resequencing earlier than its number implies, since it gates the
-version-gate half of `FinalConstantRule`, `NativeTypedClassConstantRule`,
-`ConstantAttributesRule`, `DeprecatedCastRule`, `VoidCastRule`,
-`BacktickRule`, `UnsetCastRule`, `ArrayUnpackingRule`, `ReadOnlyClassRule`,
-`ConstantsInTraitsRule`, `InvalidPromotedPropertiesRule`,
-`NoncapturingCatchRule`, and `ThrowExpressionRule`.
+`src/php_version.rs`'s `PhpVersion`/`parse_php_version`/`PhpFeature`
+now give every version-gated check a real target to consult, following
+`strict_mixed_arrays`' own exact precedent end to end: `config.rs`'s
+new `php_version: Option<String>` field (`"8.1"`-shaped, since TOML
+has no tuple literal), a new `--php-version` CLI flag on `check-project`
+(merged with the config value - CLI wins), `Project::set_php_version`,
+and `Registry::php_version: Option<(u8, u8)>` (`None` = "not
+configured," never "PHP version zero").
+
+This phase was always scoped as infrastructure only, not the consuming
+rules themselves - it's a **recurring blocker** across four other audit
+categories, gating the version-gate half of `FinalConstantRule`,
+`NativeTypedClassConstantRule`, `ConstantAttributesRule`,
+`DeprecatedCastRule`, `VoidCastRule`, `BacktickRule`, `UnsetCastRule`,
+`ArrayUnpackingRule`, `ReadOnlyClassRule`, `ConstantsInTraitsRule`,
+`InvalidPromotedPropertiesRule`, `NoncapturingCatchRule`, and
+`ThrowExpressionRule` - each of those rules is still its own open,
+unimplemented phase; only the shared configuration mechanism they'd
+all consult is done.
 
 **Phase 39 - Deprecated-symbol usage warnings (PLANNED).**
 `@deprecated` is parsed-past and discarded (confirmed - it only appears
@@ -577,66 +591,104 @@ Phase 16 (CI output formats), and Phase 41's possibly-impure tip
 decoration. Size: M.
 
 **Phase 48 - Symbol-existence validation pipeline (classes, functions,
-use-imports, typehints) (NEW, PLANNED).** `resolve_name_expr`
-(`src/checker/resolve.rs:39`) unconditionally returns
-`Type::Object(name, ..)` regardless of whether the class exists, and
-`resolve_type_hint` (`src/checker/resolve.rs:53`) silently accepts a
-typo'd class name in a param/return/property type unless that name is
-*also* used at a `new` or call site elsewhere - confirmed by reading
-both functions directly. Build the missing "does this name actually
-resolve" primitive once (`ClassKind` is already tracked per class,
-`src/ast.rs:213-218`, and the registry can already resolve a name to a
-`ClassInfo` - this is checker wiring reusing existing data, not a new
-data model), then wire it into every site that currently trusts a name
-blindly: `use`/`use function`/`use const`/group-use validation,
-catch-clause types, `extends`/`implements`/`instanceof`/trait-use
-targets, and - the single highest-value application - parameter/
-return/property type hints.
+use-imports, typehints) (PARTIAL).** This entry's own status was never
+updated after an earlier pilot batch landed its MVP (commit `d038b80`):
+`resolve_name_expr` used to unconditionally return `Type::Object(name,
+..)` regardless of whether the class existed, and `resolve_type_hint`
+silently accepted a typo'd class name in a param/return/property type
+unless that name was *also* used at a `new` or call site elsewhere.
 
-This is the highest real-world-value item in the entire audit -
-typo'd/missing class references are one of PHPStan's most common
-catches, and it surfaced as an independent blocker in *seven* separate
-audit categories. Consolidated unlock list: `ExistingNamesInUseRule`,
-`ExistingNamesInGroupUseRule`, `CaughtExceptionExistenceRule`,
-`ExistingClassInClassExtendsRule` (partially done already -
-`check_final_class_extension`, `src/checker/oop.rs:16-34`, implements
-this rule's final-class-extension sub-check using this same registry
-data), `ExistingClassesInClassImplementsRule`,
+**Done**: the shared "does this name actually resolve" primitive
+(`Checker::class_name_exists`/`collect_unknown_class_names`/`check_
+type_class_names_exist`, `checker/resolve.rs`), wired into every site
+the audit flagged: `use`/`use function`/group-use validation (`UseImport`
+gained a real `kind: Class|Function|Const` field, `checker.rs`'s
+`check_use_function_imports`), catch-clause types (`stmt.rs`, replacing
+a previously-misleading "does not implement Throwable" for an
+unregistered class with the real `class.notFound`), `extends`/
+`implements`/`instanceof`/trait-use targets (`oop.rs`/`expr.rs`), and
+parameter/return/property type hints on named functions, methods,
+closures, and arrow functions (`checker.rs`/`expr.rs`/`generics.rs`).
+Unlocked: `ExistingNamesInUseRule`, `CaughtExceptionExistenceRule`,
+`ExistingClassInClassExtendsRule`, `ExistingClassesInClassImplementsRule`,
 `ExistingClassesInEnumImplementsRule`, `ExistingClassesInInterfaceExtendsRule`,
 `ExistingClassInInstanceOfRule`, `ExistingClassInTraitUseRule`,
 `ExistingClassesInTypehintsRule`, `ExistingClassesInPropertiesRule`,
 `ExistingClassesInArrowFunctionTypehintsRule`,
-`ExistingClassesInClosureTypehintsRule`,
-`ExistingClassesInPropertyHookTypehintsRule`, `ClassConstantRule`,
-`ClassNameCheck`/`ClassCaseSensitivityCheck`/`ClassForbiddenNameCheck`
-(case-sensitivity + leaked-prefix checks fold in cheaply once the
-lookup exists). A fuller version of this same primitive - a centralized
-"resolve a type, split union/intersection members, collect per-class
-existence errors while respecting `class_exists()`/`interface_exists()`
-guards, tag each with a usage-location-specific message + identifier"
-pipeline matching PHPStan's `RuleLevelHelper::findTypeToCheck` +
-`ClassNameUsageLocation` taxonomy - is a stretch goal on top of this
-phase's MVP; it additionally needs Phase 36's attribute/assert/
-template/sealed/mixin/requireExtends/requireImplements tag parsing to
-reach several of PHPStan's ~27 usage-location kinds, and unlocks
-`ClassNameNodePair`, `ClassNameUsageLocation`, `FoundTypeResult`, and
-`RuleLevelHelper`'s `findTypeToCheck()` half. Prerequisite for
-`InstantiationRule`'s remaining trait/enum-instantiation cases and
-several Phase 15-adjacent items. Size: L for the MVP, XL for the
-full `RuleLevelHelper`-equivalent pipeline.
+`ExistingClassesInClosureTypehintsRule`. Two deliberate leniencies,
+both confirmed necessary by real failing tests otherwise:
+`collect_unknown_class_names` doesn't recurse into a class's own
+`@template` type arguments (an unindexed dependency's own generic
+argument shouldn't be guessed as "missing"), and `class_name_exists`
+exempts the parser's own synthetic `class@anonymous` name.
+
+**Still open**: `ExistingNamesInGroupUseRule` (case-sensitivity/
+forbidden-name folding specifically, not existence - deferred the same
+way `ClassNameCheck` below is); `ExistingClassesInPropertyHookTypehintsRule`
+(hook bodies aren't type-checked at all yet, a larger pre-existing
+gap); `ClassConstantRule`'s typed-constant half (PHP 8.3 typed class
+constants aren't modeled); `ClassNameCheck`/`ClassCaseSensitivityCheck`/
+`ClassForbiddenNameCheck` (the phase's own explicitly-labeled stretch
+goal). Also still open, and explicitly out of this MVP's own scope by
+design (confirmed against the real `ExistingNamesInUseRule` source): a
+plain, class-shaped `use Foo;` is never existence-checked by real
+PHPStan either (only case-sensitivity/forbidden-name checking runs
+there - a class reference is only checked where it's actually used),
+and `use const` has no project-wide global-constant registry to check
+against at all. A fuller version of this same primitive - a
+centralized "resolve a type, split union/intersection members, collect
+per-class existence errors while respecting `class_exists()`/
+`interface_exists()` guards, tag each with a usage-location-specific
+message + identifier" pipeline matching PHPStan's `RuleLevelHelper::
+findTypeToCheck` + `ClassNameUsageLocation` taxonomy - remains a
+stretch goal on top of this phase's now-done MVP; it additionally
+needs Phase 36's attribute/assert/template/sealed/mixin/
+requireExtends/requireImplements tag parsing to reach several of
+PHPStan's ~27 usage-location kinds, and unlocks `ClassNameNodePair`,
+`ClassNameUsageLocation`, `FoundTypeResult`, and `RuleLevelHelper`'s
+`findTypeToCheck()` half. Size: XL for the full `RuleLevelHelper`-
+equivalent pipeline; the MVP itself is done.
 
 **Phase 49 - Call-argument binding generalization (named args, spread,
-by-ref legality) (NEW, PLANNED).** `check_args`
-(`src/checker/calls.rs:262`) implements only the MVP: positional arity
-plus a per-positional type check. Extend it with named-argument handling
-(unknown/duplicate/positional-after-named), unpacked/spread arguments,
-and by-ref target legality - the last needs the same "does this access
-chain contain a nullsafe operator" walk `NullsafeCheck` provides in real
-PHPStan, which this project has never built despite already tracking
-nullsafe elsewhere. Unlocks `FunctionCallParametersCheck`,
-`NullsafeCheck`. Prerequisite for attribute constructor-argument
-validation (Phase 37). Size: L - one of the highest-value gaps found;
-named-argument and by-ref misuse are common in modern PHP.
+by-ref legality) (PARTIAL).** This entry's own status was never
+updated after an earlier pilot batch landed it (commit `76fc86e`) -
+`check_args` used to implement only positional arity plus a per-
+positional type check.
+
+**Done**: named-argument legality (an unknown named argument, a
+duplicate named argument re-targeting an already-filled parameter, and
+the ordering rules real PHP's own parser enforces at compile time -
+positional-after-named, an unpacked `...` argument after a named one,
+a non-unpacked argument after an unpacked one, none of which this
+project's own parser enforces - `argument.unknown`/`argument.duplicate`/
+`argument.positionalAfterNamed`/`argument.unpackAfterNamed`/
+`argument.nonUnpackAfterUnpacked`, matching real PHPStan's own
+`FunctionCallParametersCheck::processArguments`); spread/unpack
+resolution no longer `break`s entirely on the first spread argument,
+silently dropping every argument written after it (a legal named
+argument following a spread, `f(...$a, name: $b)`, now resolves
+correctly) - `resolve_call_args` only stops resolving further
+*positional* arguments past a spread (whose real contents can't be
+known statically), and `check_args`'s "missing required parameter"/
+"too many arguments" checks are spread-aware too, no longer skipping
+the whole call the way every call site previously had to; by-ref
+argument legality via a new access-chain walk (`contains_nullsafe_
+access`) mirroring real PHPStan's own `NullsafeCheck::containsNullSafe`
+(flags a by-ref parameter fed a nullsafe chain, since it can short-
+circuit and never write back) plus `is_valid_byref_argument_expr`
+(flags any other non-lvalue expression - a method-call result, a
+literal - passed where a parameter expects a reference). Unlocks
+`FunctionCallParametersCheck`, `NullsafeCheck`.
+
+**Still open** (a deliberate scope decision made explicit in the
+commit itself, not an oversight): full constant-array-spread expansion.
+Real PHPStan's own `FunctionCallParametersCheck` uses
+`getConstantArrays()` to type-check *individual unpacked elements*
+against their own target parameters; this phase only got the
+boundary-aware arity checking (stop trusting "missing"/"too many" at
+or past a spread's own position) right, not that deeper per-element
+modeling, which is a substantial feature in its own right. Prerequisite
+for attribute constructor-argument validation (Phase 37) either way.
 
 **Phase 50 - `Type::Array` key-type and general offset/shape engine
 (PARTIAL).** `Type::Array(Box<Type>)` carried only a value type -
@@ -996,18 +1048,38 @@ private/protected access violations are one of the most common
 real-world PHP mistakes.
 
 **Phase 58 - `MissingTypehintCheck` completeness battery (level-6
-family) (NEW, PLANNED).** No `MissingTypehintCheck`-equivalent exists
-anywhere: no detection of implicit-mixed parameters/returns, bare
-`iterable`/`array` with no value type, non-generic use of a generic
-class, or `callable` with no signature - for any declaration kind
-(function, method, closure, arrow-fn, property, class constant).
-Unlocks `MissingClassConstantTypehintRule`, `MissingMethodParameterTypehintRule`,
-`MissingMethodReturnTypehintRule`, `MissingPropertyTypehintRule`,
-`MissingFunctionParameterTypehintRule`, `MissingFunctionReturnTypehintRule`.
-Size: L - build the generic `Type`-tree walker once, apply it at five
-declaration-kind call sites. High value for teams targeting
-PHPStan-level-6-equivalent strictness; not a correctness-bug catcher,
-more a completeness nudge.
+family) (DONE).** This entry's own status was never updated after an
+earlier pilot batch landed it (commit `9b7736d`) - no
+`MissingTypehintCheck`-equivalent used to exist anywhere.
+
+`src/checker/missing_typehint.rs` walks a declaration's already-
+resolved `Type` for the three shapes real PHPStan flags at level 6:
+implicit `mixed` (no hint at all - distinguished from an explicit
+`mixed` by checking the original source text, since this project's
+`Type` model has only one `Mixed` variant for both), a bare
+`array`/`iterable`/`list`/... with no element type, and a bare
+reference to a generic class given no type arguments (`Traversable`/
+`Iterator`/`IteratorAggregate`/`Generator` excluded, matching real
+PHPStan's own `checkGenericIterableClasses: false` default). Wired
+into `check_program` (properties, class constants) and `check_function`
+(params/returns, shared between plain functions and methods). Unlocks
+all six of `MissingClassConstantTypehintRule`,
+`MissingMethodParameterTypehintRule`, `MissingMethodReturnTypehintRule`,
+`MissingPropertyTypehintRule`, `MissingFunctionParameterTypehintRule`,
+`MissingFunctionReturnTypehintRule`.
+
+Two deliberate scope trims vs. this entry's own original text, both
+confirmed correct against `vendor/phpstan-src` rather than left as
+gaps: no closure/arrow-fn call site (real PHPStan has no
+`RegisteredRule(level: 6)` rule for closures/arrow-fns at all - the
+original text's mention of them was simply stale), and no
+`missingType.callable` ("callable has no signature") check (real
+PHPStan gates this behind `checkMissingCallableSignature`, `false` by
+default - and more fundamentally, `types::parse_type_string` already
+collapses both a bare `callable` and a signature-carrying
+`callable(int): string` down to the same `Type::Callable` at parse
+time, so there's no way to tell them apart post-parse without Phase
+53's still-open structural `Callable`/`Closure` type first).
 
 **Phase 59 - Unused-symbol detection subsystem (NEW, PLANNED).**
 phpstan-rs has no dead-code/unused-variable-usage-scanning category at
