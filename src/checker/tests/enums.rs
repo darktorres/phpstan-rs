@@ -195,3 +195,323 @@ fn phpstan_enum_sanity_flags_duplicate_backing_values() {
     assert!(dupes.iter().any(|x| x.message.contains("for case C")));
     assert!(dupes.iter().any(|x| x.message.contains("for case E")));
 }
+
+// ---- Phase 66: the rest of EnumSanityRule, generic rejection, and
+// generic-bound wiring - all confirmed directly against real `php -l`
+// (constructor/destructor/magic-method/redeclaration/backing-type/
+// case-value shapes) or matched against real PHPStan's own
+// EnumTemplateTypeRule (Serializable and @template aren't PHP parse
+// errors, just real-PHPStan-flagged design errors).
+
+#[test]
+fn an_enum_constructor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active;
+                public function __construct() {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.constructor"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_destructor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active;
+                public function __destruct() {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.destructor"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_magic_get_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active;
+                public function __get($name) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.magicMethod"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_call_method_is_never_flagged_as_magic() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active;
+                public function __call($name, $args) {}
+                public static function __callStatic($name, $args) {}
+                public function __invoke() {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "enum.magicMethod"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_redeclaring_cases_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active;
+                public static function cases(): array { return []; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.methodRedeclaration"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_pure_enum_redeclaring_from_is_never_flagged() {
+    // `from()`/`tryFrom()` only exist on a *backed* enum - a pure
+    // enum's own `from()` isn't a native-method collision at all.
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active;
+                public static function from($value): self { return self::Active; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "enum.methodRedeclaration"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_backed_enum_redeclaring_try_from_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status: int {
+                case Active = 1;
+                public static function tryFrom($value): ?self { return null; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.methodRedeclaration"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_backed_enum_with_a_float_backing_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status: float {
+                case Active;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.backingType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_backed_enum_with_an_int_backing_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status: int {
+                case Active = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "enum.backingType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_implementing_serializable_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status implements \Serializable {
+                case Active;
+                public function serialize(): ?string { return null; }
+                public function unserialize($data): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.serializable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_plain_enum_is_never_flagged_as_serializable() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "enum.serializable"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_backed_enum_case_with_a_value_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active = 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.caseWithValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_backed_enum_case_missing_a_value_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status: int {
+                case Active;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.missingCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_string_value_on_an_int_backed_enum_case_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status: int {
+                case Active = 'active';
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.caseType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_int_value_on_a_string_backed_enum_case_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status: string {
+                case Active = 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.caseType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_matching_case_value_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status: int {
+                case Active = 1;
+            }
+            enum Kind: string {
+                case A = 'a';
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "enum.caseType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_case_value_referencing_another_constant_is_not_guessed_at() {
+    // `self::SOME_CONST`-shaped case values aren't literals this
+    // project's own const-value inference resolves - skipped rather
+    // than flagged, matching the "don't guess" leniency
+    // `check_enum_case_values`'s own duplicate-value detection already
+    // applies to the same kind of non-literal value.
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status: int {
+                const BASE = 1;
+                case Active = self::BASE;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "enum.caseType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_template_tag_on_an_enum_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             */
+            enum Status {
+                case Active;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.generic"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_with_no_template_tag_is_never_flagged_as_generic() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * A perfectly ordinary enum.
+             */
+            enum Status {
+                case Active;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "enum.generic"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

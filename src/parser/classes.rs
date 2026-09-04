@@ -592,6 +592,11 @@ impl Parser {
     // properties or extend anything.
     pub(crate) fn parse_enum_decl(&mut self) -> Result<EnumDecl, ParseError> {
         let start = self.current_pos();
+        // Phase 66: captured here, at the very first token, mirroring
+        // `parse_class_decl`'s identical note above - needed for
+        // rejecting a stray `@template` on an enum (enums can't be
+        // generic; PHP has no `enum Foo<T>` syntax at all).
+        let doc_comment = self.take_doc_comment();
         self.expect(&Token::Keyword(Keyword::Enum))?;
         let name = self.expect_ident()?;
 
@@ -763,6 +768,7 @@ impl Parser {
             uses,
             trait_aliases,
             resolved_trait_conflicts,
+            doc_comment,
             // Overwritten by `parse_statement`, the only caller that saw
             // any leading `#[Attr]` groups - see `ClassDecl.attrs`'s
             // identical note in `parse_class_decl`.

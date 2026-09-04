@@ -353,6 +353,9 @@ pub struct EnumDecl {
     pub uses: Vec<String>,
     pub trait_aliases: Vec<TraitAlias>,
     pub resolved_trait_conflicts: Vec<String>,
+    // The enum's own `/** ... */` doc comment, if any (Phase 66) - needed
+    // only to reject a stray `@template` tag (enums can't be generic).
+    pub doc_comment: Option<String>,
     // Phase 37: `#[Attr]` groups preceding this enum declaration.
     pub attrs: Vec<Attribute>,
     pub span: Span,

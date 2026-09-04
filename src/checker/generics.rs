@@ -150,6 +150,20 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        self.check_ancestor_generic_bounds(fqn, c.span);
+    }
+
+    /// Phase 66: the `extends`/`implements` half of
+    /// `check_class_generic_bounds`, split out so an enum declaration -
+    /// which can `implements` a generic interface but has no properties
+    /// and can't `extends` anything - can share it too. Previously this
+    /// whole check only ran for `StmtKind::ClassDecl`, silently skipping
+    /// generic-bound violations written on an enum's own `implements`
+    /// clause.
+    pub(crate) fn check_ancestor_generic_bounds(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
         // `extends_args`/`implements_args` store just the argument list,
         // not paired with the parent/interface's own name - re-pair each
         // one into a real `Object(class, args)` here, or
@@ -157,7 +171,7 @@ impl<'a> Checker<'a> {
         // at all (it would just see the *arguments* as if they were the
         // generic reference themselves). Neither the parent name nor an
         // interface name carries its own span in the AST, so both use the
-        // class declaration's own span - imprecise. but still real.
+        // declaration's own span - imprecise. but still real.
         let mut types_to_check: Vec<Type> = Vec::new();
         if let Some(parent) = info.extends.first() {
             types_to_check.push(Type::Object(parent.clone(), info.extends_args.clone()));
@@ -175,7 +189,7 @@ impl<'a> Checker<'a> {
             ));
         }
         for ty in types_to_check {
-            self.check_generic_bounds(&ty, fqn, c.span);
+            self.check_generic_bounds(&ty, fqn, span);
         }
     }
 

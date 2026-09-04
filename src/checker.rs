@@ -634,7 +634,10 @@ impl<'a> Checker<'a> {
                     let fqn = self.name_ctx.declared_name(&e.name);
                     self.check_class_completeness(&fqn, e.span);
                     self.check_class_references_exist(&fqn, e.span);
+                    self.check_ancestor_generic_bounds(&fqn, e.span);
+                    self.check_enum_template_tag(&fqn, e);
                     self.check_enum_case_values(&fqn, e);
+                    self.check_enum_sanity(&fqn, e);
                     self.check_trait_conflicts(&fqn, e.span);
                     self.check_duplicate_enum_members(&fqn, e);
                     self.check_method_declaration_sanity(&fqn, ClassKind::Enum, false, &e.methods);

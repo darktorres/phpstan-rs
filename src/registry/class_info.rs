@@ -380,8 +380,24 @@ impl ClassInfo {
     pub(crate) fn from_enum_decl(e: &EnumDecl, ctx: &NameContext) -> ClassInfo {
         // Enums can't be generic in real PHP (no `@template` on an enum
         // means anything), so there's no enclosing-class template list to
-        // pass down here, unlike ClassInfo::from_decl.
+        // pass down here, unlike ClassInfo::from_decl. An enum CAN
+        // `implements` a genuinely generic interface though (`enum Suit
+        // implements \IteratorAggregate<int, self> {}`-shaped code is
+        // real), so `@implements` tags are still worth resolving - just
+        // with an empty `template_params` map, since there's no class-
+        // level template a tag's argument could reference.
         let fqn = ctx.declared_name(&e.name);
+        let class_doc: Option<DocBlock> = e.doc_comment.as_deref().map(docblock::parse);
+        let implements_args: HashMap<String, Vec<Type>> = class_doc
+            .iter()
+            .flat_map(|d| &d.implements)
+            .filter_map(
+                |raw| match resolve_names_in_type(types::parse_type_string(raw), ctx) {
+                    Type::Object(name, args) => Some((name, args)),
+                    _ => None,
+                },
+            )
+            .collect();
         let mut methods: HashMap<String, FunctionSig> = e
             .methods
             .iter()
@@ -578,13 +594,12 @@ impl ClassInfo {
             resolved_trait_conflicts: e.resolved_trait_conflicts.iter().cloned().collect(),
             templates: Vec::new(),
             extends_args: Vec::new(),
-            implements_args: HashMap::new(),
+            implements_args,
             template_bounds: HashMap::new(),
             covariant_templates: HashSet::new(),
             contravariant_templates: HashSet::new(),
-            // `EnumDecl` has no `doc_comment` field at all (the parser
-            // never captures one) - real PHPStan's own API surface has no
-            // enums to mark `@api` anyway, so this is never a real gap.
+            // Real PHPStan's own API surface has no enums to mark `@api`
+            // anyway, so leaving these false is never a real gap.
             is_api: false,
             is_api_do_not_implement: false,
         }
