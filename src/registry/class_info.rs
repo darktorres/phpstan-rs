@@ -87,6 +87,19 @@ pub struct ClassInfo {
     // variance half) - a name absent from both stays invariant.
     pub covariant_templates: HashSet<String>,
     pub contravariant_templates: HashSet<String>,
+    // Phase 40: this class/interface/trait's own docblock carries `@api`
+    // (or, equivalently, `@api-do-not-implement`, which implies it - see
+    // `DocBlock::api`'s own doc comment). Consulted only by
+    // `checker::phpstan_api`, and only ever meaningful for a class this
+    // project didn't declare itself (i.e. one loaded from a real
+    // `phpstan/phpstan` `vendor/` tree as context) - `false` for every
+    // ordinary class, which is exactly the right default.
+    pub is_api: bool,
+    // `@api-do-not-implement` specifically - an `@api` interface/class a
+    // third party must not `extends`/`implements`, even though calling
+    // its already-declared members is still fully covered by `is_api`
+    // above.
+    pub is_api_do_not_implement: bool,
 }
 
 impl ClassInfo {
@@ -302,6 +315,9 @@ impl ClassInfo {
             })
             .collect();
 
+        let is_api = class_doc.as_ref().is_some_and(|d| d.api);
+        let is_api_do_not_implement = class_doc.as_ref().is_some_and(|d| d.api_do_not_implement);
+
         ClassInfo {
             kind: c.kind,
             is_abstract: c.is_abstract,
@@ -322,6 +338,8 @@ impl ClassInfo {
             template_bounds,
             covariant_templates,
             contravariant_templates,
+            is_api,
+            is_api_do_not_implement,
         }
     }
 
@@ -523,6 +541,11 @@ impl ClassInfo {
             template_bounds: HashMap::new(),
             covariant_templates: HashSet::new(),
             contravariant_templates: HashSet::new(),
+            // `EnumDecl` has no `doc_comment` field at all (the parser
+            // never captures one) - real PHPStan's own API surface has no
+            // enums to mark `@api` anyway, so this is never a real gap.
+            is_api: false,
+            is_api_do_not_implement: false,
         }
     }
 
@@ -554,6 +577,13 @@ impl ClassInfo {
             .extend(other.contravariant_templates);
         self.template_bounds.extend(other.template_bounds);
         self.implements_args.extend(other.implements_args);
+        // Same "a tag present on either declaration sticks" reasoning as
+        // the `HashSet::extend` calls above - a stub override that
+        // doesn't repeat `@api` on its own docblock must not un-mark a
+        // class the real declaration already tagged.
+        self.is_api = self.is_api || other.is_api;
+        self.is_api_do_not_implement =
+            self.is_api_do_not_implement || other.is_api_do_not_implement;
         if self.extends.is_empty() {
             self.extends = other.extends;
         }
