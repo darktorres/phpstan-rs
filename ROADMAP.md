@@ -1183,19 +1183,68 @@ member by a name it can't resolve statically: `func_get_args()`,
 `$obj->{$expr}`/`$obj->$name(...)` dynamic member access, and a
 `Foo::{$expr}`/`Foo::$$name` dynamic static access.
 
-**Phase 60 - Isset/empty/nullsafe existence-probe reversal (NEW,
-PLANNED).** `is_existence_probe`/`check_expr_quiet_root`
-(`src/checker/expr.rs:195-224`) deliberately suppress "offset doesn't
-exist" diagnostics inside `isset()`/`empty()`/`??` - a real, tested
-design choice, not an oversight. Build the *other* half real PHPStan
-has: a diagnostic that fires when the probed expression's statically-
-known type proves the check is pointless (`isset($x)` where `$x` is
-never null; `?->` on a never-null receiver). Unlocks `EmptyRule`,
-`IssetRule`, `NullCoalesceRule`, `NullsafeMethodCallRule`,
-`NullsafePropertyFetchRule`. Size: M - strong effort-to-value ratio;
-the harder architectural half (quiet-root suppression through nested
-chains) is already built, only a type-to-message mapping remains, and
-`isset($x)`-on-never-null is a very common real finding.
+**Phase 60 - Isset/empty/nullsafe existence-probe reversal
+(PARTIAL).** `is_existence_probe`/`check_expr_quiet_root`
+(`src/checker/expr.rs`) deliberately suppress "offset doesn't exist"
+diagnostics inside `isset()`/`empty()`/`??` - a real, tested design
+choice, not an oversight. Built the *other* half real PHPStan has for a
+bare local variable and a nullsafe receiver: `isset.variable`/
+`nullCoalesce.variable`/`nullsafe.neverNull`, firing when the probed
+expression's statically-known type already proves the check is
+pointless (mirrors `IssetRule`/`NullCoalesceRule`/
+`NullsafeMethodCallRule`/`NullsafePropertyFetchRule` exactly, same
+identifiers and message shapes). `empty()` is deliberately excluded -
+its own "make sense" check needs BOTH nullability and falsiness to be
+unambiguous (`toBoolean()->isFalse()` staying `maybe` for an ordinary
+`array`/`string`/`int` keeps real `EmptyRule` silent on almost every
+shape this project could otherwise flag), which is real, separate
+machinery this pass doesn't build.
+
+Two single-pass-analysis blind spots, both confirmed silent in real
+PHPStan too via `vendor/bin/phpstan` itself: a loop-carried accumulator
+(`$err ??= $e;` self-referentially widened only inside the very loop
+being checked - `Checker::loop_depth`) and a `static` local carrying a
+value from an earlier call (`Checker::static_var_names`) both suppress
+the new checks rather than risk a false positive from a real value this
+project's own non-iterated, single-invocation model can't see.
+
+Corpus verification surfaced a deeper, pre-existing registry gap these
+new diagnostics made visible rather than introduced: a conditional
+polyfill declaration (`if (!function_exists('str_contains')) {
+function str_contains(?string $haystack, ...) {...} }`, the
+`function_exists()`-guarded idiom used throughout symfony/polyfill-*)
+always lost to a built-in stub's own signature, silently discarding
+real, more-precise native types - `str_contains`/`ctype_punct`-shaped
+false "always null"/"not nullable" findings, traced all the way back to
+`FunctionSig::from_decl`'s own docblock-vs-native reconciliation.
+`stub_provided_functions` tracking lets the first trustworthy
+conditional declaration replace a stub outright; two further gates
+(matching arity, and never letting a replacement downgrade a param/
+return position the stub already had typed down to `Mixed`) keep this
+safe against the corpus's real variety of competing conditional
+declarations for one name: bare `func_get_args()`-forwarding shims,
+PHP-version-gated typed/untyped variant pairs, and `jetbrains/
+phpstorm-stubs` itself being vendored as ordinary project source. A
+related, narrower bug in the same area (a `@var` tag on a `static`
+declaration being silently clobbered by the declaration's own
+default-expression inference) was fixed alongside it.
+
+Done: `isset()`/`??`/`??=` on a bare variable, `?->` on a property/
+method receiver; the loop/`static` unsoundness guards; the stub-vs-
+conditional-declaration registry fix. Still open: `empty()`'s own
+falsiness-aware variant; the offset/property-chain half
+(`isset($x['key'])`, `isset($x->prop)`) real PHPStan gates behind its
+own `checkAdvancedIsset` flag, which needs property-initialization/
+offset-existence dataflow this project doesn't model yet (Phase 62);
+and one narrow residual case the registry fix doesn't resolve - a
+function bundling *both* a legacy (PHP<8 real-runtime, non-nullable)
+and modern (PHP8+, nullable) native-typed variant behind a runtime
+`PHP_VERSION_ID` branch (not just `function_exists()`) still shares one
+registry slot between two bodies with genuinely different nullability
+assumptions, which can misattribute an `argument.type` finding to
+whichever body loses that race (confirmed corpus-rare: 4 occurrences
+across the whole ~20,300-file corpus, all on the legacy-PHP branch of
+`symfony/polyfill-intl-normalizer`).
 
 **Phase 61 - Return-statement / control-flow completeness (NEW,
 PLANNED).** Two related gaps in return-path analysis: (a) nothing
