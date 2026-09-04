@@ -695,3 +695,223 @@ fn variadic_parameter_is_an_array_inside_an_arrow_fn_body() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 49: named-argument legality (unknown/duplicate/positional-after-
+// named, and the unpack-ordering rules real PHP's own parser enforces at
+// compile time that this project's own parser doesn't).
+
+#[test]
+fn an_unknown_named_argument_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f20(int $a): void {}
+            function test(): void { f20(a: 1, x: 2); }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.unknown"
+            && x.message.contains("$x")
+            && x.message.contains("f20()")),
+        "expected an unknown-named-parameter diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_duplicate_named_argument_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f21(int $a): void {}
+            function test(): void { f21(a: 1, a: 2); }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.duplicate" && x.message.contains("$a")),
+        "expected a duplicate-named-argument diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_named_argument_targeting_an_already_filled_positional_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f22(int $a, int $b): void {}
+            function test(): void { f22(1, a: 2); }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.duplicate"
+            && x.message.contains("already been passed")
+            && x.message.contains("$a")),
+        "expected a duplicate-argument diagnostic for $a, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_positional_argument_after_a_named_argument_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f23(int $a, string $b): void {}
+            function test(): void { f23(a: 1, "x"); }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.positionalAfterNamed"),
+        "expected a positional-after-named diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn an_unpacked_argument_after_a_named_argument_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f24(int $a, string $b): void {}
+            function test(array $rest): void { f24(a: 1, ...$rest); }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.unpackAfterNamed"),
+        "expected an unpack-after-named diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_unpacked_argument_after_an_unpacked_argument_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f25(int $a, string $b): void {}
+            function test(array $rest): void { f25(...$rest, 2); }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.nonUnpackAfterUnpacked"),
+        "expected a non-unpack-after-unpack diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn an_unmatched_named_argument_into_a_trailing_variadic_parameter_is_not_flagged() {
+    // Real, legal PHP: any named argument not matching a declared
+    // parameter is collected into a trailing variadic parameter's own
+    // array, keyed by that name - only a function/method with *no*
+    // variadic parameter can have a genuinely "unknown" named argument.
+    let d = diagnostics_for(
+        r#"<?php
+            function f26(int $a, ...$rest): void {}
+            function test(): void { f26(1, x: 2); }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_duplicate_unmatched_named_argument_into_a_trailing_variadic_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f27(int $a, ...$rest): void {}
+            function test(): void { f27(1, x: 2, x: 3); }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.duplicate" && x.message.contains("$x")),
+        "expected a duplicate-named-argument-into-variadic diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_named_argument_written_after_a_spread_argument_is_not_flagged() {
+    // Real, legal PHP: `f(...$args, name: $value)` - a named argument
+    // may still follow a spread/unpack argument (only a further
+    // *positional* one may not).
+    let d = diagnostics_for(
+        r#"<?php
+            function f28(int $a, int $b, int $extra = 0): void {}
+            function test(array $args): void { f28(...$args, extra: 5); }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 49: by-reference argument legality - a nullsafe access chain
+// (`NullsafeCheck::containsNullSafe`'s own equivalent walk) or any other
+// non-lvalue expression can never be a real storage location to write a
+// by-ref parameter's mutation back into.
+
+#[test]
+fn passing_a_nullsafe_property_access_by_reference_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Box30 { public int $value = 0; }
+            function setValue30(int &$x): void { $x = 1; }
+            function test(?Box30 $b): void { setValue30($b?->value); }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.byRef" && x.message.contains("nullsafe")),
+        "expected a nullsafe-by-ref diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn passing_a_plain_property_access_by_reference_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Box31 { public int $value = 0; }
+            function setValue31(int &$x): void { $x = 1; }
+            function test(Box31 $b): void { setValue31($b->value); }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn passing_a_method_call_result_by_reference_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Box32 { public function getValue(): int { return 1; } }
+            function setValue32(int &$x): void { $x = 1; }
+            function test(Box32 $b): void { setValue32($b->getValue()); }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.byRef" && x.message.contains("expects a variable")),
+        "expected a not-an-lvalue by-ref diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn passing_an_array_index_by_reference_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function setValue33(int &$x): void { $x = 1; }
+            function test(array $arr): void { setValue33($arr[0]); }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn passing_a_deeply_nested_nullsafe_chain_by_reference_is_still_flagged() {
+    // The chain-walk needs to look past the immediate node - the
+    // nullsafe operator here is two levels down from the argument's own
+    // outermost PropertyAccess.
+    let d = diagnostics_for(
+        r#"<?php
+            class Inner34 { public int $value = 0; }
+            class Outer34 { public ?Inner34 $inner = null; }
+            function setValue34(int &$x): void { $x = 1; }
+            function test(Outer34 $o): void { setValue34($o->inner?->value); }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.byRef" && x.message.contains("nullsafe")),
+        "expected a nullsafe-by-ref diagnostic, got: {d:?}"
+    );
+}

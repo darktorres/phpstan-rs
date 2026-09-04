@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::checker::{
     Checker, DiagnosticBuilder, Locals, literal_string_value, narrow_type_excluding,
-    purge_stale_narrowing_for, union_types,
+    purge_stale_narrowing_for, union_types, unwrap_grouping,
 };
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
@@ -366,14 +366,30 @@ impl<'a> Checker<'a> {
             defining_class,
             span,
         } = call;
+        // Item 1 + Item 2: naming/ordering legality first - independent
+        // of, and prior to, every count/type check below.
+        self.check_argument_legality(callee_label, sig, args, label);
+
+        // Item 2: a spread/unpack argument's own real contents can't be
+        // resolved statically (see `resolve_call_args`'s own doc
+        // comment) - every declared parameter at or past the positional
+        // index the spread occupies might still be filled by it at
+        // runtime, so neither the "missing required parameter" nor the
+        // "too many arguments" check below can trust a `None` slot (or a
+        // raw `args.len()`) at or past that point to mean what it
+        // normally would. `None` here (rather than skipping the whole
+        // call the way this project previously did entirely) still lets
+        // both checks run precisely for everything *before* the spread.
+        let spread_from = first_spread_positional_index(args);
         let required = sig
             .params
             .iter()
             .filter(|p| !p.variadic && !p.has_default)
             .count();
+        let required_scan_len = spread_from.map_or(required, |sp| sp.min(required));
         let missing_required = resolved
             .iter()
-            .take(required)
+            .take(required_scan_len)
             .filter(|s| s.is_none())
             .count();
         if missing_required > 0 {
@@ -402,7 +418,7 @@ impl<'a> Checker<'a> {
         // `resolve_call_args`'s own design, which would make this check
         // always read `false` if it read from that shape instead.
         let last_is_variadic = sig.params.last().is_some_and(|p| p.variadic);
-        if !last_is_variadic && args.len() > sig.params.len() {
+        if spread_from.is_none() && !last_is_variadic && args.len() > sig.params.len() {
             let quantifier = if required == sig.params.len() {
                 "exactly"
             } else {
@@ -432,6 +448,41 @@ impl<'a> Checker<'a> {
                     _ => continue,
                 },
             };
+            // By-ref target legality: independent of - and checked
+            // before - the type check below, since it's about whether
+            // `arg` is even a real storage location at all, not what
+            // its value's type is. A nullsafe-chain root is checked
+            // first and reported with its own, more specific reason
+            // (short-circuiting, not "not an lvalue") even though a
+            // nullsafe chain is *also* not one of `is_valid_byref_
+            // argument_expr`'s legal shapes.
+            if param.by_ref {
+                if contains_nullsafe_access(arg) {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "{callee_label}() argument #{} (${}) is passed by reference, but its access chain contains a nullsafe operator (?->), which may short-circuit and never write back",
+                            i + 1,
+                            param.name
+                        ),
+                        arg.span,
+                        0,
+                        "argument.byRef",
+                    );
+                } else if !is_valid_byref_argument_expr(arg) {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "{callee_label}() argument #{} (${}) is passed by reference, so it expects a variable, not an expression",
+                            i + 1,
+                            param.name
+                        ),
+                        arg.span,
+                        0,
+                        "argument.byRef",
+                    );
+                }
+            }
             let arg_ty = self.infer_expr(arg, locals);
             if arg_ty == Type::Mixed {
                 continue;
@@ -455,6 +506,142 @@ impl<'a> Checker<'a> {
                     "argument.type",
                 );
             }
+        }
+    }
+
+    /// Phase 49 Item 1: validates a call's own argument list for the
+    /// naming/ordering legality real PHP itself enforces, independent of
+    /// which parameter each argument actually resolves to
+    /// (`resolve_call_args`'s own job, used by every other check in
+    /// `check_args`). Mirrors real PHPStan's own
+    /// `FunctionCallParametersCheck::processArguments` plus its raw-args
+    /// ordering pre-pass, reusing its identifiers verbatim
+    /// (`argument.unknown`, `argument.duplicate`,
+    /// `argument.positionalAfterNamed`, `argument.unpackAfterNamed`,
+    /// `argument.nonUnpackAfterUnpacked`).
+    ///
+    /// The three ordering checks are deliberately `else if` against each
+    /// other (real PHPStan instead runs an ordering pre-pass over the raw
+    /// argument list and a separate, later pass over an *expanded*
+    /// argument list - one that turns a spread over a known constant
+    /// array into one synthetic argument per element - to get
+    /// `positionalAfterNamed` from a genuinely different pass than
+    /// `unpackAfterNamed`/`nonUnpackAfterUnpacked`; this project doesn't
+    /// attempt that constant-array expansion, so the three collapse onto
+    /// the same raw-args loop here) - a single malformed argument only
+    /// ever gets one ordering complaint, not a pile of overlapping ones
+    /// for what's really the same mistake.
+    fn check_argument_legality(
+        &mut self,
+        callee_label: &str,
+        sig: &FunctionSig,
+        args: &[Arg],
+        label: &str,
+    ) {
+        let variadic = sig.params.last().is_some_and(|p| p.variadic);
+        let mut named_seen = false;
+        let mut spread_seen = false;
+        let mut used_param_names: HashSet<&str> = HashSet::new();
+        let mut positional_index = 0usize;
+
+        for arg in args {
+            if named_seen && arg.name.is_none() && !arg.spread {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "named argument cannot be followed by a positional argument in call to {callee_label}()"
+                    ),
+                    arg.value.span,
+                    0,
+                    "argument.positionalAfterNamed",
+                );
+            } else if named_seen && arg.spread {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "named argument cannot be followed by an unpacked (...) argument in call to {callee_label}()"
+                    ),
+                    arg.value.span,
+                    0,
+                    "argument.unpackAfterNamed",
+                );
+            } else if spread_seen && arg.name.is_none() && !arg.spread {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "unpacked (...) argument cannot be followed by a non-unpacked argument in call to {callee_label}()"
+                    ),
+                    arg.value.span,
+                    0,
+                    "argument.nonUnpackAfterUnpacked",
+                );
+            }
+
+            if arg.spread {
+                spread_seen = true;
+                continue;
+            }
+
+            if let Some(name) = &arg.name {
+                named_seen = true;
+                match sig.params.iter().find(|p| &p.name == name) {
+                    // A named argument targeting the real, declared
+                    // variadic parameter's own name (rather than an
+                    // unmatched name collected *into* it, the `None`
+                    // arm below) is just an ordinary named argument.
+                    Some(_) => {
+                        if !used_param_names.insert(name.as_str()) {
+                            self.report(
+                                label.to_string(),
+                                format!(
+                                    "argument for parameter ${name} has already been passed to {callee_label}()"
+                                ),
+                                arg.value.span,
+                                0,
+                                "argument.duplicate",
+                            );
+                        }
+                    }
+                    // No declared parameter has this name - legal only
+                    // when there's a trailing variadic parameter to
+                    // collect it into (real PHP's own named-argument-
+                    // into-variadic support), and then only once per
+                    // name.
+                    None if variadic => {
+                        if !used_param_names.insert(name.as_str()) {
+                            self.report(
+                                label.to_string(),
+                                format!(
+                                    "named parameter ${name} overwrites a previous argument to {callee_label}()"
+                                ),
+                                arg.value.span,
+                                0,
+                                "argument.duplicate",
+                            );
+                        }
+                    }
+                    None => {
+                        self.report(
+                            label.to_string(),
+                            format!("unknown named parameter ${name} in call to {callee_label}()"),
+                            arg.value.span,
+                            0,
+                            "argument.unknown",
+                        );
+                    }
+                }
+                continue;
+            }
+
+            // A plain positional argument, still legally placeable
+            // (nothing above flagged it): record which declared
+            // parameter it claims, the same way a named argument does
+            // above, so a *later* named argument re-targeting that same
+            // parameter is caught as a duplicate too.
+            if !spread_seen && let Some(p) = sig.params.get(positional_index) {
+                used_param_names.insert(p.name.as_str());
+            }
+            positional_index += 1;
         }
     }
 
@@ -644,9 +831,9 @@ pub(crate) fn format_specifier_accepts(spec: char, arg_ty: &Type) -> bool {
 /// parameter list it's being checked against, producing one slot per
 /// declared parameter - `Some(&Expr)` when some argument (positional or
 /// named) actually fills that parameter, `None` when it doesn't (an
-/// omitted optional parameter, or anything past the first spread
-/// argument, whose real contents can't be resolved statically at all).
-/// Every consumer that used to assume `args[i]` lines up with
+/// omitted optional parameter, or a parameter a spread/unpack argument
+/// might fill, whose real contents can't be resolved statically at
+/// all). Every consumer that used to assume `args[i]` lines up with
 /// `params[i]` - true only for the overwhelmingly common all-positional
 /// case - now goes through this first, so a named or reordered-named
 /// call resolves against the *real* parameter, not whichever one happens
@@ -669,17 +856,36 @@ pub(crate) fn format_specifier_accepts(spec: char, arg_ty: &Type) -> bool {
 /// doesn't enforce that ordering, so such input could reach here anyway,
 /// but only needs to avoid panicking on it, not produce a meaningful
 /// result for syntactically-invalid PHP).
+///
+/// Item 2: a spread/unpack argument's own real contents (how many
+/// elements, which keys) aren't known statically, so no further
+/// *positional* argument can be resolved to a slot once one is seen -
+/// but, unlike this function's previous behavior (breaking out of the
+/// whole loop the moment any spread was seen, silently dropping every
+/// argument written after it, named or not), a *named* argument
+/// following a spread (real, legal PHP: `f(...$a, name: $b)`) still
+/// resolves exactly as it would anywhere else.
 pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec<Option<&'a Expr>> {
     let mut resolved: Vec<Option<&Expr>> = vec![None; params.len()];
     let mut positional_index = 0usize;
+    let mut spread_seen = false;
     for arg in args {
         if arg.spread {
-            break;
+            spread_seen = true;
+            continue;
         }
         if let Some(name) = &arg.name {
             if let Some(pos) = params.iter().position(|p| &p.name == name) {
                 resolved[pos] = Some(&arg.value);
             }
+            continue;
+        }
+        if spread_seen {
+            // A plain positional argument written after a spread is
+            // invalid PHP in the first place (`argument.
+            // nonUnpackAfterUnpacked`, flagged separately by
+            // `check_argument_legality`) - nothing meaningful to resolve
+            // it to.
             continue;
         }
         if positional_index < resolved.len() {
@@ -690,4 +896,73 @@ pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec
         positional_index += 1;
     }
     resolved
+}
+
+/// The positional index `resolve_call_args` would have reached at the
+/// moment it hits this call's first spread/unpack argument - `None` when
+/// there isn't one. Every declared parameter at or past that index might
+/// still be filled by the spread's own runtime contents, which can't be
+/// resolved statically, so `check_args`'s "too few"/"too many" argument-
+/// count checks must stop trusting a `None` slot (or a raw `args.len()`)
+/// at or past that point to mean what it normally would.
+fn first_spread_positional_index(args: &[Arg]) -> Option<usize> {
+    let mut positional_index = 0usize;
+    for arg in args {
+        if arg.spread {
+            return Some(positional_index);
+        }
+        if arg.name.is_none() {
+            positional_index += 1;
+        }
+    }
+    None
+}
+
+/// Whether `expr`'s own access chain passes through a nullsafe operator
+/// anywhere along it (`$x?->y->z`, `$x->y?->z`, `$x?->y['k']`, ...) - the
+/// generic "does this chain contain a nullsafe operator" walk the
+/// roadmap's own audit flagged as missing from this project (`Property
+/// Access`/`MethodCall`'s own `nullsafe: bool` field was previously only
+/// ever read locally, per-node - see `checker/expr.rs`'s own several
+/// direct reads of it - never walked as a whole chain). Mirrors real
+/// PHPStan's own `NullsafeCheck::containsNullSafe`. A nullsafe access
+/// short-circuits its *entire* enclosing expression to `null` the moment
+/// its own base is `null`, so nothing built on top of one, however deep,
+/// can ever be relied on to name a genuine, always-evaluated storage
+/// location, which is exactly what passing an argument by reference
+/// needs.
+pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
+    match &unwrap_grouping(expr).kind {
+        ExprKind::PropertyAccess(base, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
+        ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
+        ExprKind::DynamicPropertyAccess(base, _) => contains_nullsafe_access(base),
+        ExprKind::DynamicMethodCall(base, _, _) => contains_nullsafe_access(base),
+        ExprKind::Index(base, _) => contains_nullsafe_access(base),
+        _ => false,
+    }
+}
+
+/// Whether `expr` is one of the narrow expression shapes real PHP itself
+/// allows as the target of a by-reference parameter - a plain variable,
+/// or an array/property access rooted in one - independent of the
+/// nullsafe-chain legality `contains_nullsafe_access` checks separately
+/// (a nullsafe chain can be built from otherwise-legal shapes below and
+/// still needs its own, more specific rejection reason). Mirrors the
+/// shapes real PHPStan's own by-ref argument check treats as legal
+/// (`Variable`, `ArrayDimFetch`, `PropertyFetch`, `StaticPropertyFetch`)
+/// before falling back to `callReturnsByReference` for anything else -
+/// not modeled here, since this project has no notion of a user-defined
+/// function/method that itself returns by reference, so every remaining
+/// shape (a call result, a literal, an operator expression, ...) is
+/// conservatively treated as illegal.
+pub(crate) fn is_valid_byref_argument_expr(expr: &Expr) -> bool {
+    matches!(
+        unwrap_grouping(expr).kind,
+        ExprKind::Variable(_)
+            | ExprKind::DynamicVariable(_)
+            | ExprKind::Index(_, _)
+            | ExprKind::PropertyAccess(_, _, _)
+            | ExprKind::DynamicPropertyAccess(_, _)
+            | ExprKind::StaticAccess(_, _)
+    )
 }

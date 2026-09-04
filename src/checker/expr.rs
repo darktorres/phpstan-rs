@@ -227,29 +227,35 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
-                        // Finding 29: a spread argument (`f(...$args)`)
-                        // means the real argument count/types aren't
-                        // known statically at all - checking count/type
-                        // here would treat the spread array itself as if
-                        // it were meant to fill the very next positional
-                        // slot, producing a real, severe false positive
-                        // for the standard "forward a dynamically-sized
-                        // argument list" idiom.
-                        let has_spread = args.iter().any(|a| a.spread);
-                        if !has_spread {
-                            self.check_args(CheckArgsCall {
-                                callee_label: name,
-                                sig,
-                                args,
-                                resolved: &resolved,
-                                locals,
-                                label,
-                                defining_class: None,
-                                span: e.span,
-                            });
-                            if matches!(name.as_str(), "sprintf" | "printf") {
-                                self.check_format_string_call(name, args, locals, label);
-                            }
+                        // Finding 29 / Phase 49: a spread argument
+                        // (`f(...$args)`) means the real argument
+                        // count/types past it aren't known statically -
+                        // `check_args` itself is now spread-aware (Phase
+                        // 49 Item 2: it stops trusting a count/"missing"
+                        // check at or past a spread's own position,
+                        // rather than this call site skipping the whole
+                        // check the way it previously had to), so it's
+                        // always worth calling. `check_format_string_call`
+                        // is NOT spread-aware (it walks `args[1..]`
+                        // strictly positionally against the format
+                        // string's own specifier count) and stays gated
+                        // on no spread being present, to avoid treating
+                        // the spread argument itself as filling one
+                        // specifier slot.
+                        self.check_args(CheckArgsCall {
+                            callee_label: name,
+                            sig,
+                            args,
+                            resolved: &resolved,
+                            locals,
+                            label,
+                            defining_class: None,
+                            span: e.span,
+                        });
+                        if !args.iter().any(|a| a.spread)
+                            && matches!(name.as_str(), "sprintf" | "printf")
+                        {
+                            self.check_format_string_call(name, args, locals, label);
                         }
                     } else {
                         // Since resolve_function_candidates always
@@ -490,11 +496,11 @@ impl<'a> Checker<'a> {
                             0,
                             "method.notFound",
                         );
-                    } else if let Some(sig) = &sig
-                        && !args.iter().any(|a| a.spread)
-                    {
-                        // Finding 29: see the identical check on the
-                        // plain-function Call arm above.
+                    } else if let Some(sig) = &sig {
+                        // Finding 29 / Phase 49: see the identical
+                        // comment on the plain-function Call arm above -
+                        // `check_args` is spread-aware now, so it's
+                        // always worth calling.
                         let qualified = format!("{class}::{method}");
                         self.check_args(CheckArgsCall {
                             callee_label: &qualified,
@@ -916,9 +922,11 @@ impl<'a> Checker<'a> {
                                     "either implement every inherited abstract method, or instantiate a concrete subclass instead",
                                 ),
                             );
-                        } else if let Some(sig) = ctor_sig
-                            && !args.iter().any(|a| a.spread)
-                        {
+                        } else if let Some(sig) = ctor_sig {
+                            // Finding 29 / Phase 49: see the identical
+                            // comment on the plain-function Call arm
+                            // above - `check_args` is spread-aware now,
+                            // so it's always worth calling.
                             self.check_args(CheckArgsCall {
                                 callee_label: &format!("{class}::__construct"),
                                 sig,
@@ -1015,21 +1023,21 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(class) = &resolved_class {
                     if let Some(sig) = sig {
-                        // Finding 29: see the identical check on the
-                        // plain-function Call arm above.
-                        if !args.iter().any(|a| a.spread) {
-                            let qualified = format!("{class}::{method}");
-                            self.check_args(CheckArgsCall {
-                                callee_label: &qualified,
-                                sig,
-                                args,
-                                resolved: &resolved,
-                                locals,
-                                label,
-                                defining_class: Some(class),
-                                span: e.span,
-                            });
-                        }
+                        // Finding 29 / Phase 49: see the identical
+                        // comment on the plain-function Call arm above -
+                        // `check_args` is spread-aware now, so it's
+                        // always worth calling.
+                        let qualified = format!("{class}::{method}");
+                        self.check_args(CheckArgsCall {
+                            callee_label: &qualified,
+                            sig,
+                            args,
+                            resolved: &resolved,
+                            locals,
+                            label,
+                            defining_class: Some(class),
+                            span: e.span,
+                        });
                     } else if self.registry.classes.contains_key(class)
                         && self.registry.lookup_method(class, "__callStatic").is_none()
                     {
