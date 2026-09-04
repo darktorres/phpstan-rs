@@ -1080,6 +1080,16 @@ fn a_template_nested_inside_an_unregistered_class_s_argument_is_never_flagged() 
     // uninstalled dependency, or a PHAR-bundled one), so it must not
     // guess `Invariant` (or anything else) for its own template slot and
     // risk a false positive on real, unverifiable third-party generics.
+    //
+    // Phase 48 (symbol-existence checking) landed after this test was
+    // first written and correctly flags `Unregistered` itself as a
+    // missing class - genuinely real, separate behavior, not a
+    // regression: an unresolvable class name in a typehint is always
+    // worth reporting on its own. What this test actually guards is
+    // narrower now that both checks coexist: `check_generic_bounds`
+    // must not ALSO pile a second, generics-specific diagnostic on top
+    // once Phase 48 has already reported the class as missing - exactly
+    // one diagnostic, and it's the class-existence one.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1091,7 +1101,8 @@ fn a_template_nested_inside_an_unregistered_class_s_argument_is_never_flagged() 
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert_eq!(d.len(), 1, "unexpected diagnostics: {d:?}");
+    assert_eq!(d[0].identifier, "class.notFound");
 }
 
 #[test]
