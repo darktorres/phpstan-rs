@@ -716,10 +716,13 @@ too, wired into `abs()` and `~` respectively, with exact bound
 arithmetic (including the real `PHP_INT_MIN`-overflows-to-unbounded
 edge case). Deliberately never checks `(bool)` - real PHP has no type
 for which it's illegal. This same verification pass also found and
-fixed a real, standalone narrowing bug it surfaced (`$x instanceof A
-|| $x instanceof B` never narrowed at all, unlike a single `instanceof`
-check) - see the "OR-chain of instanceof checks" entry in Completed
-phase history below for that fix specifically.
+fixed a real, standalone narrowing bug it surfaced: `or_chain_narrowing_
+target`/`and_chain_narrowing_target` only recognized `ExprKind::Call`-
+shaped predicate leaves, so `$x instanceof A || $x instanceof B` never
+narrowed at all, unlike a single `instanceof` check - added an
+`ExprKind::Instanceof` leaf case (commit `ff40c36`). Cleared 358
+unrelated pre-existing corpus false positives with only 7 new
+(genuine, `vendor/`-only) findings.
 
 **Still open**: `PrintRule` (this project's parser has no dedicated
 `print` AST node to hang a check on - it parses through the ordinary
