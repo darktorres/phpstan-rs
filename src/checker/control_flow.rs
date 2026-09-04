@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::{Checker, Locals, union_types};
+use crate::registry::Registry;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -162,7 +163,34 @@ pub(crate) fn body_contains_yield(stmts: &[Stmt]) -> bool {
     stmts.iter().any(stmt_contains_yield)
 }
 
-fn expr_contains_yield(e: &Expr) -> bool {
+/// Phase 70: whether `ty` is a real PHP generator-compatible return type,
+/// mirroring real PHP's own engine-level check exactly (confirmed
+/// directly via `php`/`php -l`), which only needs *one* member of a
+/// union to be `Traversable`-compatible, not all of them (`int|Generator`
+/// is genuinely accepted by real PHP, however misleading, and `iterable`
+/// itself is `array|Traversable` - the `array` half alone would
+/// otherwise wrongly sink the whole check). `Mixed` (no useful
+/// information either way) is treated as always compatible, matching
+/// this project's usual "don't guess against yourself" leniency for an
+/// unresolved/undeclared type.
+pub(crate) fn type_allows_generator_return(ty: &Type, registry: &Registry) -> bool {
+    match ty {
+        Type::Mixed => true,
+        Type::Object(name, _) => registry.is_subclass_of(name, "Traversable"),
+        Type::Union(members) | Type::Intersection(members) => members
+            .iter()
+            .any(|m| type_allows_generator_return(m, registry)),
+        _ => false,
+    }
+}
+
+/// Phase 70: an arrow function's own body is a single expression, not a
+/// `Vec<Stmt>` `body_contains_yield` above can walk - this is that same
+/// walk's expression-only counterpart (`expr_children` already stops at
+/// a nested `Closure`/`ArrowFn` boundary, the correct semantics here
+/// too: a `yield` inside a nested one doesn't make *this* arrow function
+/// a generator).
+pub(crate) fn expr_contains_yield(e: &Expr) -> bool {
     matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
         || expr_children(e).into_iter().any(expr_contains_yield)
 }

@@ -1275,3 +1275,251 @@ fn phpstan_throw_expr_type_flags_throwing_a_non_throwable() {
             .contains("cannot throw InvalidException: it does not implement Throwable")
     }));
 }
+
+// Phase 70: `generator.returnType` - confirmed directly via `php -l` as
+// a real, unconditional PHP fatal error at compile time: a function
+// body containing `yield` must declare a return type compatible with
+// Generator/Iterator/Traversable/iterable.
+
+#[test]
+fn a_generator_function_declared_to_return_int_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generator.returnType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_function_declared_to_return_array_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generator.returnType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_function_declared_to_return_void_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generator.returnType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_function_declared_to_return_generator_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): Generator {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generator.returnType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_docblock_return_array_shape_on_a_native_iterable_generator_is_never_flagged() {
+    // Real corpus find (vendor/doctrine/inflector's own
+    // `Inflectible::getSingular()`): a `@return Transformation[]`
+    // docblock on a `: iterable`-typed generator describes what
+    // iterating it *produces*, not a redeclaration of the native type -
+    // real PHP's own "Generator return type must be a supertype of
+    // Generator" fatal error is checked against the *native* type alone,
+    // never the PHPDoc-refined one.
+    let d = diagnostics_for(
+        r#"<?php
+            class Transformation {}
+            class Foo {
+                /** @return Transformation[] */
+                public function f(): iterable {
+                    yield new Transformation();
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generator.returnType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_function_declared_to_return_iterator_or_traversable_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): Iterator {
+                yield 1;
+            }
+            function g(): Traversable {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generator.returnType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_function_declared_to_return_iterable_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): iterable {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generator.returnType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_function_declared_to_return_a_nullable_generator_is_never_flagged() {
+    // Confirmed directly via php -l: real PHP accepts this even though
+    // calling the function never actually produces null.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): ?Generator {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generator.returnType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_function_declared_to_return_an_unrelated_union_with_generator_is_never_flagged() {
+    // Confirmed directly via php -l: real PHP accepts `int|Generator`
+    // outright - only one union member needs to be Generator-compatible.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int|Generator {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generator.returnType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_function_with_no_declared_return_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f() {
+                yield 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generator.returnType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_generator_function_is_never_flagged_regardless_of_return_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                return 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generator.returnType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_method_that_yields_with_a_wrong_return_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function f(): int {
+                    yield 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generator.returnType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_yield_from_with_a_wrong_declared_return_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                yield from [1, 2];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generator.returnType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_closure_with_a_wrong_declared_return_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            $gen = function (): int {
+                yield 1;
+            };
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generator.returnType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_generator_arrow_function_with_a_wrong_declared_return_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            $gen = fn (): int => yield 1;
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generator.returnType"),
+        "got: {d:?}"
+    );
+}

@@ -508,6 +508,11 @@ impl<'a> Checker<'a> {
                 );
                 let previous_generator_flag = self.current_function_is_generator;
                 self.current_function_is_generator = body_contains_yield(body);
+                self.check_generator_return_type(
+                    declared_return.as_ref(),
+                    closure_expr.span,
+                    &closure_label,
+                );
                 self.check_block(
                     body,
                     &mut closure_locals,

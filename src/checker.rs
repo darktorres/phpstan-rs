@@ -432,7 +432,9 @@ pub(crate) use assignment::{
 };
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
-pub(crate) use control_flow::{body_contains_yield, merge_scopes};
+pub(crate) use control_flow::{
+    body_contains_yield, expr_contains_yield, merge_scopes, type_allows_generator_return,
+};
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
 // Only ever called by `union_types` itself in real code (`checker/expr.rs`) -
 // this crate-level re-export exists solely so this module's own test
@@ -807,6 +809,52 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 70: `YieldInGeneratorRule`, narrowed to its declared-return-
+    /// type-compatibility half (the full `Generator<K, V, TSend,
+    /// TReturn>` generic shape - checking each `yield`'s own key/value
+    /// against `K`/`V`, a sent-in value's type against `TSend`, and a
+    /// `return` statement inside a generator against `TReturn` - is left
+    /// for later; see ROADMAP.md). Confirmed directly via `php`/`php -l`
+    /// as a real, unconditional fatal error at *compile* time (not just
+    /// first-call): `function f(): int { yield 1; }` fails to parse at
+    /// all with "Generator return type must be a supertype of Generator,
+    /// int given" - real PHP's own check is lenient about *which* return
+    /// type shape satisfies this (confirmed: `?Generator`, `iterable`,
+    /// and even the deliberately-unrelated-seeming `int|Generator` are
+    /// all accepted, since only ONE member of a union needs to be
+    /// Generator-compatible), which `type_allows_generator_return`
+    /// mirrors exactly rather than guessing at PHPStan's own stricter,
+    /// `reportMaybes`-gated static heuristic.
+    pub(crate) fn check_generator_return_type(
+        &mut self,
+        declared_return: Option<&Type>,
+        span: Span,
+        label: &str,
+    ) {
+        if !self.current_function_is_generator {
+            return;
+        }
+        let Some(declared) = declared_return else {
+            return;
+        };
+        let resolved = match &self.current_class {
+            Some(c) => self.resolve_pseudo(declared, c),
+            None => declared.clone(),
+        };
+        if type_allows_generator_return(&resolved, self.registry) {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!(
+                "yields, but its declared return type {resolved} is not a supertype of Generator, Iterator, Traversable, or iterable"
+            ),
+            span,
+            0,
+            "generator.returnType",
+        );
+    }
+
     #[hotpath::measure]
     pub(crate) fn check_function(
         &mut self,
@@ -961,6 +1009,31 @@ impl<'a> Checker<'a> {
                 None => ty,
             })
         });
+        // Phase 70: the *native*-only counterpart of `declared_return`
+        // just above - `check_generator_return_type` needs it
+        // specifically, not the PHPDoc-refined type `declared_return`
+        // carries everywhere else in this function. Real PHP's own
+        // "Generator return type must be a supertype of Generator"
+        // fatal error is checked against the native declaration alone;
+        // a `@return Transformation[]` docblock on a `: iterable`-typed
+        // generator (a real, common shape - confirmed via
+        // vendor/doctrine/inflector's own `Inflectible::getSingular()`)
+        // is describing what iterating the real Generator/iterable
+        // *produces*, not redeclaring the native type at all - using
+        // `declared_return` here produced 84 false positives against
+        // the Piwigo corpus before this fix (every docblock-typed-as-
+        // array generator in vendor/doctrine/inflector alone).
+        let native_return = sig.map(|s| s.return_type_native.clone()).or_else(|| {
+            let ty = f
+                .return_type
+                .as_deref()
+                .map(types::parse_type_string)
+                .map(|ty| resolve_names_in_type(ty, &self.name_ctx))?;
+            Some(match class_name {
+                Some(c) => self.resolve_pseudo(&ty, c),
+                None => ty,
+            })
+        });
         // Phase 48: `ExistingClassesInTypehintsRule`'s own return-type
         // check - the un-widened, exactly-as-declared type (not the
         // `?`-and-`resolve_pseudo`-adjusted `expected` the falls-off-the-
@@ -1044,6 +1117,7 @@ impl<'a> Checker<'a> {
         self.saw_dynamic_var_construct = false;
         let previous_generator_flag = self.current_function_is_generator;
         self.current_function_is_generator = body_contains_yield(&f.body);
+        self.check_generator_return_type(native_return.as_ref(), f.span, &label);
 
         for stmt in &f.body {
             self.check_stmt(stmt, &mut locals, declared_return.as_ref(), &label);

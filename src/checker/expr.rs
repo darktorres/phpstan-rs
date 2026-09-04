@@ -1,9 +1,10 @@
 use crate::ast::*;
 use crate::checker::{
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, TemplateBindings,
-    body_contains_yield, is_language_construct, is_real_variable_key, is_superglobal,
-    literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
-    purge_stale_narrowing_for, resolve_call_args, superglobal_default_type, to_bitwise_not,
+    body_contains_yield, expr_contains_yield, is_language_construct, is_real_variable_key,
+    is_superglobal, literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding,
+    narrowing_key, purge_stale_narrowing_for, resolve_call_args, superglobal_default_type,
+    to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -1790,6 +1791,7 @@ impl<'a> Checker<'a> {
                 // check_block never routes through check_function at all.
                 let previous_generator_flag = self.current_function_is_generator;
                 self.current_function_is_generator = body_contains_yield(body);
+                self.check_generator_return_type(declared_return.as_ref(), e.span, &closure_label);
                 self.check_block(
                     body,
                     &mut closure_locals,
@@ -1861,7 +1863,23 @@ impl<'a> Checker<'a> {
                     };
                     arrow_locals.insert(p.name.clone(), ty);
                 }
+                // Phase 70: an arrow function's own body is a single
+                // expression, not a `Vec<Stmt>` `body_contains_yield`
+                // can walk - `expr_contains_yield` is that same walk's
+                // expression-only counterpart. Same save/set/restore
+                // `check_function`/the Closure literal arms already do:
+                // `check_expr` never routes through `check_function`
+                // either, so without this, checking a generator arrow
+                // function here would leak the flag into whatever comes
+                // after it in the *enclosing* scope's own checking pass.
+                let previous_generator_flag = self.current_function_is_generator;
+                self.current_function_is_generator = expr_contains_yield(body);
+                let declared_return = return_type
+                    .as_deref()
+                    .map(|_| self.resolve_type_hint(return_type.as_deref()));
+                self.check_generator_return_type(declared_return.as_ref(), e.span, label);
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
+                self.current_function_is_generator = previous_generator_flag;
                 // Its body is a single implicit-return expression, not a
                 // StmtKind::Return - the equivalent of check_stmt's own
                 // Return-vs-declared_return check, kept here since
