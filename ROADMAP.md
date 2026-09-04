@@ -1467,18 +1467,55 @@ item; batched as one phase since none has any shared blocker beyond
 Phase 38's PhpVersion gate for two of the const-modifier sub-checks.
 
 **Phase 66 - Enum sanity, ancestor-check wiring, and template-rejection
-completion (NEW, PLANNED).** Extend `check_enum_case_values`
-(`src/checker/oop.rs:94-121`, which already correctly detects duplicate
-backing values - the hardest sub-check) with the five remaining
-structural checks: constructor/destructor/magic-method bans, native
-`cases()`/`from()`/`tryFrom()` redeclaration ban, backing-type-must-be-
-int-or-string, `Serializable` ban, value-presence/type consistency.
-Also wire `check_class_generic_bounds` into the `StmtKind::EnumDecl` arm
-(`src/checker.rs:337`, currently gated to `ClassDecl` only at line 324 -
-a pure wiring gap) and reject `@template` tags on enums outright (enums
-can't be generic). Unlocks the `EnumSanityRule` remainder,
-`EnumTemplateTypeRule`, `EnumAncestorsRule`. Size: M - cheap wins; the
-hardest logic already exists or is a one-line wiring fix.
+completion (DONE).** Extended `check_enum_case_values`
+(`src/checker/oop.rs`, which already correctly detected duplicate backing
+values - the hardest sub-check) with a new `check_enum_sanity`: every
+remaining structural check from real PHPStan's own `EnumSanityRule`
+(`vendor/phpstan-src/src/Rules/Classes/EnumSanityRule.php`) -
+`enum.constructor`/`enum.destructor` (a magic `__construct`/`__destruct`),
+`enum.magicMethod` (any other magic method besides `__call`/
+`__callStatic`/`__invoke`), `enum.methodRedeclaration` (native `cases()`
+always; `from()`/`tryFrom()` only on a backed enum), `enum.backingType`
+(a backing type that isn't literally `int`/`string`), `enum.serializable`
+(`implements Serializable`, checked transitively via
+`Registry::is_subclass_of`), `enum.caseWithValue`/`enum.missingCase`
+(value presence must match backed-ness), and `enum.caseType` (a case's
+own inferred literal type - via the newly-exported
+`registry::infer_const_type` - must match the declared backing type,
+skipped rather than guessed for a non-literal value like `self::CONST`).
+Every one of these except `Serializable` is confirmed directly via
+`php -l` as a real, unconditional PHP fatal error, matching this
+project's established "don't guess" discipline (`check_enum_case_values`'s
+own literal-only comparison) for the one sub-check (`caseType`) that
+needs a real inferred type rather than pure AST structure.
+`enum.generic` (`EnumTemplateTypeRule`) is a new `check_enum_template_tag`
+flagging a stray `@template` tag on an enum's own doc comment - enums
+can't be generic in real PHP (no `enum Foo<T>` syntax exists at all).
+Needed a new `EnumDecl::doc_comment` field: previously never captured at
+all (the parser only called `take_doc_comment` before `class`/
+`interface`/`trait`, never `enum` - now captured at `parse_enum_decl`'s
+own first token, mirroring `parse_class_decl`'s identical pattern), which
+also let `ClassInfo::from_enum_decl` resolve an enum's own `@implements`
+generic-argument tags for the first time (previously hardcoded to an
+empty map). `check_class_generic_bounds` was split into a shared
+`check_ancestor_generic_bounds` helper (the `extends`/`implements` half,
+now taking just `fqn`+`span` instead of a whole `&ClassDecl`) so the
+`StmtKind::EnumDecl` arm in `checker.rs` can call it too - previously a
+pure wiring gap, silently skipping generic-bound violations written on an
+enum's own `implements` clause. Unlocks the `EnumSanityRule` remainder
+and `EnumTemplateTypeRule` in full. Still open: `EnumAncestorsRule`'s own
+much richer message set (mismatched-arg-count, non-generic-interface,
+call-site-variance, and several other `@implements`-specific messages
+beyond plain bound-checking) - this phase only wires the existing, more
+generic `check_generic_bounds` through, not a full port of
+`GenericAncestorsCheck`'s own dozen-plus message shapes.
+Corpus-verified: 50084 -> 50097 diagnostics (all ~20,300 Piwigo+vendor
+files), all 13 new findings confined to `jetbrains/phpstorm-stubs`' own
+`implements BackedEnum, UnitEnum` (instead of native `: int`/`: string`
+backing syntax) idiom plus its stub-only `cases()`/`from()`/`tryFrom()`
+redeclarations - the same already-accepted vendored-IDE-stub noise class
+documented throughout this project's corpus verification, not a new
+false-positive class.
 
 **Phase 67 - `@internal` restricted-usage engine (NEW, PLANNED).** No
 stage parses or stores `@internal`, and no dispatch mechanism compares
