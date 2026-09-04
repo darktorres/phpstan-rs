@@ -9,7 +9,8 @@ use lexer::Lexer;
 use output::OutputFormat;
 use parser::Parser;
 use phpstan_rs::{
-    baseline, checker, composer, config, lexer, lsp, output, parser, php_stubs, project, registry,
+    baseline, checker, composer, config, lexer, lsp, output, parser, php_stubs, php_version,
+    project, registry,
 };
 use registry::{FunctionSig, Registry};
 
@@ -297,6 +298,7 @@ fn run_check_project(
     scan_files: &[PathBuf],
     level: u8,
     strict_mixed_arrays: bool,
+    php_version: Option<php_version::PhpVersion>,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
     phpstan_api_check_enabled: bool,
@@ -331,6 +333,7 @@ fn run_check_project(
 
     let mut project = project::Project::new();
     project.set_strict_mixed_arrays(strict_mixed_arrays);
+    project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
     let default_hook = std::panic::take_hook();
@@ -462,6 +465,12 @@ enum Command {
         level: Option<u8>,
         #[arg(long)]
         strict_mixed_arrays: bool,
+        /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
+        /// portability rules that check "X is only supported on PHP Y.Z
+        /// and later" (see `php_version::PhpFeature`). Unset means no
+        /// such rule has anything to check against yet.
+        #[arg(long)]
+        php_version: Option<String>,
         #[arg(long)]
         generate_baseline: Option<PathBuf>,
         #[arg(long)]
@@ -477,8 +486,8 @@ enum Command {
         no_composer: bool,
         /// TOML config file (see src/config.rs) supplying defaults for
         /// paths/level/baseline/strict_mixed_arrays/scan_paths/
-        /// no_composer - any flag above, when given, overrides the same
-        /// key in the config.
+        /// no_composer/php_version - any flag above, when given,
+        /// overrides the same key in the config.
         #[arg(long)]
         config: Option<PathBuf>,
         /// Output format: `text` (default, human-readable), `json`, or
@@ -515,6 +524,7 @@ fn main() {
             dirs,
             level,
             strict_mixed_arrays,
+            php_version,
             generate_baseline,
             baseline,
             scan_dirs,
@@ -569,6 +579,16 @@ fn main() {
             let level = level.or(config.level).unwrap_or(MAX_LEVEL);
             let strict_mixed_arrays =
                 strict_mixed_arrays || config.strict_mixed_arrays.unwrap_or(false);
+            let php_version = match php_version.or(config.php_version) {
+                Some(s) => match php_version::parse_php_version(&s) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                },
+                None => None,
+            };
             let baseline = baseline.or(config.baseline.map(resolve_against_config));
 
             let mut scan_dirs = if !scan_dirs.is_empty() {
@@ -606,6 +626,7 @@ fn main() {
                 &scan_files,
                 level,
                 strict_mixed_arrays,
+                php_version,
                 generate_baseline.as_deref(),
                 baseline.as_deref(),
                 phpstan_api_check_enabled,

@@ -106,6 +106,17 @@ impl Project {
         self.registry.strict_mixed_arrays = strict;
     }
 
+    /// Phase 38: configures the project's target PHP version
+    /// (`registry::Registry::php_version`), following
+    /// `set_strict_mixed_arrays`'s exact precedent - a narrow setter
+    /// rather than a general `&mut Registry` accessor, for the same
+    /// reason given there. `None` means "not configured" (the default),
+    /// not "PHP version zero" - every version-gated rule reading this
+    /// field needs to treat the two differently.
+    pub fn set_php_version(&mut self, php_version: Option<crate::php_version::PhpVersion>) {
+        self.registry.php_version = php_version;
+    }
+
     /// Phase 40: opts every subsequent `check_file`/`check_all` call into
     /// `checker::phpstan_api::check_phpstan_api_usage` - the caller
     /// (`main.rs`) decides this once, via

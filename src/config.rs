@@ -14,6 +14,7 @@
 //! strict_mixed_arrays = false
 //! scan_paths = ["vendor/some-manual-extra"]
 //! no_composer = false
+//! php_version = "8.1"
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -33,6 +34,15 @@ pub struct Config {
     /// Disables the automatic Composer-autoloader-based `vendor/`
     /// context load (see `composer::discover_vendor_context`).
     pub no_composer: Option<bool>,
+    /// Phase 38: the project's target PHP version, as a `"major.minor"`
+    /// string (e.g. `"8.1"`) - see `php_version::parse_php_version` for
+    /// the exact accepted format. A plain `Option<String>` here rather
+    /// than a structured `(u8, u8)`, since TOML has no tuple literal and
+    /// `"8.1"` is what a user actually types; parsing (and erroring on a
+    /// malformed value) happens once, at the CLI/config merge point in
+    /// `main.rs`, the same place `baseline`/`scan_paths` are resolved
+    /// against the config file's own directory.
+    pub php_version: Option<String>,
 }
 
 impl Config {

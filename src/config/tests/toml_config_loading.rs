@@ -15,6 +15,7 @@ fn loads_every_field_from_a_real_toml_file() {
         strict_mixed_arrays = true
         scan_paths = ["vendor/some-manual-extra"]
         no_composer = true
+        php_version = "8.1"
         "#,
     )
     .unwrap();
@@ -35,6 +36,7 @@ fn loads_every_field_from_a_real_toml_file() {
         Some(vec![PathBuf::from("vendor/some-manual-extra")])
     );
     assert_eq!(config.no_composer, Some(true));
+    assert_eq!(config.php_version, Some("8.1".to_string()));
 
     let _ = std::fs::remove_file(&path);
 }

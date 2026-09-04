@@ -19,6 +19,7 @@ pub mod output;
 pub mod parser;
 pub mod pest_config;
 pub mod php_stubs;
+pub mod php_version;
 pub mod project;
 pub mod regex_groups;
 pub mod registry;

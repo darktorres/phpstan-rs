@@ -34,6 +34,15 @@ pub struct Registry {
     // existing construction sites already goes through `build`/
     // `default()` and none of them need to change to keep compiling.
     pub strict_mixed_arrays: bool,
+    // Phase 38: the project's configured target PHP version, if any -
+    // `None` (the default) means "not configured", which every
+    // version-gated rule that reads this should treat as "nothing to
+    // check yet" rather than assuming any particular version. Set via
+    // `Project::set_php_version`, following `strict_mixed_arrays`'s exact
+    // precedent (config.rs field -> CLI flag -> merge -> Project setter ->
+    // this field). See `crate::php_version::PhpFeature` for the small
+    // feature-availability lookup table this unlocks.
+    pub php_version: Option<crate::php_version::PhpVersion>,
     // Phase 25: class names that have had at least one *unconditional*
     // declaration indexed so far - lets `index_with_context` tell "this
     // name's existing entry is itself unconditional, so a second

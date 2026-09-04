@@ -225,6 +225,105 @@ fn check_project_a_wrong_typed_array_literal_is_flagged_without_strict_mixed_arr
 }
 
 #[test]
+fn check_project_php_version_flag_is_accepted_and_checking_proceeds_normally() {
+    // Phase 38: no rule reads `php_version` yet (it's purely the enabling
+    // config/CLI/Project plumbing) - this just confirms the flag parses
+    // and a normal run still completes and reports as usual.
+    let dir = TempDir::new("check_project_php_version");
+    dir.write("a.php", "<?php function f(): int { return 1; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--php-version")
+        .arg("8.1")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("1 file(s) checked, 0 diagnostic(s)"),
+        "got: {stdout}"
+    );
+}
+
+#[test]
+fn check_project_malformed_php_version_is_a_real_error_not_a_panic() {
+    let dir = TempDir::new("check_project_bad_php_version");
+    dir.write("a.php", "<?php function f(): int { return 1; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--php-version")
+        .arg("not-a-version")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid php_version") && stderr.contains("not-a-version"),
+        "got: {stderr}"
+    );
+}
+
+#[test]
+fn check_project_config_file_supplies_php_version() {
+    // CLI-level mirror of `strict_mixed_arrays`'s own config-supplies-a-
+    // value coverage: a config file's `php_version` key is honored (and,
+    // being unobservable in diagnostics today, is exercised here only via
+    // the malformed-value error path, which does surface on stderr).
+    let dir = TempDir::new("check_project_config_php_version");
+    dir.write("src/a.php", "<?php function f(): int { return 1; }");
+    let config_path = dir.write(
+        "phpstan-rs.toml",
+        "paths = [\"src\"]\nphp_version = \"not-a-version\"\n",
+    );
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid php_version") && stderr.contains("not-a-version"),
+        "got: {stderr}"
+    );
+}
+
+#[test]
+fn check_project_cli_php_version_overrides_config_php_version() {
+    // Same override precedent as `strict_mixed_arrays`: a CLI flag beats
+    // the same key in the config file. A valid CLI value must win over an
+    // invalid config value (if the config value were used instead, this
+    // would fail the same way the test above does).
+    let dir = TempDir::new("check_project_config_php_version_override");
+    dir.write("src/a.php", "<?php function f(): int { return 1; }");
+    let config_path = dir.write(
+        "phpstan-rs.toml",
+        "paths = [\"src\"]\nphp_version = \"not-a-version\"\n",
+    );
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--config")
+        .arg(&config_path)
+        .arg("--php-version")
+        .arg("8.2")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("1 file(s) checked, 0 diagnostic(s)"),
+        "got: {stdout}"
+    );
+}
+
+#[test]
 fn check_project_config_file_supplies_paths_and_level() {
     let dir = TempDir::new("check_project_config");
     dir.write(
