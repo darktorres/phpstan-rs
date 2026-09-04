@@ -70,6 +70,7 @@ impl<'a> Checker<'a> {
                                 format!("{class}'s @template {name} requires {bound}, got {arg}"),
                                 span,
                                 6,
+                                "generics.templateBound",
                             );
                         }
                     }
@@ -228,7 +229,7 @@ impl<'a> Checker<'a> {
         }
         violations.sort();
         for message in violations {
-            self.report(label.to_string(), message, span, 6);
+            self.report(label.to_string(), message, span, 6, "generics.variance");
         }
     }
 

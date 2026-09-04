@@ -290,6 +290,7 @@ impl<'a> Checker<'a> {
                 ),
                 span,
                 0,
+                "arguments.count",
             );
         }
 
@@ -321,6 +322,7 @@ impl<'a> Checker<'a> {
                 ),
                 span,
                 0,
+                "arguments.count",
             );
         }
 
@@ -355,6 +357,7 @@ impl<'a> Checker<'a> {
                     ),
                     arg.span,
                     5,
+                    "argument.type",
                 );
             }
         }
@@ -400,6 +403,7 @@ impl<'a> Checker<'a> {
                 ),
                 fmt_expr.value.span,
                 0,
+                "arguments.count",
             );
             return;
         }
@@ -411,6 +415,7 @@ impl<'a> Checker<'a> {
                     format!("{name}() format specifier %{spec} does not accept {arg_ty}"),
                     arg.value.span,
                     5,
+                    "argument.type",
                 );
             }
         }

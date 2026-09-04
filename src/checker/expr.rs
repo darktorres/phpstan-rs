@@ -1,9 +1,9 @@
 use crate::ast::*;
 use crate::checker::{
-    CheckArgsCall, Checker, Locals, TemplateBindings, body_contains_yield, is_language_construct,
-    is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
-    narrow_type_excluding, narrowing_key, purge_stale_narrowing_for, resolve_call_args,
-    superglobal_default_type,
+    CheckArgsCall, Checker, DiagnosticBuilder, Locals, TemplateBindings, body_contains_yield,
+    is_language_construct, is_real_variable_key, is_superglobal, literal_string_key,
+    literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
+    purge_stale_narrowing_for, resolve_call_args, superglobal_default_type,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -122,7 +122,7 @@ impl<'a> Checker<'a> {
                     if &actual != expected {
                         self.report(label.to_string(), format!(
                                 "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
-                            ), actual_arg.value.span, 0);
+                            ), actual_arg.value.span, 0, "phpstanRs.assertType");
                     }
                     self.check_expr(&actual_arg.value, locals, label);
                     return Type::Mixed;
@@ -264,6 +264,7 @@ impl<'a> Checker<'a> {
                             format!("call to undefined function {name}()"),
                             e.span,
                             0,
+                            "function.notFound",
                         );
                     }
                 }
@@ -487,6 +488,7 @@ impl<'a> Checker<'a> {
                             format!("call to undefined method {recv_ty}::{method}()"),
                             e.span,
                             0,
+                            "method.notFound",
                         );
                     } else if let Some(sig) = &sig
                         && !args.iter().any(|a| a.spread)
@@ -584,6 +586,7 @@ impl<'a> Checker<'a> {
                         format!("undefined variable ${name}"),
                         e.span,
                         0,
+                        "variable.undefined",
                     );
                 }
                 locals
@@ -874,13 +877,20 @@ impl<'a> Checker<'a> {
                                 format!("cannot instantiate interface {class}"),
                                 e.span,
                                 0,
+                                "new.interface",
                             );
                         } else if info.is_abstract {
-                            self.report(
-                                label.to_string(),
-                                format!("cannot instantiate abstract class {class}"),
-                                e.span,
-                                0,
+                            self.report_builder(
+                                DiagnosticBuilder::new(
+                                    label.to_string(),
+                                    format!("cannot instantiate abstract class {class}"),
+                                    e.span,
+                                    0,
+                                    "new.abstract",
+                                )
+                                .tip(
+                                    "either implement every inherited abstract method, or instantiate a concrete subclass instead",
+                                ),
                             );
                         } else if let Some(sig) = ctor_sig
                             && !args.iter().any(|a| a.spread)
@@ -902,6 +912,7 @@ impl<'a> Checker<'a> {
                             format!("instantiated class {class} not found"),
                             e.span,
                             0,
+                            "class.notFound",
                         );
                     }
                 }
@@ -999,6 +1010,7 @@ impl<'a> Checker<'a> {
                             format!("call to undefined static method {class}::{method}()"),
                             e.span,
                             0,
+                            "staticMethod.notFound",
                         );
                     }
                 }
@@ -1063,6 +1075,7 @@ impl<'a> Checker<'a> {
                             format!("access to undefined static property {class}::${prop_name}"),
                             e.span,
                             0,
+                            "staticProperty.notFound",
                         );
                     }
                     prop.map(|p| self.resolve_pseudo(&p.ty, &class))
@@ -1075,6 +1088,7 @@ impl<'a> Checker<'a> {
                             format!("access to undefined constant {class}::{member}"),
                             e.span,
                             0,
+                            "classConstant.notFound",
                         );
                     }
                     const_ty
@@ -1132,6 +1146,7 @@ impl<'a> Checker<'a> {
                         format!("access to undefined property {base_ty}::${prop}"),
                         e.span,
                         2,
+                        "property.notFound",
                     );
                 }
                 if let Some(base_key) = narrowing_key(base)
@@ -1373,6 +1388,7 @@ impl<'a> Checker<'a> {
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             body.span,
                             3,
+                            "return.type",
                         );
                     }
                 }
@@ -1408,6 +1424,7 @@ impl<'a> Checker<'a> {
                                         format!("call to undefined function {primary}()"),
                                         e.span,
                                         0,
+                                        "function.notFound",
                                     );
                                 }
                             }
@@ -1439,6 +1456,7 @@ impl<'a> Checker<'a> {
                                 format!("call to undefined method {recv_ty}::{method}()"),
                                 e.span,
                                 0,
+                                "method.notFound",
                             );
                         }
                     }
@@ -1456,6 +1474,7 @@ impl<'a> Checker<'a> {
                                 format!("call to undefined static method {class}::{method}()"),
                                 e.span,
                                 0,
+                                "staticMethod.notFound",
                             );
                         }
                     }

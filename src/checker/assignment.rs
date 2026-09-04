@@ -1,5 +1,7 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
+use crate::checker::{
+    Checker, DiagnosticBuilder, Locals, narrowing_key, purge_stale_narrowing_for, union_types,
+};
 use crate::types::{self, AccessoryKind, Type};
 
 impl<'a> Checker<'a> {
@@ -261,11 +263,15 @@ impl<'a> Checker<'a> {
             && (self.current_class.as_deref() != Some(owner.as_str())
                 || self.current_method.as_deref() != Some("__construct"))
         {
-            self.report(
-                label.to_string(),
-                format!("{owner}::${prop} is readonly and cannot be modified here"),
-                lhs.span,
-                0,
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    format!("{owner}::${prop} is readonly and cannot be modified here"),
+                    lhs.span,
+                    0,
+                    "property.readOnlyAssignNotInConstructor",
+                )
+                .tip("readonly properties can only be written once, from inside the declaring class's own constructor"),
             );
         }
         let bindings = self.class_template_bindings(&class, &type_args, &owner);
@@ -286,6 +292,7 @@ impl<'a> Checker<'a> {
             format!("{class}::${prop} expects {expected}, {actual} given"),
             rhs.span,
             3,
+            "assign.propertyType",
         );
     }
 
@@ -342,6 +349,7 @@ impl<'a> Checker<'a> {
             format!("array{{...}} has no key '{key}'"),
             idx.span,
             2,
+            "shapeAccess.notFound",
         );
     }
 }

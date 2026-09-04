@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::checker::Checker;
+use crate::checker::{Checker, DiagnosticBuilder};
 use crate::registry::{FunctionSig, PropertySig};
 use crate::token::Span;
 use crate::types::Type;
@@ -29,6 +29,7 @@ impl<'a> Checker<'a> {
                 format!("class {fqn} cannot extend final class {parent}"),
                 span,
                 0,
+                "class.extendsFinal",
             );
         }
     }
@@ -64,7 +65,7 @@ impl<'a> Checker<'a> {
                     Some((first_trait, first_sig)) if first_sig.ty != sig.ty => {
                         self.report(fqn.to_string(), format!(
                                 "{first_trait} and {trait_name} define the same property (${prop_name}) with incompatible types in the composition of {fqn}"
-                            ), span, 0);
+                            ), span, 0, "trait.propertyConflict");
                     }
                     Some(_) => {}
                     None => {
@@ -80,7 +81,7 @@ impl<'a> Checker<'a> {
                     Some((first_trait, first_sig)) if !signatures_compatible(first_sig, sig) => {
                         self.report(fqn.to_string(), format!(
                                 "{first_trait} and {trait_name} define the same method ({method_name}) with an incompatible signature in the composition of {fqn}"
-                            ), span, 0);
+                            ), span, 0, "trait.methodConflict");
                     }
                     Some(_) => {}
                     None => {
@@ -113,7 +114,7 @@ impl<'a> Checker<'a> {
                 self.report(fqn.to_string(), format!(
                         "duplicate value in enum {fqn} for case {} (already used by case {first_case})",
                         case.name
-                    ), case.span, 0);
+                    ), case.span, 0, "enum.duplicateValue");
             } else {
                 seen.insert(key, &case.name);
             }
@@ -155,7 +156,18 @@ impl<'a> Checker<'a> {
         if missing.len() > shown.len() {
             message.push_str(&format!(", and {} more", missing.len() - shown.len()));
         }
-        self.report(fqn.to_string(), message, span, 0);
+        self.report_builder(
+            DiagnosticBuilder::new(
+                fqn.to_string(),
+                message,
+                span,
+                0,
+                "class.abstractMethodNotImplemented",
+            )
+            .tip(
+                "either implement every method listed above, or declare this class itself abstract",
+            ),
+        );
     }
 
     /// Finding 50: an overriding method's signature must stay
@@ -195,6 +207,7 @@ impl<'a> Checker<'a> {
                     ),
                     m.span,
                     0,
+                    "method.overrideFinal",
                 );
             }
             // Real PHP deliberately exempts constructors from override-
@@ -262,7 +275,7 @@ impl<'a> Checker<'a> {
                             own_param.name,
                             own_ty,
                             ancestor_ty
-                        ), m.span, 0);
+                        ), m.span, 0, "method.childParameterType");
                 }
             }
             // An ancestor's own `static`-typed return (`self.registry`
@@ -301,7 +314,7 @@ impl<'a> Checker<'a> {
                 self.report(fqn.to_string(), format!(
                         "{fqn}::{}() return type {} is not compatible with the inherited return type {}",
                         m.function.name, own_sig.return_type, ancestor_sig.return_type
-                    ), m.span, 0);
+                    ), m.span, 0, "method.childReturnType");
             }
         }
     }

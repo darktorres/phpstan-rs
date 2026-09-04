@@ -92,6 +92,7 @@ impl<'a> Checker<'a> {
                             format!("return type mismatch: expected {expected}, got {actual}"),
                             e.span,
                             3,
+                            "return.type",
                         );
                     }
                 }
@@ -123,6 +124,7 @@ impl<'a> Checker<'a> {
                             format!("return type mismatch: expected {expected}, got null"),
                             stmt.span,
                             3,
+                            "return.type",
                         );
                     }
                 }
@@ -515,6 +517,7 @@ impl<'a> Checker<'a> {
                                 format!("cannot catch {class}: it does not implement Throwable"),
                                 c.span,
                                 0,
+                                "catch.notThrowable",
                             );
                         }
                     }
@@ -574,6 +577,7 @@ impl<'a> Checker<'a> {
                         format!("cannot throw {class}: it does not implement Throwable"),
                         e.span,
                         0,
+                        "throw.notThrowable",
                     );
                 }
             }
