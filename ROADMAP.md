@@ -639,42 +639,63 @@ validation (Phase 37). Size: L - one of the highest-value gaps found;
 named-argument and by-ref misuse are common in modern PHP.
 
 **Phase 50 - `Type::Array` key-type and general offset/shape engine
-(NEW, PLANNED).** `Type::Array(Box<Type>)` carries only a value type -
-no key type - and `Type::ArrayShape` (`Vec<(String, Type, bool)>`) has
-no distinct int-vs-string key typing, no `isList` tri-state field, no
-"unsealed"/open-shape tracking, and no per-operation return-type
-overrides (slice/splice/chunk/flip/reverse/search/shift/pop/
-intersectKey/fillKeys/mergeWith/etc. - roughly 30-40 of them in real
-PHPStan) to propagate shape/list-ness/non-emptiness through builtin
-array calls; array functions are typed generically instead of
-consulting the input's own shape/accessory markers. This is explicitly
-named in this document's own former Phase 15 as a recurring gap ("the
-same root cause Phase 35 just ran into again, seven phases after it was
-first tracked here") - the exhaustive audit shows it's now the blocker
-for a much larger rule set than that one-line mention implied, warranting
-promotion to its own phase.
+(PARTIAL).** `Type::Array(Box<Type>)` carried only a value type -
+`array<K, V>`'s own key argument was parsed and then explicitly
+discarded (`types.rs`'s own former comment said so directly) - and
+`Type::ArrayShape` (`Vec<(String, Type, bool)>`) still has no distinct
+int-vs-string key typing, no `isList` tri-state field, no "unsealed"/
+open-shape tracking, and no per-operation return-type overrides
+(slice/splice/chunk/flip/reverse/search/shift/pop/intersectKey/
+fillKeys/mergeWith/etc. - roughly 30-40 of them in real PHPStan). This
+is explicitly named in this document's own former Phase 15 as a
+recurring gap ("the same root cause Phase 35 just ran into again,
+seven phases after it was first tracked here").
 
-Consolidated unlocks: `NonexistentOffsetInArrayDimFetchCheck`/`Rule`,
-`ArrayDestructuringRule`, `AllowedArrayKeysTypes`,
-`InvalidKeyInArrayDimFetchRule`, `InvalidKeyInArrayItemRule`,
+**Done**: `Type::Array` is now `Array(Box<Type> /* key */, Box<Type>
+/* value */)`, mirroring real PHPStan's own `ArrayType(keyType,
+valueType)` - `Type::unknown_array_key()` (`int|string`) is the
+"don't know" default nearly every construction site still passes, but
+`array<K, V>`'s own `K` is used for real now, `list<T>`/
+`non-empty-list<T>` get a real `Type::Int` key (a genuine precision
+win, not just arity-matching), and `types::is_subtype`'s Array-vs-Array
+rule checks key subtyping too (`registry::is_assignable`, the more
+lenient/pervasively-used relation, deliberately does not, to avoid a
+leniency asymmetry that would false-positive the common "array literal
+degraded to unknown key" case against a key-typed sink). Every tree-
+walking `Type` transform (`mark_template_params`, `substitute_template`/
+`substitute_scoped`, `resolve_pseudo`, `resolve_names_in_type`,
+`collect_unknown_class_names`, `check_generic_bounds`,
+`is_type_fully_known`, `walk_variance`, and the narrow/exclude helpers
+in `narrowing.rs`/`builtin_calls.rs`) recurses through the key the same
+way it already did the value. Also shipped, as the first concrete
+consumer this unlocks: `InvalidKeyInArrayItemRule`/
+`AllowedArrayKeysTypes` (`array.invalidKey`) - an array-literal key
+whose type is confidently, entirely outside PHP's own legal-key domain
+(`int|string|bool|float|null`) is flagged. Verified against the full
+~20,300-file Piwigo+vendor corpus: zero `array.invalidKey` false
+positives, and only one genuinely new finding overall in first-party
+code (the rest of a small corpus-wide delta was message-text precision
+improvements in `vendor/`, now showing a declared `array<K, V>` instead
+of collapsing to bare `array`).
+
+**Still open** (the rest of this phase's original scope, unclaimed by
+any other phase): `ArrayShape`'s own int-vs-string key precision (still
+a plain `String` field - `array{0: ..}`'s key `0` and `array{'0': ..}`'s
+key `'0'` are indistinguishable internally, though PHP's own key-
+canonicalization rule happens to make this benign for the existing
+shape-lookup checks); unsealed-shape (`array{...}`) tracking - parsed
+and explicitly discarded, per `types.rs`'s own `try_parse_array_shape`
+comment; `HasOffsetType`/`HasOffsetValueType` as composable accessory
+facts; `InvalidKeyInArrayDimFetchRule` (the read/write-site counterpart
+of the literal-key check just shipped); and the ~30-40 individual
+stdlib per-operation overrides Phase 73/74 already own (this phase was
+their prerequisite, not a promise to implement those consumers too).
+Consolidated unlocks still to close: `NonexistentOffsetInArrayDimFetchCheck`/
+`Rule`, `ArrayDestructuringRule`, `InvalidKeyInArrayDimFetchRule`,
 `HasOffsetType`, `HasOffsetValueType`, `OffsetAccessAssignOpRule`,
 `OffsetAccessAssignmentRule`, `ConstantArrayType`,
 `ConstantArrayTypeBuilder`, `OversizedArrayType`, `OversizedArrayBuilder`,
-`AccessoryArrayListType`, `NonEmptyArrayType`, plus (as direct Phase-73
-consumers) `ArrayChangeKeyCaseFunctionReturnTypeExtension`,
-`ArrayFlipFunctionReturnTypeExtension`, `ArrayFillKeysFunctionReturnTypeExtension`,
-`ArrayRandFunctionReturnTypeExtension`, `ArrayCountValuesDynamicReturnTypeExtension`,
-`ArraySearchFunctionDynamicReturnTypeExtension`, `ArrayFindKeyFunctionReturnTypeExtension`,
-`ArrayIntersectKeyFunctionReturnTypeExtension`,
-`ArrayKeyExistsFunctionTypeSpecifyingExtension`,
-`UnsafeArrayStringKeyCastingTraverser`. `src/types.rs`'s `Type::Array`
-variant and `Type::ArrayShape` definition, `AccessoryKind::ArrayList`,
-and `src/checker/expr.rs`'s `infer_array_literal_type`/
-`infer_spread_array_literal_type` are the concrete call sites. Size: XL,
-a data-model change touching every array-construction and
-array-subtyping call site in the checker, but array manipulation
-preserving or destroying list-ness/non-emptiness is extremely common in
-real PHP code, making this high-value despite the size.
+`UnsafeArrayStringKeyCastingTraverser`.
 
 **Phase 51 - `Type` coercion/cast method surface + `IntegerRangeType`
 completion (NEW, PLANNED).** `Type` has no `toInteger()`/`toFloat()`/
