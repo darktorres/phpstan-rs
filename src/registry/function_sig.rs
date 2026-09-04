@@ -158,11 +158,54 @@ fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
     let kept: Vec<Type> = members
         .into_iter()
         .filter(|m| member_possible_given_native(m, &native_ty))
+        .map(|m| refine_callable_member(m, &native_ty))
         .collect();
     match kept.len() {
         0 => native_ty,
         1 => kept.into_iter().next().unwrap(),
         _ => Type::Union(kept),
+    }
+}
+
+/// A surviving `Type::Callable` member (kept only because
+/// `member_possible_given_native` can't disprove it) is itself a coarse
+/// marker with strictly less information than a real, present native
+/// type already carries - left as `Callable`, it can wrongly *lose* to
+/// the native type in an unrelated later comparison that only sees this
+/// resolved signature, not the native hint that produced it (real
+/// corpus regression: `Doctrine\Common\Collections\ReadableCollection::
+/// exists(Closure $p)`'s own `@phpstan-param Closure(TKey, T):bool $p`
+/// resolved to bare `Callable` instead of the exactly-known native
+/// `Closure`, making a subclass's own identically-typed override look
+/// like an illegal narrowing purely because the *ancestor's* resolved
+/// type had lost precision the child's never did). Substitutes the
+/// native type's own concrete counterpart back in whenever there is
+/// one - a plain class-typed native, or (when native itself is
+/// nullable) its sole non-null member - leaving `Callable` alone
+/// otherwise (an untyped-native `callable $p`, or one this project
+/// still can't say anything more precise about).
+fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
+    if m != Type::Callable {
+        return m;
+    }
+    match native_ty {
+        Type::Object(_, _) => native_ty.clone(),
+        Type::Union(members) => {
+            match members
+                .iter()
+                .filter(|t| **t != Type::Null)
+                .collect::<Vec<_>>()
+                .as_slice()
+            {
+                [Type::Object(_, _)] => members
+                    .iter()
+                    .find(|t| **t != Type::Null)
+                    .cloned()
+                    .unwrap_or(m),
+                _ => m,
+            }
+        }
+        _ => m,
     }
 }
 
@@ -195,6 +238,22 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
     match m {
         Type::Object(name, _) if name == "resource" => types::is_subtype(m, native_ty),
         Type::Object(_, _) => true,
+        // Phase 60 corpus find: a PHPStan/Psalm callable-shape doc member
+        // (`Closure(int): string`) degrades to plain `Type::Callable` at
+        // parse time (`types::parse_type_atom`'s own documented
+        // simplification - no per-parameter/return signature is tracked)
+        // - the same information loss `Object`'s own case just above
+        // already has to work around, just one layer earlier. Without
+        // this, `is_subtype(Callable, Closure)` (correctly `false` in
+        // general - not every callable is a `Closure` instance) wrongly
+        // read as "the doc member can't be right," discarding it even
+        // when the native hint is exactly `Closure` - a real corpus
+        // false positive: `Psl\Dict\filter()`'s own `null|Closure
+        // $predicate` parameter, documented as `(Closure(Tv): bool)|null`,
+        // resolved to bare `null` once the `Closure(...)`-shaped member
+        // was filtered out, in turn making Phase 60's `nullCoalesce`
+        // check wrongly flag `$predicate ??= ...` as "always null."
+        Type::Callable => true,
         _ => types::is_subtype(m, native_ty),
     }
 }

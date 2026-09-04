@@ -65,6 +65,37 @@ fn bare_name_literal_type(name: &str) -> Type {
     }
 }
 
+/// Phase 60: does `ty`'s own value-space unconditionally exclude `null`?
+/// `Mixed`/`Never` are left alone (a `Mixed` slot could always turn out
+/// to hold `null` at runtime; `Never` means unreachable code, not a real
+/// value to reason about) - everything else is settled by comparing
+/// against `narrow_type_excluding(ty, &Type::Null)` (the same "subtract
+/// null" operation `??`/`?->`'s own type inference already relies on
+/// elsewhere in this file): if removing `null` changes nothing, `ty`
+/// never carried it to begin with.
+fn type_definitely_excludes_null(ty: &Type) -> bool {
+    !matches!(ty, Type::Mixed | Type::Never) && narrow_type_excluding(ty, &Type::Null) == *ty
+}
+
+/// Phase 60: real PHPStan's own `isset()`/`empty()`/`??`/`??=` "does this
+/// null-probe make sense" verdict, condensed to the one shape this
+/// project scopes to (a bare, guaranteed-defined variable - see
+/// `Checker::check_pointless_null_probe`'s own doc comment for why a
+/// deeper chain is out of scope). `None` for a genuinely ambiguous type
+/// (`Mixed`, or one that's nullable among other members) - real PHPStan's
+/// `IssetCheck` draws the identical two-way split (`isNull()->yes()` vs.
+/// `isNull()->no()`, `maybe()` staying silent either way).
+fn null_probe_verdict(ty: &Type) -> Option<&'static str> {
+    if *ty == Type::Null {
+        return Some("is always null");
+    }
+    if type_definitely_excludes_null(ty) {
+        Some("is not nullable")
+    } else {
+        None
+    }
+}
+
 impl<'a> Checker<'a> {
     /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks
     /// down through `Index`/`PropertyAccess`/`DynamicPropertyAccess`,
@@ -113,6 +144,69 @@ impl<'a> Checker<'a> {
             }
             _ => self.check_expr(e, locals, label),
         }
+    }
+
+    /// Phase 60: `isset($x)`/`empty($x)`/`$x ?? ...`/`$x ??= ...` where
+    /// `$x` is a bare, already-guaranteed-defined local - `locals`
+    /// itself is this project's own "definitely bound on every path"
+    /// signal (`merge_scopes` drops a variable entirely rather than
+    /// carry it forward unsoundly when only one branch defines it) - and
+    /// whose tracked type proves the null-probe can never change the
+    /// outcome. Deliberately scoped to a bare `Variable` root only: a
+    /// deeper chain (`isset($x['key'])`, `isset($x->prop)`) needs
+    /// offset-existence/property-initialization dataflow this project
+    /// doesn't model yet (real PHPStan gates the equivalent behind its
+    /// own `checkAdvancedIsset` config flag) - left alone rather than
+    /// risk a false positive from an unmodeled "might not exist" case.
+    fn check_pointless_null_probe(
+        &mut self,
+        e: &Expr,
+        locals: &Locals,
+        label: &str,
+        identifier_prefix: &str,
+        operator_description: &str,
+    ) {
+        let ExprKind::Variable(name) = &e.kind else {
+            return;
+        };
+        if is_superglobal(name) {
+            return;
+        }
+        // Phase 60 corpus find: inside a loop body, `locals`'s own
+        // tracked type only reflects a single, non-iterated pass through
+        // it (see `Checker::loop_depth`'s own doc comment) - a variable
+        // initialized to a narrow type once before the loop, then
+        // self-referentially widened only via the very statement being
+        // checked here (`$err ??= $e;` inside a loop's own `catch`,
+        // Symfony's own `AbstractObjectNormalizer::
+        // validateAndDenormalize` real shape), looks "always null" on
+        // this first pass even though a real second-or-later iteration
+        // would see otherwise.
+        if self.loop_depth > 0 {
+            return;
+        }
+        // Phase 60 corpus find: a `static` local can carry a value left
+        // over from an earlier call - see `Checker::static_var_names`'s
+        // own doc comment (real shape: Symfony's own `HttpClient::
+        // create()`'s `static $curlVersion = null; $curlVersion ??=
+        // curl_version();`, confirmed genuinely silent in real PHPStan
+        // too).
+        if self.static_var_names.contains(name) {
+            return;
+        }
+        let Some(ty) = locals.get(name) else {
+            return;
+        };
+        let Some(verdict) = null_probe_verdict(ty) else {
+            return;
+        };
+        self.report(
+            label.to_string(),
+            format!("Variable ${name} {operator_description} always exists and {verdict}."),
+            e.span,
+            0,
+            &format!("{identifier_prefix}.variable"),
+        );
     }
 
     #[hotpath::measure]
@@ -251,6 +345,18 @@ impl<'a> Checker<'a> {
                 // like `is_language_construct` itself, since neither is a
                 // real, resolvable function call.
                 let is_existence_probe = matches!(&callee.kind, ExprKind::Name(name) if name == "isset" || name == "empty");
+                // Phase 60: `isset($x)` specifically (not `empty($x)` too -
+                // real PHPStan's own `EmptyRule` requires BOTH nullability
+                // *and* falsy-ness to be unambiguous before it says
+                // anything, since `empty()` tests falsiness, not just
+                // null-ness - `toBoolean()->isFalse()` staying `maybe` for
+                // an ordinary non-empty-unproven `array`/`string`/`int`
+                // keeps real PHPStan silent on exactly the shape this
+                // project's own `null_probe_verdict` would otherwise
+                // wrongly flag. Left for a follow-up rather than modeled
+                // here.
+                let is_isset_probe =
+                    matches!(&callee.kind, ExprKind::Name(name) if name == "isset");
                 // Phase 53: `array_map($callback, $items)`'s own
                 // contextual parameter-type injection - computed once,
                 // up front, from `$items`' own element type (not
@@ -295,6 +401,15 @@ impl<'a> Checker<'a> {
                         );
                     } else if is_existence_probe {
                         self.check_expr_quiet_root(&a.value, locals, label);
+                        if is_isset_probe {
+                            self.check_pointless_null_probe(
+                                &a.value,
+                                locals,
+                                label,
+                                "isset",
+                                "in isset()",
+                            );
+                        }
                     } else if i == 0
                         && let Some(elem_ty) = &array_map_elem_override
                         && self.check_closure_literal_with_param_overrides(
@@ -509,6 +624,31 @@ impl<'a> Checker<'a> {
                 } else {
                     self.check_expr(recv, locals, label)
                 };
+                // Phase 60: `$x?->method()` is pointless once `$x`'s own
+                // type already proves it's never null - mirrors real
+                // PHPStan's `NullsafeMethodCallRule` exactly (same
+                // identifier, same "only when definitely never null, not
+                // when definitely always null either" split). Guarded by
+                // `loop_depth`/`static_var_names` for the same reasons
+                // `check_pointless_null_probe` is - a receiver only ever
+                // widened to nullable on a later loop iteration or an
+                // earlier call still looks non-nullable on this single
+                // pass.
+                if *nullsafe
+                    && self.loop_depth == 0
+                    && !matches!(&recv.kind, ExprKind::Variable(n) if self.static_var_names.contains(n))
+                    && type_definitely_excludes_null(&recv_ty)
+                {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "Using nullsafe method call on non-nullable type {recv_ty}. Use -> instead."
+                        ),
+                        e.span,
+                        0,
+                        "nullsafe.neverNull",
+                    );
+                }
                 // Re-enabled (Phase 9.5): the registry is now
                 // namespace-aware, so a method lookup trusts the specific
                 // `ClassInfo` stored under a *fully-qualified* name, not a
@@ -690,6 +830,13 @@ impl<'a> Checker<'a> {
             // would otherwise discard.
             ExprKind::Binary(BinOp::Coalesce, l, r) => {
                 self.check_expr_quiet_root(l, locals, label);
+                self.check_pointless_null_probe(
+                    l,
+                    locals,
+                    label,
+                    "nullCoalesce",
+                    "on left side of ??",
+                );
                 let r_ty = self.check_expr(r, locals, label);
                 self.widen_coalesce_result(l, r_ty, locals)
             }
@@ -869,7 +1016,15 @@ impl<'a> Checker<'a> {
                 // `$x = $x ?? $default;` - the same quiet-left-side
                 // exemption as plain `??` applies to its own left side.
                 let lhs_ty = if *op == BinOp::Coalesce {
-                    self.check_expr_quiet_root(lhs, locals, label)
+                    let ty = self.check_expr_quiet_root(lhs, locals, label);
+                    self.check_pointless_null_probe(
+                        lhs,
+                        locals,
+                        label,
+                        "nullCoalesce",
+                        "on left side of ??=",
+                    );
+                    ty
                 } else {
                     self.check_expr(lhs, locals, label)
                 };
@@ -1314,6 +1469,28 @@ impl<'a> Checker<'a> {
                 // union-typed parameter, used to skip this check
                 // entirely rather than fall to `_ => {}`.
                 let base_ty = self.check_expr(base, locals, label);
+                // Phase 60: `$x?->prop` is pointless once `$x`'s own type
+                // already proves it's never null - mirrors real PHPStan's
+                // `NullsafePropertyFetchRule` exactly (same identifier,
+                // same "only when definitely never null, not when
+                // definitely always null either" split). Guarded by
+                // `loop_depth`/`static_var_names` - see the identical
+                // guard on the `MethodCall` arm above for why.
+                if *nullsafe
+                    && self.loop_depth == 0
+                    && !matches!(&base.kind, ExprKind::Variable(n) if self.static_var_names.contains(n))
+                    && type_definitely_excludes_null(&base_ty)
+                {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "Using nullsafe property access on non-nullable type {base_ty}. Use -> instead."
+                        ),
+                        e.span,
+                        0,
+                        "nullsafe.neverNull",
+                    );
+                }
                 // Phase 22 Finding 1: a Pest `beforeEach(...)` closure's own
                 // `$this->prop = ...` legitimately defines a dynamic
                 // property every other Pest closure in the file/directory

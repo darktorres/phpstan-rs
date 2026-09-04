@@ -357,6 +357,40 @@ pub struct Checker<'a> {
     // be open, matching real PHP's "innermost loop-or-switch" rule for an
     // unqualified `break;`.
     pub(crate) loop_break_states: Vec<Vec<Locals>>,
+    // Phase 60: how many loop bodies (`While`/`DoWhile`/`For`/`Foreach`,
+    // nesting included - a `Switch` doesn't count, it runs its body
+    // exactly once) currently enclose whatever's being checked right
+    // now. Every loop-body check in `checker/stmt.rs` is a single,
+    // non-iterated pass (see `StmtKind::Foreach`'s own doc comment on
+    // why this project doesn't do real per-loop fixed-point analysis) -
+    // a variable's tracked type at any point *inside* that one pass can
+    // never reflect what an *earlier* iteration's own write to the same
+    // variable would have produced, even though that's exactly what a
+    // second-or-later real iteration would see. `check_pointless_null_
+    // probe`'s own "is this variable ever null" verdict is unsound
+    // exactly there - real corpus false positive: Symfony's own
+    // `AbstractObjectNormalizer::validateAndDenormalize`'s `$extraAttributesException
+    // ??= $e;` inside a loop's own `catch` block, initialized to `null`
+    // once before the loop and self-referentially widened only via this
+    // same statement - wrongly read as "always null" by a check that
+    // can only ever see the very first pass through. Scoped to a real
+    // loop depth counter, not reused from `loop_break_states` (which
+    // also counts an enclosing `Switch` frame, not vulnerable to this).
+    pub(crate) loop_depth: u32,
+    // Phase 60 corpus find: every variable name seen bound via
+    // `static $x = ...;` anywhere in the file being checked - real
+    // shape: Symfony's own `HttpClient::create()`'s `static $curlVersion
+    // = null; $curlVersion ??= curl_version();`. A `static` local
+    // genuinely can carry a value left over from an *earlier call* -
+    // exactly the same "this single forward pass can't see a wider type
+    // a different execution of the same code would" unsoundness
+    // `loop_depth` already exists to guard against, just across
+    // invocations instead of iterations (confirmed against real PHPStan
+    // itself, which stays silent on this exact shape too). Accumulated
+    // across the whole file rather than reset per function/closure - a
+    // stale entry only costs a missed diagnostic on an unrelated later
+    // local that happens to share the same name, never a wrong one.
+    pub(crate) static_var_names: HashSet<String>,
     // Phase 59: every class named as the resolved `$scope` of a
     // `Closure::bind(...)`/`->bindTo(...)` call anywhere in the file being
     // checked (`unused::scan_program_for_rebind_targets`, built once per
@@ -422,6 +456,8 @@ impl<'a> Checker<'a> {
             pest_this_type: Type::Mixed,
             pest_hook_properties: HashSet::new(),
             loop_break_states: Vec::new(),
+            loop_depth: 0,
+            static_var_names: HashSet::new(),
             rebind_target_classes: HashSet::new(),
             rebind_escape_all: false,
         }

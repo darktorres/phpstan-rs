@@ -234,6 +234,209 @@ fn merge_stubs_does_not_override_user_functions() {
     assert_eq!(r.functions["strlen"].return_type, Type::Int);
 }
 
+// Phase 60 corpus find: `Project::new` merges stubs *before* any real
+// project file is indexed (the same ordering the class-side test just
+// below documents), so a conditionally-declared polyfill of a built-in
+// name (the real, extremely common `if (!function_exists('str_contains'))
+// { function str_contains(?string $haystack, ?string $needle): bool
+// {...} }` shape, symfony/polyfill-php80's own real source) used to
+// always lose to the stub's own signature - `entry(...).or_insert_with
+// (...)` is a no-op once the stub already occupies the slot, silently
+// discarding the polyfill's own, more-precise (here, nullable) native
+// parameter types.
+#[test]
+fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
+    let stub_sig =
+        build_registry("<?php function str_contains(string $haystack, string $needle): bool {}")
+            .functions
+            .remove("str_contains")
+            .unwrap();
+
+    let mut r = Registry::default();
+    r.merge_stubs(vec![("str_contains", stub_sig)]);
+    assert_eq!(r.functions["str_contains"].params[0].ty, Type::String);
+
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('str_contains')) {
+                function str_contains(?string $haystack, ?string $needle): bool { return true; }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+
+    assert_eq!(
+        r.functions["str_contains"].params[0].ty,
+        Type::Union(vec![Type::String, Type::Null]),
+        "the polyfill's own nullable native param type must win over the stub's non-nullable one"
+    );
+}
+
+// Phase 60 corpus find, second half: real corpus shape (rector's own
+// vendored `scoper-autoload.php`, alongside symfony/polyfill-intl-
+// grapheme's own real declaration) has *two* unrelated conditional
+// declarations of the same built-in name - a bare `func_get_args()`-
+// forwarding shim with no declared params at all, and the real,
+// correctly-typed one - competing for the one stub-provided slot the
+// fix above lets a conditional declaration claim. Letting the
+// zero-param shim win first (whichever file happens to be indexed
+// first) left the *other* file's own body-check zipping its one real
+// parameter against the winning zero-param registry signature, quietly
+// losing the parameter and reading it as undefined inside its own body.
+// The arity gate keeps the door open for whichever declaration actually
+// matches the stub's own shape, regardless of which one is seen first.
+#[test]
+fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
+    let stub_sig = build_registry("<?php function grapheme_strrev(string $string): string {}")
+        .functions
+        .remove("grapheme_strrev")
+        .unwrap();
+
+    let mut r = Registry::default();
+    r.merge_stubs(vec![("grapheme_strrev", stub_sig)]);
+
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('grapheme_strrev')) {
+                function grapheme_strrev() { return \Prefix\grapheme_strrev(...func_get_args()); }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+    assert_eq!(
+        r.functions["grapheme_strrev"].params.len(),
+        1,
+        "the zero-param shim must not have displaced the (arity-matching) stub"
+    );
+
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('grapheme_strrev')) {
+                function grapheme_strrev(string $string) { return $string; }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+    assert_eq!(
+        r.functions["grapheme_strrev"].params.len(),
+        1,
+        "the real, arity-matching declaration must still be able to win afterward"
+    );
+    assert_eq!(r.functions["grapheme_strrev"].params[0].name, "string");
+}
+
+// Phase 60 corpus find, fourth half: even at matching arity, a polyfill
+// package can bundle several PHP-version-gated variants of the same
+// function behind separate `function_exists()` guards - real shape:
+// symfony/polyfill-ctype's own `bootstrap.php` (`function ctype_punct
+// ($text) {...}`, no native types at all) alongside `bootstrap80.php`
+// (`function ctype_punct(mixed $text): bool {...}`, fully typed) for
+// the exact same name. Letting the untyped one win (whichever file the
+// corpus scan happens to reach first) silently discarded real type
+// information the stub itself already carried - and since every other
+// real file's own call sites (`jetbrains/phpstorm-stubs`'s own,
+// identically-typed declaration included) resolve through this one
+// shared registry entry, a *different* file's own body-check ended up
+// reporting the parameter/return type as missing, even though its own
+// source plainly declares both.
+#[test]
+fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration() {
+    let stub_sig = build_registry("<?php function ctype_punct(mixed $text): bool {}")
+        .functions
+        .remove("ctype_punct")
+        .unwrap();
+
+    let mut r = Registry::default();
+    r.merge_stubs(vec![("ctype_punct", stub_sig)]);
+
+    // The untyped legacy variant must not win, arity match or not.
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('ctype_punct')) {
+                function ctype_punct($text) { return true; }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+    assert_eq!(
+        r.functions["ctype_punct"].return_type,
+        Type::Bool,
+        "the untyped variant must not have displaced the stub's own bool return type"
+    );
+
+    // The fully-typed variant must still be able to win afterward.
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('ctype_punct')) {
+                function ctype_punct(mixed $text): bool { return true; }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+    assert_eq!(r.functions["ctype_punct"].return_type, Type::Bool);
+    assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::Mixed);
+}
+
+// Phase 60 corpus find, third half: real corpus shape - Piwigo itself
+// vendors `jetbrains/phpstorm-stubs` as a real dependency (presumably
+// for IDE/other tooling), so its own unconditional, bare (guard-free)
+// `function str_contains(string $haystack, string $needle): bool {}`
+// gets indexed as if it were ordinary project source, taking the
+// "second unconditional declaration merges onto the first" path against
+// the identical signature `merge_stubs` already put there. Clearing
+// `stub_provided_functions` there (as the very first version of this
+// fix did) told the *later*, better-typed conditional polyfill
+// declaration (symfony/polyfill-php80's own real `?string`-typed
+// `str_contains`) that the slot was no longer stub-equivalent and off
+// limits - silently discarding its nullable parameter types right back
+// to this phase's original bug, just via an extra hop.
+#[test]
+fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
+    let stub_sig =
+        build_registry("<?php function str_contains(string $haystack, string $needle): bool {}")
+            .functions
+            .remove("str_contains")
+            .unwrap();
+
+    let mut r = Registry::default();
+    r.merge_stubs(vec![("str_contains", stub_sig)]);
+
+    // The vendored phpstorm-stubs copy: unconditional, identical shape.
+    let tokens =
+        Lexer::new("<?php function str_contains(string $haystack, string $needle): bool {}")
+            .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+
+    // The real polyfill: conditional, nullable native params.
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('str_contains')) {
+                function str_contains(?string $haystack, ?string $needle): bool { return true; }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+
+    assert_eq!(
+        r.functions["str_contains"].params[0].ty,
+        Type::Union(vec![Type::String, Type::Null]),
+        "the real polyfill's own nullable params must still win despite the intervening unconditional duplicate"
+    );
+}
+
 // Phase 25, real shape: `Project::new` calls `merge_stub_classes`
 // *before* any project file is indexed - a built-in class like
 // `Imagick` is already present by the time a project's own

@@ -559,6 +559,39 @@ fn a_method_narrowing_an_inherited_parameter_type_is_flagged() {
     );
 }
 
+// Real corpus find (Doctrine\Common\Collections\ReadableCollection::
+// exists(Closure $p), overridden identically by AbstractLazyCollection):
+// an ancestor's own `@phpstan-param Closure(TKey, T):bool $p` (the
+// callable-shape doc syntax this project degrades to plain
+// `Type::Callable`, having no per-parameter/return signature of its
+// own to track) used to make `reconcile_with_native` resolve the
+// *ancestor's* parameter type to that coarse `Callable` marker instead
+// of its own, exactly-known native `Closure` - even though the child's
+// identically-typed native `Closure $p` resolved correctly on its own,
+// comparing "child: Closure" against "ancestor: Callable" looked like a
+// real narrowing that was never actually there.
+#[test]
+fn an_override_with_a_callable_shape_doc_on_the_ancestor_only_is_not_a_narrowing() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface ReadableCollection3 {
+                /**
+                 * @phpstan-param Closure(int, int):bool $p
+                 */
+                public function exists(Closure $p): bool;
+            }
+            class AbstractLazyCollection3 implements ReadableCollection3 {
+                public function exists(Closure $p): bool { return true; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.message.contains("narrows the inherited parameter type")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_final_class_s_own_self_typed_override_is_not_a_narrowing() {
     // Real Piwigo corpus bug (Admin\Image\ImageBackend implements

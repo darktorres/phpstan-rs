@@ -257,6 +257,31 @@ fn do_while_switch_and_static_var_bodies_are_all_checked() {
 }
 
 #[test]
+fn an_inline_var_tag_on_a_static_declaration_overrides_its_default_expression() {
+    // Real corpus find (Piwigo's own `MessengerRoundTripTest::marker()`):
+    // `static $x = null;` used to type `$x` as exactly `Null`, silently
+    // clobbering an already-applied `/** @var string|null */` tag right
+    // above it - every other assignment shape already lets `@var`
+    // override its own natural inference; a `static` declaration is no
+    // different. Asserts against Phase 60's own `nullCoalesce.variable`
+    // (which the pre-fix `Null` inference wrongly fired, "always null")
+    // as the most direct evidence the annotation is actually honored.
+    let d = diagnostics_for(
+        r#"<?php
+            function marker(): string {
+                /** @var string|null */
+                static $marker = null;
+                return $marker ??= 'x';
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "nullCoalesce.variable"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
 fn while_loop_narrows_its_body_and_merges_types_correctly_after() {
     // Same coverage-driven finding: StmtKind::While had zero test coverage
     // for both its instanceof-narrowing inside the body and its

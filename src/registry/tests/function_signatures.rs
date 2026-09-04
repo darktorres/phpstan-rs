@@ -275,6 +275,37 @@ fn a_false_member_the_native_hint_still_allows_is_kept() {
     );
 }
 
+// Phase 60 corpus find: a PHPStan/Psalm callable-shape doc member
+// (`Closure(Tv): bool`) degrades to plain `Type::Callable` at parse
+// time (no per-parameter/return signature is tracked) - `is_subtype
+// (Callable, Closure)` is correctly `false` in general (not every
+// `callable` is a `Closure` instance), but that used to make
+// `reconcile_with_native` wrongly discard the doc member even when the
+// native hint names `Closure` exactly, collapsing `null|Closure` down
+// to bare `null` (`Psl\Dict\filter()`'s real shape). The now-kept
+// `Callable` member is further refined back to the native hint's own
+// `Closure` - strictly more precise, and (a second real corpus find)
+// avoids a *different* false positive: a same-signature override
+// looking like an illegal narrowing purely because the ancestor's own
+// resolved type had degraded to `Callable` while the child's never did.
+#[test]
+fn a_callable_shape_doc_member_is_refined_to_the_closure_native_hint() {
+    let r = build_registry(
+        r#"<?php
+            class Closure {}
+            /** @param (Closure(mixed): bool)|null $predicate */
+            function f(null|Closure $predicate = null) {}
+        "#,
+    );
+    assert_eq!(
+        r.functions["f"].params[0].ty,
+        Type::Union(vec![
+            Type::Object("Closure".to_string(), Vec::new()),
+            Type::Null
+        ])
+    );
+}
+
 // A `mixed`-native case must still trust the doc fully, now via the
 // general `is_subtype(_, Type::Mixed)` rule falling out for free
 // rather than a dedicated `mixed`/`object` branch.

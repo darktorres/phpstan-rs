@@ -64,6 +64,24 @@ pub struct Registry {
     // entirely, instead of merging into a callable that accepts either
     // shape.
     unconditionally_declared_functions: HashSet<String>,
+    // Phase 60 corpus find: names `merge_stubs` provided a signature for,
+    // not yet overwritten by any real, already-indexed conditional
+    // declaration - lets `index_with_context`'s own `StmtKind::
+    // FunctionDecl` conditional branch tell "this name's existing entry
+    // is only the built-in stub's" apart from "this name's existing
+    // entry is a real, already-indexed conditional declaration of the
+    // same name from an earlier file" (both look identical from
+    // `self.functions.contains_key(&name)` alone, the same ambiguity
+    // `unconditionally_declared_functions` already exists to resolve on
+    // the *unconditional* side). Without this, the extremely common
+    // `if (!function_exists('str_contains')) { function str_contains
+    // (?string $haystack, ?string $needle): bool {...} }` polyfill idiom
+    // (real corpus shape: symfony/polyfill-php80) always lost to the
+    // built-in stub's own native-only signature, silently discarding the
+    // polyfill's real, more-precise (here, nullable) parameter types -
+    // `entry(...).or_insert_with(...)` is a no-op once the stub already
+    // occupies the slot, which `merge_stubs` guarantees happens first.
+    stub_provided_functions: HashSet<String>,
 }
 
 impl Registry {
@@ -321,18 +339,61 @@ impl Registry {
                         Visibility::Public,
                     );
                     if conditional {
-                        self.functions.entry(name).or_insert_with(|| new_sig);
+                        // Gated on arity *and* not losing any type
+                        // precision the stub already had (see
+                        // `conditional_declaration_may_replace_stub`'s own
+                        // doc comment for both real corpus shapes this
+                        // guards against) - keeps the door open for
+                        // whichever real conditional declaration actually
+                        // matches the stub's own shape, wherever in the
+                        // corpus that turns out to be, rather than
+                        // committing to the first one seen regardless of
+                        // quality.
+                        let may_replace = self.functions.get(&name).is_none_or(|existing| {
+                            conditional_declaration_may_replace_stub(&new_sig, existing)
+                        });
+                        if may_replace && self.stub_provided_functions.remove(&name) {
+                            // This slot is still exactly what `merge_stubs`
+                            // put there - a real, in-source conditional
+                            // declaration (a polyfill's whole reason for
+                            // existing) is always more trustworthy than
+                            // the built-in stub it's meant to substitute
+                            // for, so it wins outright rather than being
+                            // silently dropped by `or_insert_with` below.
+                            self.functions.insert(name, new_sig);
+                        } else {
+                            self.functions.entry(name).or_insert_with(|| new_sig);
+                        }
                     } else if self.unconditionally_declared_functions.contains(&name) {
                         // Phase 32 Finding C: a *second* unconditional
                         // declaration of the same name - the real-overload
                         // shape described on this registry's own
                         // `unconditionally_declared_functions` field -
                         // merges onto the first rather than replacing it.
+                        //
+                        // Deliberately does *not* also clear
+                        // `stub_provided_functions` here, unlike the
+                        // "first real declaration, replaces outright"
+                        // branch below - real corpus shape: Piwigo itself
+                        // vendors `jetbrains/phpstorm-stubs` as a real
+                        // dependency, so its own unconditional (bare,
+                        // guard-free) `function str_contains(string
+                        // $haystack, string $needle): bool {}` gets
+                        // indexed as if it were ordinary project source,
+                        // merging harmlessly onto the identical signature
+                        // `merge_stubs` already put there - clearing the
+                        // marker here would wrongly tell a *later*,
+                        // better-typed conditional polyfill declaration
+                        // (`?string`-typed, from the real
+                        // symfony/polyfill-php80 package) that the slot
+                        // is no longer stub-equivalent and off limits,
+                        // right back to this phase's own original bug.
                         let existing = self.functions.remove(&name).expect(
                             "name is in unconditionally_declared_functions, so it must already be indexed",
                         );
                         self.functions.insert(name, existing.merge(new_sig));
                     } else {
+                        self.stub_provided_functions.remove(&name);
                         self.unconditionally_declared_functions.insert(name.clone());
                         self.functions.insert(name, new_sig);
                     }
@@ -441,6 +502,7 @@ impl Registry {
         for (name, sig) in stubs {
             let name: String = name.into();
             self.unconditionally_declared_functions.insert(name.clone());
+            self.stub_provided_functions.insert(name.clone());
             self.functions.entry(name).or_insert(sig);
         }
     }
@@ -914,6 +976,49 @@ impl Registry {
             _ => types::is_subtype(sub, sup),
         }
     }
+}
+
+/// Whether a conditional declaration (`new_sig`) is trustworthy enough to
+/// replace `existing` (a stub-provided signature still sitting in its
+/// slot, per `stub_provided_functions`) - real corpus find: this needs
+/// *two* separate gates, not just one.
+///
+/// Arity: `scoper-autoload.php`-style `func_get_args()`-forwarding shims
+/// (`function grapheme_strrev() { return \Prefix\grapheme_strrev(
+/// ...func_get_args()); }`, zero declared params) compete with the real,
+/// correctly-typed polyfill declaration for the same name - letting the
+/// shim win left the real declaration's own body-check zipping its one
+/// real parameter against the shim's zero-param signature, silently
+/// losing it (read as undefined inside its own body).
+///
+/// Type precision: even at matching arity, a polyfill package can bundle
+/// *several* PHP-version-gated variants of the same function behind
+/// separate `function_exists()` guards, of visibly different quality -
+/// real shape: symfony/polyfill-ctype's own `bootstrap.php` (`function
+/// ctype_punct($text) {...}`, no native types at all) alongside
+/// `bootstrap80.php` (`function ctype_punct(mixed $text): bool {...}`,
+/// fully typed) for the exact same name. Letting the untyped one win
+/// (whichever file the corpus scan happens to reach first) silently
+/// discarded real, already-known type information the stub itself
+/// carried - and since every OTHER real file's own `ctype_punct` call
+/// sites, including `jetbrains/phpstorm-stubs/ctype/ctype.php`'s own
+/// (fully-typed) declaration, all resolve through this one shared
+/// registry entry, the damage wasn't confined to whichever file lost the
+/// race. Never letting a replacement *downgrade* a parameter or return
+/// position that the stub already had typed down to `Mixed` closes this
+/// without needing to fully rank two arbitrary types against each other.
+fn conditional_declaration_may_replace_stub(new_sig: &FunctionSig, existing: &FunctionSig) -> bool {
+    if new_sig.params.len() != existing.params.len() {
+        return false;
+    }
+    if existing.return_type != Type::Mixed && new_sig.return_type == Type::Mixed {
+        return false;
+    }
+    existing
+        .params
+        .iter()
+        .zip(&new_sig.params)
+        .all(|(old, new)| !(old.ty != Type::Mixed && new.ty == Type::Mixed))
 }
 
 #[cfg(test)]

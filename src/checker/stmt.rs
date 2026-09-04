@@ -177,7 +177,9 @@ impl<'a> Checker<'a> {
                 let mut body_locals = locals.clone();
                 self.apply_narrowing(cond, &mut body_locals, true);
                 self.loop_break_states.push(Vec::new());
+                self.loop_depth += 1;
                 self.check_stmt(body, &mut body_locals, declared_return, label);
+                self.loop_depth -= 1;
                 let break_states = self.loop_break_states.pop().unwrap_or_default();
                 // The loop may run zero times, so what's true after it is
                 // "either the pre-loop state, or whatever one narrowed
@@ -204,7 +206,9 @@ impl<'a> Checker<'a> {
                 // The condition is only evaluated after the body has
                 // already run once, so there's nothing to narrow going in.
                 self.loop_break_states.push(Vec::new());
+                self.loop_depth += 1;
                 self.check_stmt(body, locals, declared_return, label);
+                self.loop_depth -= 1;
                 let break_states = self.loop_break_states.pop().unwrap_or_default();
                 self.check_expr(cond, locals, label);
                 // Same as `While` - reaching code after a do-while always
@@ -236,7 +240,9 @@ impl<'a> Checker<'a> {
                         let mut body_locals = locals.clone();
                         self.apply_narrowing(c, &mut body_locals, true);
                         self.loop_break_states.push(Vec::new());
+                        self.loop_depth += 1;
                         self.check_stmt(body, &mut body_locals, declared_return, label);
+                        self.loop_depth -= 1;
                         let break_states = self.loop_break_states.pop().unwrap_or_default();
                         // `step` runs after each body iteration, so it
                         // should see whatever the body just did, not the
@@ -272,7 +278,9 @@ impl<'a> Checker<'a> {
                         // rather than trying to model "unreachable if no
                         // break exists" precisely.
                         self.loop_break_states.push(Vec::new());
+                        self.loop_depth += 1;
                         self.check_stmt(body, locals, declared_return, label);
+                        self.loop_depth -= 1;
                         let break_states = self.loop_break_states.pop().unwrap_or_default();
                         for e in step {
                             self.check_expr(e, locals, label);
@@ -361,7 +369,9 @@ impl<'a> Checker<'a> {
                 // `loop_break_states` closes exactly that gap, without
                 // touching the single-representative-pass model otherwise.
                 self.loop_break_states.push(Vec::new());
+                self.loop_depth += 1;
                 self.check_stmt(body, locals, declared_return, label);
+                self.loop_depth -= 1;
                 let break_states = self.loop_break_states.pop().unwrap_or_default();
                 for state in break_states {
                     *locals = merge_scopes(locals, &state);
@@ -630,6 +640,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::Mixed);
                     purge_stale_narrowing_for(locals, name);
                     locals.insert(name.clone(), ty);
+                    self.static_var_names.insert(name.clone());
                 }
             }
             // `check_program`'s own top-level loop already handles a
@@ -767,6 +778,19 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
             },
             _ => Vec::new(),
         },
+        // Phase 60 corpus find: `StmtKind::StaticVar`'s own arm above
+        // infers purely from the declaration's default expression
+        // (`static $x = null;` types `$x` as exactly `Null`), unlike
+        // every other statement shape here, which unconditionally
+        // clobbered an already-applied `/** @var string|null */`
+        // annotation instead of merely leaving it alone - real PHPStan's
+        // own `@var` on a `static` declaration is exactly the same
+        // "trust the annotation over the initializer" override every
+        // other assignment already gets. Listed here so both existing
+        // mechanisms (the nameless-tag target inference and the
+        // post-dispatch reapplication) pick a `static` declaration up
+        // for free, with no new plumbing of their own.
+        StmtKind::StaticVar(vars) => vars.iter().map(|(name, _)| name.clone()).collect(),
         _ => Vec::new(),
     }
 }
