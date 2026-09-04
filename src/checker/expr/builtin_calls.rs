@@ -1176,11 +1176,30 @@ fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
 /// Intersection back to its own plain base - used by array functions
 /// that can't guarantee they preserve list-ness/non-emptiness
 /// (`array_filter`/`array_combine`/`array_unique`).
+///
+/// Phase 68 corpus find: a `Union` branch of `ty` (e.g. `non-empty-
+/// list<T>|array{}` - the real shape a loop-conditionally-appended
+/// array literal gets, one branch for "at least one append happened,"
+/// one for "zero iterations") used to fall straight to the `other => ty`
+/// case below untouched, silently leaving every member's own `Accessory`
+/// marker in place - only a *bare* `Intersection` at the very top level
+/// ever got stripped. Found via a real corpus false positive:
+/// `array_values(array_filter($imageIds, is_string(...)))` flagged as a
+/// no-op (`arrayValues.list`) because `array_filter`'s own 2-argument,
+/// non-null/non-instanceof-callback case (which calls this expecting
+/// list-ness genuinely gone) left the input's `non-empty-list<T>|
+/// array{}` completely unstripped, so `array_values`'s own `is_list_like`
+/// still saw it as list-shaped.
 fn strip_accessory_markers(ty: Type) -> Type {
     match ty {
         Type::Intersection(members) => members
             .into_iter()
             .find(|m| !matches!(m, Type::Accessory(_)))
+            .unwrap_or(Type::Mixed),
+        Type::Union(members) => members
+            .into_iter()
+            .map(strip_accessory_markers)
+            .reduce(union_types)
             .unwrap_or(Type::Mixed),
         other => other,
     }

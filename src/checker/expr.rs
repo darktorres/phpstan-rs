@@ -8,6 +8,7 @@ use crate::checker::{
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::FunctionSig;
+use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
 
 mod builtin_calls;
@@ -429,6 +430,16 @@ impl<'a> Checker<'a> {
                     if let Some(sig) = sig {
                         // Phase 67: `@internal`.
                         self.check_internal_function_call(name, sig, e.span, label);
+                        // Phase 68: no-op array_filter()/array_values().
+                        match name.as_str() {
+                            "array_filter" => {
+                                self.check_array_filter_no_op(args, locals, label, e.span)
+                            }
+                            "array_values" => {
+                                self.check_array_values_no_op(args, locals, label, e.span)
+                            }
+                            _ => {}
+                        }
                         // Finding 29 / Phase 49: a spread argument
                         // (`f(...$args)`) means the real argument
                         // count/types past it aren't known statically -
@@ -1135,6 +1146,7 @@ impl<'a> Checker<'a> {
                     }
                     self.check_expr(&item.value, locals, label);
                 }
+                self.check_array_literal_duplicate_keys(items, label);
                 self.infer_array_literal_type(items, locals)
             }
             ExprKind::Index(base, idx) => {
@@ -2303,6 +2315,75 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 68: `DuplicateKeysInLiteralArraysRule` - a later literal key
+    /// silently overwrites an earlier one at runtime (real PHP raises no
+    /// warning either), almost always a real bug (a copy-pasted entry
+    /// whose key was never updated) rather than an intentional
+    /// "overwrite semantics" idiom. `infer_array_literal_type` just
+    /// below already computes the exact same key-derivation/auto-index
+    /// logic for its own overwrite-on-duplicate handling - this walks
+    /// the same shape independently so it can report every duplicate
+    /// found, rather than reusing that function's own discard-on-
+    /// overwrite `Vec`. Bails on the *first* non-literal key, same
+    /// "don't guess" leniency `infer_array_literal_type` already has -
+    /// a computed key could coincide with any later key, so nothing
+    /// past it can be soundly checked either.
+    pub(crate) fn check_array_literal_duplicate_keys(&mut self, items: &[ArrayItem], label: &str) {
+        if items.iter().any(|item| item.spread) {
+            return;
+        }
+        // Key text -> (first occurrence's span, how many times it's been
+        // seen so far). Real PHP coerces a numeric-string key ("5") to
+        // the same int key (5) it names - both an int key's own
+        // `.to_string()` and its numeric-string twin are spelled
+        // identically here, so comparing the plain text alone (no
+        // separate int/string discriminator) already gets this right,
+        // the same simplification `infer_array_literal_type` below
+        // relies on for its own overwrite-on-duplicate handling.
+        let mut seen: Vec<(String, (Span, u32))> = Vec::new();
+        let mut next_index: i64 = 0;
+        for item in items {
+            let item_span = item.key.as_ref().map_or(item.value.span, |k| k.span);
+            let key = match &item.key {
+                None => {
+                    let k = next_index.to_string();
+                    next_index += 1;
+                    k
+                }
+                Some(k) => match &k.kind {
+                    ExprKind::Literal(Literal::String(s)) => s.clone(),
+                    ExprKind::Literal(Literal::Int(n)) => {
+                        next_index = next_index.max(n + 1);
+                        n.to_string()
+                    }
+                    _ => return,
+                },
+            };
+            match seen.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, (first_span, count))) => {
+                    *count += 1;
+                    if *count == 2 {
+                        // `var_export`-style display: bare for a
+                        // canonical int key, single-quoted otherwise.
+                        let display = if is_canonical_int_key(&key) {
+                            key.clone()
+                        } else {
+                            format!("'{}'", key.replace('\\', "\\\\").replace('\'', "\\'"))
+                        };
+                        self.report(
+                            label.to_string(),
+                            format!("Array has duplicate key {display}."),
+                            *first_span,
+                            0,
+                            "array.duplicateKey",
+                        );
+                    }
+                }
+                None => seen.push((key, (item_span, 1))),
+            }
+        }
+    }
+
     /// Finding 48: an array literal's own element types were never
     /// inferred precisely - every literal read as `Array(Mixed)`
     /// regardless of its actual contents, which silently defeated
@@ -2548,6 +2629,106 @@ impl<'a> Checker<'a> {
             // case) means the merged value isn't provably non-empty.
             Type::Union(members) => members.iter().all(Self::is_known_non_empty_array),
             _ => false,
+        }
+    }
+
+    /// The mirror image of `is_known_non_empty_array` just above -
+    /// whether `ty` is provably empty (an empty `ArrayShape` literal;
+    /// nothing else in this project's own type system can prove zero
+    /// elements, the same "don't guess" leniency `is_known_non_empty_
+    /// array` already applies in the other direction).
+    pub(crate) fn is_known_empty_array(ty: &Type) -> bool {
+        match ty {
+            Type::ArrayShape(fields) => fields.is_empty(),
+            Type::Union(members) => members.iter().all(Self::is_known_empty_array),
+            _ => false,
+        }
+    }
+
+    /// Phase 68: `ArrayFilterRule`, narrowed to just its `arrayFilter.
+    /// empty` half (real PHP's own default no-callback "drop every falsy
+    /// element" behavior on a provably-empty array). The other two real
+    /// PHPStan sub-checks (`arrayFilter.same`/`arrayFilter.alwaysEmpty`,
+    /// gated on the array's own *element* type being provably always-
+    /// truthy/always-falsy) were dropped after corpus verification
+    /// caught two live false positives - a dynamic-key index-assignment
+    /// inside a loop's `if`-branch not correctly widening the tracked
+    /// element type across the branch (`vendor/symfony/var-exporter/
+    /// ProxyHelper.php`'s `$abstractProperties[$name] = new
+    /// \ReflectionProperty(...)` vs `$abstractProperties[$name] =
+    /// false;`, inferred as bare `array<false>` - the object-valued
+    /// branch went missing entirely), and a `try { $x = ...; } finally {
+    /// array_filter([..., $x]); }` shape not accounting for the
+    /// possibility the assignment inside `try` never ran (Piwigo's own
+    /// `tests/Integration/GroupServiceTest.php`, `$copyId = null;`
+    /// reassigned only conditionally inside `try`, inferred as bare
+    /// `GroupId` with the `null` branch dropped). Both are pre-existing
+    /// gaps in this project's own variable-type tracking, not something
+    /// to fix as part of this "cheap win" phase - `is_known_empty_array`
+    /// below has no such exposure (purely syntactic, no flow-sensitive
+    /// inference involved).
+    pub(crate) fn check_array_filter_no_op(
+        &mut self,
+        args: &[Arg],
+        locals: &Locals,
+        label: &str,
+        span: Span,
+    ) {
+        if args.len() != 1 {
+            return;
+        }
+        let arr_ty = self.infer_expr(&args[0].value, locals);
+        if !Self::is_array_like(&arr_ty) {
+            return;
+        }
+        if Self::is_known_empty_array(&arr_ty) {
+            self.report(
+                label.to_string(),
+                format!("call to array_filter() with an empty array ({arr_ty}) has no effect"),
+                span,
+                0,
+                "arrayFilter.empty",
+            );
+        }
+    }
+
+    /// Phase 68: `ArrayValuesRule` - a no-op both when the input is
+    /// provably empty and when it's already list-shaped (`is_list_like`,
+    /// the same accessory-marker check this call's own return-type
+    /// inference already relies on to know it *always* produces a fresh
+    /// list regardless of the input's own shape).
+    pub(crate) fn check_array_values_no_op(
+        &mut self,
+        args: &[Arg],
+        locals: &Locals,
+        label: &str,
+        span: Span,
+    ) {
+        if args.len() != 1 {
+            return;
+        }
+        let arr_ty = self.infer_expr(&args[0].value, locals);
+        if !Self::is_array_like(&arr_ty) {
+            return;
+        }
+        if Self::is_known_empty_array(&arr_ty) {
+            self.report(
+                label.to_string(),
+                format!("call to array_values() with an empty array ({arr_ty}) has no effect"),
+                span,
+                0,
+                "arrayValues.empty",
+            );
+        } else if Self::is_list_like(&arr_ty) {
+            self.report(
+                label.to_string(),
+                format!(
+                    "call to array_values() on {arr_ty}, which is already a list, has no effect"
+                ),
+                span,
+                0,
+                "arrayValues.list",
+            );
         }
     }
 

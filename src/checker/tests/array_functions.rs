@@ -651,6 +651,39 @@ fn array_filter_array_combine_and_array_unique_no_longer_claim_the_result_is_sti
     assert_eq!(d.len(), 3, "got: {d:?}");
 }
 
+// Phase 68 corpus find: `strip_accessory_markers` only ever stripped a
+// *bare* `Intersection` - a `Union` branch (the real shape a loop-
+// conditionally-appended array literal gets, e.g. `non-empty-list<T>|
+// array{}`) fell straight through untouched, leaving `array_filter()`'s
+// own 2-argument, non-null/non-instanceof-callback case wrongly still
+// claiming list-ness. Real corpus repro: Piwigo's own
+// `CategoryCatsRenderer::render` building `$imageIds` via `$imageIds[] =
+// ...;` inside a conditional loop body, then
+// `array_values(array_filter($imageIds, is_string(...)))` - flagged as a
+// no-op `arrayValues.list` before this fix, since `array_filter`'s own
+// return type still carried the list marker through the `Union`.
+#[test]
+fn array_filter_with_an_arbitrary_callback_strips_list_ness_through_a_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return list<int> */
+            function build(array $rows): array {
+                $x = [];
+                foreach ($rows as $row) {
+                    if ($row) {
+                        $x[] = $row;
+                    }
+                }
+                return array_filter($x, is_int(...));
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("return type mismatch")),
+        "expected array_filter's own list marker to be stripped through the Union, got: {d:?}"
+    );
+}
+
 // A round of Piwigo-corpus bucketing found real PHPStan's own
 // array_filter() extension recognizes an explicit null-check callback
 // (`fn ($v) => $v !== null`) and strips Null from the retained
@@ -1093,4 +1126,126 @@ fn array_shift_on_a_list_preserves_list_ness_but_not_non_emptiness() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 68: `ArrayFilterRule`/`ArrayValuesRule` - a no-op call, cheap to
+// detect once precise element/list-ness inference already exists.
+
+#[test]
+fn array_filter_on_an_empty_array_literal_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return array_filter([]);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "arrayFilter.empty"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn array_filter_on_a_list_of_objects_is_never_flagged() {
+    // `arrayFilter.same`/`arrayFilter.alwaysEmpty` (real PHPStan's own
+    // element-type-based sub-checks) were dropped after corpus
+    // verification caught live false positives in exactly this element-
+    // type-is-provably-truthy shape - see `check_array_filter_no_op`'s
+    // own doc comment for the two real-corpus repros.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @param list<Foo> $x */
+            function f(array $x): array {
+                return array_filter($x);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn array_filter_on_an_ambiguous_element_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $x */
+            function f(array $x): array {
+                return array_filter($x);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn array_filter_with_a_callback_is_never_flagged() {
+    // Real PHPStan itself doesn't attempt to analyze an explicit
+    // callback's own logic either.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @param list<Foo> $x */
+            function f(array $x): array {
+                return array_filter($x, fn ($v) => true);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn array_values_on_an_empty_array_literal_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return array_values([]);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "arrayValues.empty"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn array_values_on_an_already_list_shaped_array_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $x */
+            function f(array $x): array {
+                return array_values($x);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "arrayValues.list"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn array_values_on_a_non_list_array_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<string, int> $x */
+            function f(array $x): array {
+                return array_values($x);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("arrayValues.")),
+        "unexpected diagnostics: {d:?}"
+    );
 }

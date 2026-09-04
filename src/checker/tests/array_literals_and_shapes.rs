@@ -1035,3 +1035,120 @@ fn a_refined_string_array_literal_key_is_not_flagged() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 68: `array.duplicateKey` - a later literal key silently
+// overwrites an earlier one at runtime, almost always a copy-paste bug.
+
+#[test]
+fn a_duplicate_string_key_in_an_array_literal_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return ['a' => 1, 'b' => 2, 'a' => 3];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_duplicate_int_key_in_an_array_literal_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return [1 => 'a', 2 => 'b', 1 => 'c'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_explicit_int_key_colliding_with_an_implicit_one_is_flagged() {
+    // The first unkeyed element claims key `0` - a later explicit
+    // `0 => ...` collides with it.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return ['a', 0 => 'b'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_numeric_string_key_colliding_with_its_int_twin_is_flagged() {
+    // Real PHP coerces a numeric-string key to the same int key it
+    // names - `'5'` and `5` collide.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return ['5' => 'a', 5 => 'b'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_array_literal_with_all_unique_keys_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return ['a' => 1, 'b' => 2, 3 => 'c', 'd'];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_spread_array_literal_is_never_flagged_for_duplicate_keys() {
+    // Not guessed at - a spread source's own key set isn't known
+    // statically in general.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $x): array {
+                return ['a' => 1, ...$x, 'a' => 2];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_computed_key_suppresses_further_duplicate_key_checking() {
+    // Don't guess: once a key can't be statically resolved, nothing
+    // past it can be soundly checked either (it could coincide with
+    // any later key).
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $k): array {
+                return ['a' => 1, $k => 2, 'a' => 3];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
