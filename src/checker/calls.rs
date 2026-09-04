@@ -960,6 +960,37 @@ impl<'a> Checker<'a> {
             }
         }
     }
+
+    /// Phase 71: `DefineParametersRule` - `define()`'s own third
+    /// `$case_insensitive` argument stopped doing anything as of PHP
+    /// 8.0 (case-insensitive constants were removed entirely), confirmed
+    /// directly via `php`: `define("FOO", 1, true)` on PHP 8.5 emits
+    /// "Argument #3 ($case_insensitive) is ignored since declaration of
+    /// case-insensitive constants is no longer supported" as a real
+    /// runtime `E_WARNING` - the exact message text real PHPStan's own
+    /// rule uses. Gated on `Registry::php_version` being configured *and*
+    /// at least 8.0 (matching real PHPStan's own version-aware
+    /// behavior): with no configured version, this project has nothing
+    /// to check against, matching every other `PhpFeature`-gated rule's
+    /// own "unset means unconfigured, stay silent" convention.
+    pub(crate) fn check_define_third_argument(&mut self, args: &[Arg], span: Span, label: &str) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if crate::php_version::PhpFeature::CaseInsensitiveConstantsRemoved.is_available(version) {
+            return;
+        }
+        if args.len() < 3 {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            "Argument #3 ($case_insensitive) is ignored since declaration of case-insensitive constants is no longer supported.".to_string(),
+            span,
+            0,
+            "argument.unused",
+        );
+    }
 }
 
 /// PHP superglobals are implicitly defined in every scope without any

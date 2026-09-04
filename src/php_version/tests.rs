@@ -47,6 +47,17 @@ fn unset_cast_runs_the_opposite_direction() {
 }
 
 #[test]
+fn case_insensitive_constants_run_the_opposite_direction_too() {
+    // Confirmed directly via `php`: `define("FOO", 1, true)` on PHP 8.5
+    // emits "Argument #3 ($case_insensitive) is ignored since
+    // declaration of case-insensitive constants is no longer supported"
+    // verbatim - the same message real PHPStan's own rule uses.
+    assert!(PhpFeature::CaseInsensitiveConstantsRemoved.is_available((7, 4)));
+    assert!(!PhpFeature::CaseInsensitiveConstantsRemoved.is_available((8, 0)));
+    assert!(!PhpFeature::CaseInsensitiveConstantsRemoved.is_available((8, 5)));
+}
+
+#[test]
 fn thresholds_match_real_phpstans_own_phpversion_class() {
     // Cross-checked directly against
     // vendor/phpstan-src/src/Php/PhpVersion.php's own supportsX/
@@ -66,4 +77,8 @@ fn thresholds_match_real_phpstans_own_phpversion_class() {
     assert_eq!(PhpFeature::DeprecatedNonStandardCasts.threshold(), (8, 5));
     assert_eq!(PhpFeature::DeprecatedBacktickOperator.threshold(), (8, 5));
     assert_eq!(PhpFeature::AttributesOnGlobalConstants.threshold(), (8, 5));
+    assert_eq!(
+        PhpFeature::CaseInsensitiveConstantsRemoved.threshold(),
+        (8, 0)
+    );
 }

@@ -474,6 +474,19 @@ impl<'a> Checker<'a> {
                         {
                             self.check_format_string_call(name, args, locals, label);
                         }
+                        // Phase 71: real PHP itself resolves `define`
+                        // case-insensitively like any other function
+                        // call - matched against just the last
+                        // namespace segment, the same as every other
+                        // by-name builtin special-case here.
+                        if name
+                            .rsplit('\\')
+                            .next()
+                            .unwrap_or(name)
+                            .eq_ignore_ascii_case("define")
+                        {
+                            self.check_define_third_argument(args, e.span, label);
+                        }
                     } else {
                         // Since resolve_function_candidates always
                         // produces a definite name (there's no "can't

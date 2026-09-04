@@ -2,6 +2,7 @@ mod accessory_and_refinement_types;
 mod arity_and_signatures;
 mod array_functions;
 mod array_literals_and_shapes;
+mod builtin_checks;
 mod cast_and_coercion;
 mod closures_and_callables;
 mod control_flow;

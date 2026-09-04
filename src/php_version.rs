@@ -58,14 +58,14 @@ pub fn parse_php_version(s: &str) -> Result<PhpVersion, String> {
 /// One PHP language feature whose availability depends on the configured
 /// `php_version` - each variant corresponds to a real
 /// `PHPStan\Php\PhpVersion` method (named in its doc comment) that a
-/// version-gated portability rule calls. Every variant except
-/// `UnsetCastRemoved` follows the "available from this version on"
-/// direction (`PhpVersion::supportsX`/`deprecatesX`'s own `>=` checks);
-/// `UnsetCastRemoved` is the one gate among this phase's named rules that
-/// runs the other way - the `(unset)` cast worked *before* PHP 8.0 and was
-/// removed there (`PhpVersion::supportsUnsetCast`'s own `< 80000`) - so
-/// callers should use `is_available` rather than hand-rolling the
-/// comparison themselves.
+/// version-gated portability rule calls. Most variants follow the
+/// "available from this version on" direction (`PhpVersion::supportsX`/
+/// `deprecatesX`'s own `>=` checks); a "Removed" variant (`UnsetCastRemoved`,
+/// `CaseInsensitiveConstantsRemoved`) runs the other way - the feature
+/// worked *before* its own threshold version and was removed there
+/// (`PhpVersion::supportsUnsetCast`/`supportsCaseInsensitiveConstantNames`'s
+/// own `< 80000` checks) - so callers should use `is_available` rather
+/// than hand-rolling the comparison themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PhpFeature {
     /// Non-capturing `catch` (no bound `$variable`).
@@ -121,6 +121,12 @@ pub enum PhpFeature {
     /// `PhpVersion::supportsAttributesOnGlobalConstants`
     /// (`ConstantAttributesRule`).
     AttributesOnGlobalConstants,
+    /// Case-insensitive constants (`define()`'s own third
+    /// `$case_insensitive` argument) - removed as of this version, the
+    /// same "no longer available from this version on" direction as
+    /// `UnsetCastRemoved`. `PhpVersion::supportsCaseInsensitiveConstantNames`
+    /// (`DefineParametersRule`).
+    CaseInsensitiveConstantsRemoved,
 }
 
 impl PhpFeature {
@@ -131,7 +137,11 @@ impl PhpFeature {
     pub fn threshold(self) -> PhpVersion {
         use PhpFeature::*;
         match self {
-            NoncapturingCatch | ThrowExpression | PromotedProperties | UnsetCastRemoved => (8, 0),
+            NoncapturingCatch
+            | ThrowExpression
+            | PromotedProperties
+            | UnsetCastRemoved
+            | CaseInsensitiveConstantsRemoved => (8, 0),
             FinalClassConstants | ArrayUnpackingWithStringKeys => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants | ReadOnlyAnonymousClasses => (8, 3),
@@ -143,13 +153,16 @@ impl PhpFeature {
         }
     }
 
-    /// Whether this feature is available (or, for `UnsetCastRemoved`,
+    /// Whether this feature is available (or, for a "removed" variant,
     /// still available) under `php_version`. A version-gated rule should
     /// call this rather than comparing against `threshold()` itself, since
-    /// `UnsetCastRemoved` runs in the opposite direction from every other
-    /// variant.
+    /// a "removed" variant runs in the opposite direction from every
+    /// other one.
     pub fn is_available(self, php_version: PhpVersion) -> bool {
-        if self == PhpFeature::UnsetCastRemoved {
+        if matches!(
+            self,
+            PhpFeature::UnsetCastRemoved | PhpFeature::CaseInsensitiveConstantsRemoved
+        ) {
             php_version < self.threshold()
         } else {
             php_version >= self.threshold()
