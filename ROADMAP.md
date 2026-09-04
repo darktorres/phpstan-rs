@@ -174,16 +174,23 @@ these are genuinely part of Phase 55's narrowing-engine generalization
 (the predicate-table extension), cross-referenced there rather than
 duplicated. Size: S (item 1) -> L (items 2-3) -> L (item 4).
 
-**Phase 16 - CI-friendly output formats (PLANNED).** No JSON/checkstyle/
-junit/etc. output. Realistic starting subset: `json` (most universally
-consumable) plus `checkstyle` or `junit`. Needs real source positions to
-be useful beyond plain text - Phase 11 already shipped those, so this is
-otherwise unblocked. Unaffected by the exhaustive audit (not a PHPStan
-Rules/Type-shaped feature - PHPStan's own output formatters live outside
-`src/Rules`/`src/Type`) beyond one dependency worth noting: Phase 47's
-diagnostic-identifier work is a natural prerequisite for a JSON format
-a CI tool would actually want to consume (a stable per-check identifier
-per finding, not just a message string).
+**Phase 16 - CI-friendly output formats (DONE).** This entry's own
+status was never updated after an earlier pilot batch landed it
+(commits `afdd654`/`27c449d`) - no JSON/checkstyle/etc. output used to
+exist. `src/output.rs` now renders `json` (totals + a per-file messages
+map) and `checkstyle` (one `<file>`/`<error>` per diagnostic, hand-
+rolled XML-attribute escaping, always `severity="error"` since the
+format has no native concept of this project's 0-6 level scale,
+matching real PHPStan's own checkstyle formatter's own simplification)
+over the existing `checker::Diagnostic` struct - no struct change
+needed, since real `Span`-based positions already existed from Phase
+11. `check-project` gained `--format {text,json,checkstyle}` (CLI-only,
+matching real PHPStan's own `--error-format`, not a standing
+`config.rs` setting); `json`/`checkstyle` print one clean structured
+document with no summary prose mixed in. `junit` was the roadmap's own
+named alternative to `checkstyle` ("json... plus checkstyle or junit"),
+not an addition to it - not built, and not needed given checkstyle
+shipped.
 
 **Phase 17 - LSP hover/go-to-definition (PLANNED).** Needs a
 position-keyed lookup index - today's `Registry`/`Project` lookups are
@@ -359,23 +366,45 @@ category the way the audited categories were - it's threaded through
 individual rules elsewhere) - the scope above stands as originally
 written.
 
-**Phase 40 - PHPStan-API-usage checks (PLANNED).** Checks PHP code that
-consumes `phpstan/phpstan` itself as a Composer library (third-party
-PHPStan rule/extension authors) for references into `PHPStan\*` that
-aren't marked `@api` - see the Phase 18 note above for why this is a
-different feature. A pure namespace-prefix check (`PHPStan\*` minus
-`PHPStan\PhpDocParser\`/`PHPStan\BetterReflection\`) plus a
-vendor-directory file-path check; `@api`/`@api-do-not-implement`
-recognized via Phase 36's own tag infrastructure; gated behind
-detecting a `phpstan/extension-installer`/`phpstan/phpstan` dependency
-in the analyzed project's own `composer.json` (mirrors the real
-Pest-config-detection precedent, Phase 21). The exhaustive audit's own
-`Api/*` findings (`ApiClassConstFetchRule`, `ApiMethodCallRule`, etc.,
-11 items) were all classified `not_applicable` for phpstan-rs *itself*,
-since they gate on referencing PHPStan's own `PHPStan\*` namespace, which
-this project has none of. This phase remains the mirror-image, correct
-feature: checking *other* PHP code that consumes real PHPStan's API,
-not phpstan-rs protecting its own.
+**Phase 40 - PHPStan-API-usage checks (PARTIAL).** This entry's own
+status was never updated after an earlier pilot batch landed it
+(commits `c088fe5`/`1d17a27`/`b6d0a2a`/`94cfce8`) - no check for PHP
+code that consumes `phpstan/phpstan` itself as a Composer library
+(third-party PHPStan rule/extension authors) referencing `PHPStan\*`
+without an `@api` tag used to exist.
+
+**Done**: `checker::phpstan_api` flags a third-party project's own
+references into real PHPStan's `PHPStan\*` namespace (minus the
+bundled `PhpDocParser`/`BetterReflection` sub-namespaces) that aren't
+marked `@api` - instantiation, static calls, class-const fetches (not
+`::class`, deliberately - see the module's own doc comment),
+`instanceof`, and `extends`/`implements`/`trait-use` (with a distinct
+`@api-do-not-implement` message for the inheritance-shaped ones), plus
+a syntactically-typed slice of method calls (through a directly-typed
+parameter or closure/arrow-fn use-capture, not full receiver-type
+inference). `@api`/`@api-do-not-implement` recognized via `ClassInfo`'s
+own tag tracking; `ClassInfo::from_class_decl` detects a
+`phpstan/extension-installer`/`phpstan/phpstan` Composer dependency to
+gate the whole check the way the real Pest-config-detection precedent
+(Phase 21) does.
+
+**Still open**, both deliberate, disclosed deviations confirmed in the
+feature's own module doc comment rather than gaps found later: no
+vendor-directory file-path check the way real PHPStan's own
+`ApiRuleHelper` does (this project's registry has never tracked a
+per-class declaring file path, and the existing vendor-context/
+analyze-files split already keeps a real vendor-loaded PHPStan class
+from ever being analyzed/reported on itself, so the namespace-prefix
+check alone is sufficient here); full receiver-type inference for
+method-call detection (calls through, e.g., a constructor-promoted
+service property aren't currently caught - only a directly-typed
+parameter/use-capture receiver is). The exhaustive audit's own `Api/*`
+findings (`ApiClassConstFetchRule`, `ApiMethodCallRule`, etc., 11
+items) were all classified `not_applicable` for phpstan-rs *itself*,
+since they gate on referencing PHPStan's own `PHPStan\*` namespace,
+which this project has none of - this phase is the mirror-image,
+correct feature: checking *other* PHP code that consumes real
+PHPStan's API, not phpstan-rs protecting its own.
 
 **Phase 41 - Purity / side-effect model (PLANNED).** No purity/
 impurity tracking exists anywhere in `src/`. Needs an impure-point
@@ -572,23 +601,31 @@ reasoning - **no changes to this phase's scope, just confirmation.**
 the same audit category, is folded into Phase 71's small-builtin-checks
 batch instead, since it needs no PCRE validation of its own.)
 
-**Phase 47 - Diagnostic identifier & metadata infrastructure (NEW,
-PLANNED).** `Diagnostic` (`src/checker.rs:71`) is a flat 4-field struct,
-just `{location, message, span, level}`, populated via ad hoc struct
-literals/`format!()` calls scattered across `src/checker/*.rs`, with no
-identifier field, no tip/canned-tip helper, no metadata bag, no
-`nonIgnorable` flag, and no `fixNode`/auto-fix support, and no fluent
-builder to assemble any of it consistently (the Rust equivalent of
-`RuleErrorBuilder`). This is what real PHPStan's `@phpstan-ignore
-<identifier>` matches against, what CI output formats (Phase 16) want
-for machine consumption, and what lets a "possibly impure" tip (see
-Phase 41) be appended to a constant-condition diagnostic without a
-second diagnostic. The core struct change is small; real parity requires
-threading an identifier convention through dozens of existing
-call-sites and deciding a Rust-idiomatic builder API. Prerequisite for
-Phase 44 (`@phpstan-ignore`, which already names this as a blocker),
-Phase 16 (CI output formats), and Phase 41's possibly-impure tip
-decoration. Size: M.
+**Phase 47 - Diagnostic identifier & metadata infrastructure (DONE).**
+This entry's own status was never updated after an earlier pilot batch
+landed it (commit `6044da9`) - `Diagnostic` used to be a flat 4-field
+struct, just `{location, message, span, level}`, populated via ad hoc
+struct literals/`format!()` calls with no identifier field, no tip/
+canned-tip helper, no metadata bag, no `nonIgnorable` flag, and no
+`fixNode`/auto-fix support.
+
+`Diagnostic` now carries all 8 fields real parity needed:
+`identifier` (a dot-separated, PHPStan-style machine identifier for
+this diagnostic's own *kind*, e.g. `"argument.type"`/`"class.notFound"`,
+stable across occurrences of the same underlying problem, reusing
+real PHPStan's own spelling wherever the audit was confident of it),
+`tip`, `non_ignorable`, `metadata`, and `fix`, assembled via a fluent
+`DiagnosticBuilder` (the Rust equivalent of real PHPStan's own
+`RuleErrorBuilder`) - `Checker::report` stays the thin, no-`tip`/no-
+`fix` positional-argument fast path every ordinary call site uses,
+`Checker::report_builder` is the escape hatch for the handful that
+need more. `identifier` is threaded through essentially every one of
+this project's own `self.report(...)` call sites at this point (every
+phase since this one has supplied a real identifier string as a matter
+of course), and Phase 16's CI output formats/Phase 41's possibly-impure
+tip decoration both build on this directly. `@phpstan-ignore
+<identifier>` matching (Phase 44) is still its own separate, open
+phase - this one only built the infrastructure that phase consumes.
 
 **Phase 48 - Symbol-existence validation pipeline (classes, functions,
 use-imports, typehints) (PARTIAL).** This entry's own status was never
@@ -1081,21 +1118,32 @@ collapses both a bare `callable` and a signature-carrying
 time, so there's no way to tell them apart post-parse without Phase
 53's still-open structural `Callable`/`Closure` type first).
 
-**Phase 59 - Unused-symbol detection subsystem (NEW, PLANNED).**
-phpstan-rs has no dead-code/unused-variable-usage-scanning category at
-all. Build one variable/member-usage walker (with the
-`func_get_args()`/`compact()`/`get_defined_vars()`/dynamic-variable-name
-escape hatches that force "treat everything as used"), then apply it to
-four sites: function/method parameters, closure `use()` captures, and
-private class members (constants/methods/properties). Unlocks
-`UnusedConstructorParametersRule`, `UnusedClosureUsesRule`,
-`UnusedPrivateConstantRule`, `UnusedPrivateMethodRule`,
-`UnusedPrivatePropertyRule` (the property variant additionally needs 5
-distinct read/write messages and `@phpstan-always-read`/`-written` tag
-support). Size: L - code-cleanliness signal rather than a
-correctness-bug catcher for the parameter/closure-use half, but the
-unused-private-member half is a very common, high-signal real finding
-after refactors.
+**Phase 59 - Unused-symbol detection subsystem (DONE).** This entry's
+own status was never updated after an earlier pilot batch landed it
+(commit `10a2fb7`) - phpstan-rs used to have no dead-code/unused-
+variable-usage-scanning category at all.
+
+One variable/private-member usage walker (`src/checker/unused.rs`)
+backs all five originally-scoped diagnostics: unused `__construct`
+parameters (`UnusedConstructorParametersRule`'s own real scope exactly,
+not every function/method parameter, which would be far too noisy
+against interface implementations, overrides, and callback signatures;
+constructor property promotion is exempt, since the promotion itself
+is a real use), unused closure `use(...)` captures
+(`UnusedClosureUsesRule`), and unused private constants/methods/
+properties (`UnusedPrivateConstantRule`/`UnusedPrivateMethodRule`/
+`UnusedPrivatePropertyRule`, scanned once per class across every one
+of its own declared bodies) - the property variant carries the full 5
+distinct read/write message shapes (unused / never-read-only-written /
+never-written-only-read / never-read-read-only-hook / never-written-
+write-only-hook) plus `@phpstan-always-read`/`@phpstan-always-written`
+doc-tag support, exactly as originally scoped. The walker has explicit
+"assume used" escape hatches for everything that reads a variable/
+member by a name it can't resolve statically: `func_get_args()`,
+`compact()` with a non-literal argument, `get_defined_vars()`,
+`include`/`require`, a `${expr}`/`$$x` dynamic variable,
+`$obj->{$expr}`/`$obj->$name(...)` dynamic member access, and a
+`Foo::{$expr}`/`Foo::$$name` dynamic static access.
 
 **Phase 60 - Isset/empty/nullsafe existence-probe reversal (NEW,
 PLANNED).** `is_existence_probe`/`check_expr_quiet_root`
@@ -1293,20 +1341,30 @@ undefined-function check; useless-return-value builtins (`var_export`/
 `print_r`/`highlight_string`). Size: M overall (each item S).
 
 **Phase 72 - Regex capture-group inference extensions (distinct from,
-not blocked by, Phase 46) (NEW, PLANNED).** Two additive improvements
-to `regex_groups.rs`'s Scanner that are about *type precision for
-`$matches`*, not pattern *validity* (so independent of Phase 46's PCRE-
-validation work): (a) a tri-state fallback for non-enumerable capture
-groups (`(\d+)` -> `numeric-string`, `([a-z]+)` -> `non-empty-string`,
-instead of degrading to plain `string`) plus `(?|...)` branch-reset and
-`x`-modifier support; (b) resolving a statically-foldable `Concat`
-pattern argument (e.g. `'/^' . $prefix . '$/'`) instead of only
-matching `ExprKind::Literal(String)` in `literal_string_value()`.
-Unlocks improvements to `RegexAstWalkResult`, `RegexCapturingGroup`,
-`RegexGroupParser`, `RegexGroupWalkResult`, `RegexNonCapturingGroup`,
-`RegexExpressionHelper`. Size: M+S - high value; `preg_match()`
-`$matches` shape typing is high-frequency, and a non-literal group
-(extremely common: `(\d+)`) currently silently degrades.
+not blocked by, Phase 46) (DONE).** This entry's own status was never
+updated after an earlier pilot batch landed it (commits
+`e6251c1`/`7e308d4`) - `regex_groups.rs`'s Scanner used to have neither
+improvement below.
+
+**(a)** A new tri-state `RegexGroupFallback` (`NumericString`/
+`NonEmptyString`/`Unknown`), computed for every capturing group from
+its own body's provable minimum length and character set, consulted
+only when the existing exact literal-enumeration is `None` - `(\d+)`
+now types as `numeric-string` and `([a-z]+)` as `non-empty-string`
+instead of silently degrading to plain `string`. Digit detection covers
+the `\d` escape and digit-only bracket classes; known zero-width
+escapes (`\b`/`\B`/`\A`/`\Z`/`\z`/`\G`/`\K`) correctly don't break a
+surrounding digits-only claim. `(?|...)` branch-reset and the `x`
+(free-spacing) modifier are both supported too.
+
+**(b)** `literal_string_value` (`checker::assignment`) now folds a
+statically-foldable `Concat`/`Grouping` pattern argument (e.g. `'/^' .
+$prefix . '$/'` when every piece is a literal), not only a bare
+`ExprKind::Literal(String)` - mirrors `composer.rs`'s own pre-existing
+`eval_concat` precedent. `preg_match()`/`preg_match_all()`'s `$matches`
+shape inference, `apply_narrowing`'s `preg_match` condition recognizer,
+and `sprintf`/`printf`'s format-string check all benefit, since they
+all read through this same helper.
 
 **Phase 73 - Array/string stdlib function coverage, batch 1
 (key-type-dependent) (NEW, PLANNED).** Extensions that specifically
@@ -1359,19 +1417,41 @@ Size: L - common in real-world form/input-handling code, the kind of
 code this project's own Piwigo corpus work has been targeting.
 
 **Phase 77 - Misc built-in-class/runtime-capability modeling batch
-(NEW, PLANNED).** Batch several independent, lower-value stdlib-
-modeling gaps: `get_class`/`get_called_class`/`get_parent_class`/
-`gettype`/`get_debug_type` (late-static-binding + runtime-string
-mapping tables); `date()`/`idate()` format-character-to-type table
-(static, no runtime simulation needed - unlike the DateTime/DOM/
-SimpleXML cluster in Phase 78); hardcoded constant-array-shape tables
-for `curl_getinfo` (extend the existing ~20-entry table to the full
-~75), `stat`/`dio_stat`, `pathinfo`, `parse_url`, `sscanf`; runtime-
-capability-list snapshots for `hash_algos()`, `openssl_get_cipher_methods()`,
-`mb_list_encodings()`; Reflection-class modeling in the registry;
-`SimpleXMLElement` magic-property resolution. Size: M - low individual
-value; batch to amortize planning overhead, skip or deprioritize unless
-a corpus surfaces heavy Reflection/XML/hash usage.
+(PARTIAL).** This entry's own status was never updated after an
+earlier pilot batch landed most of it (commits `f606d1f`/`6cf9061`).
+
+**Done**: `get_called_class()`/`get_parent_class()` (late-static-
+binding resolution against `current_class`/the registry's own `extends`
+chain, matching `resolve_pseudo`'s own documented self/static
+collapse); `gettype()`/`get_debug_type()` (real per-kind/per-class
+runtime-string answers, including `get_debug_type()`'s own
+`isFinal()`-gated exact-class-name case); `date()`/`idate()` (a static
+format-character-to-type table, scoped to a literal format composed
+entirely of recognized characters - `idate()` via `IntRange`, `date()`
+via a numeric-vs-non-numeric classification feeding the
+`NonEmptyString`/`NumericString` accessory markers); `pathinfo()`/
+`parse_url()`/`sscanf()` (hardcoded constant-array-shape tables,
+including a hand-rolled `sscanf()` format-string scanner - no regex
+engine is vendored in this project); `stat()`/`lstat()`/`fstat()`/
+`ssh2_sftp_stat()`/`dio_stat()` (their real, shared fixed-key int-
+valued shape); `curl_getinfo()`'s per-option table extended from ~20 to
+the full ~73 entries. `hash_algos()`/`openssl_get_cipher_methods()`/
+`mb_list_encodings()` are typed as `list<non-empty-string>` - a
+deliberate scope correction versus this entry's own original "runtime-
+capability-list snapshots" framing: real PHPStan builds a literal,
+host-captured snapshot by calling these for real at its own analysis
+time (to validate *other* functions' string arguments, e.g. `hash()`'s
+`$algo`), a fundamentally heavier mechanism this project has no way to
+replicate without a hardcoded, platform/PHP-version-fragile literal
+list.
+
+**Still open**, per this entry's own explicit original allowance
+("skip or deprioritize unless a corpus surfaces heavy Reflection/XML/
+hash usage" - no such evidence has surfaced): Reflection-class modeling
+in the registry, and `SimpleXMLElement` magic-property resolution. Both
+would need genuinely new infrastructure this project doesn't have yet
+(no existing Reflection-specific registry surface, no existing magic-
+property-resolution mechanism).
 
 **Phase 78 - DateTime/DateInterval/DOM/SimpleXML literal-probing (NEW,
 PLANNED, low priority).** Real PHPStan validates these by constructing
