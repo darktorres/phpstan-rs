@@ -18,6 +18,75 @@ fn word_operators_bind_looser_than_assignment() {
     assert!(matches!(&lhs.kind, ExprKind::Assign(..)));
 }
 
+// Phase 85: an assignment nested (unparenthesized) as a comparison
+// operator's own RHS. Real PHP's own grammar lets `variable '=' expr`
+// appear at this operand position - a real, common guard-clause idiom
+// (`if (false === $x = fn()) {...}`), found via a real Piwigo-corpus
+// false positive (RedisTrait::createConnection): `$params` never got
+// bound to `parse_url()`'s own return type because `false === $params
+// = parse_url($params)` used to parse as `(false === $params) =
+// parse_url($params)` - a malformed assignment target this project's
+// parser silently tolerated - instead of real PHP's own `false ===
+// ($params = parse_url($params))`.
+#[test]
+fn an_assignment_nested_as_an_identical_comparisons_rhs_parses_as_real_php_does() {
+    let program = parse("<?php if (false === $params = parse_url($x)) { return; }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(BinOp::Identical, lhs, rhs) = &cond.kind else {
+        panic!("expected a top-level Identical binary expression, got {cond:?}");
+    };
+    assert!(matches!(&lhs.kind, ExprKind::Literal(Literal::Bool(false))));
+    let ExprKind::Assign(target, value) = &rhs.kind else {
+        panic!("expected the RHS to be an Assign, got {:?}", rhs.kind);
+    };
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "params"));
+    assert!(matches!(&value.kind, ExprKind::Call(..)));
+}
+
+#[test]
+fn a_compound_assignment_nested_as_a_not_equal_comparisons_rhs_parses_as_real_php_does() {
+    let program = parse("<?php if (null !== $total += $x) { return; }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(BinOp::NotIdentical, _, rhs) = &cond.kind else {
+        panic!("expected a top-level NotIdentical binary expression, got {cond:?}");
+    };
+    assert!(matches!(
+        &rhs.kind,
+        ExprKind::CompoundAssign(BinOp::Add, ..)
+    ));
+}
+
+#[test]
+fn an_assignment_nested_as_a_relational_comparisons_rhs_parses_as_real_php_does() {
+    let program = parse("<?php if (0 > $pos = strrpos($x, ':')) { return; }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(BinOp::Gt, _, rhs) = &cond.kind else {
+        panic!("expected a top-level Gt binary expression, got {cond:?}");
+    };
+    assert!(matches!(&rhs.kind, ExprKind::Assign(..)));
+}
+
+// A plain comparison with no trailing `=` (the overwhelmingly common
+// case) must still parse exactly as before - `parse_assignment_tail`
+// only fires when an assignment operator token genuinely follows.
+#[test]
+fn an_ordinary_comparison_with_no_trailing_assignment_is_unaffected() {
+    let program = parse("<?php if (false === $params) { return; }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(BinOp::Identical, _, rhs) = &cond.kind else {
+        panic!("expected a top-level Identical binary expression, got {cond:?}");
+    };
+    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "params"));
+}
+
 #[test]
 fn a_bare_anonymous_function_statement_parses_as_an_expression_not_a_declaration() {
     // `function () { ... };` with no assignment at all - a real, if

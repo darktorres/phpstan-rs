@@ -662,11 +662,18 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         ExprKind::Assign(lhs, _) => narrowing_key(lhs),
         // Phase 26: `($file = readdir($dir)) !== false` - the
         // "assign-then-check" idiom above, but wrapped in parens, which
-        // real PHP *requires* here (`=` binds looser than `!==`, so the
-        // parens aren't stylistic - `$file = readdir($dir) !== false`
-        // would parse as `$file = (readdir($dir) !== false)` instead).
-        // Without this, `Assign`'s own arm above never even got a chance
-        // to run for the single most common shape it exists to cover.
+        // real PHP requires for the *statement's own* top-level shape
+        // (`$file = readdir($dir) !== false` would parse as `$file =
+        // (readdir($dir) !== false)` instead - `=` binds looser than
+        // `!==` there). Without this, `Assign`'s own arm above never
+        // even got a chance to run for the single most common shape it
+        // exists to cover. Phase 85's parser fix means the *comparison-
+        // operand* position specifically (`false !== $file = readdir($dir)`,
+        // no parens, no assignment at the very top of the statement) no
+        // longer needs this arm at all - `parse_assignment_tail` already
+        // builds the right `Assign` node directly as the comparison's
+        // own operand - but plenty of real code still writes the parens
+        // out of habit, so both arms stay.
         ExprKind::Grouping(inner) => narrowing_key(inner),
         // Phase 32 Finding F: `is_int($decoded['status'] ?? null)` - a
         // common defensive-coding idiom (json_decode results,

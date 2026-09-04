@@ -34,6 +34,37 @@ fn is_string_shaped(ty: &Type) -> bool {
         || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)))
 }
 
+/// Phase 85: a bare `ExprKind::Name` this project has no general global-
+/// constant table for (`PHP_EOL`, `M_PI`, ... all stay `Mixed`, a
+/// deliberate, unrelated scope boundary this doesn't touch) - except
+/// `true`/`false`/`null`, real PHP *language* keywords rather than
+/// ordinary constants, and the one shape this project's own parser
+/// doesn't already fold into `ExprKind::Literal` itself: a fully-
+/// qualified reference (`\false`/`\true`/`\null`) parses as a plain
+/// `Name`, not the `Keyword::False`/`True`/`Null` token `parse_primary`
+/// matches directly for the unqualified form (real PHP itself treats
+/// both forms identically - `\false` unambiguously names the same
+/// global pseudo-constant `false` does, never a user-defined one, since
+/// PHP doesn't allow declaring a constant with one of these three
+/// names). A real, common corpus shape: Rector's own namespace-
+/// prefixing transform (`RectorPrefix...`) rewrites every unqualified
+/// global name to its fully-qualified form, including these three,
+/// across a large fraction of this corpus's `vendor/rector/rector/
+/// vendor/` and similar prefixed trees - previously silently `Mixed`,
+/// which fed straight into `apply_equality_narrowing`'s own `target_ty
+/// == Type::Mixed` bail-out, silently skipping every `\false ===
+/// $x = fn()`-shaped guard's own narrowing (Symfony\Component\
+/// Filesystem\Path::getDirectory's real shape, found via Phase 85's own
+/// corpus check).
+fn bare_name_literal_type(name: &str) -> Type {
+    match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
+        "true" => Type::True,
+        "false" => Type::False,
+        "null" => Type::Null,
+        _ => Type::Mixed,
+    }
+}
+
 impl<'a> Checker<'a> {
     /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks
     /// down through `Index`/`PropertyAccess`/`DynamicPropertyAccess`,
@@ -1620,7 +1651,7 @@ impl<'a> Checker<'a> {
                 Literal::Bool(false) => Type::False,
                 Literal::Null => Type::Null,
             },
-            ExprKind::Name(_) => Type::Mixed,
+            ExprKind::Name(name) => bare_name_literal_type(name),
         }
     }
 
@@ -1945,6 +1976,7 @@ impl<'a> Checker<'a> {
                 let key = literal_string_key(idx);
                 index_result_type(self.infer_expr(base, locals), key.as_deref())
             }
+            ExprKind::Name(name) => bare_name_literal_type(name),
             _ => Type::Mixed,
         }
     }

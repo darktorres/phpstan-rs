@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, Position, Token};
 
 impl Parser {
     // ---- expressions (precedence climbing) ----
@@ -64,6 +64,39 @@ impl Parser {
     pub(crate) fn parse_assignment_inner(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         let lhs = self.parse_ternary()?;
+        self.parse_assignment_tail(lhs, start)
+    }
+
+    /// Real PHP lets `variable '=' expr` (and its compound forms) appear
+    /// as an operand of `==`/`===`/`!=`/`!==`/`<`/`>`/`<=`/`>=` with no
+    /// enclosing parentheses - the classic guard-clause idiom
+    /// `if (false === $x = fn()) {...}`/`while ($line = fgets($fp))`
+    /// nested inside a further comparison. Precedence-climbing alone
+    /// gets this wrong: `parse_equality`'s own RHS parsing (via
+    /// `parse_relational`, which never looks for `=` at all) returns
+    /// `$x` as soon as it sees `=`, and by the time control unwinds
+    /// back to this function's own top-level `lhs`/`op` check, `lhs` is
+    /// already the *whole* `false === $x` comparison - producing the
+    /// nonsensical `(false === $x) = fn()` instead of real PHP's own
+    /// `false === ($x = fn())`.
+    ///
+    /// This is the reusable "did an assignment operator follow this
+    /// operand" half of that logic, factored out of `parse_assignment_
+    /// inner`'s own top-level case so `parse_equality`/`parse_
+    /// relational` (Phase 85) can apply it to their own RHS the moment
+    /// it's parsed, before wrapping it in the outer `Binary` node -
+    /// exactly mirroring how real PHP's grammar treats assignment as
+    /// available at that operand position, not only at the very top of
+    /// the whole expression. Deliberately not extended to every other
+    /// binary operator (`+`, `.`, `&&`, ...) - real PHP's own precedence
+    /// table doesn't uniformly allow this everywhere, and comparison
+    /// operators are both the evidenced real-world shape (a real Piwigo-
+    /// corpus false positive traced here) and the safest to be sure of.
+    pub(crate) fn parse_assignment_tail(
+        &mut self,
+        lhs: Expr,
+        start: Position,
+    ) -> Result<Expr, ParseError> {
         let op = match self.peek() {
             Token::Equals => None,
             Token::PlusEquals => Some(BinOp::Add),
@@ -223,7 +256,11 @@ impl Parser {
                 _ => break,
             };
             self.advance();
+            let rhs_start = self.current_pos();
             let rhs = self.parse_relational()?;
+            // Phase 85: `false === $x = fn()` - see `parse_assignment_
+            // tail`'s own doc comment.
+            let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
         Ok(lhs)
@@ -241,7 +278,11 @@ impl Parser {
                 _ => break,
             };
             self.advance();
+            let rhs_start = self.current_pos();
             let rhs = self.parse_pipe()?;
+            // Phase 85: `0 > $x = fn()` - see `parse_assignment_tail`'s
+            // own doc comment.
+            let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
         Ok(lhs)

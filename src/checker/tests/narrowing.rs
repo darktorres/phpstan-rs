@@ -1500,6 +1500,77 @@ fn is_string_narrows_a_parenthesized_assignment_in_a_while_condition() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 85, real shape: Symfony\Component\Filesystem\Path::getDirectory's
+// `if (false !== $schemeSeparatorPosition = strpos($path, '://'))
+// { substr($path, 0, $schemeSeparatorPosition + 3); }` - no parens
+// around the assignment at all, relying on real PHP's own grammar
+// letting `variable '=' expr` nest directly as a comparison operator's
+// operand (fixed at the parser level in `parse_assignment_tail`, see
+// its own doc comment). Before that parser fix, `$schemeSeparatorPosition`
+// never got bound to `strpos()`'s own `int|false` return type at all
+// (a stale, pre-assignment type persisted past the guard); now that it
+// does, this exercises the *narrowing* half specifically - the existing
+// `ExprKind::Assign` arm in `narrowing_key` (Phase 23) already covers
+// it once the parser hands it the right AST shape, no separate
+// narrowing fix needed.
+#[test]
+fn identity_comparison_narrows_an_unparenthesized_assignment_nested_in_an_if_condition() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $path): string {
+                if (false !== $pos = strpos($path, '://')) {
+                    return substr($path, 0, $pos + 3);
+                }
+                return '';
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 85, real shape: Symfony\Component\Filesystem\Path::getDirectory
+// again, but through Rector's own namespace-prefixing transform, which
+// rewrites every unqualified global name (including `true`/`false`/
+// `null`) to its fully-qualified form: `if (\false === $x = strrpos(...))`.
+// A fully-qualified `\false` parses as a plain `ExprKind::Name`, not the
+// `Literal(Bool(false))` a bare `false` gets via `parse_primary`'s own
+// `Keyword::False` match - previously silently `Type::Mixed` (no global-
+// constant table exists for `PHP_EOL`-style names either, a deliberate,
+// separate scope boundary this doesn't touch), which fed straight into
+// `apply_equality_narrowing`'s own `target_ty == Type::Mixed` bail-out,
+// silently skipping the guard's own narrowing entirely.
+#[test]
+fn identity_comparison_narrows_through_a_fully_qualified_false_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $path): string {
+                if (\false === $pos = strpos($path, '://')) {
+                    return '';
+                }
+                return substr($path, 0, $pos);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn fully_qualified_true_false_and_null_infer_as_their_own_literal_types() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsTrue(true $x): void {}
+            function needsFalse(false $x): void {}
+            function needsNull(null $x): void {}
+            function test(): void {
+                needsTrue(\true);
+                needsFalse(\false);
+                needsNull(\null);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Phase 26, real shape: Piwigo\Admin\Image\ImageBackend::webpInfo's
 // `$fp = fopen(...); if (! (bool) $fp) { throw ...; } fread($fp,
 // 25);` - a common, explicit style for a truthiness guard. `(bool)`
