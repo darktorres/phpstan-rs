@@ -502,7 +502,11 @@ impl<'a> Checker<'a> {
         };
         match method {
             "assertIsString" => narrow_to(locals, 0, &Type::String),
-            "assertIsArray" => narrow_to(locals, 0, &Type::Array(Box::new(Type::Mixed))),
+            "assertIsArray" => narrow_to(
+                locals,
+                0,
+                &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+            ),
             "assertIsInt" | "assertIsInteger" => narrow_to(locals, 0, &Type::Int),
             "assertIsFloat" => narrow_to(locals, 0, &Type::Float),
             "assertIsBool" | "assertIsBoolean" => narrow_to(locals, 0, &Type::Bool),
@@ -829,14 +833,17 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         "is_int" | "is_integer" | "is_long" => Some(Type::Int),
         "is_float" | "is_double" => Some(Type::Float),
         "is_bool" | "is_boolean" => Some(Type::Bool),
-        "is_array" => Some(Type::Array(Box::new(Type::Mixed))),
+        "is_array" => Some(Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed),
+        )),
         // Phase 13 Finding B: `is_countable($x)` is true for exactly
         // `array|Countable` - the only real corpus call site
         // (`SectionPopulator::computeMetaRobots`) guards `count($x)`
         // with it, a correct PHP 8+ idiom (`count()` on anything else is
         // a `TypeError`).
         "is_countable" => Some(Type::Union(vec![
-            Type::Array(Box::new(Type::Mixed)),
+            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
             Type::Object("Countable".to_string(), Vec::new()),
         ])),
         "is_null" => Some(Type::Null),
@@ -1104,7 +1111,7 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // upgrade to their own non-empty form. Shares `upgrade_array_to_
         // non_empty` with `!empty($x)`/`count($x) > 0` so the three
         // "prove this array is non-empty" paths can't drift apart.
-        Type::Array(_) | Type::Intersection(_) if matches!(excluded, Type::ArrayShape(fields) if fields.is_empty()) => {
+        Type::Array(..) | Type::Intersection(_) if matches!(excluded, Type::ArrayShape(fields) if fields.is_empty()) => {
             upgrade_array_to_non_empty(original)
         }
         other if other == excluded => Type::Never,
@@ -1190,7 +1197,7 @@ pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {
             Type::String,
             Type::Accessory(AccessoryKind::NonFalsyString),
         ]),
-        Type::Array(_) => upgrade_array_to_non_empty(original),
+        Type::Array(_, _) => upgrade_array_to_non_empty(original),
         other => other.clone(),
     }
 }
@@ -1221,12 +1228,12 @@ fn upgrade_string_to_numeric(ty: &Type) -> Type {
 
 fn upgrade_array_to_non_empty(ty: &Type) -> Type {
     match ty {
-        Type::Array(inner) => Type::Intersection(vec![
-            Type::Array(inner.clone()),
+        Type::Array(key, inner) => Type::Intersection(vec![
+            Type::Array(key.clone(), inner.clone()),
             Type::Accessory(AccessoryKind::NonEmptyArray),
         ]),
         Type::Intersection(members)
-            if members.iter().any(|m| matches!(m, Type::Array(_)))
+            if members.iter().any(|m| matches!(m, Type::Array(_, _)))
                 && !members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray)) =>
         {
             let mut members = members.clone();

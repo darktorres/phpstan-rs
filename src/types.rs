@@ -23,7 +23,16 @@ pub enum Type {
     Float,
     String,
     StringLiteral(String),
-    Array(Box<Type>),
+    // Phase 50: a real key type alongside the value type, mirroring real
+    // PHPStan's own `ArrayType(keyType, valueType)`. `Array::unknown_key`
+    // below builds the "don't know, could be either" default
+    // (`int|string`, PHP's own full legal-key-type domain) every
+    // construction site used before this phase - most call sites still
+    // pass that; only ones that can cheaply prove a narrower key type
+    // (an array literal's own keys, a stdlib function whose real PHPStan
+    // stub declares one) do better. `array<V>`'s own 1-arg PHPDoc form
+    // (key omitted) also means "unknown," the same default.
+    Array(Box<Type>, Box<Type>),
     // `class-string<T>` - a string known to hold `T`'s (or a subclass's)
     // fully-qualified name, tracked precisely enough to participate in
     // `@template` binding (unlike a bare `class-string`, which collapses to
@@ -155,6 +164,28 @@ impl TemplateParam {
     }
 }
 
+impl Type {
+    /// PHP's own full legal-array-key domain (`int|string`) - real
+    /// PHPStan's own default `keyType` for a bare `array`/`array<V>`
+    /// with no key argument given (`getIterableKeyType()`). The right
+    /// "don't know, could be either" default for any construction site
+    /// that can't cheaply prove a narrower key type.
+    pub(crate) fn unknown_array_key() -> Type {
+        Type::Union(vec![Type::Int, Type::String])
+    }
+
+    /// `Type::Array(unknown_array_key(), value)` - the drop-in
+    /// replacement for every pre-Phase-50 `Type::Array(Box::new(value))`
+    /// call site that has no more precise key type available. Most
+    /// construction sites use this; only ones that can cheaply prove a
+    /// narrower key (an array literal's own keys, a stdlib function
+    /// whose real PHPStan stub declares one) build `Type::Array(k, v)`
+    /// directly instead.
+    pub(crate) fn array_of(value: Type) -> Type {
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(value))
+    }
+}
+
 // Phase 14: mirrors real PHPStan's own `Accessory*Type` family
 // (`vendor/phpstan-src/src/Type/Accessory/*.php`) - each kind only ever
 // appears wrapped in a `Type::Intersection` alongside its own base type.
@@ -183,10 +214,14 @@ impl fmt::Display for Type {
             Type::Float => write!(f, "float"),
             Type::String => write!(f, "string"),
             Type::StringLiteral(s) => write!(f, "'{s}'"),
-            Type::Array(inner) => match inner.as_ref() {
-                Type::Mixed => write!(f, "array"),
-                other => write!(f, "array<{other}>"),
-            },
+            Type::Array(key, value) => {
+                let known_key = **key != Type::unknown_array_key();
+                match (known_key, value.as_ref()) {
+                    (false, Type::Mixed) => write!(f, "array"),
+                    (false, v) => write!(f, "array<{v}>"),
+                    (true, v) => write!(f, "array<{key}, {v}>"),
+                }
+            }
             Type::ClassString(inner) => write!(f, "class-string<{inner}>"),
             Type::ArrayShape(fields) => {
                 let parts: Vec<String> = fields
@@ -260,7 +295,7 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
 fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
     let has = |k: AccessoryKind| members.contains(&Type::Accessory(k));
     if let Some(elem) = members.iter().find_map(|m| match m {
-        Type::Array(e) => Some(e.as_ref()),
+        Type::Array(_, e) => Some(e.as_ref()),
         _ => None,
     }) {
         let elem_str = if *elem == Type::Mixed {
@@ -635,7 +670,7 @@ fn parse_type_atom(s: &str) -> Type {
         parse_type_keyword_or_class(bare, original, &generic_args)
     };
     for _ in 0..array_depth {
-        ty = Type::Array(Box::new(ty));
+        ty = Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty));
     }
     ty
 }
@@ -758,16 +793,27 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "void" => Type::Void,
         "mixed" => Type::Mixed,
         "never" | "noreturn" => Type::Never,
-        // `array<V>` / `iterable<V>` and `array<K, V>` (key type
-        // discarded - keyed array subtyping isn't modeled) resolve to
-        // our existing homogeneous Array(value) representation; no args
-        // is bare `array`. `class-string-map<TKey, TValue>` (Doctrine's
-        // own refinement of `array<class-string<TKey>, TValue>`) fits
-        // the same "2-arg generic, key discarded, value survives" shape.
+        // Phase 50: `array<K, V>`'s key argument is now real
+        // (`Type::Array`'s own key slot), not discarded. `array<V>`
+        // (1-arg) and bare `array` still mean "key unknown" -
+        // `Type::unknown_array_key()`. `class-string-map<TKey, TValue>`
+        // (Doctrine's own refinement of `array<class-string<TKey>,
+        // TValue>`) wraps its own key in `ClassString` to match.
         "array" | "class-string-map" => match generic_args.len() {
-            0 => Type::Array(Box::new(Type::Mixed)),
-            1 => Type::Array(Box::new(parse_type_string(generic_args[0]))),
-            _ => Type::Array(Box::new(parse_type_string(generic_args[1]))),
+            0 => Type::array_of(Type::Mixed),
+            1 => Type::array_of(parse_type_string(generic_args[0])),
+            _ => {
+                let key_ty = parse_type_string(generic_args[0]);
+                let key_ty = if bare == "class-string-map" {
+                    Type::ClassString(Box::new(key_ty))
+                } else {
+                    key_ty
+                };
+                Type::Array(
+                    Box::new(key_ty),
+                    Box::new(parse_type_string(generic_args[1])),
+                )
+            }
         },
         // Phase 14: `list`/`non-empty-array`/`non-empty-list` are now
         // real `Intersection([Array(_), Accessory(_)])` types, mirroring
@@ -781,7 +827,17 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 1 => parse_type_string(generic_args[0]),
                 _ => parse_type_string(generic_args[1]),
             };
-            let mut members = vec![Type::Array(Box::new(elem_ty))];
+            // Phase 50: `list`/`non-empty-list` genuinely can only ever
+            // have sequential int keys - a real precision win over the
+            // default `int|string`, not just arity-matching. Plain
+            // `non-empty-array` makes no such promise (any key type,
+            // just non-empty), so it keeps the unknown default.
+            let key_ty = if bare == "non-empty-array" {
+                Type::unknown_array_key()
+            } else {
+                Type::Int
+            };
+            let mut members = vec![Type::Array(Box::new(key_ty), Box::new(elem_ty))];
             if bare != "non-empty-array" {
                 members.push(Type::Accessory(AccessoryKind::ArrayList));
             }
@@ -804,7 +860,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 _ => parse_type_string(generic_args[1]),
             };
             Type::Union(vec![
-                Type::Array(Box::new(element_ty)),
+                Type::Array(Box::new(Type::unknown_array_key()), Box::new(element_ty)),
                 Type::Object("Traversable".to_string(), Vec::new()),
             ])
         }
@@ -936,7 +992,14 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::Intersection(members), _) => members.iter().any(|m| is_subtype(m, sup)),
         (_, Type::Intersection(members)) => members.iter().all(|m| is_subtype(sub, m)),
 
-        (Type::Array(a), Type::Array(b)) => is_subtype(a, b),
+        // Phase 50: a key-type check alongside the existing value-type
+        // one - `array<int, T>` is not a subtype of `array<string, T>`.
+        // The common "don't know the real key" case (`Type::
+        // unknown_array_key()`, `int|string`) still passes here via the
+        // ordinary `Union` subtype rule above, so this is additive
+        // precision, not a new source of false positives against the
+        // vast majority of call sites that haven't proven a narrower key.
+        (Type::Array(ka, a), Type::Array(kb, b)) => is_subtype(ka, kb) && is_subtype(a, b),
 
         // `class-string<T>` stays freely interchangeable with plain
         // `string` in both directions - this project has no way to verify
@@ -959,7 +1022,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // literal inference, so it's left unrelated rather than guessed.
         // Two shapes are only related via the general `a == b` case above -
         // no shape subtyping (e.g. "has at least these keys") is modeled.
-        (Type::ArrayShape(_), Type::Array(b)) => matches!(**b, Type::Mixed),
+        (Type::ArrayShape(_), Type::Array(_, b)) => matches!(**b, Type::Mixed),
 
         (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(..)) => true,
 
@@ -1043,8 +1106,8 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMa
                     .or_insert_with(|| arg_ty.clone());
             }
         }
-        Type::Array(inner) => {
-            if let Type::Array(arg_inner) = arg_ty {
+        Type::Array(_, inner) => {
+            if let Type::Array(_, arg_inner) = arg_ty {
                 bind_template_param(inner, arg_inner, bindings);
             }
         }
@@ -1075,7 +1138,14 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
                 .map(|d| substitute_template(d, bindings))
                 .unwrap_or(Type::Mixed)
         }),
-        Type::Array(inner) => Type::Array(Box::new(substitute_template(inner, bindings))),
+        // Phase 50: substitutes through the key type too (not just reset
+        // to "unknown" every time) - a real, if rare, `array<TKey,
+        // TValue>` bound key shouldn't be lost on every substitution
+        // pass.
+        Type::Array(key, inner) => Type::Array(
+            Box::new(substitute_template(key, bindings)),
+            Box::new(substitute_template(inner, bindings)),
+        ),
         Type::ClassString(inner) => {
             Type::ClassString(Box::new(substitute_template(inner, bindings)))
         }

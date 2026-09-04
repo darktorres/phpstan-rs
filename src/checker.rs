@@ -824,7 +824,7 @@ impl<'a> Checker<'a> {
                     // variadic parameter into an `array` from the first
                     // statement onward, never the bare element type.
                     let ty = if param.variadic {
-                        Type::Array(Box::new(ty))
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
                         ty
                     };
@@ -872,7 +872,7 @@ impl<'a> Checker<'a> {
                     );
                     resolved_params.push((p.name.clone(), ty.clone(), p.span));
                     let ty = if p.variadic {
-                        Type::Array(Box::new(ty))
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
                         ty
                     };

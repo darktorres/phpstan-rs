@@ -69,7 +69,7 @@ impl<'a> Checker<'a> {
                 };
                 if let Some(elem) = elem {
                     return Type::Intersection(vec![
-                        Type::Array(Box::new(elem)),
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem)),
                         Type::Accessory(AccessoryKind::ArrayList),
                         Type::Accessory(AccessoryKind::NonEmptyArray),
                     ]);
@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
                     Type::String
                 };
                 let list_ty = Type::Intersection(vec![
-                    Type::Array(Box::new(elem)),
+                    Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem)),
                     Type::Accessory(AccessoryKind::ArrayList),
                 ]);
                 return union_types(list_ty, Type::False);
@@ -257,7 +257,7 @@ impl<'a> Checker<'a> {
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
                 {
                     return Type::Intersection(vec![
-                        Type::Array(Box::new(elem_ty)),
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem_ty)),
                         Type::Accessory(AccessoryKind::ArrayList),
                     ]);
                 }
@@ -367,7 +367,10 @@ impl<'a> Checker<'a> {
                         .into_iter()
                         .reduce(union_types)
                         .unwrap_or(Type::Mixed);
-                    let mut members = vec![Type::Array(Box::new(elem_ty))];
+                    let mut members = vec![Type::Array(
+                        Box::new(Type::unknown_array_key()),
+                        Box::new(elem_ty),
+                    )];
                     if all_list {
                         members.push(Type::Accessory(AccessoryKind::ArrayList));
                     }
@@ -384,10 +387,16 @@ impl<'a> Checker<'a> {
             // Both fill every slot with the same, already-known $value -
             // no closure or element-type binding needed at all.
             "array_fill" if args.len() == 3 => {
-                return Type::Array(Box::new(self.infer_expr(&args[2].value, locals)));
+                return Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(self.infer_expr(&args[2].value, locals)),
+                );
             }
             "array_fill_keys" if args.len() == 2 => {
-                return Type::Array(Box::new(self.infer_expr(&args[1].value, locals)));
+                return Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(self.infer_expr(&args[1].value, locals)),
+                );
             }
             // Splits one array into several same-shaped ones - the
             // result is an array *of* arrays, each holding the original
@@ -396,7 +405,13 @@ impl<'a> Checker<'a> {
                 if let Some(elem_ty) =
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
                 {
-                    return Type::Array(Box::new(Type::Array(Box::new(elem_ty))));
+                    return Type::Array(
+                        Box::new(Type::unknown_array_key()),
+                        Box::new(Type::Array(
+                            Box::new(Type::unknown_array_key()),
+                            Box::new(elem_ty),
+                        )),
+                    );
                 }
             }
             // Extracts one named field from an array of known shapes
@@ -438,7 +453,7 @@ impl<'a> Checker<'a> {
                         .reduce(union_types)
                         .unwrap_or(Type::String);
                     return Type::Intersection(vec![
-                        Type::Array(Box::new(key_ty)),
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(key_ty)),
                         Type::Accessory(AccessoryKind::ArrayList),
                     ]);
                 }
@@ -454,7 +469,7 @@ impl<'a> Checker<'a> {
                 // guess beyond Mixed" default for an unprovable key type.
                 if Self::is_array_like(&arg_ty) {
                     return Type::Intersection(vec![
-                        Type::Array(Box::new(Type::Mixed)),
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
                         Type::Accessory(AccessoryKind::ArrayList),
                     ]);
                 }
@@ -480,7 +495,8 @@ impl<'a> Checker<'a> {
                         _ => None,
                     };
                     if let Some(field_ty) = field_ty {
-                        let arr_ty = Type::Array(Box::new(field_ty));
+                        let arr_ty =
+                            Type::Array(Box::new(Type::unknown_array_key()), Box::new(field_ty));
                         // A real Piwigo-corpus round found the
                         // 2-argument form (no `$index_key`) missing its
                         // own real list-ness entirely: `array_column()`
@@ -617,7 +633,10 @@ impl<'a> Checker<'a> {
             // which must NOT get the plain-`array` answer.
             "getenv" => {
                 if args.is_empty() {
-                    return Type::Array(Box::new(Type::String));
+                    return Type::Array(
+                        Box::new(Type::unknown_array_key()),
+                        Box::new(Type::String),
+                    );
                 }
                 let resolved = resolve_call_args(args, &sig.params);
                 if let Some(name_ty) = resolved
@@ -659,7 +678,7 @@ impl<'a> Checker<'a> {
             // (GeneratedFileErrorMapper::lines) relies on exactly this.
             "explode" if matches!(args.len(), 2..=3) => {
                 return Type::Intersection(vec![
-                    Type::Array(Box::new(Type::String)),
+                    Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String)),
                     Type::Accessory(AccessoryKind::ArrayList),
                     Type::Accessory(AccessoryKind::NonEmptyArray),
                 ]);
@@ -675,7 +694,7 @@ impl<'a> Checker<'a> {
             "glob" if matches!(args.len(), 1..=2) => {
                 return Type::Union(vec![
                     Type::Intersection(vec![
-                        Type::Array(Box::new(Type::String)),
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String)),
                         Type::Accessory(AccessoryKind::ArrayList),
                     ]),
                     Type::False,
@@ -1067,7 +1086,9 @@ fn is_null_filter_callback(e: &Expr) -> bool {
 /// dumpType().
 fn strip_null_from_array_element(ty: Type) -> Type {
     match ty {
-        Type::Array(elem) => Type::Array(Box::new(narrow_type_excluding(&elem, &Type::Null))),
+        Type::Array(key, elem) => {
+            Type::Array(key, Box::new(narrow_type_excluding(&elem, &Type::Null)))
+        }
         other => other,
     }
 }
@@ -1130,7 +1151,7 @@ fn contains_flag_name(e: &Expr, target: &str) -> bool {
 /// type to `target` specifically - verified via dumpType().
 fn narrow_array_element_type_to(ty: Type, target: &Type) -> Type {
     match ty {
-        Type::Array(elem) => Type::Array(Box::new(narrow_type_to(&elem, target))),
+        Type::Array(key, elem) => Type::Array(key, Box::new(narrow_type_to(&elem, target))),
         other => other,
     }
 }
@@ -1141,7 +1162,7 @@ fn narrow_array_element_type_to(ty: Type, target: &Type) -> Type {
 /// dumpType().
 fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
     match ty {
-        Type::Array(elem) => Type::Array(Box::new(narrow_type_excluding_falsy(&elem))),
+        Type::Array(key, elem) => Type::Array(key, Box::new(narrow_type_excluding_falsy(&elem))),
         other => other,
     }
 }
@@ -1178,7 +1199,10 @@ fn strip_accessory_markers(ty: Type) -> Type {
 fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
     match input_ty {
         Type::Intersection(members) => {
-            let mut result = vec![Type::Array(Box::new(mapped_elem))];
+            let mut result = vec![Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(mapped_elem),
+            )];
             result.extend(
                 members
                     .iter()
@@ -1188,7 +1212,10 @@ fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
             Type::Intersection(result)
         }
         Type::Union(_) => {
-            let mut result = vec![Type::Array(Box::new(mapped_elem))];
+            let mut result = vec![Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(mapped_elem),
+            )];
             if Checker::is_list_like(input_ty) {
                 result.push(Type::Accessory(AccessoryKind::ArrayList));
             }
@@ -1201,7 +1228,7 @@ fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
                 result.remove(0)
             }
         }
-        _ => Type::Array(Box::new(mapped_elem)),
+        _ => Type::Array(Box::new(Type::unknown_array_key()), Box::new(mapped_elem)),
     }
 }
 
@@ -1217,7 +1244,7 @@ fn strip_array_member(ty: Type) -> Type {
         Type::Union(members) => {
             let kept: Vec<Type> = members
                 .into_iter()
-                .filter(|m| !matches!(m, Type::Array(_) | Type::ArrayShape(_)))
+                .filter(|m| !matches!(m, Type::Array(_, _) | Type::ArrayShape(_)))
                 .collect();
             match kept.len() {
                 0 => Type::Mixed,
@@ -1225,7 +1252,7 @@ fn strip_array_member(ty: Type) -> Type {
                 _ => Type::Union(kept),
             }
         }
-        Type::Array(_) | Type::ArrayShape(_) => Type::Mixed,
+        Type::Array(_, _) | Type::ArrayShape(_) => Type::Mixed,
         other => other,
     }
 }
@@ -1281,12 +1308,18 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
     // `list<string>` - `CURLINFO_SSL_ENGINES`/`CURLINFO_COOKIELIST`'s own
     // real type.
     let string_list = Type::Intersection(vec![
-        Type::Array(Box::new(Type::String)),
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String)),
         Type::Accessory(AccessoryKind::ArrayList),
     ]);
     // `list<array<string, string>>` - `CURLINFO_CERTINFO`'s own real type.
     let nested_array_in_list = Type::Intersection(vec![
-        Type::Array(Box::new(Type::Array(Box::new(Type::String)))),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(Type::String),
+            )),
+        ),
         Type::Accessory(AccessoryKind::ArrayList),
     ]);
     Some(match name {
@@ -1379,7 +1412,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
         }
         Type::Float | Type::FloatLiteral(_) => Some(Type::StringLiteral("float".to_string())),
         Type::String | Type::StringLiteral(_) => Some(Type::StringLiteral("string".to_string())),
-        Type::Array(_) | Type::ArrayShape(_) => Some(Type::StringLiteral("array".to_string())),
+        Type::Array(_, _) | Type::ArrayShape(_) => Some(Type::StringLiteral("array".to_string())),
         Type::Object(class, _) => Some(
             if registry
                 .classes
@@ -1416,7 +1449,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
 fn gettype_string_for(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::String | Type::StringLiteral(_) => Some("string"),
-        Type::Array(_) | Type::ArrayShape(_) => Some("array"),
+        Type::Array(_, _) | Type::ArrayShape(_) => Some("array"),
         Type::Bool | Type::True | Type::False => Some("boolean"),
         Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some("integer"),
         Type::Float | Type::FloatLiteral(_) => Some("double"),
@@ -1777,10 +1810,13 @@ fn dio_stat_array_shape() -> Type {
 /// three functions' own real output).
 fn list_of_non_empty_strings() -> Type {
     Type::Intersection(vec![
-        Type::Array(Box::new(Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::NonEmptyString),
-        ]))),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NonEmptyString),
+            ])),
+        ),
         Type::Accessory(AccessoryKind::ArrayList),
         Type::Accessory(AccessoryKind::NonEmptyArray),
     ])

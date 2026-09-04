@@ -99,7 +99,10 @@ impl<'a> Checker<'a> {
                 .and_then(|info| info.extends.first())
                 .map(|p| Type::Object(p.clone(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
-            Type::Array(inner) => Type::Array(Box::new(self.resolve_pseudo(inner, defining_class))),
+            Type::Array(key, inner) => Type::Array(
+                Box::new(self.resolve_pseudo(key, defining_class)),
+                Box::new(self.resolve_pseudo(inner, defining_class)),
+            ),
             Type::ClassString(inner) => {
                 Type::ClassString(Box::new(self.resolve_pseudo(inner, defining_class)))
             }
@@ -184,9 +187,11 @@ impl<'a> Checker<'a> {
                     out.push(name.clone());
                 }
             }
-            Type::Array(inner) | Type::ClassString(inner) => {
-                self.collect_unknown_class_names(inner, out)
+            Type::Array(key, inner) => {
+                self.collect_unknown_class_names(key, out);
+                self.collect_unknown_class_names(inner, out);
             }
+            Type::ClassString(inner) => self.collect_unknown_class_names(inner, out),
             Type::Union(members) | Type::Intersection(members) => {
                 for m in members {
                     self.collect_unknown_class_names(m, out);

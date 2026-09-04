@@ -113,7 +113,7 @@ impl<'a> Checker<'a> {
                     "sort" | "rsort" | "usort" | "shuffle" => {
                         if let Some(elem_ty) = Checker::array_element_type(&current) {
                             let mut members = vec![
-                                Type::Array(Box::new(elem_ty)),
+                                Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem_ty)),
                                 Type::Accessory(types::AccessoryKind::ArrayList),
                             ];
                             if Checker::is_known_non_empty_array(&current) {
@@ -152,7 +152,10 @@ impl<'a> Checker<'a> {
                                 None => elem_ty,
                             };
                             let members = vec![
-                                Type::Array(Box::new(combined_elem)),
+                                Type::Array(
+                                    Box::new(Type::unknown_array_key()),
+                                    Box::new(combined_elem),
+                                ),
                                 Type::Accessory(types::AccessoryKind::ArrayList),
                                 Type::Accessory(types::AccessoryKind::NonEmptyArray),
                             ];
@@ -171,7 +174,7 @@ impl<'a> Checker<'a> {
                     "array_shift" | "array_pop" if Checker::is_list_like(&current) => {
                         if let Some(elem_ty) = Checker::array_element_type(&current) {
                             let members = vec![
-                                Type::Array(Box::new(elem_ty)),
+                                Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem_ty)),
                                 Type::Accessory(types::AccessoryKind::ArrayList),
                             ];
                             purge_stale_narrowing_for(locals, name);

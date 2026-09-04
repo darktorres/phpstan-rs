@@ -261,7 +261,10 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
                 .map(|a| mark_template_params(a, params))
                 .collect(),
         ),
-        Type::Array(inner) => Type::Array(Box::new(mark_template_params(*inner, params))),
+        Type::Array(key, inner) => Type::Array(
+            Box::new(mark_template_params(*key, params)),
+            Box::new(mark_template_params(*inner, params)),
+        ),
         Type::ClassString(inner) => {
             Type::ClassString(Box::new(mark_template_params(*inner, params)))
         }

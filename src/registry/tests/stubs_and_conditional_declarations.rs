@@ -157,7 +157,10 @@ fn two_unconditional_function_declarations_with_different_arities_merge() {
     assert_eq!(sig.params[1].name, "replace_pairs");
     assert_eq!(
         sig.params[1].ty,
-        Type::Union(vec![Type::String, Type::Array(Box::new(Type::Mixed))])
+        Type::Union(vec![
+            Type::String,
+            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
+        ])
     );
     assert!(!sig.params[1].has_default);
     assert_eq!(sig.params[2].name, "to");

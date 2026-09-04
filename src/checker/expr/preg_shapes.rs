@@ -346,7 +346,7 @@ pub(super) fn preg_match_all_pattern_order_shape(
     // `list<T>`, not merely `array<T>`.
     let list_of = |elem: Type| {
         Type::Intersection(vec![
-            Type::Array(Box::new(elem)),
+            Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem)),
             Type::Accessory(AccessoryKind::ArrayList),
         ])
     };

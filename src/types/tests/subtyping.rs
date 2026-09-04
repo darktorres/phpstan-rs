@@ -15,8 +15,14 @@ fn class_string_is_interchangeable_with_plain_string_both_ways() {
 #[test]
 fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
     let shape = parse_type_string("array{name: string}");
-    assert!(is_subtype(&shape, &Type::Array(Box::new(Type::Mixed))));
-    assert!(!is_subtype(&Type::Array(Box::new(Type::Mixed)), &shape));
+    assert!(is_subtype(
+        &shape,
+        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
+    ));
+    assert!(!is_subtype(
+        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+        &shape
+    ));
 }
 
 #[test]
@@ -208,11 +214,11 @@ fn array_accessory_subtype_rules() {
     // `is_subtype`'s) - using `Array(Mixed)` here isolates the new
     // accessory logic from that pre-existing, unrelated asymmetry.
     let list_ty = Type::Intersection(vec![
-        Type::Array(Box::new(Type::Mixed)),
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
         Type::Accessory(AccessoryKind::ArrayList),
     ]);
     let non_empty_ty = Type::Intersection(vec![
-        Type::Array(Box::new(Type::Mixed)),
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
         Type::Accessory(AccessoryKind::NonEmptyArray),
     ]);
     let list_shape = Type::ArrayShape(vec![
@@ -235,9 +241,12 @@ fn array_accessory_subtype_rules() {
     // Real PHPStan's own confirmed strictness: a plain Array(_),
     // even with a known element type, never satisfies list<T>/
     // non-empty-array<T> - only a real, provable ArrayShape does.
-    assert!(!is_subtype(&Type::Array(Box::new(Type::Int)), &list_ty));
     assert!(!is_subtype(
-        &Type::Array(Box::new(Type::Int)),
+        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
+        &list_ty
+    ));
+    assert!(!is_subtype(
+        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
         &non_empty_ty
     ));
 }
@@ -252,8 +261,8 @@ fn nullable_string_accepts_null_and_string() {
 
 #[test]
 fn array_subtyping_is_covariant_on_value_type() {
-    let ints = Type::Array(Box::new(Type::Int));
-    let mixed_arr = Type::Array(Box::new(Type::Mixed));
+    let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
+    let mixed_arr = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
     assert!(is_subtype(&ints, &mixed_arr));
     assert!(!is_subtype(&mixed_arr, &ints));
 }

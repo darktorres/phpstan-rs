@@ -172,7 +172,10 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .map(|a| resolve_names_in_type(a, ctx))
                 .collect(),
         ),
-        Type::Array(inner) => Type::Array(Box::new(resolve_names_in_type(*inner, ctx))),
+        Type::Array(key, inner) => Type::Array(
+            Box::new(resolve_names_in_type(*key, ctx)),
+            Box::new(resolve_names_in_type(*inner, ctx)),
+        ),
         Type::ClassString(inner) => Type::ClassString(Box::new(resolve_names_in_type(*inner, ctx))),
         Type::Union(members) => Type::Union(
             members

@@ -798,7 +798,7 @@ impl Registry {
                 self.lookup_method(class, "__invoke").is_some()
             }
             (Type::String | Type::StringLiteral(_), Type::Callable) => true,
-            (Type::Array(_) | Type::ArrayShape(_), Type::Callable) => true,
+            (Type::Array(_, _) | Type::ArrayShape(_), Type::Callable) => true,
             (Type::Object(a, _), Type::Object(b, _)) => a == b || self.is_subclass_of(a, b),
             // Same hierarchy-aware override as the plain Object-vs-Object
             // arm just above, one level up: `types::is_subtype`'s own
@@ -836,7 +836,7 @@ impl Registry {
             // `strict_mixed_arrays` (Phase 11 Stage 5) opts out of this
             // leniency, matching real PHPStan's own level-9-style "be
             // strict about values with mixed type" philosophy.
-            (Type::Array(a), Type::Array(b)) => {
+            (Type::Array(_, a), Type::Array(_, b)) => {
                 (!self.strict_mixed_arrays && matches!(**a, Type::Mixed))
                     || self.is_assignable(a, b)
             }
@@ -847,7 +847,7 @@ impl Registry {
             // false-positive just because literal keys/values aren't
             // inferred. A genuinely known, homogeneous Array(V) still
             // correctly fails to satisfy an arbitrary shape.
-            (Type::Array(a), Type::ArrayShape(_)) => {
+            (Type::Array(_, a), Type::ArrayShape(_)) => {
                 !self.strict_mixed_arrays && matches!(**a, Type::Mixed)
             }
             // Finding 48's own completion: now that an array literal
@@ -859,7 +859,7 @@ impl Registry {
             // own type became precise, a real regression `types::
             // is_subtype`'s own (deliberately conservative, pre-Finding-48)
             // rule doesn't allow for.
-            (Type::ArrayShape(fields), Type::Array(b)) => {
+            (Type::ArrayShape(fields), Type::Array(_, b)) => {
                 fields.iter().all(|(_, ty, _)| self.is_assignable(ty, b))
             }
             // Same completion for shape-to-shape: a literal's own shape

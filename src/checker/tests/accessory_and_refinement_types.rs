@@ -50,12 +50,15 @@ fn union_types_collapses_a_non_empty_string_into_an_already_present_string() {
 #[test]
 fn union_types_collapses_a_list_into_an_already_present_array() {
     let list_ty = Type::Intersection(vec![
-        Type::Array(Box::new(Type::Int)),
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
         Type::Accessory(types::AccessoryKind::ArrayList),
     ]);
     assert_eq!(
-        union_types(Type::Array(Box::new(Type::Int)), list_ty),
-        Type::Array(Box::new(Type::Int))
+        union_types(
+            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
+            list_ty
+        ),
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
     );
 }
 

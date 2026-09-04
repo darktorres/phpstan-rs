@@ -79,9 +79,11 @@ impl<'a> Checker<'a> {
                     self.check_generic_bounds(arg, label, span);
                 }
             }
-            Type::Array(inner) | Type::ClassString(inner) => {
-                self.check_generic_bounds(inner, label, span)
+            Type::Array(key, inner) => {
+                self.check_generic_bounds(key, label, span);
+                self.check_generic_bounds(inner, label, span);
             }
+            Type::ClassString(inner) => self.check_generic_bounds(inner, label, span),
             Type::Union(members) | Type::Intersection(members) => {
                 for m in members {
                     self.check_generic_bounds(m, label, span);
@@ -108,7 +110,10 @@ impl<'a> Checker<'a> {
                 (name == "object" || self.registry.classes.contains_key(name))
                     && args.iter().all(|a| self.is_type_fully_known(a))
             }
-            Type::Array(inner) | Type::ClassString(inner) => self.is_type_fully_known(inner),
+            Type::Array(key, inner) => {
+                self.is_type_fully_known(key) && self.is_type_fully_known(inner)
+            }
+            Type::ClassString(inner) => self.is_type_fully_known(inner),
             Type::Union(members) | Type::Intersection(members) => {
                 members.iter().all(|m| self.is_type_fully_known(m))
             }
@@ -316,9 +321,11 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Type::Array(inner) | Type::ClassString(inner) => {
-                self.walk_variance(inner, pos, class_name, violations)
+            Type::Array(key, inner) => {
+                self.walk_variance(key, pos, class_name, violations);
+                self.walk_variance(inner, pos, class_name, violations);
             }
+            Type::ClassString(inner) => self.walk_variance(inner, pos, class_name, violations),
             Type::Union(members) | Type::Intersection(members) => {
                 for m in members {
                     self.walk_variance(m, pos, class_name, violations);
@@ -519,7 +526,13 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &HashSet<Str
                 ty.clone()
             }
         }
-        Type::Array(inner) => Type::Array(Box::new(substitute_scoped(inner, bindings, scope))),
+        // Phase 50: substitute through the key type too, not reset
+        // to "unknown" every time (matches types::substitute_template's
+        // own Array-arm fix).
+        Type::Array(key, inner) => Type::Array(
+            Box::new(substitute_scoped(key, bindings, scope)),
+            Box::new(substitute_scoped(inner, bindings, scope)),
+        ),
         Type::ClassString(inner) => {
             Type::ClassString(Box::new(substitute_scoped(inner, bindings, scope)))
         }

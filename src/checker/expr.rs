@@ -358,11 +358,14 @@ impl<'a> Checker<'a> {
                 {
                     let leaf = preg_leaf_type(flags.offset_capture);
                     let shape = if flags.set_order {
-                        Type::Array(Box::new(preg_match_matches_shape(
-                            &parsed.groups,
-                            &leaf,
-                            flags.unmatched_as_null,
-                        )))
+                        Type::Array(
+                            Box::new(Type::unknown_array_key()),
+                            Box::new(preg_match_matches_shape(
+                                &parsed.groups,
+                                &leaf,
+                                flags.unmatched_as_null,
+                            )),
+                        )
                     } else {
                         preg_match_all_pattern_order_shape(
                             &parsed.groups,
@@ -649,7 +652,9 @@ impl<'a> Checker<'a> {
                     "float" => Type::Float,
                     "string" => Type::String,
                     "bool" => Type::Bool,
-                    "array" => Type::Array(Box::new(Type::Mixed)),
+                    "array" => {
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
+                    }
                     "object" => Type::Object("object".to_string(), Vec::new()),
                     "unset" => Type::Null,
                     _ => Type::Mixed,
@@ -853,7 +858,7 @@ impl<'a> Checker<'a> {
                             return narrowed.clone();
                         }
                         match base_ty {
-                            Type::Array(inner) => *inner,
+                            Type::Array(_, inner) => *inner,
                             Type::ArrayShape(fields) => literal_string_key(i)
                                 .and_then(|key| {
                                     fields.into_iter().find(|(name, _, _)| *name == key)
@@ -1360,7 +1365,7 @@ impl<'a> Checker<'a> {
                         &closure_label,
                     );
                     let ty = if p.variadic {
-                        Type::Array(Box::new(ty))
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
                         ty
                     };
@@ -1446,7 +1451,7 @@ impl<'a> Checker<'a> {
                         label,
                     );
                     let ty = if p.variadic {
-                        Type::Array(Box::new(ty))
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
                         ty
                     };
@@ -1685,7 +1690,7 @@ impl<'a> Checker<'a> {
                 "float" => Type::Float,
                 "string" => Type::String,
                 "bool" => Type::Bool,
-                "array" => Type::Array(Box::new(Type::Mixed)),
+                "array" => Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
                 "object" => Type::Object("object".to_string(), Vec::new()),
                 "unset" => Type::Null,
                 _ => Type::Mixed,
@@ -1940,7 +1945,12 @@ impl<'a> Checker<'a> {
                         next_index = next_index.max(n + 1);
                         n.to_string()
                     }
-                    _ => return Type::Array(Box::new(Type::Mixed)),
+                    _ => {
+                        return Type::Array(
+                            Box::new(Type::unknown_array_key()),
+                            Box::new(Type::Mixed),
+                        );
+                    }
                 },
             };
             let value_ty = self.infer_expr(&item.value, locals);
@@ -2062,7 +2072,10 @@ impl<'a> Checker<'a> {
             .into_iter()
             .reduce(union_types)
             .unwrap_or(Type::Mixed);
-        let mut members = vec![Type::Array(Box::new(elem_ty))];
+        let mut members = vec![Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(elem_ty),
+        )];
         if list_safe {
             members.push(Type::Accessory(AccessoryKind::ArrayList));
         }
@@ -2173,7 +2186,7 @@ impl<'a> Checker<'a> {
     /// a narrower type from).
     pub(crate) fn array_element_type(ty: &Type) -> Option<Type> {
         match ty {
-            Type::Array(elem) => Some((**elem).clone()),
+            Type::Array(_, elem) => Some((**elem).clone()),
             Type::ArrayShape(fields) => Some(
                 fields
                     .iter()
@@ -2229,9 +2242,9 @@ impl<'a> Checker<'a> {
     /// through a `Union` of such values (the same control-flow-merge
     /// shape `array_element_type`'s own `Union` arm above handles).
     pub(crate) fn is_array_like(ty: &Type) -> bool {
-        matches!(ty, Type::Array(_) | Type::ArrayShape(_))
+        matches!(ty, Type::Array(_, _) | Type::ArrayShape(_))
             || matches!(ty, Type::Intersection(members)
-                if members.iter().any(|m| matches!(m, Type::Array(_) | Type::ArrayShape(_))))
+                if members.iter().any(|m| matches!(m, Type::Array(_, _) | Type::ArrayShape(_))))
             || matches!(ty, Type::Union(members) if members.iter().all(Self::is_array_like))
     }
 
@@ -2429,8 +2442,8 @@ impl<'a> Checker<'a> {
         // `non-empty-array<T>`-typed left side (a real `Intersection`
         // now), which would otherwise lose its real type here the exact
         // same way a plain `Type::Array` used to.
-        let l_is_array = matches!(l_ty, Type::Array(_))
-            || matches!(&l_ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(_))));
+        let l_is_array = matches!(l_ty, Type::Array(_, _))
+            || matches!(&l_ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(_, _))));
         match &r_ty {
             Type::ArrayShape(_) if l_is_array => l_ty,
             _ => r_ty,
@@ -2490,7 +2503,7 @@ impl<'a> Checker<'a> {
                 // `list<T> + list<T>` silently fell through to numeric
                 // addition instead of array union.
                 if Self::is_array_like(&lt) && Self::is_array_like(&rt) {
-                    return Type::Array(Box::new(Type::Mixed));
+                    return Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
                 }
                 if lt == Type::Float || rt == Type::Float {
                     Type::Float
@@ -2595,7 +2608,7 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
 /// own new `preg_match_condition` recognizer, `checker/narrowing.rs`).
 fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
     match container_ty {
-        Type::Array(inner) => *inner,
+        Type::Array(_, inner) => *inner,
         Type::ArrayShape(fields) => key
             .and_then(|k| fields.into_iter().find(|(name, _, _)| name == k))
             .map(|(_, ty, _)| ty)
@@ -2687,7 +2700,7 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         .filter(|m| {
             matches!(
                 m,
-                Type::Int | Type::String | Type::Bool | Type::Array(_) | Type::Float
+                Type::Int | Type::String | Type::Bool | Type::Array(_, _) | Type::Float
             )
         })
         .cloned()
@@ -2866,7 +2879,7 @@ fn is_doctrine_query_get_result(checker: &Checker<'_>, class: &str, method: &str
 
 fn doctrine_query_result_list_type() -> Type {
     Type::Intersection(vec![
-        Type::Array(Box::new(Type::Mixed)),
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
         Type::Accessory(AccessoryKind::ArrayList),
     ])
 }

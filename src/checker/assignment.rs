@@ -154,7 +154,7 @@ impl<'a> Checker<'a> {
                 // array<T>` - without it, destructuring one
                 // (`[$a, $b] = $listTypedVar`) silently lost its real
                 // element type down to `Mixed`.
-                Type::Array(_) | Type::Intersection(_) => {
+                Type::Array(..) | Type::Intersection(_) => {
                     let element_ty = Self::array_element_type(&ty).unwrap_or(Type::Mixed);
                     for item in items {
                         self.bind_assignment_target(&item.value, element_ty.clone(), locals);
@@ -390,7 +390,9 @@ pub(crate) fn is_superglobal(name: &str) -> bool {
 pub(crate) fn superglobal_default_type(name: &str) -> Type {
     match name {
         "argc" => Type::Int,
-        _ if is_superglobal(name) => Type::Array(Box::new(Type::Mixed)),
+        _ if is_superglobal(name) => {
+            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
+        }
         _ => Type::Mixed,
     }
 }
@@ -444,12 +446,15 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
                 // sequential.
                 if idx.is_none() && Checker::is_list_like(container_ty) {
                     Some(Type::Intersection(vec![
-                        Type::Array(Box::new(widened)),
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(widened)),
                         Type::Accessory(AccessoryKind::ArrayList),
                         Type::Accessory(AccessoryKind::NonEmptyArray),
                     ]))
                 } else {
-                    Some(Type::Array(Box::new(widened)))
+                    Some(Type::Array(
+                        Box::new(Type::unknown_array_key()),
+                        Box::new(widened),
+                    ))
                 }
             }
         },
@@ -465,10 +470,14 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
         // frozen at its *initial* shape and producing a real false
         // positive once that initial shape was read back with a field
         // only ever added by the untracked nested write.
-        Type::Array(inner) => Some(Type::Array(Box::new(union_types(
-            value_ty,
-            (**inner).clone(),
-        )))),
+        // Phase 50: keeps the container's own existing key type (widening
+        // it isn't attempted here - the write's own key isn't known to
+        // be a literal at this call site, see the doc comment above)
+        // rather than resetting to the fully-unknown default.
+        Type::Array(key, inner) => Some(Type::Array(
+            key.clone(),
+            Box::new(union_types(value_ty, (**inner).clone())),
+        )),
         // Phase 12 Finding E: a real, pre-existing gap found by making
         // `check_shape_key_access` `Union`-aware and re-checking the real
         // corpus - a container whose type is a `Union` (e.g. two
@@ -514,12 +523,15 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
             let widened = union_types(value_ty, inner);
             if idx.is_none() && members.contains(&Type::Accessory(AccessoryKind::ArrayList)) {
                 Some(Type::Intersection(vec![
-                    Type::Array(Box::new(widened)),
+                    Type::Array(Box::new(Type::unknown_array_key()), Box::new(widened)),
                     Type::Accessory(AccessoryKind::ArrayList),
                     Type::Accessory(AccessoryKind::NonEmptyArray),
                 ]))
             } else {
-                Some(Type::Array(Box::new(widened)))
+                Some(Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(widened),
+                ))
             }
         }
         _ => None,

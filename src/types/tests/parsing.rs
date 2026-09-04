@@ -90,10 +90,19 @@ fn a_leading_backslash_is_preserved_by_the_bare_parser() {
 
 #[test]
 fn phpdoc_array_shorthand_parses() {
-    assert_eq!(parse_type_string("int[]"), Type::Array(Box::new(Type::Int)));
+    assert_eq!(
+        parse_type_string("int[]"),
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
+    );
     assert_eq!(
         parse_type_string("string[][]"),
-        Type::Array(Box::new(Type::Array(Box::new(Type::String))))
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(Type::String)
+            ))
+        )
     );
 }
 
@@ -126,7 +135,7 @@ fn class_constant_reference_types_degrade_to_mixed() {
     // still has to apply correctly around this degraded case.
     assert_eq!(
         parse_type_string("self::RFC_*[]"),
-        Type::Array(Box::new(Type::Mixed))
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
     );
 }
 
@@ -134,15 +143,17 @@ fn class_constant_reference_types_degrade_to_mixed() {
 fn generic_array_with_one_type_arg_parses_as_value_type() {
     assert_eq!(
         parse_type_string("array<int>"),
-        Type::Array(Box::new(Type::Int))
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
     );
 }
 
 #[test]
-fn generic_array_with_key_and_value_uses_value_type() {
+fn generic_array_with_key_and_value_uses_both() {
+    // Phase 50: the key argument used to be silently discarded - now
+    // it's a real part of the resulting Type::Array.
     assert_eq!(
         parse_type_string("array<string, int>"),
-        Type::Array(Box::new(Type::Int))
+        Type::Array(Box::new(Type::String), Box::new(Type::Int))
     );
 }
 

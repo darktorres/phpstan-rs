@@ -149,7 +149,7 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
         return None;
     }
     let array_inner = members.iter().find_map(|m| match m {
-        Type::Array(inner) => Some(inner.as_ref()),
+        Type::Array(_, inner) => Some(inner.as_ref()),
         _ => None,
     })?;
     let has_bare_traversable = members
@@ -173,7 +173,7 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
 fn collect_iterable_missing_value_types(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::TemplateParam(_) | Type::Accessory(_) => {}
-        Type::Array(inner) => {
+        Type::Array(_, inner) => {
             if matches!(inner.as_ref(), Type::Mixed) {
                 out.push(ty.to_string());
             } else {
@@ -201,7 +201,7 @@ fn collect_iterable_missing_value_types(ty: &Type, out: &mut Vec<String>) {
             // rather than re-checking which `AccessoryKind` rides along
             // with it.
             if let Some(inner) = members.iter().find_map(|m| match m {
-                Type::Array(inner) => Some(inner.as_ref()),
+                Type::Array(_, inner) => Some(inner.as_ref()),
                 _ => None,
             }) {
                 if matches!(inner, Type::Mixed) {
@@ -270,7 +270,11 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
-            Type::Array(inner) | Type::ClassString(inner) => {
+            Type::Array(key, inner) => {
+                self.collect_non_generic_generic_class(key, out);
+                self.collect_non_generic_generic_class(inner, out);
+            }
+            Type::ClassString(inner) => {
                 self.collect_non_generic_generic_class(inner, out);
             }
             Type::Union(members) | Type::Intersection(members) => {

@@ -339,7 +339,7 @@ fn phpdoc_wins_over_a_conflicting_native_hint() {
     );
     assert_eq!(
         r.functions["f"].params[0].ty,
-        Type::Array(Box::new(Type::Int))
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
     );
 }
 
@@ -370,7 +370,7 @@ fn phpdoc_types_a_promoted_constructor_property_via_param_tag() {
     );
     assert_eq!(
         r.lookup_property("Point", "coords").unwrap().ty,
-        Type::Array(Box::new(Type::Int))
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
     );
 }
 

@@ -9,17 +9,18 @@ fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
     // got treated as a literal class named "list". Phase 14: now a
     // real Intersection([Array(_), Accessory(ArrayList)]), not a
     // plain Array alias.
+    // Phase 50: a list's key can only ever be a sequential int.
     assert_eq!(
         parse_type_string("list<int>"),
         Type::Intersection(vec![
-            Type::Array(Box::new(Type::Int)),
+            Type::Array(Box::new(Type::Int), Box::new(Type::Int)),
             Type::Accessory(AccessoryKind::ArrayList),
         ])
     );
     assert_eq!(
         parse_type_string("list"),
         Type::Intersection(vec![
-            Type::Array(Box::new(Type::Mixed)),
+            Type::Array(Box::new(Type::Int), Box::new(Type::Mixed)),
             Type::Accessory(AccessoryKind::ArrayList),
         ])
     );
@@ -152,25 +153,33 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
     assert_eq!(
         parse_type_string("non-empty-array<int>"),
         Type::Intersection(vec![
-            Type::Array(Box::new(Type::Int)),
+            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
             Type::Accessory(AccessoryKind::NonEmptyArray),
         ])
     );
     assert_eq!(
+        // Phase 50: a list's key can only ever be a sequential int - a
+        // real precision win, not just arity-matching the unknown
+        // int|string default plain non-empty-array keeps above.
         parse_type_string("non-empty-list<string>"),
         Type::Intersection(vec![
-            Type::Array(Box::new(Type::String)),
+            Type::Array(Box::new(Type::Int), Box::new(Type::String)),
             Type::Accessory(AccessoryKind::ArrayList),
             Type::Accessory(AccessoryKind::NonEmptyArray),
         ])
     );
     // Doctrine's own refinement of `array<class-string<TKey>, TValue>`
-    // - the key type (including its own nested generic) is discarded,
-    // same as a plain `array<K, V>`'s key already is. Not a Phase 14
-    // accessory type at all - unaffected, still plain Array.
+    // - Phase 50: the key type is real now (wrapped in ClassString, per
+    // this pseudo-type's own documented meaning), not discarded.
     assert_eq!(
         parse_type_string("class-string-map<Foo, int>"),
-        Type::Array(Box::new(Type::Int))
+        Type::Array(
+            Box::new(Type::ClassString(Box::new(Type::Object(
+                "Foo".to_string(),
+                Vec::new()
+            )))),
+            Box::new(Type::Int)
+        )
     );
 }
 

@@ -390,8 +390,14 @@ impl ClassInfo {
             "cases".to_string(),
             FunctionSig {
                 params: Vec::new(),
-                return_type: Type::Array(Box::new(self_ty.clone())),
-                return_type_native: Type::Array(Box::new(self_ty.clone())),
+                return_type: Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(self_ty.clone()),
+                ),
+                return_type_native: Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(self_ty.clone()),
+                ),
                 no_discard: false,
             },
         );
