@@ -1007,24 +1007,45 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
     }
 }
 
-/// `curl_getinfo($ch, CONSTANT)`'s own real per-option return type - a
-/// curated subset of real PHPStan's own ~70-entry
-/// `CurlGetinfoFunctionDynamicReturnTypeExtension` table, covering the
-/// commonly-used constants real code actually reaches for (every real
-/// call site in this project's own verification corpus uses one of
-/// these) rather than transcribing the full table, including its RTSP/
-/// proxy/microsecond/bignum variants, for entries nothing here gives any
-/// evidence about. `None` for anything else falls through to this
-/// project's existing generic (`mixed`) behavior, unchanged.
+/// `curl_getinfo($ch, CONSTANT)`'s own real per-option return type - Phase
+/// 34 Finding A originally curated ~20 of real PHPStan's own ~73-entry
+/// `CurlGetinfoFunctionDynamicReturnTypeExtension` table (only the
+/// constants this project's own verification corpus evidenced at the
+/// time); Phase 77 transcribes the rest of that real table verbatim
+/// (checked directly against
+/// `vendor/phpstan-src/src/Type/Php/CurlGetinfoFunctionDynamicReturnTypeExtension.php`),
+/// including its RTSP/proxy/microsecond/bignum/`_T`-suffixed variants.
+/// `None` for anything else (there is no real `CURLINFO_*` constant left
+/// uncovered) falls through to this project's existing generic (`mixed`)
+/// behavior, unchanged.
 fn curl_getinfo_component_type(name: &str) -> Option<Type> {
     let string_false = Type::Union(vec![Type::String, Type::False]);
+    let int_false = Type::Union(vec![Type::Int, Type::False]);
+    // `list<string>` - `CURLINFO_SSL_ENGINES`/`CURLINFO_COOKIELIST`'s own
+    // real type.
+    let string_list = Type::Intersection(vec![
+        Type::Array(Box::new(Type::String)),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ]);
+    // `list<array<string, string>>` - `CURLINFO_CERTINFO`'s own real type.
+    let nested_array_in_list = Type::Intersection(vec![
+        Type::Array(Box::new(Type::Array(Box::new(Type::String)))),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ]);
     Some(match name {
         "CURLINFO_EFFECTIVE_URL"
         | "CURLINFO_PRIMARY_IP"
         | "CURLINFO_LOCAL_IP"
         | "CURLINFO_SCHEME"
         | "CURLINFO_EFFECTIVE_METHOD" => Type::String,
-        "CURLINFO_REDIRECT_URL" | "CURLINFO_HEADER_OUT" | "CURLINFO_CONTENT_TYPE" => string_false,
+        "CURLINFO_REDIRECT_URL"
+        | "CURLINFO_HEADER_OUT"
+        | "CURLINFO_CONTENT_TYPE"
+        | "CURLINFO_FTP_ENTRY_PATH"
+        | "CURLINFO_RTSP_SESSION_ID"
+        | "CURLINFO_REFERER"
+        | "CURLINFO_CAINFO"
+        | "CURLINFO_CAPATH" => string_false,
         "CURLINFO_TOTAL_TIME"
         | "CURLINFO_NAMELOOKUP_TIME"
         | "CURLINFO_CONNECT_TIME"
@@ -1036,7 +1057,8 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
         | "CURLINFO_SPEED_DOWNLOAD"
         | "CURLINFO_SPEED_UPLOAD"
         | "CURLINFO_CONTENT_LENGTH_DOWNLOAD"
-        | "CURLINFO_CONTENT_LENGTH_UPLOAD" => Type::Float,
+        | "CURLINFO_CONTENT_LENGTH_UPLOAD"
+        | "CURLINFO_APPCONNECT_TIME" => Type::Float,
         "CURLINFO_FILETIME"
         | "CURLINFO_REDIRECT_COUNT"
         | "CURLINFO_PRIMARY_PORT"
@@ -1050,7 +1072,38 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
         | "CURLINFO_OS_ERRNO"
         | "CURLINFO_NUM_CONNECTS"
         | "CURLINFO_PROTOCOL"
-        | "CURLINFO_HTTP_VERSION" => Type::Int,
+        | "CURLINFO_HTTP_VERSION"
+        | "CURLINFO_HTTPAUTH_AVAIL"
+        | "CURLINFO_PROXYAUTH_AVAIL"
+        | "CURLINFO_CONDITION_UNMET"
+        | "CURLINFO_RTSP_CLIENT_CSEQ"
+        | "CURLINFO_RTSP_CSEQ_RECV"
+        | "CURLINFO_RTSP_SERVER_CSEQ"
+        | "CURLINFO_PROXY_SSL_VERIFYRESULT"
+        | "CURLINFO_CONTENT_LENGTH_DOWNLOAD_T"
+        | "CURLINFO_CONTENT_LENGTH_UPLOAD_T"
+        | "CURLINFO_SIZE_DOWNLOAD_T"
+        | "CURLINFO_SIZE_UPLOAD_T"
+        | "CURLINFO_SPEED_DOWNLOAD_T"
+        | "CURLINFO_SPEED_UPLOAD_T"
+        | "CURLINFO_APPCONNECT_TIME_T"
+        | "CURLINFO_CONNECT_TIME_T"
+        | "CURLINFO_FILETIME_T"
+        | "CURLINFO_NAMELOOKUP_TIME_T"
+        | "CURLINFO_PRETRANSFER_TIME_T"
+        | "CURLINFO_REDIRECT_TIME_T"
+        | "CURLINFO_STARTTRANSFER_TIME_T"
+        | "CURLINFO_TOTAL_TIME_T"
+        | "CURLINFO_PROXY_ERROR"
+        | "CURLINFO_RETRY_AFTER" => Type::Int,
+        "CURLINFO_SSL_ENGINES" | "CURLINFO_COOKIELIST" => string_list,
+        "CURLINFO_CERTINFO" => nested_array_in_list,
+        "CURLINFO_POSTTRANSFER_TIME_T"
+        | "CURLINFO_QUEUE_TIME_T"
+        | "CURLINFO_USED_PROXY"
+        | "CURLINFO_HTTPAUTH_USED"
+        | "CURLINFO_PROXYAUTH_USED"
+        | "CURLINFO_CONN_ID" => int_false,
         "CURLINFO_PRIVATE" => Type::Mixed,
         _ => return None,
     })

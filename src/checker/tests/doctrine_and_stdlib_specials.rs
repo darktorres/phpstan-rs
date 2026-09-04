@@ -670,3 +670,36 @@ fn a_property_read_tag_flags_an_attempted_write() {
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
+
+// Phase 77: curl_getinfo()'s own per-option table, extended from Phase
+// 34 Finding A's original ~20 curated entries to the real, full ~73-entry
+// table (transcribed from real PHPStan's own
+// CurlGetinfoFunctionDynamicReturnTypeExtension - see
+// `curl_getinfo_component_type`'s own doc comment).
+
+#[test]
+fn curl_getinfo_certinfo_infers_a_nested_string_map_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return list<array<string, string>>
+             */
+            function f($ch) {
+                return curl_getinfo($ch, CURLINFO_CERTINFO);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn curl_getinfo_used_proxy_infers_int_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($ch): int|false {
+                return curl_getinfo($ch, CURLINFO_USED_PROXY);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
