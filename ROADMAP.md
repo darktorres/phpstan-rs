@@ -2400,7 +2400,7 @@ own array-destructuring fixes then resolved a large share of that
 (1115 -> 875), the rest left as real, uncorrected signal about the
 corpus's own type-precision gaps rather than individually triaged here.
 
-## Phase 14.5 (unplanned) - list<T> false-positive cleanup - DONE
+## Phase 14.5 (unplanned) - `list<T>` false-positive cleanup - DONE
 
 A round of bucketing the Piwigo corpus by normalized message shape (the
 same Phase 22 methodology) against Phase 14's own 875-diagnostic
@@ -2799,9 +2799,9 @@ fixed for in Phase 14 itself:
   once.
 
 **A fourteenth round** (158 -> 147) found a real, general unsoundness
-bug in equality narrowing, unrelated to Phase 14's own accessory types
-- the `===` counterpart of the `!==`-exclusion bug Phase 12 already
-fixed once for the opposite direction:
+bug in equality narrowing, unrelated to Phase 14's own accessory
+types: the `===` counterpart of the `!==`-exclusion bug Phase 12
+already fixed once for the opposite direction.
 
 - **`narrow_type_to`'s non-`Union` fallback unconditionally returned
   the comparison target's own type, discarding `original` even when it
@@ -3313,6 +3313,7 @@ phase.
 
 **Phase 35 (270 -> 249) - closing Phase 34's own deferred items,
 properly.**
+
 - **`class-string<T>` now participates in `@template` binding.** A new
   `Type::ClassString(Box<Type>)` survives from parsing through
   `Foo::class`/`get_class($obj)` inference, template binding/
