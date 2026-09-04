@@ -1517,26 +1517,58 @@ redeclarations - the same already-accepted vendored-IDE-stub noise class
 documented throughout this project's corpus verification, not a new
 false-positive class.
 
-**Phase 67 - `@internal` restricted-usage engine (NEW, PLANNED).** No
-stage parses or stores `@internal`, and no dispatch mechanism compares
-an accessed symbol's declaring namespace against the call site's
-namespace at any of the ~8 access-site shapes (method/static-method/
-property/static-property/constant/function calls, first-class-
-callables, `(string)`-cast-triggers-`__toString`). Unlocks a 16-item
-family: `RestrictedInternalClassConstantUsageExtension`,
-`RestrictedInternalClassNameUsageExtension`,
-`RestrictedInternalFunctionUsageExtension`,
-`RestrictedInternalMethodUsageExtension`,
-`RestrictedInternalPropertyUsageExtension`, `RestrictedInternalUsageHelper`,
-`RestrictedClassConstantUsageRule`, `RestrictedFunctionCallableUsageRule`/
-`UsageRule`, `RestrictedMethodCallableUsageRule`/`UsageRule`,
-`RestrictedPropertyUsageRule`, `RestrictedStaticMethodCallableUsageRule`/
-`UsageRule`, `RestrictedStaticPropertyUsageRule`,
-`RestrictedUsageOfDeprecatedStringCastRule`. Size: L - one tag + one
-namespace-comparison dispatched at ~8 call-site shapes, no new
-type-system concepts needed despite the large unlock count. Value is
-medium: matters most for library/framework authors, less for
-application codebases like this project's own Piwigo corpus.
+**Phase 67 - `@internal` restricted-usage engine (PARTIAL).** New
+`checker/internal_usage.rs` mirrors real PHPStan's own
+`RestrictedInternal*UsageExtension` family
+(`vendor/phpstan-src/src/Rules/InternalTag/`): a symbol tagged `@internal`
+(or declared inside an `@internal`-tagged class) is restricted to callers
+sharing its own top-level ("root") namespace segment - the common
+Composer-package-as-top-level-namespace convention -
+`should_report_internal_usage` matches
+`RestrictedInternalUsageHelper::shouldBeReported` exactly, including its
+"no enclosing namespace at all" fallback (usable only from within the
+exact same declaring class). Covers the highest-value access shapes:
+function calls (`function.internal`), instance/static method calls
+(`method.internal(Class|Interface|Trait|Enum)`, `staticMethod.*`),
+instance/static property reads (`property.*`, `staticProperty.*`),
+class-constant reads (`classConstant.*`, declaring-class-internal only -
+no per-constant `@internal` tracking exists yet, would need a real struct
+in place of `ClassInfo::consts`'s current bare `HashMap<String, Type>`),
+and instantiation (`new.*`). Needed new `is_internal` fields on
+`FunctionSig` (covers both plain functions and methods for free),
+`ClassInfo`, and `PropertySig`, plus a new `Registry::
+lookup_const_with_owner` (mirroring `lookup_method_with_owner`/
+`lookup_property_with_owner`) so the class-constant check knows which
+ancestor actually declares a constant.
+
+Off by default (`Registry::check_internal_usage`, wired through
+`--check-internal-usage`/`config.rs`/`Project::set_check_internal_usage`,
+following `check_uninitialized_properties`'s exact Phase 62 precedent) -
+real PHPStan's own whole `RestrictedInternal*UsageExtension` family sits
+behind `featureToggles.internalTag: false`, not part of any of the
+standard level 0-10 rule sets either. Corpus-verified: 50097 diagnostics
+either way with the flag off (zero behavior change, confirming the
+opt-in gate); with `--check-internal-usage` enabled, 51391 (+1294),
+spot-checked as genuine - e.g. Piwigo's own `tools/coverage-merge.php`
+and several vendored packages calling `phpunit/php-code-coverage`'s
+`CodeCoverage::getReport()`, explicitly marked "`@internal` This method
+is not covered by the backward compatibility promise for
+phpunit/php-code-coverage" in its own source.
+
+Still open: real PHPStan's own `RestrictedInternalClassNameUsageExtension`
+additionally covers `extends`/`implements`/param-and-return-type-hints/
+`catch`/`instanceof`/first-class-callables (this phase only covers
+instantiation of the several `ClassNameUsageLocation` variants);
+`RestrictedUsageOfDeprecatedStringCastRule` (extends the method-call
+check to an implicit `(string)`-cast-triggered `__toString()` call - easy
+to add once needed, just not wired); per-property-write and per-constant
+`@internal` tracking (see above); `RestrictedClassConstantUsageRule`/
+`RestrictedFunctionCallableUsageRule`/`RestrictedMethodCallableUsageRule`/
+`RestrictedPropertyUsageRule`/`RestrictedStaticMethodCallableUsageRule`/
+`RestrictedStaticPropertyUsageRule` (a separate, *user-configured*
+restricted-usage mechanism - unrelated to `@internal` specifically -
+allowing a project to declare its own arbitrary restricted-symbol list;
+not attempted this phase).
 
 **Phase 68 - `array_filter`/`array_values`/duplicate-key no-op
 diagnostics (NEW, PLANNED).** Two cheap wins where the hard inference
