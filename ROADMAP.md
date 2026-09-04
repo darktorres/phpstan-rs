@@ -1071,42 +1071,56 @@ Sequence optionally, either just before or interleaved with Phase 36's
 Wave B - not a hard prerequisite, but doing it first avoids rework.
 Size: XL.
 
-**Phase 57 - Property/method/constant visibility enforcement (NEW,
-PLANNED).** `PropertySig` (`src/registry/class_info.rs`) carries only
-`ty`/`is_static`/`is_readonly`/`set_ty` - no visibility field at all -
-so no checker code anywhere can enforce private/protected access,
-asymmetric `private(set)`/`protected(set)`, or LSB-unsafe `static::`
-access to a private static property (consumed at
-`src/checker/expr.rs:1089`/`:1013`, `src/checker/assignment.rs:231`).
-Separately, no call site (as opposed to declaration site) ever checks
-caller-context-vs-declared-visibility for a *method* call either
-(`src/checker/expr.rs`'s `MethodCall`/`StaticCall` arms, ~382-526/
-923-1010, do existence and arg-checking but never visibility gating).
-**Correction, verified against the current source**: threading "what
-class is the calling code currently inside" through to a call site is
-*not* new plumbing to build - `self.current_class`/`self.current_method`
-(`src/checker.rs:131-137`) already exist, are already set on every
-function/method entry and restored on exit, and are already consulted
-this exact way by `check_property_assignment`'s readonly-write check
-(`src/checker/assignment.rs:~260-263`, comparing `current_class`
-against the declaring owner) - a directly analogous sibling check, not
-a new capability. The real remaining work is narrower than originally
-scoped: (a) a visibility field on `PropertySig` (and an equivalent on
-`FunctionSig` for methods), and (b) the comparison logic at the four
-read/write/call sites reusing the existing context fields. Both halves
-are still the same missing primitive ("is this access legal from
-here") applied to two member kinds - merge into one phase.
+**Phase 57 - Property/method/constant visibility enforcement
+(PARTIAL).** `PropertySig` and `FunctionSig` now carry their own
+`Visibility`, and four call sites - property read (`ExprKind::
+PropertyAccess`), property write (`check_property_assignment`), method
+call (`ExprKind::MethodCall`), and static method call (`ExprKind::
+StaticCall`) - all gate access through the shared
+`Checker::check_member_visibility` (`src/checker/visibility.rs`),
+reusing the existing `self.current_class` context field rather than
+new plumbing. `private` is legal only from the exact declaring class;
+`protected` is legal from the declaring class or its inheritance chain
+in either direction, plus a same-named-member-in-own-hierarchy
+fallback (real corpus case: sibling classes both overriding a common
+abstract ancestor's `protected` member, where the *concrete* owner
+`lookup_method`/`lookup_property` resolves to is one sibling but the
+contract is shared through the shared ancestor).
 
-Unlocks `AccessPrivatePropertyThroughStaticRule`, `AccessPropertiesCheck`/
-`Rule`/`InAssignRule`, `AccessStaticPropertiesCheck`/`Rule`/`InAssignRule`,
-`MethodCallCheck`, `StaticMethodCallCheck`, `StaticMethodCallableRule`,
-`CallPrivateMethodThroughStaticRule`, `AccessPrivateConstantThroughStaticRule`,
-`ClassConstantRule` (visibility half). The undefined-property/undefined-
-method detection these rules also cover is already implemented - the
-gap is purely the visibility layer on top. Size: L - highest-value
-cluster found in the `properties-enum-whitespace` audit category;
-private/protected access violations are one of the most common
-real-world PHP mistakes.
+Two real corpus-found exceptions to the naive "current_class" rule
+required scope-threading: `Closure::bind()`/`->bindTo()`'s third
+`$newScope` argument, and Pest's own `$this`-binding (`uses(X::class);
+it(...)`) - both temporarily swap the effective class for
+private/protected purposes while checking a closure body, via
+`check_closure_literal_with_this_and_scope`.
+
+Verified against the ~20,300-file Piwigo+vendor corpus: settled at
+exactly one new finding after two real bugs were found and fixed in
+this pass itself (the `Closure::bind`/Pest scope gaps above), and that
+one remaining finding (Symfony's own `RedisTagAwareAdapter` reading a
+`private` property declared via a trait on its parent
+`AbstractTagAwareAdapter`) was confirmed genuine by cross-checking
+against real PHPStan itself, which flags the identical line with the
+same `property.private` identifier.
+
+Done: property/method/static-method visibility (public/private/
+protected) on reads, writes, and calls; promoted constructor property
+visibility; the sibling-shared-abstract-ancestor fallback;
+`Closure::bind`/`bindTo` and Pest `$this`-binding scope threading.
+Still open: class-constant visibility enforcement
+(`AccessPrivateConstantThroughStaticRule`, `ClassConstantRule`'s
+visibility half - constants have no visibility field on their own
+registry representation yet); asymmetric PHP 8.4 `private(set)`/
+`protected(set)` (write-visibility can currently only match read-
+visibility); LSB-unsafe `static::` access to a `private` static
+property (`AccessPrivatePropertyThroughStaticRule`,
+`AccessStaticPropertiesCheck`/`Rule`/`InAssignRule`); and
+`StaticMethodCallableRule`/`CallPrivateMethodThroughStaticRule`'s own
+`static::`-callable-specific angle. The protected-access heuristic is
+also deliberately conservative: it never guesses at cross-hierarchy
+relationships it can't resolve from the registry, so a small number of
+genuinely-illegal protected accesses that depend on runtime-only
+information may go unflagged rather than risk a false positive.
 
 **Phase 58 - `MissingTypehintCheck` completeness battery (level-6
 family) (DONE).** This entry's own status was never updated after an
