@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
                 } else if branch_true
                     && let ExprKind::Call(callee, args) = &l.kind
                     && let ExprKind::Name(name) = &callee.kind
-                    && name == "count"
+                    && name.trim_start_matches('\\') == "count"
                     && let [single_arg] = args.as_slice()
                     && let Some(key) = narrowing_key(&single_arg.value)
                     && let ExprKind::Literal(Literal::Int(n)) = &r.kind
@@ -157,6 +157,19 @@ impl<'a> Checker<'a> {
                 if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
                     && let Some(key) = narrowing_key(&single_arg.value)
                 {
+                    // Phase 55: a fully-qualified call (`\is_array($x)`,
+                    // `\count($x)`, ...) keeps its leading backslash in
+                    // `ExprKind::Name` - unlike ordinary call resolution
+                    // (`name_ctx::resolve_function_candidates`, used for
+                    // every real argument/arity check), every name
+                    // comparison in this whole match arm was a bare
+                    // string equality with no normalization, so a real,
+                    // common defensive-global-namespace style (pervasive
+                    // in Rector-prefixed vendor code, real shape:
+                    // `\is_array($value)` nested inside an
+                    // `is_iterable($value)` guard) silently skipped
+                    // narrowing entirely.
+                    let name = name.trim_start_matches('\\');
                     if name == "empty" {
                         // `empty($x)` is PHP's own falsy check - only the
                         // branch where it evaluated `false` (`$x` proven
@@ -181,6 +194,19 @@ impl<'a> Checker<'a> {
                                 self.current_narrowed_type(&single_arg.value, &key, locals);
                             locals.insert(key, narrow_type_excluding(&current, &Type::Null));
                         }
+                    } else if name == "count" && branch_true {
+                        // Phase 55: a bare `if (count($x))`/`while
+                        // (count($x))` truthiness check, not the `> 0`/
+                        // `>= 1` comparison form the `Binary` arm above
+                        // already handles - `count()` is never negative,
+                        // so a truthy result means exactly the same
+                        // "provably non-empty" fact. The false branch
+                        // (`count($x) === 0`) isn't narrowed here, the
+                        // same asymmetry the comparison form's own arm
+                        // already accepts (`upgrade_array_to_non_empty`
+                        // has no "prove empty" counterpart).
+                        let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                        locals.insert(key, upgrade_array_to_non_empty(&current));
                     } else if name == "is_numeric" {
                         // Phase 32 Finding G: deliberately its own arm,
                         // not a `narrowing_type_for_predicate` table entry
@@ -234,7 +260,7 @@ impl<'a> Checker<'a> {
                         locals.insert(key, narrowed);
                     }
                 } else if let ExprKind::Name(name) = &callee.kind
-                    && name == "in_array"
+                    && name.trim_start_matches('\\') == "in_array"
                     && let [needle, haystack, strict] = args.as_slice()
                     // Phase 33 Finding 2: only the strict, literal-array
                     // form real PHPStan's own `InArrayFunctionTypeSpecifyingExtension`
@@ -254,7 +280,7 @@ impl<'a> Checker<'a> {
                     };
                     locals.insert(key, narrowed);
                 } else if let ExprKind::Name(name) = &callee.kind
-                    && name == "array_key_exists"
+                    && name.trim_start_matches('\\') == "array_key_exists"
                     && let [key_arg, arr_arg] = args.as_slice()
                     && let ExprKind::Literal(Literal::String(lit_key)) = &key_arg.value.kind
                     && let Some(arr_key) = narrowing_key(&arr_arg.value)
@@ -752,7 +778,7 @@ fn preg_match_condition(cond: &Expr) -> Option<(&Expr, &Expr, bool)> {
     fn as_preg_match_args(e: &Expr) -> Option<&[Arg]> {
         match &e.kind {
             ExprKind::Call(callee, args) => match &callee.kind {
-                ExprKind::Name(name) if name == "preg_match" => Some(args),
+                ExprKind::Name(name) if name.trim_start_matches('\\') == "preg_match" => Some(args),
                 _ => None,
             },
             ExprKind::Grouping(inner) => as_preg_match_args(inner),
@@ -853,6 +879,15 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
             Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
             Type::Object("Countable".to_string(), Vec::new()),
         ])),
+        // Phase 55: real PHP's own native `iterable` type hint, defined
+        // as exactly `array|Traversable` - the same target `types::
+        // parse_type_string`'s own dedicated `"iterable"` arm resolves
+        // the native type hint to, kept in sync deliberately (both are
+        // "what does `iterable` actually mean" in one place each).
+        "is_iterable" => Some(Type::Union(vec![
+            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+            Type::Object("Traversable".to_string(), Vec::new()),
+        ])),
         "is_null" => Some(Type::Null),
         "is_object" => Some(Type::Object("object".to_string(), Vec::new())),
         "is_callable" => Some(Type::Callable),
@@ -904,7 +939,7 @@ impl<'a> Checker<'a> {
                     return None;
                 };
                 let key = narrowing_key(&single_arg.value)?;
-                let target_ty = narrowing_type_for_predicate(name)?;
+                let target_ty = narrowing_type_for_predicate(name.trim_start_matches('\\'))?;
                 Some((key, target_ty, &single_arg.value))
             }
             // A real, corpus-confirmed gap (Phase 51's own cast-validity

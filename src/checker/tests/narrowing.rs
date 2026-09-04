@@ -412,6 +412,102 @@ fn count_greater_than_zero_narrows_to_non_empty_array() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 55: a bare `count($x)` truthiness check (no explicit `> 0`/
+// `>= 1` comparison) - the same "provably non-empty" fact the
+// comparison form above already proves.
+#[test]
+fn a_bare_count_truthiness_check_narrows_to_non_empty_array() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function f(array $x): void {
+                if (count($x)) {
+                    sink($x);
+                }
+            }
+            function g(array $x): void {
+                while (count($x)) {
+                    sink($x);
+                    break;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_guard_clause_on_a_negated_bare_count_still_narrows_past_it() {
+    // `!count($x)` composes through the existing `Unary(Not)` arm
+    // (`apply_narrowing(inner, locals, !branch_true)`) - the guard's
+    // own true branch (`count($x)` false, i.e. genuinely empty) isn't
+    // narrowed by this arm at all (it requires `branch_true`), but the
+    // surviving continuation past a terminating guard correctly ends up
+    // narrowing `count($x)`'s own true branch instead, same as any
+    // other guard-clause idiom already composes.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function f(array $x): void {
+                if (!count($x)) {
+                    return;
+                }
+                sink($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 55: the trivial `is_iterable()` quick win named explicitly in
+// the roadmap's own phase text - narrows to `array|Traversable`, real
+// PHP's own native `iterable` type hint's own definition.
+#[test]
+fn is_iterable_narrows_a_mixed_typed_value_to_array_or_traversable() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsIterable(iterable $x): void {}
+            function test(mixed $x): void {
+                if (is_iterable($x)) {
+                    needsIterable($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 55: a real corpus check on this same phase's own `is_iterable`
+// addition found a much bigger, general, pre-existing gap: a fully-
+// qualified predicate call (`\is_array($x)`, real, common defensive-
+// global-namespace style pervasive in Rector-prefixed vendor code) kept
+// its leading backslash in `ExprKind::Name`, and every name comparison
+// in `apply_narrowing`'s own dispatch was a bare string equality with
+// no normalization - unlike ordinary call resolution (`name_ctx::
+// resolve_function_candidates`), which already handles this correctly
+// elsewhere. Real shape: symfony/type-info's own `TypeFactoryTrait::
+// fromValue` narrowing `mixed $value` via `is_iterable($value)` then
+// `\is_array($value)` - the second, backslash-prefixed check silently
+// failed to narrow further at all.
+#[test]
+fn a_fully_qualified_predicate_call_still_narrows() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsArray(array $x): void {}
+            function test(mixed $value): void {
+                if (is_iterable($value)) {
+                    if (\is_array($value)) {
+                        needsArray($value);
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn is_numeric_narrows_a_plain_string_to_numeric_string() {
     let d = diagnostics_for(
