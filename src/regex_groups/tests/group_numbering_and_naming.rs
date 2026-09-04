@@ -97,8 +97,14 @@ fn a_conditional_group_bails() {
 }
 
 #[test]
-fn the_x_and_j_modifiers_both_bail() {
-    assert!(parse_capture_groups("/(a)/x").is_none());
+fn the_j_modifier_still_bails_but_x_no_longer_does() {
+    // Phase 72: `x` (free-spacing mode) is now supported - it only
+    // changes tokenization, which `Scanner::skip_free_spacing` handles
+    // inline - so a pattern that's otherwise fully understood no longer
+    // bails just for carrying it. `J` (duplicate named groups) still
+    // bails; see `regex_groups::tests::x_modifier` for `x`'s own
+    // dedicated coverage.
+    assert!(parse_capture_groups("/(a)/x").is_some());
     assert!(parse_capture_groups("/(a)/J").is_none());
 }
 

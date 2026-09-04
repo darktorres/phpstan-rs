@@ -22,29 +22,55 @@ pub(super) fn preg_leaf_type(offset_capture: bool) -> Type {
 }
 
 /// A per-group leaf type, refined by that group's own literal-value
-/// enumeration (Task 1a) when available - never applied to field `"0"`
-/// (the whole match), matching real PHPStan's own scope: confirmed live
-/// that even a fully-constant pattern like `/(a(?:x|y))/` gets its own
+/// enumeration (Task 1a) when available, else (Phase 72) by its own
+/// `RegexGroupFallback` tri-state - never applied to field `"0"` (the
+/// whole match), matching real PHPStan's own scope: confirmed live that
+/// even a fully-constant pattern like `/(a(?:x|y))/` gets its own
 /// overall match typed as a general refinement (`non-falsy-string`),
 /// never a literal union, so this project's own field-`"0"` handling
 /// (plain `leaf.clone()`, unchanged) already matches that scope without
 /// needing this helper at all.
-fn group_leaf_type(leaf: &Type, literal_values: &Option<Vec<String>>) -> Type {
-    let Some(values) = literal_values else {
-        return leaf.clone();
-    };
-    let literal_ty = values
-        .iter()
-        .cloned()
-        .map(Type::StringLiteral)
-        .reduce(union_types)
-        .expect("literal_values is never Some(empty) by construction");
+fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type {
+    if let Some(values) = &group.literal_values {
+        let literal_ty = values
+            .iter()
+            .cloned()
+            .map(Type::StringLiteral)
+            .reduce(union_types)
+            .expect("literal_values is never Some(empty) by construction");
+        return refine_leaf(leaf, literal_ty);
+    }
+    match group.fallback {
+        regex_groups::RegexGroupFallback::NumericString => {
+            refine_leaf(leaf, accessory_string(AccessoryKind::NumericString))
+        }
+        regex_groups::RegexGroupFallback::NonEmptyString => {
+            refine_leaf(leaf, accessory_string(AccessoryKind::NonEmptyString))
+        }
+        regex_groups::RegexGroupFallback::Unknown => leaf.clone(),
+    }
+}
+
+/// `Intersection([String, Accessory(kind)])` - the same representation
+/// `types::parse_type_string` builds for `numeric-string`/
+/// `non-empty-string` docblock pseudo-types (Phase 14), reused here so a
+/// regex-derived refinement and a docblock-declared one are
+/// indistinguishable to the rest of the type system.
+fn accessory_string(kind: AccessoryKind) -> Type {
+    Type::Intersection(vec![Type::String, Type::Accessory(kind)])
+}
+
+/// Substitutes a group's own refined text type (`refined`, either an
+/// exact literal union or an accessory-refined string) into `leaf`:
+/// directly, for a plain `string` leaf, or into just the text slot of
+/// `PREG_OFFSET_CAPTURE`'s own `[string, int]` tuple, leaving the byte-
+/// offset slot untouched - unchanged from before Phase 72 split this out
+/// of `group_leaf_type` itself.
+fn refine_leaf(leaf: &Type, refined: Type) -> Type {
     match leaf {
-        Type::String => literal_ty,
-        // PREG_OFFSET_CAPTURE's own [string, int] tuple - refine just
-        // the text slot, leave the byte-offset slot untouched.
+        Type::String => refined,
         Type::ArrayShape(fields) if fields.len() == 2 => Type::ArrayShape(vec![
-            (fields[0].0.clone(), literal_ty, fields[0].2),
+            (fields[0].0.clone(), refined, fields[0].2),
             fields[1].clone(),
         ]),
         _ => leaf.clone(),
@@ -102,7 +128,7 @@ pub(crate) fn preg_match_matches_shape(
         }
         let is_trailing_optional = i >= groups.len() - trailing_optional_count;
         let is_last_group = i == groups.len() - 1;
-        let base = group_leaf_type(leaf, &g.literal_values);
+        let base = group_leaf_type(leaf, g);
         let (leaf_ty, optional) = if g.optional && unmatched_as_null {
             (union_types(base, Type::Null), false)
         } else if is_trailing_optional {
@@ -221,6 +247,23 @@ pub(crate) fn build_matched_shape(
         let mut variants: Vec<Type> = branches
             .iter()
             .map(|&b| {
+                // Phase 72: a `(?|...)` branch-reset construct reuses
+                // the same public `.number` across branches (see
+                // `regex_groups::parse_capture_groups`'s own doc comment
+                // on the topic) - an earlier sibling sharing one of
+                // *this* branch's own numbers is really the same slot,
+                // not a distinct field to backfill with `''` (confirmed
+                // live: `(?|(\d+)|([a-z]+))` never produces two same-
+                // numbered fields, only ever one, holding whichever
+                // branch actually ran), so it's excluded entirely here
+                // instead of falling into the generic `before_combo`
+                // forced-empty case below, which would otherwise push a
+                // second, wrong field under the same key.
+                let this_branch_numbers: Vec<usize> = groups
+                    .iter()
+                    .filter(|g| g.alternation == Some((alt_id, b)))
+                    .map(|g| g.number)
+                    .collect();
                 let mut before_combo = true;
                 let variant_groups: Vec<regex_groups::RegexCaptureGroup> = groups
                     .iter()
@@ -233,11 +276,15 @@ pub(crate) fn build_matched_shape(
                                 ..g.clone()
                             })
                         } else if before_combo {
-                            Some(regex_groups::RegexCaptureGroup {
-                                optional: false,
-                                forced_empty: true,
-                                ..g.clone()
-                            })
+                            if this_branch_numbers.contains(&g.number) {
+                                None // a branch-reset sibling of one of this branch's own groups
+                            } else {
+                                Some(regex_groups::RegexCaptureGroup {
+                                    optional: false,
+                                    forced_empty: true,
+                                    ..g.clone()
+                                })
+                            }
                         } else if g.alternation.map(|(id, _)| id) == Some(alt_id) {
                             None // a *later* sibling branch's own group - never participated
                         } else {
@@ -309,7 +356,7 @@ pub(super) fn preg_match_all_pattern_order_shape(
         false,
     )];
     for g in groups {
-        let base = group_leaf_type(leaf, &g.literal_values);
+        let base = group_leaf_type(leaf, g);
         let arr_ty = list_of(element_ty(base, g.optional));
         fields.push((g.number.to_string(), arr_ty.clone(), false));
         if let Some(name) = &g.name

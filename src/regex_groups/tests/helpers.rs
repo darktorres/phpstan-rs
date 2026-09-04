@@ -18,3 +18,9 @@ pub(super) fn literals(groups: &[RegexCaptureGroup]) -> Vec<Option<Vec<String>>>
 pub(super) fn top_levels(groups: &[RegexCaptureGroup]) -> Vec<bool> {
     groups.iter().map(|g| g.top_level).collect()
 }
+
+// --- Phase 72: tri-state fallback ---
+
+pub(super) fn fallbacks(groups: &[RegexCaptureGroup]) -> Vec<RegexGroupFallback> {
+    groups.iter().map(|g| g.fallback).collect()
+}

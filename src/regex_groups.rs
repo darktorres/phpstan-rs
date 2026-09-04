@@ -61,6 +61,31 @@ pub(crate) struct RegexCaptureGroup {
     /// combination yet, and adding a case for it now would be dead code
     /// with no caller to exercise it.
     pub forced_empty: bool,
+    /// Phase 72: a tri-state fallback for a group whose body isn't a
+    /// finite, exactly-enumerable set (`literal_values: None`) but is
+    /// still statically provable to be *shaped* a certain way -
+    /// `NumericString` when every possible match consists solely of
+    /// ASCII digit characters and can never be empty (e.g. `(\d+)`,
+    /// `([0-9]+)`), `NonEmptyString` when it can never be empty but
+    /// isn't provably digits-only (e.g. `([a-z]+)`), `Unknown` when
+    /// neither is provable - the safe, unchanged-from-before default,
+    /// degrading to plain `string` exactly as before this phase.
+    /// Computed purely from the group's own body shape (length/character-
+    /// set), independent of `literal_values` and of how many times the
+    /// *group itself* might be repeated from outside - only ever
+    /// consulted by `checker::expr::preg_shapes::group_leaf_type` when
+    /// `literal_values` is `None` (an exact enumeration is always more
+    /// precise than this fallback, never overridden by it).
+    pub fallback: RegexGroupFallback,
+}
+
+/// See `RegexCaptureGroup::fallback`'s own doc comment.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub(crate) enum RegexGroupFallback {
+    #[default]
+    Unknown,
+    NumericString,
+    NonEmptyString,
 }
 
 /// A deeply-nested pattern is a real stack-overflow risk via this
@@ -118,22 +143,59 @@ pub(crate) struct ParsedPattern {
 /// own understood subset.
 pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<ParsedPattern> {
     let (body, modifiers) = split_delimiters_and_modifiers(pattern_literal)?;
-    // `x` (free-spacing mode) and `J` (duplicate named groups, excluded
-    // by real PHPStan itself as "too complicated") both change the
-    // grammar in ways this scanner doesn't attempt - bail before
-    // structural scanning even starts. `i` (case-insensitive) doesn't
-    // change the grammar, only whether literal-value tracking is safe -
-    // handled below, not a full bail.
-    if modifiers.contains('x') || modifiers.contains('J') {
+    // `J` (duplicate named groups, excluded by real PHPStan itself as
+    // "too complicated") changes the grammar in a way this scanner
+    // doesn't attempt - bail before structural scanning even starts. `i`
+    // (case-insensitive) doesn't change the grammar, only whether
+    // literal-value tracking is safe - handled below, not a full bail.
+    // `x` (free-spacing mode) is Phase 72's own addition: it only
+    // changes *tokenization* (unescaped whitespace and `#`-comments
+    // outside a character class are skipped between tokens), which
+    // `Scanner::skip_free_spacing` handles inline, so it no longer needs
+    // a bail either.
+    if modifiers.contains('J') {
         return None;
     }
-    let mut scanner = Scanner::new(body, modifiers.contains('i'));
+    let mut scanner = Scanner::new(body, modifiers.contains('i'), modifiers.contains('x'));
     scanner.scan_alternation()?;
     if scanner.remaining_input() {
         // Leftover, unconsumed text - a stray unmatched `)`, or a
         // construct the atom dispatch below didn't recognize as ending
         // cleanly. Never guess past this point.
         return None;
+    }
+    // Phase 72: a `(?|...)` branch-reset construct (see
+    // `Scanner::scan_branch_reset_alternation`) legitimately reuses the
+    // same public group `.number` across its own branches - real PCRE
+    // fact, confirmed live, e.g. `(?|(\d+)|([a-z]+))` has exactly one
+    // group, number 1, shared by both branches, never two. Resolving
+    // *which* branch's own value should show up under that one shared
+    // key - correctly excluding a sibling branch's same-numbered entry
+    // rather than wrongly treating it as a distinct field to backfill
+    // with `''` - is something `checker::expr::build_matched_shape`'s
+    // own tagged-union dispatch only does right in one specific shape
+    // (the whole top-level pattern being exactly that one alternation);
+    // `preg_match_all`'s own flat, unconditional shape-builders never go
+    // through that dispatch at all. Rather than risk emitting a shape
+    // with two same-numbered fields for every other placement, this
+    // bails outright on ANY duplicate number, full stop - always safe
+    // (`$matches` is simply left untouched, this scanner's own standing
+    // contract), at the cost of not typing `$matches` for a branch-reset
+    // construct whose branches *do* each capture something. Still a real
+    // improvement over the pre-Phase-72 status quo (an unconditional
+    // bail on any `(?|` at all, anywhere in the pattern): a branch-reset
+    // with at most one group total across all its branches (no reuse
+    // possible), or one combined with otherwise-ordinary structure, now
+    // resolves correctly, and a group declared *after* one now numbers
+    // correctly too (`(?|(a)(b)|(c))(d)` renumbers `(d)` to 3, confirmed
+    // live against a real PHP interpreter - matching real PCRE's own
+    // "resume from the highest number reached in any branch" rule).
+    let mut seen_numbers: Vec<usize> = Vec::with_capacity(scanner.groups.len());
+    for g in &scanner.groups {
+        if seen_numbers.contains(&g.number) {
+            return None;
+        }
+        seen_numbers.push(g.number);
     }
     Some(ParsedPattern {
         groups: scanner.groups,
@@ -183,29 +245,61 @@ struct AtomResult {
     literal_values: Option<Vec<String>>,
     is_quoted_block: bool,
     direct_group: Option<usize>,
+    /// The *minimum* number of characters this atom could ever
+    /// contribute - `0` for anything that could legitimately match
+    /// nothing (a zero-width assertion, an atom this scanner doesn't
+    /// know the shape of at all, ...), matching real PCRE fact for fact
+    /// (never a guess in the "could be non-empty" direction). Combined
+    /// across a branch's own atoms by summing (concatenation) and across
+    /// an alternation's own branches by taking the minimum (only one
+    /// branch runs) - see `Scanner::combine_branches`/`Scanner::
+    /// scan_branch`. Feeds `RegexGroupFallback` alongside `digits_only`.
+    min_len: u64,
+    /// `true` iff this atom, *whenever it contributes any character at
+    /// all*, only ever contributes ASCII digit characters - independent
+    /// of `min_len` (an atom that might contribute nothing still has a
+    /// definite answer for "if it does, is it a digit"), and
+    /// deliberately independent of `Scanner::literal_globally_suppressed`
+    /// (the `i` modifier folds a digit's *case*, which digits don't
+    /// have, so it never turns a digit into a non-digit or vice versa -
+    /// unlike exact literal-value enumeration, which genuinely does need
+    /// to bail under `/i`). The vacuous default (`true`) for a
+    /// zero-width construct that never contributes any character at all.
+    digits_only: bool,
 }
 
 impl AtomResult {
-    /// No groups, not literal - the default for anything this scanner
-    /// can't or won't enumerate.
+    /// No groups, not literal, and no known length/character-set shape -
+    /// the maximally conservative default for anything this scanner
+    /// can't or won't say anything more precise about (never wrongly
+    /// claims non-emptiness or a digit-only charset).
     fn opaque() -> Self {
         AtomResult {
             handles: Vec::new(),
             literal_values: None,
             is_quoted_block: false,
             direct_group: None,
+            min_len: 0,
+            digits_only: false,
         }
     }
 
     /// No groups, contributes exactly `value` (a single known string -
     /// often one character, sometimes the empty string for a zero-width
-    /// construct).
+    /// construct). `min_len`/`digits_only` are derived directly from
+    /// `value` itself, so a zero-width construct built this way (`^`,
+    /// `$`, an empty `\Q\E`) correctly gets the vacuous-true/zero-length
+    /// identity for free.
     fn literal(value: String) -> Self {
+        let min_len = value.chars().count() as u64;
+        let digits_only = value.chars().all(|c| c.is_ascii_digit());
         AtomResult {
             handles: Vec::new(),
             literal_values: Some(vec![value]),
             is_quoted_block: false,
             direct_group: None,
+            min_len,
+            digits_only,
         }
     }
 }
@@ -266,6 +360,28 @@ fn repeat_literals(literals: &[String], min: u64, max: u64) -> Option<Vec<String
     Some(collected)
 }
 
+/// Classifies a single-character backslash escape's own known
+/// `(min_len, digits_only)` shape, independent of `Scanner::
+/// literal_globally_suppressed` (an escape class's character set is
+/// fixed, never affected by the `i` modifier - see `AtomResult::
+/// digits_only`'s own doc comment). `None` for anything this scanner
+/// doesn't specifically know the shape of (a digit backreference `\1`,
+/// `\K`, `\p{...}`, ...) - callers fall back to the fully-unknown
+/// `(0, false)` default rather than guess.
+fn escape_class_info(c: char) -> Option<(u64, bool)> {
+    match c {
+        // Exactly one digit character, always.
+        'd' => Some((1, true)),
+        // Exactly one character, but not knowably a digit.
+        'D' | 'w' | 'W' | 's' | 'S' | 'h' | 'H' | 'v' | 'V' | 'N' => Some((1, false)),
+        // Zero-width assertions - never contribute a character, so
+        // vacuously both "always empty" and "digits only" (there's
+        // nothing to violate either claim).
+        'b' | 'B' | 'A' | 'Z' | 'z' | 'G' | 'K' => Some((0, true)),
+        _ => None,
+    }
+}
+
 struct Scanner {
     chars: Vec<char>,
     pos: usize,
@@ -294,10 +410,21 @@ struct Scanner {
     next_alternation_id: u32,
     alternation_branch_counts: Vec<(u32, usize)>,
     alternation_wrapped_in_optional_quantifier: Vec<u32>,
+    /// The pattern's own top-level `x` modifier (free-spacing mode) -
+    /// unescaped whitespace and `#`-to-end-of-line comments outside a
+    /// character class are skipped between tokens when this is set (see
+    /// `skip_free_spacing`). Fixed for the whole scan, unlike
+    /// `literal_globally_suppressed`: no corpus evidence anywhere in
+    /// this project's own history uses an inline `(?x)`/`(?x:...)`
+    /// modifier group, so - consistent with this scanner's own existing,
+    /// documented choice for inline `i` - that inline form still bails
+    /// the whole parse (`scan_group_inner`'s own `"imsxuJU-"` branch)
+    /// rather than dynamically toggling this mid-scan.
+    free_spacing: bool,
 }
 
 impl Scanner {
-    fn new(body: &str, case_insensitive: bool) -> Self {
+    fn new(body: &str, case_insensitive: bool, free_spacing: bool) -> Self {
         Scanner {
             chars: body.chars().collect(),
             pos: 0,
@@ -309,6 +436,33 @@ impl Scanner {
             next_alternation_id: 0,
             alternation_branch_counts: Vec::new(),
             alternation_wrapped_in_optional_quantifier: Vec::new(),
+            free_spacing,
+        }
+    }
+
+    /// Free-spacing mode's own tokenization effect: skips unescaped
+    /// ASCII whitespace and `#`-to-end-of-line comments, repeatedly,
+    /// until neither is at the current position - a no-op when `x`
+    /// wasn't in the pattern's own modifiers. Only ever called from
+    /// `scan_branch`'s own atom loop (between atoms, and between an atom
+    /// and its own quantifier), never from inside a character class
+    /// (real PCRE fact: whitespace stays literal there even under `x`)
+    /// or `\Q...\E` (already consumed verbatim as one atom before this
+    /// could ever run again).
+    fn skip_free_spacing(&mut self) {
+        if !self.free_spacing {
+            return;
+        }
+        loop {
+            match self.peek() {
+                Some(c) if c.is_ascii_whitespace() => self.pos += 1,
+                Some('#') => {
+                    while !matches!(self.peek(), None | Some('\n')) {
+                        self.pos += 1;
+                    }
+                }
+                _ => break,
+            }
         }
     }
 
@@ -352,6 +506,57 @@ impl Scanner {
         while self.eat('|') {
             branches.push(self.scan_branch()?);
         }
+        Some(self.combine_branches(branches))
+    }
+
+    /// `(?|branch ('|' branch)*)` - PCRE's own "branch reset" group:
+    /// each branch's own capturing groups restart numbering from the
+    /// same point (the group number that would have come next just
+    /// before this construct), so `(?|(a)|(b))` has exactly one
+    /// capturing group, number N, shared by both branches - never two
+    /// (confirmed live against a real PHP interpreter). Numbering
+    /// resumes, after the whole construct, from one past the *highest*
+    /// number reached in *any* one branch - also confirmed live:
+    /// `(?|(a)(b)|(c))(d)` numbers `(d)` as group 3, not 2, since branch
+    /// 1 alone reached as high as 2. Otherwise behaves exactly like
+    /// `scan_alternation` (multi-branch optionality, alternation-id
+    /// bookkeeping, literal-value union, `min_len`/`digits_only`
+    /// combination) via the same shared `combine_branches` - this only
+    /// ever intercepts `next_number` between branches. The construct
+    /// itself is *not* a capturing group (mirrors `finish_non_capturing_
+    /// group`, not `finish_capturing_group`) - only what's inside it is.
+    /// A resulting duplicate `.number` across branches (the common case:
+    /// every branch captures something) is resolved, or safely bailed
+    /// on, by `parse_capture_groups`'s own dedicated check after the
+    /// whole pattern has been scanned - seeing only one branch at a time
+    /// here, this has no way to know whether a number it's about to
+    /// reuse collides with a sibling branch's own.
+    fn scan_branch_reset_alternation(&mut self) -> Option<AtomResult> {
+        let start_number = self.next_number;
+        let mut max_number = start_number;
+        let mut branches: Vec<AtomResult> = Vec::new();
+        loop {
+            self.next_number = start_number;
+            branches.push(self.scan_branch()?);
+            max_number = max_number.max(self.next_number);
+            if !self.eat('|') {
+                break;
+            }
+        }
+        self.next_number = max_number;
+        Some(self.combine_branches(branches))
+    }
+
+    /// Shared by `scan_alternation` and `scan_branch_reset_alternation`:
+    /// given every branch's own already-scanned `AtomResult`, does every
+    /// bit of "this is a real, 2+-branch alternation" bookkeeping that's
+    /// independent of how each branch's own numbering was produced -
+    /// retroactive `optional`/`alternation` marking, the alternation's
+    /// own id/branch-count record, literal-value union, and the
+    /// `min_len` (minimum across branches - only one ever runs) /
+    /// `digits_only` (AND across branches - whichever runs must still
+    /// satisfy it) combination Phase 72 adds.
+    fn combine_branches(&mut self, branches: Vec<AtomResult>) -> AtomResult {
         let multi_branch = branches.len() > 1;
         let alt_id = self.next_alternation_id;
         if multi_branch {
@@ -361,6 +566,8 @@ impl Scanner {
         }
         let mut handles = Vec::new();
         let mut literal_values: Option<Vec<String>> = Some(Vec::new());
+        let mut min_len: Option<u64> = None;
+        let mut digits_only = true;
         for (branch_index, branch) in branches.into_iter().enumerate() {
             if multi_branch {
                 for &idx in &branch.handles {
@@ -376,6 +583,11 @@ impl Scanner {
                     }
                 }
             }
+            min_len = Some(match min_len {
+                None => branch.min_len,
+                Some(m) => m.min(branch.min_len),
+            });
+            digits_only &= branch.digits_only;
             handles.extend(branch.handles);
             literal_values = match (literal_values, branch.literal_values) {
                 (Some(mut acc), Some(values)) => {
@@ -393,12 +605,14 @@ impl Scanner {
                 _ => None,
             };
         }
-        Some(AtomResult {
+        AtomResult {
             handles,
             literal_values,
             is_quoted_block: false,
             direct_group: None,
-        })
+            min_len: min_len.unwrap_or(0),
+            digits_only,
+        }
     }
 
     /// `branch := atom*`, stopping at `|`, `)`, or end of input. Its own
@@ -409,12 +623,16 @@ impl Scanner {
     fn scan_branch(&mut self) -> Option<AtomResult> {
         let mut handles = Vec::new();
         let mut literal_values: Option<Vec<String>> = Some(vec![String::new()]);
+        let mut min_len: u64 = 0;
+        let mut digits_only = true;
         loop {
+            self.skip_free_spacing();
             match self.peek() {
                 None | Some('|') | Some(')') => break,
                 _ => {}
             }
             let atom = self.scan_atom()?;
+            self.skip_free_spacing();
             let quantifier = self.maybe_consume_quantifier();
             if let Some((min, _)) = quantifier
                 && min == 0
@@ -471,6 +689,19 @@ impl Scanner {
                     .and_then(|lits| repeat_literals(&lits, min, max)),
             };
             literal_values = concat_literals(literal_values, contributed);
+            // Same "binds to the quoted block's own last character only"
+            // fact as the literal-value cross-product just above applies
+            // here too - staying with the safe, fully-unknown default
+            // (`0`/`false`) for that one atom rather than guessing at
+            // the real, more intricate length this would actually
+            // produce (no corpus evidence combines the two).
+            let (contributed_min_len, contributed_digits_only) = match quantifier {
+                None => (atom.min_len, atom.digits_only),
+                Some(_) if atom.is_quoted_block => (0, false),
+                Some((min, _)) => (atom.min_len.saturating_mul(min), atom.digits_only),
+            };
+            min_len = min_len.saturating_add(contributed_min_len);
+            digits_only &= contributed_digits_only;
             handles.extend(atom.handles);
         }
         Some(AtomResult {
@@ -478,6 +709,8 @@ impl Scanner {
             literal_values,
             is_quoted_block: false,
             direct_group: None,
+            min_len,
+            digits_only,
         })
     }
 
@@ -560,8 +793,19 @@ impl Scanner {
                 self.scan_group()
             }
             '[' => {
-                self.scan_character_class()?;
-                Some(AtomResult::opaque())
+                let digits_only = self.scan_character_class()?;
+                Some(AtomResult {
+                    handles: Vec::new(),
+                    literal_values: None,
+                    is_quoted_block: false,
+                    direct_group: None,
+                    // A well-formed `[...]` (a leading `]` is always a
+                    // literal member, never an empty class - real PCRE
+                    // fact) always matches exactly one character when it
+                    // matches at all.
+                    min_len: 1,
+                    digits_only,
+                })
             }
             '\\' => self.scan_escape_atom(),
             // Zero-width assertions - never consume a character,
@@ -572,16 +816,36 @@ impl Scanner {
                 self.pos += 1;
                 Some(AtomResult::literal(String::new()))
             }
-            // The wildcard - consumes a character, just not a knowably-
-            // literal one.
+            // The wildcard - consumes exactly one character, just not a
+            // knowably-literal or knowably-digit one.
             '.' => {
                 self.pos += 1;
-                Some(AtomResult::opaque())
+                Some(AtomResult {
+                    handles: Vec::new(),
+                    literal_values: None,
+                    is_quoted_block: false,
+                    direct_group: None,
+                    min_len: 1,
+                    digits_only: false,
+                })
             }
             c => {
                 self.pos += 1;
                 if self.literal_globally_suppressed {
-                    Some(AtomResult::opaque())
+                    // Case folding never turns a digit into a non-digit
+                    // or vice versa (digits have no case), and never
+                    // changes how many characters this contributes - so
+                    // `min_len`/`digits_only` stay knowable even though
+                    // the *exact* literal value doesn't (see
+                    // `AtomResult::digits_only`'s own doc comment).
+                    Some(AtomResult {
+                        handles: Vec::new(),
+                        literal_values: None,
+                        is_quoted_block: false,
+                        direct_group: None,
+                        min_len: 1,
+                        digits_only: c.is_ascii_digit(),
+                    })
                 } else {
                     Some(AtomResult::literal(c.to_string()))
                 }
@@ -595,8 +859,14 @@ impl Scanner {
     /// real closer), then a candidate POSIX class, then a leading-`]`
     /// literal, then an ordinary member. Character classes never contain
     /// real groups, and are never literal-tracked (no corpus evidence
-    /// calls for enumerating even a trivial `[a]`).
-    fn scan_character_class(&mut self) -> Option<()> {
+    /// calls for enumerating even a trivial `[a]`). Returns whether the
+    /// class is provably digit-only (Phase 72's own
+    /// `class_body_is_digits_only`, computed *before* consuming, since
+    /// that check is a read-only lookahead over the same span this then
+    /// consumes for real) - `None` still means "malformed/unterminated,"
+    /// same as before this phase.
+    fn scan_character_class(&mut self) -> Option<bool> {
+        let digits_only = self.class_body_is_digits_only(self.pos + 1);
         self.pos += 1; // the opening `[`
         let mut first = true;
         if self.peek() == Some('^') {
@@ -621,12 +891,83 @@ impl Scanner {
                 }
                 Some(']') => {
                     self.pos += 1;
-                    return Some(());
+                    return Some(digits_only);
                 }
                 Some(_) => {
                     self.pos += 1;
                     first = false;
                 }
+            }
+        }
+    }
+
+    /// A conservative, read-only lookahead classifying a `[...]` class
+    /// body (given `i` at the char immediately after the opening `[` -
+    /// *not* yet past a leading `^`, unlike `scan_character_class`'s own
+    /// `self.pos` at that point) as provably digit-only - never advances
+    /// `self.pos`, mirrors `scan_character_class`'s own member-boundary
+    /// rules (leading `]` is literal, `\` escapes, POSIX `[:name:]`)
+    /// closely enough to stay in sync, but independently, since this
+    /// only ever needs to answer "would this class ever produce anything
+    /// but an ASCII digit?", not actually consume the pattern. Any
+    /// construct it doesn't specifically recognize as digit-safe (an
+    /// ordinary non-digit literal, a non-`\d`/`[:digit:]` escape/POSIX
+    /// class, a negated class, an unterminated class) makes it return
+    /// `false` - the always-safe default, never a guess. A digit range
+    /// (`0-9`, or any subrange like `3-7`) is recognized explicitly;
+    /// `digits_only` only ever asserts the characters this class *can*
+    /// produce are digits, never that it covers all ten, so a subrange
+    /// is exactly as digit-safe as the full range.
+    fn class_body_is_digits_only(&self, i: usize) -> bool {
+        if self.chars.get(i) == Some(&'^') {
+            return false; // negated - never provably digit-only
+        }
+        let mut i = i;
+        let mut first = true;
+        loop {
+            match self.chars.get(i) {
+                None => return false, // unterminated
+                Some('\\') => {
+                    if self.chars.get(i + 1) != Some(&'d') {
+                        return false;
+                    }
+                    i += 2;
+                    first = false;
+                }
+                Some('[') if self.chars.get(i + 1) == Some(&':') => {
+                    let name_start = i + 2;
+                    let mut j = name_start;
+                    loop {
+                        match self.chars.get(j) {
+                            None => return false,
+                            Some(']') => return false, // outer closer first - malformed
+                            Some(':') if self.chars.get(j + 1) == Some(&']') => break,
+                            Some(_) => j += 1,
+                        }
+                    }
+                    let name: String = self.chars[name_start..j].iter().collect();
+                    if name != "digit" {
+                        return false;
+                    }
+                    i = j + 2;
+                    first = false;
+                }
+                Some(']') if first => return false, // literal `]` member - not a digit
+                Some(']') => return true, // real closer - every member so far was digit-safe
+                Some(&c) if c.is_ascii_digit() => {
+                    // A possible range `c-c2`, both endpoints digits.
+                    if self.chars.get(i + 1) == Some(&'-')
+                        && let Some(&c2) = self.chars.get(i + 2)
+                        && c2.is_ascii_digit()
+                        && c <= c2
+                    {
+                        i += 3;
+                    } else {
+                        i += 1;
+                    }
+                    first = false;
+                }
+                Some(_) => return false, // any other literal member
             }
         }
     }
@@ -683,38 +1024,70 @@ impl Scanner {
     /// quantifier handling); `\` + one ASCII-punctuation character
     /// contributes that one character (PCRE's own rule: escaping
     /// non-alphanumeric punctuation is always just that literal
-    /// character); anything else consumes normally but contributes
-    /// nothing literal - never special-casing a real multi-character
-    /// escape meaning (`\d`, `\w`, `\n`, a backreference, ...), since
-    /// getting one wrong would produce a *wrong* literal type.
+    /// character); a handful of specific multi-character escapes whose
+    /// own length/character-set *is* safely knowable even without
+    /// knowing their exact matched text (`escape_class_info`) contribute
+    /// that; anything else consumes normally but contributes nothing
+    /// literal *and* nothing about length/charset either - never
+    /// special-casing a real escape meaning this scanner isn't
+    /// specifically sure of (a digit backreference, `\p{...}`, ...),
+    /// since getting one wrong would produce a wrong literal/fallback
+    /// type, not just a missed one.
     fn scan_escape_atom(&mut self) -> Option<AtomResult> {
         self.pos += 1; // the backslash
         match self.peek() {
             Some('Q') => {
                 self.pos += 1;
                 let text = self.consume_quoted_block();
+                // `min_len`/`digits_only` are derived from `text` itself
+                // regardless of `literal_globally_suppressed` - see
+                // `AtomResult::digits_only`'s own doc comment for why
+                // that's always safe, unlike exact literal enumeration.
+                let min_len = text.chars().count() as u64;
+                let digits_only = text.chars().all(|c| c.is_ascii_digit());
+                let literal_values = if self.literal_globally_suppressed {
+                    None
+                } else {
+                    Some(vec![text])
+                };
                 Some(AtomResult {
                     handles: Vec::new(),
-                    literal_values: if self.literal_globally_suppressed {
-                        None
-                    } else {
-                        Some(vec![text])
-                    },
+                    literal_values,
                     is_quoted_block: true,
                     direct_group: None,
+                    min_len,
+                    digits_only,
                 })
             }
             Some(c) if c.is_ascii_punctuation() => {
                 self.pos += 1;
+                // Punctuation is never an ASCII digit, so `digits_only`
+                // is `false` regardless of case-folding either way; only
+                // the *exact* literal value needs the `/i` bail.
                 if self.literal_globally_suppressed {
-                    Some(AtomResult::opaque())
+                    Some(AtomResult {
+                        handles: Vec::new(),
+                        literal_values: None,
+                        is_quoted_block: false,
+                        direct_group: None,
+                        min_len: 1,
+                        digits_only: false,
+                    })
                 } else {
                     Some(AtomResult::literal(c.to_string()))
                 }
             }
-            Some(_) => {
+            Some(c) => {
                 self.pos += 1;
-                Some(AtomResult::opaque())
+                let (min_len, digits_only) = escape_class_info(c).unwrap_or((0, false));
+                Some(AtomResult {
+                    handles: Vec::new(),
+                    literal_values: None,
+                    is_quoted_block: false,
+                    direct_group: None,
+                    min_len,
+                    digits_only,
+                })
             }
             None => None, // a trailing lone backslash - malformed
         }
@@ -764,6 +1137,10 @@ impl Scanner {
                 self.pos += 1;
                 self.finish_non_capturing_group()
             }
+            Some('|') => {
+                self.pos += 1;
+                self.finish_branch_reset_group()
+            }
             Some('=') | Some('!') => {
                 self.pos += 1;
                 self.finish_lookaround()
@@ -802,10 +1179,15 @@ impl Scanner {
                 // A comment - consume verbatim to the first `)` (PCRE
                 // comments cannot contain a literal `)` at all, even
                 // escaped, so no escape handling is needed here).
+                // Zero-width, so contributes `""` like `^`/`$` do -
+                // `AtomResult::opaque()`'s own `None` literal_values
+                // would otherwise wrongly break literal enumeration for
+                // a branch merely containing a comment (`(a(?#x)b)`
+                // really is always `"ab"`).
                 loop {
                     match self.advance() {
                         None => return None,
-                        Some(')') => return Some(AtomResult::opaque()),
+                        Some(')') => return Some(AtomResult::literal(String::new())),
                         Some(_) => {}
                     }
                 }
@@ -847,7 +1229,9 @@ impl Scanner {
                 if self.eat(':') {
                     self.finish_non_capturing_group()
                 } else if self.eat(')') {
-                    Some(AtomResult::opaque())
+                    // A bare `(?i)` - zero-width, same reasoning as the
+                    // `(?#...)` comment case just above.
+                    Some(AtomResult::literal(String::new()))
                 } else {
                     None
                 }
@@ -875,6 +1259,7 @@ impl Scanner {
             in_optional_quantification: false,
             alternation: None,
             forced_empty: false,
+            fallback: RegexGroupFallback::Unknown,
         });
         self.capturing_depth += 1;
         let body = self.scan_alternation();
@@ -884,6 +1269,18 @@ impl Scanner {
             return None;
         }
         self.groups[idx].literal_values = body.literal_values.clone();
+        // Phase 72: computed unconditionally (not only when
+        // `literal_values` ends up `None`) - `group_leaf_type` is the
+        // one that decides literal enumeration always wins when both are
+        // available, so there's no need to duplicate that priority
+        // check here too.
+        self.groups[idx].fallback = if body.min_len == 0 {
+            RegexGroupFallback::Unknown
+        } else if body.digits_only {
+            RegexGroupFallback::NumericString
+        } else {
+            RegexGroupFallback::NonEmptyString
+        };
         let mut handles = vec![idx];
         handles.extend(body.handles);
         Some(AtomResult {
@@ -891,11 +1288,24 @@ impl Scanner {
             literal_values: body.literal_values,
             is_quoted_block: false,
             direct_group: Some(idx),
+            min_len: body.min_len,
+            digits_only: body.digits_only,
         })
     }
 
     fn finish_non_capturing_group(&mut self) -> Option<AtomResult> {
         let body = self.scan_alternation()?;
+        if !self.eat(')') {
+            return None;
+        }
+        Some(body)
+    }
+
+    /// `(?|...)` - see `scan_branch_reset_alternation`'s own doc comment
+    /// for the numbering semantics; the construct itself is never a
+    /// capturing group (mirrors `finish_non_capturing_group`).
+    fn finish_branch_reset_group(&mut self) -> Option<AtomResult> {
+        let body = self.scan_branch_reset_alternation()?;
         if !self.eat(')') {
             return None;
         }
@@ -923,6 +1333,11 @@ impl Scanner {
             literal_values: Some(vec![String::new()]),
             is_quoted_block: false,
             direct_group: None,
+            // Same forcing as `literal_values` just above, same reason:
+            // zero-width, so this construct's own contribution is always
+            // the empty string, never its interior's real shape.
+            min_len: 0,
+            digits_only: true,
         })
     }
 
