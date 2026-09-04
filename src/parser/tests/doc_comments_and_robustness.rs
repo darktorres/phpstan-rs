@@ -105,8 +105,30 @@ fn pathologically_nested_unary_fails_cleanly_instead_of_overflowing_the_stack() 
     // engine's own stack-depth guard, and used to take this parser's
     // process down with an uncatchable stack overflow instead of a
     // normal parse error.
+    //
+    // Runs on its own thread with an explicit, generous stack size -
+    // mirrors `main.rs::run_check`'s own `WORKER_STACK_SIZE` fix for
+    // the identical root cause, rather than depending on whatever stack
+    // size the test harness's own thread happens to have. A debug
+    // build's much larger per-frame stack usage through `parse_unary`'s
+    // own recursive descent means even the parser's own
+    // `MAX_EXPR_DEPTH = 1000` guard can physically exhaust a small
+    // default thread stack before its own counter ever gets a chance
+    // to trip - exactly the class of crash this test exists to catch.
+    // Re-raises the inner thread's own panic payload so `#[should_
+    // panic]` still sees the real message.
     let nested = "~".repeat(8000);
-    parse(&format!("<?php $x = {nested}1;"));
+    let source = format!("<?php $x = {nested}1;");
+    let result = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            parse(&source);
+        })
+        .expect("failed to spawn worker thread")
+        .join();
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
 }
 
 #[test]
