@@ -340,22 +340,45 @@ impl<'a> Checker<'a> {
     /// Checks a closure/arrow-fn literal's body with `$this` seeded to
     /// `this_ty` instead of whatever (if anything) the enclosing scope's
     /// own `locals` would otherwise provide - used by `Closure::bind`/
-    /// `->bindTo()` (Finding 49), both of which explicitly rebind `$this`
-    /// independently of where the closure was lexically declared. A
-    /// clone of `locals`, not a mutation of it: the seeded `$this` (and
-    /// anything the closure's own body binds) must not leak back into the
-    /// caller's real scope, matching how `ExprKind::Closure`'s own
-    /// ordinary handling already keeps `closure_locals` separate.
-    pub(crate) fn check_closure_literal_with_this(
+    /// `->bindTo()` (Finding 49) and Pest's own file-scoped `$this`
+    /// binding, all of which rebind `$this` independently of where the
+    /// closure was lexically declared. A clone of `locals`, not a
+    /// mutation of it: the seeded `$this` (and anything the closure's
+    /// own body binds) must not leak back into the caller's real scope,
+    /// matching how `ExprKind::Closure`'s own ordinary handling already
+    /// keeps `closure_locals` separate.
+    ///
+    /// `scope_class` is real PHP's own `$newScope` (`Closure::bind`/
+    /// `->bindTo()`'s third argument, or Pest's own bound test-class):
+    /// while the closure body is checked, `self.current_class` is
+    /// temporarily swapped to it, then restored afterward (ordinary
+    /// control flow only, no unwind-safety concern to guard against
+    /// here). Real PHP grants the rebound closure private/protected
+    /// access as if it were declared *inside* that class, independent
+    /// of `$newThis`'s own type or where the closure was lexically
+    /// written. `None` (a call site with no literal class-name/`::class`
+    /// third argument to resolve at all) leaves `current_class` alone -
+    /// real PHP's own default (`$newScope = 'static'`) keeps whatever
+    /// scope the closure already had, which this project has no way to
+    /// recover once the closure literal itself is being checked outside
+    /// its own original declaration site anyway.
+    pub(crate) fn check_closure_literal_with_this_and_scope(
         &mut self,
         closure_expr: &Expr,
         locals: &Locals,
         label: &str,
         this_ty: Type,
+        scope_class: Option<String>,
     ) {
         let mut seeded = locals.clone();
         seeded.insert("this".to_string(), this_ty);
-        self.check_expr(closure_expr, &mut seeded, label);
+        if let Some(scope) = scope_class {
+            let previous_class = self.current_class.replace(scope);
+            self.check_expr(closure_expr, &mut seeded, label);
+            self.current_class = previous_class;
+        } else {
+            self.check_expr(closure_expr, &mut seeded, label);
+        }
     }
 
     /// Phase 53: `array_map`'s own contextual parameter-type injection -

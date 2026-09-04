@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 
-use crate::ast::{ClassKind, Stmt, StmtKind};
+use crate::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use crate::types::{self, Type};
 
 mod class_info;
@@ -314,7 +314,12 @@ impl Registry {
                 }
                 StmtKind::FunctionDecl(f) => {
                     let name = ctx.declared_name(&f.name);
-                    let new_sig = FunctionSig::from_decl(f, ctx, &std::collections::HashMap::new());
+                    let new_sig = FunctionSig::from_decl(
+                        f,
+                        ctx,
+                        &std::collections::HashMap::new(),
+                        Visibility::Public,
+                    );
                     if conditional {
                         self.functions.entry(name).or_insert_with(|| new_sig);
                     } else if self.unconditionally_declared_functions.contains(&name) {

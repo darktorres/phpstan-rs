@@ -1,8 +1,8 @@
 use crate::ast::*;
 use crate::checker::{
-    CheckArgsCall, Checker, DiagnosticBuilder, Locals, TemplateBindings, body_contains_yield,
-    is_language_construct, is_real_variable_key, is_superglobal, literal_string_key,
-    literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
+    CheckArgsCall, Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, TemplateBindings,
+    body_contains_yield, is_language_construct, is_real_variable_key, is_superglobal,
+    literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
     purge_stale_narrowing_for, resolve_call_args, superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
@@ -271,11 +271,27 @@ impl<'a> Checker<'a> {
                         )
                     {
                         let this_ty = self.pest_this_type.clone();
-                        self.check_closure_literal_with_this(
+                        // Phase 57: Pest's own `$this`-binding (a real
+                        // `TestCase`-subclass instance, almost always)
+                        // grants the same private/protected access real
+                        // PHP's `Closure::bind`/`->bindTo()` third
+                        // argument does - without this, every real
+                        // corpus `it(...)`/`test(...)` closure calling
+                        // an inherited protected `TestCase` method
+                        // (`$this->expectErrorLog(...)`, a genuine,
+                        // common idiom) was wrongly flagged, since
+                        // `current_class` has no other way to reflect
+                        // Pest's own file-scoped binding.
+                        let scope_class = match &this_ty {
+                            Type::Object(name, _) => Some(name.clone()),
+                            _ => None,
+                        };
+                        self.check_closure_literal_with_this_and_scope(
                             unwrap_grouping(&a.value),
                             locals,
                             label,
                             this_ty,
+                            scope_class,
                         );
                     } else if is_existence_probe {
                         self.check_expr_quiet_root(&a.value, locals, label);
@@ -479,11 +495,15 @@ impl<'a> Checker<'a> {
                         .first()
                         .map(|a| self.infer_expr(&a.value, locals))
                         .unwrap_or(Type::Mixed);
-                    self.check_closure_literal_with_this(
+                    let scope_class = args
+                        .get(1)
+                        .and_then(|a| self.literal_class_name_from_expr(&a.value));
+                    self.check_closure_literal_with_this_and_scope(
                         unwrap_grouping(recv),
                         locals,
                         label,
                         this_ty,
+                        scope_class,
                     );
                     self.infer_expr(recv, locals)
                 } else {
@@ -569,6 +589,27 @@ impl<'a> Checker<'a> {
                             "method.notFound",
                         );
                     } else if let Some(sig) = &sig {
+                        // Phase 57: visibility - a fresh, small lookup
+                        // rather than threading `owner` out of `sig`'s
+                        // own computation above (which discards it once
+                        // `substitute_class_templates` has consumed it),
+                        // matching this project's own established
+                        // "cheap, pure lookup called twice for clarity"
+                        // precedent elsewhere (e.g. `ExprKind::
+                        // PropertyAccess`'s identical shape just above).
+                        if let Some((owner, _)) =
+                            self.registry.lookup_method_with_owner(class, method)
+                        {
+                            self.check_member_visibility(MemberVisibilityCheck {
+                                kind: "method",
+                                owner: &owner,
+                                member_name: method,
+                                visibility: &sig.visibility,
+                                describe: &format!("method {owner}::{method}()"),
+                                span: e.span,
+                                label,
+                            });
+                        }
                         // Finding 29 / Phase 49: see the identical
                         // comment on the plain-function Call arm above -
                         // `check_args` is spread-aware now, so it's
@@ -1073,9 +1114,15 @@ impl<'a> Checker<'a> {
                 // byref/unknown args using the real signature before
                 // checking them, then the existence/arg-type check.
                 let resolved_class = self.resolve_static_class_name(class_name);
-                let sig = resolved_class
+                // Phase 57: `_with_owner`, not the plain `lookup_method`
+                // this used to call - visibility needs the *declaring*
+                // class, which can differ from `resolved_class` for an
+                // inherited method (`sig` itself stays exactly what it
+                // was before; only the extra `owner` half is new).
+                let sig_with_owner = resolved_class
                     .as_ref()
-                    .and_then(|class| self.registry.lookup_method(class, method));
+                    .and_then(|class| self.registry.lookup_method_with_owner(class, method));
+                let sig = sig_with_owner.as_ref().map(|(_, s)| *s);
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
@@ -1102,11 +1149,15 @@ impl<'a> Checker<'a> {
                         .get(1)
                         .map(|a| self.infer_expr(&a.value, locals))
                         .unwrap_or(Type::Mixed);
-                    self.check_closure_literal_with_this(
+                    let scope_class = args
+                        .get(2)
+                        .and_then(|a| self.literal_class_name_from_expr(&a.value));
+                    self.check_closure_literal_with_this_and_scope(
                         unwrap_grouping(&args[0].value),
                         locals,
                         label,
                         this_ty,
+                        scope_class,
                     );
                     for a in &args[1..] {
                         self.check_expr(&a.value, locals, label);
@@ -1118,6 +1169,18 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(class) = &resolved_class {
                     if let Some(sig) = sig {
+                        // Phase 57: visibility.
+                        if let Some((owner, _)) = &sig_with_owner {
+                            self.check_member_visibility(MemberVisibilityCheck {
+                                kind: "staticMethod",
+                                owner,
+                                member_name: method,
+                                visibility: &sig.visibility,
+                                describe: &format!("static method {owner}::{method}()"),
+                                span: e.span,
+                                label,
+                            });
+                        }
                         // Finding 29 / Phase 49: see the identical
                         // comment on the plain-function Call arm above -
                         // `check_args` is spread-aware now, so it's
@@ -1284,6 +1347,25 @@ impl<'a> Checker<'a> {
                         2,
                         "property.notFound",
                     );
+                }
+                // Phase 57: visibility - only meaningful once the
+                // property is confirmed to exist at all (the block just
+                // above already handles "doesn't exist"), so this reuses
+                // the identical class-narrowing shape the real type-
+                // resolution just below performs anyway.
+                if let Type::Object(class, _) = narrow_type_excluding(&base_ty, &Type::Null)
+                    && let Some((owner, p)) = self.registry.lookup_property_with_owner(&class, prop)
+                {
+                    let visibility = p.visibility.clone();
+                    self.check_member_visibility(MemberVisibilityCheck {
+                        kind: "property",
+                        owner: &owner,
+                        member_name: prop,
+                        visibility: &visibility,
+                        describe: &format!("property {owner}::${prop}"),
+                        span: e.span,
+                        label,
+                    });
                 }
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))

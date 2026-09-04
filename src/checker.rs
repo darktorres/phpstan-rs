@@ -388,6 +388,7 @@ pub(crate) mod phpstan_api;
 mod resolve;
 mod stmt;
 mod unused;
+mod visibility;
 
 pub(crate) use assignment::{
     is_superglobal, literal_string_key, literal_string_value, superglobal_default_type,
@@ -406,6 +407,7 @@ pub(crate) use narrowing::{
     is_real_variable_key, narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to,
     narrowing_key, purge_stale_narrowing_for,
 };
+pub(crate) use visibility::MemberVisibilityCheck;
 
 impl<'a> Checker<'a> {
     pub fn new(registry: &'a Registry) -> Self {

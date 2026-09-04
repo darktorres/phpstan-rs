@@ -1,0 +1,327 @@
+//! Phase 57: `public`/`private`/`protected` access-control enforcement
+//! for property reads/writes, method calls, and static method calls.
+
+use super::super::Diagnostic;
+use super::helpers::*;
+
+/// These fixtures are deliberately minimal (a bare private property/
+/// method with no other legitimate use anywhere in the file) - real,
+/// unrelated Phase 59 unused-symbol diagnostics (`property.onlyWritten`,
+/// `method.unused`, ...) fire on them too, which isn't what these tests
+/// are about. Filters down to the visibility-family identifiers this
+/// file actually exercises.
+fn visibility_diagnostics(src: &str) -> Vec<Diagnostic> {
+    diagnostics_for(src)
+        .into_iter()
+        .filter(|d| {
+            d.identifier.starts_with("property.private")
+                || d.identifier.starts_with("property.protected")
+                || d.identifier.starts_with("method.private")
+                || d.identifier.starts_with("method.protected")
+                || d.identifier.starts_with("staticMethod.private")
+                || d.identifier.starts_with("staticMethod.protected")
+        })
+        .collect()
+}
+
+#[test]
+fn reading_a_private_property_from_outside_its_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private int $x = 1;
+            }
+            function test(Foo $f): int {
+                return $f->x;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "property.private");
+}
+
+#[test]
+fn reading_a_private_property_from_inside_its_own_class_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private int $x = 1;
+                public function getX(): int {
+                    return $this->x;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reading_a_private_property_from_a_subclass_is_flagged() {
+    // Real PHP: `private` is never inherited/visible to a subclass,
+    // unlike `protected`.
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Base {
+                private int $x = 1;
+            }
+            class Child extends Base {
+                public function getX(): int {
+                    return $this->x;
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "property.private");
+}
+
+#[test]
+fn reading_a_protected_property_from_a_subclass_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Base {
+                protected int $x = 1;
+            }
+            class Child extends Base {
+                public function getX(): int {
+                    return $this->x;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reading_a_protected_property_from_an_unrelated_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                protected int $x = 1;
+            }
+            class Unrelated {
+                public function test(Foo $f): int {
+                    return $f->x;
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "property.protected");
+}
+
+#[test]
+fn reading_a_public_property_from_anywhere_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public int $x = 1;
+            }
+            function test(Foo $f): int {
+                return $f->x;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn writing_a_private_property_from_outside_its_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private int $x = 1;
+            }
+            function test(Foo $f): void {
+                $f->x = 2;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "property.private");
+}
+
+#[test]
+fn writing_a_private_property_from_inside_its_own_class_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private int $x = 1;
+                public function setX(int $x): void {
+                    $this->x = $x;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn calling_a_private_method_from_outside_its_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private function secret(): int { return 1; }
+            }
+            function test(Foo $f): int {
+                return $f->secret();
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "method.private");
+}
+
+#[test]
+fn calling_a_private_method_from_inside_its_own_class_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private function secret(): int { return 1; }
+                public function reveal(): int {
+                    return $this->secret();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn calling_a_protected_method_from_a_subclass_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Base {
+                protected function helper(): int { return 1; }
+            }
+            class Child extends Base {
+                public function reveal(): int {
+                    return $this->helper();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn calling_a_private_static_method_from_outside_its_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private static function secret(): int { return 1; }
+            }
+            function test(): int {
+                return Foo::secret();
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "staticMethod.private");
+}
+
+#[test]
+fn calling_a_private_static_method_from_inside_its_own_class_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private static function secret(): int { return 1; }
+                public static function reveal(): int {
+                    return self::secret();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn calling_a_protected_static_method_from_a_subclass_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Base {
+                protected static function helper(): int { return 1; }
+            }
+            class Child extends Base {
+                public static function reveal(): int {
+                    return static::helper();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A real corpus check (amphp/http-server's own `Http1Driver`/
+// `Http2Driver`, siblings under a common `abstract class
+// AbstractHttpDriver { abstract protected function write(); }`) found
+// this shape wrongly flagged: `owner` (whichever class's own lookup
+// resolved the *concrete* override, `Http2Driver` here) isn't
+// necessarily where the member's own access-control contract actually
+// originates - `current_class`'s own hierarchy independently having a
+// same-named member (via the shared abstract ancestor) proves the
+// contract is shared too.
+#[test]
+fn calling_a_protected_method_on_a_sibling_class_via_a_shared_abstract_ancestor_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            abstract class Base {
+                abstract protected function write(): void;
+            }
+            class A extends Base {
+                private ?B $b = null;
+                protected function write(): void {
+                    if ($this->b) {
+                        $this->b->write();
+                    }
+                }
+            }
+            class B extends Base {
+                protected function write(): void {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Pest's own `$this`-binding (`uses(X::class)` + `it(...)`) grants the
+// same private/protected access real `Closure::bind`'s own third
+// argument does - a real corpus check (Piwigo's own PHPUnit/Pest test
+// suite calling an inherited protected `TestCase::expectErrorLog()`)
+// found this wrongly flagged before this call site started passing a
+// scope class through alongside `$this`'s own type.
+#[test]
+fn calling_a_protected_method_from_inside_a_pest_bound_closure_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function uses($class) {}
+            function it($description, $callback) {}
+            class RealTestBase {
+                protected function helper(): int { return 1; }
+            }
+            uses(RealTestBase::class);
+            it('does something', function (): int {
+                return $this->helper();
+            });
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A promoted constructor property's own visibility is enforced the same
+// way an ordinary declared property's is.
+#[test]
+fn reading_a_promoted_private_constructor_property_from_outside_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public function __construct(private int $x) {}
+            }
+            function test(Foo $f): int {
+                return $f->x;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "property.private");
+}

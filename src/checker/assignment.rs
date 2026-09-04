@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, DiagnosticBuilder, Locals, narrowing_key, purge_stale_narrowing_for, union_types,
+    Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, narrowing_key,
+    purge_stale_narrowing_for, union_types,
 };
 use crate::types::{self, AccessoryKind, Type};
 
@@ -274,6 +275,23 @@ impl<'a> Checker<'a> {
                 .tip("readonly properties can only be written once, from inside the declaring class's own constructor"),
             );
         }
+        // Phase 57: visibility - shares the same "property.private"/
+        // "property.protected" identifiers a read gets (`ExprKind::
+        // PropertyAccess`, `checker/expr.rs`), matching real PHPStan's
+        // own `AccessPropertiesCheck::check()`, which both the read
+        // rule and this project's own write-side equivalent delegate to
+        // identically (only the separate, PHP-8.4-specific asymmetric-
+        // visibility identifiers this project doesn't model differ
+        // between the two).
+        self.check_member_visibility(MemberVisibilityCheck {
+            kind: "property",
+            owner: &owner,
+            member_name: prop,
+            visibility: &prop_sig.visibility,
+            describe: &format!("property {owner}::${prop}"),
+            span: lhs.span,
+            label,
+        });
         let bindings = self.class_template_bindings(&class, &type_args, &owner);
         // A PHP 8.4 `set(Type $value)` property hook can accept a wider
         // type than the property's own backing type (it does its own

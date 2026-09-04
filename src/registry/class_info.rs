@@ -16,6 +16,13 @@ pub struct PropertySig {
     pub ty: Type,
     pub is_static: bool,
     pub is_readonly: bool,
+    // Phase 57: `public`/`private`/`protected` - previously parsed
+    // (`PropertyDecl::visibility`/`Param::promoted_visibility`) but
+    // discarded before reaching this struct, so no checker code anywhere
+    // could enforce access legality. A magic `@property` tag and an
+    // enum's own built-in `name`/`value` are always `Visibility::Public`
+    // - real PHP has no way to declare either any other way.
+    pub visibility: Visibility,
     // PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook
     // can accept a wider type than the property's own backing/read type
     // (`public array $x { set(array $value) { $this->x =
@@ -129,7 +136,12 @@ impl ClassInfo {
             .map(|m| {
                 (
                     m.function.name.clone(),
-                    FunctionSig::from_decl(&m.function, ctx, &template_params),
+                    FunctionSig::from_decl(
+                        &m.function,
+                        ctx,
+                        &template_params,
+                        m.visibility.clone(),
+                    ),
                 )
             })
             .collect();
@@ -173,6 +185,7 @@ impl ClassInfo {
                         is_static: p.is_static,
                         is_readonly: p.is_readonly,
                         set_ty,
+                        visibility: p.visibility.clone(),
                     },
                 )
             })
@@ -201,6 +214,7 @@ impl ClassInfo {
                         is_static: false,
                         is_readonly: p.promoted_readonly,
                         set_ty: None,
+                        visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
                     },
                 );
             }
@@ -226,6 +240,7 @@ impl ClassInfo {
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,
                         set_ty: None,
+                        visibility: Visibility::Public,
                     }
                 });
             }
@@ -373,7 +388,7 @@ impl ClassInfo {
             .map(|m| {
                 (
                     m.function.name.clone(),
-                    FunctionSig::from_decl(&m.function, ctx, &HashMap::new()),
+                    FunctionSig::from_decl(&m.function, ctx, &HashMap::new(), m.visibility.clone()),
                 )
             })
             .collect();
@@ -399,6 +414,7 @@ impl ClassInfo {
                     Box::new(self_ty.clone()),
                 ),
                 no_discard: false,
+                visibility: Visibility::Public,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -417,6 +433,7 @@ impl ClassInfo {
                     return_type: self_ty.clone(),
                     return_type_native: self_ty.clone(),
                     no_discard: false,
+                    visibility: Visibility::Public,
                 },
             );
             methods.insert(
@@ -426,6 +443,7 @@ impl ClassInfo {
                     return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
                     no_discard: false,
+                    visibility: Visibility::Public,
                 },
             );
         }
@@ -463,6 +481,7 @@ impl ClassInfo {
                 is_static: false,
                 is_readonly: false,
                 set_ty: None,
+                visibility: Visibility::Public,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -501,6 +520,7 @@ impl ClassInfo {
                     is_static: false,
                     is_readonly: false,
                     set_ty: None,
+                    visibility: Visibility::Public,
                 },
             );
         }

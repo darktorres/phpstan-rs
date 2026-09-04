@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{Expr, ExprKind, FunctionDecl, Literal};
+use crate::ast::{Expr, ExprKind, FunctionDecl, Literal, Visibility};
 use crate::checker::union_types;
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{NameContext, resolve_names_in_type};
@@ -40,6 +40,12 @@ pub struct FunctionSig {
     // since real PHP's own `#[NoDiscard]` is always the single, global-
     // namespace one - there's no other class this could plausibly mean).
     pub no_discard: bool,
+    // Phase 57: `public`/`private`/`protected` - `Visibility::Public` for
+    // every plain top-level function (PHP has no way to declare one
+    // otherwise), a method's own declared visibility otherwise. Threaded
+    // through so a call site can enforce access legality the same way
+    // `PropertySig::visibility` does for properties.
+    pub visibility: Visibility,
 }
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -384,6 +390,7 @@ impl FunctionSig {
         f: &FunctionDecl,
         ctx: &NameContext,
         class_templates: &HashMap<String, TemplateParam>,
+        visibility: Visibility,
     ) -> FunctionSig {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
         let mut template_params: HashMap<String, TemplateParam> = doc
@@ -446,6 +453,7 @@ impl FunctionSig {
             return_type,
             return_type_native,
             no_discard,
+            visibility,
         }
     }
 
@@ -510,6 +518,11 @@ impl FunctionSig {
             return_type,
             return_type_native,
             no_discard,
+            // Both real overloads share one declaration (a stub-modeled
+            // PHP-version split of the same underlying function/method,
+            // never two independently-declared visibilities) - either
+            // side's own value is equally correct.
+            visibility: self.visibility,
         }
     }
 }
