@@ -1394,37 +1394,39 @@ single-body scope needed. (Whole-*project* duplicate-class-name
 detection is a separate, lower-priority item - see Phase 83.)
 
 **Phase 64 - Override-compatibility check rewrite (methods +
-properties) (NEW, PLANNED).** `check_method_overrides`
-(`src/checker/oop.rs:177-307`) is one simplified function checking only
-native parameter contravariance/return covariance; it never compares
-visibility, never detects missing/extra/variadic/by-ref parameter
-mismatches, and its ancestor lookup has no interface-first priority or
-trait-abstract-method special case. Decompose it into PHPStan's
-`MethodParameterComparisonHelper`/`MethodVisibilityComparisonHelper`/
-`MethodPrototypeFinder` shape, and add the *equivalent* check that
-doesn't exist at all today for properties (`OverridingPropertyRule`:
-static/readonly/hook/visibility/final/native-type-variance mismatches
-on property override). Unlocks `MethodParameterComparisonHelper`,
-`MethodVisibilityComparisonHelper`, `MethodPrototypeFinder`,
-`MethodSignatureRule`, `OverridingMethodRule`, `ParentMethodHelper`,
-`OverridingPropertyRule`. **Prerequisite check, corrected**: the
-method half has *no* hard prerequisite and can start immediately -
-`check_method_overrides` already exists and just needs decomposing.
-The property half's real blockers are narrower than this phase
-originally claimed: `PropertyDecl` (`src/ast.rs:~149`) already carries
-a `visibility` field from parsing, so *that* part is not a blocker;
-what's genuinely missing is (a) `is_final`/`is_abstract` on
-`PropertyDecl`/`PropertySig` - not currently in scope for *any* phase,
-a real gap this phase should probably just absorb itself rather than
-wait on - and (b) Phase 57's registry-side `PropertySig` visibility
-field specifically for comparing a property against an *ancestor
-class's* declaration (a same-file AST field alone can't do a
-cross-class comparison). Phase 37's attribute AST support remains a
-real prerequisite, but only for the `#[Override]` sub-check
-specifically. Size: L for the method half (extends already-working
-logic, ship first as its own milestone), M-L for the property half
-(narrower than originally scoped, given the AST already has
-visibility).
+properties) (PARTIAL - method half only).** Extended
+`check_method_overrides` (`src/checker/oop.rs`) with three real,
+unconditional PHP fatal errors it previously missed entirely, all
+confirmed directly against real `php -l`: narrowing a method's own
+visibility on override (`method.visibility`, matching real PHPStan's
+own `MethodVisibilityComparisonHelper` exactly - an ancestor's `public`
+demands `public`; an ancestor's `protected` only forbids narrowing all
+the way to `private`), an override missing a parameter the ancestor
+declares (`parameter.missing`, exempted for a variadic ancestor tail -
+real PHPStan's own handling there is considerably more involved
+contravariance-across-every-swallowed-parameter logic this project
+doesn't attempt), and an override requiring a parameter the ancestor
+made optional (`parameter.notOptional`). Corpus verification also found
+and fixed a real pre-existing bug in the *already-shipped*
+parameter/return-type checks: a `private` ancestor method was still
+being enforced against for signature compatibility, even though
+`private` methods aren't virtual in real PHP - a same-named child
+method is an unrelated declaration, not a polymorphic override
+(confirmed: two real corpus false positives, amphp's own `Response::
+validateStatusCode()` colliding by name only with an equally-private,
+equally-unrelated ancestor method in a different class).
+
+Still open, unstarted: by-ref/variadic-contravariance parameter
+mismatches (`parameter.byRef`/`notByRef`/`variadic`/`notVariadic` -
+real PHPStan's own `MethodParameterComparisonHelper` spends most of its
+own ~250 lines on exactly this cluster), interface-first/trait-
+abstract-method ancestor-lookup priority, the `#[Override]` sub-check,
+and the *entire* property-override half (`OverridingPropertyRule`'s
+equivalent: static/readonly/hook/visibility/final/native-type-variance
+mismatches on property override) - needs `is_final`/`is_abstract` added
+to `PropertyDecl`/`PropertySig` first (not currently tracked by any
+phase), though Phase 57's own `PropertySig.visibility` field this
+phase's method half also leaned on is already in place.
 
 **Phase 65 - Declaration-site modifier-consistency + constructor-shape
 checks (NEW, PLANNED).** A batch of small, independent boolean-flag-
