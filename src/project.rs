@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{Stmt, StmtKind};
-use crate::checker::{Checker, Diagnostic};
+use crate::checker::{self, Checker, Diagnostic};
 use crate::deps;
 use crate::lexer::Lexer;
 use crate::parser::{ParseError, Parser};
@@ -52,6 +52,17 @@ pub struct Project {
     // have changed (`finish_loading`/`update_file`) - see `pest_config`'s
     // own module doc comment for the full resolution algorithm.
     pest_config: PestConfig,
+    // Phase 40: gates `checker::phpstan_api::check_phpstan_api_usage` -
+    // set once via `set_phpstan_api_check_enabled` (by the same CLI
+    // wiring that already calls `composer::discover_vendor_context`,
+    // using its own new sibling `composer::detect_phpstan_dependency`)
+    // rather than re-detected here on every load/check, since `Project`
+    // itself has no fixed notion of "the project's own root directory" -
+    // its files are just whatever absolute paths were handed to
+    // `load_file`. Defaults to `false`, so every existing caller
+    // (`Project::new`, the ~300+ direct construction sites in this
+    // project's own test suite, the LSP) is completely unaffected.
+    phpstan_api_check_enabled: bool,
 }
 
 impl Project {
@@ -64,6 +75,7 @@ impl Project {
             dependents: FxHashMap::default(),
             registry,
             pest_config: PestConfig::default(),
+            phpstan_api_check_enabled: false,
         }
     }
 
@@ -92,6 +104,16 @@ impl Project {
     /// currently indexed.
     pub fn set_strict_mixed_arrays(&mut self, strict: bool) {
         self.registry.strict_mixed_arrays = strict;
+    }
+
+    /// Phase 40: opts every subsequent `check_file`/`check_all` call into
+    /// `checker::phpstan_api::check_phpstan_api_usage` - the caller
+    /// (`main.rs`) decides this once, via
+    /// `composer::detect_phpstan_dependency` against the project's own
+    /// `composer.json`, the same way it already decides whether to load
+    /// `composer::discover_vendor_context`'s own `vendor/` context.
+    pub fn set_phpstan_api_check_enabled(&mut self, enabled: bool) {
+        self.phpstan_api_check_enabled = enabled;
     }
 
     /// Parses one file and indexes its declarations into the shared
@@ -265,7 +287,22 @@ impl Project {
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.check_program(&file.ast);
-        checker.into_diagnostics()
+        let mut diagnostics = checker.into_diagnostics();
+        if self.phpstan_api_check_enabled {
+            diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
+                &file.ast,
+                &self.registry,
+            ));
+            // `into_diagnostics` above already sorted the checker's own
+            // diagnostics into span order - re-sort once more now that
+            // `check_phpstan_api_usage`'s own (already span-ordered
+            // amongst themselves, but not yet interleaved) diagnostics
+            // have been appended, so every caller still sees one
+            // consistent, fully span-ordered list regardless of whether
+            // this gate is on.
+            diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+        }
+        diagnostics
     }
 
     pub fn registry(&self) -> &Registry {

@@ -283,6 +283,15 @@ fn try_load_file(project: &mut project::Project, path: &Path) -> bool {
     project.load_file(path.to_path_buf(), &source).is_ok()
 }
 
+// Phase 40's own new `phpstan_api_check_enabled` gate pushed this past
+// clippy's default 7-argument threshold - every argument here is already
+// its own independently-meaningful CLI-level setting (not a group crying
+// out for a struct), so silencing the lint for this one, single-call-site
+// wiring function reads clearer than a bag-of-fields options type would
+// (mirrors this project's own existing `#[allow(clippy::type_complexity)]`
+// precedent in `parser/classes.rs`: a real, deliberate exception, not a
+// blanket suppression).
+#[allow(clippy::too_many_arguments)]
 #[hotpath::measure]
 fn run_check_project(
     dirs: &[PathBuf],
@@ -292,6 +301,7 @@ fn run_check_project(
     strict_mixed_arrays: bool,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
+    phpstan_api_check_enabled: bool,
 ) {
     let mut analyze_files = Vec::new();
     for dir in dirs {
@@ -322,6 +332,7 @@ fn run_check_project(
 
     let mut project = project::Project::new();
     project.set_strict_mixed_arrays(strict_mixed_arrays);
+    project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
@@ -552,11 +563,20 @@ fn main() {
             let no_composer = no_composer || config.no_composer.unwrap_or(false);
 
             let mut scan_files = Vec::new();
+            // Phase 40: gated the same way as the vendor-context load just
+            // above (both need the project's own `composer.json`, and
+            // `--no-composer` already means "don't consult Composer at
+            // all for this run") - a project with no real
+            // `phpstan/phpstan`/`phpstan/extension-installer` dependency
+            // has no backward-compatibility promise to check anything
+            // against.
+            let mut phpstan_api_check_enabled = false;
             if !no_composer {
                 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                 let vendor_context = composer::discover_vendor_context(&cwd);
                 scan_dirs.extend(vendor_context.dirs);
                 scan_files.extend(vendor_context.files);
+                phpstan_api_check_enabled = composer::detect_phpstan_dependency(&cwd);
             }
 
             run_check_project(
@@ -567,6 +587,7 @@ fn main() {
                 strict_mixed_arrays,
                 generate_baseline.as_deref(),
                 baseline.as_deref(),
+                phpstan_api_check_enabled,
             )
         }
         Command::IncrementalBench { dir, file_to_touch } => {
