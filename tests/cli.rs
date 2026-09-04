@@ -67,7 +67,10 @@ fn check_reports_every_file_parsed_with_zero_failures() {
 #[test]
 fn check_project_reports_real_diagnostics_and_a_summary_line() {
     let dir = TempDir::new("check_project");
-    dir.write("bad.php", "<?php function f() { return $undefinedVar; }");
+    dir.write(
+        "bad.php",
+        "<?php function f(): mixed { return $undefinedVar; }",
+    );
 
     let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
     assert!(output.status.success());
@@ -80,7 +83,7 @@ fn check_project_reports_real_diagnostics_and_a_summary_line() {
     // A real `path:line:col:` prefix, compiler-style - not the old
     // line-1 placeholder.
     assert!(
-        stdout.contains("bad.php:1:29: "),
+        stdout.contains("bad.php:1:36: "),
         "expected a real line:col prefix, got: {stdout}"
     );
 }
@@ -125,7 +128,7 @@ fn check_project_level_flag_filters_out_higher_level_diagnostics() {
         "mixed.php",
         r#"<?php
             function addOne(int $x): int { return $x . "1"; }
-            function f() { return $undefinedVar; }
+            function f(): mixed { return $undefinedVar; }
         "#,
     );
 
@@ -179,7 +182,21 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
         "#,
     );
 
-    let unfiltered = bin().arg("check-project").arg(dir.path()).output().unwrap();
+    // `--level 5` here only keeps this assertion focused on
+    // `strict_mixed_arrays`'s own point (whether an *unknown*-element
+    // array is reported by default) - it doesn't change whether the
+    // check itself runs (that's gated by `--strict-mixed-arrays` alone,
+    // not by level), just excludes Phase 58's unrelated level-6
+    // `missingType.iterableValue` finding on `$untyped`'s own
+    // deliberately-bare `array` parameter, which this test needs to stay
+    // bare to exercise "unknown element type" at all.
+    let unfiltered = bin()
+        .arg("check-project")
+        .arg("--level")
+        .arg("5")
+        .arg(dir.path())
+        .output()
+        .unwrap();
     let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
     assert!(
         unfiltered_stdout.contains("0 diagnostic(s)"),
@@ -189,6 +206,8 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
     let strict = bin()
         .arg("check-project")
         .arg("--strict-mixed-arrays")
+        .arg("--level")
+        .arg("5")
         .arg(dir.path())
         .output()
         .unwrap();
@@ -471,7 +490,7 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
     // applied - only the pre-existing one is suppressed.
     dir.write(
         "bad.php",
-        "<?php function f() { return $existingBug; } function g() { return $newBug; }\n",
+        "<?php function f() { return $existingBug; } function g(): mixed { return $newBug; }\n",
     );
     let with_new_bug = bin()
         .arg("check-project")
@@ -553,7 +572,7 @@ fn check_project_scan_dir_loads_context_but_never_reports_on_it() {
         "ctx/Helper.php",
         "<?php class Helper { function bad() { return $undefinedInVendor; } }",
     );
-    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+    dir.write("src/Main.php", "<?php function f(): void { new Helper(); }");
 
     // Without --scan-dir, Helper is unresolved.
     let without = bin()
@@ -600,7 +619,7 @@ fn check_project_scan_paths_config_mirrors_scan_dir() {
         "ctx/Helper.php",
         "<?php class Helper { function bad() { return $undefinedInVendor; } }",
     );
-    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+    dir.write("src/Main.php", "<?php function f(): void { new Helper(); }");
     let config_path = dir.write(
         "phpstan.toml",
         &format!(
@@ -647,7 +666,7 @@ return array(
 );
 "#,
     );
-    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+    dir.write("src/Main.php", "<?php function f(): void { new Helper(); }");
 
     let output = bin()
         .current_dir(dir.path())
@@ -684,7 +703,7 @@ return array(
 );
 "#,
     );
-    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+    dir.write("src/Main.php", "<?php function f(): void { new Helper(); }");
 
     let output = bin()
         .current_dir(dir.path())
@@ -716,7 +735,7 @@ return array(
 );
 "#,
     );
-    dir.write("src/Main.php", "<?php function f() { new Helper(); }");
+    dir.write("src/Main.php", "<?php function f(): void { new Helper(); }");
     let config_path = dir.write(
         "phpstan.toml",
         &format!(
@@ -797,7 +816,10 @@ fn check_project_survives_a_file_that_crashes_the_parser() {
         "bad.php",
         "<?php class Foo { public readonly int $x (int $y); }",
     );
-    dir.write("good.php", "<?php function f() { return $undefinedVar; }");
+    dir.write(
+        "good.php",
+        "<?php function f(): mixed { return $undefinedVar; }",
+    );
 
     let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
     assert!(
@@ -821,7 +843,10 @@ fn check_project_survives_a_file_that_crashes_the_parser() {
 #[test]
 fn check_project_format_json_emits_a_parseable_report_with_no_extra_stdout_noise() {
     let dir = TempDir::new("format_json");
-    dir.write("bad.php", "<?php function f() { return $undefinedVar; }");
+    dir.write(
+        "bad.php",
+        "<?php function f(): mixed { return $undefinedVar; }",
+    );
 
     let output = bin()
         .arg("check-project")
@@ -906,7 +931,10 @@ fn check_project_format_json_on_a_clean_project_reports_zero_diagnostics_and_no_
 #[test]
 fn check_project_format_checkstyle_emits_well_formed_xml_on_stdout() {
     let dir = TempDir::new("format_checkstyle");
-    dir.write("bad.php", "<?php function f() { return $undefinedVar; }");
+    dir.write(
+        "bad.php",
+        "<?php function f(): mixed { return $undefinedVar; }",
+    );
 
     let output = bin()
         .arg("check-project")
@@ -959,7 +987,10 @@ fn check_project_format_checkstyle_on_a_clean_project_has_no_file_elements() {
 #[test]
 fn check_project_no_format_flag_still_uses_the_original_text_format() {
     let dir = TempDir::new("format_default");
-    dir.write("bad.php", "<?php function f() { return $undefinedVar; }");
+    dir.write(
+        "bad.php",
+        "<?php function f(): mixed { return $undefinedVar; }",
+    );
 
     let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
     assert!(output.status.success());
@@ -1041,7 +1072,10 @@ fn demo_with_no_file_parses_the_built_in_sample_and_reports_no_diagnostics() {
 #[test]
 fn demo_with_a_file_argument_parses_and_checks_that_file() {
     let dir = TempDir::new("single_file");
-    let path = dir.write("sample.php", "<?php function f() { return $undefinedVar; }");
+    let path = dir.write(
+        "sample.php",
+        "<?php function f(): mixed { return $undefinedVar; }",
+    );
 
     let output = bin().arg("demo").arg(&path).output().unwrap();
     assert!(output.status.success());

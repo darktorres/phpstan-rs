@@ -2,6 +2,7 @@
 //! `beforeEach`/`afterEach` chain that attaches dynamic properties to `$this`.
 
 use super::super::*;
+use super::helpers::*;
 
 #[test]
 fn pest_directory_scoped_uses_resolves_this_to_the_bound_class() {
@@ -32,7 +33,9 @@ fn pest_directory_scoped_uses_resolves_this_to_the_bound_class() {
         .unwrap();
     project.finish_loading();
 
-    let d = project.check_file(&PathBuf::from("tests/Browser/Api/FooTest.php"));
+    let d = without_missing_typehint_diagnostics(
+        project.check_file(&PathBuf::from("tests/Browser/Api/FooTest.php")),
+    );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
@@ -99,7 +102,9 @@ fn pest_file_outside_the_bound_directory_does_not_get_the_directory_scoped_type(
         .unwrap();
     project.finish_loading();
 
-    let d = project.check_file(&PathBuf::from("tests/Unit/FooTest.php"));
+    let d = without_missing_typehint_diagnostics(
+        project.check_file(&PathBuf::from("tests/Unit/FooTest.php")),
+    );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
@@ -118,7 +123,9 @@ fn pest_file_local_before_each_property_is_readable_from_another_closure_in_the_
         .unwrap();
     project.finish_loading();
 
-    let d = project.check_file(&PathBuf::from("tests/FooTest.php"));
+    let d = without_missing_typehint_diagnostics(
+        project.check_file(&PathBuf::from("tests/FooTest.php")),
+    );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
@@ -151,7 +158,9 @@ fn pest_directory_scoped_before_each_property_is_readable_across_files() {
         .unwrap();
     project.finish_loading();
 
-    let d = project.check_file(&PathBuf::from("tests/Unit/FooTest.php"));
+    let d = without_missing_typehint_diagnostics(
+        project.check_file(&PathBuf::from("tests/Unit/FooTest.php")),
+    );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 

@@ -36,6 +36,9 @@ class Greeter
     }
 }
 
+/**
+ * @param int[] $numbers
+ */
 function sum(array $numbers): int
 {
     $total = 0;

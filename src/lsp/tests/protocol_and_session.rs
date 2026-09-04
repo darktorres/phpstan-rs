@@ -79,18 +79,29 @@ fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
     let Some(b_notification) = b_notification else {
         panic!("expected a publishDiagnostics notification for b.php, got: {messages:?}");
     };
-    assert!(
-        b_notification["params"]["diagnostics"][0]["message"]
-            .as_str()
-            .unwrap()
-            .contains("greet"),
-        "expected b.php's diagnostic to mention the now-missing greet() method, got: {b_notification:?}"
-    );
+    // Found by content, not indexed as `diagnostics[0]` - Phase 58's own
+    // `missingType.return` (`useGreeter` itself has no `: T` return
+    // type) is a second, real diagnostic on this exact fixture, sorted
+    // ahead of the undefined-method one below since it anchors to the
+    // whole function's own span, earlier in the file. What this test
+    // actually cares about - that dropping `Greeter::greet()` publishes
+    // a fresh, correctly-ranged diagnostic for the dependent file - is
+    // unaffected by that second diagnostic existing alongside it.
+    let greet_diagnostic = b_notification["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("greet"));
+    let Some(greet_diagnostic) = greet_diagnostic else {
+        panic!(
+            "expected a diagnostic mentioning the now-missing greet() method, got: {b_notification:?}"
+        );
+    };
     // A real range, not the old hardcoded {0,0}-{0,1} placeholder -
     // pointing at `$g->greet()` itself (0-indexed LSP columns for a
     // 1-indexed byte range starting at real column 48).
     assert_eq!(
-        b_notification["params"]["diagnostics"][0]["range"],
+        greet_diagnostic["range"],
         json!({"start": {"line": 0, "character": 47}, "end": {"line": 0, "character": 58}})
     );
 }
