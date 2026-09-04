@@ -87,7 +87,42 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(expected, c),
                         None => expected.clone(),
                     };
-                    if actual != Type::Mixed && !self.registry.is_assignable(&actual, &expected) {
+                    // Phase 61: a `never`-typed function/method reaching
+                    // *any* `return` at all - value or bare - is its own
+                    // dedicated real-PHPStan identifier/message
+                    // (`return.never`, "should never return but return
+                    // statement found"), not an ordinary type mismatch -
+                    // `never` promises the caller execution can't
+                    // continue past this call, a stronger claim than
+                    // "returns the wrong type." Checked before the
+                    // generic path below, which would otherwise report
+                    // this identically to any other type mismatch.
+                    if expected == Type::Never {
+                        self.report(
+                            label.to_string(),
+                            "should never return, but a return statement was reached".to_string(),
+                            e.span,
+                            3,
+                            "return.never",
+                        );
+                    } else if expected == Type::Void {
+                        // Phase 61: same idea, one position over - a
+                        // `void` function returning an actual value is
+                        // real PHPStan's own dedicated `return.void`,
+                        // not the generic mismatch path (`void` isn't a
+                        // "wrong type" the way e.g. `string` vs `int`
+                        // is - it's "no value was ever supposed to come
+                        // back").
+                        self.report(
+                            label.to_string(),
+                            format!("return type mismatch: expected void, got {actual}"),
+                            e.span,
+                            3,
+                            "return.void",
+                        );
+                    } else if actual != Type::Mixed
+                        && !self.registry.is_assignable(&actual, &expected)
+                    {
                         self.report(
                             label.to_string(),
                             format!("return type mismatch: expected {expected}, got {actual}"),
@@ -116,7 +151,19 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(expected, c),
                         None => expected.clone(),
                     };
-                    if expected != Type::Void
+                    // Phase 61: see the identical `return.never` special
+                    // case on `Return(Some(e))` just above - a bare
+                    // `return;` reaches this exact "never returns" claim
+                    // just as surely as one with a value does.
+                    if expected == Type::Never {
+                        self.report(
+                            label.to_string(),
+                            "should never return, but a return statement was reached".to_string(),
+                            stmt.span,
+                            3,
+                            "return.never",
+                        );
+                    } else if expected != Type::Void
                         && expected != Type::Mixed
                         && !self.registry.is_assignable(&Type::Null, &expected)
                     {

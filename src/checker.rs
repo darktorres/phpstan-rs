@@ -1057,16 +1057,31 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(expected, c),
                 None => expected.clone(),
             };
-            if expected != Type::Void
+            // Phase 61: a `never`-typed function/method whose body simply
+            // falls off the end without ever throwing/exiting is the same
+            // "should never return" claim `Return(Some(e))`/`Return(None)`
+            // already special-case, just reached via the implicit
+            // fall-through instead of an explicit `return` statement -
+            // real PHPStan's own `return.never` covers both shapes
+            // identically.
+            if expected == Type::Never {
+                self.report(
+                    label.clone(),
+                    "should never return, but a return statement was reached".to_string(),
+                    f.span,
+                    3,
+                    "return.never",
+                );
+            } else if expected != Type::Void
                 && expected != Type::Mixed
                 && !self.registry.is_assignable(&Type::Null, &expected)
             {
                 self.report(
                     label.clone(),
-                    format!("return type mismatch: expected {expected}, got null"),
+                    format!("should return {expected} but return statement is missing"),
                     f.span,
                     3,
-                    "return.type",
+                    "return.missing",
                 );
             }
         }

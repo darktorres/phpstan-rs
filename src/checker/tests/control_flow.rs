@@ -781,7 +781,89 @@ fn falling_off_the_end_is_flagged_against_a_non_nullable_return_type() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert!(d[0].message.contains("got null"), "got: {d:?}");
+    // Phase 61: distinct from `return.type` (`bare_return_is_flagged_
+    // against_a_non_nullable_return_type`'s own "returned literal null"
+    // case just above) - falling off the end never explicitly returns
+    // anything at all, real PHPStan's own dedicated `return.missing`.
+    assert_eq!(d[0].identifier, "return.missing", "got: {d:?}");
+    assert!(
+        d[0].message.contains("return statement is missing"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_never_typed_function_falling_off_the_end_gets_return_never() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): never { echo "hello"; }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "return.never", "got: {d:?}");
+}
+
+#[test]
+fn a_never_typed_function_reaching_a_valued_return_gets_return_never() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): never {
+                return 5;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "return.never", "got: {d:?}");
+}
+
+#[test]
+fn a_never_typed_function_reaching_a_bare_return_gets_return_never() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): never {
+                return;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "return.never", "got: {d:?}");
+}
+
+#[test]
+fn a_never_typed_function_that_actually_never_returns_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): never {
+                throw new \Exception();
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_void_function_returning_a_value_gets_return_void() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                return 5;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "return.void", "got: {d:?}");
+}
+
+#[test]
+fn a_void_function_with_a_bare_return_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                return;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
 #[test]
@@ -935,7 +1017,7 @@ fn a_while_true_loop_with_a_reachable_break_is_still_flagged() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert!(d[0].message.contains("got null"), "got: {d:?}");
+    assert_eq!(d[0].identifier, "return.missing", "got: {d:?}");
 }
 
 // A round of Piwigo-corpus bucketing found a catch clause's own

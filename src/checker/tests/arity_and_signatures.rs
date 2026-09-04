@@ -109,8 +109,8 @@ fn a_non_generator_falling_off_the_end_is_still_a_real_null_mismatch() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message.contains("got null")),
-        "expected a return type mismatch diagnostic, got: {d:?}"
+        d.iter().any(|x| x.identifier == "return.missing"),
+        "expected a missing-return diagnostic, got: {d:?}"
     );
 }
 
