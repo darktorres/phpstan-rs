@@ -909,6 +909,192 @@ fn a_covariant_template_in_a_constructor_parameter_is_exempt() {
 }
 
 #[test]
+fn an_erased_generic_with_a_declared_default_resolves_to_it_instead_of_mixed() {
+    // Phase 54: `@template T = Default` - a bare (type-argument-free)
+    // reference used to always leave T reading as Mixed (see
+    // `bare_reference_to_a_generic_class_treats_template_as_mixed` above);
+    // with a declared default it now resolves to that default instead,
+    // proven the same way every other template-substitution test here is:
+    // a return-type mismatch that only fires if T really did become int.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T = int
+             */
+            class Box {
+                /** @return T */
+                public function get() { return null; }
+            }
+            function f(): string {
+                $b = new Box();
+                return $b->get();
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("return type mismatch") && x.message.contains("int")),
+        "expected a return-type mismatch naming int (T's own default), got: {d:?}"
+    );
+}
+
+#[test]
+fn an_erased_generic_s_default_matching_the_declared_type_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T = int
+             */
+            class Box {
+                /** @return T */
+                public function get() { return null; }
+            }
+            function f(): int {
+                $b = new Box();
+                return $b->get();
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_covariant_template_nested_inside_another_covariant_class_s_argument_is_still_flagged_in_input_position()
+ {
+    // Phase 54's own real algorithmic addition: the old flat check never
+    // recursed into another class's own generic argument at all (see this
+    // test file's own history), so `T` used as `Producer<T>`'s own
+    // argument in a parameter position was silently missed entirely, no
+    // matter how it composed. `Producer`'s own template is (implicitly)
+    // covariant-compatible with pass-through - composing a parameter
+    // (input) position with a covariant slot leaves it an input position,
+    // so `Bad`'s own covariant `T` is exactly as unsound to find there as
+    // a direct, unwrapped `T` parameter would be.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template-covariant V
+             */
+            class Producer {}
+            /**
+             * @template-covariant T
+             */
+            class Bad {
+                /** @param Producer<T> $x */
+                public function consume($x): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("@template-covariant T")
+            && x.message.contains("input (parameter) position")),
+        "expected a covariance-violation diagnostic for T nested in Producer<T>, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_covariant_template_nested_inside_another_covariant_class_s_return_position_is_not_flagged() {
+    // The output-position mirror of the test just above: T nested inside
+    // Producer<T> found in a *return* type composes to the same output
+    // position (a covariant slot never flips), which is exactly where a
+    // covariant T is allowed to be.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template-covariant V
+             */
+            class Producer {}
+            /**
+             * @template-covariant T
+             */
+            class Good {
+                /** @return Producer<T> */
+                public function produce() { return new Producer(); }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_covariant_template_nested_inside_a_contravariant_class_s_return_position_is_flagged_via_flipping()
+ {
+    // The genuinely new case a flat, non-composing check could never
+    // catch even in principle: `T` doesn't appear directly in a return
+    // position at all here - it's nested inside `Sink<T>`, and `Sink`'s
+    // own template is contravariant, which *flips* the surrounding
+    // output position into an input one. A covariant `T` found there is
+    // exactly as unsound as if it had been written as a bare parameter.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template-contravariant V
+             */
+            class Sink {}
+            /**
+             * @template-covariant T
+             */
+            class Bad {
+                /** @return Sink<T> */
+                public function makeSink() { return null; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("@template-covariant T")
+            && x.message.contains("input (parameter) position")),
+        "expected a covariance-violation diagnostic for T flipped through Sink<T>, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_contravariant_template_nested_inside_a_contravariant_class_s_return_position_is_not_flagged() {
+    // The exact mirror of the flip test above, for a contravariant T:
+    // flipping an output position through Sink's own contravariant slot
+    // lands on an input position, which is precisely where a
+    // contravariant T is allowed to be - so this is sound, not a
+    // violation.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template-contravariant V
+             */
+            class Sink {}
+            /**
+             * @template-contravariant T
+             */
+            class Good {
+                /** @return Sink<T> */
+                public function makeSink() { return new Sink(); }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_template_nested_inside_an_unregistered_class_s_argument_is_never_flagged() {
+    // "Don't know, don't guess" - same leniency `check_generic_bounds`'s
+    // own `is_type_fully_known` already applies elsewhere: this project
+    // has no real data on `Unregistered`'s own declared variance (an
+    // uninstalled dependency, or a PHAR-bundled one), so it must not
+    // guess `Invariant` (or anything else) for its own template slot and
+    // risk a false positive on real, unverifiable third-party generics.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template-covariant T
+             */
+            class Bad {
+                /** @param Unregistered<T> $x */
+                public function consume($x): void {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn a_method_s_own_template_still_binds_on_a_non_generic_class() {
     // Real Piwigo corpus bug (Piwigo\PluginConfig\EventDispatcher, a
     // plain PSR-14-style class with zero class-level templates of its

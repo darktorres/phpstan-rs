@@ -49,15 +49,22 @@ pub enum Type {
     SelfRef,
     ParentRef,
     StaticRef,
-    // An unbound `@template T` name - a placeholder for a type parameter
-    // that hasn't been bound to a concrete type yet. Produced both for a
+    // An unbound `@template T` - a placeholder for a type parameter that
+    // hasn't been bound to a concrete type yet. Produced both for a
     // function/method's own declared template parameters and for a
     // class's own `@template` (registry::mark_template_params applies to
-    // both, given the enclosing class's own template names alongside the
-    // function's) - resolving one against an actual argument or an
+    // both, given the enclosing class's own template metadata alongside
+    // the function's) - resolving one against an actual argument or an
     // instance's own carried type arguments is
     // checker::bind_template_param / substitute_template's job.
-    TemplateParam(String),
+    //
+    // Phase 54: carries its own bound/variance/scope/default (see
+    // `TemplateParam` below) instead of being a bare name - PHPStan
+    // splits "template bound to X" into ~19 concrete `Template*Type`
+    // subclasses; this single variant plus a real bound is this
+    // project's deliberately unified stand-in for all of them, not an
+    // attempt to mirror each one as its own `Type` variant.
+    TemplateParam(TemplateParam),
     Union(Vec<Type>),
     Intersection(Vec<Type>),
     // Phase 14: a `T` range constrained to `[min, max]` (either bound
@@ -76,6 +83,76 @@ pub enum Type {
     // `Accessory(_)` outside an `Intersection` never appears by
     // construction.
     Accessory(AccessoryKind),
+}
+
+// Phase 54: mirrors real PHPStan's own `TemplateTypeVariance` - whether a
+// class's own `@template` may vary co-/contravariantly with a subclass
+// relationship, or must stay exactly fixed (`Invariant`, the default for
+// a plain `@template T` with neither `-covariant` nor `-contravariant`).
+// `checker::generics::check_variance` composes this through nested
+// generics (`Collection<T>` inherits/flips based on `Collection`'s own
+// declared variance for its own template slot) rather than treating
+// every occurrence the same regardless of nesting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Variance {
+    #[default]
+    Invariant,
+    Covariant,
+    Contravariant,
+}
+
+// Phase 54: a `@template` parameter's own metadata - what PHPStan spreads
+// across ~19 concrete `Template*Type` subclasses plus `TemplateType`/
+// `TemplateTypeVariance`/`TemplateTypeScope`, this project keeps as one
+// struct embedded directly in `Type::TemplateParam`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TemplateParam {
+    pub name: String,
+    // `@template T of Bound` - `Mixed` (PHPStan's own implicit default
+    // upper bound) when no `of` clause was written. Lets an unbound `T`
+    // be used as its own bound's type prior to substitution (indexed as
+    // an array, compared as a bool, treated as the bound's own object
+    // members) instead of `is_subtype`'s old blanket "always compatible"
+    // escape hatch - see `is_subtype`'s own `TemplateParam` arm below.
+    pub bound: Box<Type>,
+    pub variance: Variance,
+    // Which class or function declared this template - `None` only for
+    // a placeholder built with no real declaration site to name (see
+    // `TemplateParam::unbounded`). Two unrelated classes in the same
+    // inheritance chain commonly reuse the same short name (`T` above
+    // all); `scope` is what lets `checker::generics::check_variance`
+    // attribute a `T` occurrence to the class whose own
+    // `@template-covariant`/`-contravariant` actually declared it,
+    // rather than to an unrelated same-named ancestor or method template.
+    pub scope: Option<String>,
+    // `@template T = Default` (Phase 54) - the type an unbound occurrence
+    // of this template falls back to instead of unconditionally `Mixed`,
+    // whether that's a function-own template never bound from any real
+    // call-site argument (`substitute_template` below) or an "erased"
+    // class reference with fewer type arguments than declared, including
+    // a bare one with none at all (`checker::generics::substitute_scoped`).
+    pub default: Option<Box<Type>>,
+}
+
+impl TemplateParam {
+    /// A bare, metadata-free placeholder: unbounded, invariant, no known
+    /// declaration site, no default - used only where a template's own
+    /// name needs to be recognized structurally (so `mark_template_params`
+    /// classifies an `Object(name, _)` as a template reference at all)
+    /// but its real metadata isn't available or doesn't matter, e.g. a
+    /// sibling template mentioned inside another's own bound text before
+    /// real substitution ever reads that inner node's own fields -
+    /// substitution replaces the whole node by name regardless of what
+    /// placeholder metadata it happened to carry.
+    pub fn unbounded(name: String) -> TemplateParam {
+        TemplateParam {
+            name,
+            bound: Box::new(Type::Mixed),
+            variance: Variance::Invariant,
+            scope: None,
+            default: None,
+        }
+    }
 }
 
 // Phase 14: mirrors real PHPStan's own `Accessory*Type` family
@@ -133,7 +210,7 @@ impl fmt::Display for Type {
             Type::SelfRef => write!(f, "self"),
             Type::ParentRef => write!(f, "parent"),
             Type::StaticRef => write!(f, "static"),
-            Type::TemplateParam(name) => write!(f, "{name}"),
+            Type::TemplateParam(tp) => write!(f, "{}", tp.name),
             Type::Union(members) => {
                 let parts: Vec<String> = members.iter().map(Type::to_string).collect();
                 write!(f, "{}", parts.join("|"))
@@ -886,12 +963,33 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
 
         (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(..)) => true,
 
-        // An unbound template parameter is a placeholder, not a real type -
-        // treat it as compatible with anything on either side rather than
-        // ever read as a confident mismatch. Call sites should have already
-        // substituted it away (checker::infer_call_return_type); this is
-        // the safety net for wherever that doesn't happen.
-        (Type::TemplateParam(_), _) | (_, Type::TemplateParam(_)) => true,
+        // An unbound template parameter is a placeholder, not a real type.
+        // Call sites should have already substituted it away
+        // (checker::infer_call_return_type); these are the safety net for
+        // wherever that doesn't happen.
+        //
+        // Phase 54: used as `sub` (the actual/source side), it's now
+        // bound-aware rather than an unconditional escape hatch - whatever
+        // `T` ultimately gets instantiated to is guaranteed to satisfy its
+        // own declared bound (real PHPStan's own upper-bound semantics),
+        // so `T` is a subtype of `sup` exactly when its bound is. An
+        // undeclared bound is `Mixed`, and `is_subtype(Mixed, sup)` is
+        // *not* generally true (only when `sup` is `Mixed` too, via the
+        // very first arm above) - so the extremely common bound-free
+        // `@template T` gets an explicit, separate `true` here to keep
+        // this arm's old blanket leniency exactly where no bound was ever
+        // written to make a real judgment from.
+        (Type::TemplateParam(tp), _) => {
+            matches!(*tp.bound, Type::Mixed) || is_subtype(&tp.bound, sup)
+        }
+        // Used as `sup` (the sink/target side) stays maximally lenient
+        // regardless of any declared bound: knowing `sub` satisfies `T`'s
+        // *upper* bound doesn't prove it satisfies whatever `T` is
+        // actually instantiated to (a `Shape`-bound `T` could still be
+        // narrowed to `Circle` alone), so there's no sound tighter check
+        // to make here without real instantiation - unlike the `sub` arm
+        // above, which only ever needs `T`'s bound to hold, not `T` itself.
+        (_, Type::TemplateParam(_)) => true,
 
         _ => false,
     }
@@ -938,10 +1036,10 @@ fn is_numeric_string_literal(s: &str) -> bool {
 /// same `T` across multiple params aren't reconciled (no union-widening).
 pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMap<String, Type>) {
     match param_ty {
-        Type::TemplateParam(name) => {
+        Type::TemplateParam(tp) => {
             if *arg_ty != Type::Mixed {
                 bindings
-                    .entry(name.clone())
+                    .entry(tp.name.clone())
                     .or_insert_with(|| arg_ty.clone());
             }
         }
@@ -960,10 +1058,23 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMa
 }
 
 /// Applies a set of template bindings through a type tree, replacing every
-/// `TemplateParam` with its bound type (or `Mixed` if it was never bound).
+/// `TemplateParam` with its bound type. Phase 54: a name left unbound now
+/// falls back to that template's own declared `@template T = Default`
+/// when it has one, rather than unconditionally `Mixed` - e.g. a
+/// function-own `@template T = int` whose `T` never actually gets bound
+/// from any real call-site argument (used only in the return type, say)
+/// now resolves to `int` instead of `Mixed`. `checker::generics::
+/// substitute_scoped` mirrors this same fallback for the separate
+/// class-level substitution path (an "erased" - too-few-arguments, or
+/// bare - generic class reference).
 pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
     match ty {
-        Type::TemplateParam(name) => bindings.get(name).cloned().unwrap_or(Type::Mixed),
+        Type::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
+            tp.default
+                .as_ref()
+                .map(|d| substitute_template(d, bindings))
+                .unwrap_or(Type::Mixed)
+        }),
         Type::Array(inner) => Type::Array(Box::new(substitute_template(inner, bindings))),
         Type::ClassString(inner) => {
             Type::ClassString(Box::new(substitute_template(inner, bindings)))

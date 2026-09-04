@@ -174,30 +174,41 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 10.5's variance-enforcement half: a class's own
-    /// `@template-covariant T` may only appear in one of its methods'
-    /// *return* types (an output position - covariance is only sound if
-    /// nothing can ever hand a `T` back *into* the generic container,
+    /// Phase 10.5's variance-enforcement half, rewritten in Phase 54 to
+    /// really compose variance through nested generics instead of the
+    /// original flat "found anywhere in an input/output type at all"
+    /// check: a class's own `@template-covariant T` may only appear in
+    /// one of its methods' *output* positions (covariance is only sound
+    /// if nothing can ever hand a `T` back *into* the generic container,
     /// the way `Collection<Cat>` being usable where `Collection<Animal>`
     /// is expected relies on only ever reading a value out, never
     /// writing one in); `@template-contravariant T` is the mirror image,
-    /// restricted to *parameter* positions only. A plain, un-annotated
+    /// restricted to *input* positions only. A plain, un-annotated
     /// `@template T` (invariant, the only kind Phase 10 modeled at all)
     /// is unrestricted, same as always.
     ///
-    /// Deliberately conservative in two ways, both matching this
+    /// "Position" is no longer just "which half of the signature" - a
+    /// nested generic argument slot composes with (and can flip) the
+    /// position it's found in, based on *that* class's own declared
+    /// variance for its own template at that position: a `T` found as
+    /// `Collection<T>`'s own argument stays in the same position
+    /// `Collection<T>` itself was found in when `Collection`'s own
+    /// template is covariant (reading a `T` back out of a covariant
+    /// container is exactly as safe as reading the container itself),
+    /// flips when it's contravariant, and becomes doubly-restricted
+    /// (`Position::Inv`, flagged regardless of which direction this
+    /// class's own template varies) when it's invariant - unrelated
+    /// generic containers don't let subtyping flow through their own
+    /// invariant slot at all, so neither direction is sound there
+    /// either. See `walk_variance`/`Position::compose` below.
+    ///
+    /// Still deliberately conservative in one way, matching this
     /// project's general preference for fewer false positives over
     /// catching everything: only checks method params/return types, not
     /// properties (this project doesn't track `readonly` at all yet, and
     /// a *readonly* property typed `T` is actually a legitimate output-
     /// only position - without that information, checking properties
-    /// here would misflag every real one); and doesn't attempt real
-    /// variance's positional *flipping* through a nested generic
-    /// argument (a `T` found inside another class's own `Collection<T>`
-    /// type argument is treated the same as a direct occurrence, not
-    /// re-derived from that other class's own variance) - a full,
-    /// correct algorithm needs real per-class variance composition this
-    /// project doesn't attempt.
+    /// here would misflag every real one).
     pub(crate) fn check_variance(
         &mut self,
         sig: &FunctionSig,
@@ -211,35 +222,114 @@ impl<'a> Checker<'a> {
         if info.covariant_templates.is_empty() && info.contravariant_templates.is_empty() {
             return;
         }
-        let mut input_names = HashSet::new();
-        for param in &sig.params {
-            collect_template_params(&param.ty, &mut input_names);
-        }
-        let mut output_names = HashSet::new();
-        collect_template_params(&sig.return_type, &mut output_names);
-
-        // Sorted before iterating - both are `HashSet`s, and this project
-        // has already been bitten once this phase by a `HashMap`/`HashSet`
-        // iteration order silently varying a diagnostic's position
-        // between runs (see `check_class_generic_bounds`'s own fix).
         let mut violations: Vec<String> = Vec::new();
-        for name in &input_names {
-            if info.covariant_templates.contains(name) {
-                violations.push(format!(
-                    "{class_name}'s @template-covariant {name} cannot be used in an input (parameter) position"
-                ));
-            }
+        for param in &sig.params {
+            self.walk_variance(&param.ty, Position::In, class_name, &mut violations);
         }
-        for name in &output_names {
-            if info.contravariant_templates.contains(name) {
-                violations.push(format!(
-                    "{class_name}'s @template-contravariant {name} cannot be used in an output (return) position"
-                ));
-            }
-        }
+        self.walk_variance(&sig.return_type, Position::Out, class_name, &mut violations);
+
+        // Sorted-and-deduped before reporting: the same `T` can now
+        // legitimately be reached more than once (once per parameter, or
+        // more than once within a single nested type), and this project
+        // has already been bitten once this phase by a `HashMap`/
+        // `HashSet` iteration order silently varying a diagnostic's
+        // position between runs (see `check_class_generic_bounds`'s own
+        // fix) - a plain `Vec` built via one deterministic left-to-right
+        // walk sidesteps that class of bug entirely, so sorting here is
+        // only about de-duplicating repeat visits, not fixing ordering.
         violations.sort();
+        violations.dedup();
         for message in violations {
             self.report(label.to_string(), message, span, 6, "generics.variance");
+        }
+    }
+
+    /// This class's own declared variance for the `index`-th `@template`
+    /// of `class` (`Covariant`/`Contravariant`/`Invariant` - the same
+    /// three-way classification `TemplateParam::variance` itself carries,
+    /// just looked up by position rather than read off an already-marked
+    /// node) - `None` when `class` isn't a registered class at all, or
+    /// declares fewer templates than `index` needs, either of which means
+    /// this project has no real basis to say whether subtyping flows
+    /// through that slot at all, let alone which direction. `walk_variance`
+    /// treats `None` as "don't recurse into this argument," matching this
+    /// project's general "don't know, don't guess" leniency elsewhere
+    /// (`Checker::is_type_fully_known` above) rather than defaulting to
+    /// `Invariant` and risking a false positive on a real but unregistered
+    /// (uninstalled dependency, PHAR-bundled `phpstan/phpstan` itself, ...)
+    /// generic class.
+    fn slot_variance(&self, class: &str, index: usize) -> Option<types::Variance> {
+        let info = self.registry.classes.get(class)?;
+        let name = info.templates.get(index)?;
+        Some(if info.covariant_templates.contains(name) {
+            types::Variance::Covariant
+        } else if info.contravariant_templates.contains(name) {
+            types::Variance::Contravariant
+        } else {
+            types::Variance::Invariant
+        })
+    }
+
+    /// Walks `ty` composing `pos` through every nested generic argument
+    /// slot (see `check_variance`'s own doc comment for the composition
+    /// rules), flagging a `TemplateParam` belonging to `class_name` itself
+    /// (`TemplateParam::scope` - not some unrelated method's own template,
+    /// or an ancestor's, reached through a chain this walk doesn't itself
+    /// resolve) whose declared variance disagrees with the position it
+    /// was found in. `Array`/`ClassString`/`Union`/`Intersection`/
+    /// `ArrayShape` are structural wrappers that don't themselves carry a
+    /// declared variance to compose with, so they pass `pos` through
+    /// unchanged - only an `Object`'s own type-argument slots can flip or
+    /// force it, via `slot_variance`.
+    fn walk_variance(
+        &self,
+        ty: &Type,
+        pos: Position,
+        class_name: &str,
+        violations: &mut Vec<String>,
+    ) {
+        match ty {
+            Type::TemplateParam(tp) => {
+                if tp.scope.as_deref() != Some(class_name) {
+                    return;
+                }
+                match tp.variance {
+                    types::Variance::Covariant if pos != Position::Out => {
+                        violations.push(format!(
+                            "{class_name}'s @template-covariant {} cannot be used in an input (parameter) position",
+                            tp.name
+                        ));
+                    }
+                    types::Variance::Contravariant if pos != Position::In => {
+                        violations.push(format!(
+                            "{class_name}'s @template-contravariant {} cannot be used in an output (return) position",
+                            tp.name
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            Type::Object(class, args) => {
+                for (i, arg) in args.iter().enumerate() {
+                    if let Some(slot) = self.slot_variance(class, i) {
+                        self.walk_variance(arg, pos.compose(slot), class_name, violations);
+                    }
+                }
+            }
+            Type::Array(inner) | Type::ClassString(inner) => {
+                self.walk_variance(inner, pos, class_name, violations)
+            }
+            Type::Union(members) | Type::Intersection(members) => {
+                for m in members {
+                    self.walk_variance(m, pos, class_name, violations);
+                }
+            }
+            Type::ArrayShape(fields) => {
+                for (_, t, _) in fields {
+                    self.walk_variance(t, pos, class_name, violations);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -409,9 +499,22 @@ impl<'a> Checker<'a> {
 /// own doc comment for why that distinction matters.
 fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &HashSet<String>) -> Type {
     match ty {
-        Type::TemplateParam(name) => {
-            if scope.contains(name) {
-                bindings.get(name).cloned().unwrap_or(Type::Mixed)
+        Type::TemplateParam(tp) => {
+            if scope.contains(&tp.name) {
+                // Phase 54: mirrors `types::substitute_template`'s own
+                // `@template T = Default` fallback - an "erased" class
+                // reference (fewer type arguments than declared,
+                // including a bare one with none at all) leaves `bindings`
+                // with no entry for this name at all, same as before; the
+                // only change is falling back to this template's own
+                // declared default (when it has one) instead of
+                // unconditionally `Mixed`.
+                bindings.get(&tp.name).cloned().unwrap_or_else(|| {
+                    tp.default
+                        .as_ref()
+                        .map(|d| substitute_scoped(d, bindings, scope))
+                        .unwrap_or(Type::Mixed)
+                })
             } else {
                 ty.clone()
             }
@@ -442,28 +545,52 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &HashSet<Str
     }
 }
 
-/// Every `TemplateParam` name appearing anywhere in `ty`, recursing into
-/// `Array`/`Union`/`Intersection`/`ArrayShape` (structural wrappers that
-/// don't change what "position" a template occupies) but *not* into
-/// another `Object`'s own type arguments - see `Checker::check_variance`'s
-/// doc comment for why that second part is a deliberate scope cut, not an
-/// oversight.
-pub(crate) fn collect_template_params(ty: &Type, found: &mut HashSet<String>) {
-    match ty {
-        Type::TemplateParam(name) => {
-            found.insert(name.clone());
+/// Phase 54: a position within a type expression, for `Checker::
+/// walk_variance`'s own real per-position variance composition -
+/// `Position::In` for a parameter type (real PHPStan's "negative"/input
+/// polarity), `Position::Out` for a return type ("positive"/output
+/// polarity), and `Position::Inv` once composition has passed through any
+/// nested generic argument slot this project knows to be invariant
+/// (`slot_variance` returning `Invariant`, or simply unresolved to any of
+/// the three - see `Position::compose`) - an invariant slot doesn't let
+/// subtyping flow through it in *either* direction, so from here on a
+/// covariant and a contravariant template are equally unsound to find,
+/// and `walk_variance`'s own `pos != Out`/`pos != In` checks flag both
+/// without needing a third, explicit case per variance kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Position {
+    In,
+    Out,
+    Inv,
+}
+
+impl Position {
+    /// Composes this position with a nested generic argument slot's own
+    /// declared variance, the same left-to-right composition real
+    /// PHPStan's own `TemplateTypeVariance::compose()` performs: a
+    /// covariant slot leaves the position unchanged (reading a value back
+    /// out of a covariant container is exactly as safe as reading the
+    /// container itself), a contravariant slot flips it, and an
+    /// invariant slot forces `Inv` outright, absorbing whatever this
+    /// position already was - once `self` is already `Inv`, every
+    /// further composition (through any slot variance) stays `Inv`, the
+    /// same "no further flipping/relaxing can undo becoming invariant"
+    /// invariant `compose`'s own match arms preserve without needing a
+    /// separate `self == Inv` guard: `Covariant` returns `self` (already
+    /// `Inv`) as-is, and `Contravariant`'s `flip()` maps `Inv` to `Inv`.
+    fn compose(self, slot: types::Variance) -> Position {
+        match slot {
+            types::Variance::Invariant => Position::Inv,
+            types::Variance::Covariant => self,
+            types::Variance::Contravariant => self.flip(),
         }
-        Type::Array(inner) => collect_template_params(inner, found),
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                collect_template_params(m, found);
-            }
+    }
+
+    fn flip(self) -> Position {
+        match self {
+            Position::In => Position::Out,
+            Position::Out => Position::In,
+            Position::Inv => Position::Inv,
         }
-        Type::ArrayShape(fields) => {
-            for (_, t, _) in fields {
-                collect_template_params(t, found);
-            }
-        }
-        _ => {}
     }
 }

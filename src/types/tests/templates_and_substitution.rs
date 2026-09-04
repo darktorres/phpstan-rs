@@ -11,14 +11,16 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
     let mut bindings = HashMap::new();
     bindings.insert("T".to_string(), Type::String);
 
-    let array_of_t = Type::Array(Box::new(Type::TemplateParam("T".to_string())));
+    let array_of_t = Type::Array(Box::new(Type::TemplateParam(TemplateParam::unbounded(
+        "T".to_string(),
+    ))));
     assert_eq!(
         substitute_template(&array_of_t, &bindings),
         Type::Array(Box::new(Type::String))
     );
 
     let intersection_with_t = Type::Intersection(vec![
-        Type::TemplateParam("T".to_string()),
+        Type::TemplateParam(TemplateParam::unbounded("T".to_string())),
         Type::Object("Countable".to_string(), Vec::new()),
     ]);
     assert_eq!(

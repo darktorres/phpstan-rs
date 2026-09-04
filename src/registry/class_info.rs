@@ -5,11 +5,11 @@ use crate::ast::{
 };
 use crate::docblock::{self, DocBlock};
 use crate::registry::function_sig::{
-    FunctionSig, ParamSig, apply_implicit_nullable_default, infer_const_type, mark_template_params,
-    resolve_type,
+    FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
+    infer_const_type, mark_template_params, resolve_type,
 };
 use crate::registry::name_context::{NameContext, resolve_names_in_type};
-use crate::types::{self, Type};
+use crate::types::{self, TemplateParam, Type};
 
 #[derive(Debug, Clone)]
 pub struct PropertySig {
@@ -109,7 +109,19 @@ impl ClassInfo {
             .as_ref()
             .map(|d| d.templates.clone())
             .unwrap_or_default();
-        let template_set: HashSet<String> = templates.iter().cloned().collect();
+        // Phase 54: this class's own `@template` metadata (bound/variance/
+        // default), keyed by name - `templates` above stays a plain
+        // `Vec<String>` (positional order still drives type-argument
+        // binding elsewhere, e.g. `checker::class_template_bindings_rec`),
+        // but every `Type::TemplateParam` this class's own docblock
+        // produces (properties, consts, `@extends`/`@implements` args, and
+        // every method's own params/return type below) now carries the
+        // real metadata from here instead of a bare name.
+        let class_scope = ctx.declared_name(&c.name);
+        let template_params: HashMap<String, TemplateParam> = class_doc
+            .as_ref()
+            .map(|d| build_template_params(d, &class_scope, ctx))
+            .unwrap_or_default();
 
         let methods: HashMap<String, FunctionSig> = c
             .methods
@@ -117,7 +129,7 @@ impl ClassInfo {
             .map(|m| {
                 (
                     m.function.name.clone(),
-                    FunctionSig::from_decl(&m.function, ctx, &templates),
+                    FunctionSig::from_decl(&m.function, ctx, &template_params),
                 )
             })
             .collect();
@@ -151,9 +163,9 @@ impl ClassInfo {
                     doc_ty.as_ref().and_then(|d| d.var_type.as_deref()),
                     p.type_hint.as_deref(),
                 );
-                let ty = mark_template_params(ty, &template_set);
+                let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
-                let set_ty = property_hook_set_type(p, &template_set, ctx);
+                let set_ty = property_hook_set_type(p, &template_params, ctx);
                 (
                     p.name.clone(),
                     PropertySig {
@@ -179,7 +191,7 @@ impl ClassInfo {
                 }
                 let doc_ty = ctor_doc.as_ref().and_then(|d| d.params.get(&p.name));
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
-                let ty = mark_template_params(ty, &template_set);
+                let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
                 properties.insert(
@@ -207,7 +219,7 @@ impl ClassInfo {
             for tag in &doc.properties {
                 properties.entry(tag.name.clone()).or_insert_with(|| {
                     let ty = types::parse_type_string(&tag.ty);
-                    let ty = mark_template_params(ty, &template_set);
+                    let ty = mark_template_params(ty, &template_params);
                     let ty = resolve_names_in_type(ty, ctx);
                     PropertySig {
                         ty,
@@ -240,7 +252,7 @@ impl ClassInfo {
                 let ty = match doc_ty {
                     Some(doc_ty) => {
                         let ty = types::parse_type_string(&doc_ty);
-                        let ty = mark_template_params(ty, &template_set);
+                        let ty = mark_template_params(ty, &template_params);
                         resolve_names_in_type(ty, ctx)
                     }
                     None => infer_const_type(&cc.value),
@@ -256,7 +268,7 @@ impl ClassInfo {
         // above, not just a bare `types::parse_type_string`.
         let resolve_generic_tag = |raw: &str| -> Type {
             let ty = types::parse_type_string(raw);
-            let ty = mark_template_params(ty, &template_set);
+            let ty = mark_template_params(ty, &template_params);
             resolve_names_in_type(ty, ctx)
         };
         let extends_args: Vec<Type> = class_doc
@@ -361,7 +373,7 @@ impl ClassInfo {
             .map(|m| {
                 (
                     m.function.name.clone(),
-                    FunctionSig::from_decl(&m.function, ctx, &[]),
+                    FunctionSig::from_decl(&m.function, ctx, &HashMap::new()),
                 )
             })
             .collect();
@@ -624,12 +636,12 @@ impl ClassInfo {
 /// write sink, unchanged.
 fn property_hook_set_type(
     p: &PropertyDecl,
-    template_set: &HashSet<String>,
+    template_params: &HashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> Option<Type> {
     let (param, _) = p.hooks.as_ref()?.set.as_ref()?;
     let param = param.as_ref()?;
     let ty = resolve_type(None, param.type_hint.as_deref());
-    let ty = mark_template_params(ty, template_set);
+    let ty = mark_template_params(ty, template_params);
     Some(resolve_names_in_type(ty, ctx))
 }

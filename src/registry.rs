@@ -305,7 +305,7 @@ impl Registry {
                 }
                 StmtKind::FunctionDecl(f) => {
                     let name = ctx.declared_name(&f.name);
-                    let new_sig = FunctionSig::from_decl(f, ctx, &[]);
+                    let new_sig = FunctionSig::from_decl(f, ctx, &std::collections::HashMap::new());
                     if conditional {
                         self.functions.entry(name).or_insert_with(|| new_sig);
                     } else if self.unconditionally_declared_functions.contains(&name) {

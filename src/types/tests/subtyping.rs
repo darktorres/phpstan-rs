@@ -35,6 +35,55 @@ fn everything_is_subtype_of_mixed() {
 }
 
 #[test]
+fn an_unbounded_template_param_is_still_unconditionally_compatible_either_way() {
+    // Phase 54: the extremely common bound-free `@template T` must keep
+    // `is_subtype`'s old blanket leniency exactly as before - an
+    // undeclared bound is `Mixed`, and `is_subtype(Mixed, sup)` is only
+    // ever true when `sup` is `Mixed` too, so without this the new
+    // bound-aware `sub` arm would turn every one of these into a brand
+    // new false positive.
+    let t = Type::TemplateParam(TemplateParam::unbounded("T".to_string()));
+    assert!(is_subtype(&t, &Type::String));
+    assert!(is_subtype(&t, &Type::Object("Foo".to_string(), Vec::new())));
+    assert!(is_subtype(&Type::String, &t));
+    assert!(is_subtype(&Type::Object("Foo".to_string(), Vec::new()), &t));
+}
+
+#[test]
+fn a_bounded_template_param_is_a_subtype_of_whatever_its_bound_satisfies() {
+    // A `T of int` is guaranteed to be an `int` (or narrower) however
+    // it's eventually instantiated, so it's a subtype of anything `int`
+    // itself is a subtype of - `float`, in particular, via real PHP's
+    // own int-to-float widening rule.
+    let t = Type::TemplateParam(TemplateParam {
+        name: "T".to_string(),
+        bound: Box::new(Type::Int),
+        variance: Variance::Invariant,
+        scope: None,
+        default: None,
+    });
+    assert!(is_subtype(&t, &Type::Int));
+    assert!(is_subtype(&t, &Type::Float));
+    assert!(!is_subtype(&t, &Type::String));
+}
+
+#[test]
+fn a_bounded_template_param_still_accepts_anything_as_a_sink() {
+    // The reverse direction (T used as `sup`, the assignment target)
+    // stays maximally lenient regardless of any declared bound: knowing
+    // a value satisfies T's *upper* bound doesn't prove it satisfies
+    // whatever T is actually instantiated to.
+    let t = Type::TemplateParam(TemplateParam {
+        name: "T".to_string(),
+        bound: Box::new(Type::Int),
+        variance: Variance::Invariant,
+        scope: None,
+        default: None,
+    });
+    assert!(is_subtype(&Type::String, &t));
+}
+
+#[test]
 fn never_is_subtype_of_everything() {
     assert!(is_subtype(&Type::Never, &Type::String));
     assert!(is_subtype(&Type::Never, &Type::Mixed));
