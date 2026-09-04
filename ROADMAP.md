@@ -1618,18 +1618,40 @@ mutations (`[]=` append, `[...$values, ...$value]` spread) before an
 unnecessary final `array_values()`.
 
 **Phase 69 - printf/sprintf/scanf format-string family completion
-(NEW, PLANNED).** `parse_format_specifiers`/`format_specifier_accepts`/
-`check_format_string_call` (`src/checker/calls.rs:376,468,529`) already
-implement a real, working subset for `sprintf`/`printf` - ordered
-specifiers only. Extend with positional (`%N$`) specifiers, width/
-precision `*` sub-placeholders, a strict-vs-castable matching mode,
-`scanf`-style placeholder counting, and wire the existing engine into
-`vprintf`/`vsprintf`/`fprintf`/`sscanf`/`fscanf`. Unlocks
-`PrintfArrayParametersRule`, `PrintfHelper`, `PrintfParameterTypeRule`,
-`PrintfParametersRule`, `PrintfPlaceholder`. Size: L - high value;
-printf-family placeholder/argument mismatches are one of the most
-common real bug classes PHPStan catches, and the existing sprintf/
-printf coverage proves the approach already works.
+(PARTIAL).** Added `parse_positional_format_specifiers` alongside the
+existing `parse_format_specifiers` - a real, common PHP idiom (`%1$s`,
+`%2$d`, ... for reordering arguments in localized message strings),
+returning one entry per 0-based argument position referenced by some
+specifier (a "gap" position still counts toward the minimum argument
+count; a position referenced by more than one specifier checks the
+argument against all of them). Deliberately bails (`None`, "don't
+guess") on any format string mixing positional and unnumbered
+specifiers - confirmed directly that real PHP's own interaction between
+the two is genuinely quirky (`sprintf('%1$s-%s-%2$s', 'a', 'b', 'c')`
+produces `"a-a-b"`, not `"a-b-c"`). `check_format_string_call` is
+refactored around a new shared `check_format_placeholders` helper
+operating on `(type, span)` pairs rather than raw `Arg` expressions, so
+it now also covers `fprintf` (format string is its *second* argument,
+otherwise identical to `sprintf`/`printf`) and `vsprintf`/`vprintf`
+(values come from one array argument, checked only when it's a real,
+sequential-keyed `ArrayShape` - a plain list literal in every way that
+matters here, the same "don't guess past what's statically known"
+restriction the format string itself already has).
+
+Still open: width/precision `*` sub-placeholders (real PHPStan's own
+`PrintfHelper` regex parses one, but it's unclear this reflects a real
+PHP `sprintf` feature at all - not attempted without a confirmed real
+example), a strict-vs-castable matching mode, and `scanf`-style
+placeholder counting for `sscanf`/`fscanf` (a different specifier set
+and semantics entirely - by-ref output-variable count, not argument
+types - and zero corpus incidence found, so deliberately deprioritized
+for now). Corpus-verified: 50138 diagnostics either way (zero delta) -
+the Piwigo corpus has no literal positional format strings and its one
+real `vsprintf` call passes a non-literal array (an `array_slice(...)`
+result), so this phase's new coverage isn't exercised there, but the
+full test suite (including new positional/`fprintf`/`vsprintf`-specific
+tests) and a direct multi-shape repro both confirm the new checks fire
+correctly with zero regressions.
 
 **Phase 70 - Generator/yield type modeling (NEW, PLANNED).** No
 `Generator<K, V, TSend, TReturn>` type shape exists; `yield`/`yield
