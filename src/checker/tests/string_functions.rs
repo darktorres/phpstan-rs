@@ -233,18 +233,145 @@ fn sprintf_and_printf_accept_ordinary_scalar_arguments() {
 
 #[test]
 fn sprintf_skips_the_check_entirely_for_shapes_it_does_not_confidently_understand() {
-    // A positional specifier (%1$s), a dynamic (non-literal) format
-    // string, and an unrecognized specifier character all safely
-    // fall back to no check at all - "don't know, don't guess" - even
-    // though the positional-args call below is actually missing an
-    // argument in spirit (it repeats the same one), and the
-    // unknown-specifier call is arguably malformed PHP.
+    // A dynamic (non-literal) format string, an unrecognized specifier
+    // character, and a format string mixing positional and unnumbered
+    // specifiers all safely fall back to no check at all - "don't know,
+    // don't guess" - even though the mixed-style call is arguably
+    // missing an argument (real PHP's own interaction between the two
+    // styles is quirky enough not to guess at, see
+    // `parse_positional_format_specifiers`'s own doc comment).
     let d = diagnostics_for(
         r#"<?php
             function f(string $fmt) {
-                sprintf('%1$s %2$s', "only one");
                 sprintf($fmt, "whatever");
                 sprintf("%v", "x");
+                sprintf('%1$s %s', "only one");
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 69: positional specifiers (`%1$s`) - a real, common PHP idiom
+// for reordering arguments in localized message strings.
+
+#[test]
+fn a_purely_positional_format_string_missing_an_argument_is_flagged() {
+    let d = diagnostics_for(r#"<?php sprintf('%1$s %2$s', "only one");"#);
+    assert!(
+        d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_purely_positional_format_string_with_enough_arguments_is_never_flagged() {
+    let d = diagnostics_for(r#"<?php sprintf('%2$s %1$s', "a", "b");"#);
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_repeated_position_only_needs_one_argument() {
+    // `%1$s %1$s` references position 1 twice but only ever needs one
+    // real argument to satisfy both.
+    let d = diagnostics_for(r#"<?php sprintf('%1$s %1$s', "a");"#);
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_gap_position_still_counts_toward_the_minimum_argument_count() {
+    // `%3$s` alone still needs positions 1 and 2 to exist as real
+    // arguments, even though nothing checks their own type.
+    let d = diagnostics_for(r#"<?php sprintf('%3$s', "a", "b");"#);
+    assert!(
+        d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_positional_specifier_still_flags_a_bad_argument_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $arr) {
+                sprintf('%1$d', $arr);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_position_referenced_by_two_different_specifiers_checks_both() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $arr) {
+                sprintf('%1$s %1$d', $arr);
+            }
+        "#,
+    );
+    assert_eq!(
+        d.iter().filter(|x| x.identifier == "argument.type").count(),
+        2,
+        "got: {d:?}"
+    );
+}
+
+// Phase 69: wiring the existing sprintf/printf engine into
+// fprintf/vsprintf/vprintf.
+
+#[test]
+fn fprintf_checks_its_format_string_as_the_second_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($stream) {
+                fprintf($stream, "%s and %s", "only one");
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn vsprintf_checks_a_literal_array_argument() {
+    let d = diagnostics_for(r#"<?php vsprintf('%s and %s', ["only one"]);"#);
+    assert!(
+        d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn vprintf_checks_a_literal_array_argument_s_element_types() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $arr) {
+                vprintf('%d', [$arr]);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn vsprintf_with_a_non_literal_array_argument_is_never_flagged() {
+    // Don't guess - a plain `array<T>`-typed variable (not a real,
+    // sequential-keyed `ArrayShape`) has no per-position types to check
+    // against at all.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<string> $values */
+            function f(array $values) {
+                vsprintf('%s and %s', $values);
             }
         "#,
     );

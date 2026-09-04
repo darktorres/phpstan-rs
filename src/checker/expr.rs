@@ -466,7 +466,10 @@ impl<'a> Checker<'a> {
                             span: e.span,
                         });
                         if !args.iter().any(|a| a.spread)
-                            && matches!(name.as_str(), "sprintf" | "printf")
+                            && matches!(
+                                name.as_str(),
+                                "sprintf" | "printf" | "fprintf" | "vsprintf" | "vprintf"
+                            )
                         {
                             self.check_format_string_call(name, args, locals, label);
                         }
