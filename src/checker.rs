@@ -361,6 +361,7 @@ mod expr;
 mod generics;
 mod narrowing;
 mod oop;
+pub(crate) mod phpstan_api;
 mod resolve;
 mod stmt;
 
