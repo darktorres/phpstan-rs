@@ -14,3 +14,4 @@ mod narrowing;
 mod oop_overrides_and_inheritance;
 mod preg_and_regex;
 mod string_functions;
+mod unused_symbols;

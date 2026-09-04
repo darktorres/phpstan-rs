@@ -424,6 +424,9 @@ fn a_stale_resource_doc_comment_does_not_override_a_narrower_native_hint() {
                     }
                     $this->image = $img;
                 }
+                public function get(): GdImage {
+                    return $this->image;
+                }
             }
         "#,
     );
@@ -447,6 +450,9 @@ fn a_mixed_native_hint_does_not_override_a_docblocks_resource_member() {
             class Logger {
                 /** @var resource|null */
                 private mixed $fileHandle = null;
+                public function __construct() {
+                    $this->open();
+                }
                 private function open(): void {
                     $handle = fopen('/tmp/x', 'a');
                     if ($handle !== false) {

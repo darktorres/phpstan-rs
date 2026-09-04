@@ -1329,6 +1329,13 @@ impl<'a> Checker<'a> {
                     &closure_label,
                 );
                 self.current_function_is_generator = previous_generator_flag;
+                // Phase 59: a `use(...)` capture never referenced anywhere
+                // in the closure's own body it was just checked against
+                // above. `ClosureUse` carries no span of its own (see its
+                // own doc comment), so every finding here anchors to the
+                // whole closure expression's span instead of the specific
+                // `$x` token.
+                self.check_unused_closure_uses(uses, body, &closure_label, e.span);
                 // A `use (&$x)` capture is a real reference - any
                 // mutation the closure body makes to `$x` is visible in
                 // the *declaring* scope too, from the closure literal's

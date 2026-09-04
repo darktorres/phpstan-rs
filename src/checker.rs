@@ -56,13 +56,18 @@ pub(crate) type TemplateBindings = std::collections::HashMap<String, Type>;
 /// unknown methods..., wrong number of arguments..., always undefined
 /// variables" - though this project doesn't implement PHPStan's own
 /// $this-only-vs-any-expression distinction for method/property checks,
-/// a real, documented simplification, not an oversight), 2 for undefined-
-/// property/array-shape-key (PHPDoc-derived structural checks, real
-/// PHPStan's `checkThisOnly: false`/`checkPhpDocMissingReturn` territory),
-/// 3 for return-type/property-type mismatches (real PHPStan's own
-/// `checkPhpDocMethodSignatures` level exactly), 5 for argument-type
-/// mismatches (real PHPStan's own `checkFunctionArgumentTypes` level
-/// exactly), and 6 for this project's own generic bound/variance checks
+/// a real, documented simplification, not an oversight), 1 for Phase 59's
+/// unused-constructor-parameter/unused-closure-use checks (real PHPStan's
+/// own level exactly - `UnusedConstructorParametersRule`/
+/// `UnusedClosureUsesRule`'s own `#[RegisteredRule(level: 1)]`), 2 for
+/// undefined-property/array-shape-key (PHPDoc-derived structural checks,
+/// real PHPStan's `checkThisOnly: false`/`checkPhpDocMissingReturn`
+/// territory), 3 for return-type/property-type mismatches (real PHPStan's
+/// own `checkPhpDocMethodSignatures` level exactly), 4 for Phase 59's
+/// unused-private-const/method/property checks (again real PHPStan's own
+/// level exactly), 5 for argument-type mismatches (real PHPStan's own
+/// `checkFunctionArgumentTypes` level exactly), and 6 for this project's
+/// own generic bound/variance checks
 /// (no direct real-PHPStan equivalent - generics are baked into its core
 /// type engine, not level-gated - placed here as this project's own
 /// "advanced, opt-in" tier, alongside real PHPStan's missing-typehints
@@ -352,6 +357,21 @@ pub struct Checker<'a> {
     // be open, matching real PHP's "innermost loop-or-switch" rule for an
     // unqualified `break;`.
     pub(crate) loop_break_states: Vec<Vec<Locals>>,
+    // Phase 59: every class named as the resolved `$scope` of a
+    // `Closure::bind(...)`/`->bindTo(...)` call anywhere in the file being
+    // checked (`unused::scan_program_for_rebind_targets`, built once per
+    // `check_program`) - a real, idiomatic way to reach a class's private
+    // members from a closure declared entirely outside that class's own
+    // body (see `checker/expr.rs`'s own Finding 49 handling), invisible to
+    // `check_unused_private_members`'s own per-class-body-only usage scan
+    // otherwise. `rebind_escape_all` is the coarser fallback for a
+    // bind/bindTo call whose scope isn't a literal `Foo::class` this
+    // project can resolve without full type inference (an omitted scope
+    // argument, or an arbitrary expression) - safer to skip every class's
+    // private-member check for the whole file than risk a false "unused"
+    // report on a member a rebound closure actually reaches.
+    pub(crate) rebind_target_classes: HashSet<String>,
+    pub(crate) rebind_escape_all: bool,
 }
 
 mod assignment;
@@ -364,6 +384,7 @@ mod oop;
 pub(crate) mod phpstan_api;
 mod resolve;
 mod stmt;
+mod unused;
 
 pub(crate) use assignment::{
     is_superglobal, literal_string_key, literal_string_value, superglobal_default_type,
@@ -395,6 +416,8 @@ impl<'a> Checker<'a> {
             pest_this_type: Type::Mixed,
             pest_hook_properties: HashSet::new(),
             loop_break_states: Vec::new(),
+            rebind_target_classes: HashSet::new(),
+            rebind_escape_all: false,
         }
     }
 
@@ -466,6 +489,13 @@ impl<'a> Checker<'a> {
         // silent method-table corruption the registry itself had to
         // guard against.
         self.name_ctx = NameContext::build(program);
+        // Phase 59: see `rebind_target_classes`'s own doc comment - built
+        // once per file, ahead of `check_unused_private_members`'s own
+        // per-class use below.
+        let (rebind_targets, rebind_escape_all) =
+            unused::scan_program_for_rebind_targets(program, &self.name_ctx);
+        self.rebind_target_classes = rebind_targets;
+        self.rebind_escape_all = rebind_escape_all;
         // Finding 1: a file-local `uses(...)` call (no `->in(...)`) wins
         // over whatever `Project::check_file` already set via
         // `set_pest_this_type` from directory-scoped Pest.php config -
@@ -506,6 +536,19 @@ impl<'a> Checker<'a> {
                         for m in &c.methods {
                             self.check_function(&m.function, Some(&fqn), m.is_static);
                         }
+                        // Phase 59: a class's own private consts/methods/
+                        // properties, checked once per class (not per
+                        // method the way check_function's own per-body
+                        // checks are) since "was this ever referenced"
+                        // needs every one of the class's own bodies
+                        // scanned together, not just one at a time.
+                        self.check_unused_private_members(
+                            &fqn,
+                            c.kind,
+                            &c.methods,
+                            &c.properties,
+                            &c.consts,
+                        );
                     }
                 }
                 StmtKind::EnumDecl(e) => {
@@ -516,6 +559,17 @@ impl<'a> Checker<'a> {
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
+                    // An enum can't declare instance properties at all
+                    // (see `ast::EnumDecl`'s own doc comment) - only its
+                    // own consts/methods are real unused-private-member
+                    // candidates.
+                    self.check_unused_private_members(
+                        &fqn,
+                        ClassKind::Enum,
+                        &e.methods,
+                        &[],
+                        &e.consts,
+                    );
                 }
                 // Top-level script statements share one scope across the
                 // whole file, so the extract()/eval() guard spans the
@@ -816,6 +870,14 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+
+        // Phase 59: needs the same body-level extract()/eval() guard as
+        // everything else checked in this function - placed before the
+        // truncation below (rather than after) specifically so a
+        // constructor that calls extract()/eval() has this diagnostic
+        // discarded along with every other one from its own body, exactly
+        // like the checks already running inside the loop above.
+        self.check_unused_constructor_parameters(f, class_name, &label);
 
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);

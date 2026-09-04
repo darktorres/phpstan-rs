@@ -1657,6 +1657,11 @@ fn reassigning_a_property_after_narrowing_it_does_not_leave_the_stale_narrowed_t
                     }
                     return $this->entries;
                 }
+
+                /** @return array<string> */
+                public function get(): array {
+                    return $this->entries();
+                }
             }
         "#,
     );

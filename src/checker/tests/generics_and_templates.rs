@@ -898,6 +898,10 @@ fn a_covariant_template_in_a_constructor_parameter_is_exempt() {
             final class Success {
                 /** @param T $value */
                 public function __construct(private $value) {}
+                /** @return T */
+                public function get() {
+                    return $this->value;
+                }
             }
         "#,
     );
