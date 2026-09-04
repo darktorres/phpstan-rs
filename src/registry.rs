@@ -855,8 +855,24 @@ impl Registry {
         self.lookup_in_hierarchy_with_owner(class, |info| info.consts.get(const_name))
     }
 
+    /// Phase 71 corpus find: real PHP function calls are case-
+    /// insensitive (`STRTOLOWER()`/`strtolower()`/`StrToLower()` all
+    /// resolve to the exact same builtin, and the same is true of a
+    /// user-declared function under whatever case its own call site
+    /// happens to use) - `self.functions` itself stays keyed by
+    /// whatever case each function was actually *declared* under (every
+    /// existing insertion call site is untouched), so an exact-case miss
+    /// falls back to a case-insensitive scan before giving up. Checked
+    /// second, not first: the overwhelming majority of real calls
+    /// already match a declaration's own case exactly, so the common
+    /// path stays a plain, allocation-free `HashMap` lookup.
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionSig> {
-        self.functions.get(name)
+        self.functions.get(name).or_else(|| {
+            self.functions
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v)
+        })
     }
 
     /// Type-compatibility check that consults the class hierarchy for

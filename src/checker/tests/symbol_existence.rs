@@ -493,6 +493,59 @@ fn a_real_use_function_import_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 71 corpus find: real PHP function calls are case-insensitive -
+// `Registry::lookup_function` used to be a plain exact-case `HashMap`
+// lookup, wrongly flagging any differently-cased call (a builtin or a
+// user-declared function alike) as undefined.
+
+#[test]
+fn a_differently_cased_call_to_a_builtin_function_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                STRTOLOWER("x");
+                StrToLower("x");
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_call_to_a_user_declared_function_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function myFunc(): void {}
+            function g(): void {
+                MYFUNC();
+                myfunc();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_genuinely_undefined_function_is_still_flagged_regardless_of_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                TOTALLYMADEUPFUNCTION();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.notFound"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_group_use_function_import_is_checked_per_member() {
     // Group-use expands to individually-kinded `UseImport`s, each
