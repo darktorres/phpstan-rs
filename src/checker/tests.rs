@@ -19,5 +19,6 @@ mod operator_validity;
 mod preg_and_regex;
 mod string_functions;
 mod symbol_existence;
+mod uninitialized;
 mod unused_symbols;
 mod visibility;

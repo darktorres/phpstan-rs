@@ -421,6 +421,7 @@ mod operators;
 pub(crate) mod phpstan_api;
 mod resolve;
 mod stmt;
+mod uninitialized;
 mod unused;
 mod visibility;
 
@@ -578,6 +579,7 @@ impl<'a> Checker<'a> {
                     self.check_class_references_exist(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
                     self.check_trait_conflicts(&fqn, c.span);
+                    self.check_uninitialized_properties(&fqn, c);
                     // Phase 37: the class's own attributes, plus every
                     // property's/const's - method/param attributes are
                     // checked per-declaration inside `check_function`

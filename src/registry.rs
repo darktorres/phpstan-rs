@@ -34,6 +34,19 @@ pub struct Registry {
     // existing construction sites already goes through `build`/
     // `default()` and none of them need to change to keep compiling.
     pub strict_mixed_arrays: bool,
+    // Phase 62: opts into `Checker::check_uninitialized_properties`.
+    // Defaults to `false`, matching real PHPStan's own default *exactly*
+    // - `UninitializedPropertyRule` sits behind its own
+    // `checkUninitializedProperties` parameter (`false` in `conf/
+    // config.neon`, not part of any of the standard level 0-10 rule
+    // sets) - real PHPStan itself doesn't trust this rule enough to run
+    // it by default, and this project's own version is a substantially
+    // simpler heuristic than PHPStan's real `ConstructorsHelper`-backed
+    // dataflow (see `checker/uninitialized.rs`'s own doc comment for
+    // exactly how much narrower). Same `strict_mixed_arrays` precedent:
+    // a plain `pub` field via `#[derive(Default)]`, config -> CLI flag ->
+    // `Project` setter -> here.
+    pub check_uninitialized_properties: bool,
     // Phase 38: the project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to

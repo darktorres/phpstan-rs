@@ -12,6 +12,7 @@
 //! level = 5
 //! baseline = "phpstan-baseline.json"
 //! strict_mixed_arrays = false
+//! check_uninitialized_properties = false
 //! scan_paths = ["vendor/some-manual-extra"]
 //! no_composer = false
 //! php_version = "8.1"
@@ -27,6 +28,11 @@ pub struct Config {
     pub level: Option<u8>,
     pub baseline: Option<PathBuf>,
     pub strict_mixed_arrays: Option<bool>,
+    /// Phase 62: mirrors real PHPStan's own opt-in `checkUninitializedProperties`
+    /// parameter - see `registry::Registry::check_uninitialized_properties`'s
+    /// own doc comment for why this defaults to `false` (unset) rather
+    /// than running unconditionally like this project's other checks.
+    pub check_uninitialized_properties: Option<bool>,
     /// Extra directories loaded for type-resolution context only - never
     /// analyzed or reported on. See `composer::discover_vendor_context`
     /// for the automatic `vendor/` counterpart to this.

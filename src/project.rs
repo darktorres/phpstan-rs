@@ -106,6 +106,15 @@ impl Project {
         self.registry.strict_mixed_arrays = strict;
     }
 
+    /// Phase 62: opts the whole project's checking into `Checker::
+    /// check_uninitialized_properties`, following `set_strict_mixed_
+    /// arrays`'s exact precedent - see `registry::Registry::check_
+    /// uninitialized_properties`'s own doc comment for why this defaults
+    /// to `false`.
+    pub fn set_check_uninitialized_properties(&mut self, enabled: bool) {
+        self.registry.check_uninitialized_properties = enabled;
+    }
+
     /// Phase 38: configures the project's target PHP version
     /// (`registry::Registry::php_version`), following
     /// `set_strict_mixed_arrays`'s exact precedent - a narrow setter
