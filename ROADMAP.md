@@ -698,22 +698,42 @@ Consolidated unlocks still to close: `NonexistentOffsetInArrayDimFetchCheck`/
 `UnsafeArrayStringKeyCastingTraverser`.
 
 **Phase 51 - `Type` coercion/cast method surface + `IntegerRangeType`
-completion (NEW, PLANNED).** `Type` has no `toInteger()`/`toFloat()`/
-`toString()`/`toBoolean()`/`toArrayKey()`-style coercion methods at all;
-every conversion is done ad hoc per call site (`src/checker/expr.rs`
-Cast arm, Echo/print handling, `~`/`-` unary). Pair this with completing
-`IntegerRangeType` arithmetic (`shift()`, range-preserving `**`,
-`toAbsoluteNumber()`/`toBitwiseNotType()` bound preservation) since
-both are the same "give `Type` a real coercion API" root cause.
-Unlocks `InvalidCastRule`, `EchoRule`, `PrintRule`,
-`InvalidPartOfEncapsedStringRule`, plus the `IntegerRangeType`-consumer
-extensions (`AbsFunctionDynamicReturnTypeExtension`,
-`StrlenFunctionReturnTypeExtension`, `RandomIntFunctionReturnTypeExtension`,
-`CountFunctionReturnTypeExtension`, `HrtimeFunctionReturnTypeExtension`),
-`StrvalFamilyFunctionReturnTypeExtension`,
-`SetTypeFunctionTypeSpecifyingExtension`. Size: L - the single
-most-cited systemic gap in the `core-types` audit category; nearly
-every scalar `Type`'s "partial" status traces back to this.
+completion (PARTIAL).** `Type` had no `toInteger()`/`toFloat()`/
+`toString()`-style coercion methods at all; every conversion was done
+ad hoc per call site with no legality checking. Paired with completing
+`IntegerRangeType` arithmetic, the same "give `Type` a real coercion
+API" root cause.
+
+**Done**: `src/checker/coercion.rs` gives the checker a real cast-
+legality surface (`type_to_integer`/`type_to_float`/`type_to_string`),
+mirroring real PHPStan's own `ObjectType::toInteger()`/`toFloat()`/
+`toString()`, `ArrayTypeTrait`'s always-illegal `toString()`, and
+`ResourceType`'s own dedicated (always-legal-for-int/float, illegal-
+for-string) rules - wired into `InvalidCastRule` (`cast.int`/
+`cast.double`/`cast.string`) and `EchoRule` (`echo.nonString`).
+`IntegerRangeType::toAbsoluteNumber()`/`toBitwiseNotType()` are done
+too, wired into `abs()` and `~` respectively, with exact bound
+arithmetic (including the real `PHP_INT_MIN`-overflows-to-unbounded
+edge case). Deliberately never checks `(bool)` - real PHP has no type
+for which it's illegal. This same verification pass also found and
+fixed a real, standalone narrowing bug it surfaced (`$x instanceof A
+|| $x instanceof B` never narrowed at all, unlike a single `instanceof`
+check) - see the "OR-chain of instanceof checks" entry in Completed
+phase history below for that fix specifically.
+
+**Still open**: `PrintRule` (this project's parser has no dedicated
+`print` AST node to hang a check on - it parses through the ordinary
+call/language-construct path); `InvalidPartOfEncapsedStringRule`
+(string-interpolation parts - `Interpolated(Vec<Expr>)` has no per-part
+position information a check could report against precisely yet);
+range-preserving `**` (pow) and `shift()` arithmetic on `IntegerRangeType`
+(less common than `abs()`/`~`, and not corpus-evidenced as a real gap).
+Consolidated unlocks still to close: `PrintRule`,
+`InvalidPartOfEncapsedStringRule`, plus the remaining `IntegerRangeType`-
+consumer extensions (`StrlenFunctionReturnTypeExtension`,
+`RandomIntFunctionReturnTypeExtension`, `CountFunctionReturnTypeExtension`,
+`HrtimeFunctionReturnTypeExtension`), `StrvalFamilyFunctionReturnTypeExtension`,
+`SetTypeFunctionTypeSpecifyingExtension`.
 
 **Phase 52 - Invalid-operand-combination (`ErrorType`) concept for
 operators (NEW, PLANNED).** `infer_binary`/unary-operator arms always
