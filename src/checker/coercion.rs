@@ -1,0 +1,184 @@
+//! Phase 51: `Type` coercion validity - real PHPStan's own `Type::
+//! toInteger()`/`toFloat()`/`toString()` surface, condensed to what
+//! `InvalidCastRule`/`EchoRule` actually need: "is this cast/context
+//! legal, and if so what does it produce." Every scalar, `null`, `array`
+//! (for int/float only - see below), and `Mixed` are always legal; the
+//! only real illegality lives on the object side, mirroring real
+//! PHPStan's own `ObjectType::toInteger()`/`toFloat()`/`toString()` and
+//! `ArrayTypeTrait`'s own always-`ErrorType` `toString()`.
+//!
+//! Deliberately narrower than real PHPStan in one respect: `toBoolean()`
+//! is never modeled here at all - real PHP has no type for which `(bool)`
+//! is illegal (every value has a truthiness), so `InvalidCastRule`'s own
+//! `bool` arm can never actually fire and isn't worth a coercion method
+//! of its own.
+
+use crate::checker::{Checker, union_types};
+use crate::token::Span;
+use crate::types::{AccessoryKind, Type};
+
+/// The handful of built-in extension classes real PHPStan's own
+/// `ObjectType::toInteger()`/`toFloat()` special-case as numeric-
+/// castable (`vendor/phpstan-src/src/Type/ObjectType.php`) - every other
+/// object is illegal for `(int)`/`(float)`, even one with a real
+/// `__toString()` (int/float coercion has no string-cast fallback the
+/// way `(string)` itself does).
+const INT_CASTABLE_CLASSES: &[&str] = &["SimpleXMLElement", "GMP", "CurlHandle", "CurlMultiHandle"];
+const FLOAT_CASTABLE_CLASSES: &[&str] = &["SimpleXMLElement", "GMP"];
+
+impl<'a> Checker<'a> {
+    /// `(int) $expr` / an implicit int-coercion context. `None` = PHP
+    /// itself cannot legally produce an int this way. `resource` (this
+    /// project's own sentinel `Object("resource", [])`, not a real
+    /// class - see `parse_type_keyword_or_class`'s own comment) is
+    /// always legal here, matching real PHPStan's own dedicated
+    /// `ResourceType::toInteger()` - a real, common idiom (`(int)
+    /// $fileHandle` for a resource's own unique id), unlike an
+    /// arbitrary object.
+    pub(crate) fn type_to_integer(&self, ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Object(name, _) if name == "resource" => Some(Type::Int),
+            Type::Object(name, _) if self.is_castable_object(name, INT_CASTABLE_CLASSES) => {
+                Some(Type::Int)
+            }
+            Type::Object(..) => None,
+            Type::Union(members) => union_coercion(members, |m| self.type_to_integer(m)),
+            _ => Some(Type::Int),
+        }
+    }
+
+    /// `(float) $expr`. Same shape as `type_to_integer` (`resource`
+    /// included, matching real PHPStan's own `ResourceType::toFloat()`),
+    /// real PHPStan's own numeric-castable class list is one entry
+    /// narrower for objects specifically (no `CurlHandle`/
+    /// `CurlMultiHandle` - `curl_getinfo()`-style resource handles have
+    /// no meaningful float value).
+    pub(crate) fn type_to_float(&self, ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Object(name, _) if name == "resource" => Some(Type::Float),
+            Type::Object(name, _) if self.is_castable_object(name, FLOAT_CASTABLE_CLASSES) => {
+                Some(Type::Float)
+            }
+            Type::Object(..) => None,
+            Type::Union(members) => union_coercion(members, |m| self.type_to_float(m)),
+            _ => Some(Type::Float),
+        }
+    }
+
+    /// `(string) $expr`. `None` = illegal - an array (PHP's own "Array
+    /// to string conversion" - always triggered, regardless of the
+    /// array's own content, matching real PHPStan's `ArrayTypeTrait::
+    /// toString()` unconditionally returning `ErrorType`) or an object
+    /// with no `__toString()` method that also isn't `GMP`/
+    /// `BcMath\Number` (both real, numeric-string-castable by a native
+    /// operator overload, not a real `__toString()` declaration - real
+    /// PHPStan special-cases them the same way). An *unresolvable*
+    /// class (not in this project's own registry at all) is left alone,
+    /// matching this project's usual "don't know, don't guess" leniency
+    /// since a real corpus's own stub coverage may simply not include it.
+    pub(crate) fn type_to_string(&self, ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Array(..) | Type::ArrayShape(_) => None,
+            Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
+                None
+            }
+            // Matches real PHPStan's own dedicated `ResourceType::
+            // toString()`, which is `ErrorType` unconditionally -
+            // unlike `(int)`/`(float)` just above, a resource-to-string
+            // cast is treated as illegal even though real PHP itself
+            // produces a "Resource id #N" string with no warning.
+            Type::Object(name, _) if name == "resource" => None,
+            Type::Object(name, _) => {
+                if self.registry.is_subclass_of(name, "GMP")
+                    || self.registry.is_subclass_of(name, "BcMath\\Number")
+                {
+                    return Some(Type::Intersection(vec![
+                        Type::String,
+                        Type::Accessory(AccessoryKind::NumericString),
+                        Type::Accessory(AccessoryKind::NonEmptyString),
+                    ]));
+                }
+                match self.registry.lookup_method(name, "__toString") {
+                    Some(sig) => Some(sig.return_type.clone()),
+                    None if self.registry.classes.contains_key(name) => None,
+                    None => Some(Type::String),
+                }
+            }
+            Type::Union(members) => union_coercion(members, |m| self.type_to_string(m)),
+            _ => Some(Type::String),
+        }
+    }
+
+    fn is_castable_object(&self, name: &str, classes: &[&str]) -> bool {
+        classes
+            .iter()
+            .any(|c| self.registry.is_subclass_of(name, c))
+    }
+
+    /// Real PHPStan's `InvalidCastRule` (`cast.int`/`cast.double`/
+    /// `cast.string`) - `(bool)`/`(array)`/`(object)`/`(unset)` are never
+    /// checked, matching real PHPStan's own callback (only the four
+    /// scalar-coercion casts it names).
+    pub(crate) fn check_cast_validity(
+        &mut self,
+        cast_ty: &str,
+        inner_ty: &Type,
+        span: Span,
+        label: &str,
+    ) {
+        let (result, identifier, target_name) = match cast_ty {
+            "int" => (self.type_to_integer(inner_ty), "cast.int", "int"),
+            "float" => (self.type_to_float(inner_ty), "cast.double", "float"),
+            "string" => (self.type_to_string(inner_ty), "cast.string", "string"),
+            _ => return,
+        };
+        if result.is_some() {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!("Cannot cast {inner_ty} to {target_name}."),
+            span,
+            2,
+            identifier,
+        );
+    }
+
+    /// Real PHPStan's `EchoRule` (`echo.nonString`) - `position` is
+    /// 0-based, real PHPStan's own message counts from 1.
+    pub(crate) fn check_echo_validity(
+        &mut self,
+        expr_ty: &Type,
+        position: usize,
+        span: Span,
+        label: &str,
+    ) {
+        if self.type_to_string(expr_ty).is_some() {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!(
+                "Parameter #{} ({expr_ty}) of echo cannot be converted to string.",
+                position + 1
+            ),
+            span,
+            2,
+            "echo.nonString",
+        );
+    }
+}
+
+/// A union's own cast validity: real PHPStan's `UnionType::toInteger()`/
+/// etc. combine each member's own result via `TypeCombinator`, and
+/// `InvalidCastRule` only flags when the *combined* result is exactly
+/// `ErrorType` - which only happens when every single member's own cast
+/// was illegal (a union with even one legal member produces a real,
+/// mixed-but-not-purely-`ErrorType` result). Mirrors Phase 50's own
+/// `invalid_array_key_description` union handling for the identical
+/// reason: no tri-state "possibly invalid" grading to fall back on, so
+/// "confidently illegal" is the only case worth flagging.
+fn union_coercion(members: &[Type], f: impl Fn(&Type) -> Option<Type>) -> Option<Type> {
+    let legal: Vec<Type> = members.iter().filter_map(f).collect();
+    legal.into_iter().reduce(union_types)
+}

@@ -376,6 +376,7 @@ pub struct Checker<'a> {
 
 mod assignment;
 mod calls;
+mod coercion;
 mod control_flow;
 mod expr;
 mod generics;

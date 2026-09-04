@@ -646,7 +646,8 @@ impl<'a> Checker<'a> {
                 self.check_expr(inner, locals, label)
             }
             ExprKind::Cast(ty, inner) => {
-                self.check_expr(inner, locals, label);
+                let inner_ty = self.check_expr(inner, locals, label);
+                self.check_cast_validity(ty, &inner_ty, inner.span, label);
                 match ty.as_str() {
                     "int" => Type::Int,
                     "float" => Type::Float,

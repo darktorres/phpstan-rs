@@ -131,8 +131,9 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::Echo(exprs) => {
-                for e in exprs {
-                    self.check_expr(e, locals, label);
+                for (i, e) in exprs.iter().enumerate() {
+                    let ty = self.check_expr(e, locals, label);
+                    self.check_echo_validity(&ty, i, e.span, label);
                 }
             }
             StmtKind::Block(stmts) => self.check_block(stmts, locals, declared_return, label),
