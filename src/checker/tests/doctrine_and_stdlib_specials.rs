@@ -671,6 +671,507 @@ fn a_property_read_tag_flags_an_attempted_write() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
+// Phase 77: get_called_class()/get_parent_class() - real, evidenced
+// late-static-binding shapes real PHPStan's own
+// GetCalledClassDynamicReturnTypeExtension/
+// GetParentClassDynamicFunctionReturnTypeExtension already model, this
+// project's own stub-only fallback discards. `get_called_class`'s own
+// real stub is unconditionally plain `string` (no `false`) - calling it
+// outside any class context is a real runtime `Error` real PHPStan
+// itself still models as `false` (matching that real extension's own
+// fallback), which the stub-only fallback could never catch since plain
+// `string` matches everything.
+
+#[test]
+fn get_called_class_outside_any_class_is_now_caught_as_a_mismatch() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): string {
+                return get_called_class();
+            }
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "expected the outside-class `false` case to now be flagged: {d:?}"
+    );
+}
+
+#[test]
+fn get_called_class_inside_a_class_still_type_checks_as_a_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public static function whoAmI(): string {
+                    return get_called_class();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_called_class_infers_the_enclosing_classs_own_class_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class TypedRepository {
+                /**
+                 * @template R of Base
+                 * @param class-string<R> $repositoryClass
+                 * @return R
+                 */
+                public static function narrow(string $repositoryClass) {
+                    return new $repositoryClass();
+                }
+            }
+            class Derived extends Base {
+                public static function make(): int {
+                    return TypedRepository::narrow(get_called_class());
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("return type mismatch") && x.message.contains("Derived")),
+        "expected a return-type mismatch naming Derived, got: {d:?}"
+    );
+}
+
+#[test]
+fn get_parent_class_infers_the_real_parent_as_a_class_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Mid extends Base {}
+            class TypedRepository {
+                /**
+                 * @template R of Base
+                 * @param class-string<R> $repositoryClass
+                 * @return R
+                 */
+                public static function narrow(string $repositoryClass) {
+                    return new $repositoryClass();
+                }
+            }
+            class Bottom extends Mid {
+                public static function make(): int {
+                    return TypedRepository::narrow(get_parent_class(new self()));
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("return type mismatch") && x.message.contains("Mid")),
+        "expected a return-type mismatch naming Mid, got: {d:?}"
+    );
+}
+
+#[test]
+fn get_parent_class_of_a_class_with_no_parent_infers_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            class NoParent {
+                public static function whoseParent(): string|false {
+                    return get_parent_class(new self());
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_parent_class_of_an_unresolvable_argument_keeps_todays_string_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($x): string|false {
+                return get_parent_class($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 77: gettype()/get_debug_type() - real per-kind runtime-string
+// answers real PHPStan's own GettypeFunctionReturnTypeExtension/
+// GetDebugTypeFunctionReturnTypeExtension already model. Both real stubs
+// are unconditionally plain `string`, so no finite literal (or literal
+// union) return type could ever have type-checked before this phase -
+// `gettype_with_a_known_scalar_union...`/`get_debug_type_of_a_final_
+// classs_instance...` below are both genuine "used to always fail, now
+// passes" cases.
+
+#[test]
+fn gettype_with_a_known_scalar_union_infers_the_exact_literal_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return 'integer'|'string'
+             */
+            function f(int|string $x) {
+                return gettype($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn gettype_of_an_unresolvable_value_keeps_todays_plain_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($x): string {
+                return gettype($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_debug_type_of_a_final_classs_instance_infers_its_own_exact_class_name() {
+    let d = diagnostics_for(
+        r#"<?php
+            final class Foo {}
+            /**
+             * @return 'Foo'
+             */
+            function f(Foo $x) {
+                return get_debug_type($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_debug_type_of_a_final_classs_instance_still_catches_a_wrong_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            final class Foo {}
+            /**
+             * @return 'Bar'
+             */
+            function f(Foo $x) {
+                return get_debug_type($x);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn get_debug_type_of_a_non_final_classs_instance_is_not_over_narrowed() {
+    // A real, evidenced false-positive risk: a non-`final` class's own
+    // real instance could be any subclass at runtime, so `get_debug_type`
+    // must NOT collapse it down to that exact class's own name (unlike
+    // the `final`-class case right above) - if it wrongly did, this
+    // wrong-literal declared return type would incorrectly pass instead
+    // of being flagged.
+    let d = diagnostics_for(
+        r#"<?php
+            class NotFinal {}
+            /**
+             * @return 'NotFinal'
+             */
+            function f(NotFinal $x) {
+                return get_debug_type($x);
+            }
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "a non-final class must not be narrowed to its own exact name: {d:?}"
+    );
+}
+
+// Phase 77: date()/idate() - a static format-character-to-type table
+// (no runtime `date()` simulation), real PHPStan's own
+// DateFunctionReturnTypeHelper/IdateFunctionReturnTypeHelper already
+// model with a real runtime `date()` call this project has no equivalent
+// for.
+
+#[test]
+fn date_with_a_purely_numeric_literal_format_infers_a_numeric_non_empty_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return numeric-string
+             */
+            function f() {
+                return date('Ymd');
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn date_with_a_day_name_format_is_not_wrongly_claimed_numeric() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return numeric-string
+             */
+            function f() {
+                return date('l');
+            }
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "'l' (a day name like Monday) must not be claimed numeric: {d:?}"
+    );
+}
+
+#[test]
+fn date_with_a_compact_time_format_infers_a_numeric_non_empty_string() {
+    // `i`/`s` (minutes/seconds) and `O` (signless-colon GMT offset, e.g.
+    // `+0200` - real `is_numeric()` accepts the leading sign) are all
+    // still digits-only text, not just the handful of format characters
+    // the positive test above already covers.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return numeric-string
+             */
+            function f() {
+                return date('His');
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn date_with_a_day_name_format_still_infers_a_non_empty_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return non-empty-string
+             */
+            function f() {
+                return date('l');
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn idate_with_a_known_format_character_infers_its_real_bounded_range() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return int<0, 23>
+             */
+            function f() {
+                return idate('H');
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn idate_with_an_uncovered_format_character_keeps_todays_int_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int|false {
+                return idate('Y');
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 77: pathinfo()/parse_url()/sscanf() - hardcoded constant-
+// array-shape tables real PHPStan's own PathinfoFunctionDynamicReturnTypeExtension/
+// ParseUrlFunctionDynamicReturnTypeExtension/SscanfFunctionDynamicReturnTypeExtension
+// already model.
+
+#[test]
+fn pathinfo_with_one_argument_infers_the_real_array_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return array{dirname: string, basename: string, extension?: string, filename: string}
+             */
+            function f(string $path) {
+                return pathinfo($path);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn pathinfo_with_a_single_component_flag_narrows_to_plain_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $path): string {
+                return pathinfo($path, PATHINFO_EXTENSION);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn pathinfo_with_a_non_literal_flag_keeps_todays_array_or_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $path, int $flags): array|string {
+                return pathinfo($path, $flags);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn parse_url_with_a_known_component_constant_infers_its_real_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return int<0, 65535>|false|null
+             */
+            function f(string $url) {
+                return parse_url($url, PHP_URL_PORT);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn parse_url_with_one_argument_infers_the_components_array_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return array{scheme?: string, host?: string, port?: int<0, 65535>, user?: string, pass?: string, path?: string, query?: string, fragment?: string}|false
+             */
+            function f(string $url) {
+                return parse_url($url);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sscanf_with_a_literal_format_infers_a_typed_tuple_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return array{0: int|null, 1: string|null}|null
+             */
+            function f(string $line) {
+                return sscanf($line, '%d %s');
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sscanf_with_a_non_literal_format_keeps_todays_array_or_int_or_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $line, string $format): array|int|null {
+                return sscanf($line, $format);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 77: stat()/lstat()/fstat()/dio_stat() - a hardcoded constant-
+// array-shape table real PHPStan's own StatDynamicReturnTypeExtension/
+// DioStatDynamicFunctionReturnTypeExtension already model.
+
+#[test]
+fn stat_infers_the_real_key_shape_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return array{dev: int, ino: int, mode: int, nlink: int, uid: int, gid: int, rdev: int, size: int, atime: int, mtime: int, ctime: int, blksize: int, blocks: int}|false
+             */
+            function f(string $path) {
+                return stat($path);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn dio_stat_infers_the_real_key_shape_or_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return array{device: int, inode: int, mode: int, nlink: int, uid: int, gid: int, device_type: int, size: int, blocksize: int, blocks: int, atime: int, mtime: int, ctime: int}|null
+             */
+            function f($fd) {
+                return dio_stat($fd);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 77: hash_algos()/openssl_get_cipher_methods()/mb_list_encodings()
+// - each really is always a non-empty list of non-empty strings,
+// regardless of host/PHP version/installed extensions (deliberately NOT
+// the exact literal snapshot real PHPStan's own HashFunctionsReturnTypeExtension/
+// OpenSslCipherMethodsProvider/MbFunctionsReturnTypeExtensionTrait build
+// by calling these for real at its own analysis time to validate *other*
+// functions' string arguments - see the match arm's own doc comment for
+// why that heavier mechanism isn't replicated here).
+
+#[test]
+fn hash_algos_infers_a_non_empty_list_of_non_empty_strings() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return non-empty-list<non-empty-string>
+             */
+            function f() {
+                return hash_algos();
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn openssl_and_mbstring_capability_lists_share_the_same_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return non-empty-list<non-empty-string>
+             */
+            function ciphers() {
+                return openssl_get_cipher_methods();
+            }
+            /**
+             * @return non-empty-list<non-empty-string>
+             */
+            function encodings() {
+                return mb_list_encodings();
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Phase 77: curl_getinfo()'s own per-option table, extended from Phase
 // 34 Finding A's original ~20 curated entries to the real, full ~73-entry
 // table (transcribed from real PHPStan's own

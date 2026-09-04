@@ -3,7 +3,7 @@ use crate::checker::{
     Checker, Locals, literal_string_key, narrow_type_excluding, narrow_type_excluding_falsy,
     narrow_type_to, resolve_call_args,
 };
-use crate::registry::FunctionSig;
+use crate::registry::{FunctionSig, Registry};
 use crate::types::{self, AccessoryKind, Type};
 
 use super::{is_canonical_int_key, is_false_literal, union_types};
@@ -761,10 +761,267 @@ impl<'a> Checker<'a> {
                     return Type::ClassString(Box::new(Type::Object(class, Vec::new())));
                 }
             }
+            // Phase 77: `get_called_class()`'s own real stub is
+            // unconditionally `string|false` - real PHPStan's own
+            // `GetCalledClassDynamicReturnTypeExtension` resolves it to
+            // `static::class`'s own type instead (`false` only when
+            // called outside any class). This project doesn't track true
+            // late static binding (`resolve_pseudo` already collapses
+            // `self`/`static` to the same `current_class`, documented on
+            // that function) - `current_class` is exactly that
+            // resolution, same source `self::class`/`static::class`
+            // already use.
+            "get_called_class" if args.is_empty() => {
+                return match &self.current_class {
+                    Some(class) => {
+                        Type::ClassString(Box::new(Type::Object(class.clone(), Vec::new())))
+                    }
+                    None => Type::False,
+                };
+            }
+            // Phase 77: `get_parent_class($object_or_class)`'s own real
+            // stub is unconditionally `string|false` - real PHPStan's own
+            // `GetParentClassDynamicFunctionReturnTypeExtension` resolves
+            // it from the argument's own class instead, walking its real
+            // `extends` chain (the roadmap's own text additionally cites a
+            // 0-arg "current class context" form real PHPStan also
+            // supports - this project's own vendored stub
+            // (`vendor/phpstorm-stubs/Core/Core.php`) declares
+            // `$object_or_class` with no default, making it a required
+            // parameter here, so a 0-arg call already gets its own
+            // "expects at least 1 argument" diagnostic from `check_args`
+            // independently of this dynamic-return-type refinement; not
+            // worth a redundant, effectively-dead extra match arm for a
+            // shape this project's own stub already rejects). Falls
+            // through to today's plain `string|false` for anything
+            // `find_declared_parent_class` can't answer confidently (an
+            // unknown class, or a class literally declared with no parent
+            // gets a confident `false` instead - see that function's own
+            // doc comment).
+            "get_parent_class" if args.len() == 1 => {
+                if let Type::Object(class, _) = self.infer_expr(&args[0].value, locals)
+                    && let Some(ty) = self.find_declared_parent_class(&class)
+                {
+                    return ty;
+                }
+            }
+            // Phase 77: `gettype()`'s own real stub is unconditionally
+            // `string` - real PHPStan's own
+            // `GettypeFunctionReturnTypeExtension` maps a concretely-known
+            // argument type to its own exact runtime type-name string
+            // instead (falling back to the full 10-name union only for a
+            // genuinely unknown argument, not worth replicating here -
+            // `gettype_result` below returns `None` for that case,
+            // leaving today's plain `string` unchanged).
+            "gettype" if args.len() == 1 => {
+                if let Some(ty) = gettype_result(&self.infer_expr(&args[0].value, locals)) {
+                    return ty;
+                }
+            }
+            // Phase 77: `get_debug_type()`'s own real stub is
+            // unconditionally `string` - real PHPStan's own
+            // `GetDebugTypeFunctionReturnTypeExtension` maps a
+            // concretely-known argument type to its own exact
+            // `get_debug_type()`-flavored name instead (an object's own
+            // class name only when that class is `final` - a non-final
+            // class's actual runtime value could be any subclass, so its
+            // own real string can't be pinned down any tighter than
+            // `string`, exactly mirroring that real extension's own
+            // `isFinal()` check).
+            "get_debug_type" if args.len() == 1 => {
+                if let Some(ty) =
+                    self.get_debug_type_result(&self.infer_expr(&args[0].value, locals))
+                {
+                    return ty;
+                }
+            }
+            // Phase 77: `date()`'s own real stub is unconditionally
+            // `string` - real PHPStan's own `DateFunctionReturnTypeHelper`
+            // observes each format character's own real output by
+            // actually calling PHP's `date()`. Scoped down to a purely
+            // static per-character classification instead (no runtime
+            // date simulation, unlike the DateTime/DOM/SimpleXML cluster
+            // Phase 78 covers) - `date_format_return_type` below only
+            // refines a literal format string composed entirely of
+            // recognized characters; anything else (a non-literal
+            // `$format`, or one containing an escape/punctuation
+            // character this table doesn't classify) falls through to
+            // today's plain `string`, unchanged.
+            "date" if !args.is_empty() => {
+                if let Type::StringLiteral(format) = self.infer_expr(&args[0].value, locals)
+                    && let Some(ty) = date_format_return_type(&format)
+                {
+                    return ty;
+                }
+            }
+            // Phase 77: `idate()`'s own real stub is unconditionally
+            // `int|false` - real PHPStan's own
+            // `IdateFunctionReturnTypeHelper` maps each single recognized
+            // format character to its own known numeric bound (`IntRange`
+            // is this project's own exact match for that). Scoped to a
+            // literal single-character format string, `idate()`'s only
+            // real accepted shape - anything else falls through to
+            // today's plain `int|false`, unchanged.
+            "idate" if !args.is_empty() => {
+                if let Type::StringLiteral(format) = self.infer_expr(&args[0].value, locals)
+                    && let Some(c) = single_char(&format)
+                    && let Some((min, max)) = idate_format_char_range(c)
+                {
+                    return Type::IntRange(Some(min), Some(max));
+                }
+            }
+            // Phase 77: `pathinfo($path)`'s own real stub is
+            // unconditionally `array` (the 2-arg `$flags` overload is
+            // `array|string`) - real PHPStan's own
+            // `PathinfoFunctionDynamicReturnTypeExtension` gives the
+            // 1-arg form a real shape (`dirname`/`basename`/`filename`
+            // always present, `extension` only when the path actually has
+            // one - simplified here to always-optional, since this
+            // project has no way to know a literal path has a dot in it)
+            // and narrows the 2-arg form down to plain `string` for a
+            // literal single-component `PATHINFO_*` flag (everything but
+            // `PATHINFO_ALL`, which gets the same array shape as the 1-arg
+            // form). A non-literal `$flags` keeps today's `array|string`
+            // union, unchanged.
+            "pathinfo" if args.len() == 1 => {
+                return pathinfo_array_shape();
+            }
+            "pathinfo" if args.len() == 2 => {
+                if let ExprKind::Name(flag_name) = &args[1].value.kind {
+                    return match flag_name.trim_start_matches('\\') {
+                        "PATHINFO_DIRNAME" | "PATHINFO_BASENAME" | "PATHINFO_EXTENSION"
+                        | "PATHINFO_FILENAME" => Type::String,
+                        "PATHINFO_ALL" => pathinfo_array_shape(),
+                        _ => Type::Union(vec![pathinfo_array_shape(), Type::String]),
+                    };
+                }
+            }
+            // Phase 77: `parse_url()`'s own real stub is unconditionally
+            // `array|string|int|false|null` - real PHPStan's own
+            // `ParseUrlFunctionDynamicReturnTypeExtension` narrows the
+            // no-`$component`/non-literal-`$component` form down to a
+            // real shape (every URL component optional, since none of
+            // them are guaranteed present) unioned with `false`, and the
+            // literal-`PHP_URL_*`-constant form down to that one
+            // component's own real type. Deliberately skips that real
+            // extension's own literal-`$url`-string special case (letting
+            // Rust's own `url`/regex-free code re-parse a URL exactly the
+            // way PHP's own C implementation does is real, evidenced
+            // complexity `curl_getinfo`/`json_encode` above don't need -
+            // not worth it for one function nothing in this project's own
+            // corpus needs that precision for).
+            "parse_url" if args.len() == 1 => {
+                return Type::Union(vec![parse_url_components_array_shape(), Type::False]);
+            }
+            "parse_url" if args.len() == 2 => {
+                if let ExprKind::Name(component_name) = &args[1].value.kind
+                    && let Some(ty) =
+                        parse_url_component_type(component_name.trim_start_matches('\\'))
+                {
+                    return ty;
+                }
+            }
+            // Phase 77: `sscanf($string, $format)`'s own real stub is
+            // unconditionally `array|null` - real PHPStan's own
+            // `SscanfFunctionDynamicReturnTypeExtension` walks a literal
+            // `$format` string's own `%`-specifiers (`%d`, `%5s`, ...) and
+            // builds one array field per specifier, each typed by its own
+            // conversion character (numeric conversions become `int`/
+            // `float`; anything else stays `string`, refined by any
+            // explicit field-width digits the same way that real
+            // extension's own length-based accessory choice does) -
+            // always nullable per element (a real trailing unmatched
+            // specifier leaves that slot `null`) and the whole array
+            // nullable too (a total match failure). Scoped to the 2-arg
+            // form (the 3+-arg by-reference-`$vars` form returns `int|
+            // null` instead, a materially different shape not modeled
+            // here) - a non-literal or entirely-unrecognized `$format`
+            // falls through to today's plain `array|null`, unchanged.
+            "sscanf" if args.len() == 2 => {
+                if let Type::StringLiteral(format) = self.infer_expr(&args[1].value, locals)
+                    && let Some(fields) = sscanf_result_fields(&format)
+                {
+                    return Type::Union(vec![Type::ArrayShape(fields), Type::Null]);
+                }
+            }
+            // Phase 77: `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()`
+            // share one real per-key shape (real PHPStan's own
+            // `StatDynamicReturnTypeExtension` covers exactly this set) -
+            // their own real stubs are unconditionally `array` (`fstat`)
+            // or `array|false`, discarding the real fixed 13-key shape
+            // (`dev`/`ino`/`mode`/... , every value an `int`) every one of
+            // them actually returns. `dio_stat()` shares the same shape
+            // under different key names (real PHPStan's own separate
+            // `DioStatDynamicFunctionReturnTypeExtension`), nullable
+            // rather than `false`-able on failure.
+            "stat" | "lstat" | "fstat" | "ssh2_sftp_stat" if args.len() == 1 => {
+                return Type::Union(vec![stat_array_shape(), Type::False]);
+            }
+            "dio_stat" if args.len() == 1 => {
+                return Type::Union(vec![dio_stat_array_shape(), Type::Null]);
+            }
+            // Phase 77: `hash_algos()`/`openssl_get_cipher_methods()`/
+            // `mb_list_encodings()`'s own real stubs are unconditionally
+            // a bare `array` - real PHPStan doesn't type these calls
+            // themselves any more precisely either; its own
+            // `HashFunctionsReturnTypeExtension`/`OpenSslCipherMethods
+            // Provider`/`MbFunctionsReturnTypeExtensionTrait` instead
+            // call them for real at PHPStan's own analysis time to build
+            // a live allowlist validating *other* functions' string
+            // arguments against the actual host's installed algorithms/
+            // ciphers/encodings (`hash($algo, ...)`,
+            // `openssl_encrypt($data, $cipher, ...)`, `mb_convert_
+            // encoding($str, $to, ...)`) - a fundamentally different,
+            // heavier mechanism than a per-function return-type refinement,
+            // and one this project has no way to replicate without a
+            // hardcoded, platform/PHP-version-fragile literal snapshot
+            // (this static binary can't shell out to a live PHP+OpenSSL+
+            // mbstring build the way PHPStan's own PHP-hosted analysis
+            // does). What's implemented here is only the roadmap's other,
+            // genuinely static half: each of these three calls' own
+            // return value really is always a non-empty list of non-empty
+            // strings, real, evidenced information today's bare `array`
+            // throws away regardless of host/version.
+            "hash_algos" | "openssl_get_cipher_methods" | "mb_list_encodings"
+                if args.is_empty() =>
+            {
+                return list_of_non_empty_strings();
+            }
             _ => {}
         }
         let resolved = resolve_call_args(args, &sig.params);
         self.infer_call_return_type(sig, &resolved, locals)
+    }
+
+    /// `get_parent_class`'s own real per-class answer: `class`'s
+    /// registered `extends` chain gives a real, evidenced answer either
+    /// way - a real parent (`class-string<Parent>`) or a real "no parent"
+    /// (`false`, since a class with a known, empty `extends` genuinely has
+    /// none). `None` only for a class this registry has no entry for at
+    /// all (an external/unstubbed class) - there real PHPStan itself
+    /// stays uncertain (`class-string|false`), so this project's own
+    /// "don't guess" convention leaves today's plain `string|false`
+    /// unchanged rather than picking one side of that uncertainty.
+    fn find_declared_parent_class(&self, class: &str) -> Option<Type> {
+        let info = self.registry.classes.get(class)?;
+        Some(match info.extends.first() {
+            Some(parent) => Type::ClassString(Box::new(Type::Object(parent.clone(), Vec::new()))),
+            None => Type::False,
+        })
+    }
+
+    /// `get_debug_type()`'s own object case: a `final` class's own real
+    /// instances can only ever be that exact class (never a subclass, by
+    /// definition), so its own name is the one real, exact answer - a
+    /// non-`final` class's own real instance could be any subclass at
+    /// runtime, so the tightest honest answer stays plain `string` (real
+    /// PHPStan's own `GetDebugTypeFunctionReturnTypeExtension` makes this
+    /// exact same `isFinal()` distinction). A class this registry has no
+    /// entry for at all (external/unstubbed) is treated the same as
+    /// non-`final` - real PHPStan itself can't assume a class it hasn't
+    /// reflected is sealed either.
+    fn get_debug_type_result(&self, ty: &Type) -> Option<Type> {
+        get_debug_type_for(ty, self.registry)
     }
 }
 
@@ -1107,4 +1364,424 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
         "CURLINFO_PRIVATE" => Type::Mixed,
         _ => return None,
     })
+}
+
+/// `get_debug_type()`'s object case - shared free function (not a
+/// `Checker` method) so `Checker::get_debug_type_result`'s own union
+/// handling below can call it once per member without fighting the
+/// borrow checker over `&self`.
+fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
+    match ty {
+        Type::Null => Some(Type::StringLiteral("null".to_string())),
+        Type::Bool | Type::True | Type::False => Some(Type::StringLiteral("bool".to_string())),
+        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => {
+            Some(Type::StringLiteral("int".to_string()))
+        }
+        Type::Float | Type::FloatLiteral(_) => Some(Type::StringLiteral("float".to_string())),
+        Type::String | Type::StringLiteral(_) => Some(Type::StringLiteral("string".to_string())),
+        Type::Array(_) | Type::ArrayShape(_) => Some(Type::StringLiteral("array".to_string())),
+        Type::Object(class, _) => Some(
+            if registry
+                .classes
+                .get(class)
+                .is_some_and(|info| info.is_final)
+            {
+                Type::StringLiteral(class.clone())
+            } else {
+                Type::String
+            },
+        ),
+        Type::Intersection(members) => members.iter().find_map(|m| get_debug_type_for(m, registry)),
+        Type::Union(members) => {
+            let mut iter = members.iter();
+            let mut acc = get_debug_type_for(iter.next()?, registry)?;
+            for m in iter {
+                acc = union_types(acc, get_debug_type_for(m, registry)?);
+            }
+            Some(acc)
+        }
+        _ => None,
+    }
+}
+
+/// `gettype()`'s own real per-kind runtime-string answer (real PHP's own
+/// historically-quirky names: `"boolean"`, `"integer"`, `"double"`,
+/// `"NULL"` - not `"bool"`/`"int"`/`"float"`/`"null"`, which is what
+/// `get_debug_type()` returns instead). `None` for anything this project
+/// can't confidently classify (`Mixed`, a bare unresolved `Callable`/
+/// `TemplateParam`, ...) - real PHPStan itself falls back to the full
+/// 10-name union for that case; this project's own "don't guess"
+/// convention leaves today's plain `string` unchanged instead, matching
+/// `curl_getinfo_component_type`'s own `None`-means-"unchanged" contract.
+fn gettype_string_for(ty: &Type) -> Option<&'static str> {
+    match ty {
+        Type::String | Type::StringLiteral(_) => Some("string"),
+        Type::Array(_) | Type::ArrayShape(_) => Some("array"),
+        Type::Bool | Type::True | Type::False => Some("boolean"),
+        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some("integer"),
+        Type::Float | Type::FloatLiteral(_) => Some("double"),
+        Type::Null => Some("NULL"),
+        Type::Object(_, _) => Some("object"),
+        Type::Intersection(members) => members.iter().find_map(gettype_string_for),
+        _ => None,
+    }
+}
+
+fn gettype_result(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Union(members) => {
+            let mut iter = members.iter();
+            let mut acc = Type::StringLiteral(gettype_string_for(iter.next()?)?.to_string());
+            for m in iter {
+                acc = union_types(acc, Type::StringLiteral(gettype_string_for(m)?.to_string()));
+            }
+            Some(acc)
+        }
+        other => gettype_string_for(other).map(|s| Type::StringLiteral(s.to_string())),
+    }
+}
+
+/// Whether `s` is exactly one Unicode scalar value - `idate()`'s own
+/// format argument is only ever meaningfully a single character (real
+/// PHP itself only reads the first byte).
+fn single_char(s: &str) -> Option<char> {
+    let mut chars = s.chars();
+    let c = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+    Some(c)
+}
+
+/// `idate()`'s own real per-character numeric bound - transcribed from
+/// real PHPStan's own `IdateFunctionReturnTypeHelper`
+/// (`vendor/phpstan-src/src/Type/Php/IdateFunctionReturnTypeHelper.php`),
+/// using this project's own `Type::IntRange` in place of that file's
+/// `IntegerRangeType::fromInterval`. A handful of real `idate()` format
+/// characters (`B`/`o`/`U`/`Y`/`Z`) are real, unbounded integers there -
+/// deliberately left out of this table (returning `None`, i.e. "no
+/// refinement") rather than mapped to plain `Int`, since `idate()`'s own
+/// stub already gives `int|false` and an unbounded `Int` here would only
+/// ever narrow away the `false` half for a recognized-but-unbounded
+/// character, a real claim this project can't back for every one of
+/// those five (real PHP does raise a `ValueError`/return `false` for a
+/// handful of other, truly unrecognized characters this table also
+/// doesn't distinguish from the unbounded five) - kept conservative.
+fn idate_format_char_range(c: char) -> Option<(i64, i64)> {
+    match c {
+        'd' | 'j' => Some((1, 31)),
+        'h' | 'g' => Some((1, 12)),
+        'H' | 'G' => Some((0, 23)),
+        'i' | 's' => Some((0, 59)),
+        'I' | 'L' => Some((0, 1)),
+        'm' | 'n' => Some((1, 12)),
+        'N' => Some((1, 7)),
+        't' => Some((28, 31)),
+        'w' => Some((0, 6)),
+        'W' => Some((1, 53)),
+        'y' => Some((0, 99)),
+        'z' => Some((0, 365)),
+        _ => None,
+    }
+}
+
+/// `date()`'s own per-character static classification: does this
+/// recognized format character always produce digits-only text (`Some(
+/// true)`), always produce text that isn't guaranteed numeric (`Some(
+/// false)`, month/day names, `am`/`pm`, timezone abbreviations, the `st`/
+/// `nd`/`rd`/`th` ordinal suffix, ...), or is it not a character this
+/// table classifies at all (`None` - an escape sequence or literal
+/// punctuation `date()` would echo back verbatim, which this project has
+/// no way to evaluate without actually running `date()`)? Transcribed
+/// from real PHPStan's own `DateFunctionReturnTypeHelper` (`vendor/
+/// phpstan-src/src/Type/Php/DateFunctionReturnTypeHelper.php`)'s own
+/// `switch` cases, collapsed from "the exact literal/numeric-string type"
+/// down to this coarser yes/no (Phase 77's own scope: a static table, not
+/// a runtime `date()` simulation).
+fn date_format_char_is_always_numeric(c: char) -> Option<bool> {
+    match c {
+        // Digits-only output: day/week/month/year numbers, hour/minute/
+        // second/sub-second, the leap-year and DST 0/1 flags, Swatch
+        // Internet time (`B`, `000`-`999`), the signless-colon GMT
+        // offset (`O`, e.g. `+0200` - PHP's own `is_numeric()` accepts a
+        // leading `+`/`-` before the digits), the GMT offset in seconds
+        // (`Z`, e.g. `-18000`), and the Unix timestamp (`U`) - all real,
+        // digits-(optionally-signed-)only text.
+        'd' | 'j' | 'N' | 'w' | 'm' | 'n' | 't' | 'L' | 'g' | 'G' | 'h' | 'H' | 'i' | 's' | 'y'
+        | 'Y' | 'z' | 'W' | 'u' | 'v' | 'U' | 'B' | 'I' | 'O' | 'Z' | 'o' => Some(true),
+        // Real letter/punctuation-bearing output: weekday/month names,
+        // the `st`/`nd`/`rd`/`th` ordinal suffix, `am`/`pm`, timezone
+        // identifiers/abbreviations, the colon-bearing GMT offset (`P`/
+        // `p`, e.g. `+02:00` - the colon makes `is_numeric()` false), and
+        // the full ISO-8601/RFC-2822 combined formats.
+        'D' | 'l' | 'S' | 'F' | 'M' | 'a' | 'A' | 'e' | 'T' | 'P' | 'p' | 'c' | 'r' => Some(false),
+        _ => None,
+    }
+}
+
+/// `date($format)`'s own real return type for a literal `$format` -
+/// `None` (today's plain `string`, unchanged) unless every character is
+/// one `date_format_char_is_always_numeric` recognizes; a non-empty
+/// literal format then always produces non-empty text (`Accessory::
+/// NonEmptyString`), additionally numeric text
+/// (`Accessory::NumericString`) only when every character does.
+fn date_format_return_type(format: &str) -> Option<Type> {
+    if format.is_empty() {
+        // Real `date('')` returns `''` - a degenerate literal this
+        // project already infers precisely via the generic stub path
+        // (`ConstantStringType`-equivalent isn't modeled for `date()`
+        // itself here), not worth a special case.
+        return None;
+    }
+    let mut all_numeric = true;
+    for c in format.chars() {
+        match date_format_char_is_always_numeric(c)? {
+            true => {}
+            false => all_numeric = false,
+        }
+    }
+    let mut members = vec![Type::String, Type::Accessory(AccessoryKind::NonEmptyString)];
+    if all_numeric {
+        members.push(Type::Accessory(AccessoryKind::NumericString));
+    }
+    Some(Type::Intersection(members))
+}
+
+/// `pathinfo($path)`'s own real 1-arg array shape - `dirname`/`basename`/
+/// `filename` always present, `extension` only when the path actually has
+/// a dot in it (simplified here to always-optional: this project has no
+/// way to know from `$path`'s own `Type` alone whether a literal path
+/// contains one, unlike real PHPStan's own `isNonEmptyString()`-driven
+/// `dirname`-optionality check, which this project mirrors for the same
+/// reason on that field too - see the 1-arg match arm above referencing
+/// this function).
+fn pathinfo_array_shape() -> Type {
+    Type::ArrayShape(vec![
+        ("dirname".to_string(), Type::String, false),
+        ("basename".to_string(), Type::String, false),
+        ("extension".to_string(), Type::String, true),
+        ("filename".to_string(), Type::String, false),
+    ])
+}
+
+/// `parse_url($url)`'s own real "all components" array shape - every
+/// field genuinely optional (none of `scheme`/`host`/`user`/`pass`/
+/// `path`/`query`/`fragment`/`port` are guaranteed present in a real
+/// parsed URL), `port` alone typed `IntRange(0, 65535)` rather than plain
+/// `String` like the rest.
+fn parse_url_components_array_shape() -> Type {
+    Type::ArrayShape(vec![
+        ("scheme".to_string(), Type::String, true),
+        ("host".to_string(), Type::String, true),
+        (
+            "port".to_string(),
+            Type::IntRange(Some(0), Some(65535)),
+            true,
+        ),
+        ("user".to_string(), Type::String, true),
+        ("pass".to_string(), Type::String, true),
+        ("path".to_string(), Type::String, true),
+        ("query".to_string(), Type::String, true),
+        ("fragment".to_string(), Type::String, true),
+    ])
+}
+
+/// `parse_url($url, PHP_URL_*)`'s own real per-component return type -
+/// transcribed from real PHPStan's own
+/// `ParseUrlFunctionDynamicReturnTypeExtension` (`vendor/phpstan-src/src/
+/// Type/Php/ParseUrlFunctionDynamicReturnTypeExtension.php`)'s own
+/// `$componentTypesPairedConstants` table, minus that real extension's
+/// own `AccessoryLowercaseStringType` refinement for a lowercase `$url`
+/// (this project has no equivalent accessory kind to carry that
+/// distinction - see `types::AccessoryKind`).
+fn parse_url_component_type(name: &str) -> Option<Type> {
+    let string_false_null = Type::Union(vec![Type::String, Type::False, Type::Null]);
+    let port_false_null = Type::Union(vec![
+        Type::IntRange(Some(0), Some(65535)),
+        Type::False,
+        Type::Null,
+    ]);
+    Some(match name {
+        "PHP_URL_SCHEME" | "PHP_URL_HOST" | "PHP_URL_USER" | "PHP_URL_PASS" | "PHP_URL_PATH"
+        | "PHP_URL_QUERY" | "PHP_URL_FRAGMENT" => string_false_null,
+        "PHP_URL_PORT" => port_false_null,
+        _ => return None,
+    })
+}
+
+/// One `sscanf()` conversion specifier - either a single `[cdeEfosux]`
+/// character, or a `[...]` bracket character-class (real `sscanf()`
+/// treats every bracket class the same as `%s` for typing purposes: it
+/// always captures a substring, never a number).
+enum SscanfSpecifier {
+    Char(char),
+    Bracket,
+}
+
+/// Walks a literal `sscanf()`/`fscanf()` format string for every real
+/// conversion specifier (`%d`, `%5s`, `%[abc]`, ...) it contains, in
+/// order - a hand-rolled scan standing in for real PHPStan's own regex
+/// (`/%(\d*)(\[[^\]]+\]|[cdeEfosux]{1})/`), since this project has no
+/// regex engine available (see `Cargo.toml`). `None` when the format
+/// contains no recognized specifier at all (today's plain `array|null`
+/// stays unchanged) - an unterminated `%[...` bracket at the very end of
+/// the string stops the scan there (matching the regex's own behavior:
+/// it simply doesn't match past the point it can't close the bracket).
+fn parse_sscanf_format(format: &str) -> Option<Vec<(Option<u32>, SscanfSpecifier)>> {
+    let chars: Vec<char> = format.chars().collect();
+    let mut i = 0;
+    let mut specs = Vec::new();
+    while i < chars.len() {
+        if chars[i] != '%' {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let digits_start = i;
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        let length: Option<u32> = if i > digits_start {
+            chars[digits_start..i]
+                .iter()
+                .collect::<String>()
+                .parse()
+                .ok()
+        } else {
+            None
+        };
+        if i >= chars.len() {
+            break;
+        }
+        if chars[i] == '[' {
+            let bracket_body_start = i + 1;
+            let mut j = bracket_body_start;
+            while j < chars.len() && chars[j] != ']' {
+                j += 1;
+            }
+            if j >= chars.len() {
+                break;
+            }
+            specs.push((length, SscanfSpecifier::Bracket));
+            i = j + 1;
+        } else if "cdeEfosux".contains(chars[i]) {
+            specs.push((length, SscanfSpecifier::Char(chars[i])));
+            i += 1;
+        }
+        // Any other character right after `%`/its digits (including a
+        // literal `%%`) isn't a real conversion specifier - just keep
+        // scanning from here, same as the real regex simply not matching
+        // at this position.
+    }
+    if specs.is_empty() { None } else { Some(specs) }
+}
+
+/// One `sscanf()` field's own real type, given its own specifier and any
+/// explicit field-width digits - every field is nullable (a real trailing
+/// unmatched specifier leaves that slot `null`), mirroring real PHPStan's
+/// own `TypeCombinator::addNull` on each field.
+fn sscanf_field_type(length: Option<u32>, specifier: &SscanfSpecifier) -> Type {
+    let base = match specifier {
+        SscanfSpecifier::Char('d' | 'o' | 'u' | 'x') => Type::Int,
+        SscanfSpecifier::Char('e' | 'E' | 'f') => Type::Float,
+        SscanfSpecifier::Char(_) | SscanfSpecifier::Bracket => match length {
+            Some(n) if n > 1 => Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NonFalsyString),
+            ]),
+            Some(_) => Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NonEmptyString),
+            ]),
+            None => Type::String,
+        },
+    };
+    Type::Union(vec![base, Type::Null])
+}
+
+/// `sscanf($string, $format)`'s own real numeric-keyed result-array
+/// fields, one per conversion specifier `parse_sscanf_format` finds, in
+/// order - keyed by each field's own canonical string form of its
+/// integer index (`"0"`, `"1"`, ...), exactly how `Type::ArrayShape`
+/// itself already represents an int-keyed array elsewhere in this project
+/// (see `literal_string_key`).
+fn sscanf_result_fields(format: &str) -> Option<Vec<(String, Type, bool)>> {
+    let specs = parse_sscanf_format(format)?;
+    Some(
+        specs
+            .into_iter()
+            .enumerate()
+            .map(|(i, (length, specifier))| {
+                (i.to_string(), sscanf_field_type(length, &specifier), false)
+            })
+            .collect(),
+    )
+}
+
+/// `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()`'s own real, shared
+/// 13-key shape (transcribed from real PHPStan's own
+/// `StatDynamicReturnTypeExtension` - `vendor/phpstan-src/src/Type/Php/
+/// StatDynamicReturnTypeExtension.php`'s own `$keys`) - every value a
+/// real `int`. Real `stat()`'s own array is actually double-keyed, each
+/// value reachable by both its numeric position and its own string name;
+/// only the string-keyed half is modeled here, the way real code
+/// actually reads it (`$stat['size']`, not `$stat[7]`), matching this
+/// project's own established "model the evidenced access pattern, not
+/// the full PHP-internal shape" convention (`curl_getinfo`'s own 1-arg
+/// "all components" form is skipped for the identical reason).
+fn stat_array_shape() -> Type {
+    Type::ArrayShape(
+        [
+            "dev", "ino", "mode", "nlink", "uid", "gid", "rdev", "size", "atime", "mtime", "ctime",
+            "blksize", "blocks",
+        ]
+        .into_iter()
+        .map(|key| (key.to_string(), Type::Int, false))
+        .collect(),
+    )
+}
+
+/// `dio_stat()`'s own real 13-key shape - transcribed from real PHPStan's
+/// own `DioStatDynamicFunctionReturnTypeExtension` (`vendor/phpstan-src/
+/// src/Type/Php/DioStatDynamicFunctionReturnTypeExtension.php`), the same
+/// values-are-all-`int` shape as `stat_array_shape` above under `dio_stat`'s
+/// own distinct key names.
+fn dio_stat_array_shape() -> Type {
+    Type::ArrayShape(
+        [
+            "device",
+            "inode",
+            "mode",
+            "nlink",
+            "uid",
+            "gid",
+            "device_type",
+            "size",
+            "blocksize",
+            "blocks",
+            "atime",
+            "mtime",
+            "ctime",
+        ]
+        .into_iter()
+        .map(|key| (key.to_string(), Type::Int, false))
+        .collect(),
+    )
+}
+
+/// `list<non-empty-string>` - `hash_algos()`/`openssl_get_cipher_methods(
+/// )`/`mb_list_encodings()`'s own real, evidenced return shape regardless
+/// of host/PHP version/installed extensions (see the match arm above
+/// referencing this function for why this project stops there, rather
+/// than also replicating what real PHPStan additionally does with these
+/// three functions' own real output).
+fn list_of_non_empty_strings() -> Type {
+    Type::Intersection(vec![
+        Type::Array(Box::new(Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString),
+        ]))),
+        Type::Accessory(AccessoryKind::ArrayList),
+        Type::Accessory(AccessoryKind::NonEmptyArray),
+    ])
 }
