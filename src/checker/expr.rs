@@ -827,6 +827,7 @@ impl<'a> Checker<'a> {
                 for item in items {
                     if let Some(k) = &item.key {
                         self.check_expr(k, locals, label);
+                        self.check_array_item_key_type(k, locals, label);
                     }
                     self.check_expr(&item.value, locals, label);
                 }
@@ -2184,6 +2185,32 @@ impl<'a> Checker<'a> {
     /// variable. A shape's own "effective element type" is the union of
     /// every field's type (`Mixed` for an empty literal - nothing to infer
     /// a narrower type from).
+    /// Phase 50: real PHPStan's `InvalidKeyInArrayItemRule` - an array
+    /// literal's own key expression (`[$key => $value]`) must be a type
+    /// PHP itself accepts as an array key at runtime (`int`/`string`,
+    /// plus `bool`/`float`/`null`, which PHP silently coerces) - anything
+    /// else (an array, an object, ...) is a hard `TypeError` at runtime,
+    /// not a static-analysis nicety. Mirrors real PHPStan's own
+    /// `AllowedArrayKeysTypes::getType()` default (non-strict) allowed
+    /// set; unlike real PHPStan, has no tri-state "possibly invalid"
+    /// case - `invalid_array_key_description` only ever answers when
+    /// every part of the key's own type is confidently illegal, the same
+    /// "don't guess" leniency this project applies everywhere else, so a
+    /// `Mixed`/unresolved/partially-legal key is silently allowed rather
+    /// than flagged.
+    fn check_array_item_key_type(&mut self, key_expr: &Expr, locals: &Locals, label: &str) {
+        let key_ty = self.infer_expr(key_expr, locals);
+        if let Some(desc) = invalid_array_key_description(&key_ty) {
+            self.report(
+                label.to_string(),
+                format!("Invalid array key type {desc}."),
+                key_expr.span,
+                3,
+                "array.invalidKey",
+            );
+        }
+    }
+
     pub(crate) fn array_element_type(ty: &Type) -> Option<Type> {
         match ty {
             Type::Array(_, elem) => Some((**elem).clone()),
@@ -2812,6 +2839,47 @@ fn literal_base_type(t: &Type) -> Option<Type> {
                 .iter()
                 .find(|m| !matches!(m, Type::Accessory(_)))
                 .cloned()
+        }
+        _ => None,
+    }
+}
+
+/// Phase 50: whether `ty` is a type PHP itself can NEVER legally use as
+/// an array key (`int`/`string`/`bool`/`float`/`null` all being legal -
+/// PHP coerces the latter three at runtime) - `Some(description)` only
+/// when every part of `ty` is confidently illegal, `None` (silently
+/// allowed) for anything ambiguous (`Mixed`, a union mixing legal and
+/// illegal members, an unresolved template, ...), matching this
+/// project's "don't guess" leniency everywhere else. A `Type::Object`
+/// covers both a real class instance and this project's own `resource`/
+/// `Closure`-as-object representations - none of which PHP ever accepts
+/// as a key either, even one with a real `__toString()` (array-key
+/// coercion has no string-cast fallback the way string CONTEXT does).
+fn invalid_array_key_description(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Array(..) | Type::ArrayShape(_) => Some("array".to_string()),
+        Type::Object(name, _) => Some(name.clone()),
+        Type::Union(members) => {
+            let mut descs = Vec::new();
+            for m in members {
+                // At least one member being legal (or ambiguous) bails
+                // out entirely - real PHPStan would report "possibly
+                // invalid" here (its own tri-state `isSuperTypeOf`),
+                // which this project has no equivalent for; skipping
+                // rather than guessing matches its usual leniency.
+                descs.push(invalid_array_key_description(m)?);
+            }
+            if descs.is_empty() {
+                None
+            } else {
+                Some(descs.join("|"))
+            }
+        }
+        // An accessory-refined intersection (`non-empty-string`, `list<T>`,
+        // ...) is illegal only when its own base type is - a refined
+        // *string* is still a perfectly legal key.
+        Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
+            Some("array".to_string())
         }
         _ => None,
     }

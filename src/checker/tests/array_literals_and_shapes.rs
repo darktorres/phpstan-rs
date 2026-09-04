@@ -909,3 +909,108 @@ fn correctly_typed_shape_destructuring_is_not_flagged() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 50: InvalidKeyInArrayItemRule - an array literal key must be a
+// type PHP itself accepts as an array key at runtime.
+
+#[test]
+fn an_array_literal_key_typed_as_an_object_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            function test(Foo $obj): array {
+                return [$obj => 1];
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "array.invalidKey");
+    assert!(
+        d[0].message.contains("Invalid array key type Foo"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_array_literal_key_typed_as_an_array_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int[] $xs */
+            function test(array $xs): array {
+                return [$xs => 1];
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "array.invalidKey");
+}
+
+#[test]
+fn ordinary_int_and_string_array_literal_keys_are_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(int $i, string $s): array {
+                return [$i => 1, $s => 2, 3 => 'a', 'k' => 'b'];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn bool_float_and_null_array_literal_keys_are_not_flagged_php_coerces_them() {
+    // PHP silently coerces these at runtime (matches real PHPStan's own
+    // default, non-strict AllowedArrayKeysTypes) - not a hard TypeError
+    // the way an array/object key is.
+    let d = diagnostics_for(
+        r#"<?php
+            function test(bool $b, float $f, ?string $n): array {
+                return [$b => 1, $f => 2, $n => 3];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_mixed_typed_array_literal_key_is_not_flagged_dont_guess() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(mixed $m): array {
+                return [$m => 1];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_union_key_type_mixing_a_legal_and_illegal_member_is_not_flagged() {
+    // This project has no tri-state "possibly invalid" - only a key
+    // type that's confidently, entirely illegal is flagged.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            function test(int|Foo $k): array {
+                return [$k => 1];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_refined_string_array_literal_key_is_not_flagged() {
+    // An accessory-refined string (literal-string, non-empty-string,
+    // ...) is still a plain legal string key - only an Array-shaped
+    // base type is illegal.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-string $k */
+            function test(string $k): array {
+                return [$k => 1];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
