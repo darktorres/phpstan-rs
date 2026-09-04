@@ -27,9 +27,9 @@ use std::str::FromStr;
 use lsp_server::{ErrorCode, Message, Notification as LspNotification, Request, Response};
 use lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, Position as LspPosition,
-    PublishDiagnosticsParams, Range as LspRange, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    DidOpenTextDocumentParams, InitializeParams, InitializeResult, NumberOrString,
+    Position as LspPosition, PublishDiagnosticsParams, Range as LspRange, ServerCapabilities,
+    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 
 use crate::checker::Diagnostic;
@@ -134,7 +134,17 @@ fn percent_encode_path(s: &str) -> String {
 /// `"ClassName::methodName"`, not a position) is folded into the message
 /// text instead of dropped - `lsp_types::Diagnostic` has no field for
 /// it. `Span`'s 1-indexed line/col become LSP's 0-indexed line/character.
+///
+/// Phase 47: `identifier` now has a real home - LSP's own `code` field,
+/// exactly what an editor's "quick fix"/problem-matcher tooling expects a
+/// stable per-diagnostic-kind string in. `tip`, when present, is appended
+/// to the message text the same way `location` already is - LSP has no
+/// separate field for a secondary hint either.
 fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
+    let message = match &d.tip {
+        Some(tip) => format!("{}: {}\n💡 {tip}", d.location, d.message),
+        None => format!("{}: {}", d.location, d.message),
+    };
     LspDiagnostic {
         range: LspRange {
             start: LspPosition {
@@ -147,8 +157,9 @@ fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
             },
         },
         severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(NumberOrString::String(d.identifier.clone())),
         source: Some("phpstan-rs".to_string()),
-        message: format!("{}: {}", d.location, d.message),
+        message,
         ..Default::default()
     }
 }

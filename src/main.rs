@@ -230,9 +230,12 @@ fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
         println!("{}: {} diagnostic(s)", path.display(), diagnostics.len());
         for d in diagnostics {
             println!(
-                "  {}:{}: {}: {}",
-                d.span.start.line, d.span.start.col, d.location, d.message
+                "  {}:{}: {}: {} ({})",
+                d.span.start.line, d.span.start.col, d.location, d.message, d.identifier
             );
+            if let Some(tip) = &d.tip {
+                println!("      💡 {tip}");
+            }
         }
     }
 }
@@ -378,13 +381,17 @@ fn run_check_project(
     for path in paths {
         for d in &results[path] {
             println!(
-                "{}:{}:{}: {}: {}",
+                "{}:{}:{}: {}: {} ({})",
                 path.display(),
                 d.span.start.line,
                 d.span.start.col,
                 d.location,
-                d.message
+                d.message,
+                d.identifier
             );
+            if let Some(tip) = &d.tip {
+                println!("    💡 {tip}");
+            }
             total += 1;
         }
     }
@@ -651,9 +658,12 @@ fn run_demo(file: Option<&Path>) {
     } else {
         for d in &diagnostics {
             println!(
-                "{}:{}: {}: {}",
-                d.span.start.line, d.span.start.col, d.location, d.message
+                "{}:{}: {}: {} ({})",
+                d.span.start.line, d.span.start.col, d.location, d.message, d.identifier
             );
+            if let Some(tip) = &d.tip {
+                println!("    💡 {tip}");
+            }
         }
     }
 }
