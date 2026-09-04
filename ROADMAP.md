@@ -781,13 +781,12 @@ comparison rule) didn't share `coercion.rs`'s own `SimpleXMLElement`/
 flagging `$bcMathNumber < $int`. Also added `BcMath\Number` (missing
 from the original arithmetic operand list) alongside `GMP`.
 
-**Still open**: a residual class of false positives traced to a real,
-separate, pre-existing **parser** bug this same corpus pass discovered
-but did not fix (out of scope for an operand-validity matrix, and
-large/risky enough to need its own dedicated phase) - see Phase 85.
-Consolidated unlocks still to close: real per-operator `ErrorType`-
-value resolution (not just operand-type legality) for the literal-
-zero-division/modulo case specifically.
+**Still open**: real per-operator `ErrorType`-value resolution (not
+just operand-type legality) for the literal-zero-division/modulo case
+specifically. A residual class of false positives this same corpus pass
+found was traced to a real, separate, pre-existing **parser** bug -
+closed by its own dedicated Phase 85, not bundled into this phase's own
+commit.
 
 **Phase 53 - Structural Callable/Closure signature type + contextual
 closure-parameter typing (NEW, PLANNED).** `Type::Callable`
@@ -1351,49 +1350,58 @@ if diagnostic-message quality becomes a stated goal. Size: XL,
 low-medium value.
 
 **Phase 85 - An assignment nested as a comparison operator's own
-operand, with no enclosing parentheses, parses wrong (NEW, PLANNED,
-found by Phase 52's own corpus check).** Real PHP's actual grammar lets
-`variable '=' expr` appear as an operand anywhere an expression is
-expected, at any precedence level, whenever a bare assignable target is
-immediately followed by `=` - not just at the top of the whole
-precedence chain the way `src/parser/expr.rs`'s own `parse_assignment_
-inner` (the ordinary precedence-climbing `lhs`-then-check-for-`=`
-shape) currently implements it. Confirmed via a minimized repro:
+operand, with no enclosing parentheses, parsed wrong (DONE).** Real
+PHP's actual grammar lets `variable '=' expr` appear as a comparison
+operator's own operand with no enclosing parens - the classic guard-
+clause idiom (`if (false === $x = fn())`) - not just at the top of the
+whole precedence chain the way `src/parser/expr.rs`'s own
+`parse_assignment_inner` (the ordinary precedence-climbing `lhs`-then-
+check-for-`=` shape) used to implement it. `parse_ternary()` (called
+first, for `lhs`) already fully consumed `false === $x` as one
+`Binary(Identical, ...)` node before `parse_assignment_inner` ever saw
+the trailing `= fn()`, wrapping that whole comparison as the
+assignment's own (nonsensical, but silently accepted) left-hand side
+instead of real PHP's actual `false === ($x = fn())` - the checker
+then never bound `$x` to `fn()`'s own real return type at all, silently
+keeping its pre-assignment type past the guard. Not new to Phase 52 -
+a pre-existing parser gap Phase 52's own operand-validity checks were
+simply the first thing sensitive enough to expose as visible false
+positives.
 
-```php
-$params = $s;
-if (false === $params = parse_url($params)) { throw new \Exception('x'); }
-$params += ['x' => []]; // $params is still $s's own pre-assignment type here
-```
+**Fix**: `parse_assignment_tail` (factored out of `parse_assignment_
+inner`'s own top-level case) now runs on `parse_equality`/`parse_
+relational`'s own RHS the moment it's parsed, before wrapping it in the
+outer comparison node - scoped to comparison operators specifically
+(`==`, `===`, `!=`, `!==`, `<`, `>`, `<=`, `>=`), the evidenced real-
+world shape and the safest one to be confident about (real PHP's own
+grammar doesn't uniformly allow this at every operator precedence
+level, and this project has no way to verify the ones it didn't
+evidence without a real PHP interpreter to check against). This same
+corpus check also found and fixed a second, related bug:
+`\false`/`\true`/`\null` (a fully-qualified reference to one of these -
+Rector's own namespace-prefixing transform rewrites every unqualified
+global name this way, across a large fraction of this corpus's
+Rector-vendored trees) parsed as a bare `ExprKind::Name` rather than
+the `Literal` a plain `false`/`true`/`null` gets from `parse_primary`'s
+own `Keyword` match, silently resolving to `Type::Mixed` (this project
+has no general global-constant table - `PHP_EOL`, `M_PI`, etc. all stay
+`Mixed` too, a deliberate, separate, still-open scope boundary) - which
+fed straight into `apply_equality_narrowing`'s own `target_ty ==
+Type::Mixed` bail-out, silently skipping every `\false`/`\true`/`\null`-
+guarded narrowing entirely. `bare_name_literal_type` recognizes these
+three specifically (case-insensitively, leading backslash stripped)
+without attempting general constant resolution.
 
-`parse_ternary()` (called first, for `lhs`) already fully consumes
-`false === $params` as one `Binary(Identical, ...)` node - by the time
-`parse_assignment_inner` sees the trailing `= parse_url($params)`, it
-wraps that whole comparison as the assignment's own (nonsensical, but
-silently accepted) left-hand side, instead of real PHP's actual
-`false === ($params = parse_url($params))`. The checker then never
-binds `$params` to `parse_url()`'s own real return type at all - a
-real, common, idiomatic PHP pattern (`if (false === $x = fn())`,
-`while ($line = fgets($fp))` nested inside a further comparison, ...)
-silently keeps the pre-assignment type past the guard. This is not new
-to Phase 52 - it's a pre-existing parser gap Phase 52's own operand-
-validity checks were simply the first thing sensitive enough to expose
-as visible false positives (`RedisTrait::createConnection`,
-`MemcachedAdapter::createConnection`, `Connection::buildConfiguration`,
-and likely other, differently-shaped false negatives/positives
-elsewhere in the checker that this project's corpus runs haven't
-happened to surface yet). Fix: wherever a postfix/primary expression
-finishes parsing as a valid assignment target (`Variable`/`Index`/
-`PropertyAccess`/`DynamicPropertyAccess`/`StaticAccess`/
-`DynamicVariable`) and the next token is an assignment operator,
-recursively parse the assignment right there (calling back into
-`parse_assignment`) and return the `Assign`/`CompoundAssign` node as
-that operand - not only at the top-level statement-expression
-position. Needs its own dedicated verification pass (full test suite +
-a fresh, targeted corpus diff isolating this change alone, since it
-touches core expression parsing) - deliberately not bundled into Phase
-52's own commit. Size: M - a real, load-bearing PHP idiom, silently
-wrong until now.
+**Corpus impact**: real, and far larger than Phase 52's own original
+motivating false positives - 1711 corpus locations cleared (almost
+entirely inside Rector-prefixed vendor trees, where both bugs compound:
+the guard-clause idiom is extremely common in Symfony/Composer-
+ecosystem code, and Rector's prefixing turns every bare `false`/`true`/
+`null` guard into the fully-qualified form), only 7 new findings (spot-
+checked for genuineness - e.g. `PHP_CodeSniffer\Autoload::loadFile`
+declares a `string` return but has a real `return \false;` path,
+previously invisible because `\false` resolved to `Mixed`), zero
+first-party Piwigo regressions either direction.
 
 ## Known limitations
 
