@@ -733,6 +733,7 @@ impl<'a> Checker<'a> {
                 format!("constructor of {fqn} has an unused parameter ${}", p.name),
                 p.span,
                 1,
+                "parameter.unused",
             );
         }
     }
@@ -765,6 +766,7 @@ impl<'a> Checker<'a> {
                 format!("closure has an unused use (${})", u.name),
                 span,
                 1,
+                "closure.unusedUse",
             );
         }
     }
@@ -839,6 +841,7 @@ impl<'a> Checker<'a> {
                 format!("private constant {fqn}::{} is unused", c.name),
                 c.span,
                 4,
+                "classConstant.unused",
             );
         }
 
@@ -860,6 +863,7 @@ impl<'a> Checker<'a> {
                 format!("{kind_word} {fqn}::{}() is unused", m.function.name),
                 m.function.span,
                 4,
+                "method.unused",
             );
         }
 
@@ -937,24 +941,43 @@ impl<'a> Checker<'a> {
         } else {
             "property"
         };
-        let message = if !read {
+        // Identifiers match real PHPStan's own UnusedPrivatePropertyRule
+        // one-for-one (property.unused/.neverRead/.onlyWritten/
+        // .neverWritten/.onlyRead - vendor/phpstan-src's own five
+        // ->identifier(...) calls).
+        let (message, identifier) = if !read {
             if !written {
-                format!("private {kind_word} {fqn}::${name} is unused")
+                (
+                    format!("private {kind_word} {fqn}::${name} is unused"),
+                    "property.unused",
+                )
             } else if only_readable {
-                format!("private read-only {kind_word} {fqn}::${name} is never read")
+                (
+                    format!("private read-only {kind_word} {fqn}::${name} is never read"),
+                    "property.neverRead",
+                )
             } else {
-                format!("private {kind_word} {fqn}::${name} is never read, only written")
+                (
+                    format!("private {kind_word} {fqn}::${name} is never read, only written"),
+                    "property.onlyWritten",
+                )
             }
         } else if !written {
             if only_writable {
-                format!("private write-only {kind_word} {fqn}::${name} is never written")
+                (
+                    format!("private write-only {kind_word} {fqn}::${name} is never written"),
+                    "property.neverWritten",
+                )
             } else {
-                format!("private {kind_word} {fqn}::${name} is never written, only read")
+                (
+                    format!("private {kind_word} {fqn}::${name} is never written, only read"),
+                    "property.onlyRead",
+                )
             }
         } else {
             return;
         };
-        self.report(fqn.to_string(), message, span, 4);
+        self.report(fqn.to_string(), message, span, 4, identifier);
     }
 }
 
