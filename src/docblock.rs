@@ -33,6 +33,13 @@ pub struct DocBlock {
     // above declared one (Phase 10.5's bound-enforcement half). A `T` with
     // no `of` clause simply has no entry here.
     pub template_bounds: HashMap<String, String>,
+    // `@template T = Default` (Phase 54) - the default-type text for
+    // whichever of `templates` above declared one, used when an "erased"
+    // reference (fewer type arguments than declared, including a bare
+    // one with none at all) leaves this name unbound instead of falling
+    // back to `Mixed` unconditionally. A `T` with no `=` clause simply
+    // has no entry here, same shape as `template_bounds` just above.
+    pub template_defaults: HashMap<String, String>,
     // Names from `templates` above additionally declared
     // `@template-covariant`/`@template-contravariant` (Phase 10.5's
     // variance half) - a name absent from both stays invariant, this
@@ -244,12 +251,15 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "template" => {
-                if let Some((name, bound)) = parse_template_tag(rest) {
+                if let Some((name, bound, default)) = parse_template_tag(rest) {
                     if !block.templates.contains(&name) {
                         block.templates.push(name.clone());
                     }
                     if let Some(bound) = bound {
-                        block.template_bounds.insert(name, bound);
+                        block.template_bounds.insert(name.clone(), bound);
+                    }
+                    if let Some(default) = default {
+                        block.template_defaults.insert(name, default);
                     }
                 }
             }
@@ -258,23 +268,29 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // just also marking which direction the parameter is allowed
             // to vary in.
             "template-covariant" => {
-                if let Some((name, bound)) = parse_template_tag(rest) {
+                if let Some((name, bound, default)) = parse_template_tag(rest) {
                     if !block.templates.contains(&name) {
                         block.templates.push(name.clone());
                     }
                     if let Some(bound) = bound {
                         block.template_bounds.insert(name.clone(), bound);
+                    }
+                    if let Some(default) = default {
+                        block.template_defaults.insert(name.clone(), default);
                     }
                     block.covariant_templates.insert(name);
                 }
             }
             "template-contravariant" => {
-                if let Some((name, bound)) = parse_template_tag(rest) {
+                if let Some((name, bound, default)) = parse_template_tag(rest) {
                     if !block.templates.contains(&name) {
                         block.templates.push(name.clone());
                     }
                     if let Some(bound) = bound {
                         block.template_bounds.insert(name.clone(), bound);
+                    }
+                    if let Some(default) = default {
+                        block.template_defaults.insert(name.clone(), default);
                     }
                     block.contravariant_templates.insert(name);
                 }
@@ -306,25 +322,38 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
     }
 }
 
-/// Parses `@template`'s own body: `T` alone, or `T of Bound` (a bound can
-/// itself be a union, e.g. `T of Foo|Bar`, so it goes through
+/// Parses `@template`'s own body: `T` alone, `T of Bound`, `T = Default`
+/// (Phase 54), or `T of Bound = Default` with both together, in that
+/// order - real PHPStan's own grammar always writes the bound (when
+/// present) before the default. Either a bound or a default can itself be
+/// a union (`T of Foo|Bar`, `T = Foo|Bar`), so both go through
 /// `take_type_token` like every other type token here, not a bare
-/// `split_whitespace`). Returns `None` only when there's no name at all
-/// (a malformed/empty tag).
-fn parse_template_tag(rest: &str) -> Option<(String, Option<String>)> {
+/// `split_whitespace`. Returns `None` only when there's no name at all (a
+/// malformed/empty tag).
+fn parse_template_tag(rest: &str) -> Option<(String, Option<String>, Option<String>)> {
     let mut parts = rest.splitn(2, char::is_whitespace);
     let name = parts.next()?.to_string();
     if name.is_empty() {
         return None;
     }
-    let after_name = parts.next().unwrap_or("").trim();
-    let bound = after_name
+    let mut remainder = parts.next().unwrap_or("").trim();
+    let bound = match remainder
         .strip_prefix("of")
         .filter(|s| s.starts_with(char::is_whitespace))
-        .map(|s| take_type_token(s.trim_start()))
-        .filter(|b| !b.is_empty())
-        .map(str::to_string);
-    Some((name, bound))
+    {
+        Some(s) => {
+            let s = s.trim_start();
+            let bound = take_type_token(s);
+            remainder = s[bound.len()..].trim_start();
+            (!bound.is_empty()).then(|| bound.to_string())
+        }
+        None => None,
+    };
+    let default = remainder.strip_prefix('=').and_then(|s| {
+        let default = take_type_token(s.trim_start());
+        (!default.is_empty()).then(|| default.to_string())
+    });
+    Some((name, bound, default))
 }
 
 /// Takes the leading type expression off `s`, stopping at the first

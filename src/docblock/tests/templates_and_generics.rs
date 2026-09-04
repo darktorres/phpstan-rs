@@ -71,6 +71,39 @@ fn parses_a_union_bound() {
 }
 
 #[test]
+fn parses_a_template_default() {
+    // Phase 54: `@template T = Default` - previously silently dropped
+    // entirely (no field existed to hold it at all).
+    let block = parse("/** @template T = int */");
+    assert_eq!(block.templates, vec!["T".to_string()]);
+    assert_eq!(block.template_defaults.get("T"), Some(&"int".to_string()));
+    assert!(!block.template_bounds.contains_key("T"));
+}
+
+#[test]
+fn parses_a_bound_and_a_default_together() {
+    let block = parse("/** @template T of Shape = Circle */");
+    assert_eq!(block.template_bounds.get("T"), Some(&"Shape".to_string()));
+    assert_eq!(
+        block.template_defaults.get("T"),
+        Some(&"Circle".to_string())
+    );
+}
+
+#[test]
+fn a_template_with_no_default_has_no_default_entry() {
+    let block = parse("/** @template T */");
+    assert!(!block.template_defaults.contains_key("T"));
+}
+
+#[test]
+fn parses_a_default_on_a_covariant_template_tag() {
+    let block = parse("/** @template-covariant T = int */");
+    assert_eq!(block.template_defaults.get("T"), Some(&"int".to_string()));
+    assert!(block.covariant_templates.contains("T"));
+}
+
+#[test]
 fn parses_covariant_and_contravariant_template_tags() {
     let block = parse(
         r#"/**
