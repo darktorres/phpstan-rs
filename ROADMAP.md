@@ -739,21 +739,55 @@ consumer extensions (`StrlenFunctionReturnTypeExtension`,
 `SetTypeFunctionTypeSpecifyingExtension`.
 
 **Phase 52 - Invalid-operand-combination (`ErrorType`) concept for
-operators (NEW, PLANNED).** `infer_binary`/unary-operator arms always
-compute a best-effort, permissive result and never treat an operand
+operators (PARTIAL).** `infer_binary`/unary-operator arms always
+computed a best-effort, permissive result and never treated an operand
 pairing as an outright type error - confirmed structurally, since
-`ExprKind::Cast`/`Binary`/`Unary` and the inc/dec arms only ever compute
-a resulting type and never call `self.report(...)`, and `infer_binary`
-is an `&self` method that cannot report diagnostics even if someone
-wanted to add one without refactoring its signature. Add an
-`ErrorType`-equivalent concept (14 raw `Type::Mixed` fallback sites in
-`core-types` currently mask this - no distinct "resolution failed"
-sentinel exists) plus an operand-validity matrix, consulted from
-binary/comparison/unary arms. Unlocks `InvalidBinaryOperationRule`,
-`InvalidComparisonOperationRule`, `InvalidUnaryOperationRule`,
-`InvalidIncDecOperationRule`. Size: L - high value; array+object,
-string-array comparisons, `~` on an array/object are common
-real fatal-adjacent bugs.
+`ExprKind::Cast`/`Binary`/`Unary` and the inc/dec arms only ever
+computed a resulting type and never called `self.report(...)`.
+
+**Done**: `src/checker/operators.rs` gives the checker a real operand-
+validity matrix (`is_number_operand`, mirroring real PHPStan's own
+`Type::toNumber()` legality, plus a byte-op exception for `&`/`|`/`^`
+on two plain strings) wired into `InvalidBinaryOperationRule`
+(`binaryOp.invalid`/`assignOp.invalid`), `InvalidComparisonOperationRule`
+(`equal.invalid`/`notEqual.invalid`/`smaller.invalid`/
+`smallerOrEqual.invalid`/`greater.invalid`/`greaterOrEqual.invalid`/
+`spaceship.invalid` - a number compared against a possibly-null array/
+object), `InvalidUnaryOperationRule` (`unaryOp.invalid` - `-`/`+`/`~`),
+and `InvalidIncDecOperationRule` (`{pre,post}{Inc,Dec}.expr`/`.type`).
+Deliberately not a full port of real PHPStan's own operator type
+resolver (see `operators.rs`'s own module doc for the precise scope:
+no per-operator "resolve the exact expression and check for
+`ErrorType`" - division/modulo by a literal zero isn't modeled - and a
+`Union`'s own legality is "at least one member is legal," diverging
+from real PHPStan's own stricter "every member must be legal" by
+deliberate choice, to avoid a real, elevated false-positive rate
+against this project's own coarser unions).
+
+This phase's own corpus-verification pass found and fixed four real,
+independent bugs its new checks exposed (none of them new to this
+phase - each a pre-existing leniency gap the codebase's own established
+patterns already had elsewhere, just missing here): `upgrade_string_to_
+numeric` (narrowing.rs) only upgraded a bare `Type::String`, not an
+already-refined `non-empty-string`-shaped `Intersection` (a real
+`preg_match()` capture group surviving an `is_numeric()` guard);
+`is_number_operand`'s `Object` arm didn't special-case an *unregistered*
+class name (a PHPDoc type alias this project doesn't resolve) the way
+`type_to_string` already does, wrongly treating it as confidently
+non-numeric; `is_bitwise_not_operand`'s catch-all defaulted to illegal
+instead of "don't guess" for `Mixed`; and `is_strictly_number` (the
+comparison rule) didn't share `coercion.rs`'s own `SimpleXMLElement`/
+`GMP`/`BcMath\Number` numeric-castable-object exception, wrongly
+flagging `$bcMathNumber < $int`. Also added `BcMath\Number` (missing
+from the original arithmetic operand list) alongside `GMP`.
+
+**Still open**: a residual class of false positives traced to a real,
+separate, pre-existing **parser** bug this same corpus pass discovered
+but did not fix (out of scope for an operand-validity matrix, and
+large/risky enough to need its own dedicated phase) - see Phase 85.
+Consolidated unlocks still to close: real per-operator `ErrorType`-
+value resolution (not just operand-type legality) for the literal-
+zero-division/modulo case specifically.
 
 **Phase 53 - Structural Callable/Closure signature type + contextual
 closure-parameter typing (NEW, PLANNED).** `Type::Callable`
@@ -1315,6 +1349,51 @@ it catches new bugs (the "maybe" case already collapses to a concrete
 answer somewhere in the match arms today). Low priority - schedule only
 if diagnostic-message quality becomes a stated goal. Size: XL,
 low-medium value.
+
+**Phase 85 - An assignment nested as a comparison operator's own
+operand, with no enclosing parentheses, parses wrong (NEW, PLANNED,
+found by Phase 52's own corpus check).** Real PHP's actual grammar lets
+`variable '=' expr` appear as an operand anywhere an expression is
+expected, at any precedence level, whenever a bare assignable target is
+immediately followed by `=` - not just at the top of the whole
+precedence chain the way `src/parser/expr.rs`'s own `parse_assignment_
+inner` (the ordinary precedence-climbing `lhs`-then-check-for-`=`
+shape) currently implements it. Confirmed via a minimized repro:
+
+```php
+$params = $s;
+if (false === $params = parse_url($params)) { throw new \Exception('x'); }
+$params += ['x' => []]; // $params is still $s's own pre-assignment type here
+```
+
+`parse_ternary()` (called first, for `lhs`) already fully consumes
+`false === $params` as one `Binary(Identical, ...)` node - by the time
+`parse_assignment_inner` sees the trailing `= parse_url($params)`, it
+wraps that whole comparison as the assignment's own (nonsensical, but
+silently accepted) left-hand side, instead of real PHP's actual
+`false === ($params = parse_url($params))`. The checker then never
+binds `$params` to `parse_url()`'s own real return type at all - a
+real, common, idiomatic PHP pattern (`if (false === $x = fn())`,
+`while ($line = fgets($fp))` nested inside a further comparison, ...)
+silently keeps the pre-assignment type past the guard. This is not new
+to Phase 52 - it's a pre-existing parser gap Phase 52's own operand-
+validity checks were simply the first thing sensitive enough to expose
+as visible false positives (`RedisTrait::createConnection`,
+`MemcachedAdapter::createConnection`, `Connection::buildConfiguration`,
+and likely other, differently-shaped false negatives/positives
+elsewhere in the checker that this project's corpus runs haven't
+happened to surface yet). Fix: wherever a postfix/primary expression
+finishes parsing as a valid assignment target (`Variable`/`Index`/
+`PropertyAccess`/`DynamicPropertyAccess`/`StaticAccess`/
+`DynamicVariable`) and the next token is an assignment operator,
+recursively parse the assignment right there (calling back into
+`parse_assignment`) and return the `Assign`/`CompoundAssign` node as
+that operand - not only at the top-level statement-expression
+position. Needs its own dedicated verification pass (full test suite +
+a fresh, targeted corpus diff isolating this change alone, since it
+touches core expression parsing) - deliberately not bundled into Phase
+52's own commit. Size: M - a real, load-bearing PHP idiom, silently
+wrong until now.
 
 ## Known limitations
 
