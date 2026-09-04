@@ -85,6 +85,47 @@ pub fn discover_vendor_context(project_dir: &Path) -> ComposerContext {
     ctx
 }
 
+/// Detects whether the Composer project rooted at `project_dir` declares a
+/// `require`/`require-dev` dependency on `phpstan/phpstan` or
+/// `phpstan/extension-installer` - the gate Phase 40's own PHPStan-API-
+/// usage check (`checker::phpstan_api`) needs before it's ever correct to
+/// run: flagging `PHPStan\*` references as "not covered by the backward
+/// compatibility promise" only makes sense for a project that actually
+/// consumes `phpstan/phpstan` as a library. Mirrors this project's own
+/// Pest-config-detection precedent (Phase 21's directory-scoped `Pest.php`
+/// gating) - a real-file signal in the analyzed project decides whether a
+/// framework-specific check is even relevant, rather than running it
+/// unconditionally everywhere.
+///
+/// Unlike `discover_vendor_context` above, this actually parses
+/// `composer.json`'s contents via `serde_json` (already a real dependency,
+/// via `lsp.rs`'s own JSON-RPC framing and `baseline.rs`'s stored-baseline
+/// format) - the first thing in this module to do so; every other
+/// function here only ever reads the generated `vendor/composer/
+/// autoload_*.php` files Composer itself writes, never the hand-authored
+/// `composer.json` a project's own author wrote. A missing file, an
+/// unreadable one, or JSON that doesn't parse (or doesn't have the shape
+/// expected - `require`/`require-dev` missing or not an object) all
+/// degrade to `false`, the same "broken input means no signal, not a
+/// crash" reasoning `discover_vendor_context` already applies throughout
+/// this module.
+pub fn detect_phpstan_dependency(project_dir: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(project_dir.join("composer.json")) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    ["require", "require-dev"].iter().any(|section| {
+        json.get(section)
+            .and_then(|deps| deps.as_object())
+            .is_some_and(|deps| {
+                deps.contains_key("phpstan/phpstan")
+                    || deps.contains_key("phpstan/extension-installer")
+            })
+    })
+}
+
 fn discover_inner(composer_dir: &Path, vendor_dir: &Path, base_dir: &Path) -> ComposerContext {
     let static_path = composer_dir.join("autoload_static.php");
     if static_path.is_file()
