@@ -59,6 +59,27 @@ fn strict_mixed_arrays_still_flags_a_genuinely_unknown_mixed_typed_array() {
     assert!(d[0].message.contains("expects array<int>"), "got: {d:?}");
 }
 
+// Phase 53: a real corpus check (nikic/php-parser's own `$token->is([
+// \T_COMMENT, \T_DOC_COMMENT])`, unresolved global constants) found an
+// array-literal shape whose *individual fields* are genuinely Mixed
+// (not the whole array) didn't get the identical `Array(Mixed)`
+// leniency above - each field was checked strictly instead, wrongly
+// flagging a shape literal built from unmodeled constants against an
+// ordinary `array<V>`-typed parameter.
+#[test]
+fn an_array_literal_with_a_mixed_typed_field_from_an_unknown_constant_is_not_flagged() {
+    let src = r#"<?php
+            /** @param array<int|string> $xs */
+            function needsIntOrString($xs): void {}
+            needsIntOrString([SOME_UNKNOWN_CONST_A, SOME_UNKNOWN_CONST_B]);
+        "#;
+    assert!(diagnostics_for(src).is_empty(), "unexpected diagnostics");
+    // strict_mixed_arrays removes this leniency too, the same as the
+    // whole-array case above.
+    let d = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true);
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
 #[test]
 fn a_literal_array_shape_mismatch_is_flagged_against_a_docblock_shape() {
     let d = diagnostics_for(

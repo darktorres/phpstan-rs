@@ -859,9 +859,22 @@ impl Registry {
             // own type became precise, a real regression `types::
             // is_subtype`'s own (deliberately conservative, pre-Finding-48)
             // rule doesn't allow for.
-            (Type::ArrayShape(fields), Type::Array(_, b)) => {
-                fields.iter().all(|(_, ty, _)| self.is_assignable(ty, b))
-            }
+            // Phase 53: the same `Array(Mixed)` leniency two arms above -
+            // an individual shape field with no inferred type of its own
+            // (an unresolved global constant, most commonly - real shape:
+            // nikic/php-parser's own `$token->is([\T_COMMENT,
+            // \T_DOC_COMMENT])`, where neither constant is a name this
+            // project's registry models) reads as `Mixed`, not "really
+            // can hold anything", so confidently failing it against `b`
+            // (e.g. `array<int|string>`) is exactly the false positive
+            // this leniency already exists to prevent for a homogeneous
+            // `Array(Mixed)` - a shape literal deserves the identical
+            // treatment per field, not a stricter one just because its
+            // own type happens to be more structurally precise.
+            (Type::ArrayShape(fields), Type::Array(_, b)) => fields.iter().all(|(_, ty, _)| {
+                (!self.strict_mixed_arrays && matches!(ty, Type::Mixed))
+                    || self.is_assignable(ty, b)
+            }),
             // Same completion for shape-to-shape: a literal's own shape
             // satisfies a declared shape when every field the declared
             // shape actually requires is present (an optional field may

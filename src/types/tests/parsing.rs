@@ -106,6 +106,37 @@ fn phpdoc_array_shorthand_parses() {
     );
 }
 
+// Phase 53: a real corpus check (guzzlehttp/psr7's own `@param
+// (string|int)[] $keys`) found this array-shorthand form - the element
+// type itself is a parenthesized union/intersection, not a single bare
+// name - fell through to the generic class-name branch and got
+// nonsensically namespace-qualified, the same bug class `$this`/
+// `self::RFC_*` above already had their own dedicated fixes for.
+#[test]
+fn phpdoc_array_shorthand_with_a_parenthesized_union_element_type_parses() {
+    assert_eq!(
+        parse_type_string("(string|int)[]"),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Union(vec![Type::String, Type::Int]))
+        )
+    );
+}
+
+#[test]
+fn phpdoc_array_shorthand_with_a_parenthesized_intersection_element_type_parses() {
+    assert_eq!(
+        parse_type_string("(Foo&Bar)[]"),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Intersection(vec![
+                Type::Object("Foo".to_string(), Vec::new()),
+                Type::Object("Bar".to_string(), Vec::new())
+            ]))
+        )
+    );
+}
+
 #[test]
 fn dollar_this_phpdoc_pseudo_type_is_treated_as_static() {
     // `@return $this` is a real, documented PHPStan/Psalm convention

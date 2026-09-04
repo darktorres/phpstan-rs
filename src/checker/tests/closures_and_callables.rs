@@ -411,3 +411,99 @@ fn a_real_closure_arrow_fn_and_first_class_callable_all_satisfy_the_closure_type
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 53: array_map's own contextual parameter-type injection - an
+// unhinted callback parameter is checked against the mapped array's
+// own real element type, not left as an always-lenient `Mixed`, so a
+// genuine bug inside the callback body itself is now caught.
+#[test]
+fn array_map_arrow_fn_callback_catches_an_undefined_method_on_the_injected_element_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function bar(): int { return 1; }
+            }
+            /** @param Foo[] $items */
+            function test(array $items) {
+                return array_map(fn($x) => $x->undefinedMethod(), $items);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("undefinedMethod"), "got: {d:?}");
+}
+
+#[test]
+fn array_map_closure_callback_catches_an_undefined_method_on_the_injected_element_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function bar(): int { return 1; }
+            }
+            /** @param Foo[] $items */
+            function test(array $items) {
+                return array_map(function ($x) {
+                    return $x->undefinedMethod();
+                }, $items);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("undefinedMethod"), "got: {d:?}");
+}
+
+#[test]
+fn array_map_callback_using_the_real_injected_method_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function bar(): int { return 1; }
+            }
+            /** @param Foo[] $items */
+            function test(array $items) {
+                return array_map(fn($x) => $x->bar(), $items);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A parameter's own declared type hint stays authoritative - contextual
+// injection only fills in an otherwise-`Mixed` parameter, mirroring
+// real PHPStan's own precedence (a declared type always wins over an
+// inferred one).
+#[test]
+fn array_map_callback_with_its_own_declared_param_type_is_checked_against_that_type_not_the_injected_one()
+ {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            class Bar {
+                public function baz(): int { return 1; }
+            }
+            /** @param Foo[] $items */
+            function test(array $items) {
+                return array_map(fn(Bar $x) => $x->baz(), $items);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_map_with_a_by_ref_use_capture_still_widens_the_outer_variable() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int[] $items */
+            function test(array $items): int {
+                $seen = [];
+                array_map(function ($x) use (&$seen) {
+                    $seen[] = $x;
+                    return $x;
+                }, $items);
+                return count($seen);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

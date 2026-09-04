@@ -649,6 +649,29 @@ fn parse_type_atom(s: &str) -> Type {
         array_depth += 1;
     }
 
+    // `(A|B)[]`/`(A&B)[]` - a parenthesized union/intersection wrapped in
+    // the same array-shorthand syntax, needed whenever the element type
+    // itself isn't a single bare name (`@param (string|int)[] $keys`,
+    // a real, common PHPDoc idiom - PHPStan's own array-shorthand grammar
+    // requires the parens here since `A|B[]` alone would ambiguously read
+    // as `A|(B[])`). Recurses into `parse_type_string`, not `parse_type_
+    // atom` - the inner content can have its own top-level union/
+    // intersection that needs `split_top_level`'s own handling, which
+    // this function never does itself (its caller, `parse_type_string`,
+    // already owns that). Without this, the whole parenthesized text -
+    // parens, pipe, and all - fell through to the generic class-name
+    // branch below and got nonsensically namespace-qualified as if
+    // `"(string|int)"` were a real class name.
+    if array_depth > 0
+        && let Some(inner) = s.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
+    {
+        let mut ty = parse_type_string(inner);
+        for _ in 0..array_depth {
+            ty = Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty));
+        }
+        return ty;
+    }
+
     let (base, generic_args) = split_generic_args(s);
     let original = base.trim();
     let bare = original.trim_start_matches('\\');

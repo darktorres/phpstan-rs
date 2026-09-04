@@ -251,7 +251,19 @@ impl<'a> Checker<'a> {
                 // like `is_language_construct` itself, since neither is a
                 // real, resolvable function call.
                 let is_existence_probe = matches!(&callee.kind, ExprKind::Name(name) if name == "isset" || name == "empty");
-                for a in args {
+                // Phase 53: `array_map($callback, $items)`'s own
+                // contextual parameter-type injection - computed once,
+                // up front, from `$items`' own element type (not
+                // per-argument inside the loop below, since it's the
+                // *other* argument's own type this needs). Scoped to the
+                // common 2-arg single-array form, matching `infer_
+                // builtin_call_return_type`'s own identical restriction
+                // for the same function.
+                let array_map_elem_override = (resolved_name.as_deref() == Some("array_map")
+                    && args.len() == 2)
+                    .then(|| self.infer_expr(&args[1].value, locals))
+                    .and_then(|ty| Self::array_element_type(&ty));
+                for (i, a) in args.iter().enumerate() {
                     if is_this_binding_call
                         && matches!(
                             unwrap_grouping(&a.value).kind,
@@ -267,6 +279,17 @@ impl<'a> Checker<'a> {
                         );
                     } else if is_existence_probe {
                         self.check_expr_quiet_root(&a.value, locals, label);
+                    } else if i == 0
+                        && let Some(elem_ty) = &array_map_elem_override
+                        && self.check_closure_literal_with_param_overrides(
+                            unwrap_grouping(&a.value),
+                            std::slice::from_ref(elem_ty),
+                            locals,
+                            label,
+                        )
+                    {
+                        // Body already checked with the injected element
+                        // type above - no plain check_expr fallback.
                     } else {
                         self.check_expr(&a.value, locals, label);
                     }
