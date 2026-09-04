@@ -683,8 +683,32 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Instanceof(inner, target) => {
                 self.check_expr(inner, locals, label);
-                if let InstanceofTarget::Expr(e) = target {
-                    self.check_expr(e, locals, label);
+                match target {
+                    InstanceofTarget::Expr(inner_target) => {
+                        self.check_expr(inner_target, locals, label);
+                    }
+                    // Phase 48: `ExistingClassInInstanceOfRule`'s own
+                    // check - a dynamic target (`InstanceofTarget::Expr`,
+                    // handled above) never names a concrete class to
+                    // check existence for at all, only a literal one
+                    // does. `resolve_name_expr` already handles `self`/
+                    // `parent`/`static` (never flagged - see its own doc
+                    // comment), so anything that comes back as an
+                    // `Object` here is a genuine bare class-name
+                    // reference.
+                    InstanceofTarget::Name(name) => {
+                        if let Type::Object(class, _) = self.resolve_name_expr(name)
+                            && !self.class_name_exists(&class)
+                        {
+                            self.report(
+                                label.to_string(),
+                                format!("instanceof check target class {class} not found"),
+                                e.span,
+                                0,
+                                "class.notFound",
+                            );
+                        }
+                    }
                 }
                 Type::Mixed
             }
@@ -1312,8 +1336,21 @@ impl<'a> Checker<'a> {
                 if !is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
                 }
+                let closure_label = format!("{label} (closure)");
                 for p in params {
                     let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    // Phase 48: `ExistingClassesInClosureTypehintsRule`'s
+                    // own check - checked on the un-array-wrapped element
+                    // type below (a variadic parameter's own declared
+                    // type, not the `array` it collects into) so a
+                    // missing class inside e.g. `...Foo $items` is still
+                    // reported by its own real name, not `array`.
+                    self.check_type_class_names_exist(
+                        &ty,
+                        &format!("parameter ${} of anonymous function", p.name),
+                        p.span,
+                        &closure_label,
+                    );
                     let ty = if p.variadic {
                         Type::Array(Box::new(ty))
                     } else {
@@ -1322,7 +1359,12 @@ impl<'a> Checker<'a> {
                     closure_locals.insert(p.name.clone(), ty);
                 }
                 let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
-                let closure_label = format!("{label} (closure)");
+                self.check_type_class_names_exist(
+                    declared_return.as_ref().unwrap_or(&Type::Mixed),
+                    "return type of anonymous function",
+                    e.span,
+                    &closure_label,
+                );
                 // Finding 3: a generator-returning closure (`function ():
                 // Generator { if ($done) { return; } yield $x; }`, a
                 // plausible callback shape) needs the same
@@ -1384,6 +1426,17 @@ impl<'a> Checker<'a> {
                 let mut arrow_locals = locals.clone();
                 for p in params {
                     let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    // Phase 48:
+                    // `ExistingClassesInArrowFunctionTypehintsRule`'s own
+                    // check - same "check the element type, not the
+                    // variadic-collected `array`" reasoning as the
+                    // Closure arm above.
+                    self.check_type_class_names_exist(
+                        &ty,
+                        &format!("parameter ${} of arrow function", p.name),
+                        p.span,
+                        label,
+                    );
                     let ty = if p.variadic {
                         Type::Array(Box::new(ty))
                     } else {
@@ -1398,6 +1451,12 @@ impl<'a> Checker<'a> {
                 // there's no StmtKind::Return for it to share.
                 if return_type.is_some() {
                     let expected = self.resolve_type_hint(return_type.as_deref());
+                    self.check_type_class_names_exist(
+                        &expected,
+                        "return type of arrow function",
+                        e.span,
+                        label,
+                    );
                     if body_ty != Type::Mixed && !self.registry.is_assignable(&body_ty, &expected) {
                         self.report(
                             label.to_string(),

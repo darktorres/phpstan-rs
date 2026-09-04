@@ -489,6 +489,11 @@ impl<'a> Checker<'a> {
         // silent method-table corruption the registry itself had to
         // guard against.
         self.name_ctx = NameContext::build(program);
+        // Phase 48: `ExistingNamesInUseRule`'s own function-import half -
+        // see `check_use_function_imports`'s own doc comment for why a
+        // plain, class-shaped `use Foo;` is deliberately NOT
+        // existence-checked here.
+        self.check_use_function_imports(program);
         // Phase 59: see `rebind_target_classes`'s own doc comment - built
         // once per file, ahead of `check_unused_private_members`'s own
         // per-class use below.
@@ -528,6 +533,7 @@ impl<'a> Checker<'a> {
                     self.check_class_generic_bounds(&fqn, c);
                     self.check_class_completeness(&fqn, c.span);
                     self.check_final_class_extension(&fqn, c.span);
+                    self.check_class_references_exist(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
                     self.check_trait_conflicts(&fqn, c.span);
                     // Phase 37: the class's own attributes, plus every
@@ -568,6 +574,7 @@ impl<'a> Checker<'a> {
                 StmtKind::EnumDecl(e) => {
                     let fqn = self.name_ctx.declared_name(&e.name);
                     self.check_class_completeness(&fqn, e.span);
+                    self.check_class_references_exist(&fqn, e.span);
                     self.check_enum_case_values(&fqn, e);
                     self.check_trait_conflicts(&fqn, e.span);
                     self.check_attributes(&e.attrs, &fqn);
@@ -601,6 +608,51 @@ impl<'a> Checker<'a> {
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
             self.saw_dynamic_var_construct = false;
+        }
+    }
+
+    /// Phase 48: real PHPStan's own `ExistingNamesInUseRule`, confirmed
+    /// directly against `vendor/phpstan-src`, only ever existence-checks
+    /// the `use function foo;` and `use const FOO;` forms - a plain,
+    /// class-shaped `use Foo;` goes through `ClassNameCheck::
+    /// checkClassNames` with a `null` usage location, which (per its own
+    /// source) only runs case-sensitivity/forbidden-name checking in that
+    /// case and never calls `hasClass` at all; a class reference is only
+    /// ever existence-checked at the point it's actually *used* (a
+    /// typehint, `new`, `instanceof`, ...), not merely imported. This
+    /// project has no project-wide global-constant registry to check a
+    /// `use const` against (see `UseImport::kind`'s own doc comment for
+    /// why building a partial one would be worse than none), so only the
+    /// function half is checked here - `self.registry.functions` already
+    /// exists and is exactly as reliable a source for this as it is for
+    /// every other function-existence check in this project.
+    fn check_use_function_imports(&mut self, program: &[Stmt]) {
+        for stmt in program {
+            let StmtKind::Use(imports) = &stmt.kind else {
+                continue;
+            };
+            for import in imports {
+                if import.kind != UseKind::Function {
+                    continue;
+                }
+                // A `use`-imported path is always already fully qualified
+                // from the global namespace (real PHP requires this,
+                // leading `\` optional but implied) - unlike an ordinary
+                // reference elsewhere in the file, it never goes through
+                // `NameContext::resolve`'s own use-map/namespace-relative
+                // logic, so a bare `trim_start_matches` is the whole of
+                // it.
+                let fqn = import.path.trim_start_matches('\\');
+                if self.registry.lookup_function(fqn).is_none() {
+                    self.report(
+                        "<main>".to_string(),
+                        format!("used function {fqn} not found"),
+                        stmt.span,
+                        0,
+                        "function.notFound",
+                    );
+                }
+            }
         }
     }
 
@@ -692,6 +744,16 @@ impl<'a> Checker<'a> {
         is_static: bool,
     ) {
         let sig = self.lookup_own_signature(f, class_name);
+        // Moved up from its original position right before the bound-
+        // enforcement block below - Phase 48's own per-parameter/return
+        // existence check (right below, inside both match arms) needs a
+        // real label to attach its diagnostics to too, and nothing
+        // between here and there ever depended on `label` not existing
+        // yet.
+        let label = match class_name {
+            Some(c) => format!("{c}::{}", f.name),
+            None => f.name.clone(),
+        };
 
         let mut locals: Locals = Locals::default();
         match sig {
@@ -701,7 +763,7 @@ impl<'a> Checker<'a> {
             // doc-commented parameter usable inside its own function body,
             // not just checkable from the outside at call sites.
             Some(sig) => {
-                for param in &sig.params {
+                for (param, ast_param) in sig.params.iter().zip(&f.params) {
                     // `self`/`static`/`parent` need resolving against the
                     // enclosing class the same way `$this` and a return
                     // type already are - without this, a `self`-typed
@@ -717,6 +779,17 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(&param.ty, c),
                         None => param.ty.clone(),
                     };
+                    // Phase 48: `ExistingClassesInTypehintsRule`'s own
+                    // check - on the un-array-wrapped element type below
+                    // (a variadic parameter's declared type, not the
+                    // `array` it collects into), the same reasoning the
+                    // Closure/arrow-fn arms in `checker/expr.rs` share.
+                    self.check_type_class_names_exist(
+                        &ty,
+                        &format!("parameter ${} of {label}()", param.name),
+                        ast_param.span,
+                        &label,
+                    );
                     // `ParamSig::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
                     // individual argument at a call site) - inside the
@@ -764,6 +837,12 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(&ty, c),
                         None => ty,
                     };
+                    self.check_type_class_names_exist(
+                        &ty,
+                        &format!("parameter ${} of {label}()", p.name),
+                        p.span,
+                        &label,
+                    );
                     let ty = if p.variadic {
                         Type::Array(Box::new(ty))
                     } else {
@@ -800,10 +879,17 @@ impl<'a> Checker<'a> {
                 None => ty,
             })
         });
-        let label = match class_name {
-            Some(c) => format!("{c}::{}", f.name),
-            None => f.name.clone(),
-        };
+        // Phase 48: `ExistingClassesInTypehintsRule`'s own return-type
+        // check - the un-widened, exactly-as-declared type (not the
+        // `?`-and-`resolve_pseudo`-adjusted `expected` the falls-off-the-
+        // end check further down builds), same as every other existence
+        // check in this function.
+        self.check_type_class_names_exist(
+            declared_return.as_ref().unwrap_or(&Type::Mixed),
+            &format!("return type of {label}()"),
+            f.span,
+            &label,
+        );
 
         // Phase 37: this one `check_function` is the single choke point
         // every function-shaped declaration passes through regardless of

@@ -70,6 +70,76 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 48: the class/enum-declaration-level half of the "does this
+    /// name actually resolve" existence pipeline - every `extends`
+    /// target (a class's single parent, or an interface's own possibly-
+    /// multiple parent interfaces), every `implements` target, and every
+    /// `use`d trait. Unlike `check_final_class_extension`'s identical
+    /// `info.extends.get(0)`-only walk (which only needs the *first*
+    /// parent to check finality, since a class can only ever have one),
+    /// this checks every entry - an interface's own `extends A, B;` is
+    /// real, valid PHP with more than one target. Operates purely on the
+    /// already-indexed, already name-resolved `ClassInfo` (`info.extends`/
+    /// `implements`/`uses` are fully-qualified names by the time
+    /// `Registry::index` builds them - see `class_info.rs`'s own
+    /// `ctx.resolve(s)` calls), so this needs no raw `ClassDecl`/
+    /// `EnumDecl` at all and covers both uniformly from one call site.
+    /// Deliberately existence-only, not kind-compatibility (a class
+    /// `implements`-ing another class instead of an interface is a real,
+    /// separate PHPStan rule this phase doesn't attempt) - matches the
+    /// scope every other `Existing*Rule` this phase's own roadmap entry
+    /// lists shares.
+    pub(crate) fn check_class_references_exist(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        for parent in &info.extends {
+            if !self.class_name_exists(parent) {
+                let verb = if info.kind == ClassKind::Interface {
+                    "extends unknown interface"
+                } else {
+                    "extends unknown class"
+                };
+                self.report(
+                    fqn.to_string(),
+                    format!("{fqn} {verb} {parent}"),
+                    span,
+                    0,
+                    "class.notFound",
+                );
+            }
+        }
+        for iface in &info.implements {
+            if !self.class_name_exists(iface) {
+                self.report(
+                    fqn.to_string(),
+                    format!("{fqn} implements unknown interface {iface}"),
+                    span,
+                    0,
+                    // Real PHPStan's own `ExistingClassesInClassImplementsRule`
+                    // identifier for this exact message shape - confirmed
+                    // directly against `vendor/phpstan-src`, not guessed
+                    // (unlike `extends`/trait-use just above/below, which
+                    // really do share the generic `class.notFound`).
+                    "interface.notFound",
+                );
+            }
+        }
+        for used_trait in &info.uses {
+            if !self.class_name_exists(used_trait) {
+                self.report(
+                    fqn.to_string(),
+                    format!("{fqn} uses unknown trait {used_trait}"),
+                    span,
+                    0,
+                    // Real PHPStan's own `ExistingClassInTraitUseRule`
+                    // identifier - confirmed against `vendor/phpstan-src`.
+                    "trait.notFound",
+                );
+            }
+        }
+    }
+
     /// Finding 58: two traits used by the same class declaring the same
     /// property (with a genuinely different type) or method (with a
     /// genuinely different signature) is a real, unconditional PHP fatal

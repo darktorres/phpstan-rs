@@ -166,16 +166,19 @@ impl Parser {
             }
             Token::Keyword(Keyword::Use) => {
                 self.advance();
-                // `use function foo;` / `use const BAR;` - the marker
-                // doesn't change what's tracked (undefined-class
-                // resolution only cares about class-shaped imports), just
-                // skip past it.
-                if matches!(
-                    self.peek(),
-                    Token::Keyword(Keyword::Function) | Token::Keyword(Keyword::Const)
-                ) {
-                    self.advance();
-                }
+                // `use function foo;` / `use const BAR;` - Phase 48 needs
+                // to tell these apart from a plain class-shaped `use Foo;`
+                // (only a function/class import is ever existence-
+                // checkable against this project's own registry - see
+                // `UseImport::kind`'s own doc comment), so the marker is
+                // now captured instead of merely skipped past.
+                let default_kind = if self.eat(&Token::Keyword(Keyword::Function)) {
+                    UseKind::Function
+                } else if self.eat(&Token::Keyword(Keyword::Const)) {
+                    UseKind::Const
+                } else {
+                    UseKind::Class
+                };
                 let name = self.parse_qualified_name();
                 // Group use: `use Foo\{const BAR, function baz, Qux as
                 // Quux};`, with an optional trailing comma before the
@@ -191,12 +194,20 @@ impl Parser {
                     let group_prefix = name.trim_end_matches('\\');
                     let mut imports = Vec::new();
                     while !self.check(&Token::RBrace) {
-                        if matches!(
-                            self.peek(),
-                            Token::Keyword(Keyword::Function) | Token::Keyword(Keyword::Const)
-                        ) {
-                            self.advance();
-                        }
+                        // Real PHP only allows a per-member `function`/
+                        // `const` marker when the outer `use` itself was
+                        // the bare (class-shaped) form - `use function
+                        // Foo\{...}` can't mix in its own per-member
+                        // markers - but a member here still falls back to
+                        // whatever `default_kind` the outer marker set
+                        // when it has no marker of its own.
+                        let kind = if self.eat(&Token::Keyword(Keyword::Function)) {
+                            UseKind::Function
+                        } else if self.eat(&Token::Keyword(Keyword::Const)) {
+                            UseKind::Const
+                        } else {
+                            default_kind
+                        };
                         let member = self.parse_qualified_name();
                         let alias = if self.eat(&Token::Keyword(Keyword::As)) {
                             Some(self.expect_ident()?)
@@ -206,6 +217,7 @@ impl Parser {
                         imports.push(UseImport {
                             path: format!("{group_prefix}\\{member}"),
                             alias,
+                            kind,
                         });
                         if !self.eat(&Token::Comma) {
                             break;
@@ -220,7 +232,11 @@ impl Parser {
                 } else {
                     None
                 };
-                let mut imports = vec![UseImport { path: name, alias }];
+                let mut imports = vec![UseImport {
+                    path: name,
+                    alias,
+                    kind: default_kind,
+                }];
                 // `use foo\bar\baz, foo\bar\qux;` - a plain
                 // comma-separated list, distinct from the `use Foo\{...}`
                 // group form above (each member here is a full path of its
@@ -232,7 +248,11 @@ impl Parser {
                     } else {
                         None
                     };
-                    imports.push(UseImport { path, alias });
+                    imports.push(UseImport {
+                        path,
+                        alias,
+                        kind: default_kind,
+                    });
                 }
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Use(imports), start)

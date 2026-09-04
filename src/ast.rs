@@ -221,6 +221,32 @@ pub struct MethodDecl {
 pub struct UseImport {
     pub path: String,
     pub alias: Option<String>,
+    // Phase 48: which of PHP's three `use`-import namespaces this member
+    // belongs to (`use Foo;` vs `use function foo;` vs `use const FOO;`) -
+    // needed because only a class-shaped and function-shaped import are
+    // ever existence-checkable against this project's own registry (a
+    // plain `use Foo;` isn't checked for existence at all, matching real
+    // PHPStan's own `ExistingNamesInUseRule`, which - confirmed directly
+    // against its source - only ever calls `checkClassNames` with a `null`
+    // usage location for the class case, i.e. only case-sensitivity/
+    // forbidden-name checking, never a `hasClass` existence check; a class
+    // reference is only ever existence-checked at the point it's actually
+    // *used*, not merely imported). `use const` existence is deliberately
+    // left unchecked here too - this project has no project-wide global-
+    // constant registry to check it against at all (`ast::StmtKind::
+    // GlobalConst` is currently only used to *infer a value's type*, not
+    // indexed into any name table), and PHP's own huge, extension-
+    // dependent built-in constant surface makes a half-built one worse
+    // than none.
+    pub kind: UseKind,
+}
+
+/// See `UseImport::kind`'s own doc comment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UseKind {
+    Class,
+    Function,
+    Const,
 }
 
 #[derive(Debug, Clone)]

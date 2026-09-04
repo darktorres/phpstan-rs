@@ -133,6 +133,16 @@ impl<'a> Checker<'a> {
         for p in &c.properties {
             if let Some(prop_sig) = info.properties.get(&p.name) {
                 self.check_generic_bounds(&prop_sig.ty, fqn, p.span);
+                // Phase 48: `ExistingClassesInPropertiesRule`'s own check -
+                // reuses this exact loop (same resolved `PropertySig::ty`,
+                // same real per-property span) rather than a second walk
+                // over `c.properties` elsewhere.
+                self.check_type_class_names_exist(
+                    &prop_sig.ty,
+                    &format!("property {fqn}::${}", p.name),
+                    p.span,
+                    fqn,
+                );
             }
         }
         // `extends_args`/`implements_args` store just the argument list,

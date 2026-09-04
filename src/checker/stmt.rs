@@ -510,16 +510,46 @@ impl<'a> Checker<'a> {
                     // declaration time otherwise ("Cannot catch X
                     // because it does not implement Throwable").
                     for t in &c.types {
-                        if let Type::Object(class, _) = self.resolve_name_expr(t)
-                            && !self.registry.is_subclass_of(&class, "Throwable")
-                        {
-                            self.report(
-                                label.to_string(),
-                                format!("cannot catch {class}: it does not implement Throwable"),
-                                c.span,
-                                0,
-                                "catch.notThrowable",
-                            );
+                        if let Type::Object(class, _) = self.resolve_name_expr(t) {
+                            // Phase 48: `CaughtExceptionExistenceRule`'s own
+                            // existence half, checked first - a typo'd/
+                            // missing exception class previously fell
+                            // straight through to `is_subclass_of`, which
+                            // silently treats a name the registry has no
+                            // entry for as "not a subclass of Throwable"
+                            // (indistinguishable from a real, existing,
+                            // non-Throwable class) and reported the
+                            // confusingly wrong "does not implement
+                            // Throwable" - `else if` here reports at most
+                            // one diagnostic per catch type instead of
+                            // both.
+                            if !self.class_name_exists(&class) {
+                                self.report(
+                                    label.to_string(),
+                                    format!("caught class {class} not found"),
+                                    c.span,
+                                    0,
+                                    // Real PHPStan's own
+                                    // `CaughtExceptionExistenceRule` reuses
+                                    // the generic `class.notFound`
+                                    // identifier here too (confirmed
+                                    // against `vendor/phpstan-src`) -
+                                    // `catch.notThrowable` just below is
+                                    // the one genuinely catch-specific
+                                    // identifier this rule has.
+                                    "class.notFound",
+                                );
+                            } else if !self.registry.is_subclass_of(&class, "Throwable") {
+                                self.report(
+                                    label.to_string(),
+                                    format!(
+                                        "cannot catch {class}: it does not implement Throwable"
+                                    ),
+                                    c.span,
+                                    0,
+                                    "catch.notThrowable",
+                                );
+                            }
                         }
                     }
                     let mut catch_locals = locals.clone();

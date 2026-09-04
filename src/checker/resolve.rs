@@ -1,5 +1,6 @@
 use crate::checker::Checker;
 use crate::registry::{self};
+use crate::token::Span;
 use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
@@ -121,6 +122,111 @@ impl<'a> Checker<'a> {
                     .collect(),
             ),
             _ => ty.clone(),
+        }
+    }
+
+    /// Phase 48's "does this name actually resolve" primitive: `name` is a
+    /// real class/interface/trait/enum this checker's own `Registry`
+    /// indexed, or one of the small, fixed set of native type-hint
+    /// keywords this project's own `types::parse_type_keyword_or_class`
+    /// deliberately encodes as `Type::Object` despite not being a real
+    /// class reference at all - mirrors `is_type_fully_known`'s (
+    /// `checker/generics.rs`) identical `"object"` exemption, plus
+    /// `resolve_names_in_type`'s (`registry/name_context.rs`) own
+    /// `"Traversable"`/`"resource"` exemptions, so a plain `object`/
+    /// `resource`-typed parameter or a namespaced file's `iterable`
+    /// (desugared to `array|Traversable`) never gets flagged as an
+    /// unresolvable class the way a genuine typo would. `"class@anonymous"`
+    /// is this project's own fixed, literal synthetic name for EVERY
+    /// anonymous class (`parser/classes.rs`'s own `ClassDecl::name` for
+    /// one, confirmed never unique per-instance) - deliberately never
+    /// indexed into the registry at all (see `ExprKind::NewAnonymousClass`'s
+    /// own comment), so a `self`/`static`-typed return inside an anonymous
+    /// class's own body (`resolve_pseudo` resolving `static` to exactly
+    /// this name) would otherwise always read as an unresolvable class,
+    /// on the most ordinary possible body.
+    pub(crate) fn class_name_exists(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "object" | "Traversable" | "resource" | "class@anonymous"
+        ) || self.registry.classes.contains_key(name)
+    }
+
+    /// Walks an already name-resolved `Type` (every `Object` inside it
+    /// already a fully-qualified name, the same shape `check_generic_
+    /// bounds`/`is_type_fully_known` already expect), collecting every
+    /// distinct top-level class name that doesn't actually resolve
+    /// (`class_name_exists`) - recurses through `Union`/`Intersection`/
+    /// `Array`/`ArrayShape`/`ClassString` the same way `resolve_pseudo`
+    /// does, so a typo buried inside e.g. `list<Foo\Bar>` or `Foo|Bar` is
+    /// still caught, not just a bare top-level reference. A real
+    /// `@template T` never reaches the `Object` arm at all - `registry::
+    /// mark_template_params` already rewrites every one of a function's/
+    /// class's own declared template names to `Type::TemplateParam`
+    /// before this checker ever sees the signature, so this never
+    /// mistakes a generic placeholder for a missing class.
+    ///
+    /// Deliberately does NOT recurse into a class's own `@template`
+    /// argument list (`Object(name, args)`'s own `args`) - mirrors
+    /// `check_generic_bounds`/`is_type_fully_known`'s own identical,
+    /// deliberate leniency there (`checker/generics.rs`), for the exact
+    /// same real reason: a real corpus (Piwigo, checking against a
+    /// PHAR-bundled `phpstan/phpstan` with no loose source files at all)
+    /// found a generic argument referencing a real class this project's
+    /// own registry simply has no data for is common enough that
+    /// existence-checking it too would trade a missed rare typo for a
+    /// false positive on the ordinary case - the same tradeoff this
+    /// project already made once for bound-checking.
+    pub(crate) fn collect_unknown_class_names(&self, ty: &Type, out: &mut Vec<String>) {
+        match ty {
+            Type::Object(name, _args) => {
+                if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
+                    out.push(name.clone());
+                }
+            }
+            Type::Array(inner) | Type::ClassString(inner) => {
+                self.collect_unknown_class_names(inner, out)
+            }
+            Type::Union(members) | Type::Intersection(members) => {
+                for m in members {
+                    self.collect_unknown_class_names(m, out);
+                }
+            }
+            Type::ArrayShape(fields) => {
+                for (_, t, _) in fields {
+                    self.collect_unknown_class_names(t, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The shared reporting half every existence-checking call site
+    /// (parameter/return/property type hints, closure/arrow-fn
+    /// typehints, ...) reduces to once it has its own `subject` phrase
+    /// ready (`"parameter $foo of Foo::bar()"`, `"return type of
+    /// Foo::bar()"`, `"property Foo::$bar"`, ...) - one `class.notFound`
+    /// diagnostic per distinct unresolvable name `ty` references,
+    /// mirroring the message this project's own pre-existing `new Foo()`
+    /// existence check (`checker/expr.rs`'s `ExprKind::New` arm) already
+    /// uses the same identifier for.
+    pub(crate) fn check_type_class_names_exist(
+        &mut self,
+        ty: &Type,
+        subject: &str,
+        span: Span,
+        label: &str,
+    ) {
+        let mut unknown = Vec::new();
+        self.collect_unknown_class_names(ty, &mut unknown);
+        for name in unknown {
+            self.report(
+                label.to_string(),
+                format!("{subject} has invalid type {name}"),
+                span,
+                0,
+                "class.notFound",
+            );
         }
     }
 }
