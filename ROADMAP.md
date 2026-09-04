@@ -789,20 +789,47 @@ closed by its own dedicated Phase 85, not bundled into this phase's own
 commit.
 
 **Phase 53 - Structural Callable/Closure signature type + contextual
-closure-parameter typing (NEW, PLANNED).** `Type::Callable`
-(`src/types.rs:48`) is a bare marker with no parameter list, return
-type, purity, or template map, and every closure-literal expression
-(`src/checker/expr.rs`, ~lines 1342/1379/1470/1509) infers the flat
-`Object("Closure", [])` marker, discarding the closure's own PHPDoc/
-inferred signature entirely. Once a real structural type exists, wire
-it into higher-order builtins (`array_map`/`array_filter`/`usort`/
-`array_walk`/`preg_replace_callback`) so a closure's body is actually
-*checked* with contextually-injected parameter types - today
-`infer_closure_return_with_param_overrides` only uses the override to
-compute the outer call's return type, never to type-check the closure
-body itself, so a bug inside an `array_map` callback (e.g. calling an
-undefined method on `$item`) is never caught today. Unlocks
-`CallableType`, `ClosureType`, `CallableTypeHelper`,
+closure-parameter typing (PARTIAL).** `Type::Callable`
+(`src/types.rs:48`) is still a bare marker with no parameter list,
+return type, purity, or template map, and every closure-literal
+expression still infers the flat `Object("Closure", [])` marker,
+discarding the closure's own PHPDoc/inferred signature entirely - the
+full structural-type half of this phase is still open (see below). But
+its own highest-value half - actually *checking* a higher-order
+builtin's callback body with contextually-injected parameter types,
+not just using the injection to compute the outer call's own return
+type - is done for the single most common, highest-value case.
+
+**Done**: `check_closure_literal_with_param_overrides`
+(`src/checker/calls.rs`) checks `array_map`'s own closure/arrow-fn
+callback argument's body with an unhinted parameter bound to the
+mapped array's real element type, instead of the always-lenient
+`Mixed` it otherwise got - a real bug inside the callback itself (e.g.
+calling an undefined method on the mapped element) is now caught,
+where before only `infer_closure_return_with_param_overrides`'s own
+return-type-only inference ran (no `report()` access, so no
+diagnostic possible from it at all). A parameter's own declared type
+hint stays authoritative - contextual injection only fills in what's
+otherwise `Mixed`, mirroring real PHPStan's own precedence.
+
+This same corpus-verification pass found and fixed two more real,
+independent, pre-existing gaps it exposed - neither new to `array_map`
+itself, both general type-parsing/assignability gaps that just hadn't
+been exercised this way before: PHPDoc's `(A|B)[]` array-shorthand
+form (a parenthesized union/intersection element type) fell through to
+the generic class-name branch and got nonsensically namespace-
+qualified (`types.rs`, real shape: guzzlehttp/psr7's own `@param
+(string|int)[] $keys`); an array-shape literal's own individual field
+being `Mixed` (an unresolved global constant, most commonly) didn't
+get the same `Array(Mixed)`-is-always-assignable leniency a plain
+`Array(Mixed)` already has (`registry.rs`, real shape: nikic/php-
+parser's own `$token->is([\T_COMMENT, \T_DOC_COMMENT])`).
+
+**Still open**: the structural `Callable`/`Closure` signature type
+itself (parameter list, return type, purity, template map) - `Type::
+Callable` stays a bare marker; contextual injection for `array_filter`/
+`usort`/`array_walk`/`preg_replace_callback` (`array_map` only, for
+now); `CallableType`, `ClosureType`, `CallableTypeHelper`,
 `CallableAssertionsHelper`, `FunctionParameterClosureTypeExtension`,
 `ArrayFilterParameterClosureTypeExtension`,
 `ArrayMapParameterClosureTypeExtension`, `ArrayWalkParameterClosureTypeExtension`,
@@ -810,9 +837,16 @@ undefined method on `$item`) is never caught today. Unlocks
 `ArrayFilterFunctionReturnTypeHelper`, `CallCallablesRule`,
 `FunctionCallableRule`'s remaining dynamic-callee gap,
 `DynamicMethodReturnTypeExtension`, `DynamicReturnTypeExtensionRegistry`,
-`DynamicStaticMethodReturnTypeExtension`. Size: XL - high value; the
-contextual-injection half is a real, currently-reachable source of
-missed bugs, not a nicety.
+`DynamicStaticMethodReturnTypeExtension`. Also surfaced, named, and
+deliberately deferred rather than chased: a `switch (true) { case $x
+instanceof Foo: ...; }` conditional isn't recognized as an `elseif`-
+chain the way a real `if`/`elseif` chain already is - real PHPStan's
+own `TypeSpecifier` handles this specially; this project's narrowing
+engine doesn't at all (real shape: `Illuminate\Container\Attributes\
+Bind::__construct`'s own `array_map` callback, now checked for the
+first time thanks to this phase's own contextual injection, catching a
+"maybe genuinely missing" `->value`/`->name` access this specific
+narrowing gap keeps this project from confidently ruling out).
 
 **Phase 54 - Generic template richness (`TemplateParam` bound/scope/
 variance rewrite) (NEW, PLANNED).** `Type::TemplateParam(String)`
