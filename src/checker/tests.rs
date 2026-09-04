@@ -4,6 +4,7 @@ mod array_functions;
 mod array_literals_and_shapes;
 mod closures_and_callables;
 mod control_flow;
+mod diagnostic_identifiers;
 mod doctrine_and_stdlib_specials;
 mod enums;
 mod generics_and_templates;
