@@ -1222,3 +1222,161 @@ fn phpstan_readonly_property_assign_flags_writes_outside_the_constructor() {
         .count();
     assert_eq!(readonly_hits, 2, "expected both writes flagged, got: {d:?}");
 }
+
+// Phase 64: narrowing a method's own visibility on override is a real,
+// unconditional PHP fatal error (confirmed directly against real `php`:
+// "Access level to Child::foo() must be public (as in class Base)").
+#[test]
+fn narrowing_visibility_from_public_to_protected_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(): void {} }
+            class Child extends Base { protected function foo(): void {} }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.visibility"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn narrowing_visibility_from_protected_to_private_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { protected function foo(): void {} }
+            class Child extends Base { private function foo(): void {} }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.visibility"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn widening_visibility_from_protected_to_public_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { protected function foo(): void {} }
+            class Child extends Base { public function foo(): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.visibility"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn keeping_the_same_visibility_on_override_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(): void {} }
+            class Child extends Base { public function foo(): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.visibility"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_private_ancestor_method_is_never_flagged_as_narrowing() {
+    // Not a real override at all - `private` methods aren't virtual in
+    // real PHP, so a same-named child method is an unrelated declaration.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { private function foo(int $a): void {} }
+            class Child extends Base { private function foo(): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.visibility"
+            || x.identifier == "parameter.missing"
+            || x.identifier == "parameter.notOptional"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 64: an override with fewer parameters than its ancestor is a
+// real, unconditional PHP fatal error (confirmed directly: "Declaration
+// of Child::foo(int $a): void must be compatible with Base::foo(int $a,
+// int $b): void").
+#[test]
+fn an_override_missing_an_inherited_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(int $a, int $b): void {} }
+            class Child extends Base { public function foo(int $a): void {} }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.missing" && x.message.contains("#2 ($b)")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_missing_a_variadic_ancestor_tail_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(int $a, ...$rest): void {} }
+            class Child extends Base { public function foo(int $a): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.missing"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 64: a parameter the ancestor made optional can never become
+// required on override - a real, unconditional PHP fatal error
+// (confirmed directly: "Declaration of Child::foo(int $a, int $b): void
+// must be compatible with Base::foo(int $a, int $b = 0): void").
+#[test]
+fn an_override_requiring_a_parameter_the_ancestor_made_optional_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(int $a, int $b = 0): void {} }
+            class Child extends Base { public function foo(int $a, int $b): void {} }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.notOptional" && x.message.contains("#2 ($b)")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_keeping_an_inherited_parameter_optional_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(int $a, int $b = 0): void {} }
+            class Child extends Base { public function foo(int $a, int $b = 1): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.notOptional"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_adding_its_own_extra_optional_parameter_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(int $a): void {} }
+            class Child extends Base { public function foo(int $a, int $b = 0): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.missing"
+            || x.identifier == "parameter.notOptional"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

@@ -332,10 +332,101 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
+            // A `private` ancestor method isn't a real override target at
+            // all - real PHP's own method dispatch is never virtual for
+            // `private` (a same-named method on a subclass is an
+            // unrelated declaration, not a polymorphic override), so
+            // nothing about compatibility applies. `lookup_ancestor_
+            // method_with_owner` itself doesn't filter by visibility (it
+            // answers "is there a same-named declaration up the chain",
+            // the right question for the visibility-narrowing check just
+            // below, which needs to see a `private` ancestor to *know*
+            // it's not a real override) - this exemption belongs here,
+            // not there.
+            if ancestor_sig.visibility == Visibility::Private {
+                continue;
+            }
+            // Phase 64: narrowing a method's own visibility on override
+            // is a real, unconditional PHP fatal error (confirmed
+            // directly: `Access level to Child::foo() must be public (as
+            // in class Base)`) - matches real PHPStan's own
+            // `MethodVisibilityComparisonHelper` exactly (same
+            // identifier, same two-way split: an ancestor's `public`
+            // demands `public`; an ancestor's `protected` only forbids
+            // narrowing all the way to `private`).
+            let narrows_visibility = match ancestor_sig.visibility {
+                Visibility::Public => m.visibility != Visibility::Public,
+                Visibility::Protected => m.visibility == Visibility::Private,
+                Visibility::Private => false,
+            };
+            if narrows_visibility {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "{fqn}::{}() overriding {} method {ancestor_owner}::{}() must not reduce visibility",
+                        m.function.name,
+                        visibility_word(&ancestor_sig.visibility),
+                        m.function.name
+                    ),
+                    m.span,
+                    0,
+                    "method.visibility",
+                );
+            }
             for (i, ancestor_param) in ancestor_sig.params.iter().enumerate() {
                 let Some(own_param) = own_sig.params.get(i) else {
+                    // Real PHP fatal error - the override doesn't declare
+                    // this many parameters at all. Skipped for a
+                    // variadic ancestor tail (`...$args`, matched at any
+                    // position, not just the last - real PHP itself
+                    // requires it to be the last declared parameter, so
+                    // an earlier one is already a parse-time error this
+                    // project's own parser presumably rejects too): real
+                    // PHPStan's own handling of that shape is
+                    // considerably more involved (contravariance across
+                    // every trailing ancestor parameter the variadic
+                    // swallows) than this project attempts here.
+                    if !ancestor_param.variadic {
+                        self.report(
+                            fqn.to_string(),
+                            format!(
+                                "{fqn}::{}() overrides {ancestor_owner}::{}() but misses parameter #{} (${})",
+                                m.function.name,
+                                m.function.name,
+                                i + 1,
+                                ancestor_param.name
+                            ),
+                            m.span,
+                            0,
+                            "parameter.missing",
+                        );
+                    }
                     continue;
                 };
+                // A parameter the ancestor made optional (has a default)
+                // can never become *required* on override - a caller
+                // holding the ancestor's own type could always omit it.
+                // Real, unconditional PHP fatal error (confirmed
+                // directly). Not gated on either side's type being
+                // `Mixed` the way the narrowing check below is - this is
+                // about arity/callability, not type compatibility.
+                if ancestor_param.has_default && !own_param.has_default && !own_param.variadic {
+                    self.report(
+                        fqn.to_string(),
+                        format!(
+                            "Parameter #{} (${}) of {fqn}::{}() is required but parameter #{} (${}) of {ancestor_owner}::{}() is optional",
+                            i + 1,
+                            own_param.name,
+                            m.function.name,
+                            i + 1,
+                            ancestor_param.name,
+                            m.function.name
+                        ),
+                        m.span,
+                        0,
+                        "parameter.notOptional",
+                    );
+                }
                 // `Type::Mixed` is overloaded throughout this project to
                 // mean both real PHP `mixed` *and* "no type declared at
                 // all, native or docblock" (see this file's own opening
@@ -423,6 +514,14 @@ impl<'a> Checker<'a> {
                     ), m.span, 0, "method.childReturnType");
             }
         }
+    }
+}
+
+fn visibility_word(v: &Visibility) -> &'static str {
+    match v {
+        Visibility::Public => "public",
+        Visibility::Protected => "protected",
+        Visibility::Private => "private",
     }
 }
 
