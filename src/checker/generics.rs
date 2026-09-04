@@ -511,6 +511,7 @@ impl<'a> Checker<'a> {
             return_type_native: subst(&sig.return_type_native),
             no_discard: sig.no_discard,
             visibility: sig.visibility.clone(),
+            is_internal: sig.is_internal,
         }
     }
 }

@@ -259,6 +259,47 @@ fn check_project_check_uninitialized_properties_flag_opts_into_the_extra_check()
 }
 
 #[test]
+fn check_project_check_internal_usage_flag_opts_into_the_extra_check() {
+    // Phase 67: off by default (mirroring real PHPStan's own opt-in
+    // `featureToggles.internalTag`, see `registry::Registry::
+    // check_internal_usage`'s own doc comment) - only
+    // `--check-internal-usage` turns it on.
+    let dir = TempDir::new("check_project_internal_usage");
+    dir.write(
+        "foo.php",
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            function make(): void {}
+
+            namespace Other\App;
+            function f() {
+                \Vendor\Internal\make();
+            }
+        "#,
+    );
+
+    let unfiltered = bin().arg("check-project").arg(dir.path()).output().unwrap();
+    let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
+    assert!(
+        !unfiltered_stdout.contains("function.internal"),
+        "expected the check to be off by default, got: {unfiltered_stdout}"
+    );
+
+    let enabled = bin()
+        .arg("check-project")
+        .arg("--check-internal-usage")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let enabled_stdout = String::from_utf8_lossy(&enabled.stdout);
+    assert!(
+        enabled_stdout.contains("function.internal"),
+        "got: {enabled_stdout}"
+    );
+}
+
+#[test]
 fn check_project_a_wrong_typed_array_literal_is_flagged_without_strict_mixed_arrays() {
     // The real capability Finding 48 unlocks: strict_mixed_arrays was
     // never actually necessary to catch this - it just happened to be

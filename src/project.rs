@@ -115,6 +115,15 @@ impl Project {
         self.registry.check_uninitialized_properties = enabled;
     }
 
+    /// Phase 67: opts the whole project's checking into the `@internal`
+    /// restricted-usage engine, following `set_check_uninitialized_
+    /// properties`'s exact precedent - see `registry::Registry::
+    /// check_internal_usage`'s own doc comment for why this defaults to
+    /// `false`.
+    pub fn set_check_internal_usage(&mut self, enabled: bool) {
+        self.registry.check_internal_usage = enabled;
+    }
+
     /// Phase 38: configures the project's target PHP version
     /// (`registry::Registry::php_version`), following
     /// `set_strict_mixed_arrays`'s exact precedent - a narrow setter

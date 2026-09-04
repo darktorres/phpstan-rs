@@ -31,6 +31,14 @@ pub struct PropertySig {
     // the hook uses an implicit `set { ... }` with no parameter list at
     // all - a write then still checks against `ty` as before.
     pub set_ty: Option<Type>,
+    // Phase 67: `@internal` on this property's own docblock - see
+    // `docblock::DocBlock::internal`'s own doc comment. Only ever set for
+    // a real, plainly-declared property with its own doc comment
+    // (`from_decl`'s first construction site below); a promoted
+    // constructor property, a magic `@property` tag, and an enum's own
+    // built-in `name`/`value` all stay `false` - none of them has an
+    // established per-item place to write the tag.
+    pub is_internal: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +115,9 @@ pub struct ClassInfo {
     // its already-declared members is still fully covered by `is_api`
     // above.
     pub is_api_do_not_implement: bool,
+    // Phase 67: `@internal` on this class/interface/trait/enum's own
+    // docblock - see `docblock::DocBlock::internal`'s own doc comment.
+    pub is_internal: bool,
 }
 
 impl ClassInfo {
@@ -186,6 +197,7 @@ impl ClassInfo {
                         is_readonly: p.is_readonly,
                         set_ty,
                         visibility: p.visibility.clone(),
+                        is_internal: doc_ty.as_ref().is_some_and(|d| d.internal),
                     },
                 )
             })
@@ -215,6 +227,7 @@ impl ClassInfo {
                         is_readonly: p.promoted_readonly,
                         set_ty: None,
                         visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
+                        is_internal: false,
                     },
                 );
             }
@@ -241,6 +254,7 @@ impl ClassInfo {
                         is_readonly: tag.readable && !tag.writable,
                         set_ty: None,
                         visibility: Visibility::Public,
+                        is_internal: false,
                     }
                 });
             }
@@ -344,6 +358,7 @@ impl ClassInfo {
 
         let is_api = class_doc.as_ref().is_some_and(|d| d.api);
         let is_api_do_not_implement = class_doc.as_ref().is_some_and(|d| d.api_do_not_implement);
+        let is_internal = class_doc.as_ref().is_some_and(|d| d.internal);
 
         ClassInfo {
             kind: c.kind,
@@ -367,6 +382,7 @@ impl ClassInfo {
             contravariant_templates,
             is_api,
             is_api_do_not_implement,
+            is_internal,
         }
     }
 
@@ -431,6 +447,7 @@ impl ClassInfo {
                 ),
                 no_discard: false,
                 visibility: Visibility::Public,
+                is_internal: false,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -450,6 +467,7 @@ impl ClassInfo {
                     return_type_native: self_ty.clone(),
                     no_discard: false,
                     visibility: Visibility::Public,
+                    is_internal: false,
                 },
             );
             methods.insert(
@@ -460,6 +478,7 @@ impl ClassInfo {
                     return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
                     no_discard: false,
                     visibility: Visibility::Public,
+                    is_internal: false,
                 },
             );
         }
@@ -498,6 +517,7 @@ impl ClassInfo {
                 is_readonly: false,
                 set_ty: None,
                 visibility: Visibility::Public,
+                is_internal: false,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -537,6 +557,7 @@ impl ClassInfo {
                     is_readonly: false,
                     set_ty: None,
                     visibility: Visibility::Public,
+                    is_internal: false,
                 },
             );
         }
@@ -602,6 +623,7 @@ impl ClassInfo {
             // anyway, so leaving these false is never a real gap.
             is_api: false,
             is_api_do_not_implement: false,
+            is_internal: class_doc.as_ref().is_some_and(|d| d.internal),
         }
     }
 
@@ -640,6 +662,7 @@ impl ClassInfo {
         self.is_api = self.is_api || other.is_api;
         self.is_api_do_not_implement =
             self.is_api_do_not_implement || other.is_api_do_not_implement;
+        self.is_internal = self.is_internal || other.is_internal;
         if self.extends.is_empty() {
             self.extends = other.extends;
         }

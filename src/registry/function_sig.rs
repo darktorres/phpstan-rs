@@ -46,6 +46,14 @@ pub struct FunctionSig {
     // through so a call site can enforce access legality the same way
     // `PropertySig::visibility` does for properties.
     pub visibility: Visibility,
+    // Phase 67: `@internal` on this function/method's own doc comment -
+    // see `docblock::DocBlock::internal`'s own doc comment for what it
+    // means and how it's gated. A method also counts as internal when
+    // its *declaring class* does, but that half is checked separately
+    // (against `ClassInfo::is_internal`) by whichever call site already
+    // has the declaring class in hand - this field only ever reflects
+    // the member's own tag.
+    pub is_internal: bool,
 }
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -507,12 +515,15 @@ impl FunctionSig {
             .iter()
             .any(|a| is_no_discard_attribute_name(&a.name));
 
+        let is_internal = doc.as_ref().is_some_and(|d| d.internal);
+
         FunctionSig {
             params,
             return_type,
             return_type_native,
             no_discard,
             visibility,
+            is_internal,
         }
     }
 
@@ -582,6 +593,9 @@ impl FunctionSig {
             // never two independently-declared visibilities) - either
             // side's own value is equally correct.
             visibility: self.visibility,
+            // Same permissive "either overload's own marker wins" as
+            // `no_discard` just above.
+            is_internal: self.is_internal || other.is_internal,
         }
     }
 }

@@ -13,6 +13,7 @@
 //! baseline = "phpstan-baseline.json"
 //! strict_mixed_arrays = false
 //! check_uninitialized_properties = false
+//! check_internal_usage = false
 //! scan_paths = ["vendor/some-manual-extra"]
 //! no_composer = false
 //! php_version = "8.1"
@@ -33,6 +34,11 @@ pub struct Config {
     /// own doc comment for why this defaults to `false` (unset) rather
     /// than running unconditionally like this project's other checks.
     pub check_uninitialized_properties: Option<bool>,
+    /// Phase 67: mirrors real PHPStan's own opt-in `featureToggles.
+    /// internalTag` parameter - see `registry::Registry::
+    /// check_internal_usage`'s own doc comment for why this defaults to
+    /// `false` (unset) too.
+    pub check_internal_usage: Option<bool>,
     /// Extra directories loaded for type-resolution context only - never
     /// analyzed or reported on. See `composer::discover_vendor_context`
     /// for the automatic `vendor/` counterpart to this.

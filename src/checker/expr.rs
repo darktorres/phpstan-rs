@@ -427,6 +427,8 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
+                        // Phase 67: `@internal`.
+                        self.check_internal_function_call(name, sig, e.span, label);
                         // Finding 29 / Phase 49: a spread argument
                         // (`f(...$args)`) means the real argument
                         // count/types past it aren't known statically -
@@ -749,6 +751,10 @@ impl<'a> Checker<'a> {
                                 span: e.span,
                                 label,
                             });
+                            // Phase 67: `@internal`.
+                            self.check_internal_method_call(
+                                &owner, method, sig, false, e.span, label,
+                            );
                         }
                         // Finding 29 / Phase 49: see the identical
                         // comment on the plain-function Call arm above -
@@ -1204,6 +1210,10 @@ impl<'a> Checker<'a> {
                     // - no "can't resolve a namespaced name" case left, the
                     // way there used to be before Phase 9.5's namespace
                     // support.
+                    // Phase 67: `@internal` - called before the borrow
+                    // just below (this check does its own, separate
+                    // registry lookup) since it needs `&mut self`.
+                    self.check_internal_instantiation(class, e.span, label);
                     if let Some(info) = self.registry.classes.get(class) {
                         if info.kind == ClassKind::Interface {
                             self.report(
@@ -1348,6 +1358,10 @@ impl<'a> Checker<'a> {
                                 span: e.span,
                                 label,
                             });
+                            // Phase 67: `@internal`.
+                            self.check_internal_method_call(
+                                owner, method, sig, true, e.span, label,
+                            );
                         }
                         // Finding 29 / Phase 49: see the identical
                         // comment on the plain-function Call arm above -
@@ -1434,8 +1448,11 @@ impl<'a> Checker<'a> {
                     // static property") - from the caller's own
                     // perspective there's no real static property by
                     // this name either way, so both share one message.
-                    let prop = self.registry.lookup_property(&class, prop_name);
-                    let is_valid_static = prop.is_some_and(|sig| sig.is_static);
+                    let prop_with_owner =
+                        self.registry.lookup_property_with_owner(&class, prop_name);
+                    let is_valid_static = prop_with_owner
+                        .as_ref()
+                        .is_some_and(|(_, sig)| sig.is_static);
                     if !is_valid_static {
                         self.report(
                             label.to_string(),
@@ -1444,11 +1461,16 @@ impl<'a> Checker<'a> {
                             0,
                             "staticProperty.notFound",
                         );
+                    } else if let Some((owner, sig)) = &prop_with_owner {
+                        // Phase 67: `@internal`.
+                        self.check_internal_property_access(owner, prop_name, sig, e.span, label);
                     }
-                    prop.map(|p| self.resolve_pseudo(&p.ty, &class))
+                    prop_with_owner
+                        .map(|(_, p)| self.resolve_pseudo(&p.ty, &class))
                         .unwrap_or(Type::Mixed)
                 } else {
-                    let const_ty = self.registry.lookup_const(&class, member);
+                    let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
+                    let const_ty = const_with_owner.as_ref().map(|(_, ty)| *ty);
                     if const_ty.is_none() {
                         self.report(
                             label.to_string(),
@@ -1457,6 +1479,9 @@ impl<'a> Checker<'a> {
                             0,
                             "classConstant.notFound",
                         );
+                    } else if let Some((owner, _)) = &const_with_owner {
+                        // Phase 67: `@internal`.
+                        self.check_internal_class_constant_access(owner, member, e.span, label);
                     }
                     const_ty
                         .map(|ty| self.resolve_pseudo(ty, &class))
@@ -1556,6 +1581,8 @@ impl<'a> Checker<'a> {
                         span: e.span,
                         label,
                     });
+                    // Phase 67: `@internal`.
+                    self.check_internal_property_access(&owner, prop, p, e.span, label);
                 }
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))

@@ -12,6 +12,7 @@ mod duplicates;
 mod enums;
 mod generics_and_templates;
 mod helpers;
+mod internal_usage;
 mod misc_and_regressions;
 mod missing_typehint;
 mod narrowing;

@@ -43,6 +43,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         return_type_native: types::Type::Bool,
         no_discard: false,
         visibility: phpstan_rs::ast::Visibility::Public,
+        is_internal: false,
     };
     assert_eq!(
         format_signature("f", &sig),

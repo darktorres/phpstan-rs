@@ -87,6 +87,18 @@ pub struct DocBlock {
     // "api-do-not-implement" arm) so a docblock that only ever writes the
     // longer tag alone still counts as covered for a plain reference.
     pub api_do_not_implement: bool,
+    // Phase 67: `@internal` - marks a class/interface/trait/enum,
+    // function, method, or property as usable only from within its own
+    // declaring "root" (top-level) namespace, the common Composer-
+    // package-as-top-level-namespace convention. Consumed by
+    // `checker::internal_usage`, gated behind
+    // `Registry::check_internal_usage` (default off, matching real
+    // PHPStan's own `featureToggles.internalTag: false` - this rule
+    // family isn't part of any of the standard level 0-10 rule sets
+    // either, same non-default posture Phase 62's own
+    // `check_uninitialized_properties` already established a precedent
+    // for).
+    pub internal: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -316,6 +328,11 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             "api-do-not-implement" => {
                 block.api = true;
                 block.api_do_not_implement = true;
+            }
+            // Phase 67: see `DocBlock::internal`'s own doc comment. Same
+            // no-argument shape as `@api` just above.
+            "internal" => {
+                block.internal = true;
             }
             _ => {}
         }

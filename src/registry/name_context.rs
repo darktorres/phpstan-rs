@@ -64,6 +64,16 @@ impl NameContext {
         self.use_map.clear();
     }
 
+    /// Phase 67: the current file's own namespace, empty for the global
+    /// namespace - consumed by `checker::internal_usage`'s own root-
+    /// namespace comparison. Every other reader of namespace state goes
+    /// through `declared_name`/`resolve` instead; this is the one call
+    /// site that genuinely needs the raw current namespace itself, not a
+    /// name resolved against it.
+    pub(crate) fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
     pub(crate) fn add_uses(&mut self, imports: &[UseImport]) {
         for import in imports {
             let path = strip_leading_backslash(&import.path);

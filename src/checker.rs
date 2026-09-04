@@ -415,6 +415,7 @@ mod control_flow;
 mod duplicates;
 mod expr;
 mod generics;
+mod internal_usage;
 mod missing_typehint;
 mod narrowing;
 mod oop;

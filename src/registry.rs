@@ -48,6 +48,16 @@ pub struct Registry {
     // a plain `pub` field via `#[derive(Default)]`, config -> CLI flag ->
     // `Project` setter -> here.
     pub check_uninitialized_properties: bool,
+    // Phase 67: opts into `Checker::check_internal_*` (`internal_usage.rs`).
+    // Defaults to `false`, matching real PHPStan's own default *exactly*
+    // - the whole `RestrictedInternal*UsageExtension` family sits behind
+    // `featureToggles.internalTag` (`false` in `conf/config.neon`, not
+    // part of any of the standard level 0-10 rule sets), the same
+    // non-default posture `check_uninitialized_properties` above already
+    // established a precedent for. Same wiring chain: a plain `pub`
+    // field via `#[derive(Default)]`, config -> CLI flag -> `Project`
+    // setter -> here.
+    pub check_internal_usage: bool,
     // Phase 38: the project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to
@@ -830,6 +840,19 @@ impl Registry {
     /// declared directly on `class` - mirrors `lookup_property`.
     pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&Type> {
         self.lookup_in_hierarchy(class, |info| info.consts.get(const_name))
+    }
+
+    /// Same as `lookup_const`, but also returns the declaring ancestor's
+    /// name - Phase 67 needs it to know *which* class's own `@internal`
+    /// tag (if any) actually governs a `Class::CONST` access, the same
+    /// way `lookup_method_with_owner`/`lookup_property_with_owner`
+    /// already do for their own members.
+    pub fn lookup_const_with_owner(
+        &self,
+        class: &str,
+        const_name: &str,
+    ) -> Option<(String, &Type)> {
+        self.lookup_in_hierarchy_with_owner(class, |info| info.consts.get(const_name))
     }
 
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionSig> {

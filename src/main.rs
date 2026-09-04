@@ -313,6 +313,7 @@ fn run_check_project(
     level: u8,
     strict_mixed_arrays: bool,
     check_uninitialized_properties: bool,
+    check_internal_usage: bool,
     php_version: Option<php_version::PhpVersion>,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
@@ -349,6 +350,7 @@ fn run_check_project(
     let mut project = project::Project::new();
     project.set_strict_mixed_arrays(strict_mixed_arrays);
     project.set_check_uninitialized_properties(check_uninitialized_properties);
+    project.set_check_internal_usage(check_internal_usage);
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
@@ -489,6 +491,15 @@ enum Command {
         /// doc comment for why.
         #[arg(long)]
         check_uninitialized_properties: bool,
+        /// Enables the `@internal` restricted-usage engine (`internal.*`
+        /// diagnostics) - restricts a symbol tagged `@internal` (or
+        /// declared inside an `@internal`-tagged class) to callers
+        /// sharing its own top-level namespace. Off by default,
+        /// mirroring real PHPStan's own opt-in `featureToggles.
+        /// internalTag` parameter - see `registry::Registry::
+        /// check_internal_usage`'s own doc comment for why.
+        #[arg(long)]
+        check_internal_usage: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -550,6 +561,7 @@ fn main() {
             level,
             strict_mixed_arrays,
             check_uninitialized_properties,
+            check_internal_usage,
             php_version,
             generate_baseline,
             baseline,
@@ -607,6 +619,8 @@ fn main() {
                 strict_mixed_arrays || config.strict_mixed_arrays.unwrap_or(false);
             let check_uninitialized_properties = check_uninitialized_properties
                 || config.check_uninitialized_properties.unwrap_or(false);
+            let check_internal_usage =
+                check_internal_usage || config.check_internal_usage.unwrap_or(false);
             let php_version = match php_version.or(config.php_version) {
                 Some(s) => match php_version::parse_php_version(&s) {
                     Ok(v) => Some(v),
@@ -655,6 +669,7 @@ fn main() {
                 level,
                 strict_mixed_arrays,
                 check_uninitialized_properties,
+                check_internal_usage,
                 php_version,
                 generate_baseline.as_deref(),
                 baseline.as_deref(),
