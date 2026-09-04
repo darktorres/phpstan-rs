@@ -1696,17 +1696,65 @@ repro, and 19 new unit tests (including the exact false-positive shape
 found and fixed).
 
 **Phase 71 - Small self-contained builtin checks batch (`call_user_func`,
-`random_int`, `preg_quote`, and others) (NEW, PLANNED).** Batch of
-small, independent builtin-specific checks with no shared architectural
-blocker: `call_user_func()`/`call_user_func_array()` argument-
-reordering-and-recheck against the target callable; `random_int()`
-min>max ordering; `filter_var()`'s `FILTER_NULL_ON_FAILURE`/
-`FILTER_THROW_ON_FAILURE` flag-conflict; `define()`'s ignored third
-argument; `preg_quote()` delimiter cross-checking (soft-benefits from
-Phase 72's pattern-argument-extraction helper); function-name case-
-insensitivity + `function_exists()`-guard suppression for the existing
-undefined-function check; useless-return-value builtins (`var_export`/
-`print_r`/`highlight_string`). Size: M overall (each item S).
+`random_int`, `preg_quote`, and others) (PARTIAL).** Four of the batch's
+items landed, each independently corpus-verified:
+
+- **Function-name case-insensitivity** (a real bug fix, not a new
+  check): `Registry::lookup_function` was a plain exact-case `HashMap`
+  lookup, wrongly flagging any differently-cased call to a real function
+  (builtin or user-declared) as undefined - real PHP resolves
+  `STRTOLOWER()`/`strtolower()`/`StrToLower()` identically. Falls back
+  to a case-insensitive scan only on an exact-case miss. Corpus-
+  verified: eliminated 7 genuine pre-existing false positives
+  (`node_modules`' own `Header()`/`ImageCreateTrueColor()`), which in
+  turn surfaced 2 newly-visible genuine `argument.type` findings
+  (`imagecreatetruecolor()`'s real `GdImage|false` return type, now
+  correctly resolved).
+- **`define()`'s ignored third argument** (`argument.unused`): new
+  `PhpFeature::CaseInsensitiveConstantsRemoved` (the first real consumer
+  of Phase 38's `PhpFeature` plumbing) plus `check_define_third_argument`.
+  Confirmed directly via `php` that PHP 8.0+ emits this exact message as
+  a real runtime `E_WARNING`. Gated on a configured `php_version` (>=
+  8.0) - corpus-verified at zero impact by default, and 39 genuine
+  findings with `--php-version 8.5` (matching Piwigo's own
+  `composer.json` constraint).
+- **`random_int()`'s `$min` must be `<=` `$max`** (`argument.type`):
+  narrowed to plain-literal arguments (this project has no
+  `IntegerRangeType` to reason about a non-literal argument's own
+  bounds). Confirmed directly via `php` as a real, unconditional
+  `ValueError` at call time. Corpus-verified at zero delta (every real
+  call already orders its literal arguments correctly).
+- **Useless-return-value builtins** (`function.uselessReturnValue`):
+  `var_export`/`print_r`/`highlight_string` all share a `bool $return =
+  false` last parameter - printing directly and returning a useless
+  `null`/`true` when it's omitted or literally `false`. Needed a new
+  `Checker::in_bare_statement_position` flag (set before `check_expr`
+  runs on a bare statement's own top-level expression, taken the instant
+  `check_expr`'s dispatch reads it) so a legitimate bare
+  `var_export($x);` statement stays unflagged while `$x = var_export($x);`
+  is. Corpus-verified at zero delta (the one real "capture the output"
+  call site already passes `true` correctly).
+
+Still open, deliberately deferred rather than shipped low-confidence:
+**`call_user_func()`/`call_user_func_array()`** argument-reordering-and-
+recheck against the target callable (real value, but needs a callable-
+string/array-to-signature resolution this project doesn't have yet, and
+only 4 corpus call sites to verify against); **`filter_var()`'s
+`FILTER_NULL_ON_FAILURE`/`FILTER_THROW_ON_FAILURE` flag-conflict**
+(needs a new PHP-8.4-gated `PhpFeature` plus parsing the flags argument's
+two possible shapes - a bare int bitmask or a `['flags' => ...]` array -
+and only 1 corpus call site, using neither flag); **`preg_quote()`
+delimiter cross-checking** (real value in general, but the full check
+needs walking a `preg_*` function's own pattern argument as a `Concat`
+tree to find its delimiter character, recursing to find nested
+`preg_quote()` sub-calls, and an "always-escaped regardless of the 2nd
+arg" allowlist - substantial complexity, and every one of the corpus's
+17 real `preg_quote()` call sites turned out to already be correctly
+delimited or to use an always-safe delimiter, so there was nothing to
+verify a fix against); **`function_exists()`-guard suppression** for the
+undefined-function check (no evidence found in this corpus that it's
+currently needed - every real `function_exists()`-guarded call in Piwigo
+already resolves against an existing stub).
 
 **Phase 72 - Regex capture-group inference extensions (distinct from,
 not blocked by, Phase 46) (DONE).** This entry's own status was never
