@@ -530,6 +530,20 @@ impl<'a> Checker<'a> {
                     self.check_final_class_extension(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
                     self.check_trait_conflicts(&fqn, c.span);
+                    // Phase 37: the class's own attributes, plus every
+                    // property's/const's - method/param attributes are
+                    // checked per-declaration inside `check_function`
+                    // below instead, the one place that already runs for
+                    // every method regardless of how it's reached (a
+                    // direct method here, or via `check_trait_methods`'s
+                    // own per-host loop for a trait).
+                    self.check_attributes(&c.attrs, &fqn);
+                    for p in &c.properties {
+                        self.check_attributes(&p.attrs, &fqn);
+                    }
+                    for cc in &c.consts {
+                        self.check_attributes(&cc.attrs, &fqn);
+                    }
                     if c.kind == ClassKind::Trait {
                         self.check_trait_methods(&fqn, c);
                     } else {
@@ -556,6 +570,13 @@ impl<'a> Checker<'a> {
                     self.check_class_completeness(&fqn, e.span);
                     self.check_enum_case_values(&fqn, e);
                     self.check_trait_conflicts(&fqn, e.span);
+                    self.check_attributes(&e.attrs, &fqn);
+                    for case in &e.cases {
+                        self.check_attributes(&case.attrs, &fqn);
+                    }
+                    for cc in &e.consts {
+                        self.check_attributes(&cc.attrs, &fqn);
+                    }
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
@@ -783,6 +804,18 @@ impl<'a> Checker<'a> {
             Some(c) => format!("{c}::{}", f.name),
             None => f.name.clone(),
         };
+
+        // Phase 37: this one `check_function` is the single choke point
+        // every function-shaped declaration passes through regardless of
+        // how it's reached (a top-level function, an ordinary method, a
+        // trait method re-checked once per host, a declaration nested
+        // inside a block) - checking `f.attrs`/each parameter's own attrs
+        // here covers all of them at once, rather than duplicating the
+        // same two loops at every one of those call sites.
+        self.check_attributes(&f.attrs, &label);
+        for p in &f.params {
+            self.check_attributes(&p.attrs, &label);
+        }
 
         // Phase 10.5's bound-enforcement: checked once here, against the
         // declaration itself, not at every call site - and deliberately

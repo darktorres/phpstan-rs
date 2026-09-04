@@ -226,6 +226,144 @@ fn diagnostic_builder_assembles_every_field() {
     assert_eq!(fix.description, "swap it out");
 }
 
+// Phase 37: `AttributesCheck`'s existence half - `Checker::check_attributes`,
+// wired at every declaration site an `Attribute` list can now appear on.
+
+#[test]
+fn an_attribute_naming_an_undefined_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[TotallyUndefinedAttribute]
+            class Foo {}
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "attribute.notFound");
+}
+
+#[test]
+fn an_attribute_naming_a_real_declared_class_is_not_flagged() {
+    // Negative case for the above: a genuinely known class (declared
+    // right there in the same file) must not be flagged just because
+    // it's being used as an attribute.
+    let d = diagnostics_for(
+        r#"<?php
+            class MyAttr {}
+
+            #[MyAttr]
+            class Foo {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_attribute_on_a_method_parameter_naming_an_undefined_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class C {
+                function f(#[TotallyUndefinedAttribute] string $x) {}
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "attribute.notFound");
+}
+
+#[test]
+fn an_attribute_naming_a_real_builtin_attribute_class_is_not_flagged() {
+    // `Attribute` itself is a real PHP builtin (from the vendored
+    // phpstorm-stubs corpus, not user code) - a genuinely known class,
+    // not just a plausible-looking name.
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 37: PHP 8.5's `#[\NoDiscard]` marker -
+// `Checker::check_no_discard_statement`, mirroring real PHPStan's own
+// `CallToFunctionStatementWithNoDiscardRule`/
+// `CallToMethodStatementWithNoDiscardRule`/
+// `CallToStaticMethodStatementWithNoDiscardRule`.
+
+#[test]
+fn a_bare_call_to_a_no_discard_function_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[NoDiscard]
+            function f(): int { return 1; }
+            f();
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "function.resultDiscarded");
+    assert!(d[0].non_ignorable);
+}
+
+#[test]
+fn using_a_no_discard_function_s_return_value_is_not_flagged() {
+    // Negative case: the exact same function, but its return value is
+    // actually consumed this time.
+    let d = diagnostics_for(
+        r#"<?php
+            #[NoDiscard]
+            function f(): int { return 1; }
+            $x = f();
+            echo $x;
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_bare_call_to_an_ordinary_function_with_no_marker_is_not_flagged() {
+    // False-positive guard: an otherwise-identical bare-statement call
+    // with no `#[NoDiscard]` attribute at all must never be flagged.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int { return 1; }
+            f();
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_bare_call_to_a_no_discard_method_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class C {
+                #[NoDiscard]
+                function m(): int { return 1; }
+            }
+            function test(C $c) {
+                $c->m();
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "method.resultDiscarded");
+}
+
+#[test]
+fn a_bare_call_to_a_no_discard_static_method_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class C {
+                #[NoDiscard]
+                static function m(): int { return 1; }
+            }
+            C::m();
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "staticMethod.resultDiscarded");
+}
+
 #[test]
 fn diagnostic_builder_defaults_are_all_empty_absent_or_false() {
     // The other half of the above: a builder with only the required

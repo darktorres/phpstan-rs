@@ -224,6 +224,7 @@ fn merge_stubs_does_not_override_user_functions() {
             params: vec![],
             return_type: Type::Bool,
             return_type_native: Type::Bool,
+            no_discard: false,
         },
     )]);
     assert_eq!(r.functions["strlen"].return_type, Type::Int);

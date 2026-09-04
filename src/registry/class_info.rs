@@ -380,6 +380,7 @@ impl ClassInfo {
                 params: Vec::new(),
                 return_type: Type::Array(Box::new(self_ty.clone())),
                 return_type_native: Type::Array(Box::new(self_ty.clone())),
+                no_discard: false,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -397,6 +398,7 @@ impl ClassInfo {
                     params: vec![value_param.clone()],
                     return_type: self_ty.clone(),
                     return_type_native: self_ty.clone(),
+                    no_discard: false,
                 },
             );
             methods.insert(
@@ -405,6 +407,7 @@ impl ClassInfo {
                     params: vec![value_param],
                     return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
+                    no_discard: false,
                 },
             );
         }

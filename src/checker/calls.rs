@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, literal_string_value, purge_stale_narrowing_for, union_types,
+    Checker, DiagnosticBuilder, Locals, literal_string_value, narrow_type_excluding,
+    purge_stale_narrowing_for, union_types,
 };
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
@@ -237,6 +238,100 @@ impl<'a> Checker<'a> {
             purge_stale_narrowing_for(locals, name);
             locals.insert(name.clone(), widened);
         }
+    }
+
+    /// Phase 37: the statement half of real PHPStan's own
+    /// `CallToFunctionStatementWithNoDiscardRule`/
+    /// `CallToMethodStatementWithNoDiscardRule`/
+    /// `CallToStaticMethodStatementWithNoDiscardRule` - a bare call
+    /// (`foo();`, `$obj->foo();`, `Foo::bar();`) sitting on its own line
+    /// as a whole statement, with its return value neither assigned,
+    /// returned, nor otherwise consumed, is flagged when the resolved
+    /// function/method's own signature carries PHP 8.5's `#[\NoDiscard]`
+    /// marker (`FunctionSig::no_discard`, Phase 37's own registry-side
+    /// half). Called once per `StmtKind::Expression`, on the statement's
+    /// own top-level expression only - a `NoDiscard` call anywhere else
+    /// (an argument, the right side of `=`, one operand of a larger
+    /// expression) already has its result consumed by whatever it's
+    /// nested inside, so it's not this rule's concern at all. Real
+    /// PHPStan's own rule also special-cases a `(void)`-cast call as a
+    /// separate, weaker diagnostic (still discarding, but explicitly
+    /// acknowledged) - not modeled here, since this project's own
+    /// `Cast` handling has no reason to distinguish `(void)` from any
+    /// other cast target yet; a `(void)`-cast `NoDiscard` call is simply
+    /// not flagged at all, the safe (false-negative, never false-
+    /// positive) direction to skip in.
+    pub(crate) fn check_no_discard_statement(&mut self, e: &Expr, locals: &Locals, label: &str) {
+        let (sig, callee_desc, identifier) = match &e.kind {
+            ExprKind::Call(callee, _) => {
+                let ExprKind::Name(name) = &callee.kind else {
+                    return;
+                };
+                if is_language_construct(name) {
+                    return;
+                }
+                let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+                let Some((resolved_name, sig)) = self
+                    .registry
+                    .lookup_function(&primary)
+                    .map(|sig| (primary.as_str(), sig))
+                    .or_else(|| {
+                        fallback
+                            .as_deref()
+                            .and_then(|g| self.registry.lookup_function(g).map(|sig| (g, sig)))
+                    })
+                else {
+                    return;
+                };
+                (
+                    sig,
+                    format!("{resolved_name}()"),
+                    "function.resultDiscarded",
+                )
+            }
+            ExprKind::MethodCall(recv, method, _, _) => {
+                let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::Null);
+                let Type::Object(class, _) = recv_ty else {
+                    return;
+                };
+                let Some((owner, sig)) = self.registry.lookup_method_with_owner(&class, method)
+                else {
+                    return;
+                };
+                (
+                    sig,
+                    format!("{owner}::{method}()"),
+                    "method.resultDiscarded",
+                )
+            }
+            ExprKind::StaticCall(class_name, method, _) => {
+                let Some(class) = self.resolve_static_class_name(class_name) else {
+                    return;
+                };
+                let Some(sig) = self.registry.lookup_method(&class, method) else {
+                    return;
+                };
+                (
+                    sig,
+                    format!("{class}::{method}()"),
+                    "staticMethod.resultDiscarded",
+                )
+            }
+            _ => return,
+        };
+        if !sig.no_discard {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                label.to_string(),
+                format!("Call to {callee_desc} on a separate line discards its return value."),
+                e.span,
+                0,
+                identifier,
+            )
+            .non_ignorable(),
+        );
     }
 
     /// Checks a closure/arrow-fn literal's body with `$this` seeded to

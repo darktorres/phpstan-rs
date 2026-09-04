@@ -32,6 +32,7 @@ impl<'a> Checker<'a> {
         match &stmt.kind {
             StmtKind::Expression(e) => {
                 self.check_expr(e, locals, label);
+                self.check_no_discard_statement(e, locals, label);
                 // `assert($cond)` is a real, common narrowing idiom real
                 // PHPStan explicitly documents support for - if execution
                 // continues past this statement, `$cond` held, so it's
@@ -613,12 +614,26 @@ impl<'a> Checker<'a> {
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false),
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
+                self.check_attributes(&c.attrs, &fqn);
+                for p in &c.properties {
+                    self.check_attributes(&p.attrs, &fqn);
+                }
+                for cc in &c.consts {
+                    self.check_attributes(&cc.attrs, &fqn);
+                }
                 for m in &c.methods {
                     self.check_function(&m.function, Some(&fqn), m.is_static);
                 }
             }
             StmtKind::EnumDecl(e) => {
                 let fqn = self.name_ctx.declared_name(&e.name);
+                self.check_attributes(&e.attrs, &fqn);
+                for case in &e.cases {
+                    self.check_attributes(&case.attrs, &fqn);
+                }
+                for cc in &e.consts {
+                    self.check_attributes(&cc.attrs, &fqn);
+                }
                 for m in &e.methods {
                     self.check_function(&m.function, Some(&fqn), m.is_static);
                 }

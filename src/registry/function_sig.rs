@@ -29,6 +29,17 @@ pub struct FunctionSig {
     // reader - every other consumer of a function's return type wants
     // the docblock-refined `return_type` above instead.
     pub return_type_native: Type,
+    // Phase 37: PHP 8.5's `#[\NoDiscard]` marker attribute - `true` when
+    // this declaration carries one, meaning a bare, unused call to it
+    // (`foo();` on its own line, return value neither assigned nor
+    // otherwise consumed) is a real diagnostic
+    // (`Checker::check_no_discard_statement`), matching real PHPStan's own
+    // `NativeFunctionReflection::mustUseReturnValue`/
+    // `NativeMethodReflection`'s identical convention: case-insensitive
+    // match on the attribute's own short name (no namespace resolution,
+    // since real PHP's own `#[NoDiscard]` is always the single, global-
+    // namespace one - there's no other class this could plausibly mean).
+    pub no_discard: bool,
 }
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -268,6 +279,23 @@ pub(crate) fn mark_template_params(ty: Type, template_names: &HashSet<String>) -
     }
 }
 
+/// Phase 37: whether an `Attribute`'s own raw (possibly namespaced) name
+/// names the real PHP 8.5 `#[\NoDiscard]` marker - real PHPStan's own
+/// `NativeFunctionReflection::mustUseReturnValue` matches by short name
+/// only, case-insensitively (`strtolower($attrib->getName()) ===
+/// 'nodiscard'`), not a fully-resolved, namespace-aware class reference -
+/// mirrored exactly here rather than resolving `name` against `use`
+/// imports the way an ordinary attribute-class reference would, since
+/// real PHP's own attribute is always the single global-namespace one and
+/// there's no other plausible class this could mean.
+pub(crate) fn is_no_discard_attribute_name(name: &str) -> bool {
+    name.trim_start_matches('\\')
+        .rsplit('\\')
+        .next()
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("NoDiscard")
+}
+
 impl FunctionSig {
     /// `class_templates` are the enclosing class's own `@template` names
     /// (empty for a plain function, or a method on a non-generic class) -
@@ -327,10 +355,16 @@ impl FunctionSig {
         let return_type_native = mark_template_params(return_type_native, &template_names);
         let return_type_native = resolve_names_in_type(return_type_native, ctx);
 
+        let no_discard = f
+            .attrs
+            .iter()
+            .any(|a| is_no_discard_attribute_name(&a.name));
+
         FunctionSig {
             params,
             return_type,
             return_type_native,
+            no_discard,
         }
     }
 
@@ -343,6 +377,13 @@ impl FunctionSig {
     pub(crate) fn merge(self, other: FunctionSig) -> FunctionSig {
         let return_type = union_types(self.return_type, other.return_type);
         let return_type_native = union_types(self.return_type_native, other.return_type_native);
+        // Permissive, same direction as `variadic`/`has_default` below:
+        // if either real overload actually carries the marker, the merged
+        // signature should too - a caller ignoring the return value must
+        // not silently escape the obligation just because *one* overload
+        // (of what's really the same underlying declaration, PHP-version-
+        // split) happened not to repeat the attribute.
+        let no_discard = self.no_discard || other.no_discard;
         let len = self.params.len().max(other.params.len());
         let mut self_params = self.params.into_iter();
         let mut other_params = other.params.into_iter();
@@ -387,6 +428,7 @@ impl FunctionSig {
             params,
             return_type,
             return_type_native,
+            no_discard,
         }
     }
 }

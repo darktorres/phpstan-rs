@@ -7,6 +7,42 @@ use crate::token::Span;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
+    /// Phase 37: the existence half of real PHPStan's own `AttributesCheck`
+    /// (`vendor/phpstan-src/src/Rules/AttributesCheck.php`) - every
+    /// `#[Name(...)]` group's `Name` must resolve to a real, known class,
+    /// the same `attribute.notFound` identifier real PHPStan's own rule
+    /// uses. Wired at every declaration site an `Attribute` list can now
+    /// appear on (class/enum, method/function, property, const, enum
+    /// case, param, closure/arrow-fn - see each call site).
+    ///
+    /// Deliberately narrower than real PHPStan's own check: whether the
+    /// resolved class is actually usable as an attribute at all (declares
+    /// its own `#[Attribute(...)]`, i.e. `attribute.notAttribute`),
+    /// whether its declared `Attribute::TARGET_*` flags match where this
+    /// one is actually used (`attribute.target`), and constructor-
+    /// argument validation (`attribute.noConstructor`/parameter-count/
+    /// type checks - genuinely needs Phase 49's call-argument-binding
+    /// generalization, named explicitly in this phase's own audit notes)
+    /// are all left for a later pass - this project's own registry
+    /// doesn't yet track which classes are attribute classes or what
+    /// targets they declare, and guessing wrong here (silently assuming
+    /// every class qualifies) would be strictly worse than not checking
+    /// at all.
+    pub(crate) fn check_attributes(&mut self, attrs: &[Attribute], label: &str) {
+        for attr in attrs {
+            let fqn = self.name_ctx.resolve(&attr.name);
+            if !self.registry.classes.contains_key(&fqn) {
+                self.report(
+                    label.to_string(),
+                    format!("attribute class {fqn} does not exist"),
+                    attr.span,
+                    0,
+                    "attribute.notFound",
+                );
+            }
+        }
+    }
+
     /// Finding 46's class-level half: extending a class declared `final`
     /// is a real, unconditional fatal error in PHP at class-declaration
     /// time, regardless of whether the subclass overrides anything at

@@ -929,6 +929,15 @@ impl<'a> Checker<'a> {
                 for m in &decl.methods {
                     self.check_function(&m.function, Some(&decl.name), m.is_static);
                 }
+                // Phase 37: its own properties'/consts' attributes too -
+                // method/param attributes are already covered inside
+                // `check_function` above.
+                for p in &decl.properties {
+                    self.check_attributes(&p.attrs, &decl.name);
+                }
+                for cc in &decl.consts {
+                    self.check_attributes(&cc.attrs, &decl.name);
+                }
                 Type::Mixed
             }
             ExprKind::StaticCall(class_name, method, args) => {

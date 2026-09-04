@@ -388,6 +388,7 @@ impl<'a> Checker<'a> {
                 .collect(),
             return_type: subst(&sig.return_type),
             return_type_native: subst(&sig.return_type_native),
+            no_discard: sig.no_discard,
         }
     }
 }
