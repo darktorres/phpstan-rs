@@ -19,6 +19,21 @@ use preg_shapes::{
     preg_match_matches_shape,
 };
 
+/// Phase 52: does unary `-`/`+`'s own numeric-string-to-int coercion
+/// apply to this operand's type - true for a bare `Type::String`/
+/// `Type::StringLiteral`, or a `numeric-string`-shaped `Intersection`
+/// (`String` alongside an accessory kind). Deliberately does NOT widen
+/// into a `Union`'s own members here (unlike `operators.rs`'s own
+/// leniency-tuned `is_exactly_string_operand`, tuned for suppressing a
+/// false invalid-operand flag rather than for this coercion decision) -
+/// `int|string` should keep its own original type, not collapse
+/// entirely to `Int` just because one member happens to be
+/// string-shaped.
+fn is_string_shaped(ty: &Type) -> bool {
+    matches!(ty, Type::String | Type::StringLiteral(_))
+        || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)))
+}
+
 impl<'a> Checker<'a> {
     /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks
     /// down through `Index`/`PropertyAccess`/`DynamicPropertyAccess`,
@@ -584,8 +599,10 @@ impl<'a> Checker<'a> {
                 self.widen_coalesce_result(l, r_ty, locals)
             }
             ExprKind::Binary(op, l, r) => {
-                self.check_expr(l, locals, label);
-                self.check_expr(r, locals, label);
+                let l_ty = self.check_expr(l, locals, label);
+                let r_ty = self.check_expr(r, locals, label);
+                self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span, label);
+                self.check_comparison_validity(op, &l_ty, &r_ty, l.span, label);
                 self.infer_binary(op, l, r, locals)
             }
             ExprKind::Variable(name) => {
@@ -607,7 +624,8 @@ impl<'a> Checker<'a> {
                 op @ (UnaryOp::PreInc | UnaryOp::PostInc | UnaryOp::PreDec | UnaryOp::PostDec),
                 inner,
             ) => {
-                self.check_expr(inner, locals, label);
+                let inner_ty = self.check_expr(inner, locals, label);
+                self.check_incdec_validity(op, inner, &inner_ty, e.span, label);
                 // Real PHP: incrementing `null` produces `int(1)`;
                 // decrementing `null`, and either direction on a `bool`,
                 // is a no-op (the value is unchanged) - only the
@@ -636,10 +654,13 @@ impl<'a> Checker<'a> {
             // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) - the
             // same implicit-numeric-coercion rule arithmetic operators
             // apply generally.
-            ExprKind::Unary(UnaryOp::Neg | UnaryOp::Plus, inner) => {
-                match self.check_expr(inner, locals, label) {
-                    Type::String | Type::StringLiteral(_) => Type::Int,
-                    other => other,
+            ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
+                let inner_ty = self.check_expr(inner, locals, label);
+                self.check_unary_operand_validity(op, &inner_ty, inner.span, label);
+                if is_string_shaped(&inner_ty) {
+                    Type::Int
+                } else {
+                    inner_ty
                 }
             }
             // Phase 51: `IntegerRangeType::toBitwiseNotType()` - `~5`/
@@ -649,8 +670,9 @@ impl<'a> Checker<'a> {
             // correct, if imprecise, for a plain unbounded `Int`/
             // `String` - `~"hello"` is a real, still-string byte
             // complement).
-            ExprKind::Unary(UnaryOp::BitNot, inner) => {
+            ExprKind::Unary(op @ UnaryOp::BitNot, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
+                self.check_unary_operand_validity(op, &inner_ty, inner.span, label);
                 to_bitwise_not(&inner_ty).unwrap_or(inner_ty)
             }
             ExprKind::Grouping(inner) => self.check_expr(inner, locals, label),
@@ -751,12 +773,15 @@ impl<'a> Checker<'a> {
                 // `$x ??= $default;` is defined as exactly
                 // `$x = $x ?? $default;` - the same quiet-left-side
                 // exemption as plain `??` applies to its own left side.
-                if *op == BinOp::Coalesce {
-                    self.check_expr_quiet_root(lhs, locals, label);
+                let lhs_ty = if *op == BinOp::Coalesce {
+                    self.check_expr_quiet_root(lhs, locals, label)
                 } else {
-                    self.check_expr(lhs, locals, label);
+                    self.check_expr(lhs, locals, label)
+                };
+                let rhs_ty = self.check_expr(rhs, locals, label);
+                if *op != BinOp::Coalesce {
+                    self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span, label);
                 }
-                self.check_expr(rhs, locals, label);
                 if let ExprKind::Variable(name) = &lhs.kind {
                     let ty = self.infer_binary(op, lhs, rhs, locals);
                     purge_stale_narrowing_for(locals, name);
@@ -1712,9 +1737,11 @@ impl<'a> Checker<'a> {
             // the same implicit-numeric-coercion rule arithmetic
             // operators apply generally.
             ExprKind::Unary(UnaryOp::Neg | UnaryOp::Plus, inner) => {
-                match self.infer_expr(inner, locals) {
-                    Type::String | Type::StringLiteral(_) => Type::Int,
-                    other => other,
+                let inner_ty = self.infer_expr(inner, locals);
+                if is_string_shaped(&inner_ty) {
+                    Type::Int
+                } else {
+                    inner_ty
                 }
             }
             ExprKind::Unary(UnaryOp::BitNot, inner) => {

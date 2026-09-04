@@ -1239,6 +1239,23 @@ fn upgrade_string_to_numeric(ty: &Type) -> Type {
             Type::String,
             Type::Accessory(AccessoryKind::NumericString),
         ]),
+        // Phase 52: a already-refined string (`non-empty-string`,
+        // `literal-string`, ... - any `Intersection` whose base is
+        // `String`) needs `NumericString` added alongside its existing
+        // accessory kinds, not discarded - a preg_match() capture group
+        // (`non-empty-string`) surviving an `is_numeric()` guard is a
+        // real corpus shape (`NumberComparator::__construct`), and
+        // silently falling through to `other => other.clone()` left it
+        // un-upgraded, so `is_number_operand` (Phase 52) still saw a
+        // plain non-numeric-proven string past the guard.
+        Type::Intersection(members)
+            if members.iter().any(|m| matches!(m, Type::String))
+                && !members.contains(&Type::Accessory(AccessoryKind::NumericString)) =>
+        {
+            let mut members = members.clone();
+            members.push(Type::Accessory(AccessoryKind::NumericString));
+            Type::Intersection(members)
+        }
         Type::Union(members) => {
             Type::Union(members.iter().map(upgrade_string_to_numeric).collect())
         }

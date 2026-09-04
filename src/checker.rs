@@ -383,6 +383,7 @@ mod generics;
 mod missing_typehint;
 mod narrowing;
 mod oop;
+mod operators;
 pub(crate) mod phpstan_api;
 mod resolve;
 mod stmt;

@@ -1,0 +1,449 @@
+//! Phase 52: an operand-validity matrix for binary/unary/inc-dec
+//! operators - unlocks `InvalidBinaryOperationRule` (`binaryOp.invalid`/
+//! `assignOp.invalid`), `InvalidComparisonOperationRule`
+//! (`equal.invalid`/`notEqual.invalid`/`smaller.invalid`/
+//! `smallerOrEqual.invalid`/`greater.invalid`/`greaterOrEqual.invalid`/
+//! `spaceship.invalid`), `InvalidUnaryOperationRule` (`unaryOp.invalid`),
+//! and `InvalidIncDecOperationRule` (`preInc.expr`/`preInc.type`/... for
+//! all four inc/dec directions).
+//!
+//! Confidently scoped, not a full port of real PHPStan's own operator
+//! type resolver: every check here answers "is this operand type ever
+//! legal for this operator," reusing `coercion.rs`'s existing cast-
+//! legality surface (`type_to_string` for concat) and a new, analogous
+//! `is_number_operand` (mirrors real PHPStan's own `Type::toNumber()`
+//! legality) - not "does resolving this exact operator expression
+//! produce `ErrorType`," which for a handful of real PHPStan cases
+//! (division/modulo by a literal zero, in particular) depends on the
+//! operator's own *value*, not just its operand *types*, and isn't
+//! modeled here.
+//!
+//! Deliberately diverges from real PHPStan in one respect for every
+//! check in this file: a `Union`'s own legality is "at least one member
+//! is legal" (matching `coercion.rs::union_coercion`'s own precedent),
+//! not real PHPStan's own "every member must be legal" - confirmed via
+//! `InvalidUnaryOperationRuleTest::testUnion` that real PHPStan *does*
+//! flag `~$union` for a `numeric-string|int|float`-typed `$union` unless
+//! every member individually already passes `isString()`/`isInteger()`/
+//! `isFloat()`. This project's own type inference produces much wider,
+//! coarser unions than real PHPStan's (see this codebase's own
+//! repeatedly-documented "don't guess" precedent), so matching that
+//! stricter rule here would trade a real accuracy gain for a real,
+//! elevated false-positive rate against this project's own unions -
+//! not a good trade for a rule whose whole point is confidence.
+
+use crate::ast::{BinOp, UnaryOp};
+use crate::checker::Checker;
+use crate::token::Span;
+use crate::types::{AccessoryKind, Type, is_subtype};
+
+impl<'a> Checker<'a> {
+    /// Mirrors real PHPStan's own `Type::toNumber()` legality: every
+    /// scalar except a non-numeric string, `null`, and the same
+    /// `SimpleXMLElement`/`GMP`/`BcMath\Number` numeric-castable objects
+    /// `coercion.rs` already special-cases for `(float)`/`(string)` -
+    /// never an array, a `resource`, a `class-string`, or any other
+    /// *registered* class. `Mixed`, an unresolvable class, and a PHPDoc
+    /// type alias this project doesn't resolve (both surface as
+    /// `Type::Object` with no matching registry entry - see
+    /// `self.registry.classes.contains_key`) all fall through the
+    /// catch-all, matching this project's usual "don't know, don't
+    /// guess" leniency: a real corpus check (`Composer\Pcre\Preg::
+    /// match`'s own `@phpstan-type int-mask<...>` alias, combined with a
+    /// real `mixed` flags parameter) found both cases wrongly flagged
+    /// before this arm learned to tell "confidently not a number-
+    /// castable object" apart from "not a real, known class at all."
+    pub(crate) fn is_number_operand(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array(..) | Type::ArrayShape(_) => false,
+            Type::ClassString(_) => false,
+            Type::String => false,
+            Type::StringLiteral(_) => {
+                is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
+            }
+            Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
+                is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
+            }
+            Type::Object(name, _) if name == "resource" => false,
+            Type::Object(name, _) if self.registry.classes.contains_key(name) => {
+                self.registry.is_subclass_of(name, "SimpleXMLElement")
+                    || self.registry.is_subclass_of(name, "GMP")
+                    || self.registry.is_subclass_of(name, "BcMath\\Number")
+            }
+            Type::Union(members) => members.iter().any(|m| self.is_number_operand(m)),
+            Type::Intersection(members) => members.iter().any(|m| self.is_number_operand(m)),
+            _ => true,
+        }
+    }
+
+    /// A "byte-wise bitwise op" operand - real PHP's `&`/`|`/`^` accept
+    /// two strings directly (a per-byte operation, no numeric coercion
+    /// at all), independent of whether either string is numeric.
+    fn is_exactly_string_operand(&self, ty: &Type) -> bool {
+        match ty {
+            Type::String | Type::StringLiteral(_) => true,
+            Type::Intersection(members) => members.iter().any(|m| matches!(m, Type::String)),
+            Type::Union(members) => members.iter().any(|m| self.is_exactly_string_operand(m)),
+            _ => false,
+        }
+    }
+
+    /// Real PHPStan's `InvalidBinaryOperationRule` (`binaryOp.invalid` for
+    /// an `ExprKind::Binary`, `assignOp.invalid` for an
+    /// `ExprKind::CompoundAssign`). `span` should be the left operand's
+    /// own span, matching real PHPStan's `->line($left->getStartLine())`.
+    pub(crate) fn check_binary_operand_validity(
+        &mut self,
+        op: &BinOp,
+        l_ty: &Type,
+        r_ty: &Type,
+        is_compound_assign: bool,
+        span: Span,
+        label: &str,
+    ) {
+        // Don't guess: a bare `Mixed` operand might be anything at
+        // runtime, on either side, for any operator here - matches real
+        // PHPStan's own top-level `$type instanceof MixedType => skip`
+        // check in `RuleLevelHelper::findTypeToCheckImplementation`,
+        // which every one of these operator-specific callbacks sits
+        // behind. Without this, `$mixedFlags | self::SOME_INT_MASK`
+        // (a real corpus shape) got wrongly flagged - `is_number_
+        // operand`'s own per-type leniency doesn't help here, since
+        // `Mixed | non-numeric-literal` fails *both* of `BitAnd`'s own
+        // legal combinations even though either one might hold at
+        // runtime.
+        if matches!(l_ty, Type::Mixed) || matches!(r_ty, Type::Mixed) {
+            return;
+        }
+        let Some(valid) = self.binary_operand_validity(op, l_ty, r_ty) else {
+            return;
+        };
+        if valid {
+            return;
+        }
+        let sigil = binop_sigil(op);
+        let (op_str, identifier) = if is_compound_assign {
+            (format!("{sigil}="), "assignOp.invalid")
+        } else {
+            (sigil.to_string(), "binaryOp.invalid")
+        };
+        self.report(
+            label.to_string(),
+            format!("Binary operation \"{op_str}\" between {l_ty} and {r_ty} results in an error."),
+            span,
+            2,
+            identifier,
+        );
+    }
+
+    /// `None` = this operator's operand legality isn't modeled here:
+    /// `&&`/`||`/`xor`/`??` can never be operand-illegal in real PHP,
+    /// `===`/`!==` accept any two operands, the comparison operators
+    /// (`==`, `<`, ...) have their own, narrower `check_comparison_
+    /// validity` below, and PHP 8.5's `|>` pipe has no legality concept
+    /// this project's own coercion surface can answer without resolving
+    /// an arbitrary callable.
+    fn binary_operand_validity(&self, op: &BinOp, l_ty: &Type, r_ty: &Type) -> Option<bool> {
+        match op {
+            BinOp::Concat => {
+                Some(self.type_to_string(l_ty).is_some() && self.type_to_string(r_ty).is_some())
+            }
+            // `+` is PHP's array-union operator when both sides are
+            // arrays, ordinary arithmetic otherwise - one array and one
+            // non-array is a hard runtime error (the caller's own
+            // top-level `Mixed` guard already excused a `Mixed` operand
+            // that might itself be an array at runtime).
+            BinOp::Add => {
+                let l_arr = Checker::is_array_like(l_ty);
+                let r_arr = Checker::is_array_like(r_ty);
+                if l_arr && r_arr {
+                    Some(true)
+                } else if l_arr != r_arr {
+                    Some(false)
+                } else {
+                    Some(self.is_number_operand(l_ty) && self.is_number_operand(r_ty))
+                }
+            }
+            BinOp::Sub
+            | BinOp::Mul
+            | BinOp::Div
+            | BinOp::Pow
+            | BinOp::Mod
+            | BinOp::Shl
+            | BinOp::Shr => Some(self.is_number_operand(l_ty) && self.is_number_operand(r_ty)),
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => Some(
+                (self.is_number_operand(l_ty) && self.is_number_operand(r_ty))
+                    || (self.is_exactly_string_operand(l_ty)
+                        && self.is_exactly_string_operand(r_ty)),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Real PHPStan's `InvalidComparisonOperationRule`: a number
+    /// (strictly `int|float`, not a numeric string or bool) compared
+    /// against a possibly-`null` array or object always resolves how PHP
+    /// itself would (`0`/comparing-as-scalars in older PHP, a hard
+    /// `TypeError` since PHP 8) - a common real bug shape (an accidental
+    /// `array` where a `float` was expected reaching a `<`/`>` check).
+    /// `===`/`!==` are never checked - PHP identity comparison accepts
+    /// any two operands.
+    pub(crate) fn check_comparison_validity(
+        &mut self,
+        op: &BinOp,
+        l_ty: &Type,
+        r_ty: &Type,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(identifier) = comparison_identifier(op) else {
+            return;
+        };
+        if matches!(l_ty, Type::Mixed) || matches!(r_ty, Type::Mixed) {
+            return;
+        }
+        let l_num = self.is_strictly_number(l_ty);
+        let r_num = self.is_strictly_number(r_ty);
+        if l_num == r_num {
+            return;
+        }
+        let invalid = (l_num
+            && (is_possibly_nullable_object(r_ty) || is_possibly_nullable_array(r_ty)))
+            || (r_num && (is_possibly_nullable_object(l_ty) || is_possibly_nullable_array(l_ty)));
+        if !invalid {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!(
+                "Comparison operation \"{}\" between {l_ty} and {r_ty} results in an error.",
+                binop_sigil(op)
+            ),
+            span,
+            2,
+            identifier,
+        );
+    }
+
+    /// Real PHPStan's `InvalidUnaryOperationRule` (`unaryOp.invalid`).
+    /// `UnaryOp::Not` (`!`) is never checked - every PHP value has a
+    /// truthiness, matching this project's own `check_cast_validity`
+    /// never checking `(bool)` for the identical reason.
+    pub(crate) fn check_unary_operand_validity(
+        &mut self,
+        op: &UnaryOp,
+        inner_ty: &Type,
+        span: Span,
+        label: &str,
+    ) {
+        let valid = match op {
+            UnaryOp::Neg | UnaryOp::Plus => self.is_number_operand(inner_ty),
+            UnaryOp::BitNot => is_bitwise_not_operand(inner_ty),
+            _ => return,
+        };
+        if valid {
+            return;
+        }
+        let sigil = match op {
+            UnaryOp::Neg => "-",
+            UnaryOp::Plus => "+",
+            _ => "~",
+        };
+        self.report(
+            label.to_string(),
+            format!("Unary operation \"{sigil}\" on {inner_ty} results in an error."),
+            span,
+            2,
+            "unaryOp.invalid",
+        );
+    }
+
+    /// Real PHPStan's `InvalidIncDecOperationRule`. Two independent
+    /// checks, matching the real rule's own two identifier families:
+    /// `{name}.expr` when the target isn't an assignable l-value at all
+    /// (`5++`, `foo()++`), `{name}.type` when it is one but its current
+    /// type can never legally be incremented/decremented (an array, or a
+    /// plain object with no native operator overload). Deliberately
+    /// ignores real PHPStan's own PHP-version-gated deprecation nuance
+    /// (non-numeric-string/`null`/`bool` inc-dec is deprecated, not
+    /// illegal, on newer PHP versions) - this project has no per-target
+    /// PHP-version concept to gate that on, so the older, always-legal
+    /// behavior is assumed throughout.
+    pub(crate) fn check_incdec_validity(
+        &mut self,
+        op: &UnaryOp,
+        target: &crate::ast::Expr,
+        inner_ty: &Type,
+        span: Span,
+        label: &str,
+    ) {
+        use crate::ast::ExprKind;
+
+        let name = match op {
+            UnaryOp::PreInc => "preInc",
+            UnaryOp::PostInc => "postInc",
+            UnaryOp::PreDec => "preDec",
+            UnaryOp::PostDec => "postDec",
+            _ => return,
+        };
+        let symbol = match op {
+            UnaryOp::PreInc | UnaryOp::PostInc => "++",
+            _ => "--",
+        };
+        if !matches!(
+            target.kind,
+            ExprKind::Variable(_)
+                | ExprKind::Index(..)
+                | ExprKind::PropertyAccess(..)
+                | ExprKind::DynamicPropertyAccess(..)
+                | ExprKind::StaticAccess(..)
+        ) {
+            self.report(
+                label.to_string(),
+                format!("Cannot use {symbol} on a non-variable."),
+                span,
+                0,
+                &format!("{name}.expr"),
+            );
+            return;
+        }
+        if self.is_incdec_operand_valid(inner_ty) {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!("Cannot use {symbol} on {inner_ty}."),
+            span,
+            0,
+            &format!("{name}.type"),
+        );
+    }
+
+    /// Real PHPStan's `RuleLevelHelper::isNumberType` (as used by
+    /// `InvalidComparisonOperationRule`): strictly `int|float`, plus its
+    /// own real `SimpleXMLElement`/`GMP` exception (a number-castable
+    /// object counts as a "number" in its own right for this
+    /// comparison) - extended one class further to `BcMath\Number` too,
+    /// matching this project's own existing number-castable-class
+    /// precedent everywhere else in this file/`coercion.rs`. A real
+    /// corpus check (`NumberComparator::assertEquals` comparing a
+    /// `BcMath\Number` against a plain `int`) confirmed this matters in
+    /// practice, not just in theory.
+    fn is_strictly_number(&self, ty: &Type) -> bool {
+        is_subtype(ty, &Type::Union(vec![Type::Int, Type::Float]))
+            || matches!(ty, Type::Object(name, _) if
+                self.registry.is_subclass_of(name, "SimpleXMLElement")
+                    || self.registry.is_subclass_of(name, "GMP")
+                    || self.registry.is_subclass_of(name, "BcMath\\Number"))
+    }
+
+    /// Real PHPStan's own `InvalidIncDecOperationRule` allowed-type union
+    /// (`float|int|string|SimpleXMLElement|GMP|null|bool`), minus the
+    /// version-gated `BcMath\Number` addition and the deprecation-driven
+    /// numeric-string/non-null/non-bool narrowing - see `check_incdec_
+    /// validity`'s own doc comment for why.
+    fn is_incdec_operand_valid(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array(..) | Type::ArrayShape(_) | Type::ClassString(_) => false,
+            Type::Object(name, _) => {
+                self.registry.is_subclass_of(name, "SimpleXMLElement")
+                    || self.registry.is_subclass_of(name, "GMP")
+            }
+            Type::Union(members) => members.iter().any(|m| self.is_incdec_operand_valid(m)),
+            Type::Intersection(members) => members.iter().any(|m| self.is_incdec_operand_valid(m)),
+            _ => true,
+        }
+    }
+}
+
+/// Real PHPStan's own `isString()->yes() || isInteger()->yes() ||
+/// isFloat()->yes()` check for `~` - unlike `is_number_operand`, `bool`,
+/// `null`, and any object (including `SimpleXMLElement`/`GMP` - real
+/// `ObjectType` has no `toBitwiseNotType()` override of its own, unlike
+/// its `toNumber()`/`toInteger()`/`toFloat()`) are NOT legal here.
+/// Everything else - `Mixed` included - falls through to `true` (don't
+/// guess): a real corpus check (`InstallBootstrapTest::
+/// testBootSkipsTheErrorReportingIniChangeWhenDeploymentPolicyHasShow
+/// PhpErrorsDisabled`, `~$mixed`) confirmed a bare, unmatched `Mixed`
+/// needs the same leniency here as everywhere else in this file.
+fn is_bitwise_not_operand(ty: &Type) -> bool {
+    match ty {
+        Type::Bool | Type::True | Type::False | Type::Null => false,
+        Type::Array(..) | Type::ArrayShape(_) | Type::Object(..) | Type::ClassString(_) => false,
+        Type::Intersection(members) => members
+            .iter()
+            .any(|m| matches!(m, Type::String | Type::Int | Type::Float)),
+        Type::Union(members) => members.iter().any(is_bitwise_not_operand),
+        _ => true,
+    }
+}
+
+fn comparison_identifier(op: &BinOp) -> Option<&'static str> {
+    Some(match op {
+        BinOp::Eq => "equal.invalid",
+        BinOp::NotEq => "notEqual.invalid",
+        BinOp::Lt => "smaller.invalid",
+        BinOp::LtEq => "smallerOrEqual.invalid",
+        BinOp::Gt => "greater.invalid",
+        BinOp::GtEq => "greaterOrEqual.invalid",
+        BinOp::Spaceship => "spaceship.invalid",
+        _ => return None,
+    })
+}
+
+fn is_object_or_null(ty: &Type) -> bool {
+    match ty {
+        Type::Null => true,
+        Type::Object(name, _) => name != "resource",
+        Type::Union(members) => members.iter().all(is_object_or_null),
+        _ => false,
+    }
+}
+
+fn is_possibly_nullable_object(ty: &Type) -> bool {
+    !matches!(ty, Type::Null) && is_object_or_null(ty)
+}
+
+fn is_array_or_null(ty: &Type) -> bool {
+    match ty {
+        Type::Null => true,
+        Type::Array(..) | Type::ArrayShape(_) => true,
+        Type::Union(members) => members.iter().all(is_array_or_null),
+        _ => false,
+    }
+}
+
+fn is_possibly_nullable_array(ty: &Type) -> bool {
+    !matches!(ty, Type::Null) && is_array_or_null(ty)
+}
+
+fn binop_sigil(op: &BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+        BinOp::Mod => "%",
+        BinOp::Pow => "**",
+        BinOp::Concat => ".",
+        BinOp::Eq => "==",
+        BinOp::Identical => "===",
+        BinOp::NotEq => "!=",
+        BinOp::NotIdentical => "!==",
+        BinOp::Lt => "<",
+        BinOp::Gt => ">",
+        BinOp::LtEq => "<=",
+        BinOp::GtEq => ">=",
+        BinOp::Spaceship => "<=>",
+        BinOp::And => "&&",
+        BinOp::Or => "||",
+        BinOp::LogicalXor => "xor",
+        BinOp::BitAnd => "&",
+        BinOp::BitOr => "|",
+        BinOp::BitXor => "^",
+        BinOp::Shl => "<<",
+        BinOp::Shr => ">>",
+        BinOp::Coalesce => "??",
+        BinOp::Pipe => "|>",
+    }
+}

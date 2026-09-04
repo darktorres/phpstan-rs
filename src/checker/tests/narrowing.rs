@@ -453,6 +453,29 @@ fn is_numeric_false_branch_leaves_a_string_unchanged() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
+// Phase 52's own corpus check (`NumberComparator::__construct`) found
+// this exact shape genuinely unflagged: `is_numeric()`'s upgrade must
+// stack onto an already-refined string (`non-empty-string` here, e.g.
+// from a preg_match() capture group), not silently no-op just because
+// it wasn't a bare `string`.
+#[test]
+fn is_numeric_upgrades_an_already_non_empty_string_to_numeric_string_too() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param numeric-string $x */
+            function sink($x): void {}
+            /** @param non-empty-string $x */
+            function f($x): void {
+                if (!is_numeric($x)) {
+                    throw new \RuntimeException('not numeric');
+                }
+                sink($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn instanceof_narrows_to_the_checked_class() {
     let d = diagnostics_for(

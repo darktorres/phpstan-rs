@@ -575,10 +575,30 @@ fn increment_on_a_bool_variable_leaves_it_a_bool() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 52: a plain, unconstrained `string` is genuinely not proven
+// numeric (real PHPStan's own `StringType::toNumber()` is
+// unconditionally `ErrorType` too - only a `numeric-string`/literal
+// numeric value is legal here), so `-$s` is now correctly flagged
+// (`unaryOp.invalid`) alongside still inferring as `int` for the
+// purposes of `negate`'s own declared return type -
+// `unary_minus_on_a_numeric_string_infers_as_int_and_is_never_flagged`
+// below is this same test's legal counterpart.
 #[test]
-fn unary_minus_on_a_string_infers_as_int() {
+fn unary_minus_on_a_non_numeric_string_infers_as_int_but_is_flagged() {
     let d = diagnostics_for(
         r#"<?php
+            function negate(string $s): int { return -$s; }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "unaryOp.invalid");
+}
+
+#[test]
+fn unary_minus_on_a_numeric_string_infers_as_int_and_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param numeric-string $s */
             function negate(string $s): int { return -$s; }
         "#,
     );
