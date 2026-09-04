@@ -62,6 +62,24 @@ pub struct DocBlock {
     // `__set`, declared on a class's own docblock rather than a real
     // field. A class can declare many, so every tag is kept.
     pub properties: Vec<PropertyTag>,
+    // Phase 40: real PHPStan's own backward-compatibility-promise marker
+    // - a class/interface/trait tagged `@api` is safe for a third-party
+    // extension author to reference; anything else may change in a minor
+    // version with no notice. Consumed by `checker::phpstan_api`, gated
+    // behind the analyzed project actually depending on `phpstan/phpstan`
+    // (see `composer::detect_phpstan_dependency`).
+    pub api: bool,
+    // `@api-do-not-implement` (always found paired with a plain `@api` on
+    // the same docblock in real PHPStan's own source, confirmed directly
+    // against a fresh `phpstan/phpstan-src` clone - e.g.
+    // `Analyser/Scope.php`, `Reflection/ReflectionProvider.php`) - an
+    // `@api` interface/class additionally marked this way may gain new
+    // abstract members in a minor version, so third-party code must not
+    // `implements`/`extends` it, even though calling its existing methods
+    // is still fully covered. Implies `api` on its own (see `apply_tag`'s
+    // "api-do-not-implement" arm) so a docblock that only ever writes the
+    // longer tag alone still counts as covered for a plain reference.
+    pub api_do_not_implement: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -272,6 +290,16 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if !ty.is_empty() {
                     block.implements.push(ty.to_string());
                 }
+            }
+            // Phase 40: see `DocBlock::api`/`api_do_not_implement`'s own
+            // doc comments. Neither tag takes an argument, so `rest` is
+            // never consulted - unlike every other arm above.
+            "api" => {
+                block.api = true;
+            }
+            "api-do-not-implement" => {
+                block.api = true;
+                block.api_do_not_implement = true;
             }
             _ => {}
         }
