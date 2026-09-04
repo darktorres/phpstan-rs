@@ -233,6 +233,7 @@ impl Parser {
                         name: cname,
                         value,
                         doc_comment: doc.clone(),
+                        visibility: visibility.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),
@@ -686,6 +687,7 @@ impl Parser {
                         name: cname,
                         value,
                         doc_comment: doc.clone(),
+                        visibility: visibility.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),

@@ -198,6 +198,19 @@ pub struct UseImport {
 pub struct ClassConst {
     pub name: String,
     pub value: Expr,
+    // Phase 59: the `public`/`private`/`protected` modifier a real class's
+    // own `const` declaration can carry (PHP 7.1+) - parsed by both
+    // `parser/classes.rs` call sites already (into a local `visibility`
+    // that used to be discarded once `Const` was reached), but never kept
+    // on the node itself until `UnusedPrivateConstantRule` needed to tell
+    // a private constant candidate apart from a public/protected one.
+    // `Visibility::Public` for the top-level (non-class) `const NAME =
+    // value;` statement, which reuses this same struct shape (see
+    // `StmtKind::GlobalConst`'s own doc comment) but has no visibility
+    // concept of its own - a top-level const is never a legal "unused
+    // private constant" candidate, so this default is never actually
+    // read by that check.
+    pub visibility: Visibility,
     // A real, common PHPDoc convention for pinning a `const array`'s own
     // element type more precisely than its native declaration ever can
     // (e.g. `@var list<class-string<MiddlewareInterface>>` on a `public

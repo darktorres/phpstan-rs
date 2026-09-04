@@ -234,6 +234,11 @@ impl Parser {
                         name,
                         value,
                         doc_comment: None,
+                        // A top-level `const` has no `public`/`private`
+                        // modifier of its own to parse - see `ClassConst::
+                        // visibility`'s own doc comment for why `Public`
+                        // is a safe, never-actually-consulted default here.
+                        visibility: Visibility::Public,
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),
