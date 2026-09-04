@@ -720,6 +720,176 @@ fn check_project_survives_a_file_that_crashes_the_parser() {
 }
 
 #[test]
+fn check_project_format_json_emits_a_parseable_report_with_no_extra_stdout_noise() {
+    let dir = TempDir::new("format_json");
+    dir.write("bad.php", "<?php function f() { return $undefinedVar; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--format")
+        .arg("json")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The whole of stdout must be one JSON document - a CI pipeline piping
+    // this straight into a JSON parser must never see the old text
+    // format's prose mixed in.
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("expected valid JSON on stdout, got {e}: {stdout}"));
+    assert_eq!(parsed["totals"]["files_checked"], 1);
+    assert_eq!(parsed["totals"]["diagnostics"], 1);
+    let bad_php_key = parsed["files"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .find(|k| k.ends_with("bad.php"))
+        .unwrap_or_else(|| panic!("expected a bad.php entry in files, got: {stdout}"))
+        .clone();
+    let file = &parsed["files"][&bad_php_key];
+    assert_eq!(file["diagnostics"], 1);
+    let message = file["messages"][0]["message"].as_str().unwrap();
+    assert!(message.contains("undefined variable"), "got: {message}");
+    assert_eq!(file["messages"][0]["line"], 1);
+}
+
+#[test]
+fn check_project_format_json_respects_the_level_filter() {
+    let dir = TempDir::new("format_json_level");
+    dir.write(
+        "mixed.php",
+        r#"<?php
+            function addOne(int $x): int { return $x . "1"; }
+            function f() { return $undefinedVar; }
+        "#,
+    );
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--format")
+        .arg("json")
+        .arg("--level")
+        .arg("0")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(parsed["totals"]["diagnostics"], 1);
+}
+
+#[test]
+fn check_project_format_json_on_a_clean_project_reports_zero_diagnostics_and_no_files_entry() {
+    let dir = TempDir::new("format_json_clean");
+    dir.write("good.php", "<?php function f(): int { return 1; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--format")
+        .arg("json")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(parsed["totals"]["files_checked"], 1);
+    assert_eq!(parsed["totals"]["diagnostics"], 0);
+    assert_eq!(parsed["files"].as_object().unwrap().len(), 0);
+}
+
+#[test]
+fn check_project_format_checkstyle_emits_well_formed_xml_on_stdout() {
+    let dir = TempDir::new("format_checkstyle");
+    dir.write("bad.php", "<?php function f() { return $undefinedVar; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--format")
+        .arg("checkstyle")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
+        "got: {stdout}"
+    );
+    assert!(stdout.contains("<checkstyle"), "got: {stdout}");
+    assert!(stdout.contains("bad.php"), "got: {stdout}");
+    assert!(stdout.contains("severity=\"error\""), "got: {stdout}");
+    assert!(stdout.contains("undefined variable"), "got: {stdout}");
+    assert!(
+        stdout.trim_end().ends_with("</checkstyle>"),
+        "got: {stdout}"
+    );
+    // The old text format's own summary prose must not leak into this
+    // format's stdout.
+    assert!(!stdout.contains("file(s) checked"), "got: {stdout}");
+}
+
+#[test]
+fn check_project_format_checkstyle_on_a_clean_project_has_no_file_elements() {
+    let dir = TempDir::new("format_checkstyle_clean");
+    dir.write("good.php", "<?php function f(): int { return 1; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--format")
+        .arg("checkstyle")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("<file"), "got: {stdout}");
+    assert!(stdout.contains("<checkstyle"), "got: {stdout}");
+}
+
+#[test]
+fn check_project_no_format_flag_still_uses_the_original_text_format() {
+    let dir = TempDir::new("format_default");
+    dir.write("bad.php", "<?php function f() { return $undefinedVar; }");
+
+    let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("1 file(s) checked, 1 diagnostic(s)"),
+        "got: {stdout}"
+    );
+    assert!(!stdout.trim_start().starts_with('{'), "got: {stdout}");
+}
+
+#[test]
+fn check_project_format_rejects_an_unknown_value() {
+    let dir = TempDir::new("format_invalid");
+    dir.write("good.php", "<?php function f(): int { return 1; }");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--format")
+        .arg("yaml")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("yaml"), "got: {stderr}");
+}
+
+#[test]
 fn incremental_bench_reports_full_load_and_incremental_timings() {
     let dir = TempDir::new("bench");
     dir.write("a.php", "<?php function f(): int { return 1; }");

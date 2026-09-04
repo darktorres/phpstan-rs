@@ -5,6 +5,17 @@ use super::*;
 use crate::token::{Position, Span};
 
 fn diag(location: &str, message: &str, line: u32, col: u32, level: u8) -> Diagnostic {
+    diag_with_identifier(location, message, line, col, level, "variable.undefined")
+}
+
+fn diag_with_identifier(
+    location: &str,
+    message: &str,
+    line: u32,
+    col: u32,
+    level: u8,
+    identifier: &str,
+) -> Diagnostic {
     Diagnostic {
         location: location.to_string(),
         message: message.to_string(),
@@ -13,13 +24,21 @@ fn diag(location: &str, message: &str, line: u32, col: u32, level: u8) -> Diagno
             end: Position { line, col },
         },
         level,
+        identifier: identifier.to_string(),
+        tip: None,
+        non_ignorable: false,
+        metadata: HashMap::new(),
+        fix: None,
     }
 }
 
 #[test]
 fn diagnostic_line_matches_this_projects_original_text_shape() {
     let d = diag("f", "undefined variable: $x", 3, 12, 0);
-    assert_eq!(diagnostic_line(&d), "3:12: f: undefined variable: $x");
+    assert_eq!(
+        diagnostic_line(&d),
+        "3:12: f: undefined variable: $x (variable.undefined)"
+    );
 }
 
 #[test]
@@ -42,6 +61,9 @@ fn render_json_includes_totals_and_per_file_messages() {
     assert_eq!(file["messages"][0]["column"], 12);
     assert_eq!(file["messages"][0]["level"], 0);
     assert_eq!(file["messages"][0]["location"], "f");
+    assert_eq!(file["messages"][0]["identifier"], "variable.undefined");
+    // tip is omitted entirely (not even `null`) when there isn't one.
+    assert!(file["messages"][0].get("tip").is_none());
 }
 
 #[test]
@@ -84,12 +106,13 @@ fn render_checkstyle_produces_well_formed_xml_with_one_error_per_diagnostic() {
         PathBuf::from("src/bad.php"),
         vec![
             diag("f", "undefined variable: $x", 3, 12, 0),
-            diag(
+            diag_with_identifier(
                 "f",
                 "return type mismatch: expected int, got string",
                 4,
                 5,
                 3,
+                "return.type",
             ),
         ],
     );
@@ -100,11 +123,12 @@ fn render_checkstyle_produces_well_formed_xml_with_one_error_per_diagnostic() {
     assert!(xml.contains("<file name=\"src/bad.php\">"));
     assert!(xml.contains(
         "<error line=\"3\" column=\"12\" severity=\"error\" \
-         message=\"undefined variable: $x\" source=\"phpstan-rs.f\"/>"
+         message=\"f: undefined variable: $x\" source=\"phpstan-rs.variable.undefined\"/>"
     ));
     assert!(xml.contains(
         "<error line=\"4\" column=\"5\" severity=\"error\" \
-         message=\"return type mismatch: expected int, got string\" source=\"phpstan-rs.f\"/>"
+         message=\"f: return type mismatch: expected int, got string\" \
+         source=\"phpstan-rs.return.type\"/>"
     ));
     assert!(xml.trim_end().ends_with("</checkstyle>"));
 }

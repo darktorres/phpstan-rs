@@ -10,14 +10,18 @@
 //! Quality XML->JSON converters, and most CI dashboards that don't
 //! specifically integrate PHPStan itself).
 //!
-//! Neither format claims a stable per-check rule identifier - `checker::
-//! Diagnostic` doesn't have one yet (that's Phase 47's job; see this
-//! phase's own roadmap entry). `Diagnostic::location` is a caller-supplied
-//! *context* label (the enclosing function/method/class a finding was
-//! reported against - e.g. `"f"` or `"Shape::area"`, sometimes the
-//! catch-all `"<main>"` for top-level script code), not a rule ID, so it's
-//! surfaced below under that same honest name rather than mislabeled
-//! "identifier"/"rule"/"source".
+//! `Diagnostic::location` is a caller-supplied *context* label (the
+//! enclosing function/method/class a finding was reported against - e.g.
+//! `"f"` or `"Shape::area"`, sometimes the catch-all `"<main>"` for
+//! top-level script code), not a rule ID, so it's surfaced below under
+//! that same honest name rather than mislabeled "identifier"/"rule". Phase
+//! 47 (merged after this phase was originally written) added a real
+//! stable per-check `identifier` field to `Diagnostic` - both formats
+//! below now surface it too: `json` as its own `identifier` field per
+//! message, `checkstyle` as the `source` attribute (the field most
+//! Checkstyle-consuming tools treat as a rule name for grouping/
+//! suppression), with `location` folded into the message text there
+//! instead so neither piece of context is lost.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -51,8 +55,8 @@ pub enum OutputFormat {
 /// one file) prepends the path itself.
 pub fn diagnostic_line(d: &Diagnostic) -> String {
     format!(
-        "{}:{}: {}: {}",
-        d.span.start.line, d.span.start.col, d.location, d.message
+        "{}:{}: {}: {} ({})",
+        d.span.start.line, d.span.start.col, d.location, d.message, d.identifier
     )
 }
 
@@ -63,6 +67,9 @@ struct JsonMessage<'a> {
     column: u32,
     level: u8,
     location: &'a str,
+    identifier: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tip: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -119,6 +126,8 @@ pub fn render_json(results: &HashMap<PathBuf, Vec<Diagnostic>>, files_checked: u
                 column: d.span.start.col,
                 level: d.level,
                 location: &d.location,
+                identifier: &d.identifier,
+                tip: d.tip.as_deref(),
             })
             .collect();
         files.insert(
@@ -146,11 +155,12 @@ pub fn render_json(results: &HashMap<PathBuf, Vec<Diagnostic>>, files_checked: u
 /// project's own 0-6 `level` scale, so there's no non-arbitrary mapping to
 /// pick between (real PHPStan's own Checkstyle-shaped formatter makes the
 /// same simplification: every finding is an "error"). `source` carries
-/// this project's own `location` context label (see this module's own
-/// doc comment - not a rule ID) prefixed with `phpstan-rs.`, mirroring the
-/// dotted-class-name convention most Checkstyle producers use for
-/// `source`, so a human reading the XML still gets *some* breadcrumb of
-/// which function/method/class a finding came from.
+/// this diagnostic's real, stable `identifier` (Phase 47) prefixed with
+/// `phpstan-rs.`, mirroring the dotted-class-name convention most
+/// Checkstyle producers use for `source` - the field most Checkstyle-
+/// consuming tools group/suppress by, so a real rule identifier belongs
+/// there, not the `location` context label. `location` is folded into the
+/// message text instead so that breadcrumb isn't lost.
 pub fn render_checkstyle(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> String {
     let mut paths: Vec<&PathBuf> = results.keys().filter(|p| !results[*p].is_empty()).collect();
     paths.sort();
@@ -167,8 +177,8 @@ pub fn render_checkstyle(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> String 
                 "    <error line=\"{}\" column=\"{}\" severity=\"error\" message=\"{}\" source=\"phpstan-rs.{}\"/>\n",
                 d.span.start.line,
                 d.span.start.col,
-                xml_escape(&d.message),
-                xml_escape(&d.location),
+                xml_escape(&format!("{}: {}", d.location, d.message)),
+                xml_escape(&d.identifier),
             ));
         }
         out.push_str("  </file>\n");

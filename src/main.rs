@@ -6,9 +6,10 @@ use clap::{Parser as ClapParser, Subcommand};
 
 use checker::Checker;
 use lexer::Lexer;
+use output::OutputFormat;
 use parser::Parser;
 use phpstan_rs::{
-    baseline, checker, composer, config, lexer, lsp, parser, php_stubs, project, registry,
+    baseline, checker, composer, config, lexer, lsp, output, parser, php_stubs, project, registry,
 };
 use registry::{FunctionSig, Registry};
 
@@ -229,10 +230,7 @@ fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
         let diagnostics = &results[path];
         println!("{}: {} diagnostic(s)", path.display(), diagnostics.len());
         for d in diagnostics {
-            println!(
-                "  {}:{}: {}: {} ({})",
-                d.span.start.line, d.span.start.col, d.location, d.message, d.identifier
-            );
+            println!("  {}", output::diagnostic_line(d));
             if let Some(tip) = &d.tip {
                 println!("      💡 {tip}");
             }
@@ -302,6 +300,7 @@ fn run_check_project(
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
     phpstan_api_check_enabled: bool,
+    format: OutputFormat,
 ) {
     let mut analyze_files = Vec::new();
     for dir in dirs {
@@ -385,42 +384,54 @@ fn run_check_project(
         }
     }
 
-    let mut paths: Vec<&PathBuf> = results.keys().collect();
-    paths.sort();
+    let checked = analyze_files.len() - skipped_analyze;
 
-    let mut total = 0usize;
-    for path in paths {
-        for d in &results[path] {
-            println!(
-                "{}:{}:{}: {}: {} ({})",
-                path.display(),
-                d.span.start.line,
-                d.span.start.col,
-                d.location,
-                d.message,
-                d.identifier
-            );
-            if let Some(tip) = &d.tip {
-                println!("    💡 {tip}");
+    // Text is the only format carrying anything beyond raw diagnostics
+    // (the "N more file(s) loaded for context"/"N file(s) skipped" prose)
+    // - `json`/`checkstyle` exist so a CI pipeline can consume clean,
+    // uninterrupted structured data on stdout, so they report only the
+    // diagnostics themselves (`json`'s own `totals.files_checked` is the
+    // one piece of that extra bookkeeping structured output still
+    // carries - context/skip counts would need their own stable fields to
+    // add without guessing at what a consumer wants, so they're left for
+    // a real request rather than invented here).
+    match format {
+        OutputFormat::Text => {
+            let mut paths: Vec<&PathBuf> = results.keys().collect();
+            paths.sort();
+
+            let mut total = 0usize;
+            for path in paths {
+                for d in &results[path] {
+                    println!("{}:{}", path.display(), output::diagnostic_line(d));
+                    if let Some(tip) = &d.tip {
+                        println!("    💡 {tip}");
+                    }
+                    total += 1;
+                }
             }
-            total += 1;
+            let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");
+            let mut extras = Vec::new();
+            let context_loaded = context_files.len() - skipped_context;
+            if context_loaded > 0 {
+                extras.push(format!("{context_loaded} more file(s) loaded for context"));
+            }
+            let skipped_total = skipped_analyze + skipped_context;
+            if skipped_total > 0 {
+                extras.push(format!("{skipped_total} file(s) skipped: parse error"));
+            }
+            if !extras.is_empty() {
+                summary.push_str(&format!(" ({})", extras.join(", ")));
+            }
+            println!("{summary}");
+        }
+        OutputFormat::Json => {
+            println!("{}", output::render_json(&results, checked));
+        }
+        OutputFormat::Checkstyle => {
+            print!("{}", output::render_checkstyle(&results));
         }
     }
-    let checked = analyze_files.len() - skipped_analyze;
-    let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");
-    let mut extras = Vec::new();
-    let context_loaded = context_files.len() - skipped_context;
-    if context_loaded > 0 {
-        extras.push(format!("{context_loaded} more file(s) loaded for context"));
-    }
-    let skipped_total = skipped_analyze + skipped_context;
-    if skipped_total > 0 {
-        extras.push(format!("{skipped_total} file(s) skipped: parse error"));
-    }
-    if !extras.is_empty() {
-        summary.push_str(&format!(" ({})", extras.join(", ")));
-    }
-    println!("{summary}");
 }
 
 #[derive(ClapParser)]
@@ -470,6 +481,15 @@ enum Command {
         /// key in the config.
         #[arg(long)]
         config: Option<PathBuf>,
+        /// Output format: `text` (default, human-readable), `json`, or
+        /// `checkstyle` (XML) - the latter two for CI pipelines that want
+        /// to consume diagnostics as structured data rather than parsing
+        /// plain text. CLI-only, matching real PHPStan's own
+        /// `--error-format`: unlike `level`/`baseline`/etc., this isn't a
+        /// `config.rs` TOML key, since it's how one particular invocation
+        /// wants its output shaped, not a standing project setting.
+        #[arg(long)]
+        format: Option<OutputFormat>,
     },
     /// Loads every .php file under `dir` into a Project (timed), then
     /// re-parses/re-checks just one file via the incremental path (also
@@ -500,6 +520,7 @@ fn main() {
             scan_dirs,
             no_composer,
             config,
+            format,
         } => {
             // Finding 8: a config file's own `paths`/`baseline`/
             // `scan_paths` are conventionally relative to the config file
@@ -588,6 +609,7 @@ fn main() {
                 generate_baseline.as_deref(),
                 baseline.as_deref(),
                 phpstan_api_check_enabled,
+                format.unwrap_or_default(),
             )
         }
         Command::IncrementalBench { dir, file_to_touch } => {
@@ -678,10 +700,7 @@ fn run_demo(file: Option<&Path>) {
         println!("(none)");
     } else {
         for d in &diagnostics {
-            println!(
-                "{}:{}: {}: {} ({})",
-                d.span.start.line, d.span.start.col, d.location, d.message, d.identifier
-            );
+            println!("{}", output::diagnostic_line(d));
             if let Some(tip) = &d.tip {
                 println!("    💡 {tip}");
             }
