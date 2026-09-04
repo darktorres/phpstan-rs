@@ -1274,21 +1274,68 @@ it; Generator `TReturn` completeness (`@return Generator<...,...,
 TReturn>`'s own 4th argument) remains unmodeled, matching this
 project's existing, separately-documented generator simplification.
 
-**Phase 62 - Uninitialized-property / constructor dataflow (NEW,
-PLANNED).** No `ConstructorsHelper`-equivalent exists: nothing tracks
-which properties every constructor path (including the parent-
-constructor chain) is guaranteed to initialize before a premature read.
-Also sharpen `check_property_assignment`'s current one-condition
-readonly-write approximation (`current_class==owner &&
-current_method=="__construct"`) with real per-constructor dataflow:
-uninitialized-at-end-of-constructor detection, `__unserialize`/`__clone`
-recognition, double-assignment-in-clone detection. Unlocks
-`UninitializedPropertyRule`, `MissingReadOnlyPropertyAssignRule`,
-`ReadOnlyPropertyAssignRule`. Size: XL - real cross-method dataflow
-(every constructor's CFG plus every read site across the parent chain),
-but rated among the highest-value gaps in the audit; uninitialized
-typed properties are a very common real PHP error class, especially
-under `strict_types`.
+**Phase 62 - Uninitialized-property / constructor dataflow
+(PARTIAL).** Implements `UninitializedPropertyRule`'s own core case
+(`property.uninitialized`), deliberately *not* the full `ConstructorsHelper`-
+backed dataflow this entry originally scoped (every constructor path,
+including the parent-constructor chain, proven to initialize a property
+*before its first real read*) - real PHPStan's own version of that is a
+250+ line algorithm (`ClassPropertiesNode::getUninitializedProperties`)
+tracking exactly which methods a constructor calls and in what order.
+This project settles for a cheaper, more permissive question instead:
+"is this property assigned *anywhere at all* in the class's own body, by
+any method, however conditionally" - see `checker/uninitialized.rs`'s
+own module doc comment for the full reasoning. An initial constructor-
+only, CFG-precise attempt (guaranteed-on-every-path, mirroring
+`always_terminates`'s own structure) kept finding real corpus false
+positives on legitimate patterns real PHPStan's own richer analysis
+handles correctly: deferred/pooled-object initialization via a separate
+method called after construction (amphp's own `Http1Driver::$client`,
+guarded by its own `assert(!isset(...))`), the `isset()`-based `??=`
+lazy-init idiom (a typed property's own `isset()` is specially exempted
+from the "must not be accessed before initialization" error, unlike a
+raw read or any *other* compound operator - confirmed directly against
+real `php`), and static named-constructor patterns (`$node = new
+static; ...; $node->prop = ...; return $node;`, including a chained-
+assignment variant) populating a fresh instance held in a local
+variable, not `$this`.
+
+**Correction discovered mid-implementation**: real PHPStan itself
+doesn't trust `UninitializedPropertyRule` enough to run it by default at
+*any* level - it sits behind its own opt-in `checkUninitializedProperties`
+parameter (`false` in PHPStan's own `conf/config.neon`, not part of any
+standard rule set). Since this project's own version is a considerably
+simpler heuristic than PHPStan's real dataflow, and kept finding new,
+previously-unconsidered false-positive classes through three rounds of
+real corpus-driven fixes, it mirrors that same opt-in default exactly
+rather than shipping unconditionally the way this project's other
+checks do - `Registry::check_uninitialized_properties` (off by default),
+wired through `Project::set_check_uninitialized_properties`/
+`--check-uninitialized-properties`/`config.rs`'s own
+`check_uninitialized_properties` key, the same `strict_mixed_arrays`
+precedent used elsewhere. Corpus-verified at a literal byte-identical
+diagnostic diff with the flag at its own default (off).
+
+Also still open, per this entry's original scope: sharpening
+`check_property_assignment`'s current one-condition readonly-write
+approximation (`current_class==owner && current_method=="__construct"`)
+with real per-constructor dataflow (uninitialized-at-end-of-constructor
+detection specifically for `readonly` - deliberately excluded from
+`property.uninitialized` itself, matching real PHPStan's own rule split,
+since a `readonly` property's own failure mode is `MissingReadOnlyPropertyAssignRule`/
+`ReadOnlyPropertyAssignRule`, not implemented here), `__unserialize`/
+`__clone` recognition, double-assignment-in-clone detection, the parent-
+constructor chain (a subclass's own newly-declared property genuinely
+can't be initialized by an ancestor constructor written before it
+existed, so this is lower-value than it first sounds - see the module's
+own doc comment), and a known, unfixed false-positive class: a property
+populated entirely by an external framework/visitor rather than the
+declaring class's own body (real shape: nikic/php-parser's own
+`Node\Const_::$namespacedName`, populated by a separate `NameResolver`
+visitor) - real PHPStan's own algorithm also excludes writes from
+outside the declaring class, so this may be a *narrower* real gap than
+it first appeared, not fully investigated before the opt-in default made
+it non-blocking.
 
 **Phase 63 - Duplicate-declaration scans (NEW, PLANNED).** No scan
 exists for redeclared enum cases/constants/properties/methods within
