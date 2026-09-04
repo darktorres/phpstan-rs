@@ -15,6 +15,7 @@ pub mod deps;
 pub mod docblock;
 pub mod lexer;
 pub mod lsp;
+pub mod output;
 pub mod parser;
 pub mod pest_config;
 pub mod php_stubs;
