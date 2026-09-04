@@ -177,7 +177,20 @@ impl<'a> Walker<'a> {
     /// below handles those, since an `@api-do-not-implement` class is
     /// still perfectly fine to *call*, just not to `extends`/
     /// `implements`/`use`).
-    fn report_not_covered(&mut self, fqn: &str, action: &str, span: Span, label: &str) {
+    /// `identifier` matches real PHPStan's own `Rules\Api\*` identifier
+    /// strings one-for-one (see e.g. `ApiMethodCallRule`'s
+    /// `phpstanApi.method`) - threaded in by each call site below rather
+    /// than derived here, since the identifier depends on the reference
+    /// *kind* (method call vs. instantiation vs. instanceof, ...), not on
+    /// anything `report_not_covered` itself knows.
+    fn report_not_covered(
+        &mut self,
+        fqn: &str,
+        action: &str,
+        span: Span,
+        label: &str,
+        identifier: &str,
+    ) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
@@ -191,10 +204,22 @@ impl<'a> Walker<'a> {
             ),
             span,
             level: 0,
+            identifier: identifier.to_string(),
+            tip: None,
+            non_ignorable: false,
+            metadata: HashMap::new(),
+            fix: None,
         });
     }
 
-    fn report_inheritance(&mut self, fqn: &str, action: &str, span: Span, label: &str) {
+    fn report_inheritance(
+        &mut self,
+        fqn: &str,
+        action: &str,
+        span: Span,
+        label: &str,
+        identifier: &str,
+    ) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
@@ -206,6 +231,11 @@ impl<'a> Walker<'a> {
                 ),
                 span,
                 level: 0,
+                identifier: identifier.to_string(),
+                tip: None,
+                non_ignorable: false,
+                metadata: HashMap::new(),
+                fix: None,
             });
             return;
         }
@@ -217,6 +247,11 @@ impl<'a> Walker<'a> {
                 ),
                 span,
                 level: 0,
+                identifier: identifier.to_string(),
+                tip: None,
+                non_ignorable: false,
+                metadata: HashMap::new(),
+                fix: None,
             });
         }
     }
@@ -238,19 +273,19 @@ impl<'a> Walker<'a> {
         for parent in &c.extends {
             if let Some(pfqn) = self.resolve_if_phpstan(parent, ctx) {
                 let action = format!("extending {pfqn}");
-                self.report_inheritance(&pfqn, &action, c.span, &fqn);
+                self.report_inheritance(&pfqn, &action, c.span, &fqn, "phpstanApi.class");
             }
         }
         for iface in &c.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(&ifqn, &action, c.span, &fqn);
+                self.report_inheritance(&ifqn, &action, c.span, &fqn, "phpstanApi.interface");
             }
         }
         for used in &c.uses {
             if let Some(ufqn) = self.resolve_if_phpstan(used, ctx) {
                 let action = format!("using trait {ufqn}");
-                self.report_inheritance(&ufqn, &action, c.span, &fqn);
+                self.report_inheritance(&ufqn, &action, c.span, &fqn, "phpstanApi.trait");
             }
         }
         let empty = ParamTypes::new();
@@ -273,13 +308,13 @@ impl<'a> Walker<'a> {
         for iface in &e.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(&ifqn, &action, e.span, &fqn);
+                self.report_inheritance(&ifqn, &action, e.span, &fqn, "phpstanApi.interface");
             }
         }
         for used in &e.uses {
             if let Some(ufqn) = self.resolve_if_phpstan(used, ctx) {
                 let action = format!("using trait {ufqn}");
-                self.report_inheritance(&ufqn, &action, e.span, &fqn);
+                self.report_inheritance(&ufqn, &action, e.span, &fqn, "phpstanApi.trait");
             }
         }
         let empty = ParamTypes::new();
@@ -401,7 +436,13 @@ impl<'a> Walker<'a> {
                 if let ExprKind::Name(n) = &callee.kind {
                     if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
                         let action = format!("instantiating {fqn}");
-                        self.report_not_covered(&fqn, &action, e.span, label);
+                        self.report_not_covered(
+                            &fqn,
+                            &action,
+                            e.span,
+                            label,
+                            "phpstanApi.constructor",
+                        );
                     }
                 } else {
                     self.check_expr(callee, ctx, param_types, label);
@@ -413,7 +454,7 @@ impl<'a> Walker<'a> {
             ExprKind::StaticCall(class_name, method, args) => {
                 if let Some(fqn) = self.resolve_if_phpstan(class_name, ctx) {
                     let action = format!("calling {fqn}::{method}()");
-                    self.report_not_covered(&fqn, &action, e.span, label);
+                    self.report_not_covered(&fqn, &action, e.span, label, "phpstanApi.method");
                 }
                 for a in args {
                     self.check_expr(&a.value, ctx, param_types, label);
@@ -424,7 +465,13 @@ impl<'a> Walker<'a> {
             ExprKind::StaticAccess(class_name, member) if member != "class" => {
                 if let Some(fqn) = self.resolve_if_phpstan(class_name, ctx) {
                     let action = format!("accessing {fqn}::{member}");
-                    self.report_not_covered(&fqn, &action, e.span, label);
+                    self.report_not_covered(
+                        &fqn,
+                        &action,
+                        e.span,
+                        label,
+                        "phpstanApi.classConstant",
+                    );
                 }
             }
             ExprKind::MethodCall(recv, method, args, _) => {
@@ -433,7 +480,7 @@ impl<'a> Walker<'a> {
                     && is_phpstan_namespace(fqn)
                 {
                     let action = format!("calling {fqn}::{method}()");
-                    self.report_not_covered(fqn, &action, e.span, label);
+                    self.report_not_covered(fqn, &action, e.span, label, "phpstanApi.method");
                 }
                 self.check_expr(recv, ctx, param_types, label);
                 for a in args {
@@ -443,7 +490,13 @@ impl<'a> Walker<'a> {
             ExprKind::Instanceof(inner, InstanceofTarget::Name(n)) => {
                 if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
                     let action = format!("instanceof {fqn}");
-                    self.report_not_covered(&fqn, &action, e.span, label);
+                    self.report_not_covered(
+                        &fqn,
+                        &action,
+                        e.span,
+                        label,
+                        "phpstanApi.instanceofAssumption",
+                    );
                 }
                 self.check_expr(inner, ctx, param_types, label);
             }
