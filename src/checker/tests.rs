@@ -10,6 +10,7 @@ mod enums;
 mod generics_and_templates;
 mod helpers;
 mod misc_and_regressions;
+mod missing_typehint;
 mod narrowing;
 mod oop_overrides_and_inheritance;
 mod preg_and_regex;

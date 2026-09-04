@@ -379,6 +379,7 @@ mod calls;
 mod control_flow;
 mod expr;
 mod generics;
+mod missing_typehint;
 mod narrowing;
 mod oop;
 pub(crate) mod phpstan_api;
@@ -550,6 +551,17 @@ impl<'a> Checker<'a> {
                     for cc in &c.consts {
                         self.check_attributes(&cc.attrs, &fqn);
                     }
+                    // Phase 58: a property/const's own missing-typehint
+                    // completeness is about where it's textually
+                    // declared, not which class(es) end up using it - so
+                    // it's checked once here, regardless of trait-ness.
+                    // `check_function` below runs once per *host* for a
+                    // trait's own methods instead (a method's own
+                    // `$this`-dependent body needs a real host to check
+                    // against; a property/const's own declared type
+                    // never does, so it has no such need).
+                    self.check_missing_property_typehints(&fqn, &c.properties);
+                    self.check_missing_class_constant_typehints(&fqn, &c.consts);
                     if c.kind == ClassKind::Trait {
                         self.check_trait_methods(&fqn, c);
                     } else {
@@ -584,6 +596,11 @@ impl<'a> Checker<'a> {
                     for cc in &e.consts {
                         self.check_attributes(&cc.attrs, &fqn);
                     }
+                    // Phase 58: an enum can't declare instance properties
+                    // at all (see `ast::EnumDecl`'s own doc comment), but
+                    // its own consts are exactly as real a
+                    // missing-typehint candidate as a class's.
+                    self.check_missing_class_constant_typehints(&fqn, &e.consts);
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static);
                     }
@@ -755,6 +772,15 @@ impl<'a> Checker<'a> {
             None => f.name.clone(),
         };
 
+        // Phase 58: `(name, resolved type, AST span)` per parameter,
+        // collected below in lockstep with `locals`'s own per-branch
+        // loops - but *before* either one's variadic-collects-into-
+        // `array` rewrite, since `check_missing_function_typehints`
+        // wants the per-argument type a genuinely untyped `...$args`
+        // would have (implicit `mixed`), not the already-array-wrapped
+        // type `locals` itself needs for checking the function's body.
+        let mut resolved_params: Vec<(String, Type, Span)> = Vec::with_capacity(f.params.len());
+
         let mut locals: Locals = Locals::default();
         match sig {
             // The registry's FunctionSig already has PHPDoc types merged in
@@ -790,6 +816,7 @@ impl<'a> Checker<'a> {
                         ast_param.span,
                         &label,
                     );
+                    resolved_params.push((param.name.clone(), ty.clone(), ast_param.span));
                     // `ParamSig::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
                     // individual argument at a call site) - inside the
@@ -843,6 +870,7 @@ impl<'a> Checker<'a> {
                         p.span,
                         &label,
                     );
+                    resolved_params.push((p.name.clone(), ty.clone(), p.span));
                     let ty = if p.variadic {
                         Type::Array(Box::new(ty))
                     } else {
@@ -939,6 +967,18 @@ impl<'a> Checker<'a> {
         {
             self.check_variance(sig, c, &label, f.span);
         }
+
+        // Phase 58: same "check the declaration once" placement as the
+        // bound/variance checks just above - a missing typehint is about
+        // the signature as written, not something a body-local
+        // `extract()` should be able to hide either.
+        self.check_missing_function_typehints(
+            f,
+            class_name,
+            &label,
+            &resolved_params,
+            declared_return.as_ref(),
+        );
 
         let previous_class = self.current_class.take();
         self.current_class = class_name.map(|s| s.to_string());
