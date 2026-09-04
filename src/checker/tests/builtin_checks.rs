@@ -109,6 +109,100 @@ fn random_int_with_equal_min_and_max_is_never_flagged() {
     );
 }
 
+// `function.uselessReturnValue` - var_export()/print_r()/
+// highlight_string() all print directly and return a useless null/true
+// unless their own `$return` flag is passed `true` - only a problem
+// once something tries to actually *use* that useless return value.
+
+#[test]
+fn a_bare_var_export_statement_is_never_flagged() {
+    // The normal, intended way to use it - printing, with the return
+    // value going nowhere by construction.
+    let d = diagnostics_for(r#"<?php var_export([1, 2]);"#);
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "function.uselessReturnValue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn assigning_var_exports_return_value_with_no_flag_is_flagged() {
+    let d = diagnostics_for(r#"<?php $x = var_export([1, 2]);"#);
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "function.uselessReturnValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn assigning_var_exports_return_value_with_an_explicit_false_flag_is_flagged() {
+    let d = diagnostics_for(r#"<?php $x = var_export([1, 2], false);"#);
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "function.uselessReturnValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn assigning_var_exports_return_value_with_true_is_never_flagged() {
+    let d = diagnostics_for(r#"<?php $x = var_export([1, 2], true);"#);
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "function.uselessReturnValue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn assigning_var_exports_return_value_with_an_unknown_flag_is_never_flagged() {
+    // Don't guess - a genuinely unknown (non-literal) flag could be
+    // true at runtime.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $flag) {
+                $x = var_export([1, 2], $flag);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "function.uselessReturnValue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn print_r_and_highlight_string_are_also_covered() {
+    let d = diagnostics_for(
+        r#"<?php
+            $a = print_r("x");
+            $b = highlight_string("<?php echo 1;");
+        "#,
+    );
+    assert_eq!(
+        d.iter()
+            .filter(|x| x.identifier == "function.uselessReturnValue")
+            .count(),
+        2,
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_var_export_call_nested_inside_another_call_is_flagged() {
+    // Not a bare statement itself, even though it's the outer call's
+    // own argument, not an assignment.
+    let d = diagnostics_for(r#"<?php strlen(var_export([1, 2]));"#);
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "function.uselessReturnValue"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn random_int_with_a_non_literal_argument_is_never_flagged() {
     // Don't guess - no IntegerRangeType in this project's own type

@@ -31,6 +31,7 @@ impl<'a> Checker<'a> {
         }
         match &stmt.kind {
             StmtKind::Expression(e) => {
+                self.in_bare_statement_position = true;
                 self.check_expr(e, locals, label);
                 self.check_no_discard_statement(e, locals, label);
                 // `assert($cond)` is a real, common narrowing idiom real

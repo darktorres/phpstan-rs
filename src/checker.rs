@@ -315,6 +315,23 @@ pub struct Checker<'a> {
     // StmtKind::Return(None) arm, which has no direct access to the
     // enclosing function's body to answer this itself.
     pub(crate) current_function_is_generator: bool,
+    // Phase 71: set to `true` immediately before `check_expr` is called
+    // for a `StmtKind::Expression`'s own top-level expression (a bare
+    // `foo();`, its return value going nowhere by construction), cleared
+    // the instant `check_expr` reads it (`std::mem::take`, at the very
+    // top of its own dispatch) - so it only ever reads `true` for that
+    // exact top-level call, never for anything nested inside it
+    // (`foo(bar());`'s inner `bar()` call sees `false`, correctly, since
+    // *its* return value genuinely is consumed as an argument).
+    // `check_useless_return_value_call` is this flag's one reader: real
+    // PHPStan's own `UselessFunctionReturnValueRule` needs exactly this
+    // "is my own result being used at all" signal, the mirror image of
+    // `check_no_discard_statement`'s "is my result NOT being used"
+    // question - which already has its own dedicated call site (the
+    // literal top-level statement) to answer that from directly, unlike
+    // this one, which needs to answer it from every *other*, much more
+    // varied call site instead.
+    pub(crate) in_bare_statement_position: bool,
     // Finding 1: the `$this` type inside a Pest `it`/`test`/`describe`/
     // `beforeEach`/`afterEach`/`beforeAll`/`afterAll` closure - set via
     // `set_pest_this_type` (by `Project::check_file`, from its own
@@ -458,6 +475,7 @@ impl<'a> Checker<'a> {
             current_method: None,
             saw_dynamic_var_construct: false,
             current_function_is_generator: false,
+            in_bare_statement_position: false,
             pest_this_type: Type::Mixed,
             pest_hook_properties: HashSet::new(),
             loop_break_states: Vec::new(),

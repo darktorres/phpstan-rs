@@ -213,6 +213,12 @@ impl<'a> Checker<'a> {
 
     #[hotpath::measure]
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
+        // Phase 71: see `Checker::in_bare_statement_position`'s own doc
+        // comment - taken (not just read) so it reads `true` only for
+        // the exact top-level expression `StmtKind::Expression` set it
+        // for, never for anything this match's own arms go on to
+        // recursively check via a nested `check_expr` call.
+        let is_bare_statement = std::mem::take(&mut self.in_bare_statement_position);
         match &e.kind {
             ExprKind::Call(callee, args) => {
                 // `unset($x)` genuinely removes `$x` from scope in real
@@ -494,6 +500,9 @@ impl<'a> Checker<'a> {
                             .eq_ignore_ascii_case("random_int")
                         {
                             self.check_random_int_call(args, locals, label);
+                        }
+                        if !is_bare_statement {
+                            self.check_useless_return_value_call(name, args, locals, e.span, label);
                         }
                     } else {
                         // Since resolve_function_candidates always
@@ -2685,6 +2694,59 @@ impl<'a> Checker<'a> {
             Type::Union(members) => members.iter().all(Self::is_known_empty_array),
             _ => false,
         }
+    }
+
+    /// Phase 71: `UselessFunctionReturnValueRule` -
+    /// `var_export`/`print_r`/`highlight_string` all share the same
+    /// `bool $return = false` last parameter: printing directly and
+    /// returning a useless `null`/`true` when it's omitted or literally
+    /// `false`, or returning the real string instead of printing when
+    /// it's `true`. Gated on `!is_bare_statement` at the one call site
+    /// (see `Checker::in_bare_statement_position`'s own doc comment) -
+    /// a bare `var_export($x);` statement genuinely wants the print
+    /// side effect and legitimately discards the useless return value,
+    /// the normal way to use any of these three; only flagged once
+    /// something else tries to *use* that return value instead
+    /// (assigned, returned, passed as an argument, ...).
+    fn check_useless_return_value_call(
+        &mut self,
+        name: &str,
+        args: &[Arg],
+        locals: &Locals,
+        span: Span,
+        label: &str,
+    ) {
+        let bare_name = name.rsplit('\\').next().unwrap_or(name);
+        let useless_value = if bare_name.eq_ignore_ascii_case("var_export") {
+            "null"
+        } else if bare_name.eq_ignore_ascii_case("print_r")
+            || bare_name.eq_ignore_ascii_case("highlight_string")
+        {
+            "true"
+        } else {
+            return;
+        };
+        // Only fires when the print-vs-return flag is definitely absent
+        // or definitely `false` - a genuinely unknown (non-literal,
+        // non-narrowed) second argument stays silent, "don't guess": it
+        // really could be `true` at runtime.
+        let is_useless = match args.len() {
+            0 => return,
+            1 => true,
+            _ => self.infer_expr(&args[1].value, locals) == Type::False,
+        };
+        if !is_useless {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!(
+                "Return value of function {bare_name}() is always {useless_value} and the result is printed instead of being returned. Pass in true as parameter #2 $return to return the output instead."
+            ),
+            span,
+            0,
+            "function.uselessReturnValue",
+        );
     }
 
     /// Phase 68: `ArrayFilterRule`, narrowed to just its `arrayFilter.
