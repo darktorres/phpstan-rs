@@ -7,6 +7,7 @@ mod closures_and_callables;
 mod control_flow;
 mod diagnostic_identifiers;
 mod doctrine_and_stdlib_specials;
+mod duplicates;
 mod enums;
 mod generics_and_templates;
 mod helpers;
