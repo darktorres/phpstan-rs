@@ -1337,21 +1337,61 @@ outside the declaring class, so this may be a *narrower* real gap than
 it first appeared, not fully investigated before the opt-in default made
 it non-blocking.
 
-**Phase 63 - Duplicate-declaration scans (NEW, PLANNED).** No scan
-exists for redeclared enum cases/constants/properties/methods within
-one class/trait body (real value here is narrower than it sounds - PHP
-itself fatals on a literal same-body duplicate; this mainly catches
-duplicate enum cases and trait-composition collisions PHP does *not*
-reject at parse time), nor for a same-file case-insensitive collision
-between a class's own declarations and its `use`-alias imports, nor for
-duplicate top-level function declarations (the registry's
-`FxHashMap<String, FunctionSig>` silently last-write-wins). Unlocks
-`DuplicateDeclarationHelper`/`Rule`, `DuplicateTraitDeclarationRule`,
-`UsedNamesRule`, `DuplicateFunctionDeclarationRule`. Size: M - low-to-
-medium value individually; batched because they're all small,
-independent name-collision scans with no type-system dependency.
-(Whole-*project* duplicate-class-name detection is a separate, lower-
-priority item - see Phase 83.)
+**Phase 63 - Duplicate-declaration scans (PARTIAL).** Implements
+`DuplicateDeclarationHelper`'s own core case: a single class/interface/
+trait/enum body literally redeclaring the same constant/enum-case/
+property/method name twice (`class.duplicateProperty`/
+`duplicateConstant`/`duplicateMethod`, `enum.duplicateEnumCase`, one
+shared namespace between a const and an enum case, a promoted
+constructor property checked as a property declaration in disguise -
+matching real PHPStan's own helper exactly). Real value here was
+verified narrower than it first sounds: `php -l` already rejects a
+literal duplicate property/method/constant *and* enum case as a hard
+parse-time fatal error (confirmed directly against real `php`, for
+every one of the four shapes, not just enum cases as originally
+guessed) - but the check still earns its keep, for the same reason real
+PHPStan's own version does: a static analyzer has to tolerate parsing
+code that might never actually run (a mid-edit file, an unreachable
+branch), so nothing else in the checker would otherwise catch it before
+that code runs and fatals for real.
+
+Corpus verification found and fixed a real false-positive class along
+the way: `jetbrains/phpstorm-stubs` (vendored into this corpus as
+ordinary project source, the same recurring theme from Phases 60/62)
+represents "this member's own shape changed across PHP versions" by
+declaring the same conceptual method/property twice, once per era -
+caught by a structural "do the two colliding declarations' own native
+shapes (param count/types, return type, `readonly`-ness) actually
+differ" check, since a genuine copy-paste duplicate bug is
+definitionally the same declaration twice and never has two different
+shapes. Settled at 4 known, narrow residual false positives, all
+`jetbrains/phpstorm-stubs`-specific: its own `#[LanguageLevelTypeAware]`
+attribute resolves *both* era-declarations' visible types to the same
+"modern" value in this project's own lexer (a deliberate, pre-existing
+mechanism - see `registry::function_sig::dedup_versioned_params`'s own
+doc comment - that happens to erase the one signal that would otherwise
+tell the two declarations apart, on top of the lexer already discarding
+`#[PhpStormStubsElementAvailable]` itself the same way); fixing this
+needs touching shared lexer infrastructure Phase 32's own parameter-
+deduplication idiom also depends on, out of scope for this pass.
+
+Still open, per this entry's original batched scope: a same-file case-
+insensitive collision between a class's own declarations and its
+`use`-alias imports (`UsedNamesRule`), and duplicate top-level function
+declarations (`DuplicateFunctionDeclarationRule` - the registry's
+`FxHashMap<String, FunctionSig>` still silently last-write-wins) -
+investigated but deferred: real PHPStan's own version is a whole-
+project, cross-file, `Reflector`-backed scan (not a single-file check
+like the class-member case above), and this project's own registry
+already has an established, *legitimate* multi-declaration pattern for
+top-level functions specifically (phpstorm-stubs' own real-overload
+representation, `strtr`'s 2-/3-argument split, Phase 32 Finding C) that
+a naive "second declaration = bug" scan would conflict with the same
+way the class-member case's own false positives did, needing the
+identical structural-signature-difference treatment *plus* real
+cross-file tracking neither of the class-member check's simpler,
+single-body scope needed. (Whole-*project* duplicate-class-name
+detection is a separate, lower-priority item - see Phase 83.)
 
 **Phase 64 - Override-compatibility check rewrite (methods +
 properties) (NEW, PLANNED).** `check_method_overrides`
