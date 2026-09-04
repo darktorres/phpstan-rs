@@ -994,43 +994,67 @@ not incremental wiring, but real-world value is high for
 generic-collection-heavy codebases (arg-count mismatches, fluent-builder
 `static` returns).
 
-**Phase 55 - Narrowing-engine generalization (NEW, PLANNED).** Four
-related gaps in `src/checker/narrowing.rs`, bundled because they're all
-"the narrowing engine only handles specific hardcoded shapes" rather
-than a general mechanism: (a) no comparison-outcome/range API for
-`<`/`>`/`<=`/`>=` at all (the only `Gt`/`GtEq` arm is the narrow
-`count($x) > 0` special case, confirmed by reading `infer_binary`) -
-`Type::IntRange(Option<i64>, Option<i64>)` already exists in
-`src/types.rs`, so this API should be built as range arithmetic on top
-of the existing variant rather than a new representation (cross-check
-against Phase 51's `IntegerRangeType` completion work before starting,
-so the two phases don't each reinvent the same range arithmetic); (b)
-no truth table for loose `==`/`!=` between differing scalar kinds; (c)
-no subtracted/negated-type (`T&~U`) representation, so `!$x instanceof
-Foo` on a non-union type is dropped entirely instead of recorded; (d)
-`apply_narrowing` fires only for hardcoded top-level shapes (if/while
-conditions, a bare `assert()`, two literal `count()` patterns) rather
-than a general recursive walk of any truthy-evaluated sub-expression, so
-`assert()` nested in `&&`, or `count($x)` inside a plain `if
-(count($x))`, fails to narrow today. Also extend
-`narrowing_type_for_predicate`'s single-arg fixed-target-type table to
-handle multi-arg/argument-derived targets (`is_a`, `class_exists`,
-`str_contains`) - and add the trivial one-line `is_iterable` entry
-first, within this phase, as a quick win.
+**Phase 55 - Narrowing-engine generalization (PARTIAL).** Four related
+gaps in `src/checker/narrowing.rs`, bundled because they're all "the
+narrowing engine only handles specific hardcoded shapes" rather than a
+general mechanism: (a) no comparison-outcome/range API for `<`/`>`/
+`<=`/`>=` at all (the only `Gt`/`GtEq` arm is the narrow `count($x) >
+0` special case) - `Type::IntRange(Option<i64>, Option<i64>)` already
+exists in `src/types.rs`, so this API should be built as range
+arithmetic on top of the existing variant rather than a new
+representation (cross-check against Phase 51's `IntegerRangeType`
+completion work before starting, so the two phases don't each reinvent
+the same range arithmetic); (b) no truth table for loose `==`/`!=`
+between differing scalar kinds; (c) no subtracted/negated-type (`T&~U`)
+representation, so `!$x instanceof Foo` on a non-union type is dropped
+entirely instead of recorded; (d) `apply_narrowing` fired only for
+hardcoded top-level shapes.
 
-Unlocks `ImpossibleCheckTypeHelper`/`FunctionCallRule`/`MethodCallRule`/
-`StaticMethodCallRule`, `ImpossibleInArrayHaystackFiniteTypesRule`,
-`ConstantNumericComparisonTypeTrait`, `UndecidedComparisonTypeTrait`,
-`ConstantScalarTypeTrait`, `SubstractableTypeTrait`,
-`AssertFunctionTypeSpecifyingExtension`, `PregMatchTypeSpecifyingExtension`,
-`CountFunctionTypeSpecifyingExtension`, `IsIterableFunctionTypeSpecifyingExtension`,
+**Done**: the trivial one-line `is_iterable` quick win this entry's
+own text named explicitly (`narrowing_type_for_predicate("is_iterable")
+=> array|Traversable`); a bare `count($x)` truthiness check (`if
+(count($x)) {...}`, no explicit `> 0`/`>= 1` comparison) now narrows to
+non-empty-array too, the specific part-(d) example this entry's own
+text named (`count($x)` inside a plain `if (count($x))`). This same
+addition's own corpus-verification pass found and fixed a much bigger,
+general, pre-existing bug along the way: a fully-qualified predicate
+call (`\is_array($x)`, `\count($x)`, `\in_array(...)`, `\array_key_
+exists(...)`, `\preg_match(...)` - real, common defensive-global-
+namespace style pervasive in Rector-prefixed vendor code) kept its
+leading backslash in `ExprKind::Name`, and every name comparison in
+`apply_narrowing`'s own dispatch was a bare string equality with no
+normalization, unlike ordinary call resolution (which already strips
+it correctly elsewhere) - fixed at every affected site. Corpus impact:
+643 locations cleared.
+
+**Still open**: (a) the comparison-outcome/range API for `<`/`>`/`<=`/
+`>=` generally (only the `count()` special cases exist); (b) the loose
+`==`/`!=` truth table; (c) the subtracted/negated-type (`T&~U`)
+representation; the rest of (d)'s own generalization (`assert()`
+nested inside `&&` specifically - confirmed still a real, if rare, gap:
+`&&`/`||` do already compose narrowing recursively through nested
+conditions in general, which is why the `count()` example above
+composed correctly with no extra work, but a bare `assert(...)` call
+used as a sub-expression, not a top-level statement, still isn't
+recognized by `apply_narrowing`'s own dispatch at all); the multi-arg/
+argument-derived predicate targets (`is_a`, `class_exists`,
+`str_contains`). Also found and named, but deliberately not fixed in
+this pass: `array_is_list()` isn't a recognized narrowing predicate at
+all, so a `list<T>`-returning function whose own body proves list-ness
+via `is_array($x) && array_is_list($x)` (a real, common assertion-
+library idiom - `webmozart/assert`'s own `Assert::isList()`) can't
+have that proven by this project yet. Unlocks `ImpossibleCheckTypeHelper`/
+`FunctionCallRule`/`MethodCallRule`/`StaticMethodCallRule`,
+`ImpossibleInArrayHaystackFiniteTypesRule`, `ConstantNumericComparisonTypeTrait`,
+`UndecidedComparisonTypeTrait`, `ConstantScalarTypeTrait`,
+`SubstractableTypeTrait`, `AssertFunctionTypeSpecifyingExtension`,
+`PregMatchTypeSpecifyingExtension`, `CountFunctionTypeSpecifyingExtension`,
 `ClassExistsFunctionTypeSpecifyingExtension`, `IsAFunctionTypeSpecifyingExtension`,
 `IsSubclassOfFunctionTypeSpecifyingExtension`, `StrContainingTypeSpecifyingExtension`,
-`StrlenFunctionTypeSpecifyingExtension`. Size: XL - high value;
-redundant/impossible checks left over from refactors are a very common,
-high-signal real-world finding, and this fix compounds across every
-existing narrowing rule too (each currently fails inside `&&`/nested
-conditions).
+`StrlenFunctionTypeSpecifyingExtension` (`IsIterableFunctionTypeSpecifyingExtension`
+is the one already unlocked). Size: XL - high value; redundant/
+impossible checks left over from refactors are a very common, high-
+signal real-world finding.
 
 **Phase 56 - Grammar-level PHPDoc parser rewrite (NEW, PLANNED).**
 `docblock.rs` is a lenient, best-effort line/regex tokenizer that
