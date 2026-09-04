@@ -969,6 +969,30 @@ fn or_of_same_key_predicates_narrows_the_true_branch_to_their_union() {
 }
 
 #[test]
+fn an_or_of_instanceof_checks_on_the_same_variable_narrows_to_their_union() {
+    // Phase 51's own cast-validity check surfaced this real gap
+    // (latte/latte's own PrintContext::objectProperty/memberAsString,
+    // `$node instanceof A || $node instanceof B ? (string) $node :
+    // ...`) - or_chain_narrowing_target had no leaf for `instanceof` at
+    // all, so this fell all the way through to "no narrowing," and the
+    // cast was checked against the un-narrowed base class instead of
+    // the two Stringable subclasses proven by the condition.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Named extends Base { public function __toString(): string { return "n"; } }
+            class Ident extends Base { public function __toString(): string { return "i"; } }
+            function test(Base $node): string {
+                return $node instanceof Named || $node instanceof Ident
+                    ? (string) $node
+                    : "";
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn a_three_way_or_of_same_key_predicates_still_narrows() {
     let d = diagnostics_for(
         r#"<?php

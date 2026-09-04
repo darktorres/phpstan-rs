@@ -66,7 +66,7 @@ impl<'a> Checker<'a> {
             // actual restriction-checking; this arm only acts when it
             // succeeds.
             ExprKind::Binary(BinOp::Or, ..) if branch_true => {
-                if let Some((key, target_ty, repr_expr)) = or_chain_narrowing_target(cond) {
+                if let Some((key, target_ty, repr_expr)) = self.or_chain_narrowing_target(cond) {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
                     locals.insert(key, narrow_type_to(&current, &target_ty));
                 }
@@ -98,7 +98,7 @@ impl<'a> Checker<'a> {
             // on its own call to this same arm, mutating the one
             // shared `locals` for its own key only.
             ExprKind::Binary(BinOp::And, ..) if !branch_true => {
-                if let Some((key, target_ty, repr_expr)) = and_chain_narrowing_target(cond) {
+                if let Some((key, target_ty, repr_expr)) = self.and_chain_narrowing_target(cond) {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
                     locals.insert(key, narrow_type_to(&current, &target_ty));
                 }
@@ -883,23 +883,41 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
 /// `array_key_exists`, none of which are `narrowing_type_for_predicate`
 /// table entries, ...), the same conservative "give up" this project's
 /// narrowing already falls back to everywhere else.
-fn or_chain_narrowing_target(cond: &Expr) -> Option<(String, Type, &Expr)> {
-    match &cond.kind {
-        ExprKind::Binary(BinOp::Or, l, r) => {
-            let (lk, lt, le) = or_chain_narrowing_target(l)?;
-            let (rk, rt, _) = or_chain_narrowing_target(r)?;
-            (lk == rk).then(|| (lk, union_types(lt, rt), le))
+impl<'a> Checker<'a> {
+    fn or_chain_narrowing_target<'e>(&self, cond: &'e Expr) -> Option<(String, Type, &'e Expr)> {
+        match &cond.kind {
+            ExprKind::Binary(BinOp::Or, l, r) => {
+                let (lk, lt, le) = self.or_chain_narrowing_target(l)?;
+                let (rk, rt, _) = self.or_chain_narrowing_target(r)?;
+                (lk == rk).then(|| (lk, union_types(lt, rt), le))
+            }
+            ExprKind::Grouping(inner) => self.or_chain_narrowing_target(inner),
+            ExprKind::Call(callee, args) => {
+                let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice()) else {
+                    return None;
+                };
+                let key = narrowing_key(&single_arg.value)?;
+                let target_ty = narrowing_type_for_predicate(name)?;
+                Some((key, target_ty, &single_arg.value))
+            }
+            // A real, corpus-confirmed gap (Phase 51's own cast-validity
+            // check surfaced it: `$node instanceof A || $node instanceof
+            // B ? (string) $node : ...` cast-checked against the
+            // un-narrowed base type, since this whole match had no leaf
+            // for `instanceof` at all despite single-condition `if ($x
+            // instanceof Foo)` narrowing already working fine elsewhere -
+            // `latte/latte`'s own `PrintContext::objectProperty`/
+            // `memberAsString`). A dynamic target (`$x instanceof
+            // $className`) still doesn't name a concrete class to narrow
+            // to, same as the single-condition `ExprKind::Instanceof` arm
+            // above already requires.
+            ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name)) => {
+                let key = narrowing_key(inner)?;
+                let target_ty = self.resolve_name_expr(class_name);
+                Some((key, target_ty, inner))
+            }
+            _ => None,
         }
-        ExprKind::Grouping(inner) => or_chain_narrowing_target(inner),
-        ExprKind::Call(callee, args) => {
-            let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice()) else {
-                return None;
-            };
-            let key = narrowing_key(&single_arg.value)?;
-            let target_ty = narrowing_type_for_predicate(name)?;
-            Some((key, target_ty, &single_arg.value))
-        }
-        _ => None,
     }
 }
 
@@ -911,16 +929,18 @@ fn or_chain_narrowing_target(cond: &Expr) -> Option<(String, Type, &Expr)> {
 /// expression straight to `or_chain_narrowing_target` is exactly that
 /// double-negation, reusing its identical per-leaf predicate-table
 /// lookup and same-key union logic rather than duplicating either.
-fn and_chain_narrowing_target(cond: &Expr) -> Option<(String, Type, &Expr)> {
-    match &cond.kind {
-        ExprKind::Binary(BinOp::And, l, r) => {
-            let (lk, lt, le) = and_chain_narrowing_target(l)?;
-            let (rk, rt, _) = and_chain_narrowing_target(r)?;
-            (lk == rk).then(|| (lk, union_types(lt, rt), le))
+impl<'a> Checker<'a> {
+    fn and_chain_narrowing_target<'e>(&self, cond: &'e Expr) -> Option<(String, Type, &'e Expr)> {
+        match &cond.kind {
+            ExprKind::Binary(BinOp::And, l, r) => {
+                let (lk, lt, le) = self.and_chain_narrowing_target(l)?;
+                let (rk, rt, _) = self.and_chain_narrowing_target(r)?;
+                (lk == rk).then(|| (lk, union_types(lt, rt), le))
+            }
+            ExprKind::Grouping(inner) => self.and_chain_narrowing_target(inner),
+            ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner),
+            _ => None,
         }
-        ExprKind::Grouping(inner) => and_chain_narrowing_target(inner),
-        ExprKind::Unary(UnaryOp::Not, inner) => or_chain_narrowing_target(inner),
-        _ => None,
     }
 }
 
