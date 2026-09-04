@@ -1246,19 +1246,33 @@ whichever body loses that race (confirmed corpus-rare: 4 occurrences
 across the whole ~20,300-file corpus, all on the legacy-PHP branch of
 `symfony/polyfill-intl-normalizer`).
 
-**Phase 61 - Return-statement / control-flow completeness (NEW,
-PLANNED).** Two related gaps in return-path analysis: (a) nothing
-compares a function/method's fall-through-without-return status against
-its declared/PHPDoc return type (void/never/mixed exemptions, Generator
-`TReturn` via yield) even though `always_terminates()` already exists
-and is exercised for narrowing merges; (b) `never`-typed functions that
-actually reach a `return`, and "value returned from a void function,"
-have no dedicated diagnostic path (`stmt.rs`'s Return handling funnels
-everything through one generic mismatch path). Unlocks `MissingReturnRule`
-(wiring it to the declared return type), `FunctionReturnTypeCheck`'s
-never/void completeness half. Size: M - cheap-for-value; reuses an
-existing, exercised analysis rather than building new, and forgetting a
-`return` is a very common real bug.
+**Phase 61 - Return-statement / control-flow completeness
+(PARTIAL).** **Correction, verified against the current source**: (a),
+the fall-through-without-return check itself, was already implemented
+(`Checker::check_function`, using `always_terminates()` exactly as this
+entry originally proposed) - this entry's own status was simply never
+updated after it landed. The real remaining work was narrower: three
+shapes (a `never`-typed function/method reaching *any* `return` at all,
+value or bare, explicit or via fall-through; a `void` function returning
+a value; the ordinary fall-off-the-end case) were all funneled through
+one generic `return.type` mismatch, rather than real PHPStan's own
+dedicated `return.never`/`return.void`/`return.missing` identifiers and
+messages. Gave each its own, verified against the one new corpus
+location this surfaced (a `void` method delegating via `return
+$this->otherVoidMethod();`, confirmed genuinely flagged by real PHPStan
+itself too - `vendor/bin/phpstan` phrases it "returns null" where this
+project says "got void", a wording difference only).
+
+Done: `return.never`/`return.void`/`return.missing` on both an explicit
+`return` and the implicit fall-through case. Still open: a genuinely
+*empty* concrete method body (`function f(): int {}`) isn't
+distinguished from an abstract/interface method's own bodiless
+declaration (both parse to an empty statement list, and only a method's
+own `is_abstract` flag - not yet threaded through `check_function`'s
+signature - can tell them apart), so `return.missing` doesn't fire on
+it; Generator `TReturn` completeness (`@return Generator<...,...,
+TReturn>`'s own 4th argument) remains unmodeled, matching this
+project's existing, separately-documented generator simplification.
 
 **Phase 62 - Uninitialized-property / constructor dataflow (NEW,
 PLANNED).** No `ConstructorsHelper`-equivalent exists: nothing tracks
