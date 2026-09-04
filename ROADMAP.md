@@ -1571,17 +1571,51 @@ allowing a project to declare its own arbitrary restricted-symbol list;
 not attempted this phase).
 
 **Phase 68 - `array_filter`/`array_values`/duplicate-key no-op
-diagnostics (NEW, PLANNED).** Two cheap wins where the hard inference
-work is *already done* and only diagnostic emission is missing:
-`infer_array_literal_type` already detects duplicate literal-array keys
-for overwrite-semantics correctness but discards the fact;
-`array_filter`/`array_values`' precise return-type inference (falsy-
-narrowing, list-ness via `AccessoryKind::ArrayList`) already computes
-everything needed to detect a no-op call (already-list, all-truthy,
-empty input). Unlocks `DuplicateKeysInLiteralArraysRule`,
-`ArrayFilterRule`, `ArrayValuesRule`. Size: S - best effort-to-value
-ratio in the whole array/cast audit category; do this early and
-cheaply, independent of Phase 50's `Type::Array` rewrite.
+diagnostics (PARTIAL).** `array.duplicateKey` (`DuplicateKeysInLiteral
+ArraysRule`): a new `check_array_literal_duplicate_keys` walks the same
+key-derivation/auto-index logic `infer_array_literal_type` already has
+for its own overwrite-on-duplicate handling, but reports every duplicate
+found instead of silently discarding it (bails on the first non-literal
+key, same "don't guess" leniency). `arrayValues.empty`/`arrayValues.list`
+(`ArrayValuesRule`, both halves): a no-op both when the input is provably
+empty (an empty array literal - `is_known_empty_array`, new) and when
+it's already list-shaped (`is_list_like`, pre-existing). `arrayFilter.
+empty` only, of `ArrayFilterRule`'s three sub-checks: `arrayFilter.same`/
+`arrayFilter.alwaysEmpty` (gated on the array's own *element* type being
+provably always-truthy/always-falsy) were dropped after corpus
+verification caught two live false positives from trusting that element
+type - a dynamic-key index-assignment inside a loop's `if`-branch not
+correctly widening the tracked type across the branch
+(`vendor/symfony/var-exporter/ProxyHelper.php`'s `$abstractProperties[
+$name] = new \ReflectionProperty(...)` vs `$abstractProperties[$name] =
+false;`, inferred as bare `array<false>` with the object-valued branch
+missing entirely), and a `try { $x = ...; } finally { array_filter([...,
+$x]); }` shape not accounting for the assignment inside `try` possibly
+never running (Piwigo's own `tests/Integration/GroupServiceTest.php`,
+`$copyId = null;` reassigned only conditionally inside `try`, inferred as
+bare `GroupId` with the `null` branch dropped) - both real, pre-existing
+gaps in this project's own variable-type tracking, out of scope for this
+"cheap win" phase; see `check_array_filter_no_op`'s own doc comment.
+
+A real bug was found and fixed along the way, via the exact same corpus
+verification: `strip_accessory_markers` (shared by `array_filter`'s
+arbitrary-callback case, `array_combine`, and `array_unique` to drop
+list-ness/non-emptiness markers none of them can guarantee) only ever
+stripped a *bare* `Intersection` - a `Union` branch (the real shape a
+loop-conditionally-appended array literal gets, e.g. `non-empty-list<T>|
+array{}`) fell straight through untouched, leaving every member's own
+marker in place. Fixed by recursing into `Union` members too. Fixing it
+also surfaced one previously-masked genuine `argument.type` finding in
+`vendor/rector/rector` (passing a non-list `array<T>` where `UnionType`'s
+own constructor declares `list<Type>`).
+
+Corpus-verified: 50097 -> 50138 diagnostics (+41: 29 `arrayValues.list`,
+11 `arrayValues.empty`, 1 `argument.type` - the rector finding above),
+all spot-checked genuine, including several in Piwigo's own first-party
+`src/Piwigo/` code (not just vendored noise) - e.g. `SearchService::
+positionalCondition` building `$values` via nothing but list-preserving
+mutations (`[]=` append, `[...$values, ...$value]` spread) before an
+unnecessary final `array_values()`.
 
 **Phase 69 - printf/sprintf/scanf format-string family completion
 (NEW, PLANNED).** `parse_format_specifiers`/`format_specifier_accepts`/
