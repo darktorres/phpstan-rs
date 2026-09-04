@@ -392,6 +392,7 @@ pub(crate) use assignment::{
     is_superglobal, literal_string_key, literal_string_value, superglobal_default_type,
 };
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
+pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{body_contains_yield, merge_scopes};
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
 // Only ever called by `union_types` itself in real code (`checker/expr.rs`) -

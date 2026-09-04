@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
     Checker, Locals, literal_string_key, narrow_type_excluding, narrow_type_excluding_falsy,
-    narrow_type_to, resolve_call_args,
+    narrow_type_to, resolve_call_args, to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
 use crate::types::{self, AccessoryKind, Type};
@@ -36,6 +36,11 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Type {
         match name {
+            // Phase 51: real PHPStan's own `AbsFunctionDynamicReturnTypeExtension`
+            // - delegates entirely to `Type::toAbsoluteNumber()`.
+            "abs" if args.len() == 1 => {
+                return to_absolute_number(&self.infer_expr(&args[0].value, locals));
+            }
             // `range()`'s own real stub (phpstorm-stubs' `@return array` -
             // no refinement at all) gives no list-ness/element-type
             // information whatsoever, but real PHPStan special-cases this

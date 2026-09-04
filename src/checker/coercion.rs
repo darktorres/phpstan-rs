@@ -169,6 +169,57 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// `abs($x)` - mirrors real PHPStan's own `IntegerRangeType::
+/// toAbsoluteNumber()` exactly (including its own `PHP_INT_MIN`
+/// overflow special case: negating it would overflow, so its own
+/// absolute value is treated as unbounded, the same as an already-
+/// unbounded lower bound). Falls back to the stub's own generic
+/// `int|float` return type for anything this can't narrow (a plain,
+/// unbounded `Int`/`Float`, or any non-numeric type - the latter is
+/// already an argument-type error the ordinary call-argument check
+/// catches, not something this function needs to gate separately).
+pub(crate) fn to_absolute_number(ty: &Type) -> Type {
+    match ty {
+        Type::IntRange(min, max) => {
+            if min.is_some_and(|m| m >= 0) {
+                return ty.clone();
+            }
+            let inversed_min = min.filter(|&m| m != i64::MIN).map(|m| -m);
+            if max.is_none_or(|m| m >= 0) {
+                let upper = match (inversed_min, *max) {
+                    (Some(im), Some(mx)) => Some(im.max(mx)),
+                    _ => None,
+                };
+                Type::IntRange(Some(0), upper)
+            } else {
+                Type::IntRange(Some(-max.expect("max < 0 is always Some")), inversed_min)
+            }
+        }
+        Type::IntLiteral(n) => Type::IntLiteral(n.saturating_abs()),
+        Type::FloatLiteral(f) => Type::FloatLiteral(f.abs()),
+        Type::Union(members) => members
+            .iter()
+            .map(to_absolute_number)
+            .reduce(union_types)
+            .unwrap_or_else(|| ty.clone()),
+        Type::Int | Type::Float => ty.clone(),
+        _ => Type::Union(vec![Type::Int, Type::Float]),
+    }
+}
+
+/// `~$x` (`UnaryOp::BitNot`) on an int-range-typed operand. Mirrors real
+/// PHPStan's own `IntegerRangeType::toBitwiseNotType()`: bitwise NOT
+/// reverses ordering (`~min` is the new max, `~max` is the new min),
+/// since negating a larger magnitude number produces a smaller (more
+/// negative) two's-complement result.
+pub(crate) fn to_bitwise_not(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::IntRange(min, max) => Some(Type::IntRange(max.map(|m| !m), min.map(|m| !m))),
+        Type::IntLiteral(n) => Some(Type::IntLiteral(!n)),
+        _ => None,
+    }
+}
+
 /// A union's own cast validity: real PHPStan's `UnionType::toInteger()`/
 /// etc. combine each member's own result via `TypeCombinator`, and
 /// `InvalidCastRule` only flags when the *combined* result is exactly

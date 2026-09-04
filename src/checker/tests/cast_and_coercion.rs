@@ -253,3 +253,128 @@ fn casting_a_gmp_instance_to_string_int_and_float_is_never_flagged() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 51: IntegerRangeType completion - abs()/toAbsoluteNumber() and
+// `~`/toBitwiseNotType().
+
+#[test]
+fn abs_of_a_negative_range_computes_the_real_reflected_range() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsExact(int $x): void {}
+            /** @param int<-10, -1> $x */
+            function test(int $x): void {
+                $y = abs($x);
+                /** @var int<1, 10> $y */
+                needsExact($y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+    // A target range one narrower than the real result must still be
+    // rejected - proves the computed range is exact, not just "some
+    // unbounded positive int".
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<1, 9> $x */
+            function needsNarrower(int $x): void {}
+            /** @param int<-10, -1> $x */
+            function test(int $x): void {
+                needsNarrower(abs($x));
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("int<1, 10>"), "got: {d:?}");
+}
+
+#[test]
+fn abs_of_an_already_non_negative_range_is_unchanged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, 9> $x */
+            function needsNarrower(int $x): void {}
+            /** @param int<0, 10> $x */
+            function test(int $x): void {
+                needsNarrower(abs($x));
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("int<0, 10>"), "got: {d:?}");
+}
+
+#[test]
+fn abs_of_a_range_straddling_zero_takes_the_larger_magnitude_bound() {
+    // abs(int<-3, 10>) is int<0, 10> - 10 is the larger magnitude, not 3.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, 9> $x */
+            function needsNarrower(int $x): void {}
+            /** @param int<-3, 10> $x */
+            function test(int $x): void {
+                needsNarrower(abs($x));
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("int<0, 10>"), "got: {d:?}");
+}
+
+#[test]
+fn abs_of_a_plain_int_literal_computes_its_own_absolute_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param 4 $x */
+            function needsFour(int $x): void {}
+            function test(): void {
+                needsFour(abs(-5));
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("expects 4, 5 given"), "got: {d:?}");
+}
+
+#[test]
+fn bitwise_not_of_an_int_range_reverses_and_complements_the_bounds() {
+    // ~int<a, b> = int<~b, ~a> (order reverses).
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<-11, -1> $x */
+            function needsNarrower(int $x): void {}
+            /** @param int<0, 10> $x */
+            function test(int $x): void {
+                needsNarrower(~$x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<-11, -2> $x */
+            function needsNarrower(int $x): void {}
+            /** @param int<0, 10> $x */
+            function test(int $x): void {
+                needsNarrower(~$x);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("int<-11, -1>"), "got: {d:?}");
+}
+
+#[test]
+fn bitwise_not_of_a_plain_unbounded_int_or_string_is_unchanged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(int $i, string $s): void {
+                $a = ~$i;
+                $b = ~$s;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

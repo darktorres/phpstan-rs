@@ -3,7 +3,7 @@ use crate::checker::{
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, TemplateBindings, body_contains_yield,
     is_language_construct, is_real_variable_key, is_superglobal, literal_string_key,
     literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
-    purge_stale_narrowing_for, resolve_call_args, superglobal_default_type,
+    purge_stale_narrowing_for, resolve_call_args, superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -642,9 +642,18 @@ impl<'a> Checker<'a> {
                     other => other,
                 }
             }
-            ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) => {
-                self.check_expr(inner, locals, label)
+            // Phase 51: `IntegerRangeType::toBitwiseNotType()` - `~5`/
+            // `~$x` on a known int-literal/range-typed operand computes
+            // the real, order-reversed complement range instead of just
+            // passing the operand's own type through unchanged (still
+            // correct, if imprecise, for a plain unbounded `Int`/
+            // `String` - `~"hello"` is a real, still-string byte
+            // complement).
+            ExprKind::Unary(UnaryOp::BitNot, inner) => {
+                let inner_ty = self.check_expr(inner, locals, label);
+                to_bitwise_not(&inner_ty).unwrap_or(inner_ty)
             }
+            ExprKind::Grouping(inner) => self.check_expr(inner, locals, label),
             ExprKind::Cast(ty, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_cast_validity(ty, &inner_ty, inner.span, label);
@@ -1707,6 +1716,10 @@ impl<'a> Checker<'a> {
                     Type::String | Type::StringLiteral(_) => Type::Int,
                     other => other,
                 }
+            }
+            ExprKind::Unary(UnaryOp::BitNot, inner) => {
+                let inner_ty = self.infer_expr(inner, locals);
+                to_bitwise_not(&inner_ty).unwrap_or(inner_ty)
             }
             ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
             ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),
