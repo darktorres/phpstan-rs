@@ -849,24 +849,39 @@ first time thanks to this phase's own contextual injection, catching a
 narrowing gap keeps this project from confidently ruling out).
 
 **Phase 54 - Generic template richness (`TemplateParam` bound/scope/
-variance rewrite) (NEW, PLANNED).** `Type::TemplateParam(String)`
-(`src/types.rs:~60`) is a bare name with no bound, scope, variance, or
-default - one flat placeholder standing in for ~19 of PHPStan's
-bound-specific `Template*Type` subclasses plus the `TemplateType`
-interface/trait. An unbound template can never be used as its own
-bound's type (indexed as an array, compared as a bool, treated as its
-bound's object methods) prior to substitution; it just becomes an
-opaque name until `class_template_bindings`/`substitute_template`
-resolve it. Add a `bound: Box<Type>` field (plus scope/variance/
-default), rewrite `substitute_template`/`class_template_bindings`/
-`check_variance` (`src/checker/generics.rs`) to compose variance
-through nested generics instead of the current flat class-level
-`covariant_templates`/`contravariant_templates` name-sets, and add
-`@template T = Default` PHPDoc parsing (currently silently dropped).
+variance rewrite) (PARTIAL).** `Type::TemplateParam(String)`
+(`src/types.rs:~60`) used to be a bare name with no bound, scope,
+variance, or default - one flat placeholder standing in for ~19 of
+PHPStan's bound-specific `Template*Type` subclasses plus the
+`TemplateType` interface/trait. An unbound template could never be
+used as its own bound's type (indexed as an array, compared as a bool,
+treated as its bound's object methods) prior to substitution; it just
+became an opaque name until `class_template_bindings`/`substitute_
+template` resolved it.
 
-This is the single largest cluster by class count in the whole audit -
-PHPStan splits "template bound to X" into ~19 concrete subclasses where
-phpstan-rs uses one variant. Unlocks the 19-class `Template*Type`
+**Done** (completed in an earlier pilot batch - this entry itself was
+just never updated to reflect it until now): `Type::TemplateParam`
+carries a real `TemplateParam` struct (`name`/`bound: Box<Type>`/
+`variance`/`scope`/`default`) inside the variant itself, not a bare
+`String`; `is_subtype`'s `TemplateParam` arm is bound-aware on the
+`sub` side (an unresolved `T` is a subtype of whatever its own
+declared bound is a subtype of, not an unconditional "always
+compatible" escape hatch); `@template T = Default` PHPDoc parsing
+(previously silently dropped) is threaded through so an erased generic
+reference falls back to its own declared default instead of
+unconditionally `Mixed`.
+
+**Still open**: `substitute_template`/`class_template_bindings`/
+`check_variance` (`src/checker/generics.rs`) still read the old flat,
+class-level `covariant_templates`/`contravariant_templates` name-sets
+(`ClassInfo`, `registry/class_info.rs`) rather than each `TemplateParam`'s
+own new `variance` field, so variance still doesn't compose through
+*nested* generics (`Collection<T>` embedded inside another generic's
+own type argument) - the rewrite that was this phase's own second half
+never happened. This is still the single largest cluster by class
+count in the whole audit - PHPStan splits "template bound to X" into
+~19 concrete subclasses where phpstan-rs uses one variant. Unlocks the
+19-class `Template*Type`
 family (`TemplateArrayType`, `TemplateBooleanType`,
 `TemplateConstantArrayType`, `TemplateConstantIntegerType`,
 `TemplateConstantStringType`, `TemplateFloatType`,
