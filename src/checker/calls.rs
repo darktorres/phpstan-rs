@@ -961,6 +961,37 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 71: `RandomIntParametersRule`, narrowed to its plain-
+    /// literal-arguments case (real PHPStan's own version also handles
+    /// an `IntegerRangeType`-typed argument - this project has no such
+    /// type, so a non-literal argument is silently skipped, the usual
+    /// "don't guess" leniency). Confirmed directly via `php`:
+    /// `random_int(10, 1)` throws a real, unconditional `ValueError` at
+    /// call time ("Argument #1 ($min) must be less than or equal to
+    /// argument #2 ($max)") whenever `$min` is greater than `$max` -
+    /// `$min == $max` is fine (a degenerate but legal single-value
+    /// range).
+    pub(crate) fn check_random_int_call(&mut self, args: &[Arg], locals: &Locals, label: &str) {
+        if args.len() < 2 {
+            return;
+        }
+        let min_ty = self.infer_expr(&args[0].value, locals);
+        let max_ty = self.infer_expr(&args[1].value, locals);
+        if let (Type::IntLiteral(min), Type::IntLiteral(max)) = (min_ty, max_ty)
+            && min > max
+        {
+            self.report(
+                label.to_string(),
+                format!(
+                    "random_int(): parameter #1 ($min = {min}) must be less than or equal to parameter #2 ($max = {max})"
+                ),
+                args[0].value.span,
+                0,
+                "argument.type",
+            );
+        }
+    }
+
     /// Phase 71: `DefineParametersRule` - `define()`'s own third
     /// `$case_insensitive` argument stopped doing anything as of PHP
     /// 8.0 (case-insensitive constants were removed entirely), confirmed

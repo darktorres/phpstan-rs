@@ -64,3 +64,65 @@ fn a_plain_two_argument_define_is_never_flagged() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// `argument.type` - random_int()'s $min must be <= $max, confirmed
+// directly via php as a real, unconditional ValueError at call time.
+
+#[test]
+fn random_int_with_min_greater_than_max_is_flagged() {
+    let d = diagnostics_for(r#"<?php random_int(10, 1);"#);
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("random_int")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn random_int_case_insensitive_call_name_is_still_checked() {
+    let d = diagnostics_for(r#"<?php RANDOM_INT(10, 1);"#);
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("random_int")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn random_int_with_min_less_than_max_is_never_flagged() {
+    let d = diagnostics_for(r#"<?php random_int(1, 10);"#);
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("random_int")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn random_int_with_equal_min_and_max_is_never_flagged() {
+    // A degenerate but legal single-value range.
+    let d = diagnostics_for(r#"<?php random_int(5, 5);"#);
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("random_int")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn random_int_with_a_non_literal_argument_is_never_flagged() {
+    // Don't guess - no IntegerRangeType in this project's own type
+    // system to reason about a non-literal argument's own bounds.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $max) {
+                random_int(10, $max);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("random_int")),
+        "unexpected diagnostics: {d:?}"
+    );
+}

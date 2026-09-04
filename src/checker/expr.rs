@@ -487,6 +487,14 @@ impl<'a> Checker<'a> {
                         {
                             self.check_define_third_argument(args, e.span, label);
                         }
+                        if name
+                            .rsplit('\\')
+                            .next()
+                            .unwrap_or(name)
+                            .eq_ignore_ascii_case("random_int")
+                        {
+                            self.check_random_int_call(args, locals, label);
+                        }
                     } else {
                         // Since resolve_function_candidates always
                         // produces a definite name (there's no "can't
