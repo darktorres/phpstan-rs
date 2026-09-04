@@ -1429,20 +1429,40 @@ phase), though Phase 57's own `PropertySig.visibility` field this
 phase's method half also leaned on is already in place.
 
 **Phase 65 - Declaration-site modifier-consistency + constructor-shape
-checks (NEW, PLANNED).** A batch of small, independent boolean-flag-
-combination checks the parser currently accepts leniently where real
-PHP would fatal at compile time (phpstan-rs's own parser is more
-permissive than the PHP engine): abstract-in-non-abstract-class,
-private-abstract, final-private, interface-method-visibility,
-constructor declaring a return type, `$this` reassignment/`global`/
-`static`-declaration, reserved class-constant name `class`, class-
-constant `final`/visibility/native-type modifiers not currently tracked
-on `ClassConst`. Unlocks `AbstractMethodInNonAbstractClassRule`,
-`AbstractPrivateMethodRule`, `FinalPrivateMethodRule`,
-`MethodVisibilityInInterfaceRule`, `ConstructorReturnTypeRule`,
-`ClassAsClassConstantRule`, `FinalConstantRule`, `FinalPrivateConstantRule`,
-`NativeTypedClassConstantRule`, `InvalidVariableAssignRule`,
-`ThisInGlobalStatementRule`, `ThisInStaticStatementRule`. Size: S-M per
+checks (PARTIAL).** Landed nine of the batch's own small, independent
+boolean-flag-combination checks, all confirmed directly against real
+`php -l` as genuine, unconditional compile-time fatal errors (or, for
+one, a warning) this project's own parser is deliberately more lenient
+about than the real engine: abstract-in-non-abstract-class
+(`method.abstract`, with the enum `cases()`/`from()`/`tryFrom()`
+exemption), private-abstract (`method.abstractPrivate`, every interface
+method counted as implicitly abstract since real PHP actually *forbids*
+writing the literal `abstract` keyword on one), final-private
+(`method.finalPrivate` - a warning, not a fatal error; `__construct`
+exempt as a real, common private-final-constructor singleton idiom),
+interface-method-visibility (`method.visibility`, sharing the same
+identifier Phase 64's own override-narrowing check uses, matching real
+PHPStan's own deliberate choice), constructor declaring a return type
+(`constructor.returnType`), `$this` reassignment/`global`/`static`-
+declaration (`assign.this`/`global.this`/`static.this`), and reserved
+class-constant name `class` (`classConstant.class`). Corpus-verified:
+one genuine finding is a deliberately-broken Tracy debugger demo file
+(`$this = 2;` at top level, literally named `E_COMPILE_ERROR.php`) -
+exactly the "static analyzer tolerates code that was never meant to
+run" value case this whole batch (and Phases 60/63/64's own similar
+additions) shares.
+
+Still open: class-constant `final`/visibility/native-type modifiers -
+unlike every other item in this batch, this one needs new AST fields on
+`ClassConst` (it currently carries none of the three) rather than just
+reading fields the parser already populates, a real, if still S-M-sized,
+prerequisite this pass didn't absorb. Unlocks (done pieces already
+built): `AbstractMethodInNonAbstractClassRule`, `AbstractPrivateMethodRule`,
+`FinalPrivateMethodRule`, `MethodVisibilityInInterfaceRule`,
+`ConstructorReturnTypeRule`, `ClassAsClassConstantRule`,
+`InvalidVariableAssignRule`, `ThisInGlobalStatementRule`,
+`ThisInStaticStatementRule`; (still open) `FinalConstantRule`,
+`FinalPrivateConstantRule`, `NativeTypedClassConstantRule`. Size: S-M per
 item; batched as one phase since none has any shared blocker beyond
 Phase 38's PhpVersion gate for two of the const-modifier sub-checks.
 
