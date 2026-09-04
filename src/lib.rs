@@ -24,6 +24,6 @@ pub mod registry;
 pub mod token;
 pub mod types;
 
-pub use checker::{Checker, Diagnostic};
+pub use checker::{Checker, Diagnostic, DiagnosticBuilder, DiagnosticFix};
 pub use project::Project;
 pub use registry::Registry;

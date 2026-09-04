@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::pest_config;
@@ -67,12 +67,171 @@ pub(crate) type TemplateBindings = std::collections::HashMap<String, Type>;
 /// type engine, not level-gated - placed here as this project's own
 /// "advanced, opt-in" tier, alongside real PHPStan's missing-typehints
 /// level).
+///
+/// Phase 47: four fields grew to eight, mirroring what real PHPStan's own
+/// `RuleError` implementations (`Message`/`RuleErrorBuilder`'s product) can
+/// carry beyond a bare message - `identifier` is what `@phpstan-ignore
+/// <identifier>` (Phase 44, not yet implemented) will need to match
+/// against, CI output formats (Phase 16) want it for machine consumption,
+/// `tip`/`non_ignorable`/`metadata`/`fix` are the same shape real
+/// PHPStan's own JSON error format exposes. Every existing 4-field call
+/// site still compiles unchanged in spirit - `Checker::report` keeps its
+/// old positional shape, just with one more required argument
+/// (`identifier`) - while a call site that also wants a tip/fix/metadata
+/// goes through `DiagnosticBuilder` (`Checker::report_builder`) instead.
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub location: String,
     pub message: String,
     pub span: Span,
     pub level: u8,
+    /// A dot-separated, PHPStan-style machine identifier for this
+    /// diagnostic's *kind* (e.g. `"argument.type"`, `"class.notFound"`,
+    /// `"return.type"`) - stable across occurrences of the same underlying
+    /// problem, unlike `message`, which embeds the specific types/names
+    /// involved. Never empty in practice (every real call site names one),
+    /// but not a real PHPStan identifier list lookalike guaranteed to
+    /// match phpstan/phpstan's own strings one-for-one - chosen for
+    /// internal consistency within this project, reusing real PHPStan's
+    /// own spelling where this project's own audit was confident of it.
+    pub identifier: String,
+    /// An optional one-line, human-facing hint appended below the main
+    /// message - real PHPStan's own "💡 Tip: ..." line (`RuleErrorBuilder
+    /// ::tip()`). Rare: most diagnostics are self-explanatory, so most
+    /// call sites leave this `None`.
+    pub tip: Option<String>,
+    /// Mirrors real PHPStan's own `RuleErrorBuilder::nonIgnorable()`: when
+    /// `true`, this diagnostic must never be suppressible via a future
+    /// `@phpstan-ignore <identifier>` (Phase 44) - the same reason real
+    /// PHPStan reserves it for a handful of its own rules (e.g. flagging a
+    /// malformed `@phpstan-ignore` comment itself, which obviously can't
+    /// be ignored away by another one). Defaults to `false`; nothing in
+    /// this project sets it yet, since Phase 44 doesn't exist to consume
+    /// it - the field exists so that phase doesn't also need a struct
+    /// change.
+    pub non_ignorable: bool,
+    /// Free-form structured data a rule wants attached to its own
+    /// diagnostic without inventing a new `Diagnostic` field for it -
+    /// mirrors real PHPStan's own `RuleErrorBuilder::metadata()` (consumed
+    /// there by e.g. its `bleedingEdge` collectors). Empty for every
+    /// current call site; a `HashMap` (not `Vec<(String, Value)>`) since a
+    /// consumer looks up one known key, never iterates all of them.
+    pub metadata: HashMap<String, serde_json::Value>,
+    /// A suggested textual auto-fix, when this diagnostic's rule can
+    /// propose one - the data-model half of real PHPStan's own
+    /// `RuleErrorBuilder::fixNode()` (which hands back a *replacement AST
+    /// node*; this project has no code-generation-from-AST facility to
+    /// mirror that with, so a fix here is a literal source-text
+    /// replacement over a `Span` instead). No current call site
+    /// constructs one - a real auto-fix command (reading this field and
+    /// rewriting files) is future work, same as `non_ignorable` above.
+    pub fix: Option<DiagnosticFix>,
+}
+
+/// A single suggested textual replacement: replace whatever source text
+/// `span` covers with `replacement`. `description` is a short human label
+/// for the fix itself (real PHPStan's own fixer CLI output shows one per
+/// applied fix, e.g. "Add missing return statement").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticFix {
+    pub span: Span,
+    pub replacement: String,
+    pub description: String,
+}
+
+/// Fluent assembly for a [`Diagnostic`] - the Rust-idiomatic equivalent of
+/// real PHPStan's own `RuleErrorBuilder`
+/// (`RuleErrorBuilder::message(...)->identifier(...)->tip(...)->build()`).
+/// A plain diagnostic with no tip/metadata/fix still goes through this
+/// (via `Checker::report`, which is a thin wrapper around it) - one real
+/// construction path for every `Diagnostic`, not two independently
+/// maintained ones.
+///
+/// Consumed by value (`build(self)`, each setter takes/returns `Self`),
+/// matching real PHPStan's own chain rather than `&mut self` - a
+/// `DiagnosticBuilder` is always a short-lived, single-use expression built
+/// and immediately consumed at one `self.report_builder(...)` call site,
+/// never stored or branched on mid-construction.
+pub struct DiagnosticBuilder {
+    location: String,
+    message: String,
+    span: Span,
+    level: u8,
+    identifier: String,
+    tip: Option<String>,
+    non_ignorable: bool,
+    metadata: HashMap<String, serde_json::Value>,
+    fix: Option<DiagnosticFix>,
+}
+
+impl DiagnosticBuilder {
+    /// `identifier` is required up front, not a later `.identifier(...)`
+    /// call like real PHPStan's own builder allows omitting - every call
+    /// site in this project was written (or rewritten, Phase 47) knowing
+    /// its own identifier, so there's no "forgot to set it" state worth
+    /// representing.
+    pub fn new(
+        location: impl Into<String>,
+        message: impl Into<String>,
+        span: Span,
+        level: u8,
+        identifier: impl Into<String>,
+    ) -> Self {
+        DiagnosticBuilder {
+            location: location.into(),
+            message: message.into(),
+            span,
+            level,
+            identifier: identifier.into(),
+            tip: None,
+            non_ignorable: false,
+            metadata: HashMap::new(),
+            fix: None,
+        }
+    }
+
+    pub fn tip(mut self, tip: impl Into<String>) -> Self {
+        self.tip = Some(tip.into());
+        self
+    }
+
+    pub fn non_ignorable(mut self) -> Self {
+        self.non_ignorable = true;
+        self
+    }
+
+    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn fix(
+        mut self,
+        span: Span,
+        replacement: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        self.fix = Some(DiagnosticFix {
+            span,
+            replacement: replacement.into(),
+            description: description.into(),
+        });
+        self
+    }
+
+    pub fn build(self) -> Diagnostic {
+        Diagnostic {
+            location: self.location,
+            message: self.message,
+            span: self.span,
+            level: self.level,
+            identifier: self.identifier,
+            tip: self.tip,
+            non_ignorable: self.non_ignorable,
+            metadata: self.metadata,
+            fix: self.fix,
+        }
+    }
 }
 
 /// Walks function/method bodies, inferring a best-effort type for each
@@ -256,17 +415,31 @@ impl<'a> Checker<'a> {
         self.pest_hook_properties = props;
     }
 
-    /// Every diagnostic this checker emits goes through here - replaces
-    /// 38 hand-written `Diagnostic { location, message, span, level }`
-    /// literals (all sharing this exact 4-field shape) with one call
-    /// site.
-    pub(crate) fn report(&mut self, location: String, message: String, span: Span, level: u8) {
-        self.diagnostics.push(Diagnostic {
-            location,
-            message,
-            span,
-            level,
-        });
+    /// The plain-message path every call site that needs nothing beyond
+    /// `identifier` goes through - a thin wrapper over `DiagnosticBuilder`
+    /// (Phase 47) so there's still exactly one place a `Diagnostic` is
+    /// actually assembled. `identifier` is `&str` here (not
+    /// `impl Into<String>` the way `DiagnosticBuilder::new` takes it) so
+    /// every call site can keep passing a `&'static str` literal
+    /// (`"argument.type"`, ...) without an extra `.to_string()`.
+    pub(crate) fn report(
+        &mut self,
+        location: String,
+        message: String,
+        span: Span,
+        level: u8,
+        identifier: &str,
+    ) {
+        self.diagnostics
+            .push(DiagnosticBuilder::new(location, message, span, level, identifier).build());
+    }
+
+    /// The builder path - for a call site that also wants a `tip`, a
+    /// `fix`, `metadata`, or `non_ignorable`, none of which `report`'s own
+    /// positional signature has room for without every plain call site
+    /// paying for arguments it never uses.
+    pub(crate) fn report_builder(&mut self, builder: DiagnosticBuilder) {
+        self.diagnostics.push(builder.build());
     }
 
     pub fn into_diagnostics(mut self) -> Vec<Diagnostic> {
@@ -638,6 +811,7 @@ impl<'a> Checker<'a> {
                     format!("return type mismatch: expected {expected}, got null"),
                     f.span,
                     3,
+                    "return.type",
                 );
             }
         }
