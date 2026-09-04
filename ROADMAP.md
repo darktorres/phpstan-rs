@@ -1653,14 +1653,47 @@ full test suite (including new positional/`fprintf`/`vsprintf`-specific
 tests) and a direct multi-shape repro both confirm the new checks fire
 correctly with zero regressions.
 
-**Phase 70 - Generator/yield type modeling (NEW, PLANNED).** No
-`Generator<K, V, TSend, TReturn>` type shape exists; `yield`/`yield
-from` (`src/checker/expr.rs:656-680`) both return `Type::Mixed`
-unconditionally and are never compared against the enclosing function's
-declared return type. Add the generic shape and wire it into key/
-value/`TSend` checking plus yield-outside-a-function/wrong-return-type
-validation. Unlocks `YieldFromTypeRule`, `YieldInGeneratorRule`,
-`YieldTypeRule`. Size: L.
+**Phase 70 - Generator/yield type modeling (PARTIAL).** No `Generator<K,
+V, TSend, TReturn>` type shape exists yet; `yield`/`yield from` still
+both return `Type::Mixed` unconditionally. What's landed instead is
+`YieldInGeneratorRule`'s own declared-return-type-compatibility check
+(`generator.returnType`, new `Checker::check_generator_return_type` +
+free `type_allows_generator_return`), wired into every place this
+project already tracks `current_function_is_generator`: named
+functions/methods, `Closure` literals (both existing call sites), and -
+a previously-unwired gap, closed here - arrow functions (needed a new
+`expr_contains_yield`, the expression-bodied counterpart of
+`body_contains_yield`). Confirmed directly via `php`/`php -l` as a real,
+unconditional fatal error at *compile* time: `function f(): int { yield
+1; }` fails to parse at all ("Generator return type must be a supertype
+of Generator, int given"). `type_allows_generator_return` mirrors real
+PHP's own surprisingly lenient engine-level check exactly (confirmed
+directly): only *one* member of a union needs to be `Traversable`-
+compatible, not all of them - `int|Generator` is genuinely accepted, and
+`?Generator` too. A real bug was found and fixed via corpus verification
+before shipping: the check must use the function's *native* return type
+(`FunctionSig::return_type_native`, not `return_type`, the PHPDoc-
+refined type "PHPDoc wins" everywhere else in `check_function`) - a
+`@return Transformation[]` docblock on a `: iterable`-typed generator (a
+real, common shape - `vendor/doctrine/inflector`'s own `Inflectible::
+getSingular()` and 83 near-identical siblings) describes what iterating
+it produces, not a redeclaration of the native type, and produced 84
+false positives before this fix.
+
+Deliberately narrow slice of the full generic shape real PHPStan models:
+checking each `yield`'s own key/value against `K`/`V`, a sent-in value's
+type against `TSend`, and a `return` statement inside a generator
+against `TReturn` are all still open - the low real-world `yield`
+incidence found in this project's own Piwigo corpus (2 first-party call
+sites total) doesn't justify the full architecture yet. Unlocks
+`YieldInGeneratorRule` in full; `YieldFromTypeRule`/`YieldTypeRule` still
+need the generic shape. Corpus-verified: 50138 diagnostics either way
+(zero delta) after the fix - every real generator in the ~20,300-file
+corpus already declares a compatible native return type, so this
+phase's new check stays correctly silent throughout; correctness
+confirmed instead via `php -l` cross-verification, a direct multi-shape
+repro, and 19 new unit tests (including the exact false-positive shape
+found and fixed).
 
 **Phase 71 - Small self-contained builtin checks batch (`call_user_func`,
 `random_int`, `preg_quote`, and others) (NEW, PLANNED).** Batch of
