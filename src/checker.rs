@@ -582,6 +582,8 @@ impl<'a> Checker<'a> {
                     self.check_trait_conflicts(&fqn, c.span);
                     self.check_uninitialized_properties(&fqn, c);
                     self.check_duplicate_class_members(&fqn, c);
+                    self.check_method_declaration_sanity(&fqn, c.kind, c.is_abstract, &c.methods);
+                    self.check_reserved_class_constant_name(&fqn, &c.consts);
                     // Phase 37: the class's own attributes, plus every
                     // property's/const's - method/param attributes are
                     // checked per-declaration inside `check_function`
@@ -635,6 +637,8 @@ impl<'a> Checker<'a> {
                     self.check_enum_case_values(&fqn, e);
                     self.check_trait_conflicts(&fqn, e.span);
                     self.check_duplicate_enum_members(&fqn, e);
+                    self.check_method_declaration_sanity(&fqn, ClassKind::Enum, false, &e.methods);
+                    self.check_reserved_class_constant_name(&fqn, &e.consts);
                     self.check_attributes(&e.attrs, &fqn);
                     for case in &e.cases {
                         self.check_attributes(&case.attrs, &fqn);

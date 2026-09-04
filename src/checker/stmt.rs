@@ -676,11 +676,38 @@ impl<'a> Checker<'a> {
             // using it afterward isn't flagged as undefined.
             StmtKind::Global(names) => {
                 for name in names {
+                    // Phase 65: `$this` is real PHP's own implicitly-
+                    // bound reference, not a real global - "Cannot use
+                    // $this as global variable." is a real,
+                    // unconditional fatal error, confirmed directly.
+                    if name == "this" {
+                        self.report(
+                            label.to_string(),
+                            "cannot use $this as global variable".to_string(),
+                            stmt.span,
+                            0,
+                            "global.this",
+                        );
+                        continue;
+                    }
                     locals.entry(name.clone()).or_insert(Type::Mixed);
                 }
             }
             StmtKind::StaticVar(vars) => {
                 for (name, default) in vars {
+                    // Phase 65: same idea as `global $this;` just above -
+                    // "Cannot use $this as static variable.", confirmed
+                    // directly.
+                    if name == "this" {
+                        self.report(
+                            label.to_string(),
+                            "cannot use $this as static variable".to_string(),
+                            stmt.span,
+                            0,
+                            "static.this",
+                        );
+                        continue;
+                    }
                     let ty = default
                         .as_ref()
                         .map(|e| self.check_expr(e, locals, label))

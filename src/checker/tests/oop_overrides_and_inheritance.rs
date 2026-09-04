@@ -794,14 +794,21 @@ fn redeclaring_a_final_private_method_is_not_flagged() {
     // A `private` method isn't part of a class's inherited/
     // overridable surface at all in real PHP - a subclass declaring
     // its own same-named private method is an independent,
-    // unrelated declaration, not an override.
+    // unrelated declaration, not an override. `final`+`private` here
+    // is otherwise real PHP's own `method.finalPrivate` warning (Phase
+    // 65) - deliberately kept in the fixture and filtered out below
+    // rather than dropped, since it's what originally made this shape
+    // exercise `method.overrideFinal` at all.
     let d = diagnostics_for(
         r#"<?php
             class Base13 { final private function __clone() {} }
             class Sub13 extends Base13 { final private function __clone() {} }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.overrideFinal"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]

@@ -198,6 +198,187 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 65: `class` is reserved for `ClassName::class` name-fetching,
+    /// so declaring a class constant by that name is a real,
+    /// unconditional PHP fatal error, confirmed directly against real
+    /// PHP's own message: a class constant must not be called `class`,
+    /// since it's reserved for class name fetching. Shared between
+    /// `check_method_declaration_sanity`'s own two call sites' const
+    /// lists (a `ClassDecl`'s `consts` and an `EnumDecl`'s) rather than
+    /// living inside that function itself - unrelated to methods, and
+    /// enums route through a params-less call there already.
+    pub(crate) fn check_reserved_class_constant_name(&mut self, fqn: &str, consts: &[ClassConst]) {
+        for c in consts {
+            if c.name == "class" {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        "a class constant must not be called 'class'; it is reserved for class name fetching".to_string(),
+                        c.span,
+                        0,
+                        "classConstant.class",
+                    )
+                    .non_ignorable(),
+                );
+            }
+        }
+    }
+
+    /// Phase 65: a batch of small, independent method-declaration
+    /// boolean-flag-combination checks real PHP enforces unconditionally
+    /// at compile time, all confirmed directly against real `php -l` -
+    /// this project's own parser is deliberately more lenient than the
+    /// real engine (it has to tolerate parsing code that might never
+    /// actually run), so nothing else would catch any of these before
+    /// that code runs and fatals for real.
+    ///
+    /// `kind`/`is_class_abstract` describe the *declaring* class/enum
+    /// (never `Trait` for `is_class_abstract` - a trait itself is never
+    /// `abstract`/non-abstract in real PHP's own sense, and traits are
+    /// deliberately exempt from the "abstract method needs an abstract
+    /// container" check below the same way `check_class_completeness`
+    /// already exempts them from "must implement every abstract
+    /// method" - a trait's whole point is supplying a method the
+    /// *using* class must complete).
+    pub(crate) fn check_method_declaration_sanity(
+        &mut self,
+        fqn: &str,
+        kind: ClassKind,
+        is_class_abstract: bool,
+        methods: &[MethodDecl],
+    ) {
+        for m in methods {
+            // `method.abstract`: an abstract method inside a non-
+            // abstract, non-interface, non-trait class/enum - real PHP:
+            // "Class Foo declares abstract method bar() and must
+            // therefore be declared abstract." An enum's own built-in
+            // `cases()`/`from()`/`tryFrom()` are exempt, matching real
+            // PHPStan's own identical exemption (they're the one shape
+            // an enum's abstract method declaration legitimately
+            // re-states rather than violates).
+            if m.is_abstract
+                && !is_class_abstract
+                && matches!(kind, ClassKind::Class | ClassKind::Enum)
+            {
+                let lower = m.function.name.to_ascii_lowercase();
+                let enum_builtin = kind == ClassKind::Enum
+                    && matches!(lower.as_str(), "cases" | "from" | "tryfrom");
+                if !enum_builtin {
+                    let description = if kind == ClassKind::Enum {
+                        "Enum"
+                    } else {
+                        "Non-abstract class"
+                    };
+                    self.report_builder(
+                        DiagnosticBuilder::new(
+                            fqn.to_string(),
+                            format!(
+                                "{description} {fqn} contains abstract method {}()",
+                                m.function.name
+                            ),
+                            m.span,
+                            0,
+                            "method.abstract",
+                        )
+                        .non_ignorable(),
+                    );
+                }
+            }
+            // `method.abstractPrivate`: an abstract method can never be
+            // `private` - nothing could ever provide the required
+            // implementation, since a `private` method isn't visible to
+            // (and so can't be overridden by) a subclass at all. Only
+            // meaningful where an abstract method is legal to declare
+            // in the first place (an abstract class or an interface);
+            // elsewhere it's already `method.abstract`'s own concern,
+            // and traits are exempt for the same reason as above. Every
+            // interface method is implicitly abstract regardless of the
+            // literal `abstract` keyword - real PHP actually *forbids*
+            // writing that keyword on one at all ("Interface method
+            // Foo::bar() must not be abstract", confirmed directly), so
+            // `m.is_abstract` alone would never observe this shape;
+            // `kind == ClassKind::Interface` stands in for it here.
+            if (m.is_abstract || kind == ClassKind::Interface)
+                && m.visibility == Visibility::Private
+                && kind != ClassKind::Trait
+                && (is_class_abstract || kind == ClassKind::Interface)
+            {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "private method {fqn}::{}() cannot be abstract",
+                            m.function.name
+                        ),
+                        m.span,
+                        0,
+                        "method.abstractPrivate",
+                    )
+                    .non_ignorable(),
+                );
+            }
+            // `method.finalPrivate`: real PHP only *warns* here (not a
+            // fatal error, confirmed directly), since a `final` on a
+            // `private` method is pointless rather than contradictory -
+            // a private method is never overridden by anything, `final`
+            // or not. `__construct` is deliberately exempt, matching
+            // real PHPStan's own identical exemption - a private final
+            // constructor is a real, common, legitimate singleton-
+            // pattern idiom, not the "forgot final does nothing here"
+            // mistake this check otherwise exists to catch.
+            if m.is_final && m.visibility == Visibility::Private && m.function.name != "__construct"
+            {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "private method {fqn}::{}() cannot be final as it is never overridden by other classes",
+                        m.function.name
+                    ),
+                    m.span,
+                    1,
+                    "method.finalPrivate",
+                );
+            }
+            // `method.visibility`: every interface method is implicitly
+            // `public` - real PHP: "Access type for interface method
+            // Foo::bar() must be public." Reuses the exact same
+            // identifier Phase 64's own override-visibility-narrowing
+            // check uses, matching real PHPStan's own deliberate
+            // choice to share it between both shapes.
+            if kind == ClassKind::Interface && m.visibility != Visibility::Public {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "method {fqn}::{}() cannot use non-public visibility in interface",
+                            m.function.name
+                        ),
+                        m.span,
+                        0,
+                        "method.visibility",
+                    )
+                    .non_ignorable(),
+                );
+            }
+            // `constructor.returnType`: real PHP: "Method Foo::
+            // __construct() cannot declare a return type." - a
+            // constructor's own return value is never meaningful (it
+            // always yields the new instance), so a native return type
+            // is always a mistake, never legitimate.
+            if m.function.name.eq_ignore_ascii_case("__construct")
+                && m.function.return_type.is_some()
+            {
+                self.report(
+                    fqn.to_string(),
+                    format!("constructor of class {fqn} has a return type"),
+                    m.span,
+                    0,
+                    "constructor.returnType",
+                );
+            }
+        }
+    }
+
     /// Finding 59: every case of a backed enum must have a unique backing
     /// value - a real, unconditional PHP fatal error at declaration time
     /// otherwise ("Duplicate value in enum ... for case ..."), not merely

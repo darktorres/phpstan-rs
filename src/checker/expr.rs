@@ -999,6 +999,19 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Assign(lhs, rhs) => {
                 let rhs_ty = self.check_expr(rhs, locals, label);
+                // Phase 65: `$this` is real PHP's own reserved,
+                // implicitly-bound reference to the current object -
+                // reassigning it is a real, unconditional fatal error
+                // ("Cannot re-assign $this."), confirmed directly.
+                if matches!(&lhs.kind, ExprKind::Variable(v) if v == "this") {
+                    self.report(
+                        label.to_string(),
+                        "cannot re-assign $this".to_string(),
+                        lhs.span,
+                        0,
+                        "assign.this",
+                    );
+                }
                 // A bare variable (or a destructuring target inside one)
                 // on the left is a definition site, not a read - checking
                 // it here, before it's bound below, would make undefined-
