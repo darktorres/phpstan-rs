@@ -716,6 +716,24 @@ impl Registry {
         None
     }
 
+    /// Phase 64's own still-open property-override half: same idea as
+    /// `lookup_ancestor_method_with_owner` just above, but walking only
+    /// `extends` - real PHP interfaces can't declare properties at all,
+    /// so there's no `implements` side to check.
+    pub fn lookup_ancestor_property_with_owner(
+        &self,
+        class: &str,
+        prop: &str,
+    ) -> Option<(String, &PropertySig)> {
+        let info = self.classes.get(class)?;
+        for parent in &info.extends {
+            if let Some(found) = self.lookup_property_with_owner(parent, prop) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     /// Finding 46: real PHP forbids overriding a method declared `final`
     /// anywhere in the ancestor chain, no matter how many intervening
     /// subclasses sit between the `final` declaration and this one (a

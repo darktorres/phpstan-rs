@@ -1468,3 +1468,150 @@ fn widening_a_fixed_ancestor_parameter_to_variadic_on_override_is_never_flagged(
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 64's own still-open property-override half - each shape
+// confirmed directly via `php -r` as a real, unconditional fatal error
+// ("Cannot redeclare ... as ...", "Access level to ... must be ...").
+
+#[test]
+fn overriding_a_static_property_as_non_static_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public static int $x = 1; }
+            class Child extends Base { public int $x = 1; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.nonStatic"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_non_static_property_as_static_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base { public static int $x = 1; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.static"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn keeping_the_same_static_ness_on_override_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public static int $x = 1; }
+            class Child extends Base { public static int $x = 1; }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.nonStatic" || x.identifier == "property.static"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_readonly_property_as_readwrite_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function __construct(public readonly int $x) {}
+            }
+            class Child extends Base {
+                public int $x = 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.readWrite"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_readwrite_property_as_readonly_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base {
+                public function __construct(public readonly int $x) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.readOnly"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn narrowing_a_property_s_visibility_from_public_to_protected_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base { protected int $x = 1; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.visibility"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn narrowing_a_property_s_visibility_from_protected_to_private_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { protected int $x = 1; }
+            class Child extends Base { private int $x = 1; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.visibility"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn widening_a_property_s_visibility_on_override_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { protected int $x = 1; }
+            class Child extends Base { public int $x = 1; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.visibility"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_private_ancestor_property_is_never_flagged_for_any_mismatch() {
+    // A `private` ancestor property is an unrelated declaration, not a
+    // real override target - same reasoning as the identical method
+    // exemption.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { private static int $x = 1; }
+            class Child extends Base { public int $x = 1; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "property.nonStatic"
+                | "property.static"
+                | "property.readWrite"
+                | "property.readOnly"
+                | "property.visibility"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
