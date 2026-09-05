@@ -1037,8 +1037,8 @@ conditions in general, which is why the `count()` example above
 composed correctly with no extra work, but a bare `assert(...)` call
 used as a sub-expression, not a top-level statement, still isn't
 recognized by `apply_narrowing`'s own dispatch at all); the multi-arg/
-argument-derived predicate targets (`is_a`, `class_exists`,
-`str_contains`).
+argument-derived predicate target `is_a` (see below for why it and
+`class_exists` are now deliberately declined rather than left open).
 
 **Update**: `array_is_list($x)`'s own true branch is now a recognized
 narrowing predicate (`upgrade_array_to_list`, mirroring `count($x)`'s
@@ -1050,6 +1050,37 @@ with no extra work, the same `&&`/`||`/`!` recursive composition
 positives, including `webmozart/assert::isList()`'s own real body (the
 exact idiom named above) and `Psl\Type\Internal\MixedVecType`'s
 identical guard.
+
+**Update**: `str_contains`/`str_starts_with`/`str_ends_with` are now
+recognized too, mirroring real PHPStan's own
+`StrContainingTypeSpecifyingExtension` - a haystack argument narrows to
+`non-empty-string` (or `non-falsy-string`, when the needle itself isn't
+the falsy `"0"`) once the true branch proves it contains/starts/ends
+with a provably non-empty string literal needle. `strpos`/`stripos`/
+`fnmatch`/`mb_*` (also in real PHPStan's own table) are deliberately
+left out - their `int|false` return makes a bare truthy check a real,
+separate PHP footgun (position `0` is falsy despite matching) this
+project doesn't otherwise model, unlike these three genuinely
+bool-returning functions. `upgrade_string_to_numeric` (Phase 14) was
+refactored into a shared `upgrade_string_with_accessory(ty, kind)`
+helper to back both this and its own existing `is_numeric()` upgrade.
+Corpus-verified: 50057 -> 50050 diagnostics, all seven cleared findings
+genuine false positives (confirmed against PHPUnit/paratest/Symfony
+vendor source).
+
+**Declined** (evaluated, not just skipped): `is_a()` has exactly one
+occurrence in the whole corpus, itself never exercised further (a test
+helper's own filter callback) - no verifiable payoff, the same standard
+Phase 75/78/80 were held to. `class_exists()`/`interface_exists()`/
+`trait_exists()`/`enum_exists()` narrow their argument to a *bare*
+`class-string` in real PHPStan, but this project's own `parse_type_
+string` already collapses a bare `class-string` (no `<T>`) straight to
+plain `String` (see its own doc comment: "a bare `class-string` ... has
+nothing to preserve") specifically because `types::is_subtype` already
+treats them as freely interchangeable in both directions - narrowing to
+this project's own representation of "bare class-string" would be
+narrowing `String` to `String`, an unobservable no-op given the current
+architecture, not a real gap to leave open.
 
 Unlocks `ImpossibleCheckTypeHelper`/
 `FunctionCallRule`/`MethodCallRule`/`StaticMethodCallRule`,
