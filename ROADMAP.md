@@ -174,6 +174,47 @@ these are genuinely part of Phase 55's narrowing-engine generalization
 (the predicate-table extension), cross-referenced there rather than
 duplicated. Size: S (item 1) -> L (items 2-3) -> L (item 4).
 
+**Investigated and declined**: items (1) and (2) were both implemented
+in full and corpus-verified, then reverted. `UnreachableStatementRule`
+(`deadCode.unreachable`), wired straight onto the existing
+`always_terminates()`, initially dropped 45 -> 25 findings after fixing
+two real, independent bugs it exposed along the way (kept, see below),
+but the remaining 25 all traced to the same root cause: this checker's
+loop-body type-checking does a single pass using the pre-loop-entry
+state, with no fixed-point iteration merging across loop iterations, so
+a variable reassigned inside the loop body keeps its *pre-loop* type
+for the entire check (confirmed via a minimal repro matching real
+Piwigo code: `$diff = null; ... for (...) { if ($diff !== null) { ...
+} $diff = new Diff(...); }`, where the guard wrongly narrows to
+`Type::Never`, which this diagnostic then misread as "always
+terminates"). The constant-boolean-condition family (item 2 -
+`if`/`while`/`ternary`/`&&`/`||`/`xor`/`!` "always true/false") hit the
+identical loop-fixed-point gap from the other direction (a `foreach`-
+scoped "first iteration" flag - `$first = true; foreach (...) { if
+($first) { ... } else { ... } }`, one of the single most common PHP
+idioms there is, never gets fixed-point-merged across iterations, so
+`$first`'s type wrongly stays the literal `True`/`False` long after it
+should have widened to `bool`), plus a second, independent gap:
+`$x = $expr ?? false;` collapses to the bare literal `false` whenever
+`$expr`'s own type isn't confidently known, discarding "or whatever
+`$expr` actually was" entirely (confirmed via
+`ExtensionLifecycle.php`'s real `$isMobile = $fsEntry->mobile ?? false;`).
+Both diagnostics were fully reverted rather than shipped with a huge
+(~900-finding) unverifiable false-positive class; fixing either
+underlying gap belongs to Phase 55's own tracked narrowing-engine
+generalization (real fixed-point loop analysis), not a quick patch
+here. Two narrower, genuinely-safe bugs this same investigation *did*
+find and fix outright, independent of whether either diagnostic itself
+ships: `widen_coalesce_result` wrongly inferring `$x ?? throw ...;` as
+`Type::Never` for the whole expression (which cascaded into
+`deadCode.unreachable`'s own prototype wrongly flagging the *next*
+statement unreachable), and `always_terminates`'s own `Switch` arm
+wrongly treating a trailing, entirely-empty `case`/`default` group (a
+common "explicitly do nothing for these" idiom) as vacuously
+terminating regardless of whether anything later actually falls into
+it. Both fixes are kept and shipped independently of the two declined
+diagnostics.
+
 **Phase 16 - CI-friendly output formats (DONE).** This entry's own
 status was never updated after an earlier pilot batch landed it
 (commits `afdd654`/`27c449d`) - no JSON/checkstyle/etc. output used to
@@ -451,6 +492,18 @@ spot-checked genuine (Doctrine DBAL's `AbstractAsset::$_quoted`/
 `$_namespace`, `ForeignKeyConstraint::$options` writes, each matched
 against its own real `@deprecated` tag).
 
+**Update**: `@deprecated`'s implicit-`__toString()` coverage (Phase 67's
+own entry) now runs for `echo`/`print`/string interpolation too, not
+just an explicit `(string)` cast - all four routes share the same new
+`check_implicit_tostring_usage` helper. Also closed: a first-class
+callable (`Foo::method(...)`/`func(...)`) referencing a `@deprecated`
+function/method previously went completely undetected, since that AST
+shape never reached the ordinary call-site checks at all - it now runs
+`check_deprecated_function_call`/`check_deprecated_method_call`
+identically to an ordinary call. Both landed alongside the matching
+`@internal` fixes (same root cause, same commits) - see Phase 57's and
+Phase 67's own entries.
+
 **Still open**: whether a class-level `@deprecated` tag should imply
 deprecation of its members is left unclaimed - real PHPStan's own
 behavior here couldn't be verified without the un-vendored package.
@@ -495,7 +548,7 @@ which this project has none of - this phase is the mirror-image,
 correct feature: checking *other* PHP code that consumes real
 PHPStan's API, not phpstan-rs protecting its own.
 
-**Phase 41 - Purity / side-effect model (PLANNED).** No purity/
+**Phase 41 - Purity / side-effect model (PARTIAL).** No purity/
 impurity tracking exists anywhere in `src/`. Needs an impure-point
 detection pass - a body walk over every function/method/closure
 classifying around 20 real operation kinds (echo, property writes,
@@ -539,7 +592,22 @@ transitive purity resolution [XL, the real architectural work - also
 needs Phase 82's Collector/cross-file aggregation architecture for the
 transitive half specifically].
 
-**Phase 42 - Checked-exception / throw-type model (PLANNED).**
+**Done**: `NoopRule` itself - the first half of recommendation step (1)
+- new `checker::noop` flags a bare-statement-position `&&`/`||`/`xor`/
+ternary whose result is discarded (`logicalXor.resultUnused`/
+`booleanAnd.resultUnused`/`booleanOr.resultUnused`/
+`ternary.resultUnused`). Confirmed directly against real PHPStan's own
+`ExpressionHandler`: it only ever fires once the *whole* expression is
+proven to have zero impure points and zero explicit throw points, so
+`expr_is_side_effect_free` walks the full subtree (any
+`Call`/`MethodCall`/`StaticCall`/`New`/`Assign`/`Throw`/`Clone`/
+`Yield`/inc-dec anywhere disqualifies it) - without this gate, the
+common "guard or die" idiom (`$cond || $this->die('message');`) would
+be misflagged. The four `WithoutSideEffectsRule`s from the same
+recommendation step are still open, along with the entire (2) impure-
+point-classification/transitive-purity architecture.
+
+**Phase 42 - Checked-exception / throw-type model (PARTIAL).**
 `FunctionSig` has no `throws` field at all - the same gap Phase 15
 above already names as its own missing `Exceptions`-category
 prerequisite. Needs `throws: Option<Type>` populated from `@throws`
@@ -594,6 +662,57 @@ checked-exceptions convention, since dead-catch detection is high-signal
 and opt-in-checked-exceptions is comparatively niche], (4) the rest of
 the `*ThrowsRule` family, (5) the dynamic per-callee throw-type
 extensions.
+
+**Done**: recommendation steps (1)-(3), plus one bonus. (1)
+`ThrowExprTypeRule` fix - `ExprKind::Throw` now runs the same
+`Throwable`-subtype check `StmtKind::Throw` already had, closing the
+gap for a `throw` *expression* (`$x ?? throw new Foo();`, a match arm,
+...). (2) new `checker::throws` module: `DocBlock::throws`/
+`FunctionSig::throws` (a `@throws` tag, resolved and unioned across
+every tag present, substituted through generic template instantiation
+too) backs `InvalidThrowsPhpDocValueRule` (`throws.notThrowable` - a
+`@throws` naming something that isn't a `Throwable` subtype; a class
+the registry has no entry for at all is left alone, "don't know, don't
+guess," the same way `CaughtExceptionExistenceRule` already treats an
+unresolvable `catch` type). Bonus, needing no per-callee throw-type
+model either: `ThrowsVoidFunctionWithExplicitThrowPointRule`/
+`...MethodWithExplicitThrowPointRule` (`throws.void` - an explicit
+`@throws void` directly contradicted by a real `throw` visible in the
+declaration's own body). (3) the dead-catch half of
+`CatchWithUnthrownExceptionRule` (`catch.alreadyCaught`) shipped
+*without* needing the full `ThrowPoint` collection primitive this
+entry originally assumed it required - a later `catch` clause every
+one of whose types is already a subtype of something an earlier clause
+caught can never run, needing only `is_subclass_of` across the clauses
+in source order, no throw-type tracking at all.
+
+Verified against the ~20,300-file Piwigo+vendor corpus as part of this
+same session's full-batch diff: settled at 5 total findings across
+every change this batch shipped (see Phase 15's own entry for two
+narrowing bugs this same verification pass found and fixed along the
+way), of which 1 `throws.notThrowable` (`justinrainbow/json-schema`'s
+own `JsonSchema\Exception\ExceptionInterface`, a real, empty marker
+interface that genuinely doesn't extend `Throwable`) and 2
+`catch.alreadyCaught` (`react/event-loop`'s `StreamSelectLoop.php`,
+vendored twice, has a genuinely dead second `catch (\Exception)` clause
+after `catch (\Throwable)`) are attributable to this phase - both
+confirmed genuine by direct inspection of the real vendored source.
+`throws_is_valid`'s "unknown class" leniency was itself found and added
+during this verification, after `SVMException` (the `svm` PHP
+extension, never vendored in this corpus) and
+`Illuminate\Contracts\Container\BindingResolutionException` both
+false-positived as "not `Throwable`" before the fix.
+
+Still open: (4) the rest of the `*ThrowsRule` family (transitive
+`throws` union across the call graph, `MethodThrowTypeCovarianceRule`,
+`MissingCheckedExceptionIn{Function,Method}ThrowsRule`,
+`TooWideFunctionThrowTypeRule`/`MethodThrowTypeRule`,
+`OverwrittenExitPointByFinallyRule`) and (5) the dynamic per-callee
+throw-type extensions (`Type/Php/*ThrowTypeExtension` cluster).
+`MethodThrowTypeCovarianceRule` specifically was considered and
+declined for this pass: its "implicit `void` when no `@throws` tag is
+present" default would create a large false-positive class given how
+inconsistently real corpus code tags `@throws` at all.
 
 **Phase 43 - Property-hook checker validation (PLANNED).** PHP 8.4
 property hooks are fully parsed (`PropertyDecl.hooks`, and
@@ -994,18 +1113,32 @@ narrowed at all, unlike a single `instanceof` check - added an
 unrelated pre-existing corpus false positives with only 7 new
 (genuine, `vendor/`-only) findings.
 
-**Still open**: `PrintRule` (this project's parser has no dedicated
-`print` AST node to hang a check on - it parses through the ordinary
-call/language-construct path); `InvalidPartOfEncapsedStringRule`
-(string-interpolation parts - `Interpolated(Vec<Expr>)` has no per-part
-position information a check could report against precisely yet);
-range-preserving `**` (pow) and `shift()` arithmetic on `IntegerRangeType`
-(less common than `abs()`/`~`, and not corpus-evidenced as a real gap).
-Consolidated unlocks still to close: `PrintRule`,
-`InvalidPartOfEncapsedStringRule`, plus the remaining `IntegerRangeType`-
-consumer extensions (`StrlenFunctionReturnTypeExtension`,
-`RandomIntFunctionReturnTypeExtension`, `CountFunctionReturnTypeExtension`,
-`HrtimeFunctionReturnTypeExtension`), `StrvalFamilyFunctionReturnTypeExtension`,
+**Update**: `PrintRule` shipped after all - `print $x` turns out to
+desugar to the exact same synthetic `Call(Name("print"), [$x])` node an
+ordinary function call does (no dedicated AST node needed), special-
+cased ahead of `is_language_construct`'s routing. `check_print_validity`
+mirrors `check_echo_validity` but with real PHPStan's own no-position-
+number message wording (`print` only ever has one operand), and `print`
+itself now correctly evaluates to the literal `int(1)`, confirmed
+directly against `PrintHandler::resolveType`. `InvalidPartOfEncapsedStringRule`
+(`encapsedStringPart.nonString`) shipped too - `Interpolated`'s own
+per-part spans turned out to already exist, no new position information
+was actually needed. Also done: the remaining `IntegerRangeType`-
+consumer extensions - `StrlenFunctionReturnTypeExtension` (`strlen()`
+is never negative), `CountFunctionReturnTypeExtension` (exact for a
+fully-required `ArrayShape`, otherwise the same non-negative floor),
+`RandomIntFunctionReturnTypeExtension` (`random_int`/`rand`/`mt_rand`
+bounded by literal arguments, degrading to unbounded on either side
+otherwise), and `HrtimeFunctionReturnTypeExtension` (the two-element-
+list vs. single-number shape, unioned when the `$as_number` argument
+isn't a literal bool). All four narrowed to just the always-safe slice
+of each real extension (no guessing at `getrandmax()`'s own value for
+the 0-argument `rand()`/`mt_rand()` form, for example).
+
+**Still open**: range-preserving `**` (pow) and `shift()` arithmetic on
+`IntegerRangeType` (less common than `abs()`/`~`, and not corpus-
+evidenced as a real gap). Consolidated unlocks still to close:
+`StrvalFamilyFunctionReturnTypeExtension`,
 `SetTypeFunctionTypeSpecifyingExtension`.
 
 **Phase 52 - Invalid-operand-combination (`ErrorType`) concept for
@@ -1405,16 +1538,25 @@ genuine (`dasprid/enum`'s `AbstractEnum::createValue`, `gettext/
 translator`'s `Translator::fixTerseIfs` - real, non-`final` classes with
 a `private static` method called through `static::`).
 
-Still open: asymmetric PHP 8.4 `private(set)`/`protected(set)` (write-
-visibility can currently only match read-visibility); `StaticMethodCallableRule`
-(PHP 8.1's first-class-callable syntax, `Foo::method(...)`, for a
-static method specifically - a different, narrower gap than the
-late-static-binding rules above: real PHPStan's own version just re-runs
-the *ordinary* `StaticMethodCallCheck` against the first-class-callable
-AST shape, so this is about whether that shape reaches the existing
-checks at all, not a new safety rule - not investigated whether this
-project's own first-class-callable handling already covers it). The
-protected-access heuristic is also deliberately conservative: it
+**Update**: asymmetric PHP 8.4 write-visibility
+(`public private(set) string $x;`) is now enforced too - a new
+`PropertyDecl::write_visibility`/`PropertySig::write_visibility`
+(defaulting to the read visibility for an ordinary symmetric property,
+or for a member with no established per-item place to write a separate
+write-visibility, e.g. a promoted constructor property)
+`check_property_assignment` now checks against, instead of `visibility`
+- the read side is unaffected. Also done: `StaticMethodCallableRule`,
+generalized to the *whole* first-class-callable family, not just the
+static-method case originally scoped here - `Foo::method(...)`/
+`$obj->method(...)`/`func(...)` were all found to run *none* of the
+ordinary call-site checks (confirming the "not investigated" gap this
+entry flagged really was a real one), now running the same visibility,
+`@internal`, and `@deprecated` checks an ordinary call/method-call
+gets, mirroring real PHPStan's own version re-running the ordinary
+checks against the same AST shape.
+
+Still open: none from this phase's own original scope. The
+protected-access heuristic is still deliberately conservative: it
 never guesses at cross-hierarchy relationships it can't resolve from the
 registry, so a small number of genuinely-illegal protected accesses that
 depend on runtime-only information may go unflagged rather than risk a
@@ -2076,6 +2218,20 @@ flags off; +32 `method.internalClass` findings with
 from several of `rector/rector`'s own rules); zero delta with
 `--check-deprecated-usage` (no corpus call site implicitly
 string-casts a class whose `__toString` is itself `@deprecated`).
+
+**Update**: the same implicit-`__toString()` coverage now also runs for
+`echo`, `print`, and string-interpolation parts, not just an explicit
+`(string)` cast - all four call the same shared
+`check_implicit_tostring_usage` helper the cast case was refactored to
+use, so `@internal`/`@deprecated` restricted-usage now applies
+uniformly everywhere real PHP performs this conversion. Verified as
+part of this session's own full-batch corpus diff (see Phase 42's own
+entry for the batch verification method, including both the plain and
+`--check-internal-usage`/`--check-deprecated-usage` opt-in-flag runs);
+no findings in the final diff were attributable to this extension
+specifically - the corpus's own implicit-`(string)`-cast usages of
+`@internal`/`@deprecated` classes were already the ones caught before
+this change.
 
 Still open: real PHPStan's own `RestrictedInternalClassNameUsageExtension`
 additionally covers `extends`/`implements`/param-and-return-type-hints/
