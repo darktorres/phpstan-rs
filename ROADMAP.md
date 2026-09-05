@@ -1373,15 +1373,52 @@ itself too - `vendor/bin/phpstan` phrases it "returns null" where this
 project says "got void", a wording difference only).
 
 Done: `return.never`/`return.void`/`return.missing` on both an explicit
-`return` and the implicit fall-through case. Still open: a genuinely
-*empty* concrete method body (`function f(): int {}`) isn't
-distinguished from an abstract/interface method's own bodiless
-declaration (both parse to an empty statement list, and only a method's
-own `is_abstract` flag - not yet threaded through `check_function`'s
-signature - can tell them apart), so `return.missing` doesn't fire on
-it; Generator `TReturn` completeness (`@return Generator<...,...,
-TReturn>`'s own 4th argument) remains unmodeled, matching this
-project's existing, separately-documented generator simplification.
+`return` and the implicit fall-through case. Generator `TReturn`
+completeness (`@return Generator<...,...,TReturn>`'s own 4th argument)
+remains unmodeled, matching this project's existing, separately-
+documented generator simplification.
+
+**Investigated and declined**: the genuinely-empty-body case above
+("a genuinely *empty* concrete method body (`function f(): int {}`)
+isn't distinguished from an abstract/interface method's own bodiless
+declaration... so `return.missing` doesn't fire on it") was fully
+implemented - `is_bodiless_declaration` threaded through `check_function`'s
+own signature (`m.is_abstract`, or `kind == ClassKind::Interface` for
+the interface case real PHP forbids writing the literal `abstract`
+keyword on at all, matching `check_method_declaration_sanity`'s own
+identical convention) - confirmed correct against real PHP (`function
+f(): int {}`, called, throws a real `TypeError` at the call site: "Return
+value must be of type int, none returned") and against a direct multi-
+shape repro (fires on a concrete empty body, silent on abstract/
+interface). But full corpus verification found this single change alone
+responsible for 49989 -> 60612 (+10623) - 10615 of them in
+`vendor/jetbrains/phpstorm-stubs` alone, and the remaining 8 spot-
+checked as the identical pattern in other packages' own stub/fixture
+files (`phpstan-stubs/Imagick.stub.php`, `vendor/rector/rector/
+stubs-rector/{Internal/NativeClasses.php,PHPUnit/Framework/TestCase.php}`,
+a `tomasvotruba/type-coverage` rule-test fixture) - every one of them a
+real, ubiquitous PHP convention this project had no prior occasion to
+encounter at this scale: an IDE-stub/native-extension-modeling class
+declares a native function's *signature* with a deliberately empty body
+(the real behavior runs in C, or the stub exists purely for tooling and
+is never actually executed), not a bug. Real PHPStan itself never
+encounters this either - it loads stub files through a dedicated,
+non-rule-checked mechanism, and Piwigo's own `phpstan.neon` additionally
+`excludePaths: analyseAndScan: - vendor/*` wholesale, something this
+project's own broader, deliberately-inclusive verification corpus
+doesn't mirror. Zero of the 10623 new findings were genuine first-party
+bugs - unlike Phase 62/67's own opt-in-flag precedent (`--check-
+uninitialized-properties`/`--check-internal-usage`), which exists for
+checks with *confirmed* real value plus incidental vendor noise, this
+check found no confirmed value at all to gate behind a flag, so the
+change was fully reverted (not shipped, not merged) rather than shipped
+opt-in - matching this project's own "don't ship for a hypothetical
+need" convention. Left as documented, still-open, low-priority: a
+principled distinguishing signal (short of a new opt-in flag, and short
+of file-path-based special-casing, which this project has no existing
+precedent for) would need to tell "signature-only native-extension
+stub" apart from "genuinely buggy empty body" from the AST alone -
+not found in this pass.
 
 **Phase 62 - Uninitialized-property / constructor dataflow
 (PARTIAL).** Implements `UninitializedPropertyRule`'s own core case
