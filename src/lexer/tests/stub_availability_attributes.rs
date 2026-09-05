@@ -174,6 +174,37 @@ fn language_level_type_aware_on_a_parameter_injects_a_real_native_type_hint() {
     assert_eq!(with_attr, without_attr);
 }
 
+// Real shape: `vendor/jetbrains/phpstorm-stubs/ldap/ldap.php` does `use
+// JetBrains\PhpStorm\Internal\LanguageLevelTypeAware as PhpVersionAware;`
+// and then spells every `ldap_*` function's own gated `$ldap`/`$result`
+// parameter as `#[PhpVersionAware(...)]` exclusively - a plain PHP
+// `use`-import alias for the identical attribute class handled above,
+// not a different one. Without recognizing this second spelling, every
+// LDAP stub parameter fell through to the generic `#[` attribute-token
+// path, leaving it stuck on the stale pre-8.1 `@param resource $ldap`
+// doc comment instead of the real `\LDAP\Connection` override.
+#[test]
+fn php_version_aware_is_recognized_as_an_alias_for_language_level_type_aware() {
+    let src = "<?php\nfunction ldap_bind(#[PhpVersionAware(['8.1' => '\\LDAP\\Connection'], default: 'resource')] $ldap) {}";
+    let with_attr = Lexer::new(src).tokenize();
+    let without_attr =
+        Lexer::new("<?php\nfunction ldap_bind(\\LDAP\\Connection $ldap) {}").tokenize();
+    assert_eq!(with_attr, without_attr);
+}
+
+#[test]
+fn php_version_aware_on_a_return_type_appends_to_the_doc_comment_the_same_way() {
+    let src = "<?php\n/** @return resource|false */\n#[PhpVersionAware(['8.1' => '\\LDAP\\Connection|false'], default: 'resource|false')]\nfunction ldap_connect() {}";
+    let toks = Lexer::new(src).tokenize();
+    let Token::DocComment(doc) = &toks[0] else {
+        panic!("expected a doc comment first, got: {toks:?}");
+    };
+    assert!(
+        doc.contains("@return \\LDAP\\Connection|false"),
+        "expected the 8.1 override via the PhpVersionAware alias, not the legacy default: {doc:?}"
+    );
+}
+
 #[test]
 fn language_level_type_aware_on_a_parameter_with_bracket_shorthand_is_left_alone() {
     // Real shape (found via a crash while verifying this fix against

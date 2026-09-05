@@ -602,7 +602,23 @@ impl<'a> Lexer<'a> {
                     if self.starts_with("#[PhpStormStubsElementAvailable(") {
                         self.skip_stub_availability_attribute();
                     } else if self.starts_with("#[LanguageLevelTypeAware(") {
-                        self.skip_language_level_type_aware_attribute();
+                        self.skip_language_level_type_aware_attribute("#[LanguageLevelTypeAware(");
+                    } else if self.starts_with("#[PhpVersionAware(") {
+                        // Real phpstorm-stubs shape (`ldap/ldap.php`'s own
+                        // `use JetBrains\PhpStorm\Internal\
+                        // LanguageLevelTypeAware as PhpVersionAware;`) -
+                        // `PhpVersionAware` is a plain PHP `use`-import
+                        // alias for the identical attribute class handled
+                        // above, not a different attribute - every
+                        // `ldap_*` function stub in that one file uses
+                        // this spelling exclusively, so without this arm
+                        // every one fell through to the generic `#[`
+                        // attribute-token path below, leaving its param/
+                        // return type stuck on the stale pre-8.1 `@param
+                        // resource $ldap`-style doc comment instead of the
+                        // real `\LDAP\Connection`/`\LDAP\Result` override
+                        // this attribute exists to apply.
+                        self.skip_language_level_type_aware_attribute("#[PhpVersionAware(");
                     } else if self.starts_with("#[") {
                         // Phase 37: a real, general `#[Attribute(...)]`
                         // group is no longer thrown away here - only the
@@ -880,9 +896,9 @@ impl<'a> Lexer<'a> {
     /// parameter); a return override is stashed in
     /// `pending_return_type_override` for `tokenize_with_spans` to splice
     /// into the preceding doc comment instead.
-    fn skip_language_level_type_aware_attribute(&mut self) {
+    fn skip_language_level_type_aware_attribute(&mut self, matched_prefix: &str) {
         let attr_start = self.pos;
-        self.pos += "#[LanguageLevelTypeAware(".len();
+        self.pos += matched_prefix.len();
         let mut depth = 1i32;
         while depth > 0 && self.pos < self.src.len() {
             match self.peek() {
