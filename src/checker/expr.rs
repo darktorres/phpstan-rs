@@ -1420,6 +1420,16 @@ impl<'a> Checker<'a> {
                             self.check_internal_method_call(
                                 owner, method, sig, true, e.span, label,
                             );
+                            // Phase 57 follow-up:
+                            // `CallPrivateMethodThroughStaticRule` - same
+                            // late-static-binding unsafety as the
+                            // identical class-constant/static-property
+                            // rules.
+                            if class_name == "static" && sig.visibility == Visibility::Private {
+                                self.check_static_private_method_access(
+                                    owner, method, e.span, label,
+                                );
+                            }
                         }
                         // Finding 29 / Phase 49: see the identical
                         // comment on the plain-function Call arm above -

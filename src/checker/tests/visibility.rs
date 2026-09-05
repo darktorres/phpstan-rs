@@ -28,6 +28,7 @@ fn visibility_diagnostics(src: &str) -> Vec<Diagnostic> {
                     .starts_with("staticClassAccess.privateConstant")
                 || d.identifier
                     .starts_with("staticClassAccess.privateProperty")
+                || d.identifier.starts_with("staticClassAccess.privateMethod")
         })
         .collect()
 }
@@ -674,6 +675,83 @@ fn a_public_static_property_accessed_through_static_is_never_flagged_for_the_sta
                 public static int $x = 1;
                 public static function get(): int {
                     return static::$x;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 57 follow-up: `CallPrivateMethodThroughStaticRule` - the
+// identical late-static-binding unsafety, for a `static::method()` call
+// this time.
+
+#[test]
+fn a_private_static_method_called_through_static_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private static function secret(): int { return 1; }
+                public static function get(): int {
+                    return static::secret();
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "staticClassAccess.privateMethod"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_private_static_method_called_through_static_in_a_final_class_is_never_flagged_for_the_static_rule()
+ {
+    let d = visibility_diagnostics(
+        r#"<?php
+            final class Foo {
+                private static function secret(): int { return 1; }
+                public static function get(): int {
+                    return static::secret();
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "staticClassAccess.privateMethod"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_private_static_method_called_through_self_is_never_flagged_for_the_static_rule() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private static function secret(): int { return 1; }
+                public static function get(): int {
+                    return self::secret();
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "staticClassAccess.privateMethod"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_public_static_method_called_through_static_is_never_flagged_for_the_static_rule() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public static function secret(): int { return 1; }
+                public static function get(): int {
+                    return static::secret();
                 }
             }
         "#,

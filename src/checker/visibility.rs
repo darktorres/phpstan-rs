@@ -27,6 +27,18 @@ pub(crate) struct MemberVisibilityCheck<'a> {
     pub(crate) label: &'a str,
 }
 
+/// `check_static_private_member_access`'s own call bundle - same
+/// too-many-arguments reason as `MemberVisibilityCheck` above.
+struct StaticPrivateAccessCheck<'a> {
+    verb: &'a str,
+    noun: &'a str,
+    identifier: &'a str,
+    owner: &'a str,
+    member_display: &'a str,
+    span: Span,
+    label: &'a str,
+}
+
 impl<'a> Checker<'a> {
     /// Real PHP's own private/protected access-control rule, as far as
     /// this project can practically check it: `Visibility::Public` is
@@ -157,14 +169,15 @@ impl<'a> Checker<'a> {
         span: Span,
         label: &str,
     ) {
-        self.check_static_private_member_access(
-            "constant",
-            "staticClassAccess.privateConstant",
+        self.check_static_private_member_access(StaticPrivateAccessCheck {
+            verb: "access",
+            noun: "constant",
+            identifier: "staticClassAccess.privateConstant",
             owner,
-            member,
+            member_display: member,
             span,
             label,
-        );
+        });
     }
 
     /// Same idea as `check_static_private_constant_access` just above,
@@ -185,30 +198,61 @@ impl<'a> Checker<'a> {
         span: Span,
         label: &str,
     ) {
-        self.check_static_private_member_access(
-            "property",
-            "staticClassAccess.privateProperty",
+        self.check_static_private_member_access(StaticPrivateAccessCheck {
+            verb: "access",
+            noun: "property",
+            identifier: "staticClassAccess.privateProperty",
             owner,
-            &format!("${member}"),
+            member_display: &format!("${member}"),
             span,
             label,
-        );
+        });
     }
 
-    /// Shared by the two `check_static_private_*_access` wrappers above -
-    /// both are the identical "skip inside a `final` class, otherwise
-    /// report" shape, differing only in the noun/identifier/exactly-
-    /// formatted member name (a constant's own bare name vs. a
-    /// property's `$`-prefixed one).
-    fn check_static_private_member_access(
+    /// Same idea as `check_static_private_constant_access`/
+    /// `check_static_private_property_access` above, for a `private`
+    /// *static method call* instead (confirmed directly via `php -r`: a
+    /// subclass redeclaring the same `private static` method makes
+    /// `static::method()`, called from inside the *ancestor's* own
+    /// method, throw a real "Call to private method ... from scope ..."
+    /// error at the call site). Matches real PHPStan's own
+    /// `CallPrivateMethodThroughStaticRule`: same `final`-class exemption,
+    /// same unconditional-on-any-`static::method()` trigger.
+    pub(crate) fn check_static_private_method_access(
         &mut self,
-        noun: &str,
-        identifier: &str,
         owner: &str,
-        member_display: &str,
+        member: &str,
         span: Span,
         label: &str,
     ) {
+        self.check_static_private_member_access(StaticPrivateAccessCheck {
+            verb: "call",
+            noun: "method",
+            identifier: "staticClassAccess.privateMethod",
+            owner,
+            member_display: &format!("{member}()"),
+            span,
+            label,
+        });
+    }
+
+    /// Shared by the three `check_static_private_*_access` wrappers above.
+    /// All three are the identical "skip inside a `final` class,
+    /// otherwise report" shape, differing only in the verb
+    /// (`"access"`/`"call"`), noun, identifier, and exactly-formatted
+    /// member name (a constant's own bare name, a property's `$`-
+    /// prefixed one, or a method's own `()`-suffixed one) - bundled into
+    /// one struct for the same reason `MemberVisibilityCheck` above is.
+    fn check_static_private_member_access(&mut self, check: StaticPrivateAccessCheck) {
+        let StaticPrivateAccessCheck {
+            verb,
+            noun,
+            identifier,
+            owner,
+            member_display,
+            span,
+            label,
+        } = check;
         let is_final = self
             .current_class
             .as_deref()
@@ -219,7 +263,7 @@ impl<'a> Checker<'a> {
         }
         self.report(
             label.to_string(),
-            format!("unsafe access to private {noun} {owner}::{member_display} through static::"),
+            format!("unsafe {verb} to private {noun} {owner}::{member_display} through static::"),
             span,
             0,
             identifier,
