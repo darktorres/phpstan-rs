@@ -1553,6 +1553,10 @@ impl<'a> Checker<'a> {
                             span: e.span,
                             label,
                         });
+                        // Phase 57 follow-up: `AccessPrivateConstantThroughStaticRule`.
+                        if class_name == "static" && cs.visibility == Visibility::Private {
+                            self.check_static_private_constant_access(owner, member, e.span, label);
+                        }
                     }
                     const_ty
                         .map(|ty| self.resolve_pseudo(&ty, &class))

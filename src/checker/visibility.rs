@@ -122,6 +122,50 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// Phase 57 follow-up: `AccessPrivateConstantThroughStaticRule` - a
+    /// narrower, LSB-specific angle distinct from the ordinary visibility
+    /// check just above. `static::CONST` performs late static binding,
+    /// which can resolve to a *different* class at runtime than the one
+    /// lexically containing this code - unlike `self::CONST` (always the
+    /// literal declaring class), so a `private` constant reached this way
+    /// is unsafe even when access would otherwise be legal from here:
+    /// confirmed directly via `php -r` (`Base::make()` reading
+    /// `static::SECRET`, called through a `Child` that redeclares its own
+    /// `private const SECRET`, throws a real "Cannot access private
+    /// constant Child::SECRET" - the exact shape this rule exists to
+    /// catch ahead of time). Matches real PHPStan's own rule exactly,
+    /// including its one exemption: a `final` class can never have a
+    /// subclass at all, so `static::` there can never actually differ
+    /// from the literal declaring class - not unsafe, not flagged.
+    /// The caller (`ExprKind::StaticAccess`'s const-fetch arm in
+    /// `checker/expr.rs`) already confirmed the class-part is the literal
+    /// `static` keyword (not `self`, not `parent`, not a named class) and
+    /// that the constant is `private` before calling this - both
+    /// preconditions this function trusts rather than re-checks.
+    pub(crate) fn check_static_private_constant_access(
+        &mut self,
+        owner: &str,
+        member: &str,
+        span: Span,
+        label: &str,
+    ) {
+        let is_final = self
+            .current_class
+            .as_deref()
+            .and_then(|c| self.registry.classes.get(c))
+            .is_some_and(|info| info.is_final);
+        if is_final {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!("unsafe access to private constant {owner}::{member} through static::"),
+            span,
+            0,
+            "staticClassAccess.privateConstant",
+        );
+    }
+
     /// Real PHP's `Closure::bind`/`->bindTo()` own third argument
     /// (`$newScope`): resolves the confidently-known-class shapes -
     /// `Foo::class` and a plain, already-registered string literal

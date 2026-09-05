@@ -22,6 +22,8 @@ fn visibility_diagnostics(src: &str) -> Vec<Diagnostic> {
                 || d.identifier.starts_with("staticMethod.protected")
                 || d.identifier.starts_with("classConstant.private")
                 || d.identifier.starts_with("classConstant.protected")
+                || d.identifier
+                    .starts_with("staticClassAccess.privateConstant")
         })
         .collect()
 }
@@ -440,6 +442,111 @@ fn an_enum_case_fetch_is_never_flagged_for_visibility() {
             }
             function test(): Suit {
                 return Suit::Hearts;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 57 follow-up: `AccessPrivateConstantThroughStaticRule` -
+// `static::` performs late static binding, which can resolve to a
+// different class at runtime than the one lexically containing the
+// code, so a `private` constant reached this way is unsafe even from
+// inside its own declaring class - confirmed directly via `php -r`.
+
+#[test]
+fn a_private_constant_accessed_through_static_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private const X = 1;
+                public static function get(): int {
+                    return static::X;
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "staticClassAccess.privateConstant");
+}
+
+#[test]
+fn a_private_constant_accessed_through_static_in_a_final_class_is_never_flagged() {
+    // A `final` class can never have a subclass at all, so `static::`
+    // there can never actually differ from the literal declaring class -
+    // matches real PHPStan's own identical exemption.
+    let d = visibility_diagnostics(
+        r#"<?php
+            final class Foo {
+                private const X = 1;
+                public static function get(): int {
+                    return static::X;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_private_constant_accessed_through_self_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private const X = 1;
+                public static function get(): int {
+                    return self::X;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_public_constant_accessed_through_static_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public const X = 1;
+                public static function get(): int {
+                    return static::X;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_protected_constant_accessed_through_static_is_never_flagged() {
+    // Only `private` is unsafe this way - a subclass overriding a
+    // `protected` constant is still legally accessible from the
+    // declaring class's own perspective either way.
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                protected const X = 1;
+                public static function get(): int {
+                    return static::X;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_private_constant_accessed_through_a_named_class_is_never_flagged_for_the_static_rule() {
+    // Only the literal `static` keyword triggers this rule - `Foo::X`
+    // (even from inside `Foo` itself) is never late-static-bound.
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private const X = 1;
+                public static function get(): int {
+                    return Foo::X;
+                }
             }
         "#,
     );
