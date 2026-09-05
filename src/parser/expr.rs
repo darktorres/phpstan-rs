@@ -404,7 +404,23 @@ impl Parser {
     pub(crate) fn parse_not(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         if self.eat(&Token::Bang) {
+            let operand_start = self.current_pos();
             let operand = self.parse_not()?;
+            // The same real-PHP "assignment as a bare operand" grammar
+            // quirk `parse_assignment_tail`'s own doc comment describes
+            // for `==`/`&&`/`||`, confirmed via `php -r '$x=0; $r=!$x=5;
+            // var_dump($r,$x);'` printing `bool(false) int(5)` - `!$x =
+            // expr` parses as `!($x = expr)`, not `(!$x) = expr`. Must run
+            // here, at the point `!` actually binds, rather than relying
+            // on an enclosing `&&`/`||`/comparison's own fix further up
+            // the chain: by the time control gets there, `!` has already
+            // wrapped the bare variable, so their fix would see `Unary(
+            // Not, $var)` - not a valid assignment target - as its own
+            // "lhs" and misassign into it. A corpus-verified idiom
+            // (`plupload`'s `upload.php`: `if (!is_dir($targetDir) ||
+            // !$dir = opendir($targetDir))`) that left `$dir` looking
+            // undefined to every later `readdir($dir)` without this.
+            let operand = self.parse_assignment_tail(operand, operand_start)?;
             return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, Box::new(operand)), start));
         }
         self.parse_instanceof()

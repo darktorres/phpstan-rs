@@ -104,6 +104,31 @@ fn static_call_arguments_are_still_checked_for_undefined_variables() {
     );
 }
 
+// Corpus-found idiom (plupload's own `upload.php`): `!$var = expr`
+// parses as `!($var = expr)` (see the parser-level fix and its own
+// `php -r` confirmation), so `$dir` genuinely is defined by the time
+// the `if` body's `die()` doesn't run - a real false positive here
+// before that parser fix, since `!$dir` alone isn't a valid assignment
+// target `apply_narrowing`'s variable-definition tracking could ever
+// recognize.
+#[test]
+fn a_variable_assigned_inside_a_bang_negated_or_condition_is_defined_afterward() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $path) {
+                if (!is_dir($path) || !$dir = opendir($path)) {
+                    die();
+                }
+                readdir($dir);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("undefined variable")),
+        "expected $dir to be recognized as defined, got: {d:?}"
+    );
+}
+
 #[test]
 fn check_expr_recurses_into_every_simple_wrapper_expression() {
     // Coverage measurement found none of these check_expr arms had

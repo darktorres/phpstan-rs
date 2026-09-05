@@ -140,6 +140,53 @@ fn an_ordinary_logical_and_with_no_trailing_assignment_is_unaffected() {
     assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "x"));
 }
 
+// `!$var = expr` parses as `!($var = expr)`, not `(!$var) = expr` -
+// confirmed via `php -r '$x=0; $r=!$x=5; var_dump($r,$x);'` printing
+// `bool(false) int(5)`. Corpus-found real idiom: plupload's own
+// `upload.php`, `if (!is_dir($targetDir) || !$dir = opendir($targetDir))
+// { die(...); }`, left `$dir` looking undefined at every later
+// `readdir($dir)` without this - `!`'s own fix has to run at the point
+// `!` actually binds (inside `parse_not`, tighter than `&&`/`||`), not
+// rely on the enclosing `||`'s own assignment-tail fix: by the time
+// that runs, `!` has already wrapped the bare variable, and misassigning
+// into `Unary(Not, $var)` as if it were an lvalue wouldn't help either.
+#[test]
+fn a_bang_negated_assignment_parses_as_negating_the_assignment_result() {
+    let program = parse("<?php if (!$dir = opendir($path)) { return; }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Unary(UnaryOp::Not, inner) = &cond.kind else {
+        panic!("expected a top-level Not unary expression, got {cond:?}");
+    };
+    let ExprKind::Assign(target, value) = &inner.kind else {
+        panic!(
+            "expected the Not's operand to be an Assign, got {:?}",
+            inner.kind
+        );
+    };
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "dir"));
+    assert!(matches!(&value.kind, ExprKind::Call(..)));
+}
+
+#[test]
+fn a_bang_negated_assignment_nested_in_a_logical_or_still_assigns() {
+    let program = parse("<?php if (!is_dir($path) || !$dir = opendir($path)) { readdir($dir); }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(BinOp::Or, _, rhs) = &cond.kind else {
+        panic!("expected a top-level Or binary expression, got {cond:?}");
+    };
+    let ExprKind::Unary(UnaryOp::Not, inner) = &rhs.kind else {
+        panic!(
+            "expected the Or's RHS to be a Not unary expression, got {:?}",
+            rhs.kind
+        );
+    };
+    assert!(matches!(&inner.kind, ExprKind::Assign(..)));
+}
+
 #[test]
 fn a_bare_anonymous_function_statement_parses_as_an_expression_not_a_declaration() {
     // `function () { ... };` with no assignment at all - a real, if
