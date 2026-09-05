@@ -246,6 +246,44 @@ fn accessing_a_plain_non_deprecated_class_constant_is_never_flagged() {
 }
 
 #[test]
+fn implicit_string_cast_of_a_deprecated_tostring_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class OldThing {
+                /** @deprecated do not stringify */
+                public function __toString(): string { return "y"; }
+            }
+            function f(OldThing $o): void {
+                echo (string) $o;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.deprecated"
+            && x.message == "Call to deprecated method OldThing::__toString() (do not stringify)."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn implicit_string_cast_of_a_non_deprecated_tostring_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class NiceThing {
+                public function __toString(): string { return "y"; }
+            }
+            function f(NiceThing $n): void {
+                echo (string) $n;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
 fn instantiating_a_deprecated_class_is_flagged() {
     let d = diagnostics_for(
         r#"<?php

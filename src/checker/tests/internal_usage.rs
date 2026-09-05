@@ -455,6 +455,47 @@ fn writing_a_property_of_an_internal_class_is_flagged() {
 }
 
 #[test]
+fn implicit_string_cast_of_an_internal_class_calls_internal_tostring() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+                public function __toString(): string { return "x"; }
+            }
+
+            namespace Other\App;
+            function f(\Vendor\Internal\Thing $t) {
+                echo (string) $t;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn implicit_string_cast_of_a_non_internal_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Thing {
+                public function __toString(): string { return "x"; }
+            }
+            function f(Thing $t) {
+                echo (string) $t;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier.starts_with("method.internal")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
 fn writing_a_property_of_an_internal_class_from_the_same_root_namespace_is_never_flagged() {
     let d = diagnostics_for(
         r#"<?php

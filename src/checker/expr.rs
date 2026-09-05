@@ -985,6 +985,52 @@ impl<'a> Checker<'a> {
             ExprKind::Cast(ty, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_cast_validity(ty, &inner_ty, inner.span, label);
+                // Phase 67/Phase 39 follow-up: an implicit `(string)` cast
+                // of an object triggers a real `__toString()` call - if
+                // that method is `@internal`/`@deprecated`, real
+                // PHPStan's own `RestrictedUsageOfDeprecatedStringCastRule`
+                // (and the internal-tag equivalent, both left as "easy to
+                // add once needed, just not wired" in ROADMAP.md's own
+                // Phase 67 entry) flags it exactly like an explicit
+                // `->__toString()` call would. Same "first Object member"
+                // representative-class extraction as `ExprKind::
+                // MethodCall`'s own `recv_class` above, for the same
+                // reason (a Union/Intersection operand).
+                if ty == "string" {
+                    let class = match &inner_ty {
+                        Type::Object(class, _) => Some(class.clone()),
+                        Type::EnumCase(fqn, _) => Some(fqn.clone()),
+                        Type::Union(members) | Type::Intersection(members) => {
+                            members.iter().find_map(|m| match m {
+                                Type::Object(class, _) => Some(class.clone()),
+                                Type::EnumCase(fqn, _) => Some(fqn.clone()),
+                                _ => None,
+                            })
+                        }
+                        _ => None,
+                    };
+                    if let Some(class) = class
+                        && let Some((owner, sig)) =
+                            self.registry.lookup_method_with_owner(&class, "__toString")
+                    {
+                        self.check_internal_method_call(
+                            &owner,
+                            "__toString",
+                            sig,
+                            false,
+                            e.span,
+                            label,
+                        );
+                        self.check_deprecated_method_call(
+                            &owner,
+                            "__toString",
+                            sig,
+                            false,
+                            e.span,
+                            label,
+                        );
+                    }
+                }
                 match ty.as_str() {
                     "int" => Type::Int,
                     "float" => Type::Float,
