@@ -837,6 +837,65 @@ impl<'a> Checker<'a> {
                         "parameter.notOptional",
                     );
                 }
+                // Phase 64's own still-open list: by-ref/variadic-
+                // contravariance mismatches - real PHPStan's own
+                // `MethodParameterComparisonHelper` spends most of its
+                // own ~250 lines on this cluster; only the two
+                // unconditional-fatal-error shapes confirmed directly
+                // via `php -l` are checked here, matching this
+                // project's own established narrower scope elsewhere in
+                // this same function (`parameter.missing` above
+                // explicitly skips the fuller variadic-contravariance
+                // treatment too). Neither is gated on either side being
+                // `Type::Mixed` - both are about calling-convention
+                // compatibility, not type compatibility.
+                if own_param.by_ref != ancestor_param.by_ref {
+                    let (message, identifier) = if own_param.by_ref {
+                        (
+                            format!(
+                                "Parameter #{} (${}) of {fqn}::{}() is passed by reference but parameter #{} (${}) of {ancestor_owner}::{}() is not passed by reference",
+                                i + 1,
+                                own_param.name,
+                                m.function.name,
+                                i + 1,
+                                ancestor_param.name,
+                                m.function.name
+                            ),
+                            "parameter.byRef",
+                        )
+                    } else {
+                        (
+                            format!(
+                                "Parameter #{} (${}) of {fqn}::{}() is not passed by reference but parameter #{} (${}) of {ancestor_owner}::{}() is passed by reference",
+                                i + 1,
+                                own_param.name,
+                                m.function.name,
+                                i + 1,
+                                ancestor_param.name,
+                                m.function.name
+                            ),
+                            "parameter.notByRef",
+                        )
+                    };
+                    self.report(fqn.to_string(), message, m.span, 0, identifier);
+                }
+                // The reverse direction (a non-variadic ancestor
+                // parameter widened to variadic on override) is real,
+                // legal PHP - confirmed directly - so only this
+                // direction is checked.
+                if ancestor_param.variadic && !own_param.variadic {
+                    self.report(
+                        fqn.to_string(),
+                        format!(
+                            "Parameter #{} (${}) of {fqn}::{}() is not variadic but parameter #{} (${}) of {ancestor_owner}::{}() is variadic",
+                            i + 1, own_param.name, m.function.name,
+                            i + 1, ancestor_param.name, m.function.name
+                        ),
+                        m.span,
+                        0,
+                        "parameter.notVariadic",
+                    );
+                }
                 // `Type::Mixed` is overloaded throughout this project to
                 // mean both real PHP `mixed` *and* "no type declared at
                 // all, native or docblock" (see this file's own opening

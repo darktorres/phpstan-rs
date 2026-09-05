@@ -1387,3 +1387,84 @@ fn an_override_adding_its_own_extra_optional_parameter_is_never_flagged() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 64's own still-open list: by-ref/variadic-contravariance
+// mismatches - both confirmed directly via `php -l` as real,
+// unconditional fatal errors ("Declaration of Child::foo(...) must be
+// compatible with Base::foo(...)").
+
+#[test]
+fn an_override_dropping_a_by_ref_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(&$x): void {} }
+            class Child extends Base { public function foo($x): void {} }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.notByRef" && x.message.contains("#1 ($x)")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_adding_a_by_ref_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo($x): void {} }
+            class Child extends Base { public function foo(&$x): void {} }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.byRef" && x.message.contains("#1 ($x)")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn keeping_the_same_by_ref_ness_on_override_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(&$x): void {} }
+            class Child extends Base { public function foo(&$x): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.byRef" || x.identifier == "parameter.notByRef"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_dropping_variadic_on_the_ancestors_own_variadic_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(...$x): void {} }
+            class Child extends Base { public function foo($x): void {} }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.notVariadic" && x.message.contains("#1 ($x)")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn widening_a_fixed_ancestor_parameter_to_variadic_on_override_is_never_flagged() {
+    // Real, legal PHP - confirmed directly - the reverse direction from
+    // the check just above.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo($x): void {} }
+            class Child extends Base { public function foo(...$x): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.notVariadic"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
