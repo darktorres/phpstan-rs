@@ -53,6 +53,55 @@ fn a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced() {
 }
 
 #[test]
+fn a_root_anchored_native_closure_type_hint_is_not_namespace_qualified() {
+    // Real corpus shape (amphp/amp): a native `\Closure $callback` type
+    // hint (root-anchored, unambiguous) in a namespaced file used to
+    // become a bogus `App\Closure` - `types::parse_type_keyword_or_class`'s
+    // own `"closure"` keyword arm used to hardcode the bare, unqualified
+    // name regardless of the original text, losing the leading `\` that
+    // `NameContext::resolve` needs to see to know not to re-qualify it
+    // (the same reason `a_leading_backslash_in_a_native_type_hint_is_
+    // not_re_namespaced` above exists for an ordinary class reference).
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            class Foo {
+                public function bar(\Closure $callback): void {}
+            }"#,
+    );
+    let sig = r.lookup_method("App\\Foo", "bar").unwrap();
+    assert_eq!(
+        sig.params[0].ty,
+        Type::Object("Closure".to_string(), Vec::new())
+    );
+}
+
+#[test]
+fn a_bare_unqualified_closure_type_hint_defers_to_a_real_use_import() {
+    // Deliberately NOT given the same treatment as the root-anchored
+    // case above: a bare, unqualified `Closure` is genuinely ambiguous -
+    // real corpus shape, `rector/rector`'s own consumers of `nikic/
+    // php-parser` routinely `use PhpParser\Node\Expr\Closure;` (an
+    // entirely different real class) and then type-hint bare `Closure`
+    // meaning *that* one, not the native global class. Must resolve
+    // through the same `use`-import lookup any other class reference
+    // gets.
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Some\Other\Namespace_\Closure;
+            class Foo {
+                public function bar(Closure $callback): void {}
+            }"#,
+    );
+    let sig = r.lookup_method("App\\Foo", "bar").unwrap();
+    assert_eq!(
+        sig.params[0].ty,
+        Type::Object("Some\\Other\\Namespace_\\Closure".to_string(), Vec::new())
+    );
+}
+
+#[test]
 fn phpdoc_types_an_otherwise_untyped_function() {
     let r = build_registry(
         r#"<?php

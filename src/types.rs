@@ -713,7 +713,13 @@ fn parse_type_atom(s: &str) -> Type {
     // whole literal string `"Closure(self):T"` fell through to the
     // generic class-name branch below and got mangled into a bogus,
     // namespace-qualified "class name" (`Doctrine\DBAL\Closure(self):T`).
-    let lower = s.to_ascii_lowercase();
+    // Stripped of a leading `\` first - real corpus code commonly spells
+    // this fully qualified (`@param \Closure(CancelledException) $cb`,
+    // amphp/amp's own convention throughout), which otherwise defeated
+    // this exact check (`"\closure(...".starts_with("closure(")` is
+    // false), falling through to the generic-class branch and mangling
+    // into a bogus `Type::Object("Closure(CancelledException)", [])`.
+    let lower = s.trim_start_matches('\\').to_ascii_lowercase();
     if lower.starts_with("closure(")
         || lower.starts_with("closure (")
         || lower.starts_with("callable(")
@@ -1072,7 +1078,27 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // variant needed) means `is_assignable`'s ordinary class-hierarchy
         // check already does the right thing for it, unaffected by
         // `callable`'s own broader acceptance rules below.
-        "closure" => Type::Object("Closure".to_string(), Vec::new()),
+        // Preserves `original`'s own leading `\`, same reason this whole
+        // function's own doc comment gives for the generic user-class arm
+        // below: a bare, unqualified `Closure` is genuinely ambiguous (real
+        // corpus shape: `rector/rector` consumers of `nikic/php-parser`
+        // routinely `use PhpParser\Node\Expr\Closure;`, an entirely
+        // different real class, then type-hint bare `Closure` meaning
+        // *that* one) - only `\Closure`, root-anchored, unambiguously means
+        // the real global class, and hardcoding the bare name here (losing
+        // the backslash) used to make every native `\Closure $fn` type hint
+        // in a namespaced file look identical to the ambiguous bare case,
+        // then get silently mis-qualified into nonsense like `Amp\Closure`
+        // once `NameContext::resolve` ran (a real, corpus-found bug: amphp/
+        // amp's own `Cancellation::subscribe(\Closure $callback)`). A bare,
+        // unqualified `Closure` instead falls through to the ordinary
+        // class-reference resolution below, exactly like any other class
+        // name - correctly deferring to a real `use` import when one
+        // exists, or PHP's own genuine (if easy-to-typo) "resolves relative
+        // to the current namespace" rule otherwise.
+        "closure" if original.starts_with('\\') => {
+            Type::Object("\\Closure".to_string(), Vec::new())
+        }
         "callable" => Type::Callable,
         "self" => Type::SelfRef,
         "parent" => Type::ParentRef,

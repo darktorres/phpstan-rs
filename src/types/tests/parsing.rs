@@ -293,3 +293,21 @@ fn a_class_name_merely_starting_with_closure_is_not_mistaken_for_the_callable_sh
         Type::Object("ClosureFactory".to_string(), Vec::new())
     );
 }
+
+// Real corpus shape: amphp/amp's own `@param \Closure(CancelledException)
+// $callback` - fully qualified with a leading `\`, which used to defeat
+// the callable-shape check entirely (`"\closure(...".starts_with(
+// "closure(")` is false), falling through to the generic-class branch
+// and mangling into a bogus `Type::Object("Closure(CancelledException)",
+// [])` "class" (reported as a false `class.notFound`).
+#[test]
+fn fully_qualified_closure_shape_syntax_also_degrades_to_plain_callable() {
+    assert_eq!(
+        parse_type_string("\\Closure(CancelledException)"),
+        Type::Callable
+    );
+    assert_eq!(
+        parse_type_string("\\Closure(int, string): bool"),
+        Type::Callable
+    );
+}
