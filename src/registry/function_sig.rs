@@ -79,6 +79,18 @@ pub struct FunctionSig {
     // better-reflection`, not vendored here), so it's left unclaimed
     // rather than guessed.
     pub deprecated: Option<String>,
+    // Phase 42's own self-contained first slice: `@throws` on this
+    // function/method's own doc comment, resolved and unioned across
+    // every tag present (`docblock::DocBlock::throws`'s own doc comment
+    // explains why it's a `Vec` there) - `None` when no `@throws` tag
+    // exists at all, distinct from a real, resolvable-but-empty case
+    // (there isn't one - a tag with no type text simply isn't recorded
+    // by `docblock::parse` in the first place). Not yet consumed by any
+    // checker code - the base model this phase's later stages (a real
+    // body walk collecting `throw` statements, transitive union across
+    // the call graph, the opt-in "missing checked exception" rule
+    // family) build on.
+    pub throws: Option<Type>,
 }
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -603,6 +615,20 @@ impl FunctionSig {
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
         let deprecated = doc.as_ref().and_then(|d| d.deprecated.clone());
 
+        let throws =
+            doc.as_ref()
+                .into_iter()
+                .flat_map(|d| &d.throws)
+                .fold(None::<Type>, |acc, raw| {
+                    let ty = types::parse_type_string(raw);
+                    let ty = mark_template_params(ty, &template_params);
+                    let ty = resolve_names_in_type(ty, ctx);
+                    Some(match acc {
+                        Some(prev) => union_types(prev, ty),
+                        None => ty,
+                    })
+                });
+
         FunctionSig {
             params,
             return_type,
@@ -612,6 +638,7 @@ impl FunctionSig {
             is_internal,
             has_override_attr,
             deprecated,
+            throws,
         }
     }
 
@@ -689,6 +716,14 @@ impl FunctionSig {
             // Same permissive "either overload's own marker wins" as
             // `no_discard`/`is_internal` above.
             deprecated: self.deprecated.or(other.deprecated),
+            // Both real overloads can genuinely throw whatever either
+            // one's own `@throws` documents - a caller has to be
+            // prepared for either, whichever one actually runs.
+            throws: match (self.throws, other.throws) {
+                (Some(a), Some(b)) => Some(union_types(a, b)),
+                (Some(t), None) | (None, Some(t)) => Some(t),
+                (None, None) => None,
+            },
         }
     }
 }

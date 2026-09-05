@@ -232,6 +232,7 @@ fn merge_stubs_does_not_override_user_functions() {
             is_internal: false,
             has_override_attr: false,
             deprecated: None,
+            throws: None,
         },
     )]);
     assert_eq!(r.functions["strlen"].return_type, Type::Int);

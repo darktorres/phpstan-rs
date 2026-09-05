@@ -442,6 +442,7 @@ mod operators;
 pub(crate) mod phpstan_api;
 mod resolve;
 mod stmt;
+mod throws;
 mod uninitialized;
 mod unused;
 mod visibility;
@@ -455,6 +456,7 @@ pub(crate) use control_flow::{
     body_contains_yield, expr_contains_yield, merge_scopes, type_allows_generator_return,
 };
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
+pub(crate) use throws::body_contains_explicit_throw;
 // Only ever called by `union_types` itself in real code (`checker/expr.rs`) -
 // this crate-level re-export exists solely so this module's own test
 // suite can exercise it directly, the same reason `preg_match_matches_shape`
@@ -1106,6 +1108,41 @@ impl<'a> Checker<'a> {
             f.span,
             &label,
         );
+        // Phase 42's own self-contained first slice: `@throws` tag
+        // validity - see `checker::throws`'s own module doc comment.
+        if let Some(sig) = sig
+            && let Some(throws) = &sig.throws
+        {
+            self.check_throws_tag_validity(throws, f.span, &label);
+            // `ThrowsVoidFunctionWithExplicitThrowPointRule`/
+            // `ThrowsVoidMethodWithExplicitThrowPointRule` - needs no
+            // opt-in flag (unlike the throw-type-covariance rule family
+            // this same phase's ROADMAP entry explicitly calls out as
+            // needing one): only ever fires when the docblock *itself*
+            // explicitly claims "never throws," directly contradicted by
+            // a real `throw` sitting right there in the body - no risk
+            // of the inconsistent-@throws-tagging false-positive class
+            // the covariance rule would have (declined this pass,
+            // pending corpus verification - see ROADMAP.md).
+            if *throws == Type::Void
+                && let Some(throw_span) = body_contains_explicit_throw(&f.body)
+            {
+                let kind_word = if class_name.is_some() {
+                    "Method"
+                } else {
+                    "Function"
+                };
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "{kind_word} {label}() throws exception but the PHPDoc contains @throws void."
+                    ),
+                    throw_span,
+                    3,
+                    "throws.void",
+                );
+            }
+        }
 
         // Phase 37: this one `check_function` is the single choke point
         // every function-shaped declaration passes through regardless of

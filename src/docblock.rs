@@ -118,6 +118,18 @@ pub struct DocBlock {
     // of core `phpstan/phpstan` at all, but a separate, opt-in Composer
     // package, `phpstan/phpstan-deprecation-rules`).
     pub deprecated: Option<String>,
+    // Phase 42's own self-contained first slice: `@throws Type[,
+    // description]` on a function/method - the checked-exception type a
+    // caller should be prepared for. A function can (and often does)
+    // document more than one, one per line, so every tag is kept (same
+    // "a class can declare many" reasoning `implements`/`properties`
+    // above already have) - order isn't meaningful, only "which types
+    // were named at all," consumed as a union. Only the raw type text is
+    // kept here, same as `return_type`/`var_type` above - resolved to a
+    // real `Type` (and validated as an actual `Throwable` subtype) at
+    // registry-build time, where name resolution/generics substitution
+    // is actually available.
+    pub throws: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -360,6 +372,12 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // argument tag's own `rest` is.
             "deprecated" => {
                 block.deprecated = Some(rest.trim().to_string());
+            }
+            "throws" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    block.throws.push(ty.to_string());
+                }
             }
             _ => {}
         }

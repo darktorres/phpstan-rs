@@ -571,6 +571,7 @@ impl<'a> Checker<'a> {
             is_internal: sig.is_internal,
             has_override_attr: sig.has_override_attr,
             deprecated: sig.deprecated.clone(),
+            throws: sig.throws.as_ref().map(subst),
         }
     }
 }
