@@ -47,12 +47,20 @@ pub struct PropertySig {
 // detection), but it never reached the registry's own `consts` map,
 // which used to store a bare `Type` with no way to enforce access
 // legality at all. Mirrors `PropertySig`'s identical shape, minus the
-// property-only concerns (`is_static`/`is_readonly`/`set_ty`/
-// `is_internal`) a constant has no equivalent of.
+// property-only concerns (`is_static`/`is_readonly`/`set_ty`) a constant
+// has no equivalent of.
 #[derive(Debug, Clone)]
 pub struct ConstSig {
     pub ty: Type,
     pub visibility: Visibility,
+    // Phase 67 follow-up: `@internal` on this constant's own doc
+    // comment - previously blocked on `ConstSig` not existing at all
+    // (`ClassInfo::consts` was a bare `HashMap<String, Type>`); now that
+    // it does (added for the visibility field above), this is a direct
+    // mirror of `PropertySig::is_internal`. Always `false` for an enum
+    // case (no doc-comment/`@internal` convention of its own, same as
+    // its own always-`Visibility::Public`).
+    pub is_internal: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -297,11 +305,8 @@ impl ClassInfo {
             .consts
             .iter()
             .map(|cc| {
-                let doc_ty = cc
-                    .doc_comment
-                    .as_deref()
-                    .map(docblock::parse)
-                    .and_then(|d| d.var_type.clone());
+                let doc = cc.doc_comment.as_deref().map(docblock::parse);
+                let doc_ty = doc.as_ref().and_then(|d| d.var_type.clone());
                 let ty = match doc_ty {
                     Some(doc_ty) => {
                         let ty = types::parse_type_string(&doc_ty);
@@ -315,6 +320,11 @@ impl ClassInfo {
                     ConstSig {
                         ty,
                         visibility: cc.visibility.clone(),
+                        // Phase 67 follow-up: `@internal` on this
+                        // constant's own doc comment - see
+                        // `PropertySig::is_internal`'s identical doc
+                        // comment for the convention this mirrors.
+                        is_internal: doc.as_ref().is_some_and(|d| d.internal),
                     },
                 )
             })
@@ -525,6 +535,11 @@ impl ClassInfo {
                     ConstSig {
                         ty: infer_const_type(&cc.value),
                         visibility: cc.visibility.clone(),
+                        is_internal: cc
+                            .doc_comment
+                            .as_deref()
+                            .map(docblock::parse)
+                            .is_some_and(|d| d.internal),
                     },
                 )
             })
@@ -545,6 +560,10 @@ impl ClassInfo {
                 ConstSig {
                     ty: Type::EnumCase(fqn.clone(), case.name.clone()),
                     visibility: Visibility::Public,
+                    // A case has no doc-comment/`@internal` convention
+                    // of its own in real PHP either - same reasoning as
+                    // its own always-`Visibility::Public` just above.
+                    is_internal: false,
                 },
             );
         }

@@ -1573,7 +1573,7 @@ impl<'a> Checker<'a> {
                         );
                     } else if let Some((owner, cs)) = &const_with_owner {
                         // Phase 67: `@internal`.
-                        self.check_internal_class_constant_access(owner, member, e.span, label);
+                        self.check_internal_class_constant_access(owner, member, cs, e.span, label);
                         // Phase 57's own still-open item: constant
                         // visibility.
                         self.check_member_visibility(MemberVisibilityCheck {

@@ -11,9 +11,9 @@
 //!
 //! Covers the highest-value access shapes: a plain function call, an
 //! instance/static method call, an instance/static property read, a
-//! class-constant read (declaring-class-internal only - no per-constant
-//! `@internal` tracking exists yet, see `ClassInfo::is_internal`'s own
-//! call sites), and instantiation (`new Foo()`). Real PHPStan's own
+//! class-constant read (both a constant's own individual `@internal` tag
+//! and its declaring class's), and instantiation (`new Foo()`). Real
+//! PHPStan's own
 //! `RestrictedInternalClassNameUsageExtension` additionally covers
 //! `extends`/`implements`/param-and-return-type-hints/`catch`/
 //! `instanceof`, and `RestrictedUsageOfDeprecatedStringCastRule` extends
@@ -23,7 +23,7 @@
 
 use crate::ast::ClassKind;
 use crate::checker::Checker;
-use crate::registry::{FunctionSig, PropertySig};
+use crate::registry::{ConstSig, FunctionSig, PropertySig};
 use crate::token::Span;
 
 /// `Class`/`Interface`/`Trait`/`Enum` - matches real PHPStan's own
@@ -218,14 +218,16 @@ impl<'a> Checker<'a> {
         self.report(label.to_string(), message, span, 0, &identifier);
     }
 
-    /// `RestrictedInternalClassConstantUsageExtension`, narrowed to its
-    /// declaring-class-internal half only - see this module's own doc
-    /// comment for why a constant's own individual `@internal` tag isn't
-    /// tracked.
+    /// `RestrictedInternalClassConstantUsageExtension` - Phase 67 follow-
+    /// up: a constant's own individual `@internal` tag is now tracked too
+    /// (previously blocked on `ConstSig` not existing at all; now that it
+    /// does, added directly), mirroring `check_internal_property_access`'s
+    /// identical "own tag OR declaring class's tag" convention exactly.
     pub(crate) fn check_internal_class_constant_access(
         &mut self,
         owner: &str,
         const_name: &str,
+        sig: &ConstSig,
         span: Span,
         label: &str,
     ) {
@@ -235,30 +237,42 @@ impl<'a> Checker<'a> {
         let Some(declaring_info) = self.registry.classes.get(owner) else {
             return;
         };
-        if !declaring_info.is_internal {
+        let is_const_internal = sig.is_internal;
+        if !is_const_internal && !declaring_info.is_internal {
             return;
         }
         if !self.should_report_internal_usage(owner) {
             return;
         }
         let type_word = class_type_word(declaring_info.kind);
-        let message = match root_namespace_segment(owner) {
-            None => format!(
-                "Access to constant {const_name} of internal {} {owner}.",
-                type_word.to_lowercase()
+        let root_ns = root_namespace_segment(owner);
+        let (message, identifier) = match (root_ns, is_const_internal) {
+            (None, false) => (
+                format!(
+                    "Access to constant {const_name} of internal {} {owner}.",
+                    type_word.to_lowercase()
+                ),
+                format!("classConstant.internal{type_word}"),
             ),
-            Some(ns) => format!(
-                "Access to constant {const_name} of internal {} {owner} from outside its root namespace {ns}.",
-                type_word.to_lowercase()
+            (None, true) => (
+                format!("Access to internal constant {owner}::{const_name}."),
+                "classConstant.internal".to_string(),
+            ),
+            (Some(ns), false) => (
+                format!(
+                    "Access to constant {const_name} of internal {} {owner} from outside its root namespace {ns}.",
+                    type_word.to_lowercase()
+                ),
+                format!("classConstant.internal{type_word}"),
+            ),
+            (Some(ns), true) => (
+                format!(
+                    "Access to internal constant {owner}::{const_name} from outside its root namespace {ns}."
+                ),
+                "classConstant.internal".to_string(),
             ),
         };
-        self.report(
-            label.to_string(),
-            message,
-            span,
-            0,
-            &format!("classConstant.internal{type_word}"),
-        );
+        self.report(label.to_string(), message, span, 0, &identifier);
     }
 
     /// `RestrictedInternalClassNameUsageExtension`, narrowed to

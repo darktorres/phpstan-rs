@@ -252,6 +252,77 @@ fn reading_a_constant_of_an_internal_class_is_flagged() {
     );
 }
 
+// Phase 67 follow-up: a constant's own individual `@internal` tag - not
+// just its declaring class's - is now tracked too.
+
+#[test]
+fn reading_an_internal_constant_of_an_otherwise_public_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            class Thing {
+                /** @internal */
+                const X = 1;
+            }
+
+            namespace Other\App;
+            function f() {
+                echo \Vendor\Internal\Thing::X;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "classConstant.internal" && x.message.contains("Thing::X")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn reading_an_internal_constant_from_the_same_root_namespace_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            class Thing {
+                /** @internal */
+                const X = 1;
+            }
+
+            namespace Vendor\App;
+            function f() {
+                echo \Vendor\Internal\Thing::X;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier.starts_with("classConstant.internal")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn reading_a_non_internal_constant_of_an_otherwise_public_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            class Thing {
+                const X = 1;
+            }
+
+            namespace Other\App;
+            function f() {
+                echo \Vendor\Internal\Thing::X;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier.starts_with("classConstant.internal")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn instantiating_an_internal_class_from_a_different_root_namespace_is_flagged() {
     let d = diagnostics_for(
