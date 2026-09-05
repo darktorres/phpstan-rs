@@ -570,6 +570,7 @@ impl<'a> Checker<'a> {
             visibility: sig.visibility.clone(),
             is_internal: sig.is_internal,
             has_override_attr: sig.has_override_attr,
+            deprecated: sig.deprecated.clone(),
         }
     }
 }

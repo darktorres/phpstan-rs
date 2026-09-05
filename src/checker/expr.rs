@@ -437,6 +437,8 @@ impl<'a> Checker<'a> {
                     if let Some(sig) = sig {
                         // Phase 67: `@internal`.
                         self.check_internal_function_call(name, sig, e.span, label);
+                        // Phase 39: `@deprecated`.
+                        self.check_deprecated_function_call(name, sig, e.span, label);
                         // Phase 68: no-op array_filter()/array_values().
                         match name.as_str() {
                             "array_filter" => {
@@ -805,6 +807,10 @@ impl<'a> Checker<'a> {
                             });
                             // Phase 67: `@internal`.
                             self.check_internal_method_call(
+                                &owner, method, sig, false, e.span, label,
+                            );
+                            // Phase 39: `@deprecated`.
+                            self.check_deprecated_method_call(
                                 &owner, method, sig, false, e.span, label,
                             );
                         }
@@ -1418,6 +1424,10 @@ impl<'a> Checker<'a> {
                             });
                             // Phase 67: `@internal`.
                             self.check_internal_method_call(
+                                owner, method, sig, true, e.span, label,
+                            );
+                            // Phase 39: `@deprecated`.
+                            self.check_deprecated_method_call(
                                 owner, method, sig, true, e.span, label,
                             );
                             // Phase 57 follow-up:

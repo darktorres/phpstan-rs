@@ -58,6 +58,16 @@ pub struct Registry {
     // field via `#[derive(Default)]`, config -> CLI flag -> `Project`
     // setter -> here.
     pub check_internal_usage: bool,
+    // Phase 39: opts into `Checker::check_deprecated_*`
+    // (`deprecated_usage.rs`). Defaults to `false` - real PHPStan's own
+    // equivalent (`phpstan/phpstan-deprecation-rules`) isn't even part of
+    // core `phpstan/phpstan` at all, but a separate, opt-in Composer
+    // package most real projects install alongside it; this project has
+    // no such "separate package" concept, so an opt-in flag is the
+    // closest equivalent, following `check_internal_usage`'s exact same
+    // wiring chain and "real value, but real vendor-corpus noise"
+    // rationale.
+    pub check_deprecated_usage: bool,
     // Phase 38: the project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to

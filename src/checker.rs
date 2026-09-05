@@ -430,6 +430,7 @@ mod calls;
 mod coercion;
 mod control_flow;
 mod date_interval;
+mod deprecated_usage;
 mod duplicates;
 mod expr;
 mod generics;

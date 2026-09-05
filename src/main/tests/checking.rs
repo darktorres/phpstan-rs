@@ -45,6 +45,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         visibility: phpstan_rs::ast::Visibility::Public,
         is_internal: false,
         has_override_attr: false,
+        deprecated: None,
     };
     assert_eq!(
         format_signature("f", &sig),

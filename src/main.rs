@@ -314,6 +314,7 @@ fn run_check_project(
     strict_mixed_arrays: bool,
     check_uninitialized_properties: bool,
     check_internal_usage: bool,
+    check_deprecated_usage: bool,
     php_version: Option<php_version::PhpVersion>,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
@@ -351,6 +352,7 @@ fn run_check_project(
     project.set_strict_mixed_arrays(strict_mixed_arrays);
     project.set_check_uninitialized_properties(check_uninitialized_properties);
     project.set_check_internal_usage(check_internal_usage);
+    project.set_check_deprecated_usage(check_deprecated_usage);
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
@@ -500,6 +502,17 @@ enum Command {
         /// check_internal_usage`'s own doc comment for why.
         #[arg(long)]
         check_internal_usage: bool,
+        /// Enables `@deprecated` usage warnings (`function.deprecated`/
+        /// `method.deprecated`/`staticMethod.deprecated` diagnostics) -
+        /// flags a call to a function/method whose own doc comment
+        /// carries `@deprecated`. Off by default - real PHPStan's own
+        /// equivalent isn't part of core `phpstan/phpstan` at all, but a
+        /// separate, opt-in Composer package
+        /// (`phpstan/phpstan-deprecation-rules`) - see
+        /// `registry::Registry::check_deprecated_usage`'s own doc
+        /// comment for why.
+        #[arg(long)]
+        check_deprecated_usage: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -562,6 +575,7 @@ fn main() {
             strict_mixed_arrays,
             check_uninitialized_properties,
             check_internal_usage,
+            check_deprecated_usage,
             php_version,
             generate_baseline,
             baseline,
@@ -621,6 +635,8 @@ fn main() {
                 || config.check_uninitialized_properties.unwrap_or(false);
             let check_internal_usage =
                 check_internal_usage || config.check_internal_usage.unwrap_or(false);
+            let check_deprecated_usage =
+                check_deprecated_usage || config.check_deprecated_usage.unwrap_or(false);
             let php_version = match php_version.or(config.php_version) {
                 Some(s) => match php_version::parse_php_version(&s) {
                     Ok(v) => Some(v),
@@ -670,6 +686,7 @@ fn main() {
                 strict_mixed_arrays,
                 check_uninitialized_properties,
                 check_internal_usage,
+                check_deprecated_usage,
                 php_version,
                 generate_baseline.as_deref(),
                 baseline.as_deref(),

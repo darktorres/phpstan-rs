@@ -68,6 +68,17 @@ pub struct FunctionSig {
     // doesn't), so this needs to survive `flatten_traits`' merge the
     // same way `no_discard` already does.
     pub has_override_attr: bool,
+    // Phase 39: `@deprecated` on this function/method's own doc comment -
+    // see `docblock::DocBlock::deprecated`'s own doc comment for what it
+    // means and how it's gated. Deliberately scoped to the function/
+    // method's own tag only, unlike `is_internal`'s "declaring class
+    // also counts" fallback - whether a class-level `@deprecated`
+    // implicitly deprecates every member too isn't something this
+    // project could confirm against real PHPStan's own source (the
+    // actual deprecation-detection logic lives in `ondrejmirtes/
+    // better-reflection`, not vendored here), so it's left unclaimed
+    // rather than guessed.
+    pub deprecated: Option<String>,
 }
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -590,6 +601,7 @@ impl FunctionSig {
         let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
+        let deprecated = doc.as_ref().and_then(|d| d.deprecated.clone());
 
         FunctionSig {
             params,
@@ -599,6 +611,7 @@ impl FunctionSig {
             visibility,
             is_internal,
             has_override_attr,
+            deprecated,
         }
     }
 
@@ -673,6 +686,9 @@ impl FunctionSig {
             // `no_discard` just above.
             is_internal: self.is_internal || other.is_internal,
             has_override_attr,
+            // Same permissive "either overload's own marker wins" as
+            // `no_discard`/`is_internal` above.
+            deprecated: self.deprecated.or(other.deprecated),
         }
     }
 }

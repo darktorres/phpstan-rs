@@ -99,6 +99,25 @@ pub struct DocBlock {
     // `check_uninitialized_properties` already established a precedent
     // for).
     pub internal: bool,
+    // Phase 39: `@deprecated` on a class/interface/trait/enum, function,
+    // method, property, or class constant - `None` when the tag isn't
+    // present at all; `Some(message)` when it is, where `message` is
+    // everything after the tag name, trimmed (`Some(String::new())` for
+    // a bare `@deprecated` with no reason given, a real, common shape -
+    // confirmed directly: 491 real files in this project's own Piwigo+
+    // vendor verification corpus use the tag at all, many with no
+    // message). Note this is the PHPDoc *tag* specifically, a purely
+    // documentation/static-analysis convention with zero PHP runtime
+    // effect of its own - distinct from PHP 8.4's native `#[\Deprecated]`
+    // *attribute* (which does emit a real runtime `E_DEPRECATED`
+    // warning on use, confirmed directly via `php`), not handled here.
+    // Consumed by `checker::deprecated_usage`, gated behind `Registry::
+    // check_deprecated_usage` (default off, mirroring `check_internal_
+    // usage`'s own identical "off by default, real value but real vendor
+    // noise" precedent - real PHPStan's own equivalent isn't even part
+    // of core `phpstan/phpstan` at all, but a separate, opt-in Composer
+    // package, `phpstan/phpstan-deprecation-rules`).
+    pub deprecated: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -333,6 +352,14 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // no-argument shape as `@api` just above.
             "internal" => {
                 block.internal = true;
+            }
+            // Phase 39: see `DocBlock::deprecated`'s own doc comment.
+            // Unlike `@api`/`@internal`, this tag *does* usually take a
+            // free-text argument (the deprecation reason) - kept
+            // verbatim, trimmed, rather than discarded the way a no-
+            // argument tag's own `rest` is.
+            "deprecated" => {
+                block.deprecated = Some(rest.trim().to_string());
             }
             _ => {}
         }
