@@ -1521,18 +1521,67 @@ mirrors the existing method equivalent, walking only `extends`
 output - a direct repro (including the promoted-property case) confirms
 all three checks fire correctly, a genuine "no violations found" result.
 
-Still open: interface-first/trait-abstract-method ancestor-lookup
-priority, the `#[Override]` sub-check, property hooks
-(`notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`), and
-native-type-variance (`property.nativeType` - PHP requires *invariant*,
-not covariant, property types on override) - `PropertySig` only carries
-one already-docblock-merged `ty` field (no `return_type_native`-style
-split the way `FunctionSig` has), and comparing it directly risks the
-identical false-positive class `method.childReturnType`'s own doc
-comment already found and fixed for methods; needs that split first.
-`final`/`abstract` property modifiers (PHP 8.4) also still need
-`is_final`/`is_abstract` added to `PropertyDecl`/`PropertySig` - genuine
-new parser work, not currently tracked by any phase.
+**Update**: `check_method_overrides` previously only ever checked a
+class's own textually-declared methods - a method a trait *supplies*
+but the using class never re-declares was silently never checked
+against an implemented interface/parent at all, even though real PHP
+performs override-compatibility checking after trait flattening, not
+just against a class's own body (confirmed directly: `trait T {
+function foo(string $x) {} }` used by a class `implements Iface {
+function foo(int $x): void; }` is a real, unconditional fatal error
+even though the class itself never mentions `foo`). Fixed by
+extracting the whole per-method check into a shared `check_one_method_
+override` helper (taking a method name/visibility/span triple instead
+of an AST `MethodDecl` node) called once per `c.methods` entry as
+before, and now a second time for every name present in the registry's
+already-trait-flattened `info.methods` that the class doesn't
+textually declare itself and that isn't still abstract-only
+(`info.abstract_methods` - a trait's own unimplemented abstract method
+has no concrete body of its own to compare at all, a different,
+separately-tracked concern). No AST node exists for a trait-only
+method within *this* class's own declaration to anchor a precise span
+on (real PHP's own diagnostic points at the trait's declaration line,
+in the trait's own file - information `FunctionSig` doesn't carry), so
+`c.span` (the using class's own declaration) is used instead, matching
+this project's established fallback for class-level diagnostics with
+no more specific member location (`check_class_completeness`,
+`check_trait_conflicts`, ...). Covers all of this function's existing
+checks uniformly (`method.overrideFinal`, `method.visibility`,
+`parameter.missing`/`notOptional`/`byRef`/`notByRef`/`notVariadic`,
+`method.childParameterType`/`childReturnType`) for the trait-supplied
+case too, all confirmed directly via `php -l`/`php -r` repros
+(including that a class's own textually-declared method of the same
+name correctly still wins over - and isn't double-checked alongside -
+a same-named trait contribution, matching this project's established
+"own wins" trait-merge semantics). Corpus-verified: 49988 -> 49989
+diagnostics; the one new finding
+(`vendor/symfony/cache/Traits/RelayProxy.php`'s trait-supplied
+`unwatch()`) traced to its root cause and confirmed genuine-but-noise:
+Piwigo's own vendored `jetbrains/phpstorm-stubs` copy declares
+`Relay\Relay::unwatch(): Relay|bool` while this project's own bundled,
+newer stub declares `Relay|bool|string` for the same extension class -
+exactly the already-accepted "vendored-IDE-stub noise" class documented
+repeatedly elsewhere in this corpus's own verification history (Phase
+66's own `50084 -> 50097` note, `#8`'s "vendored older phpstorm-stubs
+release" note, ...), just newly reachable here because this method was
+never comparable against an ancestor at all before this fix.
+
+Still open: interface-first-vs-trait-abstract-method ancestor-lookup
+*priority* when both could plausibly supply the "real" ancestor (not
+attempted - `lookup_ancestor_method_with_owner` already has a fixed,
+undocumented `extends` before `implements` order that this update
+didn't change or re-examine), the `#[Override]` sub-check, property
+hooks (`notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`),
+and native-type-variance (`property.nativeType` - PHP requires
+*invariant*, not covariant, property types on override) - `PropertySig`
+only carries one already-docblock-merged `ty` field (no
+`return_type_native`-style split the way `FunctionSig` has), and
+comparing it directly risks the identical false-positive class
+`method.childReturnType`'s own doc comment already found and fixed for
+methods; needs that split first. `final`/`abstract` property modifiers
+(PHP 8.4) also still need `is_final`/`is_abstract` added to
+`PropertyDecl`/`PropertySig` - genuine new parser work, not currently
+tracked by any phase.
 
 **Phase 65 - Declaration-site modifier-consistency + constructor-shape
 checks (PARTIAL).** Landed nine of the batch's own small, independent
