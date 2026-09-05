@@ -387,18 +387,49 @@ categories, gating the version-gate half of `FinalConstantRule`,
 unimplemented phase; only the shared configuration mechanism they'd
 all consult is done.
 
-**Phase 39 - Deprecated-symbol usage warnings (PLANNED).**
-`@deprecated` is parsed-past and discarded (confirmed - it only appears
-in a `docblock.rs` test fixture, never consumed). New generalized
-"restricted symbol usage" checker reusing `Registry::lookup_method`/
-`lookup_property`'s already-centralized lookup machinery, switching the
-predicate from "not found -> error" to "found, but deprecated -> warn,"
-once `FunctionSig`/`PropertySig` gain a `deprecated: bool` field.
-Unaffected by the exhaustive audit's own unlock lists (real PHPStan's
-own `@deprecated` enforcement isn't organized as a dedicated `Rules/`
-category the way the audited categories were - it's threaded through
-individual rules elsewhere) - the scope above stands as originally
-written.
+**Phase 39 - Deprecated-symbol usage warnings (PARTIAL).**
+`@deprecated` was parsed-past and discarded (confirmed - it only
+appeared in a `docblock.rs` test fixture, never consumed). 491 real
+files across the Piwigo+vendor verification corpus (`find ... -print0
+| xargs -0 grep -l` - a plain `grep -rl --include` at this corpus size
+undercounted badly and isn't reliable here) use the tag, so implemented
+the highest-value call-site shapes.
+
+**Done**: new `checker::deprecated_usage` module flags calls to
+`@deprecated`-tagged functions, instance methods, and static methods -
+`function.deprecated`, `method.deprecated`, `staticMethod.deprecated`
+respectively - off by default behind `Registry::check_deprecated_usage`
+/ `--check-deprecated-usage` / `check_deprecated_usage` config key,
+mirroring `check_internal_usage`'s exact opt-in plumbing. New
+`FunctionSig::deprecated: Option<String>` (the reason text, if any),
+populated from `DocBlock::deprecated` at `from_decl` time - the same
+pattern `is_internal` already established. Message format matches real
+PHPStan's own wording (`Call to deprecated function foo() (reason).` /
+without the parenthetical when there's no reason). Unlike `@internal`,
+there is deliberately no "declaring scope is exempt" carve-out -
+`@deprecated` usage is worth flagging even from the declaring class's
+own body, since real PHPStan doesn't exempt it either. Corpus-verified:
+byte-identical with the flag off; +712 findings with
+`--check-deprecated-usage` on, spot-checked genuine (e.g.
+`composer/semver`'s `VersionParser::normalizeDefaultBranch()`, message
+text matched against its own real `@deprecated` tag verbatim).
+
+One known, accepted departure from this project's usual rigor: the
+exact rule identifiers above could not be checked against real
+`phpstan/phpstan` vendored source, because real PHPStan's `@deprecated`
+enforcement lives in a separate, NOT-vendored Composer package
+(`phpstan/phpstan-deprecation-rules` - confirmed via
+`deprecationRulesInstalled: false` in `vendor/phpstan-src/conf/config.neon`).
+The three identifiers used are well-established, publicly documented
+ones from that package rather than ones confirmed line-by-line here.
+
+**Still open**: property fetches, class constant fetches, and
+`new`-instantiation of a `@deprecated`-tagged class aren't covered yet
+(this pass only covers plain calls, mirroring Phase 67's own narrower
+first pass before its later per-constant follow-up). Whether a
+class-level `@deprecated` tag should imply deprecation of its members
+is left unclaimed - real PHPStan's own behavior here couldn't be
+verified without the un-vendored package.
 
 **Phase 40 - PHPStan-API-usage checks (PARTIAL).** This entry's own
 status was never updated after an earlier pilot batch landed it
