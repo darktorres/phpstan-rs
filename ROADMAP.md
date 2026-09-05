@@ -1535,6 +1535,25 @@ this project's own representation of "bare class-string" would be
 narrowing `String` to `String`, an unobservable no-op given the current
 architecture, not a real gap to leave open.
 
+**Update**: fixed a real bug in `narrow_instanceof_true`'s own existing
+intersection logic, found while bucketing the full corpus's own
+diagnostic set by identifier (not a phase, an ad hoc false-positive
+hunt): a *nullable* `current` type (`?Socket`, i.e. `Union([Object(
+"Socket"), Null])`) checked against an unrelated interface fell all the
+way through to the simpler "just trust the checked class" fallback -
+discarding `Socket` entirely, not merely its own nullability - because
+`is_object_like(current)` rejected the whole still-nullable union
+outright (`Null` isn't `Object`-shaped). A true `instanceof` can never
+itself be `null`, so `null` is now dropped from `current` before
+deciding whether what's left is object-like enough to intersect with.
+Real corpus false positive: amphp/http-client's own `Http1Connection::
+watchIdleConnection()` - a nullable `?Socket` checked via `instanceof
+ResourceStream` lost `Socket` entirely instead of narrowing to
+`Socket&ResourceStream`, so a later `$socket?->read()` looked like a
+call to a nonexistent method on the resulting bare `ResourceStream`.
+Verified against the ~20,300-file corpus: `method.notFound` 761 -> 746
+(-15), `property.notFound` 824 -> 817 (-7).
+
 Unlocks `ImpossibleCheckTypeHelper`/
 `FunctionCallRule`/`MethodCallRule`/`StaticMethodCallRule`,
 `ImpossibleInArrayHaystackFiniteTypesRule`, `ConstantNumericComparisonTypeTrait`,
@@ -3142,6 +3161,29 @@ checked for genuineness - e.g. `PHP_CodeSniffer\Autoload::loadFile`
 declares a `string` return but has a real `return \false;` path,
 previously invisible because `\false` resolved to `Mixed`), zero
 first-party Piwigo regressions either direction.
+
+**Update**: the identical gap also existed for `&&`/`||` - found while
+bucketing the full corpus's own diagnostic set by identifier (not a
+phase, an ad hoc false-positive hunt), root-caused, and fixed the same
+way: `parse_logical_and`/`parse_logical_or`'s own RHS parsing stopped
+at `parse_bit_or`, never checking for a following assignment operator,
+so `$e instanceof Foo && $x = fn()` parsed as the nonsensical `($e
+instanceof Foo && $x) = fn()` instead of real PHP's own `$e instanceof
+Foo && ($x = fn())` - confirmed directly against a live interpreter
+(`php -r '$e=true; if ($e && $x = "hi") { echo $x; }'` prints `hi`, and
+`$x` stays genuinely unset when `$e` is falsy, real short-circuiting,
+not eager evaluation) after an earlier version of this very entry's own
+doc comment had singled out `&&` by name as an operator this fix
+*wasn't* extended to, on the assumption real PHP's own grammar didn't
+allow it there either - the same "confirmed wrong the hard way" pattern
+as `NameContext::build`'s own multi-namespace-file comment. Real corpus
+false positive: symfony/console's own `Application.php`. Verified
+against the ~20,300-file corpus: `variable.undefined` 1194 -> 1055
+(-139), plus a smaller knock-on drop in `method.notFound`/
+`property.notFound` from code paths reading the newly-defined variable
+afterward. Still deliberately not extended further (`+`, `.`, the
+bitwise `|`/`^`/`&`, ...) - unconfirmed either way, not corpus-
+evidenced as a real gap the way comparison/`&&`/`||` all were.
 
 ## Known limitations
 
