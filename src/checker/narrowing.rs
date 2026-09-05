@@ -433,6 +433,59 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            // An assignment used as a boolean sub-condition (`$a &&
+            // ($x = f()) && $x->m()`, `!$a || !$x = f()`) evaluates
+            // unconditionally whenever control actually reaches it -
+            // the assigned value becomes `$x`'s real type regardless of
+            // which way the *whole* enclosing condition ultimately goes,
+            // so this must run before (and instead of) the generic
+            // bare-truthiness catch-all just below, which `narrowing_
+            // key`'s own `Assign` case would otherwise match too:
+            // without this dedicated arm, that catch-all narrowed
+            // falsiness out of the *pre*-assignment type it read via
+            // `current_narrowed_type` (a no-op for most non-falsy
+            // reassignments, silently discarding the assignment's real
+            // effect) rather than binding the assigned type at all.
+            // `check_expr`'s own `Binary(And/Or, ...)` handling re-derives
+            // each operand's narrowing through this same function (see
+            // its own doc comment) instead of reusing whatever it
+            // already computed while checking each operand for
+            // diagnostics, so a later &&/|| operand referencing the
+            // freshly-assigned variable needs the assignment replayed
+            // here too. Corpus-verified real shape (`Symfony\Component\
+            // DependencyInjection\Compiler\AbstractRecursivePass::
+            // getReflectionMethod()`): `$r->hasMethod('__call') && ($r =
+            // $r->getMethod('__call')) && $r->isPublic()` wrongly flagged
+            // `$r->isPublic()` as calling a nonexistent method on the
+            // *pre*-reassignment `ReflectionClass`, never seeing that
+            // `$r` had become a `ReflectionMethod` two conjuncts earlier
+            // in the very same condition - a real, previously-invisible
+            // gap unmasked only once `parse_not`'s own `!$var = expr`
+            // fix stopped leaving reflection variables like this one
+            // typed as `Mixed` (silencing every check through them)
+            // whenever they were first bound via that idiom.
+            //
+            // The `branch_true` truthy case still needs its own extra
+            // step on top of the plain bind: `if ($position = strpos($x,
+            // "#")) { substr($x, 0, $position); }` (amphp's own
+            // `Http2ConnectionProcessor`) relies on the *assignment's
+            // own result* being truthy to reach the `if` body at all -
+            // without also excluding falsy members from the
+            // freshly-bound type here, `$position` kept `strpos()`'s raw
+            // `int<0, max>|false` inside the truthy branch instead of a
+            // real non-zero `int`, a corpus-verified false positive this
+            // arm's own first version introduced (`substr()`'s 3rd
+            // argument expects `int|null`, not `int<0, max>|false`).
+            ExprKind::Assign(lhs, rhs) => {
+                let rhs_ty = self.infer_expr(rhs, locals);
+                self.bind_assignment_target(lhs, rhs_ty, locals);
+                if branch_true
+                    && let Some(key) = narrowing_key(lhs)
+                    && let Some(current) = locals.get(&key).cloned()
+                {
+                    locals.insert(key, narrow_type_excluding_falsy(&current));
+                }
+            }
             // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
             // reaching here via the `Not` arm's recursion above) - only
             // the truthy branch is narrowable, by excluding the falsy
@@ -1572,7 +1625,13 @@ fn upgrade_array_to_non_empty(ty: &Type) -> Type {
 /// `array_values`, ...) leaves the stored key as `unknown_array_key()`
 /// too, relying on `describe_accessory_intersection`'s own display-layer
 /// guard (a list's key is always `int` by definition, so showing it
-/// would be redundant) rather than encoding it twice.
+/// would be redundant) rather than encoding it twice. A docblock-parsed
+/// `list<T>` still uses a literal `Type::Int` key instead (needed
+/// elsewhere - see `parse_type_string`'s own `"list"` arm), so `types::
+/// is_subtype`'s dedicated list-vs-list `Intersection` arm and `types::
+/// types_equal_for_union` both compare the two representations ignoring
+/// key entirely, rather than this project settling on one encoding
+/// everywhere.
 fn upgrade_array_to_list(ty: &Type) -> Type {
     match ty {
         Type::Array(key, inner) => Type::Intersection(vec![

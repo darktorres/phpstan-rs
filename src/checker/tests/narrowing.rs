@@ -2883,3 +2883,51 @@ fn plain_arrow_on_a_non_nullable_receiver_is_unaffected() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Corpus-verified real shape (Symfony DependencyInjection's own
+// `AbstractRecursivePass::getReflectionMethod()`): reassigning a
+// variable inside a middle `&&` conjunct must be visible to a *later*
+// conjunct in the same condition, not just to code after the whole `if`.
+// `apply_narrowing`'s own `Binary(And, ...)` composition re-derives each
+// operand's effect independently of whatever `check_expr` already
+// computed while checking it for diagnostics, so without a dedicated
+// `ExprKind::Assign` arm there, the reassignment was invisible to
+// `$r->isPublic()` two conjuncts later - `$r` still looked like its
+// pre-assignment `ReflectionClass`, wrongly flagging `isPublic()` (a
+// real `ReflectionMethod` method) as undefined.
+#[test]
+fn a_reassignment_in_a_middle_and_conjunct_is_visible_to_a_later_conjunct() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(ReflectionClass $r): void {
+                if ($r->hasMethod('__call') && ($r = $r->getMethod('__call')) && $r->isPublic()) {
+                    echo "ok";
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Same shape, `||` instead of `&&` - a later disjunct still needs to see
+// an earlier one's reassignment (relevant once the earlier disjunct's
+// own condition is false and control reaches the assignment at all).
+#[test]
+fn a_reassignment_in_a_middle_or_conjunct_is_visible_to_a_later_conjunct() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(?ReflectionClass $r): void {
+                if ($r === null || ($r = $r->getMethod('x')) || $r->isPublic()) {
+                    echo "ok";
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
