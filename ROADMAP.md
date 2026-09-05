@@ -1811,7 +1811,7 @@ comment already found and fixed for methods; needs that split first.
 new parser work, not currently tracked by any phase.
 
 **Phase 65 - Declaration-site modifier-consistency + constructor-shape
-checks (PARTIAL).** Landed nine of the batch's own small, independent
+checks (DONE).** Landed nine of the batch's own small, independent
 boolean-flag-combination checks, all confirmed directly against real
 `php -l` as genuine, unconditional compile-time fatal errors (or, for
 one, a warning) this project's own parser is deliberately more lenient
@@ -1834,19 +1834,31 @@ exactly the "static analyzer tolerates code that was never meant to
 run" value case this whole batch (and Phases 60/63/64's own similar
 additions) shares.
 
-Still open: class-constant `final`/visibility/native-type modifiers -
-unlike every other item in this batch, this one needs new AST fields on
-`ClassConst` (it currently carries none of the three) rather than just
-reading fields the parser already populates, a real, if still S-M-sized,
-prerequisite this pass didn't absorb. Unlocks (done pieces already
-built): `AbstractMethodInNonAbstractClassRule`, `AbstractPrivateMethodRule`,
+**Update**: the class-constant `final`/native-type modifier trio is now
+done too - a new `ClassConst::is_final` field (threaded through both
+class-body and enum-body const parsing the same way `visibility`/
+`type_hint` already are) backs all three: `classConstant.
+finalNotSupported` (`final const` needs PHP 8.1+), `classConstant.
+finalPrivate` (a `private` constant can never be `final` too - nothing
+outside its own declaring class could ever see it to override -
+unconditional, no version gate), and `classConstant.
+nativeTypeNotSupported` (a typed constant needs PHP 8.3+, reusing the
+already-parsed `type_hint` field from Phase 48, no new parsing needed
+for that one at all). Both version-gated checks reuse `PhpFeature::
+FinalClassConstants`/`NativeTypedClassConstants` - Phase 38 already
+defined both variants but never wired them to anything. Corpus-verified:
+byte-identical with no configured PHP version and with `--php-version
+8.5` (Piwigo's own `composer.json` constraint) - zero corpus usage of
+`final const` at all, confirmed as a genuine "no violations found"
+result (not dormant) via a direct multi-version repro.
+
+Unlocks: `AbstractMethodInNonAbstractClassRule`, `AbstractPrivateMethodRule`,
 `FinalPrivateMethodRule`, `MethodVisibilityInInterfaceRule`,
 `ConstructorReturnTypeRule`, `ClassAsClassConstantRule`,
 `InvalidVariableAssignRule`, `ThisInGlobalStatementRule`,
-`ThisInStaticStatementRule`; (still open) `FinalConstantRule`,
-`FinalPrivateConstantRule`, `NativeTypedClassConstantRule`. Size: S-M per
-item; batched as one phase since none has any shared blocker beyond
-Phase 38's PhpVersion gate for two of the const-modifier sub-checks.
+`ThisInStaticStatementRule`, `FinalConstantRule`,
+`FinalPrivateConstantRule`, `NativeTypedClassConstantRule` - every item
+this phase originally named is now done.
 
 **Phase 66 - Enum sanity, ancestor-check wiring, and template-rejection
 completion (DONE).** Extended `check_enum_case_values`
