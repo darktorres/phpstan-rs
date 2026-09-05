@@ -1913,16 +1913,9 @@ exact same declaring class). Covers the highest-value access shapes:
 function calls (`function.internal`), instance/static method calls
 (`method.internal(Class|Interface|Trait|Enum)`, `staticMethod.*`),
 instance/static property reads (`property.*`, `staticProperty.*`),
-class-constant reads (`classConstant.*`, declaring-class-internal only -
-no per-constant `@internal` tracking exists yet; this originally needed
-a real struct in place of `ClassInfo::consts`'s then-bare
-`HashMap<String, Type>`, but Phase 57's own later `ConstSig` (added for
-class-constant *visibility* enforcement, mirroring `PropertySig`) is
-that exact struct - per-constant `@internal` tracking is no longer
-blocked on new infrastructure, just on adding an `is_internal` field to
-`ConstSig` and reading a constant declaration's own `@internal` tag the
-same way `PropertySig::from_decl` already does),
-and instantiation (`new.*`). Needed new `is_internal` fields on
+class-constant reads (`classConstant.*`, both a constant's own
+individual `@internal` tag and its declaring class's - see the Update
+below), and instantiation (`new.*`). Needed new `is_internal` fields on
 `FunctionSig` (covers both plain functions and methods for free),
 `ClassInfo`, and `PropertySig`, plus a new `Registry::
 lookup_const_with_owner` (mirroring `lookup_method_with_owner`/
@@ -1943,6 +1936,19 @@ and several vendored packages calling `phpunit/php-code-coverage`'s
 is not covered by the backward compatibility promise for
 phpunit/php-code-coverage" in its own source.
 
+**Update**: per-constant `@internal` tracking is now done too - a new
+`ConstSig::is_internal` (populated the same way `PropertySig::
+is_internal` already is, no longer blocked on `ConstSig` not existing at
+all now that Phase 57 built it) wired into `check_internal_class_
+constant_access` alongside the existing declaring-class-internal check,
+mirroring `check_internal_property_access`'s identical "own tag OR
+declaring class's tag" convention exactly. Corpus-verified: byte-
+identical with the flag off; with `--check-internal-usage`, 51288 ->
+51291 (+3, genuine: `friendsofphp/php-cs-fixer`'s `OrderedImportsFixer::
+IMPORT_TYPE_CLASS`/`_CONST`/`_FUNCTION`, each individually marked
+`@internal`, accessed from `phar-io/manifest`'s own
+`.php-cs-fixer.dist.php` outside `PhpCsFixer`'s root namespace).
+
 Still open: real PHPStan's own `RestrictedInternalClassNameUsageExtension`
 additionally covers `extends`/`implements`/param-and-return-type-hints/
 `catch`/`instanceof`/first-class-callables (this phase only covers
@@ -1951,9 +1957,7 @@ instantiation of the several `ClassNameUsageLocation` variants);
 check to an implicit `(string)`-cast-triggered `__toString()` call - easy
 to add once needed, just not wired); per-property-write `@internal`
 tracking (property *reads* are covered, writes aren't - a separate gap
-from the constant one); per-constant `@internal` tracking (see above -
-no longer blocked on new infrastructure now that `ConstSig` exists,
-just not yet wired); `RestrictedClassConstantUsageRule`/
+from the constant one, now fully closed); `RestrictedClassConstantUsageRule`/
 `RestrictedFunctionCallableUsageRule`/`RestrictedMethodCallableUsageRule`/
 `RestrictedPropertyUsageRule`/`RestrictedStaticMethodCallableUsageRule`/
 `RestrictedStaticPropertyUsageRule` (a separate, *user-configured*
