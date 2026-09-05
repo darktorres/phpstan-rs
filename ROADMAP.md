@@ -1473,12 +1473,24 @@ method is an unrelated declaration, not a polymorphic override
 validateStatusCode()` colliding by name only with an equally-private,
 equally-unrelated ancestor method in a different class).
 
-Still open, unstarted: by-ref/variadic-contravariance parameter
-mismatches (`parameter.byRef`/`notByRef`/`variadic`/`notVariadic` -
-real PHPStan's own `MethodParameterComparisonHelper` spends most of its
-own ~250 lines on exactly this cluster), interface-first/trait-
-abstract-method ancestor-lookup priority, the `#[Override]` sub-check,
-and the *entire* property-override half (`OverridingPropertyRule`'s
+**Update**: two of the by-ref/variadic-contravariance shapes are now
+checked too - `parameter.byRef`/`notByRef` (a parameter's by-ref-ness
+must match the ancestor's exactly, either direction) and
+`parameter.notVariadic` (an ancestor's variadic tail can't be narrowed
+to non-variadic on override; the reverse - widening a fixed parameter to
+variadic - is real, legal PHP, confirmed directly, and stays unflagged).
+Both match real PHPStan's own `MethodParameterComparisonHelper`
+identifiers exactly; its own fuller variadic-contravariance-across-
+every-swallowed-parameter logic (`parameter.variadic`,
+`method.childParameterType`'s variadic-specific sub-case) is left
+unattempted, matching this same function's already-established narrower
+`parameter.missing` scope. Corpus-verified: no diagnostic-count change
+(byte-identical output) - a direct repro confirms both fire correctly,
+a genuine "no violations found" result, not a dormant check.
+
+Still open, unstarted: interface-first/trait-abstract-method ancestor-
+lookup priority, the `#[Override]` sub-check, and the *entire*
+property-override half (`OverridingPropertyRule`'s
 equivalent: static/readonly/hook/visibility/final/native-type-variance
 mismatches on property override) - needs `is_final`/`is_abstract` added
 to `PropertyDecl`/`PropertySig` first (not currently tracked by any
