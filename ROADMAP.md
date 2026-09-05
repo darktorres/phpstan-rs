@@ -5162,6 +5162,56 @@ filled in). Given this is a *global* registration-semantics change,
 verification swept every file in both vendored stub corpora, not just
 the usual before/after diff.
 
+**Update**: a full-corpus top-10-bucket round found the mirror-image gap
+this phase's own class-merging fix hadn't covered: a *conditional*
+declaration (`if (...) { class X {...} }`) colliding with a name that
+already exists stayed a plain `entry().or_insert_with()` no-op,
+discarding the conditional declaration's own members entirely -
+deliberately correct for a `class_exists('X')`-guarded defensive
+fallback colliding with a real, already-known vendor class (the
+existing `unconditional_class_wins_over_a_later_conditional_stub` test,
+`PHPUnit\Framework\TestCase`'s real shape), but too conservative when
+the *existing* entry is only `jetbrains/phpstorm-stubs`' own
+type-checking fiction for a real native class, and the conditional
+declaration is a genuine, version-gated polyfill implementation whose
+own method bodies still get checked. Real corpus shape:
+`symfony/polyfill-php84`'s own `if (PHP_VERSION_ID < 80400) { final
+class ReflectionConstant { private $value; private $deprecated; ... }
+}` collides with phpstorm-stubs' own native-class stub (only `$name`) -
+every `$this->value`/`$this->deprecated`/`self::$persistentConstants`
+access inside that one polyfill file was checked against the stub's far
+narrower shape instead of its own real one.
+
+New `built_in_stub_classes` tracking set (populated only by
+`merge_stub_classes`) lets `index_with_context`'s own `if conditional`
+branch tell "the existing entry is itself only a stub, safe to fill in
+gaps from" apart from "the existing entry is a real vendor/first-party
+class, must stay untouched" - only the former now merges (existing wins
+any real conflict, matching `ClassInfo::merge`'s own established
+contract), the latter keeps the original no-op. `extends`/`implements`/
+`uses`/`templates`/`extends_args`/`trait_aliases`/`implements_args` are
+deliberately excluded from the merge and restored to the winning
+declaration's own values afterward, even for the stub case: a first
+attempt without this exclusion regressed 2 new `method.overrideFinal`
+false positives, caught via full corpus diff before shipping -
+`nikic/php-parser`'s own conditional `class PhpToken extends
+Symfony\Polyfill\Php80\PhpToken {}` (guarding PHP <8.0, colliding with
+the identical stub-vs-conditional pattern) merged that never-taken
+`extends` onto the real `\PhpToken` stub, which a wholly unrelated
+third file's own `TokenPolyfill extends \PhpToken {}` then inherited
+transitively, wrongly flagging its real `__construct()` as overriding a
+`final` method it has no actual relation to - a fictitious
+inheritance edge is categorically more dangerous than a fictitious
+member, unlike the property/method maps a member is always safe to have
+more of. Verified against the ~20,300-file corpus: 46,012 -> 45,973
+(-39, concentrated in `property.notFound`/`staticProperty.notFound`
+across `ReflectionConstant`/`PhpToken`/`Pdo\Pgsql`'s own
+polyfill-vs-stub collisions), only 2 new findings - both a genuine,
+previously-invisible `missingType.iterableValue` on `Pdo\Pgsql`'s own
+newly-merged-in `pgsqlCopyToArray()`/`pgsqlGetNotify()` methods, the
+same already-accepted informational diagnostic class every other
+`array|false`-without-a-value-type docblock gets.
+
 **Phase 26 (732 -> 706) - narrowing through wrapper expressions.**
 `narrowing_key` never unwrapped a parenthesized `Grouping` node, so the
 overwhelmingly common `while (($file = readdir($dir)) !== false)` shape
