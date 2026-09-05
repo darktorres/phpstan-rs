@@ -330,7 +330,37 @@ impl<'a> Checker<'a> {
             // leaving a gap in whatever sequential keys remain), same
             // "don't guess past what's certain" leniency `array_unique`
             // just above already applies to its own similar shape.
-            "array_intersect_key" if args.len() >= 2 => {
+            // Phase 74 follow-up: generalizes the identical shape to
+            // every other `array_diff*`/`array_udiff*`/`array_intersect*`/
+            // `array_uintersect*` sibling - none of them ever transforms
+            // a surviving element's own value (only *which* key/value
+            // pairs survive differs between them: by value, by key, by
+            // both, or via a user comparison callback for the `u`-
+            // prefixed variants), so every one shares `array_unique`/
+            // `array_intersect_key`'s identical "arg0's own type, minus
+            // whatever accessory markers, verbatim" result. Confirmed
+            // directly via `php -r`: `array_diff([10, 20, 30], [20])`
+            // returns `[0 => 10, 2 => 30]`, not re-sequenced - list-ness
+            // never survives here either, the same "don't guess past
+            // what's certain" leniency already established.
+            "array_intersect_key"
+            | "array_intersect"
+            | "array_intersect_assoc"
+            | "array_intersect_ukey"
+            | "array_intersect_uassoc"
+            | "array_uintersect"
+            | "array_uintersect_assoc"
+            | "array_uintersect_uassoc"
+            | "array_diff"
+            | "array_diff_key"
+            | "array_diff_assoc"
+            | "array_diff_ukey"
+            | "array_diff_uassoc"
+            | "array_udiff"
+            | "array_udiff_assoc"
+            | "array_udiff_uassoc"
+                if args.len() >= 2 =>
+            {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
                     return strip_accessory_markers(arr_ty);

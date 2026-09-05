@@ -427,6 +427,107 @@ fn array_intersect_key_preserves_the_first_array_s_own_key_and_value_types() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 74 follow-up: the identical `array_intersect_key` shape,
+// generalized to every other `array_diff*`/`array_udiff*`/
+// `array_intersect*`/`array_uintersect*` sibling.
+
+#[test]
+fn array_diff_preserves_the_first_array_s_own_value_type_and_loses_list_ness() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<int> $xs */
+            function f(array $xs, array $other): void {
+                assertType('array<int, int>', array_diff($xs, $other));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_diff_key_preserves_the_first_array_s_own_key_and_value_types() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param array<string, int> $a
+             * @param array<string, bool> $b
+             */
+            function f(array $a, array $b): void {
+                assertType('array<string, int>', array_diff_key($a, $b));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_udiff_preserves_the_first_array_s_own_value_type() {
+    // Only asserts the *return*-type shape this phase is about - a
+    // separate, pre-existing, zero-corpus-incidence stub imprecision
+    // (phpstorm-stubs' own real `array_udiff` declares its PHP 8.0+
+    // `...$rest` tail with a bare `@param array ...$rest` docblock, with
+    // no way to express "0+ arrays then one trailing callback"), found
+    // while writing this test, separately still flags the 3rd argument
+    // itself - unrelated to this check, not fixed here.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param array<string, int> $a
+             * @param array<string, int> $b
+             */
+            function f(array $a, array $b): void {
+                assertType('array<string, int>', array_udiff($a, $b, fn($x, $y) => $x <=> $y));
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "phpstanRs.assertType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn array_intersect_preserves_the_first_array_s_own_value_type_and_loses_list_ness() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<int> $xs */
+            function f(array $xs, array $other): void {
+                assertType('array<int, int>', array_intersect($xs, $other));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_uintersect_assoc_preserves_the_first_array_s_own_key_and_value_types() {
+    // Same caveat as `array_udiff` just above - only the return-type
+    // shape is asserted here.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param array<string, int> $a
+             * @param array<string, int> $b
+             */
+            function f(array $a, array $b): void {
+                assertType(
+                    'array<string, int>',
+                    array_uintersect_assoc($a, $b, fn($x, $y) => $x <=> $y)
+                );
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "phpstanRs.assertType"),
+        "got: {d:?}"
+    );
+}
+
 // Phase 73: array_flip() swaps keys and values - confirmed directly via
 // php that list-ness never survives (the new keys come from the old
 // values, essentially never already 0, 1, 2, ...) but non-emptiness
