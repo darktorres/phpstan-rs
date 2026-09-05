@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::ast::*;
 use crate::checker::{Checker, TemplateBindings};
+use crate::docblock;
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -150,7 +151,63 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        self.check_property_tag_types(fqn, c);
         self.check_ancestor_generic_bounds(fqn, c.span);
+    }
+
+    /// Phase 36's own "bright spot": `@property`/`@property-read`/
+    /// `@property-write`'s *validation* half (real PHPStan's own
+    /// `PropertyTagCheck`) - parsing and inference already shipped back
+    /// in Phase 13 Finding D (`ClassInfo::from_decl` already synthesizes
+    /// every tag into a real, resolved `PropertySig`, exactly the way a
+    /// magic `__get`/`__set`-backed property needs); only the diagnostic
+    /// layer checking the tag's own declared type was missing. Mirrors
+    /// the identical `check_generic_bounds`/`check_type_class_names_exist`
+    /// pair the loop just above already runs for a class's own *real*
+    /// properties, applied to every `@property`-family tag on this
+    /// class's own doc comment instead. Re-parses `c.doc_comment` fresh
+    /// (the same pattern `check_enum_template_tag` already uses) rather
+    /// than threading a `DocBlock` through from wherever the registry
+    /// last parsed one, since the checker doesn't keep it around after
+    /// indexing.
+    ///
+    /// Deliberately narrower than real PHPStan's own `PropertyTagCheck`
+    /// in one way: looks the tag's *name* up in the already-resolved
+    /// `info.properties` map (which only ever holds one winning entry per
+    /// name - a real, physically-declared property of the same name
+    /// always wins over a tag, `ClassInfo::from_decl`'s own `or_insert_
+    /// with` above) rather than independently re-resolving each tag's own
+    /// type from scratch. This means a `@property` tag whose name is
+    /// shadowed by a real property of the same name checks the *real*
+    /// property's type instead of the tag's own - a redundant/self-
+    /// contradictory declaration style with no confirmed corpus incidence,
+    /// not the common case this check exists for.
+    fn check_property_tag_types(&mut self, fqn: &str, c: &ClassDecl) {
+        let Some(raw) = &c.doc_comment else {
+            return;
+        };
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        let block = docblock::parse(raw);
+        for tag in &block.properties {
+            let Some(prop_sig) = info.properties.get(&tag.name) else {
+                continue;
+            };
+            let tag_name = match (tag.readable, tag.writable) {
+                (true, true) => "@property",
+                (true, false) => "@property-read",
+                (false, true) => "@property-write",
+                (false, false) => "@property",
+            };
+            self.check_generic_bounds(&prop_sig.ty, fqn, c.span);
+            self.check_type_class_names_exist(
+                &prop_sig.ty,
+                &format!("PHPDoc tag {tag_name} for property {fqn}::${}", tag.name),
+                c.span,
+                fqn,
+            );
+        }
     }
 
     /// Phase 66: the `extends`/`implements` half of

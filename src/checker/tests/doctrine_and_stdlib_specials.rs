@@ -671,6 +671,115 @@ fn a_property_read_tag_flags_an_attempted_write() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
+// Phase 36's "bright spot": @property/@property-read/@property-write's
+// own *validation* half (real PHPStan's PropertyTagCheck) - the tag's
+// own declared type must reference a real, known class, the same
+// existence-checking every native property type hint already gets.
+
+#[test]
+fn a_property_tag_referencing_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @property TotallyMadeUp $thing
+             */
+            class A {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"
+            && x.message.contains("TotallyMadeUp")
+            && x.message.contains("@property")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_property_read_tag_referencing_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @property-read TotallyMadeUp $thing
+             */
+            class A {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "class.notFound" && x.message.contains("@property-read")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_property_write_tag_referencing_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @property-write TotallyMadeUp $thing
+             */
+            class A {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "class.notFound" && x.message.contains("@property-write")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_property_tag_referencing_a_real_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Paths {}
+            /**
+             * @property Paths $paths
+             */
+            class OpenApi {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_property_tag_with_a_builtin_scalar_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @property int $x
+             * @property-read string $y
+             */
+            class A {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_unknown_class_referenced_only_by_a_property_tag_shadowed_by_a_real_property_is_not_double_flagged()
+ {
+    // Documented, deliberate leniency: a tag's name shadowed by a real,
+    // physically-declared property of the same name checks the real
+    // property's own type, not the tag's - a redundant declaration style
+    // with no confirmed corpus incidence.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @property TotallyMadeUp $x
+             */
+            class A { public int $x = 0; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // Phase 77: get_called_class()/get_parent_class() - real, evidenced
 // late-static-binding shapes real PHPStan's own
 // GetCalledClassDynamicReturnTypeExtension/
