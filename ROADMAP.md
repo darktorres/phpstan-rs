@@ -5440,6 +5440,34 @@ loop variable). Correctly modeling `break` surfaced 6 further, previously-
 masked diagnostics - all traced to the already-known `Type::Array`-has-
 no-key-type gap, a legitimate disclosed limitation, not a new defect.
 
+**Update**: a top-10-bucket workflow scoping the full corpus found the
+one loop shape this phase's own `loop_break_states` fix didn't cover:
+`StmtKind::While` still unconditionally merged the pre-loop state with
+the body's own state (the ordinary "may run zero times" reasoning),
+even for a literal `while (true)`/`while (1)` condition, which always
+runs at least once and can only ever be exited via a `break` inside the
+body - `while (true) { $y = 1; break; } return $y;` discarded `$y` from
+every break-reached state during that merge, leaving it looking
+undefined afterward. Fixed by reusing `is_truthy_literal` (already used
+by `always_terminates`'s own `While` arm for the identical reasoning -
+a break-less `while (true) {...}` never lets control reach past it at
+all) to skip the zero-iteration merge and the "cond went false"
+narrowing entirely when the condition is a bare truthy literal, folding
+together only the loop's own `break`-reached states instead. One
+narrow residual, not chased further: a variable *accumulated across
+several iterations* before an eventual `break` (real shape: phpunit's
+own `GlobalStateCapture::activeExceptionHandlers()`, appending to `$res`
+each pass until a null sentinel triggers the break) can't be captured
+by this project's own single-representative-pass loop model (this
+exact function's own pre-existing doc comment already names the
+tradeoff: "not a real fixed point, but sound enough to avoid claiming
+more precision than we have") - the old, technically-unsound merge
+happened to smuggle in a "completed one full un-broken iteration" state
+that accidentally carried the right accumulated shape; removing it (to
+fix the false positive above) makes 2 corpus diagnostics visibly less
+precise than before, a real fixed-point loop analysis being the only
+complete fix and well past this round's scope.
+
 **Phase 30 (533 -> 512) - `Closure(...)`/`callable(...)` shape syntax.**
 A PHPDoc callable-shape type (`@param Closure(self):T $func`, real and
 documented, e.g. Doctrine DBAL's own `transactional()`) had no parser
