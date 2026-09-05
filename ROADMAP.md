@@ -2111,19 +2111,53 @@ from, not strictly blocked by" framing - no corpus evidence pushed it
 into this pass on its own.
 
 **Phase 80 - Object-shape/`key-of<T>`/conditional-return-type PHPDoc
-syntax (NEW, PLANNED).** `docblock.rs` deliberately skips conditional-
-return-type syntax (`($subject is Target ? If : Else)` - a tested,
-deliberate design choice, not an oversight, per this document's own
-Permanent design boundaries) and never parses `object{...}` shapes or
-`key-of<T>`/`value-of<T>` pseudo-types. Add a deferred-resolution
-mechanism to `Type` plus parsing for all three syntaxes. Unlocks
-`ConditionalType`, `ConditionalTypeForParameter`, `KeyOfType`,
-`ValueOfType`, `OffsetAccessType`, `LateResolvableType`,
-`ClassConstantAccessType`. Prerequisite for the `TemplateKeyOfType`/
-`TemplateObjectShapeType` bound kinds in Phase 54. Size: XL - the
-single biggest coherent missing PHPDoc subsystem by item count;
-conditional return types are common in real stubs and increasingly in
-user `is_*()`-predicate code.
+syntax (PARTIAL).** This entry's own original text was stale on arrival:
+it claimed `docblock.rs` "deliberately skips conditional-return-type
+syntax... a tested, deliberate design choice, not an oversight, per this
+document's own Permanent design boundaries," but a corpus-cleanup round
+after this entry was written (see "A fifth round" above) already added
+`types::try_parse_conditional_type` - real PHPStan's own `($subject is
+Target ? If : Else)` syntax is recognized (the literal `is`/`?`/`:`
+tokens at the top level of a parenthesized group) and resolved to the
+union of both branches, since this project has no per-call-site
+type-expression evaluation to actually pick one. Not a full deferred-
+resolution mechanism (`ConditionalType`/`ConditionalTypeForParameter`
+stay unmodeled as *distinct*, narrowable-per-call-site types), but a
+real, sound, already-shipped approximation - this phase's own
+"Permanent design boundaries" citation should be read as referring to
+that narrower remaining gap, not to conditional-type syntax being
+unparsed entirely.
+
+**Done** (this phase, not the round above): `object{name: string, age?:
+int}` - a new `Type::ObjectShape`, mirroring `ArrayShape` exactly
+(parsing, `Display`, structural `is_subtype`/`is_assignable` rules, and
+property-access resolution in both `check_expr`/`infer_expr`). Before
+this, the raw `object{...}` text was mangled into a bogus, namespace-
+qualified "class name" - a real, active `class.notFound` false positive
+on every use of this syntax, not a mere precision gap; a real class
+instance satisfies a declared object shape structurally (via
+`lookup_property`, the same "required fields present with an assignable
+type, extra fields ignored" spirit `ArrayShape` already has for arrays).
+Corpus-verified: 50050 -> 50036 diagnostics, 14 genuine false positives
+eliminated across `amphp/sync`, `jetbrains/phpstorm-stubs`'s own test
+suite, `pelago/emogrifier`, and two rector/ECS-prefixed copies of
+`nette/utils` - real, common usage an earlier zero-corpus-evidence grep
+for this phase had missed (a spacing/multi-line docblock variation this
+document's own author didn't account for when scoping the phase).
+
+**Still open**: `key-of<T>`/`value-of<T>`/`OffsetAccessType` pseudo-
+types (a real, separate parsing gap - `value-of<T>` in particular
+already surfaces as ~50+ pre-existing `class.notFound`-adjacent findings
+elsewhere in the corpus per Phase 74's own notes, so there's real,
+already-confirmed payoff here too); a genuine deferred-resolution
+mechanism for conditional return types, letting a specific call site's
+own argument type pick the real branch instead of always widening to
+the union of both (`ConditionalType`/`ConditionalTypeForParameter`/
+`LateResolvableType`/`ClassConstantAccessType`). Also still a
+prerequisite for the `TemplateKeyOfType`/`TemplateObjectShapeType` bound
+kinds in Phase 54. Size: L remaining (down from this entry's own
+original XL, now that `object{...}` and conditional-syntax parsing are
+both accounted for).
 
 **Phase 81 - Object-operator overloading dispatch (GMP/`BcMath\Number`)
 (DONE).** `infer_binary` and unary-op inference assumed plain numeric
