@@ -1038,12 +1038,20 @@ composed correctly with no extra work, but a bare `assert(...)` call
 used as a sub-expression, not a top-level statement, still isn't
 recognized by `apply_narrowing`'s own dispatch at all); the multi-arg/
 argument-derived predicate targets (`is_a`, `class_exists`,
-`str_contains`). Also found and named, but deliberately not fixed in
-this pass: `array_is_list()` isn't a recognized narrowing predicate at
-all, so a `list<T>`-returning function whose own body proves list-ness
-via `is_array($x) && array_is_list($x)` (a real, common assertion-
-library idiom - `webmozart/assert`'s own `Assert::isList()`) can't
-have that proven by this project yet. Unlocks `ImpossibleCheckTypeHelper`/
+`str_contains`).
+
+**Update**: `array_is_list($x)`'s own true branch is now a recognized
+narrowing predicate (`upgrade_array_to_list`, mirroring `count($x)`'s
+existing non-emptiness upgrade exactly) - the `is_array($x) &&
+array_is_list($x)` idiom this entry originally named composes correctly
+with no extra work, the same `&&`/`||`/`!` recursive composition
+`count()`'s own truthiness upgrade already relies on. Corpus-verified:
+50060 -> 50057 diagnostics, all three cleared findings genuine false
+positives, including `webmozart/assert::isList()`'s own real body (the
+exact idiom named above) and `Psl\Type\Internal\MixedVecType`'s
+identical guard.
+
+Unlocks `ImpossibleCheckTypeHelper`/
 `FunctionCallRule`/`MethodCallRule`/`StaticMethodCallRule`,
 `ImpossibleInArrayHaystackFiniteTypesRule`, `ConstantNumericComparisonTypeTrait`,
 `UndecidedComparisonTypeTrait`, `ConstantScalarTypeTrait`,
