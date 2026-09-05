@@ -415,6 +415,70 @@ declaration-consistency *validation* half (checking the tag itself
 against the parameter's own declared type, independent of any call
 site) remains unbuilt - still open.
 
+**Update**: a top-10-bucket round of the same full-corpus identifier-
+bucketing methodology (46,511 diagnostics) found `variable.undefined`
+was still the 9th-largest bucket at 1,055, dominated by a single real
+idiom in `plupload`'s own `upload.php`: `if (!is_dir($targetDir) ||
+!$dir = opendir($targetDir)) { die(...); }`. `parse_not` folded `!`
+tighter than assignment (`Unary(Not, $dir)` was returned as a whole
+before any `=` was ever consumed, matching every other unary operator
+in `parse_unary_inner`), so the trailing `= opendir(...)` was left for
+an *enclosing* `&&`/`||`'s own Phase 85 assignment-tail fix to pick up
+- which then wrongly tried to assign into `Unary(Not, $dir)` itself (not
+a valid target `bind_assignment_target` recognizes) instead of real
+PHP's own `!($dir = opendir($targetDir))`. Confirmed directly (`php -r
+'$x=0; $r=!$x=5; var_dump($r,$x);'` prints `bool(false) int(5)`, and
+short-circuit evaluation still applies: `$b=true; $out=$b||!$x=f();`
+never calls `f()`, leaving `$x` genuinely unset). Fixed inside
+`parse_not` itself, at the point `!` actually binds, applying `parse_
+assignment_tail` to its own operand before wrapping it - not by
+extending `parse_multiplicative`/`parse_unary_inner` generally (`-$x =
+5`/`~$x = 5` show the identical real-PHP quirk via direct `php -r`
+testing, but have zero corpus evidence either way, so left alone per
+this project's usual "don't guess past what's evidenced" rule). Verified
+against the ~20,300-file corpus: 46,511 -> 46,014 (-497, 499
+`variable.undefined` cleared plus small knock-on drops elsewhere), only
+one reworded line (a duplicate-union display fix, see Phase 14.5's own
+update below) and otherwise zero new findings.
+
+That same fix then surfaced a second, independent, real narrowing gap:
+`apply_narrowing` had no `ExprKind::Assign` arm at all, so a variable
+reassigned inside a *middle* `&&`/`||` conjunct (`$r->hasMethod(
+'__call') && ($r = $r->getMethod('__call')) && $r->isPublic()`, real
+shape from Symfony DependencyInjection's own `AbstractRecursivePass::
+getReflectionMethod()`) stayed at its *pre*-reassignment type for any
+*later* conjunct in the same condition - `check_expr`'s own `Binary(
+And/Or, ...)` handling re-derives each operand's narrowing through
+`apply_narrowing` independently of whatever `check_expr` itself already
+computed while checking that operand for diagnostics (see that arm's
+own doc comment, `checker/expr.rs`), and the existing bare-truthiness
+catch-all an `Assign` node fell into instead just re-narrowed the
+*old* value's falsiness - a near no-op for a non-falsy reassignment,
+never binding the assigned type at all. Previously invisible on this
+exact corpus line only because `parse_not`'s own bug (above) had left
+`$r` typed `Mixed` from its very first `!$r = $this->container->
+getReflectionClass($class)` binding, silencing every check through it -
+a direct instance of this project's own "verify before declining a
+fix" lesson: fixing the visible bug can unmask a second, independent
+one at the very same call site. Fixed by giving `ExprKind::Assign` its
+own dedicated arm ahead of the bare-truthiness catch-all (whose
+`narrowing_key` recognizes an `Assign` too, so ordering matters):
+`infer_expr` the RHS and `bind_assignment_target` it unconditionally
+(the assignment's side effect happens whenever control reaches it,
+regardless of which way the *whole* enclosing condition later goes),
+then - only for the branch actually narrowing "this is true" - also
+strip falsy members from the just-bound value via the existing
+`narrow_type_excluding_falsy`, matching the common `if ($position =
+strpos($x, "#")) { substr($x, 0, $position); }` idiom (amphp's own
+`Http2ConnectionProcessor`) where the assignment's own truthiness is
+what gates the branch. The first version of this fix shipped without
+that second half and, verified against the full corpus before
+committing, regressed 176 new `argument.type` findings this exact way
+(`strpos()`'s raw `int<0, max>|false` leaking into the truthy branch
+unnarrowed) - caught and corrected before shipping, not after. Verified
+final: 46,014 -> 46,012 (-2, the two `AbstractRecursivePass` false
+positives), zero new findings.
+
 **Phase 37 - Attribute (`#[...]`) AST support (PARTIAL).** This
 entry's own status was never updated after an earlier pilot batch
 landed it (commits `65983a0`/`bff7145`) - `#[Attribute(...)]` used to
@@ -4923,6 +4987,49 @@ work:
   does, but a list's own keys are always sequential integers by
   definition, a real, narrower special case already trackable without
   any key-type machinery. Real shape (`pageAssetsTestIndexOf`).
+
+**Update**: a full-corpus top-10-bucket round (identifier-bucketing the
+entire ~20,300-file corpus, not just Piwigo's own `src/`) surfaced a
+real internal inconsistency this project had carried since `list<T>`
+became a real `Intersection([Array(_), Accessory(ArrayList)])` shape
+(Phase 14): a docblock-parsed `list<int>` (`parse_type_string`'s own
+`"list"` arm, `src/types.rs`) builds its underlying `Array`'s key as a
+literal `Type::Int`, needed so a later marker-stripping operation (e.g.
+`array_diff()`'s own result) still shows a known `array<int, int>`
+rather than collapsing to a keyless `array<T>` (verified via
+`dumpType()`) - but every *runtime*-inferred list this project builds
+instead (`array_values()`, `sort()`, `upgrade_array_to_list`, ...) uses
+the generic `unknown_array_key()` sentinel for that same position,
+deliberately, per that helper's own doc comment (a list's key is always
+`int` *by definition*, so encoding it twice was judged redundant).
+`describe_accessory_intersection` already hides a list's key from
+`Display` unconditionally either way, so both print identically as
+`list<int>` - but aren't structurally `==`-equal, and worse, `is_
+subtype`'s own generic `Array` key check is directionally asymmetric
+between the two (`is_subtype(unknown_array_key(), Int)` is false, the
+reverse true). Corpus-verified real shape: `SearchService::
+getRegularSearchResults()` (`src/Piwigo/Search/SearchService.php`)
+printed a genuine return-type mismatch as `list<int>|list<int>|array|
+array{}` - the two `list<int>` members were exactly this
+docblock-vs-runtime pair, `union_types`'s own `==`-based dedup unable to
+recognize them as the same type.
+
+Rather than settle on one representation everywhere (touching well
+over a dozen scattered runtime-construction call sites, each carrying
+its own already-verified reasoning for the sentinel it uses), fixed at
+the two points that actually compare types: a new `types::
+types_equal_for_union` (wired into `union_types`'s dedup, both the
+initial `a == b` short-circuit and the `members.contains`-equivalent
+checks) and a dedicated `is_subtype` `Intersection`-vs-`Intersection`
+arm - placed ahead of the generic one - that recognizes a pair where
+both sides carry `Accessory::ArrayList`, skips key comparison entirely
+(both are provably `int` either way), and compares only the element
+type plus the `NonEmptyArray` marker. Verified against the full corpus:
+no diagnostic-count change on its own (the duplicate-union case was
+already going to be flagged as a mismatch either way, just with an
+uglier, duplicated message - now reads `list<int>|array|array{}`
+instead), folded into the same validation pass as Phase 85's own
+`!$var = expr` update above, which is what actually surfaced this bug.
 
 ## Phase 20 - Performance & robustness - DONE
 
