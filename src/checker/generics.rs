@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::ast::*;
 use crate::checker::{Checker, TemplateBindings};
 use crate::docblock;
-use crate::registry::{FunctionSig, ParamSig};
+use crate::registry::{AssertInfo, FunctionSig, ParamSig};
 use crate::token::Span;
 use crate::types::{self, Type};
 
@@ -572,8 +572,30 @@ impl<'a> Checker<'a> {
             has_override_attr: sig.has_override_attr,
             deprecated: sig.deprecated.clone(),
             throws: sig.throws.as_ref().map(subst),
+            assert_if_true: substitute_assert_infos(&sig.assert_if_true, &subst),
+            assert_if_false: substitute_assert_infos(&sig.assert_if_false, &subst),
+            assert: substitute_assert_infos(&sig.assert, &subst),
         }
     }
+}
+
+/// Applies the same class-template substitution `substitute_class_
+/// templates` computes for every other declared type on this same
+/// signature to a `@phpstan-assert`-family list's own asserted type -
+/// only `ty` needs it; `target`/`negated` name a real parameter/`$this`
+/// chain, never a type, so they're carried through unchanged.
+fn substitute_assert_infos(
+    infos: &[AssertInfo],
+    subst: &impl Fn(&Type) -> Type,
+) -> Vec<AssertInfo> {
+    infos
+        .iter()
+        .map(|info| AssertInfo {
+            negated: info.negated,
+            ty: subst(&info.ty),
+            target: info.target.clone(),
+        })
+        .collect()
 }
 
 /// Same structural walk as `types::substitute_template`, except a

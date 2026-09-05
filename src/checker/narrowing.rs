@@ -349,6 +349,67 @@ impl<'a> Checker<'a> {
                         let current = self.current_narrowed_type(&haystack.value, &key, locals);
                         locals.insert(key, upgrade_string_with_accessory(&current, kind));
                     }
+                } else if let ExprKind::Name(name) = &callee.kind {
+                    // A plain function call tagged `@phpstan-assert-if-true`/
+                    // `-if-false` on its own docblock - see `FunctionSig::
+                    // assert_if_true`'s own doc comment for the full
+                    // picture. No `$this`/receiver here, so only a
+                    // `Param`-targeted assertion can ever resolve
+                    // (`apply_assert_infos` silently skips the rest).
+                    let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+                    if let Some(sig) = self.registry.lookup_function(&primary).or_else(|| {
+                        fallback
+                            .as_deref()
+                            .and_then(|g| self.registry.lookup_function(g))
+                    }) {
+                        let infos = if branch_true {
+                            &sig.assert_if_true
+                        } else {
+                            &sig.assert_if_false
+                        };
+                        if !infos.is_empty() {
+                            self.apply_assert_infos(infos, sig, None, args, locals);
+                        }
+                    }
+                }
+            }
+            // `@phpstan-assert-if-true`/`-if-false` on a method's own
+            // docblock (real corpus shape: PHPUnit's own accessor pair
+            // `hasTestFilesFile(): bool` tagged `@phpstan-assert-if-true
+            // !null $this->testFilesFile`) - see `FunctionSig::
+            // assert_if_true`'s own doc comment for the full picture.
+            // Scoped to a resolvable `Type::Object` receiver, the same
+            // "don't guess through a Union" leniency every other
+            // receiver-typed check in this project already has.
+            ExprKind::MethodCall(recv, method, args, _) => {
+                if let Type::Object(class, _) = self.infer_expr(recv, locals)
+                    && let Some(sig) = self.registry.lookup_method(&class, method)
+                {
+                    let infos = if branch_true {
+                        &sig.assert_if_true
+                    } else {
+                        &sig.assert_if_false
+                    };
+                    if !infos.is_empty() {
+                        self.apply_assert_infos(infos, sig, Some(recv), args, locals);
+                    }
+                }
+            }
+            // Same idea as `MethodCall` just above, for a static method
+            // call - no receiver expression exists here at all, so only
+            // a `Param`-targeted assertion can ever resolve.
+            ExprKind::StaticCall(class_name, method, args) => {
+                if let Some(class) = self.resolve_static_class_name(class_name)
+                    && let Some(sig) = self.registry.lookup_method(&class, method)
+                {
+                    let infos = if branch_true {
+                        &sig.assert_if_true
+                    } else {
+                        &sig.assert_if_false
+                    };
+                    if !infos.is_empty() {
+                        self.apply_assert_infos(infos, sig, None, args, locals);
+                    }
                 }
             }
             ExprKind::Instanceof(inner, target) => {
@@ -619,6 +680,96 @@ impl<'a> Checker<'a> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Applies one `@phpstan-assert`-family list (`sig.assert_if_true`,
+    /// `sig.assert_if_false`, or `sig.assert`) to `locals` - shared by
+    /// both the conditional (`apply_narrowing`'s own `MethodCall`/`Call`/
+    /// `StaticCall` arms, gated on which branch actually held) and
+    /// unconditional (`check_stmt`'s own bare `@phpstan-assert` wiring,
+    /// mirroring `assert($cond)`'s identical "narrows for the rest of
+    /// scope, no branch/merge needed" shape) call sites. `recv` is the
+    /// call's own receiver expression (`Some` for a method call, `None`
+    /// for a plain function call) - a `ThisSelf`/`ThisProp` target is
+    /// silently skipped when there isn't one, since there's no `$this`
+    /// to narrow from a plain function call.
+    pub(crate) fn apply_assert_infos(
+        &self,
+        infos: &[crate::registry::AssertInfo],
+        sig: &crate::registry::FunctionSig,
+        recv: Option<&Expr>,
+        args: &[Arg],
+        locals: &mut Locals,
+    ) {
+        for info in infos {
+            let Some((key, current)) =
+                self.assert_target_key_and_current(&info.target, sig, recv, args, locals)
+            else {
+                continue;
+            };
+            let narrowed = if info.negated {
+                narrow_type_excluding(&current, &info.ty)
+            } else {
+                narrow_type_to(&current, &info.ty)
+            };
+            locals.insert(key, narrowed);
+        }
+    }
+
+    /// The `(narrowing key, current type)` pair a `@phpstan-assert`
+    /// target resolves to at this call site - `None` when the target
+    /// can't be resolved here at all (a `ThisSelf`/`ThisProp` target on a
+    /// receiverless call, or a `Param` target this call didn't actually
+    /// pass an argument for, e.g. an omitted optional parameter).
+    /// `Param`/`ThisSelf` both name a *real* argument/receiver
+    /// expression already in hand, so `current_narrowed_type` (which
+    /// needs a real `Expr` for its own `infer_expr` fallback) applies
+    /// directly; `ThisProp` has no such expression to offer (`$this->
+    /// prop` is synthesized from docblock text, never a real parsed
+    /// node) - its own "not already narrowed" fallback instead looks the
+    /// property's declared type up directly from the receiver's own
+    /// resolved class, sidestepping the need to fabricate one.
+    fn assert_target_key_and_current(
+        &self,
+        target: &crate::registry::AssertTarget,
+        sig: &crate::registry::FunctionSig,
+        recv: Option<&Expr>,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Option<(String, Type)> {
+        use crate::registry::AssertTarget;
+        match target {
+            AssertTarget::Param(name) => {
+                let idx = sig.params.iter().position(|p| &p.name == name)?;
+                let arg = args.get(idx)?;
+                let key = narrowing_key(&arg.value)?;
+                let current = self.current_narrowed_type(&arg.value, &key, locals);
+                Some((key, current))
+            }
+            AssertTarget::ThisSelf => {
+                let recv = recv?;
+                let key = narrowing_key(recv)?;
+                let current = self.current_narrowed_type(recv, &key, locals);
+                Some((key, current))
+            }
+            AssertTarget::ThisProp(prop) => {
+                let recv = recv?;
+                let base_key = narrowing_key(recv)?;
+                let key = format!("{base_key}->{prop}");
+                let current = match locals.get(&key) {
+                    Some(t) => t.clone(),
+                    None => match self.infer_expr(recv, locals) {
+                        Type::Object(class, _) => self
+                            .registry
+                            .lookup_property(&class, prop)
+                            .map(|p| p.ty.clone())
+                            .unwrap_or(Type::Mixed),
+                        _ => Type::Mixed,
+                    },
+                };
+                Some((key, current))
+            }
         }
     }
 }

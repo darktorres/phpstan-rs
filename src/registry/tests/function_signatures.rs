@@ -533,3 +533,123 @@ fn missing_doc_comment_falls_back_to_native_hint() {
     assert_eq!(r.functions["f"].params[0].ty, Type::String);
     assert_eq!(r.functions["f"].return_type, Type::String);
 }
+
+// `@phpstan-assert`-family tags - real PHPStan's custom-assertion-
+// function convention (real corpus shape: phpunit's own accessor pair
+// `hasTestFilesFile(): bool` / `testFilesFile(): string`).
+
+#[test]
+fn an_assert_if_true_tag_naming_a_this_property_resolves() {
+    let r = build_registry(
+        r#"<?php
+            class Foo {
+                /** @phpstan-assert-if-true !null $this->bar */
+                public function hasBar(): bool {
+                    return $this->bar !== null;
+                }
+                private ?string $bar = null;
+            }
+        "#,
+    );
+    let sig = &r.classes["Foo"].methods["hasBar"];
+    assert_eq!(sig.assert_if_true.len(), 1);
+    let info = &sig.assert_if_true[0];
+    assert!(info.negated);
+    assert_eq!(info.ty, Type::Null);
+    assert_eq!(info.target, AssertTarget::ThisProp("bar".to_string()));
+}
+
+#[test]
+fn an_assert_if_false_tag_resolves() {
+    let r = build_registry(
+        r#"<?php
+            class Foo {
+                /** @phpstan-assert-if-false !null $x */
+                public function isNull($x): bool {
+                    return $x === null;
+                }
+            }
+        "#,
+    );
+    let sig = &r.classes["Foo"].methods["isNull"];
+    assert_eq!(sig.assert_if_false.len(), 1);
+    assert_eq!(
+        sig.assert_if_false[0].target,
+        AssertTarget::Param("x".to_string())
+    );
+}
+
+#[test]
+fn an_unconditional_assert_tag_on_the_function_s_own_docblock_resolves() {
+    let r = build_registry(
+        r#"<?php
+            /** @phpstan-assert string $actual */
+            function assertIsString($actual): void {}
+        "#,
+    );
+    let sig = &r.functions["assertIsString"];
+    assert_eq!(sig.assert.len(), 1);
+    assert!(!sig.assert[0].negated);
+    assert_eq!(sig.assert[0].ty, Type::String);
+    assert_eq!(
+        sig.assert[0].target,
+        AssertTarget::Param("actual".to_string())
+    );
+}
+
+#[test]
+fn a_bare_this_target_resolves() {
+    let r = build_registry(
+        r#"<?php
+            interface After {}
+            class Foo {
+                /** @phpstan-assert-if-true After $this */
+                public function isAfter(): bool { return false; }
+            }
+        "#,
+    );
+    let sig = &r.classes["Foo"].methods["isAfter"];
+    assert_eq!(sig.assert_if_true[0].target, AssertTarget::ThisSelf);
+}
+
+#[test]
+fn a_target_naming_a_nonexistent_parameter_is_dropped() {
+    let r = build_registry(
+        r#"<?php
+            class Foo {
+                /** @phpstan-assert-if-true !null $notAnActualParam */
+                public function f(): bool { return false; }
+            }
+        "#,
+    );
+    let sig = &r.classes["Foo"].methods["f"];
+    assert!(sig.assert_if_true.is_empty());
+}
+
+#[test]
+fn a_method_call_target_is_dropped_not_misclassified() {
+    let r = build_registry(
+        r#"<?php
+            class Foo {
+                /** @phpstan-assert-if-false !null $this->parseError() */
+                public function isValid(): bool { return true; }
+            }
+        "#,
+    );
+    let sig = &r.classes["Foo"].methods["isValid"];
+    assert!(sig.assert_if_false.is_empty());
+}
+
+#[test]
+fn a_template_equality_form_is_never_resolved() {
+    let r = build_registry(
+        r#"<?php
+            class Foo {
+                /** @phpstan-assert =ExpectedType $actual */
+                public function f($actual): void {}
+            }
+        "#,
+    );
+    let sig = &r.classes["Foo"].methods["f"];
+    assert!(sig.assert.is_empty());
+}

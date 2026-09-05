@@ -26,6 +26,7 @@ mod object_shapes;
 mod oop_overrides_and_inheritance;
 mod operator_overloading;
 mod operator_validity;
+mod phpstan_assert_tags;
 mod preg_and_regex;
 mod string_functions;
 mod symbol_existence;

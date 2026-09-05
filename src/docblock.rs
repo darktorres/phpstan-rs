@@ -130,6 +130,70 @@ pub struct DocBlock {
     // registry-build time, where name resolution/generics substitution
     // is actually available.
     pub throws: Vec<String>,
+    // `@phpstan-assert[-if-true/-if-false] [!]Type $target` - real
+    // PHPStan's custom-assertion-function convention (`assertNarrowedTo
+    // Type`-style helpers, real corpus shape: PHPUnit's own accessor
+    // pair `hasTestFilesFile(): bool` tagged `@phpstan-assert-if-true
+    // !null $this->testFilesFile`, then `testFilesFile(): string`'s own
+    // body guards on it). `assert` is unconditional (true regardless of
+    // this declaration's own return value - the common shape for a
+    // function that throws on failure, mirroring `assert($cond)`'s own
+    // existing "narrows for the rest of the scope, no branch needed"
+    // treatment); `assert_if_true`/`assert_if_false` only hold once this
+    // declaration's own return value is known. `target`/`ty` are kept as
+    // raw text here, same "parse now, resolve later" split every other
+    // type-bearing tag above already has - resolved into a real `Type`
+    // plus a classified `registry::AssertTarget` at registry-build time.
+    // A real, common target shape this doesn't attempt: `=Type`/`!=value`
+    // (PHPStan's own template-equality/value-equality assertion forms,
+    // a genuinely different check than "is this a subtype of Type" -
+    // `parse_assert_tag` below skips these entirely rather than
+    // misparsing them into a bogus type assertion).
+    pub assert_if_true: Vec<AssertTag>,
+    pub assert_if_false: Vec<AssertTag>,
+    pub assert: Vec<AssertTag>,
+}
+
+/// One parsed `@phpstan-assert`-family tag - see `DocBlock::assert_if_true`'s
+/// own doc comment for the full picture. `target` is kept as raw text
+/// (`"$actual"`, `"$this"`, `"$this->prop"`) - classified into a real
+/// `registry::AssertTarget` once a declaration's own parameter list is
+/// available to match a bare name against.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssertTag {
+    pub negated: bool,
+    pub ty: String,
+    pub target: String,
+}
+
+/// Parses one `@phpstan-assert`-family tag's own `rest` text
+/// (`"!null $this->testFilesFile"`) into a negation flag, a type text,
+/// and a target text - `None` for the `=Type`/`!=value` forms this
+/// project doesn't model (a genuinely different, value/generic-argument
+/// comparison, not a type check `take_type_token` could parse
+/// meaningfully anyway).
+fn parse_assert_tag(rest: &str) -> Option<AssertTag> {
+    let rest = rest.trim();
+    if rest.starts_with("!=") || rest.starts_with('=') {
+        return None;
+    }
+    let (negated, rest) = match rest.strip_prefix('!') {
+        Some(after) => (true, after),
+        None => (false, rest),
+    };
+    let ty = take_type_token(rest);
+    if ty.is_empty() {
+        return None;
+    }
+    let target = rest[ty.len()..].trim();
+    if target.is_empty() {
+        return None;
+    }
+    Some(AssertTag {
+        negated,
+        ty: ty.to_string(),
+        target: target.to_string(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -377,6 +441,21 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
                     block.throws.push(ty.to_string());
+                }
+            }
+            "assert-if-true" => {
+                if let Some(tag) = parse_assert_tag(rest) {
+                    block.assert_if_true.push(tag);
+                }
+            }
+            "assert-if-false" => {
+                if let Some(tag) = parse_assert_tag(rest) {
+                    block.assert_if_false.push(tag);
+                }
+            }
+            "assert" => {
+                if let Some(tag) = parse_assert_tag(rest) {
+                    block.assert.push(tag);
                 }
             }
             _ => {}

@@ -532,6 +532,9 @@ impl ClassInfo {
                 has_override_attr: false,
                 deprecated: None,
                 throws: None,
+                assert_if_true: Vec::new(),
+                assert_if_false: Vec::new(),
+                assert: Vec::new(),
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -558,6 +561,9 @@ impl ClassInfo {
                     // matches (confirmed directly via `php -r`) - unlike
                     // `tryFrom()`, which returns `null` instead.
                     throws: Some(Type::Object("ValueError".to_string(), Vec::new())),
+                    assert_if_true: Vec::new(),
+                    assert_if_false: Vec::new(),
+                    assert: Vec::new(),
                 },
             );
             methods.insert(
@@ -572,6 +578,9 @@ impl ClassInfo {
                     has_override_attr: false,
                     deprecated: None,
                     throws: None,
+                    assert_if_true: Vec::new(),
+                    assert_if_false: Vec::new(),
+                    assert: Vec::new(),
                 },
             );
         }

@@ -85,6 +85,47 @@ impl<'a> Checker<'a> {
                     }
                     _ => {}
                 }
+                // A bare `@phpstan-assert Type $target` on this call's
+                // own declaration - the same "narrows unconditionally,
+                // no branch needed" shape `assert($cond)`/PHPUnit's own
+                // assertions get just above, generalized via a real
+                // `FunctionSig` lookup instead of a hardcoded name table
+                // (see `FunctionSig::assert_if_true`'s own doc comment).
+                match &e.kind {
+                    ExprKind::MethodCall(recv, method, args, _) => {
+                        if let Type::Object(class, _) = self.infer_expr(recv, locals)
+                            && let Some(sig) = self.registry.lookup_method(&class, method)
+                            && !sig.assert.is_empty()
+                        {
+                            self.apply_assert_infos(&sig.assert, sig, Some(recv), args, locals);
+                        }
+                    }
+                    ExprKind::StaticCall(class_name, method, args) => {
+                        if let Some(class) = self.resolve_static_class_name(class_name)
+                            && let Some(sig) = self.registry.lookup_method(&class, method)
+                            && !sig.assert.is_empty()
+                        {
+                            self.apply_assert_infos(&sig.assert, sig, None, args, locals);
+                        }
+                    }
+                    ExprKind::Call(callee, args) => {
+                        if let ExprKind::Name(name) = &callee.kind {
+                            let (primary, fallback) =
+                                self.name_ctx.resolve_function_candidates(name);
+                            if let Some(sig) =
+                                self.registry.lookup_function(&primary).or_else(|| {
+                                    fallback
+                                        .as_deref()
+                                        .and_then(|g| self.registry.lookup_function(g))
+                                })
+                                && !sig.assert.is_empty()
+                            {
+                                self.apply_assert_infos(&sig.assert, sig, None, args, locals);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
                 // Phase 32 Finding K: a bare `$cond || neverReturningCall();`
                 // statement - PHP's classic "guard or die" idiom
                 // (`$pos !== false || $this->ierror('Missing .', 400);`).

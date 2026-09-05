@@ -47,6 +47,9 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         has_override_attr: false,
         deprecated: None,
         throws: None,
+        assert_if_true: Vec::new(),
+        assert_if_false: Vec::new(),
+        assert: Vec::new(),
     };
     assert_eq!(
         format_signature("f", &sig),
