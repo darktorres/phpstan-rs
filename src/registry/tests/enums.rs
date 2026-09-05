@@ -15,7 +15,7 @@ fn a_case_constant_s_type_is_its_own_singleton() {
             }"#,
     );
     assert_eq!(
-        r.lookup_const("Suit", "Hearts"),
+        r.lookup_const("Suit", "Hearts").map(|cs| &cs.ty),
         Some(&Type::EnumCase("Suit".to_string(), "Hearts".to_string()))
     );
 }
@@ -70,7 +70,7 @@ fn enum_consts_are_registered_too() {
             }"#,
     );
     assert_eq!(
-        r.lookup_const("Suit", "KIND"),
+        r.lookup_const("Suit", "KIND").map(|cs| &cs.ty),
         Some(&Type::StringLiteral("hearts".to_string()))
     );
 }

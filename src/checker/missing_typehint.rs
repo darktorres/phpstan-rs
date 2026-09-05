@@ -418,7 +418,7 @@ impl<'a> Checker<'a> {
                 .classes
                 .get(fqn)
                 .and_then(|info| info.consts.get(&c.name))
-                .cloned()
+                .map(|cs| cs.ty.clone())
             else {
                 continue;
             };

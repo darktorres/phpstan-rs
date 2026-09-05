@@ -8,7 +8,7 @@ mod class_info;
 mod function_sig;
 mod name_context;
 
-pub use class_info::{ClassInfo, PropertySig};
+pub use class_info::{ClassInfo, ConstSig, PropertySig};
 pub(crate) use function_sig::infer_const_type;
 pub use function_sig::{FunctionSig, ParamSig};
 pub(crate) use name_context::{NameContext, resolve_names_in_type};
@@ -838,7 +838,7 @@ impl Registry {
 
     /// Looks up a class constant, walking the ancestor graph if not
     /// declared directly on `class` - mirrors `lookup_property`.
-    pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&Type> {
+    pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstSig> {
         self.lookup_in_hierarchy(class, |info| info.consts.get(const_name))
     }
 
@@ -846,12 +846,13 @@ impl Registry {
     /// name - Phase 67 needs it to know *which* class's own `@internal`
     /// tag (if any) actually governs a `Class::CONST` access, the same
     /// way `lookup_method_with_owner`/`lookup_property_with_owner`
-    /// already do for their own members.
+    /// already do for their own members; Phase 57's own still-open item
+    /// (constant visibility enforcement) needs it the identical way too.
     pub fn lookup_const_with_owner(
         &self,
         class: &str,
         const_name: &str,
-    ) -> Option<(String, &Type)> {
+    ) -> Option<(String, &ConstSig)> {
         self.lookup_in_hierarchy_with_owner(class, |info| info.consts.get(const_name))
     }
 

@@ -117,11 +117,14 @@ fn class_consts_are_registered_and_typed_from_their_literal_value() {
             }"#,
     );
     assert_eq!(
-        r.lookup_const("Config", "NAME"),
+        r.lookup_const("Config", "NAME").map(|cs| &cs.ty),
         Some(&Type::StringLiteral("app".to_string()))
     );
-    assert_eq!(r.lookup_const("Config", "MAX"), Some(&Type::IntLiteral(10)));
-    assert_eq!(r.lookup_const("Config", "MISSING"), None);
+    assert_eq!(
+        r.lookup_const("Config", "MAX").map(|cs| &cs.ty),
+        Some(&Type::IntLiteral(10))
+    );
+    assert!(r.lookup_const("Config", "MISSING").is_none());
 }
 
 #[test]
@@ -132,7 +135,7 @@ fn class_consts_are_inherited_through_extends() {
             class Derived extends Base {}"#,
     );
     assert_eq!(
-        r.lookup_const("Derived", "KIND"),
+        r.lookup_const("Derived", "KIND").map(|cs| &cs.ty),
         Some(&Type::StringLiteral("base".to_string()))
     );
 }

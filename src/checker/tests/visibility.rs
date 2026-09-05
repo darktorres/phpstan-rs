@@ -20,6 +20,8 @@ fn visibility_diagnostics(src: &str) -> Vec<Diagnostic> {
                 || d.identifier.starts_with("method.protected")
                 || d.identifier.starts_with("staticMethod.private")
                 || d.identifier.starts_with("staticMethod.protected")
+                || d.identifier.starts_with("classConstant.private")
+                || d.identifier.starts_with("classConstant.protected")
         })
         .collect()
 }
@@ -324,4 +326,122 @@ fn reading_a_promoted_private_constructor_property_from_outside_is_flagged() {
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert_eq!(d[0].identifier, "property.private");
+}
+
+// Phase 57's own still-open item: a class constant's own `public`/
+// `private`/`protected` modifier (PHP 7.1+) gets the identical
+// enforcement a property/method already does.
+
+#[test]
+fn reading_a_private_constant_from_outside_its_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private const X = 1;
+            }
+            function test(): int {
+                return Foo::X;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "classConstant.private");
+}
+
+#[test]
+fn reading_a_private_constant_from_inside_its_own_class_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private const X = 1;
+                public function getX(): int {
+                    return self::X;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reading_a_private_constant_from_a_subclass_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Base {
+                private const X = 1;
+            }
+            class Child extends Base {
+                public function getX(): int {
+                    return self::X;
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "classConstant.private");
+}
+
+#[test]
+fn reading_a_protected_constant_from_a_subclass_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Base {
+                protected const X = 1;
+            }
+            class Child extends Base {
+                public function getX(): int {
+                    return self::X;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reading_a_protected_constant_from_an_unrelated_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                protected const X = 1;
+            }
+            function test(): int {
+                return Foo::X;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "classConstant.protected");
+}
+
+#[test]
+fn reading_a_public_constant_from_anywhere_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public const X = 1;
+                const Y = 2;
+            }
+            function test(): int {
+                return Foo::X + Foo::Y;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_enum_case_fetch_is_never_flagged_for_visibility() {
+    // Enum cases have no visibility syntax in real PHP at all.
+    let d = visibility_diagnostics(
+        r#"<?php
+            enum Suit {
+                case Hearts;
+            }
+            function test(): Suit {
+                return Suit::Hearts;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }

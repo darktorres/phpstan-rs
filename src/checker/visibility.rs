@@ -58,7 +58,7 @@ impl<'a> Checker<'a> {
         owner: &str,
         visibility: &Visibility,
         member_name: &str,
-        is_method: bool,
+        kind: &str,
     ) -> bool {
         match visibility {
             Visibility::Public => true,
@@ -68,10 +68,15 @@ impl<'a> Checker<'a> {
                     c == owner
                         || self.registry.is_subclass_of(c, owner)
                         || self.registry.is_subclass_of(owner, c)
-                        || if is_method {
-                            self.registry.lookup_method(c, member_name).is_some()
-                        } else {
-                            self.registry.lookup_property(c, member_name).is_some()
+                        || match kind {
+                            "property" => self.registry.lookup_property(c, member_name).is_some(),
+                            // Phase 57's own still-open item: a class
+                            // constant gets the identical sibling-shared-
+                            // ancestor fallback as property/method
+                            // access - a real constant can be overridden
+                            // per-subclass exactly like a method can.
+                            "classConstant" => self.registry.lookup_const(c, member_name).is_some(),
+                            _ => self.registry.lookup_method(c, member_name).is_some(),
                         }
                 }
                 None => false,
@@ -105,8 +110,7 @@ impl<'a> Checker<'a> {
             Visibility::Private => "private",
             Visibility::Protected => "protected",
         };
-        let is_method = kind != "property";
-        if self.is_member_access_visible(owner, visibility, member_name, is_method) {
+        if self.is_member_access_visible(owner, visibility, member_name, kind) {
             return;
         }
         self.report(

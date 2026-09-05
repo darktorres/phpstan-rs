@@ -41,6 +41,20 @@ pub struct PropertySig {
     pub is_internal: bool,
 }
 
+// Phase 57's own still-open item: a class constant's own `public`/
+// `private`/`protected` modifier (PHP 7.1+) - `ast::ClassConst` already
+// carries `visibility` (added for Phase 59's unused-private-constant
+// detection), but it never reached the registry's own `consts` map,
+// which used to store a bare `Type` with no way to enforce access
+// legality at all. Mirrors `PropertySig`'s identical shape, minus the
+// property-only concerns (`is_static`/`is_readonly`/`set_ty`/
+// `is_internal`) a constant has no equivalent of.
+#[derive(Debug, Clone)]
+pub struct ConstSig {
+    pub ty: Type,
+    pub visibility: Visibility,
+}
+
 #[derive(Debug, Clone)]
 pub struct ClassInfo {
     pub kind: ClassKind,
@@ -50,7 +64,7 @@ pub struct ClassInfo {
     pub implements: Vec<String>,
     pub methods: HashMap<String, FunctionSig>,
     pub properties: HashMap<String, PropertySig>,
-    pub consts: HashMap<String, Type>,
+    pub consts: HashMap<String, ConstSig>,
     pub uses: Vec<String>,
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
@@ -296,7 +310,13 @@ impl ClassInfo {
                     }
                     None => infer_const_type(&cc.value),
                 };
-                (cc.name.clone(), ty)
+                (
+                    cc.name.clone(),
+                    ConstSig {
+                        ty,
+                        visibility: cc.visibility.clone(),
+                    },
+                )
             })
             .collect();
 
@@ -493,10 +513,18 @@ impl ClassInfo {
                 },
             );
         }
-        let mut consts: HashMap<String, Type> = e
+        let mut consts: HashMap<String, ConstSig> = e
             .consts
             .iter()
-            .map(|cc| (cc.name.clone(), infer_const_type(&cc.value)))
+            .map(|cc| {
+                (
+                    cc.name.clone(),
+                    ConstSig {
+                        ty: infer_const_type(&cc.value),
+                        visibility: cc.visibility.clone(),
+                    },
+                )
+            })
             .collect();
         // A case is accessed exactly like a constant (`Suit::Hearts`,
         // same `ClassName::member` syntax as `Suit::SOME_CONST`) and has
@@ -506,11 +534,15 @@ impl ClassInfo {
         // just work, with no new lookup path needed - previously cases
         // weren't registered as anything at all, so `Suit::Hearts`
         // always read as Mixed and a genuinely undefined case name was
-        // never caught.
+        // never caught. A case has no visibility syntax in real PHP at
+        // all - always public.
         for case in &e.cases {
             consts.insert(
                 case.name.clone(),
-                Type::EnumCase(fqn.clone(), case.name.clone()),
+                ConstSig {
+                    ty: Type::EnumCase(fqn.clone(), case.name.clone()),
+                    visibility: Visibility::Public,
+                },
             );
         }
 

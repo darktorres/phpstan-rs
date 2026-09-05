@@ -1530,7 +1530,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::Mixed)
                 } else {
                     let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
-                    let const_ty = const_with_owner.as_ref().map(|(_, ty)| *ty);
+                    let const_ty = const_with_owner.as_ref().map(|(_, cs)| cs.ty.clone());
                     if const_ty.is_none() {
                         self.report(
                             label.to_string(),
@@ -1539,12 +1539,23 @@ impl<'a> Checker<'a> {
                             0,
                             "classConstant.notFound",
                         );
-                    } else if let Some((owner, _)) = &const_with_owner {
+                    } else if let Some((owner, cs)) = &const_with_owner {
                         // Phase 67: `@internal`.
                         self.check_internal_class_constant_access(owner, member, e.span, label);
+                        // Phase 57's own still-open item: constant
+                        // visibility.
+                        self.check_member_visibility(MemberVisibilityCheck {
+                            kind: "classConstant",
+                            owner,
+                            member_name: member,
+                            visibility: &cs.visibility,
+                            describe: &format!("constant {owner}::{member}"),
+                            span: e.span,
+                            label,
+                        });
                     }
                     const_ty
-                        .map(|ty| self.resolve_pseudo(ty, &class))
+                        .map(|ty| self.resolve_pseudo(&ty, &class))
                         .unwrap_or(Type::Mixed)
                 }
             }
@@ -2361,7 +2372,7 @@ impl<'a> Checker<'a> {
                         None => self
                             .registry
                             .lookup_const(&class, member)
-                            .map(|ty| self.resolve_pseudo(ty, &class)),
+                            .map(|cs| self.resolve_pseudo(&cs.ty, &class)),
                     })
                     .unwrap_or(Type::Mixed)
             }
