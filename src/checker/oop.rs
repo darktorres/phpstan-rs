@@ -772,281 +772,317 @@ impl<'a> Checker<'a> {
             return;
         };
         for m in &c.methods {
-            // Finding 46: overriding a `final` method is a real,
-            // unconditional fatal error in PHP - including for
-            // __construct, unlike the signature-compatibility checks
-            // below, so this runs before that exemption.
-            if let Some(ancestor) = self
-                .registry
-                .find_final_ancestor_method(fqn, &m.function.name)
-            {
-                self.report(
-                    fqn.to_string(),
-                    format!(
-                        "{fqn}::{}() cannot override final method {ancestor}::{}()",
-                        m.function.name, m.function.name
-                    ),
-                    m.span,
-                    0,
-                    "method.overrideFinal",
-                );
-            }
-            // Real PHP deliberately exempts constructors from override-
-            // compatibility checking - a subclass's own __construct is
-            // allowed an entirely different, otherwise-incompatible
-            // signature from its parent's, unlike every other method.
-            if m.function.name == "__construct" {
-                continue;
-            }
-            let Some(own_sig) = info.methods.get(&m.function.name) else {
-                continue;
-            };
-            let Some((ancestor_owner, ancestor_sig)) = self
-                .registry
-                .lookup_ancestor_method_with_owner(fqn, &m.function.name)
-            else {
-                continue;
-            };
-            // A `private` ancestor method isn't a real override target at
-            // all - real PHP's own method dispatch is never virtual for
-            // `private` (a same-named method on a subclass is an
-            // unrelated declaration, not a polymorphic override), so
-            // nothing about compatibility applies. `lookup_ancestor_
-            // method_with_owner` itself doesn't filter by visibility (it
-            // answers "is there a same-named declaration up the chain",
-            // the right question for the visibility-narrowing check just
-            // below, which needs to see a `private` ancestor to *know*
-            // it's not a real override) - this exemption belongs here,
-            // not there.
-            if ancestor_sig.visibility == Visibility::Private {
-                continue;
-            }
-            // Phase 64: narrowing a method's own visibility on override
-            // is a real, unconditional PHP fatal error (confirmed
-            // directly: `Access level to Child::foo() must be public (as
-            // in class Base)`) - matches real PHPStan's own
-            // `MethodVisibilityComparisonHelper` exactly (same
-            // identifier, same two-way split: an ancestor's `public`
-            // demands `public`; an ancestor's `protected` only forbids
-            // narrowing all the way to `private`).
-            let narrows_visibility = match ancestor_sig.visibility {
-                Visibility::Public => m.visibility != Visibility::Public,
-                Visibility::Protected => m.visibility == Visibility::Private,
-                Visibility::Private => false,
-            };
-            if narrows_visibility {
-                self.report(
-                    fqn.to_string(),
-                    format!(
-                        "{fqn}::{}() overriding {} method {ancestor_owner}::{}() must not reduce visibility",
-                        m.function.name,
-                        visibility_word(&ancestor_sig.visibility),
-                        m.function.name
-                    ),
-                    m.span,
-                    0,
-                    "method.visibility",
-                );
-            }
-            for (i, ancestor_param) in ancestor_sig.params.iter().enumerate() {
-                let Some(own_param) = own_sig.params.get(i) else {
-                    // Real PHP fatal error - the override doesn't declare
-                    // this many parameters at all. Skipped for a
-                    // variadic ancestor tail (`...$args`, matched at any
-                    // position, not just the last - real PHP itself
-                    // requires it to be the last declared parameter, so
-                    // an earlier one is already a parse-time error this
-                    // project's own parser presumably rejects too): real
-                    // PHPStan's own handling of that shape is
-                    // considerably more involved (contravariance across
-                    // every trailing ancestor parameter the variadic
-                    // swallows) than this project attempts here.
-                    if !ancestor_param.variadic {
-                        self.report(
-                            fqn.to_string(),
-                            format!(
-                                "{fqn}::{}() overrides {ancestor_owner}::{}() but misses parameter #{} (${})",
-                                m.function.name,
-                                m.function.name,
-                                i + 1,
-                                ancestor_param.name
-                            ),
-                            m.span,
-                            0,
-                            "parameter.missing",
-                        );
-                    }
+            self.check_one_method_override(fqn, &m.function.name, &m.visibility, m.span);
+        }
+        // A method a trait supplies but the class itself never
+        // textually re-declares still needs the identical override-
+        // compatibility checking against any ancestor interface/parent -
+        // real PHP performs Liskov compatibility checking after trait
+        // flattening, not just against a class's own directly-declared
+        // methods (confirmed directly: `trait T { function foo(string
+        // $x) {} }` used by a class implementing `Iface { function
+        // foo(int $x): void; }` is a real, unconditional fatal error even
+        // though the class itself never mentions `foo` at all). No AST
+        // node exists for a trait-only method within *this* class's own
+        // declaration to anchor a precise span on (real PHP itself points
+        // at the trait's own declaration line, in the trait's own file -
+        // information `FunctionSig` doesn't carry), so `c.span` (the
+        // using class's own declaration) is used instead, matching this
+        // project's established fallback for class-level diagnostics with
+        // no more specific member location (`check_class_completeness`,
+        // `check_trait_conflicts`, ...).
+        if !c.uses.is_empty() {
+            let own_method_names: std::collections::HashSet<&str> =
+                c.methods.iter().map(|m| m.function.name.as_str()).collect();
+            let mut trait_method_names: Vec<String> = info
+                .methods
+                .keys()
+                .filter(|name| {
+                    name.as_str() != "__construct"
+                        && !own_method_names.contains(name.as_str())
+                        && !info.abstract_methods.contains(*name)
+                })
+                .cloned()
+                .collect();
+            trait_method_names.sort();
+            for name in trait_method_names {
+                let Some(own_visibility) = info.methods.get(&name).map(|s| s.visibility.clone())
+                else {
                     continue;
                 };
-                // A parameter the ancestor made optional (has a default)
-                // can never become *required* on override - a caller
-                // holding the ancestor's own type could always omit it.
-                // Real, unconditional PHP fatal error (confirmed
-                // directly). Not gated on either side's type being
-                // `Mixed` the way the narrowing check below is - this is
-                // about arity/callability, not type compatibility.
-                if ancestor_param.has_default && !own_param.has_default && !own_param.variadic {
-                    self.report(
-                        fqn.to_string(),
-                        format!(
-                            "Parameter #{} (${}) of {fqn}::{}() is required but parameter #{} (${}) of {ancestor_owner}::{}() is optional",
-                            i + 1,
-                            own_param.name,
-                            m.function.name,
-                            i + 1,
-                            ancestor_param.name,
-                            m.function.name
-                        ),
-                        m.span,
-                        0,
-                        "parameter.notOptional",
-                    );
-                }
-                // Phase 64's own still-open list: by-ref/variadic-
-                // contravariance mismatches - real PHPStan's own
-                // `MethodParameterComparisonHelper` spends most of its
-                // own ~250 lines on this cluster; only the two
-                // unconditional-fatal-error shapes confirmed directly
-                // via `php -l` are checked here, matching this
-                // project's own established narrower scope elsewhere in
-                // this same function (`parameter.missing` above
-                // explicitly skips the fuller variadic-contravariance
-                // treatment too). Neither is gated on either side being
-                // `Type::Mixed` - both are about calling-convention
-                // compatibility, not type compatibility.
-                if own_param.by_ref != ancestor_param.by_ref {
-                    let (message, identifier) = if own_param.by_ref {
-                        (
-                            format!(
-                                "Parameter #{} (${}) of {fqn}::{}() is passed by reference but parameter #{} (${}) of {ancestor_owner}::{}() is not passed by reference",
-                                i + 1,
-                                own_param.name,
-                                m.function.name,
-                                i + 1,
-                                ancestor_param.name,
-                                m.function.name
-                            ),
-                            "parameter.byRef",
-                        )
-                    } else {
-                        (
-                            format!(
-                                "Parameter #{} (${}) of {fqn}::{}() is not passed by reference but parameter #{} (${}) of {ancestor_owner}::{}() is passed by reference",
-                                i + 1,
-                                own_param.name,
-                                m.function.name,
-                                i + 1,
-                                ancestor_param.name,
-                                m.function.name
-                            ),
-                            "parameter.notByRef",
-                        )
-                    };
-                    self.report(fqn.to_string(), message, m.span, 0, identifier);
-                }
-                // The reverse direction (a non-variadic ancestor
-                // parameter widened to variadic on override) is real,
-                // legal PHP - confirmed directly - so only this
-                // direction is checked.
-                if ancestor_param.variadic && !own_param.variadic {
-                    self.report(
-                        fqn.to_string(),
-                        format!(
-                            "Parameter #{} (${}) of {fqn}::{}() is not variadic but parameter #{} (${}) of {ancestor_owner}::{}() is variadic",
-                            i + 1, own_param.name, m.function.name,
-                            i + 1, ancestor_param.name, m.function.name
-                        ),
-                        m.span,
-                        0,
-                        "parameter.notVariadic",
-                    );
-                }
-                // `Type::Mixed` is overloaded throughout this project to
-                // mean both real PHP `mixed` *and* "no type declared at
-                // all, native or docblock" (see this file's own opening
-                // comment) - and real PHP explicitly does NOT enforce
-                // override compatibility for a parameter/return position
-                // that isn't typed at all (only an explicitly *narrower*
-                // declared type is a real fatal error). Since an
-                // intentional, explicit `mixed` on an override is rare
-                // next to "just wasn't declared", skipping either side
-                // being Mixed avoids flagging the overwhelmingly common
-                // case (confirmed via vendor/phpstorm-stubs: dozens of
-                // real stub methods simply don't redeclare an inherited
-                // native return type) at the cost of missing the rare
-                // genuine `mixed`-narrows-a-real-type case - the same
-                // "don't guess wrong on Mixed" tradeoff `is_assignable`
-                // already makes elsewhere in this project.
-                if own_param.ty == Type::Mixed || ancestor_param.ty == Type::Mixed {
-                    continue;
-                }
-                // A bare `self`/`static` in either signature means "an
-                // instance of the class that actually declared it", not
-                // some shared, comparable-by-name sentinel - `self` in
-                // `fqn`'s own override and `self` in `ancestor_owner`'s
-                // declaration usually name two *different* concrete
-                // classes. `is_assignable`/`is_subtype` have no rule at
-                // all for a concrete `Object` satisfying a still-bare
-                // `SelfRef` (only the reverse - `self` satisfying a
-                // concrete class - is handled), so a real, correct
-                // override typing its own parameter `self` (a `final`
-                // class implementing an interface that (redundantly, but
-                // validly) re-declares the same concrete class by name)
-                // was flagged as narrowing what's actually the exact
-                // same type. Resolving both sides first, same as any
-                // other pseudo-type use, fixes this without weakening
-                // the check for a genuine narrowing.
-                let own_ty = self.resolve_pseudo(&own_param.ty, fqn);
-                let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty, &ancestor_owner);
-                if !self.registry.is_assignable(&ancestor_ty, &own_ty) {
-                    self.report(fqn.to_string(), format!(
-                            "{fqn}::{}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
-                            m.function.name,
-                            i + 1,
-                            own_param.name,
-                            own_ty,
-                            ancestor_ty
-                        ), m.span, 0, "method.childParameterType");
-                }
+                self.check_one_method_override(fqn, &name, &own_visibility, c.span);
             }
-            // An ancestor's own `static`-typed return (`self.registry`
-            // has no way to resolve what `static` meant relative to the
-            // *ancestor's* declaring class, only the checker's own
-            // current-class-aware `resolve_pseudo`, which isn't
-            // available here) is real PHP's own explicit "late static
-            // binding" covariance escape hatch - a subclass narrowing it
-            // to its own concrete class name (the overwhelmingly common
-            // real shape, confirmed via vendor/phpstorm-stubs'
-            // `Ds\Collection::copy(): static` and its own subclasses'
-            // `copy(): Vector`/`copy(): Stack`/...) is always exactly
-            // what real PHP allows, never a real incompatibility.
-            // Checked at the *native* level only (ignoring any `@return`
-            // docblock refinement on either side) - real PHP itself only
-            // ever enforces override-compatibility on the native
-            // signature, and by default so does real PHPStan
-            // (`checkPhpDocMethodSignatures` is off unless a project
-            // explicitly opts in - confirmed neither Piwigo's own corpus
-            // config nor this project's own does). Using the merged,
-            // docblock-aware `return_type` here wrongly flagged every
-            // override that faithfully keeps the ancestor's own native
-            // `array` while the ancestor's *interface* had separately
-            // narrowed it to `list<...>` via docblock alone - a real
-            // corpus false positive (several `HtmlRenderingInterface`
-            // test fakes each declaring `getCatBreadcrumb(): array`,
-            // exactly matching the interface's own native signature).
-            if own_sig.return_type_native != Type::Mixed
-                && ancestor_sig.return_type_native != Type::Mixed
-                && !ancestor_return_uses_static(&ancestor_sig.return_type_native)
-                && !self.registry.is_assignable(
-                    &own_sig.return_type_native,
-                    &ancestor_sig.return_type_native,
-                )
-            {
+        }
+    }
+
+    /// The full per-method override-compatibility check, shared between a
+    /// class's own textually-declared methods and a trait-supplied method
+    /// it never re-declares (see `check_method_overrides` above) - the
+    /// two differ only in which visibility/span they can offer.
+    fn check_one_method_override(
+        &mut self,
+        fqn: &str,
+        method_name: &str,
+        own_visibility: &Visibility,
+        span: Span,
+    ) {
+        // Finding 46: overriding a `final` method is a real,
+        // unconditional fatal error in PHP - including for __construct,
+        // unlike the signature-compatibility checks below, so this runs
+        // before that exemption.
+        if let Some(ancestor) = self.registry.find_final_ancestor_method(fqn, method_name) {
+            self.report(
+                fqn.to_string(),
+                format!(
+                    "{fqn}::{method_name}() cannot override final method {ancestor}::{method_name}()"
+                ),
+                span,
+                0,
+                "method.overrideFinal",
+            );
+        }
+        // Real PHP deliberately exempts constructors from override-
+        // compatibility checking - a subclass's own __construct is
+        // allowed an entirely different, otherwise-incompatible signature
+        // from its parent's, unlike every other method.
+        if method_name == "__construct" {
+            return;
+        }
+        let Some(own_sig) = self
+            .registry
+            .classes
+            .get(fqn)
+            .and_then(|i| i.methods.get(method_name))
+        else {
+            return;
+        };
+        let Some((ancestor_owner, ancestor_sig)) = self
+            .registry
+            .lookup_ancestor_method_with_owner(fqn, method_name)
+        else {
+            return;
+        };
+        // A `private` ancestor method isn't a real override target at
+        // all - real PHP's own method dispatch is never virtual for
+        // `private` (a same-named method on a subclass is an unrelated
+        // declaration, not a polymorphic override), so nothing about
+        // compatibility applies. `lookup_ancestor_method_with_owner`
+        // itself doesn't filter by visibility (it answers "is there a
+        // same-named declaration up the chain", the right question for
+        // the visibility-narrowing check just below, which needs to see
+        // a `private` ancestor to *know* it's not a real override) -
+        // this exemption belongs here, not there.
+        if ancestor_sig.visibility == Visibility::Private {
+            return;
+        }
+        // Phase 64: narrowing a method's own visibility on override is a
+        // real, unconditional PHP fatal error (confirmed directly:
+        // `Access level to Child::foo() must be public (as in class
+        // Base)`) - matches real PHPStan's own
+        // `MethodVisibilityComparisonHelper` exactly (same identifier,
+        // same two-way split: an ancestor's `public` demands `public`;
+        // an ancestor's `protected` only forbids narrowing all the way
+        // to `private`).
+        let narrows_visibility = match ancestor_sig.visibility {
+            Visibility::Public => *own_visibility != Visibility::Public,
+            Visibility::Protected => *own_visibility == Visibility::Private,
+            Visibility::Private => false,
+        };
+        if narrows_visibility {
+            self.report(
+                fqn.to_string(),
+                format!(
+                    "{fqn}::{method_name}() overriding {} method {ancestor_owner}::{method_name}() must not reduce visibility",
+                    visibility_word(&ancestor_sig.visibility),
+                ),
+                span,
+                0,
+                "method.visibility",
+            );
+        }
+        for (i, ancestor_param) in ancestor_sig.params.iter().enumerate() {
+            let Some(own_param) = own_sig.params.get(i) else {
+                // Real PHP fatal error - the override doesn't declare
+                // this many parameters at all. Skipped for a variadic
+                // ancestor tail (`...$args`, matched at any position, not
+                // just the last - real PHP itself requires it to be the
+                // last declared parameter, so an earlier one is already a
+                // parse-time error this project's own parser presumably
+                // rejects too): real PHPStan's own handling of that shape
+                // is considerably more involved (contravariance across
+                // every trailing ancestor parameter the variadic
+                // swallows) than this project attempts here.
+                if !ancestor_param.variadic {
+                    self.report(
+                        fqn.to_string(),
+                        format!(
+                            "{fqn}::{method_name}() overrides {ancestor_owner}::{method_name}() but misses parameter #{} (${})",
+                            i + 1,
+                            ancestor_param.name
+                        ),
+                        span,
+                        0,
+                        "parameter.missing",
+                    );
+                }
+                continue;
+            };
+            // A parameter the ancestor made optional (has a default) can
+            // never become *required* on override - a caller holding the
+            // ancestor's own type could always omit it. Real,
+            // unconditional PHP fatal error (confirmed directly). Not
+            // gated on either side's type being `Mixed` the way the
+            // narrowing check below is - this is about arity/callability,
+            // not type compatibility.
+            if ancestor_param.has_default && !own_param.has_default && !own_param.variadic {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "Parameter #{} (${}) of {fqn}::{method_name}() is required but parameter #{} (${}) of {ancestor_owner}::{method_name}() is optional",
+                        i + 1,
+                        own_param.name,
+                        i + 1,
+                        ancestor_param.name
+                    ),
+                    span,
+                    0,
+                    "parameter.notOptional",
+                );
+            }
+            // Phase 64's own still-open list: by-ref/variadic-
+            // contravariance mismatches - real PHPStan's own
+            // `MethodParameterComparisonHelper` spends most of its own
+            // ~250 lines on this cluster; only the two unconditional-
+            // fatal-error shapes confirmed directly via `php -l` are
+            // checked here, matching this project's own established
+            // narrower scope elsewhere in this same function
+            // (`parameter.missing` above explicitly skips the fuller
+            // variadic-contravariance treatment too). Neither is gated on
+            // either side being `Type::Mixed` - both are about calling-
+            // convention compatibility, not type compatibility.
+            if own_param.by_ref != ancestor_param.by_ref {
+                let (message, identifier) = if own_param.by_ref {
+                    (
+                        format!(
+                            "Parameter #{} (${}) of {fqn}::{method_name}() is passed by reference but parameter #{} (${}) of {ancestor_owner}::{method_name}() is not passed by reference",
+                            i + 1,
+                            own_param.name,
+                            i + 1,
+                            ancestor_param.name
+                        ),
+                        "parameter.byRef",
+                    )
+                } else {
+                    (
+                        format!(
+                            "Parameter #{} (${}) of {fqn}::{method_name}() is not passed by reference but parameter #{} (${}) of {ancestor_owner}::{method_name}() is passed by reference",
+                            i + 1,
+                            own_param.name,
+                            i + 1,
+                            ancestor_param.name
+                        ),
+                        "parameter.notByRef",
+                    )
+                };
+                self.report(fqn.to_string(), message, span, 0, identifier);
+            }
+            // The reverse direction (a non-variadic ancestor parameter
+            // widened to variadic on override) is real, legal PHP -
+            // confirmed directly - so only this direction is checked.
+            if ancestor_param.variadic && !own_param.variadic {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "Parameter #{} (${}) of {fqn}::{method_name}() is not variadic but parameter #{} (${}) of {ancestor_owner}::{method_name}() is variadic",
+                        i + 1, own_param.name,
+                        i + 1, ancestor_param.name
+                    ),
+                    span,
+                    0,
+                    "parameter.notVariadic",
+                );
+            }
+            // `Type::Mixed` is overloaded throughout this project to
+            // mean both real PHP `mixed` *and* "no type declared at all,
+            // native or docblock" (see this file's own opening comment)
+            // - and real PHP explicitly does NOT enforce override
+            // compatibility for a parameter/return position that isn't
+            // typed at all (only an explicitly *narrower* declared type
+            // is a real fatal error). Since an intentional, explicit
+            // `mixed` on an override is rare next to "just wasn't
+            // declared", skipping either side being Mixed avoids
+            // flagging the overwhelmingly common case (confirmed via
+            // vendor/phpstorm-stubs: dozens of real stub methods simply
+            // don't redeclare an inherited native return type) at the
+            // cost of missing the rare genuine `mixed`-narrows-a-real-
+            // type case - the same "don't guess wrong on Mixed" tradeoff
+            // `is_assignable` already makes elsewhere in this project.
+            if own_param.ty == Type::Mixed || ancestor_param.ty == Type::Mixed {
+                continue;
+            }
+            // A bare `self`/`static` in either signature means "an
+            // instance of the class that actually declared it", not some
+            // shared, comparable-by-name sentinel - `self` in `fqn`'s own
+            // override and `self` in `ancestor_owner`'s declaration
+            // usually name two *different* concrete classes.
+            // `is_assignable`/`is_subtype` have no rule at all for a
+            // concrete `Object` satisfying a still-bare `SelfRef` (only
+            // the reverse - `self` satisfying a concrete class - is
+            // handled), so a real, correct override typing its own
+            // parameter `self` (a `final` class implementing an interface
+            // that (redundantly, but validly) re-declares the same
+            // concrete class by name) was flagged as narrowing what's
+            // actually the exact same type. Resolving both sides first,
+            // same as any other pseudo-type use, fixes this without
+            // weakening the check for a genuine narrowing.
+            let own_ty = self.resolve_pseudo(&own_param.ty, fqn);
+            let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty, &ancestor_owner);
+            if !self.registry.is_assignable(&ancestor_ty, &own_ty) {
                 self.report(fqn.to_string(), format!(
-                        "{fqn}::{}() return type {} is not compatible with the inherited return type {}",
-                        m.function.name, own_sig.return_type, ancestor_sig.return_type
-                    ), m.span, 0, "method.childReturnType");
+                        "{fqn}::{method_name}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
+                        i + 1,
+                        own_param.name,
+                        own_ty,
+                        ancestor_ty
+                    ), span, 0, "method.childParameterType");
             }
+        }
+        // An ancestor's own `static`-typed return (`self.registry` has
+        // no way to resolve what `static` meant relative to the
+        // *ancestor's* declaring class, only the checker's own current-
+        // class-aware `resolve_pseudo`, which isn't available here) is
+        // real PHP's own explicit "late static binding" covariance
+        // escape hatch - a subclass narrowing it to its own concrete
+        // class name (the overwhelmingly common real shape, confirmed
+        // via vendor/phpstorm-stubs' `Ds\Collection::copy(): static` and
+        // its own subclasses' `copy(): Vector`/`copy(): Stack`/...) is
+        // always exactly what real PHP allows, never a real
+        // incompatibility. Checked at the *native* level only (ignoring
+        // any `@return` docblock refinement on either side) - real PHP
+        // itself only ever enforces override-compatibility on the native
+        // signature, and by default so does real PHPStan
+        // (`checkPhpDocMethodSignatures` is off unless a project
+        // explicitly opts in - confirmed neither Piwigo's own corpus
+        // config nor this project's own does). Using the merged,
+        // docblock-aware `return_type` here wrongly flagged every
+        // override that faithfully keeps the ancestor's own native
+        // `array` while the ancestor's *interface* had separately
+        // narrowed it to `list<...>` via docblock alone - a real corpus
+        // false positive (several `HtmlRenderingInterface` test fakes
+        // each declaring `getCatBreadcrumb(): array`, exactly matching
+        // the interface's own native signature).
+        if own_sig.return_type_native != Type::Mixed
+            && ancestor_sig.return_type_native != Type::Mixed
+            && !ancestor_return_uses_static(&ancestor_sig.return_type_native)
+            && !self.registry.is_assignable(
+                &own_sig.return_type_native,
+                &ancestor_sig.return_type_native,
+            )
+        {
+            self.report(fqn.to_string(), format!(
+                    "{fqn}::{method_name}() return type {} is not compatible with the inherited return type {}",
+                    own_sig.return_type, ancestor_sig.return_type
+                ), span, 0, "method.childReturnType");
         }
     }
 

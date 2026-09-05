@@ -1615,3 +1615,155 @@ fn overriding_a_private_ancestor_property_is_never_flagged_for_any_mismatch() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 64 follow-up: a method a trait supplies but the class itself
+// never textually re-declares still needs override-compatibility
+// checking against an implemented interface/parent - confirmed
+// directly via `php -r` as a real, unconditional fatal error even
+// though the class body never mentions the method name at all.
+
+#[test]
+fn a_trait_supplied_method_narrowing_an_interface_parameter_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {
+                public function foo(int $x): void;
+            }
+            trait T {
+                public function foo(string $x): void {}
+            }
+            class Impl implements Iface {
+                use T;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.childParameterType" && x.message.contains("Impl")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_trait_supplied_method_matching_an_interface_signature_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {
+                public function foo(int $x): void;
+            }
+            trait T {
+                public function foo(int $x): void {}
+            }
+            class Impl implements Iface {
+                use T;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "method.childParameterType"
+                | "method.childReturnType"
+                | "method.visibility"
+                | "parameter.missing"
+                | "parameter.notOptional"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_trait_supplied_method_narrowing_an_interface_method_s_visibility_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {
+                public function foo(): void;
+            }
+            trait T {
+                protected function foo(): void {}
+            }
+            class Impl implements Iface {
+                use T;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.visibility" && x.message.contains("Impl")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_final_ancestor_method_via_a_used_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                final public function foo(): void {}
+            }
+            trait T {
+                public function foo(): void {}
+            }
+            class Impl extends Base {
+                use T;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.overrideFinal" && x.message.contains("Impl")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_s_own_method_overriding_a_trait_method_of_the_same_name_is_checked_once() {
+    // A class's own directly-declared method always wins over a
+    // same-named trait contribution (established "own wins"
+    // semantics) - the trait-only sweep must not double-check it.
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {
+                public function foo(int $x): void;
+            }
+            trait T {
+                public function foo(string $x): void {}
+            }
+            class Impl implements Iface {
+                use T;
+                public function foo(int $x): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.childParameterType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_unimplemented_abstract_trait_method_is_not_flagged_by_the_trait_override_sweep() {
+    // A trait's own `abstract` method (the using class is required to
+    // supply a body for) has no concrete implementation of its own to
+    // compare against an ancestor at all - this is a different, already-
+    // separately-tracked concern (`abstract_methods`), not an override.
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {
+                public function foo(int $x): void;
+            }
+            trait T {
+                abstract public function foo(string $x): void;
+            }
+            class Impl implements Iface {
+                use T;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.childParameterType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
