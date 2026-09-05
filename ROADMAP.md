@@ -3596,6 +3596,31 @@ comments.
   above do - they'd mostly improve inference precision or diagnostic
   quality at the margins. Revisit if a future corpus round traces a
   real false positive/negative back to one of them specifically.
+- **A trait declared twice with genuinely different method signatures
+  per conditional branch checks both bodies against whichever signature
+  won the name** (Phase 13 Finding E's own update, below) -
+  `check_function`'s `lookup_own_signature` resolves "the declared
+  return type to check this body's own `return` statements against" via
+  a registry lookup (`self.registry.classes[host].methods[name]`), not
+  the specific AST branch currently being checked - harmless for the
+  overwhelmingly common case (two conditional branches of the same
+  trait declare the *same* signature, differing only in body), but a
+  real, narrow false positive when they genuinely differ. Confirmed
+  real: `doctrine/orm`'s own `GetReflectionClassImplementation.php`
+  (`if (! class_exists(StaticReflectionService::class)) { trait
+  GetReflectionClassImplementation { function getReflectionClass():
+  ReflectionClass {...} } } else { trait GetReflectionClassImplementation
+  { function getReflectionClass(): ReflectionClass|null {...} } }`) -
+  whichever branch's signature the registry ends up with, the *other*
+  branch's own body gets checked against it, flagging a
+  `return.type` mismatch on the nullable-returning branch (`expected
+  ReflectionClass, got ReflectionClass<T>|null`). 4 diagnostics total,
+  isolated to this one real file - fixing it properly means
+  `check_function` trusting the AST node's own declared return type
+  for this specific check rather than re-resolving through the
+  registry, a change to a heavily-used, core code path with its own
+  regression surface; not attempted here given the narrow real-world
+  incidence.
 
 ### Permanent design boundaries (not phase-tracked - not planned, by choice)
 
@@ -4229,6 +4254,34 @@ Five real findings shipped:
   as before. **Lowest confidence of the five**: zero traits exist
   anywhere in this corpus, so verified only via six new tests, never
   against real corpus behavior.
+
+**Update**: that "zero traits exist anywhere in this corpus" caveat
+turned out to describe only *first-party* Piwigo code, not the full
+vendored corpus - a full-corpus top-10-bucket identifier hunt found
+Finding E's own dispatch (`check_trait_methods`, wired into `check_
+program`'s top-level `StmtKind::ClassDecl` handling) was never reached
+by a trait declared *inside* a conditional block (the common `if
+(version_compare(...)) { trait Foo {...} }`/`if (PHP_VERSION_ID ...) {
+trait Foo {...} }` shape - real corpus example, `symfony/cache`'s own
+`Redis63ProxyTrait`/`RedisCluster63ProxyTrait`/several `Relay*Trait`
+variants). A conditionally-declared trait instead reaches `check_stmt`'s
+own separate, nested `StmtKind::ClassDecl` arm (`checker/stmt.rs`),
+which unconditionally checked every method with `current_class` set to
+the *trait's own* name regardless of `ClassKind` - never dispatching
+through `check_trait_methods` at all, so `$this->hostOnlyMethod()`
+calls (real shape: `$this->initializeLazyObject()`, provided by a
+sibling trait on the real host `RedisProxy`) were false-positived as
+undefined exactly the way Finding E's own fix was built to prevent.
+Fixed by mirroring `check_program`'s own `ClassKind::Trait` branch
+there too. Verified against the ~20,300-file corpus: 45,973 -> 45,873
+(-100 net; 405 false positives cleared - `property.notFound`/`method.
+notFound` across every real host-dependent trait method this newly
+reaches - against 305 additions, 301 of which are the same already-
+accepted informational `missingType.parameter`/`missingType.
+iterableValue` class becoming newly visible now that these methods are
+checked against a real host instead of silently invisible; the
+remaining 4 are a real, narrow residual gap, recorded in "Known but not
+yet scheduled" above rather than chased further this round).
 
 Confirmed real but deliberately left open, each named precisely rather
 than left in a vague "batch": `BinOp::Pipe` (zero corpus usage, needs new
