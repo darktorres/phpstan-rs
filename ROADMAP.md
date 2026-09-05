@@ -1238,19 +1238,40 @@ checked genuine (`symfony/cache`'s `CouchbaseCollectionAdapter`,
 `symfony/property-info`'s `ReflectionExtractor` - real, non-`final`
 classes with a `private const` accessed through `static::`).
 
+**Update**: static-property visibility (`AccessStaticPropertiesCheck`)
+and `AccessPrivatePropertyThroughStaticRule` are now done too, and
+uncovered a real, more foundational gap along the way - static-property
+visibility wasn't enforced *at all* before this (confirmed directly via
+`php -r` as a real "Cannot access private property" fatal error,
+identical to an instance property's own already-enforced rule). Wired
+`check_member_visibility` into `ExprKind::StaticAccess`'s `$prop`-fetch
+arm (`kind: "staticProperty"`, sharing the exact same `PropertySig`-
+based lookup an instance property already uses - a static property
+carries no separate representation of its own in this project's
+registry, only `PropertySig::is_static` distinguishes them), then layered
+the identical late-static-binding-unsafety check
+(`check_static_private_property_access`, factored through a small shared
+`check_static_private_member_access` helper alongside the constant
+case's own wrapper) on top. Corpus-verified: 49991 -> 49992 (+1, genuine:
+`opis/json-schema`'s `IriFormats`, a real non-`final` class with
+`private static $idn` accessed via `static::$idn`) - the general
+static-property visibility check itself found zero real violations
+across the whole corpus, confirmed working (not dormant) via a direct
+repro.
+
 Still open: asymmetric PHP 8.4 `private(set)`/`protected(set)` (write-
-visibility can currently only match read-visibility); LSB-unsafe
-`static::` access to a `private` static property
-(`AccessPrivatePropertyThroughStaticRule`, `AccessStaticPropertiesCheck`/
-`Rule`/`InAssignRule`); and `StaticMethodCallableRule`/
+visibility can currently only match read-visibility); `StaticMethodCallableRule`/
 `CallPrivateMethodThroughStaticRule`'s own `static::`-callable-specific
-angle - both real, tractable follow-ups sharing this same update's exact
+angle - a real, tractable follow-up sharing this same update's exact
 shape (`class_name == "static"` + a `private`-visibility member + a
-`final`-class exemption), not attempted this pass. The protected-access
-heuristic is also deliberately conservative: it never guesses at cross-
-hierarchy relationships it can't resolve from the registry, so a small
-number of genuinely-illegal protected accesses that depend on runtime-
-only information may go unflagged rather than risk a false positive.
+`final`-class exemption), not attempted this pass (ordinary static-
+method-call visibility itself, unlike the property case above, was
+already enforced - only the narrower late-static-binding angle remains).
+The protected-access heuristic is also deliberately conservative: it
+never guesses at cross-hierarchy relationships it can't resolve from the
+registry, so a small number of genuinely-illegal protected accesses that
+depend on runtime-only information may go unflagged rather than risk a
+false positive.
 
 **Phase 58 - `MissingTypehintCheck` completeness battery (level-6
 family) (DONE).** This entry's own status was never updated after an
