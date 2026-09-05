@@ -1085,25 +1085,41 @@ fn narrow_instanceof_true(current: &Type, target: &Type) -> Type {
     if is_subtype(current, target) {
         return current.clone();
     }
+    // A nullable `current` (`?Socket`, i.e. `Union([Object("Socket"),
+    // Null])`) can never actually be `null` once a true `instanceof`
+    // check has passed - `null instanceof AnyClass` is always `false` in
+    // real PHP - so `null` is dropped before deciding whether what's
+    // left is object-like enough to intersect with. Without this, a
+    // nullable property/variable checked against an *unrelated*
+    // interface (real corpus shape: amphp/http-client's own
+    // `Http1Connection::watchIdleConnection()`, `?Socket` checked via
+    // `instanceof ResourceStream`) fell all the way through to the
+    // simpler "just trust the checked class" branch below - discarding
+    // `Socket` entirely instead of intersecting down to `Socket&
+    // ResourceStream` - so every one of `Socket`'s own members (real
+    // shape: a later `$socket?->read()`) looked confirmed-missing on
+    // the resulting bare `ResourceStream`.
+    let non_null = narrow_type_excluding(current, &Type::Null);
     // Only combined into a real Intersection when every branch of
-    // `current` is itself provably object-like - anything else (`Mixed`,
-    // or a scalar/array type that could never actually satisfy a true
-    // `instanceof` in the first place, a sign this project's own
-    // upstream inference already went wrong somewhere *else*) falls back
-    // to the simpler "just trust the checked class" behavior instead of
-    // risking compounding an unrelated bug into a nonsensical type like
-    // `null&ImageId`. Found live: `$id = is_array($row) ? ($row['id'] ??
-    // null) : null;` was itself mis-inferred as bare `Null` (a real,
-    // separate gap, not narrowed away here) - this guard is what kept
-    // this fix's own regression check from compounding that into
-    // exactly this nonsense. Recurses through `Union`/`Intersection` so
-    // a *second*, independent `instanceof` check against the same
-    // variable (real shape: `Template\Renderer::render`'s own three
-    // sequential checks) still combines correctly once the first check's
-    // own merge has already turned `current` into a real union of
-    // object-like branches.
-    if is_object_like(current) {
-        Type::Intersection(vec![current.clone(), target.clone()])
+    // `current` (once stripped of any nullability, per above) is itself
+    // provably object-like - anything else (`Mixed`, or a scalar/array
+    // type that could never actually satisfy a true `instanceof` in the
+    // first place, a sign this project's own upstream inference already
+    // went wrong somewhere *else*) falls back to the simpler "just trust
+    // the checked class" behavior instead of risking compounding an
+    // unrelated bug into a nonsensical type like `null&ImageId`. Found
+    // live: `$id = is_array($row) ? ($row['id'] ?? null) : null;` was
+    // itself mis-inferred as bare `Null` (a real, separate gap, not
+    // narrowed away here) - this guard is what kept this fix's own
+    // regression check from compounding that into exactly this
+    // nonsense. Recurses through `Union`/`Intersection` so a *second*,
+    // independent `instanceof` check against the same variable (real
+    // shape: `Template\Renderer::render`'s own three sequential checks)
+    // still combines correctly once the first check's own merge has
+    // already turned `current` into a real union of object-like
+    // branches.
+    if is_object_like(&non_null) {
+        Type::Intersection(vec![non_null, target.clone()])
     } else {
         target.clone()
     }

@@ -816,6 +816,32 @@ fn instanceof_against_an_unrelated_interface_also_narrows_to_the_new_interface()
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive: amphp/http-client's own `Http1Connection::
+// watchIdleConnection()` - a *nullable* property/variable checked against
+// an unrelated interface. `?Socket instanceof ResourceStream` used to
+// fall all the way through to "just trust the checked class" (losing
+// `Socket` entirely, not merely its own nullability) because `is_object_
+// like` rejected the whole still-nullable `Union([Socket, Null])`
+// outright - `null` needs dropping first (a true `instanceof` can never
+// itself be `null`), not treated as disqualifying the rest of the union
+// from being object-like.
+#[test]
+fn instanceof_against_an_unrelated_interface_on_a_nullable_type_keeps_the_original_type_too() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface ResourceStream { public function unreference(): void; }
+            interface Socket { public function read(): ?string; }
+            function f(?Socket $socket): void {
+                if ($socket instanceof ResourceStream) {
+                    $socket->unreference();
+                }
+                $socket?->read();
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Regression test for a real bug caught while implementing the fix
 // above: when the pre-narrowing type is something that could never
 // actually be `instanceof` anything at all (`Null`, a scalar, ... -
@@ -1519,6 +1545,52 @@ fn or_short_circuit_narrows_its_right_operand_on_the_false_branch() {
         r#"<?php
             function f(?string $x) {
                 return $x === null || strlen($x) > 0;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Parser-level fix (not `merge_new_variable_definitions`'s own
+// mechanism, already proven correct by the by-ref-out-param test right
+// below this one) - a plain `$x = expr` assignment nested unparenthesized
+// as `&&`'s/`||`'s own RHS used to parse into the wrong tree shape
+// entirely (`($cond && $x) = expr` instead of real PHP's own `$cond &&
+// ($x = expr)`), so `$x` never looked assigned to anything downstream,
+// regardless of how correct the checker's own narrowing/definite-
+// assignment merge logic already was. Real corpus false positive:
+// symfony/console's own `Application.php`.
+#[test]
+fn an_assignment_nested_as_and_s_rhs_defines_the_variable_in_the_if_body() {
+    let d = diagnostics_for(
+        r#"<?php
+            class NotFoundException {}
+            function findNamespace(string $name): string { return $name; }
+            function f(object $e, string $name): void {
+                if ($e instanceof NotFoundException && $namespace = findNamespace($name)) {
+                    echo $namespace;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_assignment_nested_as_or_s_rhs_defines_the_variable_afterward() {
+    // Mirrors `Binary(Or, ...)`'s own existing `merge_new_variable_
+    // definitions` policy exactly (same as `preg_match`'s by-ref
+    // `$matches` test below already exercises for `&&`) - a new
+    // variable defined by evaluating the right side is merged back into
+    // `locals` unconditionally once the whole `||` expression is done,
+    // regardless of which side actually ran. This test only needs to
+    // confirm the parser now hands that mechanism a real `Assign` node
+    // to find at all.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(?string $name): void {
+                $name === null || $resolved = $name;
+                echo $resolved;
             }
         "#,
     );
