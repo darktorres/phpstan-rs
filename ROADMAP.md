@@ -1488,14 +1488,33 @@ unattempted, matching this same function's already-established narrower
 (byte-identical output) - a direct repro confirms both fire correctly,
 a genuine "no violations found" result, not a dormant check.
 
-Still open, unstarted: interface-first/trait-abstract-method ancestor-
-lookup priority, the `#[Override]` sub-check, and the *entire*
-property-override half (`OverridingPropertyRule`'s
-equivalent: static/readonly/hook/visibility/final/native-type-variance
-mismatches on property override) - needs `is_final`/`is_abstract` added
-to `PropertyDecl`/`PropertySig` first (not currently tracked by any
-phase), though Phase 57's own `PropertySig.visibility` field this
-phase's method half also leaned on is already in place.
+**Update**: the property-override half (`OverridingPropertyRule`'s
+equivalent) is now partially done too - `property.nonStatic`/`static`,
+`property.readWrite`/`readOnly`, and `property.visibility` (the
+identical two-way visibility-narrowing split the method half already
+uses), scoped to the three mismatch kinds answerable with fields
+`PropertyDecl`/`PropertySig` already carry, no new fields needed. A
+promoted constructor property is a real property for override purposes
+too (confirmed directly) - both plain declarations and promoted
+`__construct` parameters are checked via a shared `check_one_property_
+override` helper; a new `Registry::lookup_ancestor_property_with_owner`
+mirrors the existing method equivalent, walking only `extends`
+(interfaces can't declare properties). Corpus-verified: byte-identical
+output - a direct repro (including the promoted-property case) confirms
+all three checks fire correctly, a genuine "no violations found" result.
+
+Still open: interface-first/trait-abstract-method ancestor-lookup
+priority, the `#[Override]` sub-check, property hooks
+(`notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`), and
+native-type-variance (`property.nativeType` - PHP requires *invariant*,
+not covariant, property types on override) - `PropertySig` only carries
+one already-docblock-merged `ty` field (no `return_type_native`-style
+split the way `FunctionSig` has), and comparing it directly risks the
+identical false-positive class `method.childReturnType`'s own doc
+comment already found and fixed for methods; needs that split first.
+`final`/`abstract` property modifiers (PHP 8.4) also still need
+`is_final`/`is_abstract` added to `PropertyDecl`/`PropertySig` - genuine
+new parser work, not currently tracked by any phase.
 
 **Phase 65 - Declaration-site modifier-consistency + constructor-shape
 checks (PARTIAL).** Landed nine of the batch's own small, independent
