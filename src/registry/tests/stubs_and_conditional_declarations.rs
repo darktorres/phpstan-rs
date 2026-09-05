@@ -490,3 +490,120 @@ fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
         "the override's own convolveImage() (2 params) should win over the built-in's (1 param)"
     );
 }
+
+// Real corpus shape: `symfony/polyfill-php84`'s own `if (PHP_VERSION_ID
+// < 80400) { final class ReflectionConstant { private $value; ... } }`
+// collides with jetbrains/phpstorm-stubs' own native-class stub for the
+// real PHP 8.4+ `ReflectionConstant` (only `$name`, no `$value`) -
+// merged in via `merge_stub_classes` before this conditional
+// declaration is ever indexed. Unlike the `class_exists`-guarded
+// defensive-fallback shape above (`unconditional_class_wins_over_a_
+// later_conditional_stub`), the *built-in stub's* own members must gain
+// the conditional declaration's real properties/methods, not discard
+// them - the stub is itself only a type-checking fiction, and the
+// polyfill's own method bodies are checked against whatever wins this
+// name.
+#[test]
+fn a_conditional_declaration_merges_onto_a_built_in_stub_class() {
+    let built_in = build_registry("<?php class ReflectionConstant { public string $name; }")
+        .classes
+        .remove("ReflectionConstant")
+        .unwrap();
+
+    let mut r = Registry::default();
+    r.merge_stub_classes(vec![("ReflectionConstant".to_string(), built_in)]);
+
+    let tokens = Lexer::new(
+        r#"<?php
+            if (\PHP_VERSION_ID < 80400) {
+                final class ReflectionConstant {
+                    private $value;
+
+                    public function getValue() {
+                        return $this->value;
+                    }
+                }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+
+    assert!(
+        r.classes["ReflectionConstant"]
+            .properties
+            .contains_key("value"),
+        "the polyfill's own $value property must become visible"
+    );
+    assert!(
+        r.classes["ReflectionConstant"]
+            .properties
+            .contains_key("name"),
+        "the built-in stub's own $name property must survive the merge"
+    );
+}
+
+// The sibling regression this fix must not reintroduce: a *real*,
+// already-known vendor class colliding with a `class_exists`-guarded
+// defensive fallback must still behave exactly like
+// `unconditional_class_wins_over_a_later_conditional_stub` - the
+// fallback's own members must not leak in just because the winning
+// declaration happens to have been indexed via ordinary file processing
+// rather than `merge_stub_classes`.
+#[test]
+fn a_conditional_declaration_does_not_merge_onto_a_real_non_stub_class() {
+    let r = build_registry(
+        r#"<?php
+            class X { public function real() {} }
+            if (!class_exists('X')) {
+                class X { public function stub() {} }
+            }"#,
+    );
+    assert!(r.classes["X"].methods.contains_key("real"));
+    assert!(!r.classes["X"].methods.contains_key("stub"));
+}
+
+// Real corpus regression, caught before shipping: `nikic/php-parser`'s
+// own conditional `class PhpToken extends Symfony\Polyfill\Php80\
+// PhpToken {}` (guarding PHP <8.0) collides with the built-in stub for
+// the real `\PhpToken` - merging that never-taken `extends` onto the
+// stub, a wholly unrelated third file's own `TokenPolyfill extends
+// \PhpToken {}` then inherited it transitively, wrongly flagging its
+// real `__construct()` as overriding a `final` method it has no actual
+// relation to. `extends`/`implements` must never be adopted from the
+// conditional declaration, even while its properties/methods do merge
+// in.
+#[test]
+fn a_conditional_declaration_s_extends_never_leaks_onto_a_built_in_stub() {
+    let built_in = build_registry("<?php class PhpToken implements Stringable {}")
+        .classes
+        .remove("PhpToken")
+        .unwrap();
+
+    let mut r = Registry::default();
+    r.merge_stub_classes(vec![("PhpToken".to_string(), built_in)]);
+
+    let tokens = Lexer::new(
+        r#"<?php
+            if (\PHP_VERSION_ID < 80000) {
+                class PhpToken extends Symfony\Polyfill\Php80\PhpToken {
+                }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+
+    assert!(
+        r.classes["PhpToken"].extends.is_empty(),
+        "the built-in stub declared no extends of its own - the conditional \
+         declaration's real-but-never-taken extends must not be adopted"
+    );
+    assert_eq!(
+        r.classes["PhpToken"].implements,
+        vec!["Stringable".to_string()],
+        "the built-in stub's own implements must survive unchanged"
+    );
+}

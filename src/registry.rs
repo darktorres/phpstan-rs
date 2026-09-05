@@ -87,6 +87,27 @@ pub struct Registry {
     // pre-existing `PHPUnit\Framework\TestCase` shape) - both look
     // identical from `self.classes.contains_key(&name)` alone.
     unconditionally_declared_classes: HashSet<String>,
+    // Names `merge_stub_classes` provided a built-in native-class stub
+    // for (jetbrains/phpstorm-stubs) - a *subset* of `unconditionally_
+    // declared_classes` above, distinguishing "this name's existing
+    // entry is itself only a type-checking fiction, never really
+    // instantiated" from "this name's existing entry is a real,
+    // unconditionally-declared vendor/first-party class". Both look
+    // identical from `unconditionally_declared_classes.contains(&name)`
+    // alone, but `index_with_context`'s own `if conditional` branch
+    // needs to tell them apart: merging a version-gated real polyfill
+    // implementation's own members onto a built-in stub is safe and
+    // desired (the stub is fictional either way, see that branch's own
+    // doc comment - `symfony/polyfill-php84`'s own `ReflectionConstant`
+    // colliding with jetbrains's native-class stub for it), but doing
+    // the identical merge onto a *real*, already-known vendor class
+    // (the pre-existing `PHPUnit\Framework\TestCase`-vs-`class_exists`-
+    // guarded-fallback shape `unconditionally_declared_classes` itself
+    // was added for) would wrongly leak a defensive fallback's own
+    // never-taken members onto the real class everything else sees -
+    // exactly the regression `unconditional_class_wins_over_a_later_
+    // conditional_stub` catches.
+    built_in_stub_classes: HashSet<String>,
     // Phase 32 Finding C: the function-side sibling of the tracking set
     // above - phpstorm-stubs represents a real PHP internal function
     // overload (different signatures by argument shape, not version) as
@@ -320,7 +341,95 @@ impl Registry {
                 StmtKind::ClassDecl(c) => {
                     let name = ctx.declared_name(&c.name);
                     let new_info = ClassInfo::from_decl(c, ctx);
-                    if conditional {
+                    if conditional && self.built_in_stub_classes.contains(&name) {
+                        // A plain `or_insert_with` no-op (the shape every
+                        // other conditional case below still uses) fully
+                        // discards a conditional declaration's *own*
+                        // members the moment its name already exists -
+                        // correct when the existing entry is a *real*,
+                        // already-known vendor/first-party class (a
+                        // `class_exists`-guarded defensive fallback's own
+                        // members genuinely must never leak onto it, see
+                        // `unconditional_class_wins_over_a_later_
+                        // conditional_stub`), but too conservative when
+                        // the existing entry is only `built_in_stub_
+                        // classes`' own type-checking fiction (jetbrains/
+                        // phpstorm-stubs, never really instantiated) and
+                        // the conditional declaration is instead a real,
+                        // version-gated polyfill implementation whose own
+                        // method bodies still get checked against
+                        // whatever won the name: real corpus shape,
+                        // `symfony/polyfill-php84`'s own conditionally-
+                        // declared `ReflectionConstant` (`if
+                        // (PHP_VERSION_ID < 80400) { final class
+                        // ReflectionConstant { private $value; ... } }`)
+                        // collides with jetbrains/phpstorm-stubs' own
+                        // native-class stub for the *real* PHP 8.4+
+                        // `ReflectionConstant`. The polyfill's own
+                        // `getValue()`/`__toString()`/etc. bodies were
+                        // then checked against the stub's much narrower
+                        // shape (just `$name`), not the polyfill's real
+                        // one - a corpus-verified false positive on every
+                        // `$this->value`/`$this->deprecated`/`self::
+                        // $persistentConstants` access inside that one
+                        // file. Merging (existing wins any real conflict,
+                        // same "first/more-authoritative wins" contract
+                        // `merge`'s own doc comment establishes) fills in
+                        // exactly the members the winning declaration
+                        // doesn't have, without touching anything it
+                        // already provides.
+                        //
+                        // `extends`/`implements`/`uses`/`templates`/
+                        // `extends_args`/`trait_aliases`/`implements_args`
+                        // are the one part of `merge` deliberately
+                        // *excluded* here, restored to the winning
+                        // declaration's own values right after - unlike a
+                        // member map (additive, never wrong to have more
+                        // of), a fictitious inheritance edge is actively
+                        // dangerous: real corpus regression caught before
+                        // shipping, `nikic/php-parser`'s own conditional
+                        // `class PhpToken extends
+                        // Symfony\Polyfill\Php80\PhpToken {}` (guarding
+                        // PHP <8.0, itself colliding with the exact same
+                        // stub-vs-conditional pattern this fix targets)
+                        // merged that never-taken `extends` onto the real
+                        // `\PhpToken` stub, which a wholly unrelated
+                        // third file's own `TokenPolyfill extends
+                        // \PhpToken {}` then inherited transitively -
+                        // wrongly flagging `TokenPolyfill::__construct()`
+                        // as overriding a `final` method it doesn't, in
+                        // real PHP, have any relation to at all.
+                        if let Some(existing) = self.classes.remove(&name) {
+                            let (
+                                extends,
+                                implements,
+                                uses,
+                                templates,
+                                extends_args,
+                                trait_aliases,
+                                implements_args,
+                            ) = (
+                                existing.extends.clone(),
+                                existing.implements.clone(),
+                                existing.uses.clone(),
+                                existing.templates.clone(),
+                                existing.extends_args.clone(),
+                                existing.trait_aliases.clone(),
+                                existing.implements_args.clone(),
+                            );
+                            let mut merged = new_info.merge(existing);
+                            merged.extends = extends;
+                            merged.implements = implements;
+                            merged.uses = uses;
+                            merged.templates = templates;
+                            merged.extends_args = extends_args;
+                            merged.trait_aliases = trait_aliases;
+                            merged.implements_args = implements_args;
+                            self.classes.insert(name, merged);
+                        } else {
+                            self.classes.insert(name, new_info);
+                        }
+                    } else if conditional {
                         self.classes.entry(name).or_insert_with(|| new_info);
                     } else if self.unconditionally_declared_classes.contains(&name) {
                         // Phase 25: a *second* unconditional declaration
@@ -568,6 +677,7 @@ impl Registry {
         for (name, info) in stubs {
             let name: String = name.into();
             self.unconditionally_declared_classes.insert(name.clone());
+            self.built_in_stub_classes.insert(name.clone());
             match self.classes.remove(&name) {
                 Some(existing) => {
                     self.classes.insert(name, info.merge(existing));
