@@ -258,6 +258,70 @@ fn conditional_return_type_syntax_collapses_identical_branches() {
     assert_eq!(ty, parse_type_string("list<string>"));
 }
 
+// A docblock-parsed `list<int>` builds its key as a literal `Type::Int`
+// (needed so a later marker-stripping op, e.g. `array_diff()`'s own
+// result, still shows a known `array<int, T>` rather than collapsing to
+// a keyless `array<T>` - verified via dumpType()), while every
+// runtime-inferred list this project builds (`array_values()`, `sort()`,
+// ...) uses the generic `unknown_array_key()` sentinel for that same
+// position instead (deliberately - a list's key is always int *by
+// definition*, so `upgrade_array_to_list`'s own doc comment treats
+// encoding it twice as redundant). Both printed identically as
+// `list<int>` (`describe_accessory_intersection` hides a list's key
+// unconditionally) but weren't structurally `==`-equal, and worse,
+// `is_subtype`'s own generic `Array` key check is directionally
+// asymmetric between the two representations
+// (`is_subtype(unknown_array_key(), Int)` is false, the reverse true),
+// so a genuine runtime `list<int>` failed to satisfy an otherwise-
+// identical docblock-declared `list<int>` parameter/return type.
+// Corpus-verified via `SearchService::getRegularSearchResults()`
+// printing a real return-type mismatch as `list<int>|list<int>|array|
+// array{}` - the two `list<int>` members were exactly this
+// docblock-vs-runtime pair, which `union_types`'s own dedup (via
+// `types_equal_for_union`) now also collapses into one.
+#[test]
+fn a_docblock_parsed_list_is_a_mutual_subtype_of_the_runtime_inferred_shape() {
+    let docblock_list = parse_type_string("list<int>");
+    let runtime_list = Type::Intersection(vec![
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ]);
+    assert_ne!(
+        docblock_list, runtime_list,
+        "still two distinct representations"
+    );
+    assert!(is_subtype(&runtime_list, &docblock_list));
+    assert!(is_subtype(&docblock_list, &runtime_list));
+    assert!(types_equal_for_union(&docblock_list, &runtime_list));
+}
+
+#[test]
+fn a_docblock_parsed_non_empty_list_is_a_mutual_subtype_of_the_runtime_inferred_shape() {
+    let docblock_list = parse_type_string("non-empty-list<int>");
+    let runtime_list = Type::Intersection(vec![
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
+        Type::Accessory(AccessoryKind::ArrayList),
+        Type::Accessory(AccessoryKind::NonEmptyArray),
+    ]);
+    assert!(is_subtype(&runtime_list, &docblock_list));
+    assert!(is_subtype(&docblock_list, &runtime_list));
+    assert!(types_equal_for_union(&docblock_list, &runtime_list));
+}
+
+// The `NonEmptyArray` half of the same rule: a plain (possibly-empty)
+// runtime `list<int>` must NOT satisfy a docblock-declared
+// `non-empty-list<int>` - only the element-type comparison is skipped
+// for keys, not the non-emptiness guarantee itself.
+#[test]
+fn a_plain_list_is_not_a_subtype_of_a_non_empty_list_of_the_same_element_type() {
+    let docblock_non_empty = parse_type_string("non-empty-list<int>");
+    let runtime_plain_list = Type::Intersection(vec![
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ]);
+    assert!(!is_subtype(&runtime_plain_list, &docblock_non_empty));
+}
+
 // Phase 30, real shape: Doctrine DBAL's own `@param Closure(self):T
 // $func` (`Connection::transactional()`) - the callable-shape syntax
 // wasn't recognized at all, so the whole literal string

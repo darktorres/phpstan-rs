@@ -3804,7 +3804,7 @@ const MAX_UNION_MEMBERS: usize = 12;
 /// unions and keeps `Mixed` "unknown" rather than let it compose into a
 /// falsely-precise-looking Union (same principle as the ternary inference).
 pub(crate) fn union_types(a: Type, b: Type) -> Type {
-    if a == b {
+    if types::types_equal_for_union(&a, &b) {
         return a;
     }
     if a == Type::Mixed || b == Type::Mixed {
@@ -3818,13 +3818,16 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
     match b {
         Type::Union(m) => {
             for x in m {
-                if !members.contains(&x) {
+                if !members.iter().any(|m| types::types_equal_for_union(m, &x)) {
                     members.push(x);
                 }
             }
         }
         other => {
-            if !members.contains(&other) {
+            if !members
+                .iter()
+                .any(|m| types::types_equal_for_union(m, &other))
+            {
                 members.push(other);
             }
         }

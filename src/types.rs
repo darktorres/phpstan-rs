@@ -1133,6 +1133,43 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
 /// Class hierarchy isn't modeled yet, so `Object` subtyping is name-equality
 /// only; self/parent/static are accepted against any `Object` as a
 /// placeholder until a class-context resolver exists.
+/// Whether `a`/`b` should be treated as the identical type for union
+/// deduplication - ordinary `==` for everything except a `list<T>`/
+/// `non-empty-list<T>` pair, which can be structurally unequal (a
+/// literal `Type::Int` key vs. the generic `unknown_array_key()`
+/// sentinel - see the `is_subtype` `Intersection`-vs-`Intersection` list
+/// arm's own doc comment for why both exist) while still being the same
+/// type PHPStan-visibly. Without this, `union_types` kept both as
+/// separate members whenever a docblock-declared `list<T>` and a
+/// runtime-inferred one of the same element type met in one union,
+/// printing a duplicate `list<int>|list<int>` in a real corpus
+/// return-type mismatch (`SearchService::getRegularSearchResults()`).
+pub(crate) fn types_equal_for_union(a: &Type, b: &Type) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a, b) {
+        (Type::Intersection(ma), Type::Intersection(mb))
+            if ma.contains(&Type::Accessory(AccessoryKind::ArrayList))
+                && mb.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
+        {
+            let keyless = |members: &[Type]| -> Vec<Type> {
+                members
+                    .iter()
+                    .map(|m| match m {
+                        Type::Array(_, v) => {
+                            Type::Array(Box::new(Type::unknown_array_key()), v.clone())
+                        }
+                        other => other.clone(),
+                    })
+                    .collect()
+            };
+            keyless(ma) == keyless(mb)
+        }
+        _ => false,
+    }
+}
+
 pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
     match (sub, sup) {
         (_, Type::Mixed) => true,
@@ -1248,6 +1285,46 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // Intersection) => any(...)` rule alone only checks whether one
         // *bare* member of `sub` satisfies the whole `sup` intersection,
         // never whether `sub`'s own combination does.
+        // A `list<T>`/`non-empty-list<T>` pair needs its own rule ahead
+        // of the generic one below: this project builds the exact same
+        // `list<T>` shape two different ways that both stay internally
+        // consistent on their own but disagree structurally - a
+        // docblock-parsed one (`parse_type_string`'s `"list"` arm) uses a
+        // literal `Type::Int` key (needed so stripping the list marker
+        // later, e.g. `array_diff()`'s own result, still shows a known
+        // `array<int, T>` rather than collapsing to a keyless `array<T>`
+        // - verified via dumpType()), while every runtime-inferred one
+        // (`array_values()`, `sort()`, ...) uses the generic
+        // `unknown_array_key()` sentinel instead (deliberately, per
+        // `upgrade_array_to_list`'s own doc comment - a list's key is
+        // always int *by definition*, so encoding it twice was judged
+        // redundant). The generic `Array` key check below is directionally
+        // asymmetric between the two (`is_subtype(unknown_array_key(),
+        // Int)` is false, `is_subtype(Int, unknown_array_key())` is true),
+        // so without this a real runtime `list<int>` failed to satisfy an
+        // otherwise-identical docblock-declared `list<int>` parameter/
+        // return type - corpus-verified via `SearchService::
+        // getRegularSearchResults()`'s own real return-type mismatch.
+        // Keys are skipped entirely here (both are provably int either
+        // way); only the element type and `NonEmptyArray` need comparing.
+        (Type::Intersection(sub_members), Type::Intersection(sup_members))
+            if sub_members.contains(&Type::Accessory(AccessoryKind::ArrayList))
+                && sup_members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
+        {
+            fn elem_of(members: &[Type]) -> Option<&Type> {
+                members.iter().find_map(|m| match m {
+                    Type::Array(_, v) => Some(v.as_ref()),
+                    _ => None,
+                })
+            }
+            match (elem_of(sub_members), elem_of(sup_members)) {
+                (Some(sub_elem), Some(sup_elem)) if is_subtype(sub_elem, sup_elem) => {
+                    !sup_members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
+                        || sub_members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
+                }
+                _ => false,
+            }
+        }
         (Type::Intersection(_), Type::Intersection(sup_members)) => {
             sup_members.iter().all(|m| is_subtype(sub, m))
         }
