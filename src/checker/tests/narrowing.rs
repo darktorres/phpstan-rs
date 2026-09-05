@@ -492,6 +492,104 @@ fn failing_array_is_list_proves_nothing_more_specific() {
     );
 }
 
+// Phase 55's own still-open list: `str_contains`/`str_starts_with`/
+// `str_ends_with` with a non-empty literal needle - real PHPStan's own
+// `StrContainingTypeSpecifyingExtension`.
+
+#[test]
+fn str_contains_with_a_literal_needle_narrows_the_haystack_to_non_falsy_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $x): void {
+                if (str_contains($x, 'foo')) {
+                    sink($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn str_starts_with_and_str_ends_with_also_narrow_the_haystack() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $a, string $b): void {
+                if (str_starts_with($a, 'foo')) {
+                    sink($a);
+                }
+                if (str_ends_with($b, 'bar')) {
+                    sink($b);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn str_contains_with_a_literal_zero_needle_narrows_to_non_empty_not_non_falsy() {
+    // `"0"` is itself falsy - a haystack containing it can't be proven
+    // non-falsy (it could be exactly `"0"`), only non-empty.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $x): void {
+                if (str_contains($x, '0')) {
+                    sink($x);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "a '0'-containing haystack isn't provably non-falsy: {d:?}"
+    );
+}
+
+#[test]
+fn str_contains_composes_with_a_negated_guard_clause() {
+    // The exact real-corpus idiom: `if (!str_contains($x, 'foo')) {
+    // return; }` - only the code past the guard should see the upgrade.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $x): void {
+                if (!str_contains($x, 'foo')) {
+                    return;
+                }
+                sink($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn str_contains_with_a_non_literal_needle_narrows_nothing() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $x, string $needle): void {
+                if (str_contains($x, $needle)) {
+                    sink($x);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "a non-literal needle shouldn't prove anything about the haystack: {d:?}"
+    );
+}
+
 #[test]
 fn a_guard_clause_on_a_negated_bare_count_still_narrows_past_it() {
     // `!count($x)` composes through the existing `Unary(Not)` arm

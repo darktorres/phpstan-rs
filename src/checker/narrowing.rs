@@ -310,6 +310,45 @@ impl<'a> Checker<'a> {
                     let narrowed =
                         narrow_array_shape_by_key_presence(&current, lit_key, branch_true);
                     locals.insert(arr_key, narrowed);
+                } else if let ExprKind::Name(name) = &callee.kind
+                    && matches!(
+                        name.trim_start_matches('\\'),
+                        "str_contains" | "str_starts_with" | "str_ends_with"
+                    )
+                    && branch_true
+                    && let [haystack, needle] = args.as_slice()
+                    && let Some(key) = narrowing_key(&haystack.value)
+                {
+                    // Phase 55's own still-open list: real PHPStan's own
+                    // `StrContainingTypeSpecifyingExtension` - a haystack
+                    // that provably contains/starts/ends with a non-empty
+                    // literal needle can't itself be empty. Only fires for
+                    // a needle this checker can prove is a non-empty
+                    // string literal (matching real PHPStan's own
+                    // `isNonEmptyString()` gate) - a variable/computed
+                    // needle proves nothing. Only the true branch is
+                    // narrowable (mirrors `isFunctionSupported`'s own
+                    // `$context->true()` restriction) - failing any of
+                    // these three proves nothing about the haystack's own
+                    // emptiness. `strpos`/`stripos`/`fnmatch`/`mb_*`
+                    // variants (also in real PHPStan's own table) are
+                    // deliberately left out - their `int|false` (or
+                    // `false`-on-no-match) return makes a bare truthy
+                    // `if (strpos(...))` a real, separate PHP footgun
+                    // (position `0` is falsy despite being a match) this
+                    // checker doesn't otherwise model, unlike these three
+                    // genuinely bool-returning functions.
+                    if let Type::StringLiteral(needle_lit) = self.infer_expr(&needle.value, locals)
+                        && !needle_lit.is_empty()
+                    {
+                        let kind = if needle_lit == "0" {
+                            AccessoryKind::NonEmptyString
+                        } else {
+                            AccessoryKind::NonFalsyString
+                        };
+                        let current = self.current_narrowed_type(&haystack.value, &key, locals);
+                        locals.insert(key, upgrade_string_with_accessory(&current, kind));
+                    }
                 }
             }
             ExprKind::Instanceof(inner, target) => {
@@ -1304,31 +1343,39 @@ pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {
 /// `numeric-string`. The false branch is intentionally left alone (a
 /// string that fails `is_numeric()` is still validly just `String`).
 fn upgrade_string_to_numeric(ty: &Type) -> Type {
+    upgrade_string_with_accessory(ty, AccessoryKind::NumericString)
+}
+
+/// Adds `kind` to a `String` value - bare, or already refined by some
+/// other accessory kind (`non-empty-string`, `literal-string`, ... - any
+/// `Intersection` whose base is `String`), recursing into a `Union`'s own
+/// members the same way. Shared by `upgrade_string_to_numeric` (Phase 14,
+/// `is_numeric($x)`) and the `str_contains`/`str_starts_with`/
+/// `str_ends_with` haystack narrowing (Phase 55's own still-open list) -
+/// both are "prove this string satisfies one more accessory fact" upgrades
+/// that would otherwise duplicate the identical bare/intersection/union
+/// recursion. Phase 52's own finding motivated the "already-refined
+/// string" arm: a preg_match() capture group (`non-empty-string`)
+/// surviving an `is_numeric()` guard is a real corpus shape
+/// (`NumberComparator::__construct`), and silently falling through to
+/// `other => other.clone()` left it un-upgraded.
+fn upgrade_string_with_accessory(ty: &Type, kind: AccessoryKind) -> Type {
     match ty {
-        Type::String => Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::NumericString),
-        ]),
-        // Phase 52: a already-refined string (`non-empty-string`,
-        // `literal-string`, ... - any `Intersection` whose base is
-        // `String`) needs `NumericString` added alongside its existing
-        // accessory kinds, not discarded - a preg_match() capture group
-        // (`non-empty-string`) surviving an `is_numeric()` guard is a
-        // real corpus shape (`NumberComparator::__construct`), and
-        // silently falling through to `other => other.clone()` left it
-        // un-upgraded, so `is_number_operand` (Phase 52) still saw a
-        // plain non-numeric-proven string past the guard.
+        Type::String => Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
         Type::Intersection(members)
             if members.iter().any(|m| matches!(m, Type::String))
-                && !members.contains(&Type::Accessory(AccessoryKind::NumericString)) =>
+                && !members.contains(&Type::Accessory(kind)) =>
         {
             let mut members = members.clone();
-            members.push(Type::Accessory(AccessoryKind::NumericString));
+            members.push(Type::Accessory(kind));
             Type::Intersection(members)
         }
-        Type::Union(members) => {
-            Type::Union(members.iter().map(upgrade_string_to_numeric).collect())
-        }
+        Type::Union(members) => Type::Union(
+            members
+                .iter()
+                .map(|m| upgrade_string_with_accessory(m, kind))
+                .collect(),
+        ),
         other => other.clone(),
     }
 }
