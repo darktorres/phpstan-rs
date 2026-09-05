@@ -1413,6 +1413,35 @@ compatible" escape hatch); `@template T = Default` PHPDoc parsing
 reference falls back to its own declared default instead of
 unconditionally `Mixed`.
 
+**Update**: fixed a real bug in the bound-aware `sub`-side arm this
+entry's own "Done" paragraph names - found while bucketing the full
+corpus's own diagnostic set by identifier (not a phase, an ad hoc
+false-positive hunt). Both `types::is_subtype` and `Registry::
+is_assignable` had a generic `(_, Union(members)) => any(is_subtype(sub,
+m))`-shaped arm that ran *before* their own dedicated `TemplateParam`
+arm - so a template whose own bound is *itself* a union (`@template
+TKey of array-key`, i.e. `int|string`) got checked against a union
+target by splitting the target member-by-member (`is_subtype(TKey,
+Int)` and `is_subtype(TKey, String)`, each correctly `false` alone)
+instead of comparing `TKey`'s own bound against the target as a whole -
+wrongly failing even when the bound was exactly that same union. Fixed
+by moving/adding the `TemplateParam` arm before the `Union` arms in
+both functions - `Registry::is_assignable`'s own version needed its own
+hierarchy-aware recursion (`self.is_assignable(&tp.bound, sup)`), not a
+bare delegation to the plain `types::is_subtype`, caught during this
+same verification pass when a first attempt silently dropped class-
+hierarchy-walking for a bound that's a union of concrete classes
+(`phpstan/phpstan-strict-rules`'s own `@phpstan-template TNodeType of
+PreInc|PreDec|PostInc|PostDec` satisfying `Rule<TNodeType>`'s own
+`TNodeType of Node` bound - each of those four classes only reaches
+`Node` via a multi-level `Expr` ancestor chain). Real corpus false
+positive: doctrine/collections' own `Collection<TKey, T>` self-reference
+inside its own `map()`/`filter()`/`partition()` methods. Verified
+against the ~20,300-file corpus: `generics.templateBound` 213 -> 0,
+plus knock-on drops in `argument.type` (-28), `method.
+childParameterType` (-9), and `return.type` (-1) from other sites
+checking a bounded template param's own type against its bound.
+
 **Still open**: `substitute_template`/`class_template_bindings`/
 `check_variance` (`src/checker/generics.rs`) still read the old flat,
 class-level `covariant_templates`/`contravariant_templates` name-sets
