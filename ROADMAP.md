@@ -2245,6 +2245,28 @@ registry design. Unlocks `DuplicateClassDeclarationRule`.
 **Recommendation.** Low priority; real but rare (a stray duplicate class
 in a legacy tree). Size: XL, low value.
 
+**Re-evaluated, still declined**: confirmed by direct inspection (not
+just repeating this entry's own prior text) that this is a genuine
+architectural conflict, not merely low-priority - `registry::
+index_with_context`'s own "second unconditional declaration" branch
+(Phase 25) *deliberately* treats every same-name redeclaration as a
+targeted stub-style override to merge, specifically because a real,
+observed corpus bug (`PHPUnit\Framework\TestCase`, documented on that
+function) came from *not* doing that. Real PHPStan can tell a genuine
+accidental duplicate apart from a deliberate `stubFiles` override
+because stub files are a wholly separate loading mechanism its own
+`DuplicateClassDeclarationRule` never even reflects over - this
+project's own `config.rs`/`project.rs`/`main.rs` have no `stubFiles`-
+equivalent concept at all (confirmed by grep: zero references), so
+every file, stub or not, goes through the identical code path. Flagging
+"declared twice" here would mean flagging Piwigo's own real, intentional
+`phpstan-stubs/Imagick.stub.php` - a guaranteed, demonstrable false
+positive against the very corpus this project verifies against, not a
+hypothetical risk. Implementable only after a genuinely new prerequisite
+(file-provenance tracking - "is this a designated stub file" - this
+project's CLI/config surface doesn't expose at all today), not as a
+self-contained addition.
+
 **Phase 84 - `RuleLevelHelper`-equivalent configurable type-acceptance +
 tri-state-with-reasons architecture (NEW, PLANNED, low priority).**
 `is_assignable`/`is_subtype` return plain `bool` today with no
@@ -2261,6 +2283,20 @@ it catches new bugs (the "maybe" case already collapses to a concrete
 answer somewhere in the match arms today). Low priority - schedule only
 if diagnostic-message quality becomes a stated goal. Size: XL,
 low-medium value.
+
+**Re-evaluated, still declined**: unlike Phase 78/80 (whose "low
+evidence" framing turned out to understate real payoff once actually
+investigated), this entry's own recommendation holds up under a second
+look - it's not a confidence gap, it's an explicit admission that the
+rewrite wouldn't change any diagnostic's *outcome*, only its internal
+plumbing and (maybe) its message text, for a cost the entry itself
+already correctly sizes as touching every `is_subtype`/`is_assignable`
+call site in the checker. With no concrete behavior change to verify
+against the corpus (every "maybe" already resolves to a real match arm
+today, per this entry's own text), there's no way to confirm a rewrite
+this size was done correctly other than trusting the refactor - a much
+weaker guarantee than every other phase this session shipped, all
+corpus-verified against a real diagnostic-count delta.
 
 **Phase 85 - An assignment nested as a comparison operator's own
 operand, with no enclosing parentheses, parsed wrong (DONE).** Real
