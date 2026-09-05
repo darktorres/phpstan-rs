@@ -115,6 +115,52 @@ impl<'a> Checker<'a> {
                 ]);
                 return union_types(list_ty, Type::False);
             }
+            // Phase 76: a deliberately narrow slice of real PHPStan's own
+            // `FilterFunctionReturnTypeHelper` - only the single most
+            // common real-world shape (a literal `FILTER_VALIDATE_*`
+            // constant as the filter, a plain int flags argument with no
+            // `options` array, no `FILTER_REQUIRE_ARRAY`/
+            // `FILTER_FORCE_ARRAY`) is modeled; everything else (a
+            // computed filter value, sanitize filters, `FILTER_DEFAULT`,
+            // an `options` array - real corpus shape:
+            // `filter_var($v, FILTER_VALIDATE_INT, ['options' =>
+            // ['min_range' => 1]])`, which narrows the successful result
+            // to a real range this doesn't attempt to compute - the
+            // array-requiring/forcing flags, PHP 8.4's
+            // `FILTER_THROW_ON_FAILURE`) falls through to the generic
+            // stub type unchanged rather than guessing at real PHPStan's
+            // own considerably more involved logic for them.
+            // `FILTER_NULL_ON_FAILURE` is checked the same lenient
+            // bitwise-or-chain-of-names way `preg_split`'s own flags
+            // argument just above already is, since real code commonly
+            // ORs it together with an unrelated flag (e.g.
+            // `FILTER_VALIDATE_IP`'s own `FILTER_FLAG_NO_PRIV_RANGE`).
+            "filter_var" if (2..=3).contains(&args.len()) => {
+                let flags_is_options_array = args
+                    .get(2)
+                    .is_some_and(|a| Self::is_array_like(&self.infer_expr(&a.value, locals)));
+                if let ExprKind::Name(filter_name) = &args[1].value.kind
+                    && let Some(base_ty) =
+                        filter_validate_type_for_constant(filter_name.trim_start_matches('\\'))
+                    && !flags_is_options_array
+                    && !args
+                        .get(2)
+                        .is_some_and(|a| contains_flag_name(&a.value, "FILTER_REQUIRE_ARRAY"))
+                    && !args
+                        .get(2)
+                        .is_some_and(|a| contains_flag_name(&a.value, "FILTER_FORCE_ARRAY"))
+                {
+                    let null_on_failure = args
+                        .get(2)
+                        .is_some_and(|a| contains_flag_name(&a.value, "FILTER_NULL_ON_FAILURE"));
+                    let fallback = if null_on_failure {
+                        Type::Null
+                    } else {
+                        Type::False
+                    };
+                    return union_types(base_ty, fallback);
+                }
+            }
             // Scoped to the common 2-arg single-array form - the real
             // function is variadic (multiple arrays); a 3+-arg call falls
             // through to the generic path below, unchanged.
@@ -1261,6 +1307,34 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
 /// list-ness/non-emptiness), so there's no need to reject the whole
 /// expression over one, just answer "is `target` definitely one of
 /// them" for whatever it does recognize.
+/// Phase 76: `filter_var()`'s own `FILTER_VALIDATE_*` half of real
+/// PHPStan's `FilterFunctionReturnTypeHelper::getFilterTypeMap()` -
+/// deliberately excludes every `FILTER_SANITIZE_*` constant (they all
+/// map to plain `string`, exactly what the generic stub already
+/// declares, so there'd be nothing to gain by special-casing them) and
+/// `FILTER_DEFAULT`/`FILTER_UNSAFE_RAW` (real PHPStan's own logic for
+/// those depends on the *input* value's own type, not just the filter
+/// constant - genuinely more than this narrow slice attempts).
+fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
+    match name {
+        "FILTER_VALIDATE_BOOLEAN" | "FILTER_VALIDATE_BOOL" => Some(Type::Bool),
+        "FILTER_VALIDATE_INT" => Some(Type::Int),
+        "FILTER_VALIDATE_FLOAT" => Some(Type::Float),
+        "FILTER_VALIDATE_DOMAIN" | "FILTER_VALIDATE_REGEXP" => Some(Type::String),
+        // Real PHPStan's own map: these three can never come back as the
+        // empty string on success (a validated IP/email/MAC address is
+        // never `''`), so it's `non-falsy-string`, not plain `string`.
+        "FILTER_VALIDATE_IP"
+        | "FILTER_VALIDATE_EMAIL"
+        | "FILTER_VALIDATE_MAC"
+        | "FILTER_VALIDATE_URL" => Some(Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonFalsyString),
+        ])),
+        _ => None,
+    }
+}
+
 fn contains_flag_name(e: &Expr, target: &str) -> bool {
     match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == target,

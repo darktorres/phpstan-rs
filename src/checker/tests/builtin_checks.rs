@@ -203,6 +203,135 @@ fn a_var_export_call_nested_inside_another_call_is_flagged() {
     );
 }
 
+// Phase 76: filter_var()'s own FILTER_VALIDATE_* return-type precision,
+// confirmed directly via php.
+
+#[test]
+fn filter_var_validate_int_returns_int_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType('int|false', filter_var($x, FILTER_VALIDATE_INT));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_validate_boolean_returns_bool_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                // `bool|false` normalizes to plain `bool` (`false`
+                // is already a subtype of `bool`) - matches real
+                // PHPStan too.
+                assertType('bool', filter_var($x, FILTER_VALIDATE_BOOLEAN));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_validate_ip_returns_a_non_falsy_string_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType('non-falsy-string|false', filter_var($x, FILTER_VALIDATE_IP));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_with_null_on_failure_returns_null_instead_of_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'non-falsy-string|null',
+                    filter_var($x, FILTER_VALIDATE_IP, FILTER_NULL_ON_FAILURE)
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_recognizes_null_on_failure_inside_an_or_chain() {
+    // A real corpus idiom: ORing FILTER_NULL_ON_FAILURE together with an
+    // unrelated flag - contains_flag_name's own lenient bitwise-or-chain
+    // scan (already established for preg_split's flags argument) covers
+    // this the same way.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'non-falsy-string|null',
+                    filter_var($x, FILTER_VALIDATE_IP, FILTER_NULL_ON_FAILURE | FILTER_FLAG_NO_PRIV_RANGE)
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_with_require_array_flag_falls_back_to_the_generic_stub() {
+    // Genuinely more complex than this narrow slice attempts - don't
+    // guess, just leave the generic stub type in place.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType('mixed', filter_var($x, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_with_an_options_array_falls_back_to_the_generic_stub() {
+    // Real corpus find: filter_var($v, FILTER_VALIDATE_INT, ['options'
+    // => ['min_range' => 1]]) narrows the successful result to a real
+    // range this project doesn't attempt to compute - guessing plain
+    // int|false here wrongly widened past a declared positive-int sink.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'mixed',
+                    filter_var($x, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_with_a_computed_filter_falls_back_to_the_generic_stub() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x, int $filter): void {
+                assertType('mixed', filter_var($x, $filter));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn random_int_with_a_non_literal_argument_is_never_flagged() {
     // Don't guess - no IntegerRangeType in this project's own type
