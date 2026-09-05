@@ -4097,6 +4097,43 @@ new bug: `DerivativeImage::build`'s `getByType()` argument mismatch
 lack of a real key-type parameter, the existing `Type::Array` key-type row
 in the Known limitations table above (tracked under Phase 15).
 
+**Update**: a top-10-bucket workflow scoping the full corpus found the
+mirror-image gap to the nested-write fix above: `bind_assignment_
+target`'s own `Index` arm silently gave up (`return;`, a no-op) when the
+*base* variable itself wasn't yet in `locals` at all - `$x[] = 1;`/
+`$x['key'] = 1;` as `$x`'s very first use left it permanently
+undefined for every later read, real PHP's own silent array auto-
+vivification (confirmed directly via `php -d error_reporting=E_ALL
+-r` - no warning at any level) treated instead as producing nothing.
+`check_assignment_target`'s own `Index` arm had the identical gap one
+level up: a `Variable` base was always read-checked via `check_expr`
+even for a pure append, wrongly flagging the write itself as
+`variable.undefined` on top of the later read. Fixed by starting `write_
+index_into` from a fresh empty `ArrayShape` when the base is absent
+(reusing its own existing "a real append onto a provably list-like
+container stays a real list" rule, so `$x[] = 1;` alone infers `non-
+empty-list<int>` correctly) and exempting a `Variable` base from the
+read-check the same way the top-level `Variable` assignment-target arm
+already is. A superglobal write (`$_SERVER['KEY'] = ...`) needed its
+own carve-out from the fresh-shape path - it already has a much wider
+real shape PHP populates before the script runs, so narrowing it to
+only the locally-written key(s) is wrong; a first version of this fix
+missed that and regressed 25 new `shapeAccess.notFound` false
+positives on `$_SERVER`-reading test fixtures, caught via corpus diff
+before shipping and fixed by reusing the existing `superglobal_
+default_type` for a superglobal name instead. One narrow residual
+left, not chased further: a variable first assigned only *inside* a
+`foreach` body (never before it) is now visibly treated as
+unconditionally defined afterward by a single `nullCoalesce.variable`
+false positive in vendor code (`rector-symfony`'s own
+`MessageSubscriberInterfaceToAttributeRector::parseArguments()`,
+`return $arguments ?? [];`) - this is `Foreach`'s own already-
+documented, already-deliberate choice (see this same phase's own
+`Foreach`/Phase 29 comment) not to merge in the "may run zero times"
+possibility the way `While`/`For` do, previously invisible only
+because the auto-vivification bug silently dropped the loop-body write
+entirely rather than tracking it unconditionally.
+
 **Follow-on investigation, 2026-09-02**: a further corpus re-check (using
 `--config phpstan-rs.toml <explicit files>` for bisection) surfaced a
 `CategoryUpdateController::__invoke` false positive ("no key 'visible'")
