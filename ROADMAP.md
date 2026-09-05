@@ -1902,15 +1902,47 @@ SQL-injection-safety checking on functions like `PDO::query`). Unlocks
 `SubstrDynamicReturnTypeExtension`, `ParseStrParameterOutTypeExtension`,
 plus `AccessoryLiteralStringType`'s concatenation-inference gap. Size: M.
 
-**Phase 76 - `filter_var`/`filter_input` subsystem (NEW, PLANNED).** A
-whole self-contained subsystem with zero coverage today:
-`FILTER_VALIDATE_*`/`FILTER_SANITIZE_*` constant-to-type mapping table,
-`FILTER_NULL_ON_FAILURE`/`FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY`
-flag logic, literal-value coercion rules. Unlocks
-`FilterFunctionReturnTypeHelper`, `FilterInputDynamicReturnTypeExtension`,
-`FilterVarArrayDynamicReturnTypeExtension`, `FilterVarDynamicReturnTypeExtension`.
-Size: L - common in real-world form/input-handling code, the kind of
-code this project's own Piwigo corpus work has been targeting.
+**Phase 76 - `filter_var`/`filter_input` subsystem (PARTIAL).** A
+deliberately narrow slice of real PHPStan's own
+`FilterFunctionReturnTypeHelper`: new `filter_validate_type_for_constant`
+maps `FILTER_VALIDATE_BOOLEAN`/`INT`/`FLOAT`/`DOMAIN`/`REGEXP` to their
+exact type, and `IP`/`EMAIL`/`MAC`/`URL` to `non-falsy-string` (a
+validated one is never `''`). Only fires for a literal
+`FILTER_VALIDATE_*` constant filter argument with a plain int flags
+argument (no `options` array, no `FILTER_REQUIRE_ARRAY`/
+`FILTER_FORCE_ARRAY`) - everything else (a computed filter value,
+sanitize filters, `FILTER_DEFAULT`, an `options` array, PHP 8.4's
+`FILTER_THROW_ON_FAILURE`) falls through to the generic `mixed` stub
+unchanged. `FILTER_NULL_ON_FAILURE` (swaps the on-failure fallback from
+`false` to `null`) is checked via the existing `contains_flag_name`
+helper (already established for `preg_split`'s own flags argument),
+which already tolerates it being OR'd with an unrelated flag - a real
+corpus idiom (`FILTER_VALIDATE_IP`'s own `FILTER_FLAG_NO_PRIV_RANGE`).
+
+A real gap was found and fixed before shipping: the options-array guard
+was missing entirely at first, so `filter_var($v, FILTER_VALIDATE_INT,
+['options' => ['min_range' => 1]])` - a real corpus shape - wrongly got
+the unconstrained `int|false` type instead of falling through, silently
+widening past a declared `positive-int` sink. Fixed by checking the
+flags argument's own inferred type, not just its syntactic shape.
+
+Corpus-verified: 50061 -> 50063 diagnostics (net +2), both traced to
+narrow, pre-existing narrowing gaps unrelated to `filter_var` itself (an
+identity-equality (`$a === $b`) narrowing that doesn't intersect with
+the narrowed variable's own prior type, and a null-coalescing-guard
+pattern this project's narrowing doesn't understand) that `filter_var`'s
+own increased return-type precision merely exposed - not new false
+positives this phase introduced.
+
+Still open: `filter_input()` (zero corpus incidence found - `filter_var`
+alone had 24 real call sites, all first-party); `FILTER_SANITIZE_*`
+(every one maps to plain `string`, exactly what the generic stub already
+declares, so there's nothing to gain from special-casing them);
+`FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY`'s own real per-element
+return-type computation; an `options` array's own `default`/
+`min_range`/`max_range` values (would need this project's own
+`IntegerRangeType` completion, Phase 51, to do properly); PHP 8.4's
+`FILTER_THROW_ON_FAILURE`.
 
 **Phase 77 - Misc built-in-class/runtime-capability modeling batch
 (PARTIAL).** This entry's own status was never updated after an
