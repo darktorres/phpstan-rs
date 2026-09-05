@@ -1783,11 +1783,62 @@ and `sprintf`/`printf`'s format-string check all benefit, since they
 all read through this same helper.
 
 **Phase 73 - Array/string stdlib function coverage, batch 1
-(key-type-dependent) (NEW, PLANNED).** Extensions that specifically
-need Phase 50's array key-type work first: `array_change_key_case`,
-`array_flip`, `array_fill_keys`, `array_rand`, `array_count_values`,
-`array_search` (key precision), `array_find_key`, `array_intersect_key`,
-`array_key_exists` narrowing. Prerequisite: Phase 50. Size: L.
+(key-type-dependent) (PARTIAL).** New `Checker::array_key_type`
+(`array_element_type`'s key-side counterpart - only a bare `Type::Array`
+or one wrapped in the `list<T>`/`non-empty-array<T>` `Intersection`
+shape carries a real key type; an `ArrayShape` returns `None`, since
+`is_list_like` already covers its one precise, commonly-useful key
+fact). Four of the batch's nine items landed, prioritized by real
+corpus incidence (`array_key_exists`: 75 call sites; `array_flip`: 24;
+`array_search`: 15; `array_intersect_key`: 5; `array_fill_keys`: 7; the
+rest: 0):
+
+- **`array_fill_keys()`**: `$keys`' own elements become the result's
+  real key type, not the generic `unknown_array_key()` default.
+- **`array_search()`**: extends the pre-existing "definitely a list
+  haystack -> `int` key" case with one level less precision - a
+  haystack whose own key type is confidently known narrows the
+  found-key half the same way (`array<string, V>` can only ever find a
+  `string` key).
+- **`array_intersect_key()`**: every surviving pair's own type comes
+  straight from the first argument (confirmed: only *which* keys
+  survive is narrowed by the rest) - list-ness doesn't survive.
+- **`array_flip()`**: swaps key and value types (confirmed directly via
+  `php`); list-ness never survives, non-emptiness does.
+
+A real, pre-existing bug was found and fixed along the way:
+`describe_accessory_intersection` (`Type::Display`'s own
+`non-empty-array<V>`/`list<V>` formatter) discarded the key type
+entirely, even when it was genuinely known and non-default -
+`array_flip()`'s own new key/value-swapping return type was the first
+caller to actually produce such a case (e.g. `non-empty-array<string,
+int>`, silently rendered as `non-empty-array<int>`). Fixed to show both
+positions when the key is known (mirroring `Type::Array`'s own `Display`
+arm), but deliberately never for `list<V>`/`non-empty-list<V>` - a
+list's own key really is the "known" `Type::Int` under the same test,
+but a list's keys are always sequential ints by definition and real
+PHPStan's own convention never states it either (caught by two existing
+tests before the narrower fix landed).
+
+Corpus-verified: 50133 -> 50135 diagnostics (+2 net); the bulk of the
+delta is message-text precision only (the same finding, now showing a
+real `array<K, V>` instead of a collapsed `array<V>`), plus a handful of
+genuinely new findings in `vendor/` the improved precision now correctly
+catches (e.g. `symplify/easy-coding-standard`'s own
+`resolveCheckersToRemove()` flipping a `string[]` and passing the result
+where `array<string>` is declared, when post-flip the values are
+actually the original `int|string` keys, not strings).
+
+Still open, zero corpus incidence found (`array_change_key_case`,
+`array_rand`, `array_count_values`, `array_find_key`): deferred rather
+than implemented blind, with no real call site to verify a fix against.
+**`array_key_exists` narrowing** is the one high-incidence item (75
+call sites) deliberately not attempted - real PHPStan's own version
+needs `HasOffsetType`/`HasOffsetValueType` accessory facts, explicitly
+still open from Phase 50 itself; this project's own `Type::ArrayShape`
+model would need its own, different narrowing mechanism, not just a
+port of PHPStan's, and that's a real architectural piece of work, not a
+one-function slice.
 
 **Phase 74 - Array/string stdlib function coverage, batch 2
 (independent of key-type work) (NEW, PLANNED).** Everything else in
