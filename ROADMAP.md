@@ -1995,17 +1995,58 @@ marked `not_applicable` elsewhere in the audit for the identical "no
 PHP runtime to shell out to" reason (see Won't-port list). Size: XL,
 low value.
 
-**Phase 79 - Enum-case singleton type + `BackedEnum::from()` narrowing
-(NEW, PLANNED).** Enum case fetches resolve through the generic
-`lookup_const` path today, producing plain `Type::Object(fqn, [])` with
-no per-case singleton identity - `->name` is generic string not a
-literal, `->value` is a coarse union of all cases rather than the exact
-per-case value. Add a real per-case type, then use it to narrow
-`::from()`/`::tryFrom()` to the exact matching case. Unlocks
-`EnumCaseObjectType`, `BackedEnumFromMethodDynamicReturnTypeExtension`.
-Benefits from (not strictly blocked by) Phase 55's subtracted-type work
-for match-exhaustiveness-quality narrowing. Size: L - enums are
-idiomatic in PHP 8.1+ codebases.
+**Phase 79 - Enum-case singleton type + `BackedEnum::from()`/`::tryFrom()`
+narrowing (DONE).** Enum case fetches used to resolve through the generic
+`lookup_const` path, producing plain `Type::Object(fqn, [])` with no
+per-case singleton identity - `->name` read as generic `string` not a
+literal, `->value` as a coarse union of every case's value rather than
+the exact per-case one.
+
+**Done**: a new `Type::EnumCase(fqn, case_name)` variant - `Suit::Hearts`'s
+own real static type, produced wherever a case constant is fetched
+(`ClassInfo::from_enum_decl`'s own `consts` map). Deliberately not a
+`types::is_subtype` class-hierarchy target itself (it has none): a case
+is still a real instance of its enum for every ordinary member-lookup
+purpose (methods, `narrowing::member_confirmed_missing`, `MethodCall`'s
+own `recv_class` extraction), widened back to `Object(fqn, [])`-
+equivalent behavior at those call sites specifically, while `->name`/
+`->value`/equality narrowing/`registry::is_assignable`'s own
+`EnumCase -> Object` hierarchy-aware rule (covering
+`UnitEnum`/`BackedEnum`/any implemented interface, not just the bare
+enum) all see the real case identity. `ClassInfo::enum_case_values`
+(a new field, populated the same way the pre-existing `->value` union-
+of-literals property type already is) plus `Registry::enum_case_value`/
+`enum_case_for_value` (forward and reverse lookups) back both
+`->value`'s own now-exact-per-case type and a shared
+`Checker::narrow_enum_from_call` helper (used by both the mutating
+`check_expr` and the pure `infer_expr` `StaticCall` arms) that narrows
+`Suit::from(...)`/`Suit::tryFrom(...)` to the exact matching case's own
+singleton type when called with a literal argument provably matching
+one case's backing value - left alone (falls back to the generic
+`self`/`?self` stub) for a non-literal argument or a literal matching no
+known case, rather than guessing `never`/`null` for the latter.
+
+**Corpus impact**: 50063 -> 50060 diagnostics against the ~20,300-file
+Piwigo+vendor corpus, all five changed lines genuine on inspection - two
+already-correct `return.type`/`argument.type` findings just got more
+precise type text (`Psl\DateTime\Meridiem` collapsing to
+`Meridiem::AnteMeridiem|Meridiem::PostMeridiem`, and similarly for
+`ShipMonk\...\AccessType`), and three real false positives were
+eliminated in `php-standard-library/h2`'s `StateMachine.php`:
+`FrameType::Settings/Ping/RstStream->value` used to type as the full
+13-member union of every `FrameType` case's own backing value, failing
+`RateLimiter::record()`'s declared `-1|int<0, 9>` parameter even though
+each of those three specific cases' own real value (`3`/`4`/`6`) is
+well within range - confirmed directly against `FrameType.php`'s own
+`case ... = 0x...;` declarations.
+
+Unlocked `EnumCaseObjectType`,
+`BackedEnumFromMethodDynamicReturnTypeExtension`. Match-exhaustiveness-
+quality narrowing (a `match` over every case, using this new per-case
+identity to prove exhaustiveness) is left for whenever Phase 55's
+subtracted-type work is tackled, per this entry's own original "benefits
+from, not strictly blocked by" framing - no corpus evidence pushed it
+into this pass on its own.
 
 **Phase 80 - Object-shape/`key-of<T>`/conditional-return-type PHPDoc
 syntax (NEW, PLANNED).** `docblock.rs` deliberately skips conditional-
