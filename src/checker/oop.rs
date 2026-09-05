@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::{Checker, DiagnosticBuilder, Locals};
 use crate::docblock;
 use crate::registry::{self, FunctionSig, PropertySig};
 use crate::token::Span;
@@ -250,6 +250,71 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+    }
+
+    /// `ClassConstantRule`'s own typed-constant half: PHP 8.3's
+    /// `const TYPE NAME = value;` syntax declares a real, unconditional
+    /// native type for the constant - checked here the same "does the
+    /// literal value actually satisfy the declared type" way a typed
+    /// property's own default value already is (see `check_missing_
+    /// property_typehints`'s sibling checks), matching real PHPStan's
+    /// own `classConstant.value` identifier exactly. Untyped (`const
+    /// NAME = value;`, the overwhelming majority) constants have nothing
+    /// to check here - their own `@var`-doc-refined type (a *separate*,
+    /// already-existing mechanism, `ConstSig::ty`'s own construction in
+    /// `class_info.rs`) is never enforced this strictly against real
+    /// PHPStan's own convention either (`classConstant.phpDocType`, not
+    /// attempted here). `self.infer_expr`, not the registry's own
+    /// already-resolved `ConstSig.ty`, so a value referencing another
+    /// constant/enum case gets this checker's full expression inference
+    /// rather than only ever seeing `infer_const_type`'s narrower
+    /// literal-only view.
+    pub(crate) fn check_typed_class_constant_values(&mut self, fqn: &str, consts: &[ClassConst]) {
+        if !consts.iter().any(|c| c.type_hint.is_some()) {
+            return;
+        }
+        // `self::OTHER_CONST` inside a const's own value (a real, common
+        // idiom - confirmed live: without this, `resolve_static_class_
+        // name("self")` had no defining class to resolve against here,
+        // silently reading every `self::`-qualified value as `Mixed` and
+        // producing a real false positive against `int DERIVED =
+        // self::BASE;`) needs `current_class` set the same way `check_
+        // function` sets it for a method body - this call site runs
+        // outside any method, so it's otherwise left at whatever it was
+        // (typically `None` here).
+        let previous_class = self.current_class.take();
+        self.current_class = Some(fqn.to_string());
+        for c in consts {
+            let Some(raw_hint) = &c.type_hint else {
+                continue;
+            };
+            let declared_ty = self.resolve_type_hint(Some(raw_hint));
+            let value_ty = self.infer_expr(&c.value, &Locals::default());
+            // `Type::Mixed` here almost always means "this checker
+            // couldn't resolve it" (an unrecognized global constant -
+            // this project has no such table at all, confirmed live:
+            // `DEBUG_BACKTRACE_IGNORE_ARGS`, a real PHP builtin, reads as
+            // `Mixed`), not a genuinely `mixed`-typed value - the same
+            // "don't guess wrong on Mixed" leniency `check_method_
+            // overrides`'s own parameter-narrowing check already applies
+            // for the identical reason.
+            if value_ty == Type::Mixed {
+                continue;
+            }
+            if !self.registry.is_assignable(&value_ty, &declared_ty) {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "constant {fqn}::{} ({declared_ty}) does not accept value {value_ty}",
+                        c.name
+                    ),
+                    c.span,
+                    0,
+                    "classConstant.value",
+                );
+            }
+        }
+        self.current_class = previous_class;
     }
 
     /// Phase 65: a batch of small, independent method-declaration

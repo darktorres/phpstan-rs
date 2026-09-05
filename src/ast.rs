@@ -279,6 +279,13 @@ pub struct ClassConst {
     // `const A = 1, B = 2;` list, mirroring how `visibility`/`doc_comment`
     // are already cloned onto each one.
     pub attrs: Vec<Attribute>,
+    // PHP 8.3 typed class constants (`const TYPE NAME = value;`) - parsed
+    // by both `parser/classes.rs` call sites already (via `parse_type_
+    // hint`), but the result used to be discarded immediately, only kept
+    // around to advance the parser past the tokens. Same "one type
+    // applies to every name in a comma-separated list" cloning as
+    // `visibility`/`doc_comment`/`attrs` above.
+    pub type_hint: Option<String>,
     pub span: Span,
 }
 

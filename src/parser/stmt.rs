@@ -275,6 +275,9 @@ impl Parser {
                         // is a safe, never-actually-consulted default here.
                         visibility: Visibility::Public,
                         attrs: attrs.clone(),
+                        // A top-level `const` has no PHP 8.3 typed-
+                        // constant syntax either - that's class-const-only.
+                        type_hint: None,
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),

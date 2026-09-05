@@ -232,9 +232,12 @@ impl Parser {
                 // is followed by *another* identifier (the real name)
                 // rather than `=` - `const FOO = 1;`'s `FOO` is followed
                 // directly by `=`, so nothing is consumed as a type there.
-                if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals) {
-                    self.parse_type_hint()?;
-                }
+                let type_hint = if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals)
+                {
+                    self.parse_type_hint()?
+                } else {
+                    None
+                };
                 loop {
                     let const_start = self.current_pos();
                     let cname = self.expect_ident()?;
@@ -246,6 +249,7 @@ impl Parser {
                         doc_comment: doc.clone(),
                         visibility: visibility.clone(),
                         attrs: attrs.clone(),
+                        type_hint: type_hint.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),
@@ -706,9 +710,12 @@ impl Parser {
                 // is followed by *another* identifier (the real name)
                 // rather than `=` - `const FOO = 1;`'s `FOO` is followed
                 // directly by `=`, so nothing is consumed as a type there.
-                if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals) {
-                    self.parse_type_hint()?;
-                }
+                let type_hint = if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals)
+                {
+                    self.parse_type_hint()?
+                } else {
+                    None
+                };
                 loop {
                     let const_start = self.current_pos();
                     let cname = self.expect_ident()?;
@@ -720,6 +727,7 @@ impl Parser {
                         doc_comment: doc.clone(),
                         visibility: visibility.clone(),
                         attrs: attrs.clone(),
+                        type_hint: type_hint.clone(),
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),

@@ -360,3 +360,115 @@ fn an_enum_constant_named_class_is_flagged() {
         "got: {d:?}"
     );
 }
+
+// `ClassConstantRule`'s own typed-constant half (PHP 8.3's `const TYPE
+// NAME = value;`) - confirmed directly via `php -l` as a real,
+// unconditional fatal error ("Cannot use string as value for class
+// constant Foo::BAD of type int").
+
+#[test]
+fn a_typed_constant_whose_value_mismatches_its_declared_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                const int BAD = "not an int";
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "classConstant.value" && x.message.contains("Foo::BAD")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_typed_constant_whose_value_matches_its_declared_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                const int GOOD = 1;
+                const string ALSO_GOOD = "hi";
+                const array LIST_OK = [1, 2, 3];
+                const ?int NULLABLE_OK = null;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "classConstant.value"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_untyped_constant_is_never_flagged_by_this_check() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                const BAD = "any value is fine here";
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "classConstant.value"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_typed_enum_constant_whose_value_mismatches_its_declared_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status {
+                case Active;
+                const int BAD = "not an int";
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "classConstant.value"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_typed_constant_assigned_an_unresolved_global_constant_is_never_flagged() {
+    // Real corpus find: `DEBUG_BACKTRACE_IGNORE_ARGS` (a real PHP
+    // builtin int constant this project has no global-constant table
+    // for at all) reads as `Mixed`, not a genuinely `mixed`-typed value -
+    // don't guess wrong on it, the same leniency established elsewhere.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                private const int OPTIONS = DEBUG_BACKTRACE_IGNORE_ARGS;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "classConstant.value"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_typed_constant_referencing_another_constant_is_checked_via_full_inference() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                const int BASE = 1;
+                const int DERIVED = self::BASE;
+                const string WRONG = self::BASE;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "classConstant.value" && x.message.contains("DERIVED")),
+        "unexpected diagnostics: {d:?}"
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "classConstant.value" && x.message.contains("WRONG")),
+        "got: {d:?}"
+    );
+}
