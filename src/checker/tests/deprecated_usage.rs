@@ -266,6 +266,66 @@ fn implicit_string_cast_of_a_deprecated_tostring_is_flagged() {
 }
 
 #[test]
+fn echoing_a_deprecated_tostring_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class OldThing {
+                /** @deprecated do not stringify */
+                public function __toString(): string { return "y"; }
+            }
+            function f(OldThing $o): void {
+                echo $o;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.deprecated"
+            && x.message == "Call to deprecated method OldThing::__toString() (do not stringify)."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn printing_a_deprecated_tostring_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class OldThing {
+                /** @deprecated do not stringify */
+                public function __toString(): string { return "y"; }
+            }
+            function f(OldThing $o): void {
+                print $o;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.deprecated"
+            && x.message == "Call to deprecated method OldThing::__toString() (do not stringify)."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn interpolating_a_deprecated_tostring_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class OldThing {
+                /** @deprecated do not stringify */
+                public function __toString(): string { return "y"; }
+            }
+            function f(OldThing $o): string {
+                return "value: {$o}";
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.deprecated"
+            && x.message == "Call to deprecated method OldThing::__toString() (do not stringify)."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
 fn implicit_string_cast_of_a_non_deprecated_tostring_is_never_flagged() {
     let d = diagnostics_for(
         r#"<?php

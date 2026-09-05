@@ -41,6 +41,103 @@ impl<'a> Checker<'a> {
             "abs" if args.len() == 1 => {
                 return to_absolute_number(&self.infer_expr(&args[0].value, locals));
             }
+            // Real PHPStan's own `StrlenFunctionReturnTypeExtension`
+            // (`vendor/phpstan-src`) additionally refines a literal or
+            // known-non-empty-string argument's own exact/minimum length -
+            // narrowed here to just the one part that's always true
+            // regardless of the argument (`strlen()` can never be
+            // negative), the single highest-value, zero-risk slice given
+            // this function's own massive corpus incidence (1061 files in
+            // this project's own Piwigo+vendor verification corpus).
+            "strlen" if args.len() == 1 => {
+                return Type::IntRange(Some(0), None);
+            }
+            // Real PHPStan's own `CountFunctionReturnTypeExtension` -
+            // narrowed to the plain 1-argument form (no `$mode` argument,
+            // i.e. always `COUNT_NORMAL`) real PHPStan's own
+            // `isNormalCount` treats as the same case anyway. A known
+            // `ArrayShape` with no optional field has an exact, literal
+            // count (`getArraySize()`'s own exact-`ConstantIntegerType`
+            // case) - anything else (an unshaped `Array`, an `ArrayShape`
+            // with any optional field, or a non-array `Countable`) still
+            // gets the same always-true "never negative" floor `strlen`
+            // above does.
+            "count" | "sizeof" if args.len() == 1 => {
+                if let Type::ArrayShape(fields) = self.infer_expr(&args[0].value, locals)
+                    && fields.iter().all(|(_, _, optional)| !optional)
+                {
+                    return Type::IntLiteral(fields.len() as i64);
+                }
+                return Type::IntRange(Some(0), None);
+            }
+            // Real PHPStan's own `RandomIntFunctionReturnTypeExtension` -
+            // `random_int`/`rand`/`mt_rand($min, $max)` always produce a
+            // value within `[$min, $max]` inclusive (confirmed directly
+            // via `php -r`); a non-literal, unbounded argument on either
+            // side degrades that side of the range to unbounded too,
+            // rather than guessing. The 0-argument `rand()`/`mt_rand()`
+            // form (real PHP's own implicit `[0, getrandmax()]`) is left
+            // as the stub's own plain `int` - `getrandmax()`'s own exact
+            // value isn't modeled anywhere in this project, and guessing
+            // a wrong upper bound would be worse than the stub's honest
+            // `int`.
+            "random_int" | "rand" | "mt_rand" if args.len() == 2 => {
+                let min = int_bound(&self.infer_expr(&args[0].value, locals), true);
+                let max = int_bound(&self.infer_expr(&args[1].value, locals), false);
+                return Type::IntRange(min, max);
+            }
+            // Real PHPStan's own `HrtimeFunctionReturnTypeExtension` -
+            // `hrtime()`/`hrtime(false)` return a 2-element list
+            // `[seconds, nanoseconds]` (`nanoseconds` always `< 1e9` by
+            // definition - it's the sub-second remainder); `hrtime(true)`
+            // instead collapses both into one `int|float` nanosecond
+            // count. A non-literal-bool argument can't rule either shape
+            // out, so both union together (matching real PHPStan's own
+            // `BenevolentUnionType` fallback for that case, minus the
+            // "benevolent" comparison-leniency wrapper this project has
+            // no equivalent concept for).
+            "hrtime" if args.is_empty() => {
+                return hrtime_array_shape();
+            }
+            "hrtime" if args.len() == 1 => {
+                return match self.infer_expr(&args[0].value, locals) {
+                    Type::True => hrtime_number_type(),
+                    Type::False => hrtime_array_shape(),
+                    _ => union_types(hrtime_array_shape(), hrtime_number_type()),
+                };
+            }
+            // Investigated and declined: real PHPStan's own
+            // `ArrayPopFunctionReturnTypeExtension`/
+            // `ArrayShiftFunctionReturnTypeExtension` (element type, or
+            // `null` when the argument is provably empty/unproven) was
+            // implemented and corpus-verified, then reverted. Two
+            // compounding problems, not just one: (1) the "provably
+            // non-empty -> non-nullable" half is unsound here - `predefine_
+            // byref_or_unknown_args` widens this same by-ref argument's
+            // own type immediately (dropping any non-empty marker, since
+            // popping a list's last element can empty it), correct for
+            // what the *argument* looks like after the call, but a
+            // *separate*, later re-inference of the very same call
+            // expression (`check_args`'s own `infer_expr` re-derivation
+            // for the argument-type check, when array_pop/array_shift is
+            // itself nested inside another call's argument) reads that
+            // same, already-widened `locals` entry - a known, pre-
+            // existing category in this project (an earlier `check_expr`-
+            // vs-`infer_expr` divergence for the same tree bit Phase 22's
+            // own ternary-narrowing work too), not something to
+            // re-architect here. (2) even the safe, always-nullable
+            // fallback (`elem_ty | null`, dropping that unsound half)
+            // still produced real, if individually defensible, noise
+            // across more than ten distinct real projects
+            // (`monolog/monolog`'s own `Logger::popHandler()`,
+            // `symfony/console`'s `OutputFormatterStyleStack::pop()`,
+            // `doctrine/orm`, `sentry/sentry`, `gettext/gettext`, ...) -
+            // every one a real `explode()`-then-`array_shift()` or an
+            // explicit `count() === 0` guard immediately before the
+            // pop/shift, both real, common idioms that genuinely
+            // guarantee non-emptiness in ways this project's own
+            // narrowing doesn't track, so the honestly-nullable type is
+            // technically defensible but not corpus-quiet enough to ship.
             // `range()`'s own real stub (phpstorm-stubs' `@return array` -
             // no refinement at all) gives no list-ness/element-type
             // information whatsoever, but real PHPStan special-cases this
@@ -1740,6 +1837,28 @@ fn single_char(s: &str) -> Option<char> {
     Some(c)
 }
 
+/// Extracts a definite lower (`want_min: true`) or upper (`false`)
+/// integer bound from `ty` - a literal's own value, or `Type::IntRange`'s
+/// own matching side - `None` for anything else (a non-literal,
+/// non-range argument), meaning "unbounded" to whichever caller asked.
+/// Mirrors real PHPStan's own `RandomIntFunctionReturnTypeExtension::
+/// createRange`'s per-side `ConstantIntegerType`/`IntegerRangeType`
+/// extraction, minus its own Union-of-multiple-candidates case (not a
+/// real shape a `random_int`/`rand`/`mt_rand` argument takes).
+fn int_bound(ty: &Type, want_min: bool) -> Option<i64> {
+    match ty {
+        Type::IntLiteral(n) => Some(*n),
+        Type::IntRange(min, max) => {
+            if want_min {
+                *min
+            } else {
+                *max
+            }
+        }
+        _ => None,
+    }
+}
+
 /// `idate()`'s own real per-character numeric bound - transcribed from
 /// real PHPStan's own `IdateFunctionReturnTypeHelper`
 /// (`vendor/phpstan-src/src/Type/Php/IdateFunctionReturnTypeHelper.php`),
@@ -2016,6 +2135,29 @@ fn sscanf_result_fields(format: &str) -> Option<Vec<(String, Type, bool)>> {
 /// project's own established "model the evidenced access pattern, not
 /// the full PHP-internal shape" convention (`curl_getinfo`'s own 1-arg
 /// "all components" form is skipped for the identical reason).
+/// `hrtime(false)`/`hrtime()`'s own real 2-element `[seconds,
+/// nanoseconds]` list shape - transcribed from real PHPStan's own
+/// `HrtimeFunctionReturnTypeExtension`. `seconds` is always at least 1
+/// (real PHP's own monotonic clock, confirmed never `0` in practice -
+/// matches the vendored extension's own `IntegerRangeType::
+/// fromInterval(1, null)`); `nanoseconds` is always a sub-second
+/// remainder, `0` to `999_999_999` inclusive.
+fn hrtime_array_shape() -> Type {
+    Type::ArrayShape(vec![
+        ("0".to_string(), Type::IntRange(Some(1), None), false),
+        (
+            "1".to_string(),
+            Type::IntRange(Some(0), Some(999_999_999)),
+            false,
+        ),
+    ])
+}
+
+/// `hrtime(true)`'s own single-number nanosecond-count form.
+fn hrtime_number_type() -> Type {
+    Type::Union(vec![Type::IntRange(Some(1), None), Type::Float])
+}
+
 fn stat_array_shape() -> Type {
     Type::ArrayShape(
         [

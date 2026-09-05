@@ -533,6 +533,42 @@ impl<'a> Checker<'a> {
         self.diagnostics.push(builder.build());
     }
 
+    /// Phase 67/Phase 39 follow-up: an object used somewhere real PHP
+    /// implicitly converts it to a string - an explicit `(string)` cast
+    /// (`ExprKind::Cast`), `echo`, and `print` all do this identically at
+    /// runtime, invoking the object's own `__toString()` - triggers the
+    /// exact same `@internal`/`@deprecated` restricted-usage checks an
+    /// explicit `->__toString()` call would (real PHPStan's own
+    /// `RestrictedUsageOfDeprecatedStringCastRule` and the internal-tag
+    /// equivalent, both previously left as "easy to add once needed, just
+    /// not wired" in ROADMAP.md's own Phase 67 entry - confirmed real via
+    /// `vendor/phpstan-src`'s own `PrintHandler`/`EchoRule`, which run the
+    /// identical `ImplicitToStringCallHelper` this project's checks
+    /// mirror). Same "first Object member" representative-class
+    /// extraction `ExprKind::MethodCall`'s own `recv_class` uses for a
+    /// Union/Intersection operand.
+    pub(crate) fn check_implicit_tostring_usage(&mut self, ty: &Type, span: Span, label: &str) {
+        let class = match ty {
+            Type::Object(class, _) => Some(class.clone()),
+            Type::EnumCase(fqn, _) => Some(fqn.clone()),
+            Type::Union(members) | Type::Intersection(members) => {
+                members.iter().find_map(|m| match m {
+                    Type::Object(class, _) => Some(class.clone()),
+                    Type::EnumCase(fqn, _) => Some(fqn.clone()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        };
+        let Some(class) = class else { return };
+        let Some((owner, sig)) = self.registry.lookup_method_with_owner(&class, "__toString")
+        else {
+            return;
+        };
+        self.check_internal_method_call(&owner, "__toString", sig, false, span, label);
+        self.check_deprecated_method_call(&owner, "__toString", sig, false, span, label);
+    }
+
     pub fn into_diagnostics(mut self) -> Vec<Diagnostic> {
         // Internal checks run in traversal order (properties/bounds
         // before method bodies, methods in AST declaration order, an

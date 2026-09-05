@@ -477,6 +477,72 @@ fn implicit_string_cast_of_an_internal_class_calls_internal_tostring() {
 }
 
 #[test]
+fn echoing_an_internal_class_calls_internal_tostring() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+                public function __toString(): string { return "x"; }
+            }
+
+            namespace Other\App;
+            function f(\Vendor\Internal\Thing $t) {
+                echo $t;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn printing_an_internal_class_calls_internal_tostring() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+                public function __toString(): string { return "x"; }
+            }
+
+            namespace Other\App;
+            function f(\Vendor\Internal\Thing $t) {
+                print $t;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn interpolating_an_internal_class_calls_internal_tostring() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+                public function __toString(): string { return "x"; }
+            }
+
+            namespace Other\App;
+            function f(\Vendor\Internal\Thing $t) {
+                return "value: {$t}";
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
 fn implicit_string_cast_of_a_non_internal_class_is_never_flagged() {
     let d = diagnostics_for(
         r#"<?php

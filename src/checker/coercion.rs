@@ -167,6 +167,26 @@ impl<'a> Checker<'a> {
             "echo.nonString",
         );
     }
+
+    /// Real PHPStan's `PrintRule` (`print.nonString`) - unlike
+    /// `check_echo_validity`, `print` only ever has one operand, so real
+    /// PHPStan's own message has no `#%d` position number at all
+    /// (confirmed directly against `vendor/phpstan-src`'s own
+    /// `PrintRule::processNode`, which interpolates the type description
+    /// straight into `"Parameter %s of print..."` with no separate
+    /// position argument - not a typo to "fix" into echo's shape).
+    pub(crate) fn check_print_validity(&mut self, expr_ty: &Type, span: Span, label: &str) {
+        if self.type_to_string(expr_ty).is_some() {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!("Parameter {expr_ty} of print cannot be converted to string."),
+            span,
+            2,
+            "print.nonString",
+        );
+    }
 }
 
 /// `abs($x)` - mirrors real PHPStan's own `IntegerRangeType::

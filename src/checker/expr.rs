@@ -280,6 +280,28 @@ impl<'a> Checker<'a> {
                 {
                     self.saw_dynamic_var_construct = true;
                 }
+                // `print $x` desugars to this same synthetic `Call(Name
+                // ("print"), [$x])` node (see the parser's own comment on
+                // that decision) - checked here, since `is_language_
+                // construct` below routes it away from ordinary
+                // signature-based argument checking entirely (`print`
+                // has no real signature to check against). Real PHPStan's
+                // own `PrintRule`/`PrintHandler` (`vendor/phpstan-src`):
+                // the operand must be string-coercible (`print.nonString`,
+                // distinct wording from `echo.nonString` - see
+                // `check_print_validity`'s own doc comment), it triggers
+                // the same implicit `__toString()` call `echo`/`(string)`
+                // do, and `print` itself always evaluates to the literal
+                // `int(1)`.
+                if let ExprKind::Name(name) = &callee.kind
+                    && name == "print"
+                    && let [arg] = args.as_slice()
+                {
+                    let arg_ty = self.check_expr(&arg.value, locals, label);
+                    self.check_print_validity(&arg_ty, arg.value.span, label);
+                    self.check_implicit_tostring_usage(&arg_ty, arg.value.span, label);
+                    return Type::IntLiteral(1);
+                }
                 // Resolved once up front (namespace/`use`-import rules
                 // applied, with the same global-namespace fallback real
                 // PHP gives an unqualified function call) so both the
@@ -986,50 +1008,10 @@ impl<'a> Checker<'a> {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_cast_validity(ty, &inner_ty, inner.span, label);
                 // Phase 67/Phase 39 follow-up: an implicit `(string)` cast
-                // of an object triggers a real `__toString()` call - if
-                // that method is `@internal`/`@deprecated`, real
-                // PHPStan's own `RestrictedUsageOfDeprecatedStringCastRule`
-                // (and the internal-tag equivalent, both left as "easy to
-                // add once needed, just not wired" in ROADMAP.md's own
-                // Phase 67 entry) flags it exactly like an explicit
-                // `->__toString()` call would. Same "first Object member"
-                // representative-class extraction as `ExprKind::
-                // MethodCall`'s own `recv_class` above, for the same
-                // reason (a Union/Intersection operand).
+                // of an object triggers a real `__toString()` call - see
+                // `check_implicit_tostring_usage`'s own doc comment.
                 if ty == "string" {
-                    let class = match &inner_ty {
-                        Type::Object(class, _) => Some(class.clone()),
-                        Type::EnumCase(fqn, _) => Some(fqn.clone()),
-                        Type::Union(members) | Type::Intersection(members) => {
-                            members.iter().find_map(|m| match m {
-                                Type::Object(class, _) => Some(class.clone()),
-                                Type::EnumCase(fqn, _) => Some(fqn.clone()),
-                                _ => None,
-                            })
-                        }
-                        _ => None,
-                    };
-                    if let Some(class) = class
-                        && let Some((owner, sig)) =
-                            self.registry.lookup_method_with_owner(&class, "__toString")
-                    {
-                        self.check_internal_method_call(
-                            &owner,
-                            "__toString",
-                            sig,
-                            false,
-                            e.span,
-                            label,
-                        );
-                        self.check_deprecated_method_call(
-                            &owner,
-                            "__toString",
-                            sig,
-                            false,
-                            e.span,
-                            label,
-                        );
-                    }
+                    self.check_implicit_tostring_usage(&inner_ty, e.span, label);
                 }
                 match ty.as_str() {
                     "int" => Type::Int,
@@ -1837,8 +1819,46 @@ impl<'a> Checker<'a> {
                 Type::Mixed
             }
             ExprKind::Interpolated(parts) => {
+                // Real PHPStan's own `InvalidPartOfEncapsedStringRule`
+                // (`encapsedStringPart.nonString`) - an interpolated
+                // `"{$x}"` part implicitly casts `$x` to string exactly
+                // like an explicit `(string)`/`echo`/`print` would (down
+                // to triggering the same `__toString()` call), so an
+                // array or an object with no usable `__toString()` there
+                // is a real, confirmed PHP fatal error ("Array to string
+                // conversion" / "Object of class X could not be
+                // converted to string"), not just a style nit. A raw
+                // literal text chunk between substitutions is itself
+                // modeled as a synthetic `Literal(String(_))` part
+                // (`build_interpolated`'s own doc comment) - skipped
+                // here the same way real PHPStan's own rule skips a
+                // plain `InterpolatedStringPart`, since it was never a
+                // real expression to begin with.
+                //
+                // One known, deliberate departure from real PHPStan's
+                // own message text: its wording embeds the part's
+                // original PHP source (`Part $obj->prop (Foo) of...`),
+                // printed via its own dedicated `ExprPrinter` - this
+                // project has no general expression-to-source printer to
+                // match that with, so the message here names only the
+                // type, not the source snippet.
                 for p in parts {
-                    self.check_expr(p, locals, label);
+                    let part_ty = self.check_expr(p, locals, label);
+                    if matches!(&p.kind, ExprKind::Literal(Literal::String(_))) {
+                        continue;
+                    }
+                    self.check_implicit_tostring_usage(&part_ty, p.span, label);
+                    if self.type_to_string(&part_ty).is_none() {
+                        self.report(
+                            label.to_string(),
+                            format!(
+                                "Part of encapsed string ({part_ty}) cannot be cast to string."
+                            ),
+                            p.span,
+                            2,
+                            "encapsedStringPart.nonString",
+                        );
+                    }
                 }
                 Type::String
             }
@@ -3874,6 +3894,11 @@ fn call_fallback_return_type(callee: &Expr) -> Type {
         ExprKind::Name(name) if matches!(name.to_ascii_lowercase().as_str(), "exit" | "die") => {
             Type::Never
         }
+        // `print` always evaluates to the literal `int(1)` in real PHP -
+        // confirmed directly against `vendor/phpstan-src`'s own
+        // `PrintHandler::resolveType`, which returns `new
+        // ConstantIntegerType(1)` unconditionally.
+        ExprKind::Name(name) if name == "print" => Type::IntLiteral(1),
         _ => Type::Mixed,
     }
 }

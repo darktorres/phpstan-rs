@@ -182,6 +182,10 @@ impl<'a> Checker<'a> {
                 for (i, e) in exprs.iter().enumerate() {
                     let ty = self.check_expr(e, locals, label);
                     self.check_echo_validity(&ty, i, e.span, label);
+                    // Phase 67/Phase 39 follow-up: `echo` implicitly
+                    // invokes `__toString()` on an object argument - see
+                    // `check_implicit_tostring_usage`'s own doc comment.
+                    self.check_implicit_tostring_usage(&ty, e.span, label);
                 }
             }
             StmtKind::Block(stmts) => self.check_block(stmts, locals, declared_return, label),
