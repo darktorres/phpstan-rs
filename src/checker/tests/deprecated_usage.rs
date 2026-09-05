@@ -264,6 +264,47 @@ fn instantiating_a_deprecated_class_is_flagged() {
 }
 
 #[test]
+fn writing_a_deprecated_instance_property_is_flagged() {
+    // Same write-side gap as `internal_usage`'s own identical test: a
+    // plain write reaches `check_property_assignment` directly, not the
+    // `ExprKind::PropertyAccess` read arm.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @deprecated */
+                public int $oldProp;
+            }
+            function f(Foo $foo): void {
+                $foo->oldProp = 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.deprecated"
+            && x.message == "Call to deprecated property Foo::$oldProp."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn writing_a_plain_non_deprecated_property_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public int $niceProp;
+            }
+            function f(Foo $foo): void {
+                $foo->niceProp = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
 fn instantiating_a_plain_non_deprecated_class_is_never_flagged() {
     let d = diagnostics_for(
         r#"<?php

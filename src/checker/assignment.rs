@@ -275,6 +275,16 @@ impl<'a> Checker<'a> {
                 .tip("readonly properties can only be written once, from inside the declaring class's own constructor"),
             );
         }
+        // Phase 67/Phase 39 follow-up: `@internal`/`@deprecated` - the
+        // read side (`ExprKind::PropertyAccess` in `checker/expr.rs`)
+        // already covers both; a plain write reached this function
+        // directly instead (`check_assignment_target`'s own
+        // `PropertyAccess` arm deliberately only checks the *base*, to
+        // avoid misflagging dynamic-property creation), so neither check
+        // ever ran for a write. Confirmed via the exact same corpus this
+        // project already used for the read side - see ROADMAP.md.
+        self.check_internal_property_access(&owner, prop, prop_sig, lhs.span, label);
+        self.check_deprecated_property_access(&owner, prop, prop_sig, lhs.span, label);
         // Phase 57: visibility - shares the same "property.private"/
         // "property.protected" identifiers a read gets (`ExprKind::
         // PropertyAccess`, `checker/expr.rs`), matching real PHPStan's

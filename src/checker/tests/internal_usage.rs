@@ -427,3 +427,52 @@ fn a_global_namespace_internal_class_accessed_from_within_itself_is_never_flagge
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn writing_a_property_of_an_internal_class_is_flagged() {
+    // Previously a real, undetected gap (see ROADMAP.md's own Phase 67
+    // entry): a plain write reaches `check_property_assignment`
+    // directly, not the `ExprKind::PropertyAccess` read arm that
+    // already carried this check.
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+                public int $x = 1;
+            }
+
+            namespace Other\App;
+            function f(\Vendor\Internal\Thing $t) {
+                $t->x = 2;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn writing_a_property_of_an_internal_class_from_the_same_root_namespace_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+                public int $x = 1;
+            }
+
+            namespace Vendor\App;
+            function f(\Vendor\Internal\Thing $t) {
+                $t->x = 2;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier.starts_with("property.internal")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
