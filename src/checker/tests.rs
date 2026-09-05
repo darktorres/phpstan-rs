@@ -15,6 +15,7 @@ mod enums;
 mod generics_and_templates;
 mod helpers;
 mod internal_usage;
+mod key_value_of;
 mod misc_and_regressions;
 mod missing_typehint;
 mod narrowing;

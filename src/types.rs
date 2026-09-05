@@ -624,6 +624,18 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
 /// opposed to being part of a *positional* field's own type text that
 /// merely happens to contain a colon (a callable-shape return type,
 /// `Closure(int): string`). See `try_parse_array_shape`'s own call site.
+/// `key-of<array{foo: string, 5: int}>`'s own per-field answer - a
+/// shape's own field name is always stored as a plain `String` (see
+/// `ArrayShape`'s own doc comment), the same way a real array literal's
+/// keys are canonicalized, so a field name that parses as an integer
+/// names an int key, matching PHP's own key-canonicalization rule.
+fn shape_key_literal(name: &str) -> Type {
+    match name.parse::<i64>() {
+        Ok(n) => Type::IntLiteral(n),
+        Err(_) => Type::StringLiteral(name.to_string()),
+    }
+}
+
 fn looks_like_shape_key(key_part: &str) -> bool {
     let key_part = key_part.strip_suffix('?').unwrap_or(key_part).trim();
     if key_part.is_empty() {
@@ -917,6 +929,52 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // namespace-qualification exemption below for the same reason:
         // "resource" isn't a real class reference to resolve per-file.
         "resource" => Type::Object("resource".to_string(), Vec::new()),
+        // Phase 80: `value-of<T>`/`key-of<T>` - real PHPStan's own
+        // `ValueOfType`/`KeyOfType`, both `LateResolvableType`s evaluated
+        // against `T`'s own resolved type only once actually needed.
+        // This project has no lazy/deferred type-resolution mechanism at
+        // all (a real, separate prerequisite this phase's own roadmap
+        // entry names), so only the case answerable immediately, with no
+        // registry access, is handled here: `T` itself already parsing
+        // to a real `Array`/`ArrayShape` (no class/enum lookup needed at
+        // all - real PHPStan's own `key-of<T>` never special-cases an
+        // enum either, only `value-of<T>` does). `T` naming a class/enum
+        // by reference (needing a registry lookup this function has no
+        // access to) degrades to `Mixed` instead of guessing - before
+        // this arm existed, `value-of<T>`/`key-of<T>` fell through to the
+        // generic-user-class branch below and got mangled into a bogus,
+        // namespace-qualified "class name" (`class.notFound` on every
+        // real use) regardless of which case it was, so `Mixed` is
+        // already a strict improvement even for the unhandled case.
+        "value-of" => match generic_args {
+            [single] => match parse_type_string(single) {
+                Type::Array(_, value) => *value,
+                Type::ArrayShape(fields) => match fields.len() {
+                    0 => Type::Never,
+                    1 => fields.into_iter().next().unwrap().1,
+                    _ => Type::Union(fields.into_iter().map(|(_, ty, _)| ty).collect()),
+                },
+                _ => Type::Mixed,
+            },
+            _ => Type::Mixed,
+        },
+        "key-of" => match generic_args {
+            [single] => match parse_type_string(single) {
+                Type::Array(key, _) => *key,
+                Type::ArrayShape(fields) => match fields.len() {
+                    0 => Type::Never,
+                    1 => shape_key_literal(&fields[0].0),
+                    _ => Type::Union(
+                        fields
+                            .iter()
+                            .map(|(name, _, _)| shape_key_literal(name))
+                            .collect(),
+                    ),
+                },
+                _ => Type::Mixed,
+            },
+            _ => Type::Mixed,
+        },
         "null" => Type::Null,
         "void" => Type::Void,
         "mixed" => Type::Mixed,
