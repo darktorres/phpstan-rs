@@ -2103,14 +2103,40 @@ conditional return types are common in real stubs and increasingly in
 user `is_*()`-predicate code.
 
 **Phase 81 - Object-operator overloading dispatch (GMP/`BcMath\Number`)
-(NEW, PLANNED).** `infer_binary` and unary-op inference assume plain
-numeric operands throughout; add a class-name-keyed dispatch hook for
-the two built-in classes that overload `+`/`-`/`*`/`/`/`**`/`%`/
-comparisons. Unlocks `GmpOperatorTypeSpecifyingExtension`,
+(DONE).** `infer_binary` and unary-op inference assumed plain numeric
+operands throughout - a class-name-keyed dispatch hook
+(`Checker::binary_operator_overload_result`, in `operators.rs`) now
+checks whether either binary operand is a `GMP`/`BcMath\Number`
+instance before falling back to the existing plain-numeric inference,
+mirroring real PHPStan's own `GmpOperatorTypeSpecifyingExtension`/
+`BcMathNumberOperatorTypeSpecifyingExtension` exactly - including their
+different operator sets (GMP additionally overloads the bitwise/shift
+operators; `BcMath\Number` doesn't) and their shared "the other operand
+must be an int, a numeric string, or another instance of the same
+class" arithmetic legality gate (a float on the other side is
+deliberately never accepted by either, matching both real extensions).
+Comparison operators and unary `-`/`+` needed no change at all - they
+already produced the right answer via `infer_binary`'s own existing
+catch-all (`Bool` regardless of operand) and the unary arm's existing
+"pass a non-string-shaped operand's type straight through" fallback,
+respectively.
+
+**Found and fixed independently**: `is_bitwise_not_operand`
+unconditionally rejected every `Type::Object`, flagging real, valid
+`~$gmp` syntax as `unaryOp.invalid` - `GmpUnaryOperatorTypeSpecifyingExtension`
+explicitly overloads `~` (unlike `BcMath\Number`'s own equivalent
+extension, which doesn't). Fixed via a new `bitnot_operand_is_valid`
+wrapper method adding the one exception.
+
+Unlocked `GmpOperatorTypeSpecifyingExtension`,
 `GmpUnaryOperatorTypeSpecifyingExtension`,
 `BcMathNumberOperatorTypeSpecifyingExtension`,
-`BcMathNumberUnaryOperatorTypeSpecifyingExtension`. Size: M, low value -
-GMP/BcMath are rare in typical application corpora.
+`BcMathNumberUnaryOperatorTypeSpecifyingExtension`. Corpus-verified: no
+diagnostic-count change against the Piwigo+vendor corpus (zero GMP/
+BcMath usage anywhere in it, exactly as this entry's own original "low
+value" note anticipated) and zero regressions - verified instead via a
+standalone repro plus a new dedicated unit-test file
+(`operator_overloading.rs`).
 
 **Phase 82 - Collector / cross-file aggregation architecture
 (opportunistic infrastructure, do not schedule standalone) (NEW,
