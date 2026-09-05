@@ -1841,20 +1841,49 @@ port of PHPStan's, and that's a real architectural piece of work, not a
 one-function slice.
 
 **Phase 74 - Array/string stdlib function coverage, batch 2
-(independent of key-type work) (NEW, PLANNED).** Everything else in
-the array-function long tail with no shared blocker beyond "write the
-match arm": generalize the existing `array_unique` "return an
-`ArrayType` from arg 0" pattern to its 16 sibling functions in
-PHPStan's `ArgumentBasedFunctionReturnTypeExtension` list (`array_diff*`,
-`array_udiff*`, `array_intersect*`, `array_uintersect*`);
-`array_pop`/`array_shift`'s own expression-result type (the by-ref side
-is already solved, only the call's own value is missing);
-`array_splice`/`array_replace`/`array_pad` (can reuse `array_merge`'s
-existing field-merge logic); the six array-pointer/position accessors
-(`current`/`next`/`prev`/`reset`/`end`/`key`/`array_key_first`/
-`array_key_last`); PHP 8.4's `array_find`/`array_find_key`/`array_any`/
-`array_all` (currently not even stub-registered). Size: M (batch of
-many S-effort items with a uniform pattern).
+(independent of key-type work) (PARTIAL).** The six array-pointer/
+position accessors landed: new `Checker::array_pointer_result` (the
+shared three-way split every one of them follows - provably empty gives
+a fixed marker, provably non-empty gives the bare element/key type,
+otherwise unions the two) backs `reset`/`current`/`end` (`false` marker),
+`next`/`prev` (`false` marker, but *always* unioned even when provably
+non-empty - confirmed via `php` that moving the pointer can run off
+either end regardless of element count), and `key`/`array_key_first`/
+`array_key_last` (`null` marker instead of `false`, matching real PHP's
+own asymmetric API).
+
+A real, pre-existing bug was found and fixed along the way, independent
+of this phase's own pointer functions (reproduced identically with a
+plain, unrelated `array<Bar, string>`): `member_possible_given_native`
+checked an array doc member's own *key* type against the native `array`
+hint via the same full `is_subtype` as any other member - correct for a
+concrete key, wrong for a `@template`-bound key placeholder
+(`array<TKey, TValue>`, still a bare unresolved `Object("TKey", [])` at
+the point this runs, since it's called *before* `mark_template_params`
+ever substitutes it) - discarding the *entire* array member (`TValue`
+included) in favor of the bare native `array`. Fixed by never checking
+an array member's key against native at all (a bare `array` hint carries
+no key information to contradict in the first place). Corpus-verified:
+50135 -> 50061 diagnostics (net -74) - 182 pre-existing
+`missingType.iterableValue` false positives eliminated (real shape:
+`Psl\Type\Internal\NonEmptyDictType`'s own `@return non-empty-array<Tk,
+Tv>`, silently rendered as "no value type specified"), offset by
+newly-surfaced genuine findings the improved precision now correctly
+catches, plus a handful of `class.notFound` findings that just relocate
+an already-accepted, pre-existing gap (this project's own lack of
+`@phpstan-type`/`@phpstan-import-type`/`value-of<T>` pseudo-type support,
+confirmed present in the same corpus's own pre-Phase-74 baseline in 49
+other places already) rather than introducing a new problem class.
+
+Still open, deferred as their own separate, still-uncommitted batch:
+generalizing `array_unique`'s "return an `ArrayType` from arg 0" pattern
+to its 16 `array_diff*`/`array_udiff*`/`array_intersect*`/
+`array_uintersect*` siblings; `array_pop`/`array_shift`'s own expression-
+result type; `array_splice`/`array_replace`/`array_pad`; PHP 8.4's
+`array_find`/`array_find_key`/`array_any`/`array_all` (currently not
+even stub-registered, and zero corpus incidence beyond `array_find`/
+`array_any` at 5 call sites each - real, but not independently
+verifiable at meaningful scale in this corpus).
 
 **Phase 75 - String accessory-type extensions (case-tracking) + related
 string function coverage (NEW, PLANNED).** Add `Lowercase`/`Uppercase`/
