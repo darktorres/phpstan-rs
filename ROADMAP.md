@@ -819,18 +819,62 @@ code (the rest of a small corpus-wide delta was message-text precision
 improvements in `vendor/`, now showing a declared `array<K, V>` instead
 of collapsing to bare `array`).
 
-**Still open** (the rest of this phase's original scope, unclaimed by
-any other phase): `ArrayShape`'s own int-vs-string key precision (still
-a plain `String` field - `array{0: ..}`'s key `0` and `array{'0': ..}`'s
+**Investigated and declined**: `InvalidKeyInArrayDimFetchRule` (the
+offset read/write-site counterpart of the literal-key check just
+shipped) was fully implemented, sharing the exact same
+`invalid_array_key_description` primitive via a new shared
+`check_array_dim_fetch_key_type` helper wired into both `check_expr`'s
+`Index` arm and `check_assignment_target`'s identical arm (a real,
+confirmed gap: real PHP's own `TypeError` on an invalid offset key
+applies equally to reads and writes, and real PHPStan's own rule fires
+on the `ArrayDimFetch` AST node generically with no read/write
+distinction). Full test suite passed (including 6 new tests covering
+both directions, an `ArrayAccess`-object exemption, and the existing
+"don't guess" leniencies), but full corpus verification found +31
+diagnostics, and sampling confirmed essentially all of them share one
+root cause this project doesn't yet handle correctly: a **used** (not
+merely declared) generic template parameter's own type leaking through
+as a bogus, namespace-qualified `Type::Object` reference instead of
+staying `Type::TemplateParam` or its own declared bound - real examples:
+`amphp/sync`'s `PriorityQueue<T of int|string>` (a property typed `T`,
+read back through a nested array-key position, loses the `int|string`
+bound entirely and reports "Invalid array key type T"), and several
+`php-standard-library`/`phpunit`/`php-cs-fixer` packages' own
+`@template Tk`/local `@phpstan-type` aliases (`Psl\Type\Internal\Tk`,
+`SebastianBergmann\CodeCoverage\Data\TestIndexType`, `PhpCsFixer\...\
+_ImportType`) resolving the same wrong way, plus a distinct second gap
+found alongside it: `int-mask-of<Constraint::CHECK_MODE_*>` (a real
+PHPStan pseudo-type this project doesn't parse at all) falling back to
+being treated as an ordinary generic class reference. `collect_unknown_
+class_names` already has a deliberate, working exemption for a real
+`@template T` at the *declared-signature* level (`mark_template_params`
+runs before it ever sees the type) - this gap is different and deeper:
+it's a *call-site* substitution failure (a nested generic method call
+whose own inner template parameter gets bound to the *outer* class's
+still-unresolved template parameter, inside the generic class's own
+body, never a concrete type at all in this context) that `invalid_
+array_key_description` has no way to distinguish from a genuine invalid
+key without registry/template context it doesn't have access to as a
+free function. Reverted rather than shipped (matching the Phase 61
+precedent exactly) - every one of the 31 findings was noise from this
+one pre-existing, deeper generics-substitution gap, not a genuine array-
+key bug, and fixing the substitution issue properly belongs with Phase
+54's own already-tracked "generics variance rewrite... XL... genuine
+algorithmic rewrite" scope, not a quick fix here.
+
+Still open (the rest of this phase's original scope, unclaimed by any
+other phase): `ArrayShape`'s own int-vs-string key precision (still a
+plain `String` field - `array{0: ..}`'s key `0` and `array{'0': ..}`'s
 key `'0'` are indistinguishable internally, though PHP's own key-
 canonicalization rule happens to make this benign for the existing
 shape-lookup checks); unsealed-shape (`array{...}`) tracking - parsed
 and explicitly discarded, per `types.rs`'s own `try_parse_array_shape`
 comment; `HasOffsetType`/`HasOffsetValueType` as composable accessory
-facts; `InvalidKeyInArrayDimFetchRule` (the read/write-site counterpart
-of the literal-key check just shipped); and the ~30-40 individual
-stdlib per-operation overrides Phase 73/74 already own (this phase was
-their prerequisite, not a promise to implement those consumers too).
+facts; `InvalidKeyInArrayDimFetchRule` itself, now blocked on the
+generics-substitution gap just found rather than simply unimplemented;
+and the ~30-40 individual stdlib per-operation overrides Phase 73/74
+already own (this phase was their prerequisite, not a promise to
+implement those consumers too).
 Consolidated unlocks still to close: `NonexistentOffsetInArrayDimFetchCheck`/
 `Rule`, `ArrayDestructuringRule`, `InvalidKeyInArrayDimFetchRule`,
 `HasOffsetType`, `HasOffsetValueType`, `OffsetAccessAssignOpRule`,
