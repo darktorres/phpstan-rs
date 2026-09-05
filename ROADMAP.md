@@ -1216,20 +1216,41 @@ is a genuine "no violations found" result, not a dormant check,
 consistent with this same phase's own original property/method pass
 also finding almost nothing across the identical corpus.
 
-Still open: `AccessPrivateConstantThroughStaticRule` (`Foo::CONST` via
-`static::` when `CONST` is `private` - a narrower, LSB-specific angle
-distinct from the ordinary visibility check just shipped); asymmetric
-PHP 8.4 `private(set)`/
-`protected(set)` (write-visibility can currently only match read-
-visibility); LSB-unsafe `static::` access to a `private` static
-property (`AccessPrivatePropertyThroughStaticRule`,
-`AccessStaticPropertiesCheck`/`Rule`/`InAssignRule`); and
-`StaticMethodCallableRule`/`CallPrivateMethodThroughStaticRule`'s own
-`static::`-callable-specific angle. The protected-access heuristic is
-also deliberately conservative: it never guesses at cross-hierarchy
-relationships it can't resolve from the registry, so a small number of
-genuinely-illegal protected accesses that depend on runtime-only
-information may go unflagged rather than risk a false positive.
+**Update**: `AccessPrivateConstantThroughStaticRule` is now done too -
+new `Checker::check_static_private_constant_access` (`checker/
+visibility.rs`), wired into `ExprKind::StaticAccess`'s const-fetch arm
+right alongside the ordinary visibility check. `static::` performs late
+static binding, which can resolve to a *different* class at runtime than
+the one lexically containing the code - unlike `self::` (always the
+literal declaring class) - so a `private` constant reached this way is
+unsafe even from inside its own declaring class, confirmed directly via
+`php -r` (a subclass redeclaring the same `private const` throws a real
+"Cannot access private constant" error at the call site, even though
+calling the exact same code path directly on the declaring class, with
+no subclass involved at all, works fine - matching real PHPStan's own
+proactive, not runtime-failure-conditional, stance). Fires
+unconditionally on any `static::CONST` resolving to a `private`
+constant, except inside a `final` class (which can never have a
+subclass at all, so `static::` there can never actually differ from the
+literal declaring class - matches real PHPStan's own identical
+exemption exactly). Corpus-verified: 49989 -> 49991 (+2), both spot-
+checked genuine (`symfony/cache`'s `CouchbaseCollectionAdapter`,
+`symfony/property-info`'s `ReflectionExtractor` - real, non-`final`
+classes with a `private const` accessed through `static::`).
+
+Still open: asymmetric PHP 8.4 `private(set)`/`protected(set)` (write-
+visibility can currently only match read-visibility); LSB-unsafe
+`static::` access to a `private` static property
+(`AccessPrivatePropertyThroughStaticRule`, `AccessStaticPropertiesCheck`/
+`Rule`/`InAssignRule`); and `StaticMethodCallableRule`/
+`CallPrivateMethodThroughStaticRule`'s own `static::`-callable-specific
+angle - both real, tractable follow-ups sharing this same update's exact
+shape (`class_name == "static"` + a `private`-visibility member + a
+`final`-class exemption), not attempted this pass. The protected-access
+heuristic is also deliberately conservative: it never guesses at cross-
+hierarchy relationships it can't resolve from the registry, so a small
+number of genuinely-illegal protected accesses that depend on runtime-
+only information may go unflagged rather than risk a false positive.
 
 **Phase 58 - `MissingTypehintCheck` completeness battery (level-6
 family) (DONE).** This entry's own status was never updated after an
