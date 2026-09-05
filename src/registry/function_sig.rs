@@ -262,6 +262,47 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // was filtered out, in turn making Phase 60's `nullCoalesce`
         // check wrongly flag `$predicate ??= ...` as "always null."
         Type::Callable => true,
+        // Phase 74 corpus find: an array's own *key* type was checked
+        // against `native_ty` via the same full `is_subtype` as every
+        // other member, including its key - fine for a concrete key
+        // (`array<string, int>`'s `string` really is a subtype of
+        // `int|string`), but this function runs *before*
+        // `mark_template_params` ever gets a chance to substitute a
+        // `@template`-bound key placeholder (`array<TKey, TValue>`,
+        // `TKey` still a bare, unresolved `Object("TKey", [])` at this
+        // point) - `is_subtype(Object("TKey", []), int|string)` is
+        // correctly `false` for an arbitrary class, so the *entire*
+        // array member was discarded in favor of the bare native
+        // `array`, silently losing `TValue` too even though it would
+        // have resolved to a perfectly legitimate template param one
+        // step later. A native `array` hint carries no key information
+        // to contradict in the first place (PHP's own type system has
+        // no generics), so this only ever checks the *value* side
+        // against native's own - the key is always trusted as-is.
+        Type::Array(_, elem) => match native_ty {
+            Type::Array(_, native_elem) => member_possible_given_native(elem, native_elem),
+            _ => types::is_subtype(m, native_ty),
+        },
+        // Same reasoning as the plain `Type::Array` arm just above, for
+        // `list<T>`/`non-empty-array<T>`/`non-empty-list<T>`'s own real
+        // `Intersection([Array(key, elem), Accessory(_), ...])`
+        // representation (Phase 14) - an accessory marker never affects
+        // whether the member is "possible" given a bare native `array`
+        // hint (which states nothing about list-ness/non-emptiness
+        // either), so this only needs to find the `Array` member inside
+        // and re-run the same key-ignoring check on it.
+        Type::Intersection(members) => match (
+            members.iter().find_map(|inner| match inner {
+                Type::Array(_, elem) => Some(elem.as_ref()),
+                _ => None,
+            }),
+            native_ty,
+        ) {
+            (Some(elem), Type::Array(_, native_elem)) => {
+                member_possible_given_native(elem, native_elem)
+            }
+            _ => types::is_subtype(m, native_ty),
+        },
         _ => types::is_subtype(m, native_ty),
     }
 }

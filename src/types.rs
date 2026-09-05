@@ -868,11 +868,23 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             };
             // Phase 50: `list`/`non-empty-list` genuinely can only ever
             // have sequential int keys - a real precision win over the
-            // default `int|string`, not just arity-matching. Plain
-            // `non-empty-array` makes no such promise (any key type,
-            // just non-empty), so it keeps the unknown default.
+            // default `int|string`, not just arity-matching.
+            //
+            // Phase 74 corpus find: `non-empty-array` makes no such
+            // *implicit* promise (non-emptiness alone says nothing about
+            // key type) - but an *explicit* 2-arg `non-empty-array<K, V>`
+            // still names a real `K`, exactly like plain `array<K, V>`
+            // does, and previously always got thrown away here in favor
+            // of the unknown default regardless of what was actually
+            // written - `key()`/`array_key_first()`/`array_key_last()`'s
+            // own new precision (this same phase) immediately surfaced
+            // it by silently losing a docblock's own `non-empty-array<
+            // string, int>` key type.
             let key_ty = if bare == "non-empty-array" {
-                Type::unknown_array_key()
+                match generic_args.len() {
+                    2 => parse_type_string(generic_args[0]),
+                    _ => Type::unknown_array_key(),
+                }
             } else {
                 Type::Int
             };

@@ -313,6 +313,48 @@ impl<'a> Checker<'a> {
                     };
                 }
             }
+            // Phase 74: the internal-array-pointer family
+            // (`ArrayPointerFunctionsDynamicReturnTypeExtension`/
+            // `ArrayCurrentDynamicReturnTypeExtension`/
+            // `ArrayNextDynamicReturnTypeExtension` real PHPStan side) -
+            // `reset`/`current`/`end` all report the array's own element
+            // type (bare when it's provably non-empty, unioned with
+            // `false` otherwise, `false` alone when it's provably
+            // empty), the same three-way split `array_pointer_result`
+            // below shares with `key`. `next`/`prev` always union with
+            // `false` even when the array is provably non-empty -
+            // confirmed directly via `php`: moving the pointer can run
+            // off either end regardless of how many elements exist.
+            "reset" | "current" | "end" if args.len() == 1 => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if Self::is_array_like(&arr_ty) {
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed);
+                    return Self::array_pointer_result(&arr_ty, elem_ty, Type::False, false);
+                }
+            }
+            "next" | "prev" if args.len() == 1 => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if Self::is_array_like(&arr_ty) {
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed);
+                    return Self::array_pointer_result(&arr_ty, elem_ty, Type::False, true);
+                }
+            }
+            // `key()` (the current pointer's own key) and
+            // `array_key_first`/`array_key_last` (pure, pointer-
+            // independent) all share the same shape as `reset`/
+            // `current`/`end` above, but report `null` instead of
+            // `false` for "no such element" - real PHP's own
+            // `key(): int|string|null` (never `false`, unlike its
+            // siblings) and `array_key_first`/`array_key_last`'s
+            // identical `int|string|null` signature.
+            "key" | "array_key_first" | "array_key_last" if args.len() == 1 => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if Self::is_array_like(&arr_ty) {
+                    let key_ty =
+                        Self::array_key_type(&arr_ty).unwrap_or_else(Type::unknown_array_key);
+                    return Self::array_pointer_result(&arr_ty, key_ty, Type::Null, false);
+                }
+            }
             // A round of Piwigo-corpus bucketing after Phase 14 found this
             // was the single largest remaining false-positive source:
             // `array_merge(['a', 'b'], someListReturningCall())`, real
@@ -1101,6 +1143,30 @@ impl<'a> Checker<'a> {
     /// reflected is sealed either.
     fn get_debug_type_result(&self, ty: &Type) -> Option<Type> {
         get_debug_type_for(ty, self.registry)
+    }
+
+    /// Phase 74: the shared three-way split every internal-array-pointer
+    /// function's own return type follows - a provably empty `arr_ty`
+    /// always just reports `empty_marker` (`false` for `reset`/
+    /// `current`/`end`/`next`/`prev`, `null` for `key`/`array_key_first`/
+    /// `array_key_last`); a provably non-empty one reports the bare
+    /// `result_ty` (the element or key type) *unless* `force_union` -
+    /// `next`/`prev` alone set it, since moving the pointer can run off
+    /// either end regardless of how many elements exist; anything else
+    /// (emptiness genuinely unknown) unions the two.
+    fn array_pointer_result(
+        arr_ty: &Type,
+        result_ty: Type,
+        empty_marker: Type,
+        force_union: bool,
+    ) -> Type {
+        if Self::is_known_empty_array(arr_ty) {
+            return empty_marker;
+        }
+        if Self::is_known_non_empty_array(arr_ty) && !force_union {
+            return result_ty;
+        }
+        union_types(result_ty, empty_marker)
     }
 }
 

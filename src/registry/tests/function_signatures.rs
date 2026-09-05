@@ -306,6 +306,79 @@ fn a_callable_shape_doc_member_is_refined_to_the_closure_native_hint() {
     );
 }
 
+// Phase 74 corpus find: an `array<K, V>`-shaped doc member's own *key*
+// used to be checked against the native `array` hint via the same full
+// `is_subtype` as any other member - correct for a concrete key
+// (`array<string, int>`'s own `string` really is a subtype of
+// `int|string`), but wrong once the key is a `@template`-bound
+// placeholder (`array<TKey, TValue>`, `TKey` still a bare, unresolved
+// `Object("TKey", [])` at this point - `reconcile_with_native` runs
+// *before* `mark_template_params` ever gets a chance to substitute it):
+// `is_subtype(Object("TKey", []), int|string)` is correctly `false` for
+// an arbitrary class, so the *entire* array member (including `TValue`,
+// which would have resolved just fine) was discarded in favor of the
+// bare native `array`. A native `array` hint carries no key information
+// to contradict in the first place, so the key is now always trusted
+// as-is; only the value is still checked against native's own.
+#[test]
+fn an_array_doc_member_with_a_template_key_is_not_discarded() {
+    let r = build_registry(
+        r#"<?php
+            /**
+             * @template TKey
+             * @template TValue
+             */
+            class Foo {
+                /** @param array<TKey, TValue> $x */
+                public function f(array $x): void {}
+            }
+        "#,
+    );
+    let sig = &r.classes["Foo"].methods["f"];
+    let Type::Array(key, value) = &sig.params[0].ty else {
+        panic!("expected Type::Array, got {:?}", sig.params[0].ty);
+    };
+    assert!(
+        matches!(key.as_ref(), Type::TemplateParam(p) if p.name == "TKey"),
+        "got key: {key:?}"
+    );
+    assert!(
+        matches!(value.as_ref(), Type::TemplateParam(p) if p.name == "TValue"),
+        "got value: {value:?}"
+    );
+}
+
+// The same trust extends to a plain (non-template) class name in the
+// key position too - `member_possible_given_native` never actually
+// checks an array member's own key against the native hint at all (a
+// bare `array` carries no key information to contradict in the first
+// place), regardless of what the key turns out to be. Real PHP would
+// reject `Bar` as an actual array key at runtime, but that's a usage-
+// site problem for whatever later reads/writes through it, not a
+// reason to sanitize the declared type itself here - the same "trust
+// the docblock, let real usage-site checks catch real problems"
+// leniency this project applies everywhere else.
+#[test]
+fn an_array_doc_member_with_a_plain_class_key_is_also_kept() {
+    let r = build_registry(
+        r#"<?php
+            class Bar {}
+            class Foo {
+                /** @param array<Bar, string> $x */
+                public function f(array $x): void {}
+            }
+        "#,
+    );
+    let sig = &r.classes["Foo"].methods["f"];
+    assert_eq!(
+        sig.params[0].ty,
+        Type::Array(
+            Box::new(Type::Object("Bar".to_string(), Vec::new())),
+            Box::new(Type::String)
+        )
+    );
+}
+
 // A `mixed`-native case must still trust the doc fully, now via the
 // general `is_subtype(_, Type::Mixed)` rule falling out for free
 // rather than a dedicated `mixed`/`object` branch.

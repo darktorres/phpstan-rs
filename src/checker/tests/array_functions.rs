@@ -460,6 +460,176 @@ fn array_flip_preserves_non_emptiness_but_not_list_ness() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 74: the internal-array-pointer family - reset/current/end/key/
+// array_key_first/array_key_last/next/prev - confirmed directly via php.
+
+// Each pointer function gets its own dedicated `$xs`/function - passing
+// it to one of these by-ref functions widens this project's own tracked
+// type for it afterward (a deliberate, pre-existing conservative
+// simplification, not something these tests are about), so reusing one
+// variable across several calls in the same body would make a later
+// assertion see the *previous* call's own widening instead of its own.
+
+#[test]
+fn reset_reports_the_element_type_when_provably_non_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<string> $xs */
+            function f(array $xs): void {
+                assertType('string', reset($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn current_reports_the_element_type_when_provably_non_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<string> $xs */
+            function f(array $xs): void {
+                assertType('string', current($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn end_reports_the_element_type_when_provably_non_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<string> $xs */
+            function f(array $xs): void {
+                assertType('string', end($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reset_current_end_report_false_when_provably_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $a = [];
+                $b = [];
+                $c = [];
+                assertType('false', reset($a));
+                assertType('false', current($b));
+                assertType('false', end($c));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reset_unions_with_false_when_emptiness_is_unknown() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<string> $xs */
+            function f(array $xs): void {
+                assertType('string|false', reset($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn next_always_unions_with_false_even_when_provably_non_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<string> $xs */
+            function f(array $xs): void {
+                assertType('string|false', next($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn prev_always_unions_with_false_even_when_provably_non_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<string> $xs */
+            function f(array $xs): void {
+                assertType('string|false', prev($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn key_reports_the_key_type_when_provably_non_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-array<string, int> $xs */
+            function f(array $xs): void {
+                assertType('string', key($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn key_unions_with_null_when_emptiness_is_unknown() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, int> $xs */
+            function f(array $xs): void {
+                assertType('string|null', key($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_key_first_and_last_report_the_key_type_when_provably_non_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-array<string, int> $xs */
+            function f(array $xs): void {
+                assertType('string', array_key_first($xs));
+                assertType('string', array_key_last($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn key_and_array_key_first_report_null_when_provably_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $a = [];
+                assertType('null', key($a));
+                assertType('null', array_key_first([]));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn array_chunk_wraps_the_original_element_type_in_an_extra_array_layer() {
     let d = diagnostics_for(
