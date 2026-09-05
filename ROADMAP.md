@@ -1228,6 +1228,53 @@ get the same `Array(Mixed)`-is-always-assignable leniency a plain
 `Array(Mixed)` already has (`registry.rs`, real shape: nikic/php-
 parser's own `$token->is([\T_COMMENT, \T_DOC_COMMENT])`).
 
+**Update**: two more real, independent bugs found while bucketing and
+triaging the full ~20,300-file corpus's own ~50k-diagnostic run by
+identifier (not itself a phase - an ad hoc false-positive hunt over
+the whole current diagnostic set) - both in the same callable-shape
+parsing this phase's own `Closure(ParamType, ...): ReturnType`/
+`callable(...): ReturnType` degrade-to-`Type::Callable` handling
+(`types::parse_type_atom`) already does, just missing the leading-`\`
+case. (1) A **fully-qualified** callable-shape doc type (`@param
+\Closure(CancelledException) $callback`, amphp/amp's own convention
+throughout) defeated the shape check entirely - `"\closure(...".
+starts_with("closure(")` is false - falling through to the generic
+class-name branch and mangling into a bogus `Type::Object(
+"Closure(CancelledException)", [])` "class," reported as a false
+`class.notFound`; fixed by stripping a leading `\` before the check.
+(2) A native `\Closure $fn` type hint (no doc override, no signature -
+just the plain class) in a namespaced file became a bogus `App\Closure`
+- the `"closure"` keyword-match arm in `parse_type_keyword_or_class`
+always hardcoded the bare, unqualified name regardless of the original
+text, losing the leading `\` that `NameContext::resolve` needs to see
+to know not to re-qualify it (the exact same category `a_leading_
+backslash_in_a_native_type_hint_is_not_re_namespaced` already guards
+for an ordinary class reference - this one arm just wasn't going
+through that same path). Fixed by preserving the leading `\` into the
+arm's own output when present, and - since a *bare*, unqualified
+`Closure` is genuinely ambiguous (real corpus shape: `rector/rector`'s
+own consumers of `nikic/php-parser` routinely `use PhpParser\Node\Expr\
+Closure;`, an entirely different real class, then type-hint bare
+`Closure` meaning *that* one) - only special-casing the unambiguous
+root-anchored `\Closure` spelling; a bare `Closure` now correctly falls
+through to ordinary class-reference resolution instead (deferring to a
+real `use` import when one exists, matching real PHP's own actual
+resolution rule for an unqualified class reference either way).
+
+Verified against the ~20,300-file corpus: 49,899 -> 48,576 (-1,323),
+concentrated in `class.notFound` (-572), `argument.type` (-499),
+`assign.propertyType` (-150), `method.childParameterType` (-63),
+`return.type` (-38), and `method.childReturnType` (-2) - all across
+`amphp/amp`, `revolt/event-loop`, `symfony/http-client`, and several
+others that spell a callable-typed parameter this way. One new,
+genuine finding surfaced as a side effect (the same "a fix un-breaks a
+previously-corrupted type, revealing a real finding that was always
+true but never reached" pattern Phase 42's own `argument.type` finding
+had): `symfony/config`'s `NodeDefinition::getNode()` accesses
+`$expr->allowedTypes` where `$expr`'s own real type includes bare
+`Closure` (a real object with no such property) alongside
+`ExprBuilder<T>` - confirmed genuine by reading the source directly.
+
 **Still open**: the structural `Callable`/`Closure` signature type
 itself (parameter list, return type, purity, template map) - `Type::
 Callable` stays a bare marker; contextual injection for `array_filter`/
