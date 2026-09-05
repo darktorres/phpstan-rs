@@ -3317,10 +3317,26 @@ impl<'a> Checker<'a> {
             // The spaceship operator returns -1/0/1 (an int), not a bool -
             // its single most common real use is returning a value
             // directly from a comparator (`usort`/`uasort`/...).
-            BinOp::Spaceship => Type::Int,
+            //
+            // Phase 81: `GMP`/`BcMath\Number`'s own overloaded spaceship
+            // still returns the same `-1|0|1` range, just computed by the
+            // object's own comparison rather than a plain numeric one -
+            // `binary_operator_overload_result` produces the identical
+            // `IntRange(-1, 1)` either way, so this only refines *how*
+            // precisely non-overloaded spaceship is typed too (a real,
+            // if incidental, improvement over the previous bare `Int`).
+            BinOp::Spaceship => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                self.binary_operator_overload_result(op, &lt, &rt)
+                    .unwrap_or(Type::Int)
+            }
             BinOp::Add => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
+                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                    return ty;
+                }
                 // `+` on two arrays is PHP's array-union operator, not
                 // arithmetic - it keeps every key from the left operand,
                 // filling in any key only present on the right. The real
@@ -3343,6 +3359,9 @@ impl<'a> Checker<'a> {
             BinOp::Sub | BinOp::Mul | BinOp::Pow => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
+                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                    return ty;
+                }
                 if lt == Type::Float || rt == Type::Float {
                     Type::Float
                 } else {
@@ -3353,8 +3372,17 @@ impl<'a> Checker<'a> {
             // operands to int before operating, regardless of whether
             // either side was a float - unlike Add/Sub/Mul/Pow, there is
             // no float-promotion rule for these.
+            //
+            // Phase 81: except when GMP (all five) or `BcMath\Number`
+            // (`%` only - it doesn't overload the bitwise/shift operators
+            // at all, per `binary_operator_overload_result`'s own gate)
+            // is genuinely involved, which yields the object type back
+            // instead of a plain `int`.
             BinOp::Mod | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
-                Type::Int
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                self.binary_operator_overload_result(op, &lt, &rt)
+                    .unwrap_or(Type::Int)
             }
             // Phase 13 Finding C: verified against real PHPStan's own
             // dumpType() - `/` gives `int|float` unconditionally whenever
@@ -3367,6 +3395,9 @@ impl<'a> Checker<'a> {
             BinOp::Div => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
+                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                    return ty;
+                }
                 if lt == Type::Float || rt == Type::Float {
                     Type::Float
                 } else {

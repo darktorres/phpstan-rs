@@ -19,6 +19,7 @@ mod missing_typehint;
 mod narrowing;
 mod null_probes;
 mod oop_overrides_and_inheritance;
+mod operator_overloading;
 mod operator_validity;
 mod preg_and_regex;
 mod string_functions;

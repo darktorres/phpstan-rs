@@ -76,6 +76,115 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 81: whether `ty` is (or, inside a `Union`, could be) a real
+    /// instance of `class` - `is_subclass_of`'s own reflexive "a class is
+    /// always its own subclass" covers the exact-name case too.
+    fn type_is_instance_of(&self, ty: &Type, class: &str) -> bool {
+        match ty {
+            Type::Object(name, _) => self.registry.is_subclass_of(name, class),
+            Type::Union(members) => members.iter().any(|m| self.type_is_instance_of(m, class)),
+            _ => false,
+        }
+    }
+
+    /// Phase 81: the "other side" legality gate real PHPStan's own
+    /// `GmpOperatorTypeSpecifyingExtension`/
+    /// `BcMathNumberOperatorTypeSpecifyingExtension` share for their
+    /// arithmetic operators - GMP/`BcMath\Number` can combine with an
+    /// int, a numeric string, or another instance of the same
+    /// overloading class, but deliberately *not* a float (both real
+    /// extensions reject it - `BcMath\Number`'s own extension checks this
+    /// explicitly first; GMP's own just never lists `isFloat()` among its
+    /// accepted cases either). Same "any Union member legal" leniency as
+    /// `is_number_operand` above, for the same reason (this project's own
+    /// unions are coarser than real PHPStan's).
+    fn is_valid_overload_operand(&self, ty: &Type, class: &str) -> bool {
+        match ty {
+            Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => true,
+            Type::StringLiteral(_) => {
+                is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
+            }
+            Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
+                is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
+            }
+            Type::Object(name, _) => self.registry.is_subclass_of(name, class),
+            Type::Union(members) => members
+                .iter()
+                .any(|m| self.is_valid_overload_operand(m, class)),
+            _ => false,
+        }
+    }
+
+    /// Phase 81: `GMP`/`BcMath\Number`'s own operator-overloading return
+    /// type - `is_number_operand` above already establishes these two
+    /// classes as legal arithmetic/comparison operands (Phase 52); this
+    /// answers what the *result* actually is once legality is
+    /// established, mirroring real PHPStan's own
+    /// `GmpOperatorTypeSpecifyingExtension`/
+    /// `BcMathNumberOperatorTypeSpecifyingExtension` (comparison operators
+    /// and unary `-`/`+`/`~` are deliberately not covered here - the
+    /// comparisons already produce `Type::Bool` regardless of operand via
+    /// `infer_binary`'s own existing catch-all, and unary `-`/`+`/`~`
+    /// already pass a non-string-shaped operand's type straight through
+    /// unchanged, both already matching real PHP's actual behavior with
+    /// no override needed). `None` when neither side is one of these two
+    /// classes at all (the overwhelming common case, cheap to rule out
+    /// first), when the class's own operator set doesn't include `op`
+    /// (`BcMath\Number` doesn't overload the bitwise/shift operators at
+    /// all), or when the other side isn't a valid operand - left alone
+    /// rather than guessing a wrong result type, matching this project's
+    /// "don't guess" precedent; `is_number_operand`'s own independent
+    /// legality check still governs whether an `binaryOp.invalid`-style
+    /// diagnostic fires for a genuinely bad combination.
+    pub(crate) fn binary_operator_overload_result(
+        &self,
+        op: &BinOp,
+        l_ty: &Type,
+        r_ty: &Type,
+    ) -> Option<Type> {
+        for class in ["GMP", "BcMath\\Number"] {
+            let l_is = self.type_is_instance_of(l_ty, class);
+            let r_is = self.type_is_instance_of(r_ty, class);
+            if !l_is && !r_is {
+                continue;
+            }
+            let bitwise_or_shift = matches!(
+                op,
+                BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+            );
+            if bitwise_or_shift && class != "GMP" {
+                return None;
+            }
+            if !matches!(
+                op,
+                BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Pow
+                    | BinOp::Mod
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+                    | BinOp::Shl
+                    | BinOp::Shr
+                    | BinOp::Spaceship
+            ) {
+                return None;
+            }
+            if *op == BinOp::Spaceship {
+                return Some(Type::IntRange(Some(-1), Some(1)));
+            }
+            let other = if l_is { r_ty } else { l_ty };
+            return if self.is_valid_overload_operand(other, class) {
+                Some(Type::Object(class.to_string(), Vec::new()))
+            } else {
+                None
+            };
+        }
+        None
+    }
+
     /// A "byte-wise bitwise op" operand - real PHP's `&`/`|`/`^` accept
     /// two strings directly (a per-byte operation, no numeric coercion
     /// at all), independent of whether either string is numeric.
@@ -225,6 +334,17 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// Phase 81: `~$gmp` is real, valid, GMP-overloaded syntax
+    /// (`GmpUnaryOperatorTypeSpecifyingExtension`'s own operator set
+    /// includes `~`, unlike `BcMath\Number`'s equivalent extension, which
+    /// doesn't overload `~` at all) - the free `is_bitwise_not_operand`
+    /// below has no registry access to special-case it (it unconditionally
+    /// rejects every `Type::Object`), so this thin wrapper adds the one
+    /// exception.
+    fn bitnot_operand_is_valid(&self, ty: &Type) -> bool {
+        is_bitwise_not_operand(ty) || self.type_is_instance_of(ty, "GMP")
+    }
+
     /// Real PHPStan's `InvalidUnaryOperationRule` (`unaryOp.invalid`).
     /// `UnaryOp::Not` (`!`) is never checked - every PHP value has a
     /// truthiness, matching this project's own `check_cast_validity`
@@ -238,7 +358,7 @@ impl<'a> Checker<'a> {
     ) {
         let valid = match op {
             UnaryOp::Neg | UnaryOp::Plus => self.is_number_operand(inner_ty),
-            UnaryOp::BitNot => is_bitwise_not_operand(inner_ty),
+            UnaryOp::BitNot => self.bitnot_operand_is_valid(inner_ty),
             _ => return,
         };
         if valid {
