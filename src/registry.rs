@@ -855,6 +855,27 @@ impl Registry {
         self.lookup_in_hierarchy_with_owner(class, |info| info.consts.get(const_name))
     }
 
+    /// Phase 79: a backed enum case's own literal backing value, if this
+    /// checker was able to prove one (see `ClassInfo::enum_case_values`'s
+    /// own doc comment) - not hierarchy-walked, since an enum can't
+    /// extend anything for a case to inherit from in the first place.
+    pub fn enum_case_value(&self, class: &str, case: &str) -> Option<&Type> {
+        self.classes.get(class)?.enum_case_values.get(case)
+    }
+
+    /// Phase 79: the matching case (if any, and if provable) for a
+    /// literal argument passed to a backed enum's own `::from()`/
+    /// `::tryFrom()` - a reverse lookup over `enum_case_value` above,
+    /// since PHP itself only stores value -> case at runtime, never the
+    /// other way around.
+    pub fn enum_case_for_value(&self, class: &str, value: &Type) -> Option<&str> {
+        let info = self.classes.get(class)?;
+        info.enum_case_values
+            .iter()
+            .find(|(_, v)| *v == value)
+            .map(|(name, _)| name.as_str())
+    }
+
     /// Phase 71 corpus find: real PHP function calls are case-
     /// insensitive (`STRTOLOWER()`/`strtolower()`/`StrToLower()` all
     /// resolve to the exact same builtin, and the same is true of a
@@ -920,6 +941,18 @@ impl Registry {
             (Type::String | Type::StringLiteral(_), Type::Callable) => true,
             (Type::Array(_, _) | Type::ArrayShape(_), Type::Callable) => true,
             (Type::Object(a, _), Type::Object(b, _)) => a == b || self.is_subclass_of(a, b),
+            // Phase 79: hierarchy-aware version of `types::is_subtype`'s
+            // own bare `EnumCase -> Object` name-equality rule - a case
+            // is assignable not just to its own enum's bare type but to
+            // `UnitEnum`/`BackedEnum` (both synthesized `implements`
+            // entries every enum gets, see `ClassInfo::from_enum_decl`)
+            // and any interface the enum itself declares.
+            (Type::EnumCase(fqn, _), Type::Object(b, _)) => fqn == b || self.is_subclass_of(fqn, b),
+            // Two different cases of the same enum are never
+            // interchangeable (`types::is_subtype`'s own `a == b` fast
+            // path already covers the identical-case case) - no
+            // hierarchy to widen through beyond what's handled above.
+            (Type::EnumCase(_, _), Type::EnumCase(_, _)) => false,
             // Same hierarchy-aware override as the plain Object-vs-Object
             // arm just above, one level up: `types::is_subtype`'s own
             // `ClassString` arm inherits its non-hierarchy-aware Object

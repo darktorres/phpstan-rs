@@ -3,6 +3,63 @@
 use super::super::*;
 use super::helpers::*;
 
+// Phase 79: a case constant's own singleton type, and the reverse
+// literal-value -> case lookup `::from()`/`::tryFrom()` narrowing needs.
+
+#[test]
+fn a_case_constant_s_type_is_its_own_singleton() {
+    let r = build_registry(
+        r#"<?php
+            enum Suit {
+                case Hearts;
+            }"#,
+    );
+    assert_eq!(
+        r.lookup_const("Suit", "Hearts"),
+        Some(&Type::EnumCase("Suit".to_string(), "Hearts".to_string()))
+    );
+}
+
+#[test]
+fn enum_case_value_and_its_reverse_lookup_agree() {
+    let r = build_registry(
+        r#"<?php
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'S';
+            }"#,
+    );
+    assert_eq!(
+        r.enum_case_value("Suit", "Hearts"),
+        Some(&Type::StringLiteral("H".to_string()))
+    );
+    assert_eq!(
+        r.enum_case_for_value("Suit", &Type::StringLiteral("S".to_string())),
+        Some("Spades")
+    );
+    assert_eq!(
+        r.enum_case_for_value("Suit", &Type::StringLiteral("Z".to_string())),
+        None
+    );
+}
+
+#[test]
+fn a_non_literal_case_value_never_appears_in_enum_case_values() {
+    let r = build_registry(
+        r#"<?php
+            class C { const FOO = 'FOO'; }
+            enum WithConst: string {
+                case Foo = C::FOO;
+                case Bar = 'BAR';
+            }"#,
+    );
+    assert_eq!(r.enum_case_value("WithConst", "Foo"), None);
+    assert_eq!(
+        r.enum_case_value("WithConst", "Bar"),
+        Some(&Type::StringLiteral("BAR".to_string()))
+    );
+}
+
 #[test]
 fn enum_consts_are_registered_too() {
     let r = build_registry(

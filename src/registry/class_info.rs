@@ -118,6 +118,16 @@ pub struct ClassInfo {
     // Phase 67: `@internal` on this class/interface/trait/enum's own
     // docblock - see `docblock::DocBlock::internal`'s own doc comment.
     pub is_internal: bool,
+    // Phase 79: for a backed enum only, each case's own literal backing
+    // value (`StringLiteral`/`IntLiteral`), keyed by case name - lets
+    // `::from()`/`::tryFrom()` narrow a literal-argument call to the
+    // exact matching case's own `Type::EnumCase` instead of the coarse
+    // `self`/`?self`. Only populated when every case's value is a bare
+    // literal (mirrors the identical "don't guess" restriction the
+    // existing `->value` union-of-literals property type already
+    // applies) - empty for a non-enum, an unbacked enum, or a backed enum
+    // with any non-literal case value (a case naming a class constant).
+    pub enum_case_values: HashMap<String, Type>,
 }
 
 impl ClassInfo {
@@ -383,6 +393,7 @@ impl ClassInfo {
             is_api,
             is_api_do_not_implement,
             is_internal,
+            enum_case_values: HashMap::new(),
         }
     }
 
@@ -497,8 +508,32 @@ impl ClassInfo {
         // always read as Mixed and a genuinely undefined case name was
         // never caught.
         for case in &e.cases {
-            consts.insert(case.name.clone(), Type::Object(fqn.clone(), Vec::new()));
+            consts.insert(
+                case.name.clone(),
+                Type::EnumCase(fqn.clone(), case.name.clone()),
+            );
         }
+
+        // Phase 79: each case's own literal backing value, independent
+        // of whether *every* case happens to be a bare literal (unlike
+        // `->value`'s own union type just below, which deliberately
+        // requires all-or-nothing precision) - `::from()`/`::tryFrom()`
+        // narrowing only needs to know a given literal argument's own
+        // matching case, if any, and a partial map still answers that
+        // for the literal-valued cases it does cover.
+        let enum_case_values: HashMap<String, Type> = e
+            .cases
+            .iter()
+            .filter_map(|c| {
+                let v = c.value.as_ref()?;
+                let ty = match &v.kind {
+                    ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
+                    ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
+                    _ => return None,
+                };
+                Some((c.name.clone(), ty))
+            })
+            .collect();
 
         // Every enum case is a real object with a built-in `->name`
         // (its case name, as a string) - and a backed enum's case
@@ -534,12 +569,7 @@ impl ClassInfo {
             let case_values: Vec<Type> = e
                 .cases
                 .iter()
-                .filter_map(|c| c.value.as_ref())
-                .filter_map(|v| match &v.kind {
-                    ExprKind::Literal(Literal::String(s)) => Some(Type::StringLiteral(s.clone())),
-                    ExprKind::Literal(Literal::Int(n)) => Some(Type::IntLiteral(*n)),
-                    _ => None,
-                })
+                .filter_map(|c| enum_case_values.get(&c.name).cloned())
                 .collect();
             let value_ty = if !case_values.is_empty() && case_values.len() == e.cases.len() {
                 match case_values.len() {
@@ -624,6 +654,7 @@ impl ClassInfo {
             is_api: false,
             is_api_do_not_implement: false,
             is_internal: class_doc.as_ref().is_some_and(|d| d.internal),
+            enum_case_values,
         }
     }
 
@@ -646,6 +677,7 @@ impl ClassInfo {
         self.methods.extend(other.methods);
         self.properties.extend(other.properties);
         self.consts.extend(other.consts);
+        self.enum_case_values.extend(other.enum_case_values);
         self.abstract_methods.extend(other.abstract_methods);
         self.final_methods.extend(other.final_methods);
         self.resolved_trait_conflicts

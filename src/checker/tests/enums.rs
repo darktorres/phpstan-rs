@@ -515,3 +515,205 @@ fn an_enum_with_no_template_tag_is_never_flagged_as_generic() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 79: a specific enum case's own singleton type - `Suit::Hearts`'s
+// real static type is `Suit::Hearts`, not the coarse `Suit` every case
+// used to collapse to - and `->name`/`->value` on a case fetched this
+// way narrow to their own exact literal rather than the enum-wide
+// generic string/union-of-every-case's-value.
+
+#[test]
+fn a_case_fetch_has_its_own_singleton_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit {
+                case Hearts;
+                case Spades;
+            }
+            function f(): void {
+                assertType('Suit::Hearts', Suit::Hearts);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_case_fetch_s_name_property_is_its_own_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit {
+                case Hearts;
+                case Spades;
+            }
+            function f(): void {
+                assertType("'Hearts'", Suit::Hearts->name);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_case_fetch_s_value_property_is_its_own_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'S';
+            }
+            function f(): void {
+                assertType("'H'", Suit::Hearts->value);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_case_singleton_is_still_assignable_to_its_own_enum_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit {
+                case Hearts;
+            }
+            function f(Suit $s): void {}
+            f(Suit::Hearts);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_case_singleton_is_still_assignable_to_unit_enum() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit {
+                case Hearts;
+            }
+            function f(UnitEnum $s): void {}
+            f(Suit::Hearts);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_case_singleton_still_supports_its_enum_s_own_methods() {
+    // Member lookup on a specific case must still see every method the
+    // enum itself declares - `EnumCase` is a real instance of its enum
+    // for that purpose, only `->name`/`->value`/case identity are
+    // case-specific.
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit {
+                case Hearts;
+                public function label(): string { return "Hearts"; }
+            }
+            function f(): void {
+                Suit::Hearts->label();
+                Suit::Hearts->missing();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.notFound" && x.message.contains("label")),
+        "unexpected diagnostics: {d:?}"
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.notFound" && x.message.contains("missing")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn from_with_a_literal_matching_a_case_narrows_to_that_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'S';
+            }
+            function f(): void {
+                assertType('Suit::Hearts', Suit::from('H'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn try_from_with_a_literal_matching_a_case_narrows_to_that_case_not_nullable() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'S';
+            }
+            function f(): void {
+                assertType('Suit::Hearts', Suit::tryFrom('H'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn from_with_a_literal_matching_no_known_case_falls_back_to_the_generic_stub() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'S';
+            }
+            function f(): void {
+                assertType('Suit', Suit::from('Z'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn from_with_a_non_literal_argument_falls_back_to_the_generic_stub() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'S';
+            }
+            function f(string $x): void {
+                assertType('Suit', Suit::from($x));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn equality_narrowing_gives_the_exact_case_singleton_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit {
+                case Hearts;
+                case Spades;
+            }
+            function f(Suit $s): void {
+                if ($s === Suit::Hearts) {
+                    assertType('Suit::Hearts', $s);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

@@ -54,6 +54,22 @@ pub enum Type {
     // substitution (a subclass fixing its parent's own type parameter via
     // `@extends Base<Concrete>` isn't modeled).
     Object(String, Vec<Type>),
+    // Phase 79: a single enum case's own singleton type (enum fqn, case
+    // name) - `Suit::Hearts`'s real static type in real PHPStan, not the
+    // coarse `Object(Suit, [])` every case previously collapsed to. Kept
+    // as its own variant rather than folding the case name into
+    // `Object`'s existing (always-empty, for an enum) template-args slot:
+    // an enum genuinely can't be generic in real PHP, so that slot is
+    // reliably free, but overloading it to mean something unrelated to
+    // template arguments would be exactly the kind of undocumented,
+    // action-at-a-distance encoding this project's own conventions
+    // avoid elsewhere. Deliberately NOT a subtype target in
+    // `types::is_subtype`'s own class-hierarchy sense (it has none) -
+    // `registry::is_assignable` is where `EnumCase -> Object(enum_fqn)`
+    // (and up through `UnitEnum`/`BackedEnum`/any implemented interface)
+    // is actually recognized, mirroring how plain `Object`-vs-`Object`
+    // hierarchy checks already work.
+    EnumCase(String, String),
     Callable,
     SelfRef,
     ParentRef,
@@ -241,6 +257,7 @@ impl fmt::Display for Type {
                 }
                 Ok(())
             }
+            Type::EnumCase(fqn, case) => write!(f, "{fqn}::{case}"),
             Type::Callable => write!(f, "callable"),
             Type::SelfRef => write!(f, "self"),
             Type::ParentRef => write!(f, "parent"),
@@ -1076,6 +1093,15 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::ArrayShape(_), Type::Array(_, b)) => matches!(**b, Type::Mixed),
 
         (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(..)) => true,
+
+        // Phase 79: a specific case is a real instance of its own enum -
+        // the exact-name check here is the same non-hierarchy-aware
+        // baseline `Object`-vs-`Object` gets just below; `registry::
+        // is_assignable` is where the hierarchy-aware upgrade (matching
+        // `UnitEnum`/`BackedEnum`/any interface the enum implements)
+        // actually happens, mirroring how plain class inheritance already
+        // works one layer up from this function.
+        (Type::EnumCase(fqn, _), Type::Object(name, _)) => fqn == name,
 
         // An unbound template parameter is a placeholder, not a real type.
         // Call sites should have already substituted it away

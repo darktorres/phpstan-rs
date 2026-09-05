@@ -712,11 +712,18 @@ impl<'a> Checker<'a> {
                 // (the first `Object` found) for argument-checking.
                 let recv_class = match &recv_ty {
                     Type::Object(class, type_args) => Some((class.clone(), type_args.clone())),
+                    // Phase 79: an enum can't be generic, so there's no
+                    // real template-args list to carry through here -
+                    // same as every other synthesized enum-instance type
+                    // this checker builds (`cases()`'s own element type,
+                    // `self_ty` in `ClassInfo::from_enum_decl`).
+                    Type::EnumCase(fqn, _) => Some((fqn.clone(), Vec::new())),
                     Type::Union(members) | Type::Intersection(members) => {
                         members.iter().find_map(|m| match m {
                             Type::Object(class, type_args) => {
                                 Some((class.clone(), type_args.clone()))
                             }
+                            Type::EnumCase(fqn, _) => Some((fqn.clone(), Vec::new())),
                             _ => None,
                         })
                     }
@@ -1444,6 +1451,8 @@ impl<'a> Checker<'a> {
                 match (&resolved_class, sig) {
                     (Some(class), Some(s)) => {
                         let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
+                        let resolved_ty =
+                            self.narrow_enum_from_call(class, method, args, resolved_ty, locals);
                         self.resolve_pseudo(&resolved_ty, class)
                     }
                     _ => Type::Mixed,
@@ -1644,6 +1653,34 @@ impl<'a> Checker<'a> {
                             let resolved = types::substitute_template(&p.ty, &bindings);
                             self.resolve_pseudo(&resolved, &class)
                         })
+                        .unwrap_or(Type::Mixed),
+                    // Phase 79: `->name`/`->value` on a specific known
+                    // case narrows past the enum-wide property type
+                    // registered in `ClassInfo` (a generic `string` /
+                    // union-of-every-case's-value) to this exact case's
+                    // own literal - real PHPStan's own `->name`/`->value`
+                    // precision (`EnumCaseObjectType`). Enums can't
+                    // declare any instance property of their own in real
+                    // PHP, so no other property name is ever legitimate
+                    // here - the fallback still does an ordinary by-class
+                    // lookup rather than assuming that, in case this
+                    // checker's own synthesized `properties` map (or a
+                    // future language change) ever disagrees.
+                    Type::EnumCase(_, case) if prop == "name" => Type::StringLiteral(case),
+                    Type::EnumCase(fqn, case) if prop == "value" => self
+                        .registry
+                        .enum_case_value(&fqn, &case)
+                        .cloned()
+                        .or_else(|| {
+                            self.registry
+                                .lookup_property(&fqn, "value")
+                                .map(|p| p.ty.clone())
+                        })
+                        .unwrap_or(Type::Mixed),
+                    Type::EnumCase(fqn, _) => self
+                        .registry
+                        .lookup_property_with_owner(&fqn, prop)
+                        .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
                         .unwrap_or(Type::Mixed),
                     _ => Type::Mixed,
                 };
@@ -2241,6 +2278,20 @@ impl<'a> Checker<'a> {
                             self.resolve_pseudo(&resolved, &class)
                         })
                         .unwrap_or(Type::Mixed),
+                    // Phase 79: an enum case is a real instance of its
+                    // enum for method-call purposes (see
+                    // `member_confirmed_missing`'s identical `EnumCase`
+                    // arm) - no real template-args list to carry through,
+                    // same as every other synthesized enum-instance type.
+                    Type::EnumCase(fqn, _) => self
+                        .registry
+                        .lookup_method_with_owner(&fqn, method)
+                        .map(|(owner, sig)| {
+                            let resolved_args = resolve_call_args(args, &sig.params);
+                            let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
+                            self.resolve_pseudo(&resolved, &owner)
+                        })
+                        .unwrap_or(Type::Mixed),
                     _ => Type::Mixed,
                 };
                 // `$x?->method()` short-circuits to `null` when `$x` is
@@ -2259,6 +2310,8 @@ impl<'a> Checker<'a> {
                     self.registry.lookup_method(&class, method).map(|sig| {
                         let resolved_args = resolve_call_args(args, &sig.params);
                         let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
+                        let resolved =
+                            self.narrow_enum_from_call(&class, method, args, resolved, locals);
                         self.resolve_pseudo(&resolved, &class)
                     })
                 })
@@ -2327,6 +2380,24 @@ impl<'a> Checker<'a> {
                             let resolved = types::substitute_template(&p.ty, &bindings);
                             self.resolve_pseudo(&resolved, &class)
                         })
+                        .unwrap_or(Type::Mixed),
+                    // Phase 79: mirrors `check_expr`'s own identical
+                    // `EnumCase` arm just above - see its comment.
+                    Type::EnumCase(_, case) if prop == "name" => Type::StringLiteral(case),
+                    Type::EnumCase(fqn, case) if prop == "value" => self
+                        .registry
+                        .enum_case_value(&fqn, &case)
+                        .cloned()
+                        .or_else(|| {
+                            self.registry
+                                .lookup_property(&fqn, "value")
+                                .map(|p| p.ty.clone())
+                        })
+                        .unwrap_or(Type::Mixed),
+                    Type::EnumCase(fqn, _) => self
+                        .registry
+                        .lookup_property_with_owner(&fqn, prop)
+                        .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
                         .unwrap_or(Type::Mixed),
                     _ => Type::Mixed,
                 };
@@ -2854,6 +2925,39 @@ impl<'a> Checker<'a> {
             types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
         }
         types::substitute_template(&sig.return_type, &bindings)
+    }
+
+    /// Phase 79: `Suit::from(1)`/`Suit::tryFrom(1)` called with a literal
+    /// argument that provably matches one specific case's own backing
+    /// value narrows past the synthesized `self`/`?self` signature
+    /// straight to that case's own singleton type -
+    /// `Registry::enum_case_for_value` is a no-op (returns `None`) for
+    /// every non-enum class and every enum whose cases this checker
+    /// couldn't prove literal values for, so this never fires outside a
+    /// real backed-enum `from`/`tryFrom` call. A literal that matches
+    /// *no* known case is deliberately left alone (returns `fallback`
+    /// unchanged) rather than guessing `never`/`null` - real PHP's own
+    /// `from()` runtime-error path isn't modeled, and this project
+    /// doesn't have every case's value proven literal often enough to
+    /// safely conclude "none of them match." Shared by both the
+    /// mutating `check_expr` and the pure `infer_expr` `StaticCall` arms
+    /// so they stay in sync.
+    fn narrow_enum_from_call(
+        &self,
+        class: &str,
+        method: &str,
+        args: &[Arg],
+        fallback: Type,
+        locals: &Locals,
+    ) -> Type {
+        if (method != "from" && method != "tryFrom") || args.len() != 1 {
+            return fallback;
+        }
+        let arg_ty = self.infer_expr(&args[0].value, locals);
+        match self.registry.enum_case_for_value(class, &arg_ty) {
+            Some(case) => Type::EnumCase(class.to_string(), case.to_string()),
+            None => fallback,
+        }
     }
 
     /// Finding 48 made a literal array's own inferred type a real

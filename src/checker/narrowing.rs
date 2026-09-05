@@ -473,6 +473,11 @@ impl<'a> Checker<'a> {
             Type::Object(class, _) => {
                 self.registry.classes.contains_key(class) && !has_member(class)
             }
+            // Phase 79: a specific enum case is still a real instance of
+            // its enum for member-lookup purposes - only its own case
+            // identity (narrowing, `->name`/`->value`) cares which case,
+            // never whether some *other* method/property exists.
+            Type::EnumCase(fqn, _) => self.registry.classes.contains_key(fqn) && !has_member(fqn),
             Type::Union(members) => members
                 .iter()
                 .any(|m| self.member_confirmed_missing(m, has_member)),
@@ -1124,7 +1129,16 @@ pub(crate) fn narrow_type_to(original: &Type, target: &Type) -> Type {
 fn is_known_single_value(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Null | Type::True | Type::False | Type::IntLiteral(_) | Type::StringLiteral(_)
+        Type::Null
+            | Type::True
+            | Type::False
+            | Type::IntLiteral(_)
+            | Type::StringLiteral(_)
+            // Phase 79: `Suit::Hearts` is exactly as single-valued as any
+            // other literal - `$case !== Suit::Hearts` should exclude
+            // that one case, the same way `$x !== 'a'` already excludes
+            // that one string.
+            | Type::EnumCase(_, _)
     ) ||
     // Found by a round of Piwigo-corpus bucketing: `$x !== []` (the same
     // idiom `$x !== ''` already gets, Phase 14) never excluded the empty
