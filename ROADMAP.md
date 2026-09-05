@@ -1566,22 +1566,74 @@ repeatedly elsewhere in this corpus's own verification history (Phase
 release" note, ...), just newly reachable here because this method was
 never comparable against an ancestor at all before this fix.
 
+**Update**: the `#[Override]` sub-check is now done too - the
+unconditional-fatal-error half only (`method.override`: the attribute is
+present but no matching ancestor method exists, confirmed directly via
+`php -r`). The *other* direction (`method.missingOverride` - a real
+override missing the attribute) is a real PHPStan opt-in rule gated
+behind `checkMissingOverrideMethodAttribute`, off by default and not
+enabled anywhere in this project's own corpus config - not attempted.
+`FunctionSig` gained `has_override_attr` (mirroring `no_discard` exactly,
+including its short-name-only, case-insensitive, no-namespace-resolution
+matching convention - confirmed this matches real PHPStan's own
+`hasOverrideAttribute`, deliberately more lenient than the real PHP
+*engine*'s own stricter namespace resolution for this same attribute),
+so the check works uniformly for a class's own methods and a trait-
+supplied one via the shared `check_one_method_override` helper.
+
+Two real false-positive classes were found and fixed via corpus
+verification before shipping, both non-obvious:
+
+- A trait's own method carrying `#[Override]` must never be checked in
+  isolation against the trait's own (always-empty) ancestor chain - real
+  PHP defers this whole check entirely to whichever class eventually
+  `use`s the trait (confirmed directly: the identical trait method is
+  fine when the using class has a real ancestor, and fatals - attributed
+  to the *using class's* own method name, not the trait's - only when it
+  doesn't). Fixed by exempting `ClassKind::Trait` from the check
+  entirely; the trait-derived-method sweep above already re-runs this
+  same check keyed on the *using* class, which is exactly where real PHP
+  wants it evaluated.
+- Implementing a trait's own *abstract* method (confirmed directly, and
+  a genuine corpus false positive:
+  `Psl\RandomSequence\MersenneTwisterSequence::twist()` overriding
+  `Internal\MersenneTwisterTrait`'s own abstract declaration this exact
+  way) needed a new `Registry::trait_declares_abstract_method` -
+  deliberately narrower than folding `uses` into
+  `lookup_ancestor_method_with_owner`'s own general walk (that would
+  also change every *other*, already-shipped check in this function in
+  ways not verified here). An unresolved name anywhere in the
+  extends/implements chain (a dependency this project's own registry has
+  no declaration for at all - two more genuine corpus false positives:
+  `CycloneDX\Composer\Plugin implements ... Composer\Plugin\
+  PluginInterface` and `CycloneDX\Composer\_internal\MakeBom\Command
+  extends Composer\Command\BaseCommand`, neither vendored anywhere in
+  this corpus) needed a new `Registry::has_unresolvable_ancestor` -
+  "don't guess wrong" the same way elsewhere in this project.
+
+Corpus-verified: byte-identical to the 49989 baseline once both fixes
+landed (an intermediate, never-shipped version produced 42, then 9,
+spurious findings before each root cause was traced and fixed) - a
+direct repro confirms the check fires correctly on a genuine violation,
+a real "no violations found in this corpus" result, not a dormant check.
+
 Still open: interface-first-vs-trait-abstract-method ancestor-lookup
-*priority* when both could plausibly supply the "real" ancestor (not
-attempted - `lookup_ancestor_method_with_owner` already has a fixed,
-undocumented `extends` before `implements` order that this update
-didn't change or re-examine), the `#[Override]` sub-check, property
-hooks (`notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`),
-and native-type-variance (`property.nativeType` - PHP requires
-*invariant*, not covariant, property types on override) - `PropertySig`
-only carries one already-docblock-merged `ty` field (no
-`return_type_native`-style split the way `FunctionSig` has), and
-comparing it directly risks the identical false-positive class
-`method.childReturnType`'s own doc comment already found and fixed for
-methods; needs that split first. `final`/`abstract` property modifiers
-(PHP 8.4) also still need `is_final`/`is_abstract` added to
-`PropertyDecl`/`PropertySig` - genuine new parser work, not currently
-tracked by any phase.
+*priority* when both could plausibly supply the "real" ancestor for the
+*signature-compatibility* checks (not attempted -
+`lookup_ancestor_method_with_owner` already has a fixed, undocumented
+`extends` before `implements` order that this update didn't change or
+re-examine, and the two new trait-aware helpers added above are
+deliberately scoped to the `#[Override]` check alone), property hooks
+(`notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`), and
+native-type-variance (`property.nativeType` - PHP requires *invariant*,
+not covariant, property types on override) - `PropertySig` only carries
+one already-docblock-merged `ty` field (no `return_type_native`-style
+split the way `FunctionSig` has), and comparing it directly risks the
+identical false-positive class `method.childReturnType`'s own doc
+comment already found and fixed for methods; needs that split first.
+`final`/`abstract` property modifiers (PHP 8.4) also still need
+`is_final`/`is_abstract` added to `PropertyDecl`/`PropertySig` - genuine
+new parser work, not currently tracked by any phase.
 
 **Phase 65 - Declaration-site modifier-consistency + constructor-shape
 checks (PARTIAL).** Landed nine of the batch's own small, independent
