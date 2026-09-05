@@ -2270,15 +2270,31 @@ an already-accepted, pre-existing gap (this project's own lack of
 confirmed present in the same corpus's own pre-Phase-74 baseline in 49
 other places already) rather than introducing a new problem class.
 
-Still open, deferred as their own separate, still-uncommitted batch:
-generalizing `array_unique`'s "return an `ArrayType` from arg 0" pattern
-to its 16 `array_diff*`/`array_udiff*`/`array_intersect*`/
-`array_uintersect*` siblings; `array_pop`/`array_shift`'s own expression-
-result type; `array_splice`/`array_replace`/`array_pad`; PHP 8.4's
-`array_find`/`array_find_key`/`array_any`/`array_all` (currently not
-even stub-registered, and zero corpus incidence beyond `array_find`/
-`array_any` at 5 call sites each - real, but not independently
-verifiable at meaningful scale in this corpus).
+**Update**: generalizing `array_unique`'s "return an `ArrayType` from
+arg 0" pattern to its 16 `array_diff*`/`array_udiff*`/`array_intersect*`/
+`array_uintersect*` siblings is now done - none of them ever transforms
+a surviving element's own value (only *which* key/value pairs survive
+differs), confirmed directly via `php -r`. Found, but did not fix, a
+separate pre-existing stub imprecision while writing tests for it:
+phpstorm-stubs' own `array_udiff`/`array_uintersect_assoc` declare their
+real PHP 8.0+ variadic tail with a bare `@param array ...$rest`
+docblock, unable to express "0+ arrays then one trailing callback" - a
+real callback argument gets wrongly flagged as "expects array" against
+these 6 callback-taking siblings specifically. Zero corpus incidence for
+any of them, so not fixed here. Corpus-verified: 49994 -> 49995 (+1,
+genuine: `php_codesniffer`'s own `Autoload::determineLoadedClass`
+declares `@return string` but its body can return `null` through an
+uninitialized `$className` - previously masked by `array_diff`'s own
+less precise return type), plus 4 message-precision improvements
+(`list` -> `list<T>`) with no diagnostic-count change.
+
+Still open: `array_pop`/`array_shift`'s own expression-result type;
+`array_splice`/`array_replace`/`array_pad`; PHP 8.4's `array_find`/
+`array_find_key`/`array_any`/`array_all` (currently not even stub-
+registered, and zero corpus incidence beyond `array_find`/`array_any` at
+5 call sites each - real, but not independently verifiable at
+meaningful scale in this corpus); the `array_udiff`/`array_uintersect_
+assoc` callback-argument-type imprecision found above.
 
 **Phase 75 - String accessory-type extensions (case-tracking) + related
 string function coverage (NEW, PLANNED).** Add `Lowercase`/`Uppercase`/
