@@ -238,11 +238,45 @@ unlocks per tag for tracking: `@method`/`@mixin` (synthesized into
 `cases()`/`value`/`name` already are, Phase 9) unlock `MethodTagCheck`/
 `Rule`/`TraitRule`/`TraitUseRule`, `MixinCheck`/`Rule`/`TraitRule`/
 `TraitUseRule`, and (nested-template sub-case) `MethodTagTemplateTypeCheck`/
-`Rule`/`TraitRule`. The `@property`/`@property-read`/`@property-write`
-*validation* half is a genuine bright spot found by the audit: parsing
-and inference already ship (Phase 13 Finding D); only the diagnostic
-layer (`PropertyTagCheck`/`Rule`/`TraitRule`/`TraitUseRule`) is missing -
-cheapest item in the whole phase, do it first. `@phpstan-type`/
+`Rule`/`TraitRule`.
+
+**Update**: the `@property`/`@property-read`/`@property-write`
+*validation* half - the bright spot the audit found, called out as the
+cheapest item in the whole phase - is now done, its `class.notFound`
+slice at least: new `Checker::check_property_tag_types`
+(`checker/generics.rs`) reuses the exact `check_generic_bounds`/
+`check_type_class_names_exist` pair `check_class_generic_bounds`
+already runs for a class's own real properties (Phase 48/54's own
+generic-bounds/existence-checking primitives), applied to every
+`@property`-family tag's own declared type instead - re-parses
+`c.doc_comment` fresh (the same pattern `check_enum_template_tag`
+already uses) rather than threading a `DocBlock` through from
+registry-indexing time. Looks a tag's type up via the already-resolved
+`info.properties.get(&tag.name)` (which only ever holds the *winning*
+synthesized entry per name - a real, physically-declared property of
+the same name always wins over a tag, matching `ClassInfo::from_decl`'s
+own `or_insert_with` semantics), so a tag shadowed by a real property
+of the same name checks the real property's type instead of the tag's
+own - a documented, deliberate leniency for a redundant/self-
+contradictory declaration style with no confirmed corpus incidence.
+Corpus-verified: byte-identical to baseline (only 2 files in the whole
+~20,300-file corpus use `@property` at all, both already correct) - a
+direct repro confirms the check fires correctly on a genuine
+unresolvable-class tag, a real "no violations found" result, not a
+dormant check. Still open, out of this update's own narrower scope:
+`propertyTag.trait`/`propertyTag.unresolvableType` (the tag's type
+resolves to a trait, or a genuinely unresolvable shape - `class.notFound`
+was judged the highest-value slice to ship first). A trait's own
+`@property` tag is already checked for free in its declaration context
+(confirmed directly: `check_property_tag_types` runs uniformly for
+every `ClassDecl` regardless of `kind`, unlike real PHPStan's own
+`PropertyTagCheck::checkInTraitDefinitionContext`, a deliberately
+separate method it needs) - only `PropertyTagTraitUseRule`'s own re-
+check relative to each *using* class's own template-resolution context
+(relevant only when the trait's tag type references a `@template` name
+that resolves differently per user) remains genuinely unbuilt.
+
+`@phpstan-type`/
 `@phpstan-import-type` (global config-level aliases, circular-alias
 detection, duplicate-name checks) unlock `LocalTypeAliasesCheck`/`Rule`/
 `TraitAliasesRule`/`TraitUseAliasesRule`, `TypeAlias`, `TypeAliasResolver`,
