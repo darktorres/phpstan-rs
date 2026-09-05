@@ -1524,6 +1524,28 @@ impl<'a> Checker<'a> {
                     } else if let Some((owner, sig)) = &prop_with_owner {
                         // Phase 67: `@internal`.
                         self.check_internal_property_access(owner, prop_name, sig, e.span, label);
+                        // Phase 57 follow-up: a static property shares
+                        // the exact same visibility rules as an instance
+                        // one - confirmed directly via `php -r` as a real
+                        // "Cannot access private property" fatal error.
+                        self.check_member_visibility(MemberVisibilityCheck {
+                            kind: "staticProperty",
+                            owner,
+                            member_name: prop_name,
+                            visibility: &sig.visibility,
+                            describe: &format!("static property {owner}::${prop_name}"),
+                            span: e.span,
+                            label,
+                        });
+                        // Phase 57 follow-up:
+                        // `AccessPrivatePropertyThroughStaticRule` - same
+                        // late-static-binding unsafety as the identical
+                        // class-constant rule above.
+                        if class_name == "static" && sig.visibility == Visibility::Private {
+                            self.check_static_private_property_access(
+                                owner, prop_name, e.span, label,
+                            );
+                        }
                     }
                     prop_with_owner
                         .map(|(_, p)| self.resolve_pseudo(&p.ty, &class))

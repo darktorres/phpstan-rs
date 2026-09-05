@@ -69,7 +69,15 @@ impl<'a> Checker<'a> {
                         || self.registry.is_subclass_of(c, owner)
                         || self.registry.is_subclass_of(owner, c)
                         || match kind {
-                            "property" => self.registry.lookup_property(c, member_name).is_some(),
+                            // A static property shares the exact same
+                            // `PropertySig`/`lookup_property` machinery an
+                            // instance property already uses - only
+                            // `PropertySig::is_static` (already checked by
+                            // this arm's own caller before it ever reaches
+                            // here) tells them apart.
+                            "property" | "staticProperty" => {
+                                self.registry.lookup_property(c, member_name).is_some()
+                            }
                             // Phase 57's own still-open item: a class
                             // constant gets the identical sibling-shared-
                             // ancestor fallback as property/method
@@ -149,6 +157,58 @@ impl<'a> Checker<'a> {
         span: Span,
         label: &str,
     ) {
+        self.check_static_private_member_access(
+            "constant",
+            "staticClassAccess.privateConstant",
+            owner,
+            member,
+            span,
+            label,
+        );
+    }
+
+    /// Same idea as `check_static_private_constant_access` just above,
+    /// for a `private` *static property* instead - a static property
+    /// shares the exact same late-static-binding unsafety (confirmed
+    /// directly via `php -r`: a subclass redeclaring the same `private
+    /// static` property makes `static::$prop`, read from inside the
+    /// *ancestor's* own method, throw a real "Cannot access private
+    /// property" error at the call site, the identical shape as the
+    /// constant case). Matches real PHPStan's own
+    /// `AccessPrivatePropertyThroughStaticRule`: same `final`-class
+    /// exemption, same unconditional-on-any-`static::$prop` trigger
+    /// regardless of whether a subclass actually redeclares it.
+    pub(crate) fn check_static_private_property_access(
+        &mut self,
+        owner: &str,
+        member: &str,
+        span: Span,
+        label: &str,
+    ) {
+        self.check_static_private_member_access(
+            "property",
+            "staticClassAccess.privateProperty",
+            owner,
+            &format!("${member}"),
+            span,
+            label,
+        );
+    }
+
+    /// Shared by the two `check_static_private_*_access` wrappers above -
+    /// both are the identical "skip inside a `final` class, otherwise
+    /// report" shape, differing only in the noun/identifier/exactly-
+    /// formatted member name (a constant's own bare name vs. a
+    /// property's `$`-prefixed one).
+    fn check_static_private_member_access(
+        &mut self,
+        noun: &str,
+        identifier: &str,
+        owner: &str,
+        member_display: &str,
+        span: Span,
+        label: &str,
+    ) {
         let is_final = self
             .current_class
             .as_deref()
@@ -159,10 +219,10 @@ impl<'a> Checker<'a> {
         }
         self.report(
             label.to_string(),
-            format!("unsafe access to private constant {owner}::{member} through static::"),
+            format!("unsafe access to private {noun} {owner}::{member_display} through static::"),
             span,
             0,
-            "staticClassAccess.privateConstant",
+            identifier,
         );
     }
 

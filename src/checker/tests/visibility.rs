@@ -20,10 +20,14 @@ fn visibility_diagnostics(src: &str) -> Vec<Diagnostic> {
                 || d.identifier.starts_with("method.protected")
                 || d.identifier.starts_with("staticMethod.private")
                 || d.identifier.starts_with("staticMethod.protected")
+                || d.identifier.starts_with("staticProperty.private")
+                || d.identifier.starts_with("staticProperty.protected")
                 || d.identifier.starts_with("classConstant.private")
                 || d.identifier.starts_with("classConstant.protected")
                 || d.identifier
                     .starts_with("staticClassAccess.privateConstant")
+                || d.identifier
+                    .starts_with("staticClassAccess.privateProperty")
         })
         .collect()
 }
@@ -546,6 +550,130 @@ fn a_private_constant_accessed_through_a_named_class_is_never_flagged_for_the_st
                 private const X = 1;
                 public static function get(): int {
                     return Foo::X;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 57 follow-up: ordinary static-property visibility enforcement
+// (previously entirely unenforced - confirmed directly via `php -r` as
+// a real "Cannot access private property" fatal error), plus the
+// identical `AccessPrivatePropertyThroughStaticRule` late-static-binding
+// unsafety the constant case above already gets.
+
+#[test]
+fn reading_a_private_static_property_from_outside_its_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private static int $x = 1;
+            }
+            function test(): int {
+                return Foo::$x;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "staticProperty.private");
+}
+
+#[test]
+fn reading_a_private_static_property_from_inside_its_own_class_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private static int $x = 1;
+                public static function get(): int {
+                    return self::$x;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reading_a_protected_static_property_from_a_subclass_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Base {
+                protected static int $x = 1;
+            }
+            class Child extends Base {
+                public static function get(): int {
+                    return self::$x;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn writing_a_private_static_property_from_outside_its_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private static int $x = 1;
+            }
+            function test(): void {
+                Foo::$x = 2;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "staticProperty.private");
+}
+
+#[test]
+fn a_private_static_property_accessed_through_static_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private static int $x = 1;
+                public static function get(): int {
+                    return static::$x;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "staticClassAccess.privateProperty"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_private_static_property_accessed_through_static_in_a_final_class_is_never_flagged_for_the_static_rule()
+ {
+    let d = visibility_diagnostics(
+        r#"<?php
+            final class Foo {
+                private static int $x = 1;
+                public static function get(): int {
+                    return static::$x;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "staticClassAccess.privateProperty"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_public_static_property_accessed_through_static_is_never_flagged_for_the_static_rule() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public static int $x = 1;
+                public static function get(): int {
+                    return static::$x;
                 }
             }
         "#,
