@@ -993,6 +993,47 @@ interface with no `extends \Throwable`, the exact same shape Phase 42's
 own `JsonSchema\Exception\ExceptionInterface` finding already
 confirmed genuine).
 
+**Investigated and declined**: `@phpstan-type Name TypeExpr` local type
+alias support (the next-biggest remaining `class.notFound` driver after
+the fix above - real corpus shape: `justinrainbow/json-schema`'s own
+`ErrorBag`, `@phpstan-type Error array{...}` then `@phpstan-type
+ErrorList list<Error>`, referenced bare from the same class's own
+`@var`/`@param`/`@return` tags). Implemented in full - `DocBlock::
+type_aliases` parsing, a `ClassInfo`-level resolved-alias map threaded
+into property/method type resolution the same way `@template` metadata
+already is - and corpus-verified, then reverted. One real, independent
+bug was found and fixed along the way during that verification (a
+`substitute_type_aliases`/`resolve_names_in_type` ordering mistake that
+re-qualified an alias's own already-resolved inner names every time it
+was spliced into a new containing type, tripling `json-schema`'s own
+unparsed `int-mask-of<...>` pseudo-type into `JsonSchema\Entity\
+JsonSchema\Entity\JsonSchema\Entity\int-mask-of` - fixed by keying the
+alias map by resolved FQN and substituting strictly *after* `resolve_
+names_in_type` runs on the surrounding type, not before), but even
+after that fix, the feature's net corpus effect was a clear regression:
+47,132 -> 47,384 (+252 total), a `class.notFound` win (-312) more than
+offset by a new `argument.type` false-positive class (+508, concentrated
+in `friendsofphp/php-cs-fixer`'s own `Tokenizer\Token` class). Root
+cause: once an alias resolves to a real, precise type instead of an
+unresolvable placeholder, `is_assignable`'s existing "an unresolvable
+`Type::Object` is always compatible" leniency (`registry.rs`) stops
+applying to it, and the argument-type check runs for real for the first
+time - at which point a *separate*, large, pre-existing gap this project
+already has (`define()`-declared global constants, e.g. phpstorm-stubs'
+own `define('T_WHITESPACE', 397);`, resolve to bare `Type::Mixed`
+everywhere they're referenced, never their real literal int value - only
+`const NAME = value;` is modeled at all) makes a real, correct,
+precisely-typed parameter (`array{0: int, 1: string, 2?: int}|string`)
+look incompatible with a caller's own `[\T_WHITESPACE, ' ']` array
+literal, whose first element the checker can only ever see as `mixed`.
+Fixing that properly needs a real `define()`-based global-constant
+registry (name -> inferred-value-type, likely its own phase-sized
+effort given how many exist across `jetbrains/phpstorm-stubs` alone) -
+not attempted here. Cross-class `@phpstan-import-type Name from Class`
+(a distinct, separate real tag - not attempted even in the reverted
+implementation) remains open too, needed by real corpus consumers of
+this same alias, e.g. `json-schema`'s own `ErrorBagProxy` trait.
+
 **Phase 49 - Call-argument binding generalization (named args, spread,
 by-ref legality) (PARTIAL).** This entry's own status was never
 updated after an earlier pilot batch landed it (commit `76fc86e`) -
