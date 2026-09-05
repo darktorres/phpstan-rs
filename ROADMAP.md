@@ -942,6 +942,57 @@ PHPStan's ~27 usage-location kinds, and unlocks `ClassNameNodePair`,
 `findTypeToCheck()` half. Size: XL for the full `RuleLevelHelper`-
 equivalent pipeline; the MVP itself is done.
 
+**Update**: fixed a real, previously-declined-as-"not worth it"
+`Checker`-wide false-positive/false-negative source this same bucketing
+pass found, root-caused, and then reconsidered after a direct challenge
+("isn't [positional namespace tracking] needed for a proper tool?") -
+correctly, since the actual fix turned out to be a small, contained
+change, not the "rework `Checker` to track namespace positionally
+throughout" rewrite the first assessment wrongly assumed. `Checker::
+name_ctx` used to be built once per file via a single whole-file
+`NameContext::build(program)` call (last `namespace` statement in the
+file wins), unlike `Registry::index_with_context`'s own positional
+`ctx.set_namespace` walk - wrong for any file with more than one
+`namespace` statement (real PHP allows this, both the brace-delimited
+form and, less obviously, several plain `namespace Foo;` statements in
+one file - `NameContext::build`'s own doc comment used to claim
+incorrectly that only one is ever legal). Since a `namespace`/`use`
+statement can only ever appear at a file's own top level in real PHP
+(never nested inside a class/function/block), the fix only needed
+`check_program`'s own top-level per-statement loop to track `self.
+name_ctx` positionally too - adding `StmtKind::Namespace`/`StmtKind::
+Use` arms right alongside its existing `ClassDecl`/`FunctionDecl`/
+`EnumDecl` ones - not any deeper rework; every recursive check called
+from inside that loop already just reads `self.name_ctx` whenever it
+needs it, so it now naturally sees whichever namespace was actually
+active at each declaration's own position. The three genuinely
+whole-file, position-independent pre-loop questions (file-wide `use`-
+import existence, Phase 59's rebind-target scan, Pest's file-local
+`uses()`) keep using a separately-computed whole-file `NameContext`,
+since "last namespace wins" was never their bug to begin with.
+
+Verified against the ~20,300-file corpus: 48,576 -> 47,132 (-1,444),
+far beyond the one file (`relay/Cluster.php`) that originally surfaced
+this - real PHPStan-style multi-namespace-per-file stub bundles are a
+whole `jetbrains/phpstorm-stubs` convention (`cassandra/cassandra.php`,
+`http/http3.php`, `yaf/yaf_namespace.php`, `pq/pq.php`, `PDO/PDO.php`,
+`random/random.php`, and others), every one of which had some of its
+own classes silently mis-resolved under the wrong namespace before this
+fix. Spot-checked genuine across every affected identifier: `class.
+notFound` (-274, e.g. `relay/Cluster.php`'s own self-reference),
+`missingType.return`/`missingType.parameter` (-905/-365, methods that
+previously failed their own registry lookup under the wrong FQN and
+silently skipped this check entirely, now correctly found and checked),
+`attribute.notFound` (-57), plus new, previously-hidden-but-genuine
+findings surfacing now that resolution is correct: `method.visibility`
+(+2, `yaf/yaf_namespace.php`'s own `Yaf\Response\Http::__toString()`/
+`Yaf\Response\Cli::__toString()` really do reduce a `public` parent
+method to `private`) and `throws.notThrowable` (+7, `cassandra/
+cassandra.php`'s own `Cassandra\Exception` really is an empty marker
+interface with no `extends \Throwable`, the exact same shape Phase 42's
+own `JsonSchema\Exception\ExceptionInterface` finding already
+confirmed genuine).
+
 **Phase 49 - Call-argument binding generalization (named args, spread,
 by-ref legality) (PARTIAL).** This entry's own status was never
 updated after an earlier pilot batch landed it (commit `76fc86e`) -
