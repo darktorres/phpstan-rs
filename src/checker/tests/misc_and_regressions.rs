@@ -165,6 +165,67 @@ fn a_variable_assigned_as_a_cast_operand_is_defined_afterward() {
     );
 }
 
+// Real PHP silently auto-vivifies an array-index write onto a
+// completely undefined variable (confirmed via `php -d
+// error_reporting=E_ALL -r` - no warning at any level), for both a
+// pure append and a literal-keyed write. `$x[] = 1; return $x;` used
+// to produce two `variable.undefined` diagnostics: one from the write
+// itself being checked as a read, and one from the later real read
+// never seeing `$x` bound at all.
+#[test]
+fn an_array_append_onto_an_undefined_variable_auto_vivifies_it() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f() {
+                $x[] = 1;
+                return $x;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("undefined variable")),
+        "expected $x to be auto-vivified, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_keyed_array_write_onto_an_undefined_variable_auto_vivifies_it() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f() {
+                $x['key'] = 1;
+                return $x;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("undefined variable")),
+        "expected $x to be auto-vivified, got: {d:?}"
+    );
+}
+
+// A superglobal write must NOT go through the same fresh-empty-shape
+// auto-vivification as an ordinary local - real corpus regression
+// caught before shipping: `$_SERVER['SCRIPT_FILENAME'] = ...;` then
+// separately reading the real, pre-existing `$_SERVER['PHP_SELF']` (a
+// key never locally written) was wrongly flagged as accessing a key a
+// freshly-narrowed `ArrayShape` could never have.
+#[test]
+fn a_keyed_write_to_a_superglobal_does_not_narrow_it_to_a_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f() {
+                $_SERVER['SCRIPT_FILENAME'] = '/index.php';
+                return $_SERVER['PHP_SELF'];
+            }
+        "#,
+    );
+    assert!(
+        d.is_empty(),
+        "expected no diagnostics - $_SERVER stays a generic array, not a narrow shape, got: {d:?}"
+    );
+}
+
 #[test]
 fn check_expr_recurses_into_every_simple_wrapper_expression() {
     // Coverage measurement found none of these check_expr arms had

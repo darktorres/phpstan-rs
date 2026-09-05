@@ -74,6 +74,20 @@ impl<'a> Checker<'a> {
             ExprKind::Index(base, idx) => {
                 match &base.kind {
                     ExprKind::Index(..) => self.check_assignment_target(base, locals, label),
+                    // Same reasoning as the top-level `Variable` arm
+                    // above, one level down: `$x[] = ...`/`$x['key'] =
+                    // ...` as `$x`'s very first use is real PHP's own
+                    // silent array auto-vivification (confirmed directly
+                    // via `php -d error_reporting=E_ALL -r` - no warning
+                    // at any level), not a read of an already-defined
+                    // `$x` - routing it through `check_expr` here wrongly
+                    // flagged it as `variable.undefined`. Whether `$x`
+                    // already holds a non-array-compatible type is a
+                    // separate, not-yet-checked question this project's
+                    // usual "don't guess" leniency already leaves alone
+                    // for the write side (`bind_assignment_target`'s own
+                    // identical `Index` arm).
+                    ExprKind::Variable(_) => {}
                     _ => {
                         self.check_expr(base, locals, label);
                     }
@@ -203,9 +217,49 @@ impl<'a> Checker<'a> {
             // correctly handling any nesting depth.
             ExprKind::Index(base, idx) => match &base.kind {
                 ExprKind::Variable(name) => {
-                    let Some(current) = locals.get(name).cloned() else {
-                        return;
-                    };
+                    // A write through an as-yet-undefined variable
+                    // (`$x[] = 1;`/`$x['key'] = 1;` as `$x`'s very first
+                    // use) is real PHP's own array auto-vivification -
+                    // silently creates a fresh `[]` and writes into it,
+                    // no warning at any error-reporting level (confirmed
+                    // directly via `php -d error_reporting=E_ALL -r`).
+                    // Previously bailed out here entirely, leaving `$x`
+                    // permanently undefined for every later read - a
+                    // real corpus `variable.undefined` false positive.
+                    // Starting `write_index_into` from a fresh empty
+                    // `ArrayShape` reuses its own existing "a real append
+                    // onto a provably list-like container (an empty
+                    // shape included) stays a real, now-non-empty list"
+                    // rule, so `$x[] = 1;` alone correctly infers
+                    // `non-empty-list<int>`, not just `array`.
+                    //
+                    // A superglobal (`$_SERVER['PHP_SELF'] = ...;`, a
+                    // real, common test-setup idiom) must NOT go through
+                    // this same fresh-empty-shape path even though it's
+                    // also typically absent from `locals` - unlike an
+                    // ordinary local, a superglobal already has a real,
+                    // much wider shape PHP itself populates before the
+                    // script ever runs, so treating this write as if it
+                    // were the array's *first* key would wrongly narrow
+                    // it down to only the key(s) a test happens to write
+                    // locally - a real corpus regression this fix's own
+                    // first version introduced, caught via corpus diff
+                    // before shipping (`tests/Unit/Core/
+                    // PageFilterHelperTest.php` writing `$_SERVER[
+                    // 'SCRIPT_FILENAME']` then separately reading the
+                    // real, pre-existing `$_SERVER['PHP_SELF']` - flagged
+                    // as accessing a key the freshly-narrowed shape could
+                    // never have). `superglobal_default_type` already
+                    // exists for exactly this "read before any real
+                    // assignment appears in locals" case - reused
+                    // verbatim rather than re-deriving it.
+                    let current = locals.get(name).cloned().unwrap_or_else(|| {
+                        if is_superglobal(name) {
+                            superglobal_default_type(name)
+                        } else {
+                            Type::ArrayShape(vec![])
+                        }
+                    });
                     if let Some(new_ty) = write_index_into(&current, idx.as_deref(), ty) {
                         locals.insert(name.clone(), new_ty);
                     }
