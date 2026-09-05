@@ -2145,19 +2145,40 @@ suite, `pelago/emogrifier`, and two rector/ECS-prefixed copies of
 for this phase had missed (a spacing/multi-line docblock variation this
 document's own author didn't account for when scoping the phase).
 
-**Still open**: `key-of<T>`/`value-of<T>`/`OffsetAccessType` pseudo-
-types (a real, separate parsing gap - `value-of<T>` in particular
-already surfaces as ~50+ pre-existing `class.notFound`-adjacent findings
-elsewhere in the corpus per Phase 74's own notes, so there's real,
-already-confirmed payoff here too); a genuine deferred-resolution
-mechanism for conditional return types, letting a specific call site's
-own argument type pick the real branch instead of always widening to
-the union of both (`ConditionalType`/`ConditionalTypeForParameter`/
-`LateResolvableType`/`ClassConstantAccessType`). Also still a
-prerequisite for the `TemplateKeyOfType`/`TemplateObjectShapeType` bound
-kinds in Phase 54. Size: L remaining (down from this entry's own
-original XL, now that `object{...}` and conditional-syntax parsing are
-both accounted for).
+**Done**: `value-of<T>`/`key-of<T>` are now parsed too - both are real
+PHPStan `LateResolvableType`s, evaluated against `T`'s own resolved type
+only once actually needed, which this project has no lazy/deferred
+type-resolution mechanism to fully replicate. Only the case answerable
+with no registry access at parse time is handled precisely: `T` itself
+already a real `array<K, V>`/`array{...}` extracts the real key/value
+type directly (a shape unions every field's own type/name-as-a-literal,
+matching real PHPStan's identical "no enum special-case for `key-of`"
+scope); `T` naming a class/enum by reference degrades to `Mixed` rather
+than the same bogus, namespace-qualified "class name" both syntaxes
+mangled into before this. Corpus-verified: 50036 -> 49988 diagnostics,
+52 genuine false positives eliminated (`doctrine/dbal`,
+`jetbrains/phpstorm-stubs`, `shipmonk/dead-code-detector` - confirming
+Phase 74's own "~50+ pre-existing findings" estimate almost exactly),
+only 2 substantive additions, both an unresolvable `key-of<self::CONST>`
+/`value-of<...enum>` reference correctly degrading to `Mixed` instead of
+nonsense - an honest, if less precise than real PHPStan would manage,
+`missingType.iterableValue`/`return.type` finding instead of a
+false-positive `class.notFound` one.
+
+**Still open**: `OffsetAccessType` (`$array['literal-key']`'s own type
+extracted from a docblock type-string context, distinct from
+`key-of`/`value-of`'s whole-key/value-union extraction); a genuine
+deferred-resolution mechanism that would let `value-of<T>`/`key-of<T>`
+resolve a class/enum reference (needs registry access unavailable at
+parse time) and let conditional return types pick a specific call site's
+real branch instead of always widening to the union of both
+(`ConditionalType`/`ConditionalTypeForParameter`/`LateResolvableType`/
+`ClassConstantAccessType`). Also still a prerequisite for the
+`TemplateKeyOfType`/`TemplateObjectShapeType` bound kinds in Phase 54.
+Size: M remaining (down from this entry's own original XL, now that
+`object{...}`, `value-of`/`key-of` parsing, and conditional-syntax
+parsing are all accounted for) - what's left is squarely the deferred-
+resolution architecture work, not more syntax to parse.
 
 **Phase 81 - Object-operator overloading dispatch (GMP/`BcMath\Number`)
 (DONE).** `infer_binary` and unary-op inference assumed plain numeric
