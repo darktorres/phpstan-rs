@@ -3358,6 +3358,21 @@ afterward. Still deliberately not extended further (`+`, `.`, the
 bitwise `|`/`^`/`&`, ...) - unconfirmed either way, not corpus-
 evidenced as a real gap the way comparison/`&&`/`||` all were.
 
+**Update**: a top-10-bucket workflow scoping the full ~45,873-diagnostic
+corpus found the identical gap for `+`/`-`/`.` (`parse_additive`) and
+the cast arm of `parse_unary_inner` - confirmed directly (`php -r
+'$v=0; $r="x".$v="y"; var_dump($r,$v);'` prints `string(3) "xy"` and
+`$v` becomes `"y"`, i.e. `"x" . ($v = "y")`; `(int) $v = 5` similarly
+parses as `(int)($v = 5)`). Fixed the same way, mirroring `parse_
+logical_and`/`parse_logical_or`'s own shape exactly. The bitwise
+`|`/`^`/`&` operators show the identical quirk when spot-tested
+directly, but still have no corpus evidence, so remain deliberately
+unextended - this project's convention is to extend on evidence, not
+on a grammar property alone, even once confirmed general. Verified
+against the ~20,300-file corpus (combined with a separate `namespace\
+foo()` resolution fix in the same round): `variable.undefined` dropped
+by 96 on its own.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
@@ -3882,6 +3897,31 @@ top-level-function lookup used raw names not FQNs; `instanceof self`
 wasn't resolved against the enclosing class; `@return $this`/
 `self::RFC_*`-style pseudo-types weren't recognized; `catch (SomeException
 $e)` built its type from the raw AST name with zero resolution.
+
+**Update**: a top-10-bucket workflow scoping the full corpus found one
+more namespace-resolution gap - real PHP's own `namespace\foo()`
+construct ("call `foo` relative to the current namespace only, no
+`use`-import lookup, no global-namespace fallback" - distinct from an
+ordinary bare reference to a symbol literally named "namespace").
+`take_name_segment` accepts the `namespace` keyword as an ordinary name
+segment, so `namespace\chunk` parsed into the literal string
+`"namespace\chunk"`, which `NameContext::resolve()` then re-qualified
+against the current namespace a *second* time (`Psl\Str\namespace\
+chunk` instead of the real `Psl\Str\chunk`), never resolving. Real,
+deliberate house style used by `php-standard-library`/Psl (663 real
+call sites in the corpus, to force resolution against a same-named
+sibling function rather than risk hitting a same-named global one).
+Fixed by stripping a case-insensitive `namespace\` prefix inside
+`resolve()` and resolving the remainder via `declared_name()` only.
+Verified against the ~20,300-file corpus (combined with the `.`/cast
+assignment-tail fix above in the same round): `function.notFound`
+dropped by 462 on its own, plus a knock-on 96-diagnostic
+`variable.undefined` drop and 6 `return.type` drops from call sites
+finally resolving to a real signature, and 19 new, genuine `argument.
+type` findings at real call sites that were simply never checked
+before (confirmed: `Psl\Str\slice()`'s own real docblock declares
+`@param null|int<0, max> $length`, which several of its own sibling
+functions call with a plain, unproven `int`).
 
 ## Phase 10 - Class-level generics - DONE
 
