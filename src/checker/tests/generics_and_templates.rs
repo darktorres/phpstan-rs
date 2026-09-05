@@ -639,6 +639,38 @@ fn a_bound_violation_in_a_return_type_is_flagged() {
     );
 }
 
+// Real corpus false positive: doctrine/collections' own `Collection<TKey,
+// T>` self-reference inside its own `map()`/`filter()`/`partition()`
+// methods' `@phpstan-return` tags, where `TKey` (this same class's own
+// template, itself bound to `array-key`, i.e. `int|string`) is passed
+// right back as the argument satisfying that identical bound.
+// `is_subtype`'s/`Registry::is_assignable`'s own generic `(_, Union(
+// members)) => any(is_subtype(sub, m))` arm ran *before* the dedicated
+// `TemplateParam` arm, splitting the target union member-by-member
+// instead of comparing `TKey`'s own union bound against it as a whole -
+// each split member failed alone even though the whole bound matched.
+#[test]
+fn a_template_whose_own_bound_is_a_union_satisfies_that_same_union_bound_via_self_reference() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template TKey of array-key
+             * @template T
+             */
+            class Collection {
+                /**
+                 * @phpstan-return Collection<TKey, T>
+                 */
+                public function filter() {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generics.templateBound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_bound_violation_in_a_property_type_is_flagged() {
     let d = diagnostics_for(

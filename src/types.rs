@@ -1194,6 +1194,44 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
             .enumerate()
             .all(|(i, (k, _, _))| k == &i.to_string()),
 
+        // An unbound template parameter is a placeholder, not a real type.
+        // Call sites should have already substituted it away
+        // (checker::infer_call_return_type); these are the safety net for
+        // wherever that doesn't happen.
+        //
+        // Phase 54: used as `sub` (the actual/source side), it's now
+        // bound-aware rather than an unconditional escape hatch - whatever
+        // `T` ultimately gets instantiated to is guaranteed to satisfy its
+        // own declared bound (real PHPStan's own upper-bound semantics),
+        // so `T` is a subtype of `sup` exactly when its bound is. An
+        // undeclared bound is `Mixed`, and `is_subtype(Mixed, sup)` is
+        // *not* generally true (only when `sup` is `Mixed` too, via the
+        // very first arm above) - so the extremely common bound-free
+        // `@template T` gets an explicit, separate `true` here to keep
+        // this arm's old blanket leniency exactly where no bound was ever
+        // written to make a real judgment from.
+        //
+        // Placed deliberately *before* the `(_, Union(members))` arm
+        // below, not just after the ordinary early arms - a real,
+        // corpus-found bug when it lived there instead: that arm's own
+        // "is `sub` a subtype of *any one* union member" splitting is
+        // wrong for a `TemplateParam` whose own bound is *itself* a union
+        // (`@template TKey of array-key`, i.e. bound `int|string`) - it
+        // recursed into `is_subtype(TemplateParam(TKey), Int)` and
+        // `is_subtype(TemplateParam(TKey), String)` *separately*, each
+        // one correctly false (`int|string` isn't a subtype of `Int`
+        // alone, nor of `String` alone), concluding the *whole* check
+        // failed even though `TKey`'s own bound is exactly the target
+        // union as a whole. Real corpus shape: doctrine/collections' own
+        // `Collection<TKey, T>` self-reference inside its own `map()`/
+        // `filter()`/`partition()` methods' `@phpstan-return` tags,
+        // where `TKey` (this same class's own template, correctly bound
+        // to `array-key`) is passed right back as the argument satisfying
+        // that identical bound - `generics.templateBound` wrongly fired
+        // as if `TKey` didn't satisfy its own declared bound at all.
+        (Type::TemplateParam(tp), _) => {
+            matches!(*tp.bound, Type::Mixed) || is_subtype(&tp.bound, sup)
+        }
         (Type::Union(members), _) => members.iter().all(|m| is_subtype(m, sup)),
         (_, Type::Union(members)) => members.iter().any(|m| is_subtype(sub, m)),
 
@@ -1269,25 +1307,6 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // works one layer up from this function.
         (Type::EnumCase(fqn, _), Type::Object(name, _)) => fqn == name,
 
-        // An unbound template parameter is a placeholder, not a real type.
-        // Call sites should have already substituted it away
-        // (checker::infer_call_return_type); these are the safety net for
-        // wherever that doesn't happen.
-        //
-        // Phase 54: used as `sub` (the actual/source side), it's now
-        // bound-aware rather than an unconditional escape hatch - whatever
-        // `T` ultimately gets instantiated to is guaranteed to satisfy its
-        // own declared bound (real PHPStan's own upper-bound semantics),
-        // so `T` is a subtype of `sup` exactly when its bound is. An
-        // undeclared bound is `Mixed`, and `is_subtype(Mixed, sup)` is
-        // *not* generally true (only when `sup` is `Mixed` too, via the
-        // very first arm above) - so the extremely common bound-free
-        // `@template T` gets an explicit, separate `true` here to keep
-        // this arm's old blanket leniency exactly where no bound was ever
-        // written to make a real judgment from.
-        (Type::TemplateParam(tp), _) => {
-            matches!(*tp.bound, Type::Mixed) || is_subtype(&tp.bound, sup)
-        }
         // Used as `sup` (the sink/target side) stays maximally lenient
         // regardless of any declared bound: knowing `sub` satisfies `T`'s
         // *upper* bound doesn't prove it satisfies whatever `T` is

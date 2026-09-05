@@ -73,6 +73,27 @@ fn a_bounded_template_param_is_a_subtype_of_whatever_its_bound_satisfies() {
     assert!(!is_subtype(&t, &Type::String));
 }
 
+// Real corpus false positive: doctrine/collections' own `@template TKey
+// of array-key` (bound `int|string`, a Union) - `is_subtype`'s own
+// generic `(_, Union(members)) => any(is_subtype(sub, m))` arm used to
+// run *before* the dedicated `TemplateParam` arm below, splitting the
+// *target* union member-by-member (`is_subtype(TKey, Int)` and
+// `is_subtype(TKey, String)`, each correctly false on its own) instead
+// of comparing `TKey`'s own union bound against the target as a whole.
+#[test]
+fn a_template_param_whose_own_bound_is_a_union_is_a_subtype_of_that_same_union() {
+    let t = Type::TemplateParam(TemplateParam {
+        name: "TKey".to_string(),
+        bound: Box::new(Type::Union(vec![Type::Int, Type::String])),
+        variance: Variance::Invariant,
+        scope: None,
+        default: None,
+    });
+    assert!(is_subtype(&t, &Type::Union(vec![Type::Int, Type::String])));
+    assert!(!is_subtype(&t, &Type::Int));
+    assert!(!is_subtype(&t, &Type::String));
+}
+
 #[test]
 fn a_bounded_template_param_still_accepts_anything_as_a_sink() {
     // The reverse direction (T used as `sup`, the assignment target)

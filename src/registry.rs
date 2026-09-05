@@ -1077,6 +1077,26 @@ impl Registry {
             // satisfy a `class-string<Base>`-typed parameter even when
             // `Derived extends Base`.
             (Type::ClassString(a), Type::ClassString(b)) => self.is_assignable(a, b),
+            // Mirrors `types::is_subtype`'s own bound-aware `TemplateParam`
+            // arm (see its doc comment for the full reasoning and why
+            // this needs to run *before* the `Union` arms just below),
+            // but recurses through `self.is_assignable` rather than the
+            // plain, hierarchy-*unaware* `types::is_subtype` - a real bug
+            // in an earlier version of this exact fix: delegating
+            // straight to `types::is_subtype(sub, sup)` silently dropped
+            // the class-hierarchy-walking half of this whole method for
+            // any bound check involving a `TemplateParam`, wrongly
+            // flagging real corpus code where a template's own bound is a
+            // union of *concrete classes* needing a real ancestor walk to
+            // match a single-class target (`phpstan/phpstan-strict-rules`'s
+            // own `@phpstan-template TNodeType of PreInc|PreDec|PostInc|
+            // PostDec` satisfying `Rule<TNodeType>`'s own `TNodeType of
+            // Node` bound - each of those four classes extends `Node`
+            // only via `Expr`, a real, multi-level ancestor chain plain
+            // name-equality can't see).
+            (Type::TemplateParam(tp), _) => {
+                matches!(*tp.bound, Type::Mixed) || self.is_assignable(&tp.bound, sup)
+            }
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
             // Phase 14: mirrors `types::is_subtype`'s own dedicated
