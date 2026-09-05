@@ -11,6 +11,26 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
+        // Phase 15 item (1), `UnreachableStatementRule`: investigated and
+        // declined - see ROADMAP.md. Implemented, corpus-verified, and
+        // reverted: wiring `always_terminates` into a `deadCode.
+        // unreachable` diagnostic here surfaced a genuine, deep, pre-
+        // existing gap in the checker's own narrowing - a variable
+        // reassigned inside a loop keeps its pre-loop-entry type for the
+        // *entire* single-pass body check (no fixed-point iteration
+        // across loop bodies), so a later `if ($x !== null)` guard on a
+        // variable the loop itself reassigns away from `null` can
+        // wrongly narrow to `Type::Never`, which this check then
+        // (incorrectly) read as "this statement always terminates."
+        // Fixing that belongs to Phase 55's own tracked narrowing-engine
+        // generalization (real fixed-point loop analysis), not a quick
+        // patch here. Two narrower, genuinely-safe bugs this same
+        // verification pass *did* find and fix outright (independent of
+        // whether this diagnostic itself ships): `widen_coalesce_result`
+        // wrongly inferring `$x ?? throw ...;` as `Type::Never` for the
+        // whole expression, and `always_terminates`'s own `Switch` arm
+        // wrongly treating a trailing, entirely-empty `case`/`default`
+        // group as vacuously terminating.
         for stmt in stmts {
             self.check_stmt(stmt, locals, declared_return, label);
         }
@@ -195,6 +215,25 @@ impl<'a> Checker<'a> {
                 else_branch,
             } => {
                 self.check_expr(cond, locals, label);
+                // Phase 15 item (2), `IfConstantConditionRule`: investigated
+                // and declined - see ROADMAP.md. Implemented and corpus-
+                // verified as "the condition's own inferred type is exactly
+                // `Type::True`/`Type::False`", then reverted: real corpus
+                // testing found this project's own narrowing has two
+                // separate, pervasive gaps that each independently make a
+                // plain variable's type wrongly collapse to a literal
+                // `True`/`False` long after it should have widened back to
+                // `bool` - a `foreach`-scoped "first iteration" flag
+                // (`$first = true; foreach (...) { if ($first) { $first =
+                // false; } else { ... } }`, one of the most common PHP
+                // idioms there is) never gets fixed-point-merged across
+                // loop iterations, and `$x = $expr ?? false;` collapses to
+                // the bare literal `false` whenever `$expr`'s own type
+                // isn't confidently known, discarding the "or whatever
+                // `$expr` actually was" half entirely. Both are real,
+                // pre-existing gaps this check merely exposed, not new
+                // bugs - fixing them belongs to Phase 55's own tracked
+                // narrowing-engine generalization, not a quick patch here.
 
                 let mut then_locals = locals.clone();
                 self.apply_narrowing(cond, &mut then_locals, true);
@@ -226,6 +265,12 @@ impl<'a> Checker<'a> {
             }
             StmtKind::While { cond, body } => {
                 self.check_expr(cond, locals, label);
+                // Phase 15 item (2), `WhileLoopAlwaysFalseConditionRule`/
+                // `WhileLoopAlwaysTrueConditionRule`: investigated and
+                // declined alongside `StmtKind::If`'s own identical
+                // check - see that arm's doc comment and ROADMAP.md for
+                // the real, corpus-found narrowing gaps that make this
+                // unsafe to ship.
                 let mut body_locals = locals.clone();
                 self.apply_narrowing(cond, &mut body_locals, true);
                 self.loop_break_states.push(Vec::new());
@@ -559,6 +604,19 @@ impl<'a> Checker<'a> {
                 } else {
                     vec![try_end_locals]
                 };
+                // Phase 42's own next-recommended step:
+                // `CatchWithUnthrownExceptionRule`'s "already caught"
+                // half (`catch.alreadyCaught`) - a real, unconditional
+                // PHP-level dead-code shape (PHP tries each `catch`
+                // clause in source order and stops at the first match,
+                // so a later clause every one of whose types is already
+                // a subtype of something an *earlier* clause caught can
+                // never actually run) that needs no throw-type tracking
+                // at all, only the registry's existing `is_subclass_of`
+                // - unlike this same rule's own "never thrown in the try
+                // block" half, which needs a real per-callee throw-type
+                // model this project doesn't have yet (still open).
+                let mut previously_caught: Vec<Type> = Vec::new();
                 for c in catches {
                     // Scoped to this catch block only, in its own clone
                     // rather than the shared `locals` - matches real PHP
@@ -615,6 +673,35 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
+                    let clause_types: Vec<Type> =
+                        c.types.iter().map(|t| self.resolve_name_expr(t)).collect();
+                    if !clause_types.is_empty()
+                        && clause_types.iter().all(|ct| {
+                            let Type::Object(class, _) = ct else {
+                                return false;
+                            };
+                            previously_caught.iter().any(|pt| {
+                                let Type::Object(prev, _) = pt else {
+                                    return false;
+                                };
+                                class == prev || self.registry.is_subclass_of(class, prev)
+                            })
+                        })
+                    {
+                        let desc = clause_types
+                            .iter()
+                            .map(Type::to_string)
+                            .collect::<Vec<_>>()
+                            .join("|");
+                        self.report(
+                            label.to_string(),
+                            format!("Dead catch - {desc} is already caught above."),
+                            c.span,
+                            4,
+                            "catch.alreadyCaught",
+                        );
+                    }
+                    previously_caught.extend(clause_types);
                     let mut catch_locals = locals.clone();
                     if let Some(var) = &c.var {
                         // A multi-type catch (`catch (TypeA|TypeB $e)`,

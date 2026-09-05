@@ -42,13 +42,40 @@ impl<'a> Checker<'a> {
             // body (`case a: case b: ...`, a pure fallthrough label) is
             // skipped rather than required to independently terminate -
             // only the eventual non-empty body it falls into needs to.
+            //
+            // A real, corpus-found bug lived here for a while (found via
+            // `deadCode.unreachable`'s own corpus verification, in an
+            // otherwise-unrelated phase): "the eventual non-empty body it
+            // falls into" was this comment's own already-correct intent,
+            // but the code below it never actually walked forward to find
+            // that later body - it treated *any* empty case, including
+            // one with no later non-empty case left to fall into at all
+            // (`case PREG_NO_ERROR: case PREG_INTERNAL_ERROR: default:`
+            // as the switch's own last, entirely-empty tail, a real,
+            // common "explicitly do nothing for these" idiom -
+            // `phpdocumentor/reflection-docblock`'s own `PcreException`,
+            // `doctrine/orm`'s own `Lexer`/`Parser`), as vacuously fine -
+            // wrongly concluding the whole switch always terminates when
+            // that trailing-empty path actually just falls out the
+            // bottom, same as if there were no `default` label there at
+            // all.
             StmtKind::Switch { cases, .. } => {
                 cases.iter().any(|c| c.test.is_none())
-                    && cases.iter().all(|c| {
-                        c.body.is_empty()
-                            || c.body.last().is_some_and(|s| {
+                    && cases.iter().enumerate().all(|(i, c)| {
+                        if !c.body.is_empty() {
+                            return c.body.last().is_some_and(|s| {
                                 !matches!(s.kind, StmtKind::Break(_))
                                     && self.always_terminates(s, locals)
+                            });
+                        }
+                        cases[i + 1..]
+                            .iter()
+                            .find(|later| !later.body.is_empty())
+                            .is_some_and(|later| {
+                                later.body.last().is_some_and(|s| {
+                                    !matches!(s.kind, StmtKind::Break(_))
+                                        && self.always_terminates(s, locals)
+                                })
                             })
                     })
             }

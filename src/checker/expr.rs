@@ -886,6 +886,10 @@ impl<'a> Checker<'a> {
             // started exercising exactly this idiom on real code.
             ExprKind::Binary(BinOp::And, l, r) => {
                 self.check_expr(l, locals, label);
+                // Phase 15 item (2), `BooleanAndConstantConditionRule`:
+                // investigated and declined alongside `StmtKind::If`'s own
+                // identical check - see that arm's doc comment
+                // (`checker/stmt.rs`) and ROADMAP.md.
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
                 self.check_expr(r, &mut narrowed, label);
@@ -894,6 +898,8 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Binary(BinOp::Or, l, r) => {
                 self.check_expr(l, locals, label);
+                // Phase 15 item (2), `BooleanOrConstantConditionRule`:
+                // investigated and declined - same as `&&` above.
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
                 self.check_expr(r, &mut narrowed, label);
@@ -931,6 +937,10 @@ impl<'a> Checker<'a> {
                 let r_ty = self.check_expr(r, locals, label);
                 self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span, label);
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span, label);
+                // Phase 15 item (2), `LogicalXorConstantConditionRule`:
+                // investigated and declined alongside `StmtKind::If`'s own
+                // identical check - see that arm's doc comment
+                // (`checker/stmt.rs`) and ROADMAP.md.
                 self.infer_binary(op, l, r, locals)
             }
             ExprKind::Variable(name) => {
@@ -976,6 +986,10 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 self.check_expr(inner, locals, label);
+                // Phase 15 item (2), `BooleanNotConstantConditionRule`:
+                // investigated and declined alongside `StmtKind::If`'s own
+                // identical check - see that arm's doc comment
+                // (`checker/stmt.rs`) and ROADMAP.md.
                 Type::Bool
             }
             // Real PHP's unary minus/plus convert a numeric string
@@ -1030,7 +1044,25 @@ impl<'a> Checker<'a> {
             // is exactly the right type for it, the same way it's used
             // for a function that always throws or exits.
             ExprKind::Throw(inner) => {
-                self.check_expr(inner, locals, label);
+                // Finding 57's own check, previously only wired for the
+                // `StmtKind::Throw` (bare `throw $x;` statement) shape -
+                // a `throw` *expression* (`$x ?? throw new Foo();`,
+                // `default => throw ...`, an arrow function body, ...)
+                // is the exact same language construct at runtime and
+                // accepts only a real Throwable just as unconditionally
+                // (a real PHP fatal error otherwise), but never ran this
+                // check at all until now.
+                if let Type::Object(class, _) = self.check_expr(inner, locals, label)
+                    && !self.registry.is_subclass_of(&class, "Throwable")
+                {
+                    self.report(
+                        label.to_string(),
+                        format!("cannot throw {class}: it does not implement Throwable"),
+                        inner.span,
+                        0,
+                        "throw.notThrowable",
+                    );
+                }
                 Type::Never
             }
             ExprKind::YieldFrom(inner) => {
@@ -1146,6 +1178,10 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Ternary(cond, then_, else_) => {
                 self.check_expr(cond, locals, label);
+                // Phase 15 item (2), `TernaryOperatorConstantConditionRule`:
+                // investigated and declined alongside `StmtKind::If`'s own
+                // identical check - see that arm's doc comment
+                // (`checker/stmt.rs`) and ROADMAP.md.
                 // Same clone-and-narrow shape as `StmtKind::If` - a
                 // ternary is just as branch-based, and without this,
                 // `$x === null ? "default" : $x` never benefits from the
@@ -3499,6 +3535,26 @@ impl<'a> Checker<'a> {
             return self.infer_expr(l, locals);
         }
         let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::Null);
+        // `$x ?? throw new Foo();` (or any other never-returning right
+        // side: `exit`, a `never`-typed call) - a real, corpus-evidenced
+        // idiom (`revolt/event-loop`'s own `AbstractDriver::enable()`/
+        // `isEnabled()`/`isReferenced()`, `latte/latte`'s own parser,
+        // several others). Found the hard way: falling through to the
+        // generic `_ => r_ty` fallback below made the *whole* expression
+        // - and by extension any `$x = ... ?? throw ...;` assignment
+        // statement built from it - infer as `Type::Never` itself,
+        // which `always_terminates`'s own `StmtKind::Expression` case
+        // (`self.infer_expr(e, locals) == Type::Never`) then read as
+        // "this plain assignment statement always ends control flow,"
+        // wrongly marking every real statement after it unreachable
+        // (`deadCode.unreachable`'s own corpus verification is what
+        // surfaced this). The real semantics: reaching anything *past*
+        // this expression at all already proves the right side never
+        // ran, so the result is exactly the left side's own (non-null)
+        // type, the same as the `?? null` case above already computes.
+        if r_ty == Type::Never {
+            return l_ty;
+        }
         // Phase 14: still scoped to exactly `Type::Array` on the left,
         // matching this function's own documented, deliberately narrow
         // boundary (an ArrayShape on the left stays uncovered, same as

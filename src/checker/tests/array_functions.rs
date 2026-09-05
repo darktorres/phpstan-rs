@@ -1625,3 +1625,9 @@ fn array_values_on_a_non_list_array_is_never_flagged() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// ArrayPopFunctionReturnTypeExtension/ArrayShiftFunctionReturnTypeExtension:
+// investigated and declined - see the long-form doc comment on the
+// (reverted) match arm in `builtin_calls.rs` for the two compounding
+// reasons (an unsound "provably non-empty" half, plus real corpus noise
+// even from the safe, always-nullable fallback alone).

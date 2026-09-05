@@ -396,6 +396,44 @@ fn throwing_a_non_throwable_class_is_flagged() {
 }
 
 #[test]
+fn throw_expression_of_a_non_throwable_class_is_flagged() {
+    // Same check as `throwing_a_non_throwable_class_is_flagged` just
+    // above, but via a `throw` *expression* (PHP 8's `??`/arrow-fn/
+    // match-arm shape) rather than a bare `throw` statement - a
+    // previously-real gap (`ExprKind::Throw` never ran this check at
+    // all, only `StmtKind::Throw` did).
+    let d = diagnostics_for(
+        r#"<?php
+            class NotAnException3 {}
+            function test(?int $x): int {
+                return $x ?? throw new NotAnException3();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x
+            .message
+            .contains("cannot throw NotAnException3: it does not implement Throwable")),
+        "expected a cannot-throw diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn throw_expression_of_a_real_exception_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(?int $x): int {
+                return $x ?? throw new \RuntimeException('bad');
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throw.notThrowable"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
 fn throwing_a_real_exception_is_not_flagged() {
     let d = diagnostics_for(
         r#"<?php
@@ -435,6 +473,101 @@ fn catching_a_real_exception_is_not_flagged() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 42: CatchWithUnthrownExceptionRule's "already caught" half
+// (`catch.alreadyCaught`) - a later catch clause every one of whose
+// types is already a subtype of something an earlier clause caught can
+// never actually run, since PHP tries each clause in source order and
+// stops at the first match.
+
+#[test]
+fn a_later_catch_clause_for_a_subtype_already_caught_above_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function doStuff2(): void {}
+            function test(): void {
+                try {
+                    doStuff2();
+                } catch (\Exception $e) {
+                    echo "outer";
+                } catch (\RuntimeException $e) {
+                    echo "inner";
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "catch.alreadyCaught"
+            && x.message == "Dead catch - RuntimeException is already caught above."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_later_catch_clause_for_the_exact_same_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function doStuff3(): void {}
+            function test(): void {
+                try {
+                    doStuff3();
+                } catch (\RuntimeException $e) {
+                    echo "first";
+                } catch (\RuntimeException $e) {
+                    echo "second";
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "catch.alreadyCaught"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn catch_clauses_in_a_narrow_to_wide_order_are_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function doStuff4(): void {}
+            function test(): void {
+                try {
+                    doStuff4();
+                } catch (\RuntimeException $e) {
+                    echo "specific";
+                } catch (\Exception $e) {
+                    echo "general";
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "catch.alreadyCaught"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn unrelated_catch_clauses_are_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function doStuff5(): void {}
+            function test(): void {
+                try {
+                    doStuff5();
+                } catch (\LogicException $e) {
+                    echo "logic";
+                } catch (\RuntimeException $e) {
+                    echo "runtime";
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "catch.alreadyCaught"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 // Phase 23 Finding 5, real shape:
@@ -1523,3 +1656,7 @@ fn a_generator_arrow_function_with_a_wrong_declared_return_type_is_flagged() {
         "got: {d:?}"
     );
 }
+
+// Phase 15 item (1), UnreachableStatementRule (`deadCode.unreachable`):
+// investigated and declined - see `checker::check_block`'s own doc
+// comment and ROADMAP.md for why.
