@@ -273,7 +273,7 @@ fn stmt_contains_yield(stmt: &Stmt) -> bool {
 /// attempting anything symbolic beyond a bare literal - a variable or
 /// expression that merely *evaluates* to a truthy constant isn't
 /// something this checker tracks precisely enough to trust here.
-fn is_truthy_literal(e: &Expr) -> bool {
+pub(crate) fn is_truthy_literal(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Literal(Literal::Bool(true)) => true,
         ExprKind::Literal(Literal::Int(n)) => *n != 0,

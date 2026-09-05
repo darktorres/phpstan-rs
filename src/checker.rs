@@ -454,7 +454,8 @@ pub(crate) use assignment::{
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{
-    body_contains_yield, expr_contains_yield, merge_scopes, type_allows_generator_return,
+    body_contains_yield, expr_contains_yield, is_truthy_literal, merge_scopes,
+    type_allows_generator_return,
 };
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
 pub(crate) use throws::body_contains_explicit_throw;

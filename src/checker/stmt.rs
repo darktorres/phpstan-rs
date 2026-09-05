@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, merge_scopes, purge_stale_narrowing_for};
+use crate::checker::{Checker, Locals, is_truthy_literal, merge_scopes, purge_stale_narrowing_for};
 use crate::docblock;
 use crate::types::Type;
 
@@ -322,25 +322,62 @@ impl<'a> Checker<'a> {
                 self.check_stmt(body, &mut body_locals, declared_return, label);
                 self.loop_depth -= 1;
                 let break_states = self.loop_break_states.pop().unwrap_or_default();
-                // The loop may run zero times, so what's true after it is
-                // "either the pre-loop state, or whatever one narrowed
-                // iteration produces" - not a real fixed point, but sound
-                // enough to avoid claiming more precision than we have.
-                *locals = merge_scopes(locals, &body_locals);
-                // Reaching code after the loop *without having broken out
-                // of it* always means `cond` just evaluated false,
-                // regardless of how many iterations ran - real,
-                // additional narrowing on top of the merge above,
-                // independent of it (e.g. a "loop until no longer null"
-                // idiom is fully narrowed non-null afterward). Applied
-                // *before* folding in break-reached states below - a
-                // `break` doesn't mean `cond` went false, so those states
-                // must not be narrowed as if it had.
-                self.apply_narrowing(cond, locals, false);
-                // Phase 29: fold in every `break`-reached state too - see
-                // `loop_break_states`'s own doc comment on `Checker`.
-                for state in break_states {
-                    *locals = merge_scopes(locals, &state);
+                if is_truthy_literal(cond) {
+                    // The condition can never itself become false (a
+                    // literal `while (true)`/`while (1)`), so the *only*
+                    // way to reach code after this loop at all is via a
+                    // `break` somewhere in the body - neither the "may
+                    // run zero times" merge below nor the "reaching here
+                    // means cond went false" narrowing after it applies:
+                    // this loop always runs at least once, and never
+                    // exits any other way. `is_truthy_literal` is the
+                    // same check `always_terminates`'s own `While` arm
+                    // already uses for the identical reasoning, one level
+                    // up (a break-less `while (true) {...}` never lets
+                    // control reach past it at all). Real corpus false
+                    // positive this fixes: `while (true) { $x = ...;
+                    // break; } return $x;` - the old unconditional
+                    // zero-iteration merge below discarded `$x` from
+                    // every representative state that reached the
+                    // `break`, leaving it looking undefined afterward.
+                    //
+                    // Folds every `break`-reached state together, seeded
+                    // by the first rather than the (semantically
+                    // meaningless here) pre-loop `locals` - with none at
+                    // all, `locals` is left as its own pre-loop state, a
+                    // safe fallback for what's genuinely unreachable code
+                    // anyway (an infinite loop with no escape).
+                    let mut states = break_states.into_iter();
+                    if let Some(first) = states.next() {
+                        let mut merged = first;
+                        for state in states {
+                            merged = merge_scopes(&merged, &state);
+                        }
+                        *locals = merged;
+                    }
+                } else {
+                    // The loop may run zero times, so what's true after it
+                    // is "either the pre-loop state, or whatever one
+                    // narrowed iteration produces" - not a real fixed
+                    // point, but sound enough to avoid claiming more
+                    // precision than we have.
+                    *locals = merge_scopes(locals, &body_locals);
+                    // Reaching code after the loop *without having broken
+                    // out of it* always means `cond` just evaluated
+                    // false, regardless of how many iterations ran - real,
+                    // additional narrowing on top of the merge above,
+                    // independent of it (e.g. a "loop until no longer
+                    // null" idiom is fully narrowed non-null afterward).
+                    // Applied *before* folding in break-reached states
+                    // below - a `break` doesn't mean `cond` went false, so
+                    // those states must not be narrowed as if it had.
+                    self.apply_narrowing(cond, locals, false);
+                    // Phase 29: fold in every `break`-reached state too -
+                    // see `loop_break_states`'s own doc comment on
+                    // `Checker`.
+                    for state in break_states {
+                        *locals = merge_scopes(locals, &state);
+                    }
                 }
             }
             StmtKind::DoWhile { body, cond } => {

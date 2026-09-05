@@ -2796,6 +2796,89 @@ fn while_loop_narrows_the_negated_condition_after_exit() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// `while (true) { ...; break; }` never exits via `cond` going false (it
+// can't - the condition is a literal `true`) - the only way past it is
+// the `break`, so a variable the body unconditionally defines before
+// breaking must be visible afterward, not merged with a "loop ran zero
+// times" possibility that can't actually happen.
+#[test]
+fn a_while_true_loop_defines_a_variable_reachable_only_via_break() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                while (true) {
+                    $y = 1;
+                    break;
+                }
+                return $y;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_while_1_loop_is_treated_as_the_identical_truthy_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                while (1) {
+                    $y = 1;
+                    break;
+                }
+                return $y;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A `while (true)` with more than one break-reached state must merge
+// them together, not just take the first one found.
+#[test]
+fn a_while_true_loop_merges_multiple_break_reached_states() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $flag): int {
+                while (true) {
+                    if ($flag) {
+                        $y = 1;
+                        break;
+                    }
+                    $y = 2;
+                    break;
+                }
+                return $y;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A while loop whose condition is truthy but not a literal (a variable,
+// a function call, ...) must still get the ordinary "may run zero
+// times" treatment - `is_truthy_literal` deliberately only recognizes a
+// bare literal, not anything that merely evaluates to one.
+#[test]
+fn a_while_loop_over_a_non_literal_truthy_condition_is_unaffected() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $cond): int {
+                while ($cond) {
+                    $y = 1;
+                    break;
+                }
+                return $y;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("undefined variable")),
+        "expected $y to still look possibly-undefined (loop may run zero \
+         times), got: {d:?}"
+    );
+}
+
 #[test]
 fn do_while_loop_narrows_the_negated_condition_after_exit() {
     let d = diagnostics_for(
