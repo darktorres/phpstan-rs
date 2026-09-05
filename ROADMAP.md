@@ -1146,10 +1146,28 @@ Done: property/method/static-method visibility (public/private/
 protected) on reads, writes, and calls; promoted constructor property
 visibility; the sibling-shared-abstract-ancestor fallback;
 `Closure::bind`/`bindTo` and Pest `$this`-binding scope threading.
-Still open: class-constant visibility enforcement
-(`AccessPrivateConstantThroughStaticRule`, `ClassConstantRule`'s
-visibility half - constants have no visibility field on their own
-registry representation yet); asymmetric PHP 8.4 `private(set)`/
+
+**Update**: class-constant visibility is now enforced too
+(`ClassConstantRule`'s visibility half) - a new `ConstSig` struct
+(mirroring `PropertySig`) carries a constant's own `public`/`private`/
+`protected` modifier alongside its type (`ast::ClassConst` already
+parsed it, for Phase 59's unused-private-constant detection, but it
+never reached the registry before now); `ExprKind::StaticAccess`'s
+const-fetch arm reuses the exact same `check_member_visibility`
+machinery every other member kind already does, including the sibling-
+shared-abstract-ancestor fallback. An enum case fetch is always
+`Visibility::Public` - real PHP has no visibility syntax for cases.
+Corpus-verified: 83 real `private`/`protected const` declarations exist
+in Piwigo's own first-party code alone, but the diagnostic count is
+unchanged - a direct repro confirms the check fires correctly, so this
+is a genuine "no violations found" result, not a dormant check,
+consistent with this same phase's own original property/method pass
+also finding almost nothing across the identical corpus.
+
+Still open: `AccessPrivateConstantThroughStaticRule` (`Foo::CONST` via
+`static::` when `CONST` is `private` - a narrower, LSB-specific angle
+distinct from the ordinary visibility check just shipped); asymmetric
+PHP 8.4 `private(set)`/
 `protected(set)` (write-visibility can currently only match read-
 visibility); LSB-unsafe `static::` access to a `private` static
 property (`AccessPrivatePropertyThroughStaticRule`,
