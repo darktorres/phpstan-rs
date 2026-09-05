@@ -1259,15 +1259,33 @@ static-property visibility check itself found zero real violations
 across the whole corpus, confirmed working (not dormant) via a direct
 repro.
 
+**Update**: `CallPrivateMethodThroughStaticRule` is now done too - the
+identical late-static-binding unsafety as the constant/property cases
+above, for a `static::method()` call (confirmed directly via `php -r`:
+a subclass redeclaring the same `private static` method throws a real
+"Call to private method ... from scope ..." error at the call site).
+Ordinary static-method-call visibility itself was already enforced
+before this update (unlike the static-property case above) - only the
+narrower late-static-binding angle was missing. The three
+`check_static_private_*_access` wrappers (constant/property/method) now
+share one `StaticPrivateAccessCheck` bundle (mirroring
+`MemberVisibilityCheck`'s own precedent) to stay under clippy's
+too-many-arguments limit once the method case added its own verb/noun
+distinction. Corpus-verified: 49992 -> 49994 (+2), both spot-checked
+genuine (`dasprid/enum`'s `AbstractEnum::createValue`, `gettext/
+translator`'s `Translator::fixTerseIfs` - real, non-`final` classes with
+a `private static` method called through `static::`).
+
 Still open: asymmetric PHP 8.4 `private(set)`/`protected(set)` (write-
-visibility can currently only match read-visibility); `StaticMethodCallableRule`/
-`CallPrivateMethodThroughStaticRule`'s own `static::`-callable-specific
-angle - a real, tractable follow-up sharing this same update's exact
-shape (`class_name == "static"` + a `private`-visibility member + a
-`final`-class exemption), not attempted this pass (ordinary static-
-method-call visibility itself, unlike the property case above, was
-already enforced - only the narrower late-static-binding angle remains).
-The protected-access heuristic is also deliberately conservative: it
+visibility can currently only match read-visibility); `StaticMethodCallableRule`
+(PHP 8.1's first-class-callable syntax, `Foo::method(...)`, for a
+static method specifically - a different, narrower gap than the
+late-static-binding rules above: real PHPStan's own version just re-runs
+the *ordinary* `StaticMethodCallCheck` against the first-class-callable
+AST shape, so this is about whether that shape reaches the existing
+checks at all, not a new safety rule - not investigated whether this
+project's own first-class-callable handling already covers it). The
+protected-access heuristic is also deliberately conservative: it
 never guesses at cross-hierarchy relationships it can't resolve from the
 registry, so a small number of genuinely-illegal protected accesses that
 depend on runtime-only information may go unflagged rather than risk a
