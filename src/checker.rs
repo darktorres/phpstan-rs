@@ -588,12 +588,21 @@ impl<'a> Checker<'a> {
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[Stmt]) {
         // A simple whole-file pass (last `namespace` seen wins), unlike
-        // `Registry::index`'s positional tracking - brace-delimited
-        // multi-namespace-per-file is rare enough in real application
-        // code that the extra precision isn't worth it here; a mismatch
-        // in such a rare file only risks a missed diagnostic, not the
-        // silent method-table corruption the registry itself had to
-        // guard against.
+        // `Registry::index`'s positional tracking - a file with more
+        // than one `namespace` statement (brace-delimited, or real PHP's
+        // own less obvious allowance for several semicolon-style
+        // `namespace Foo;` statements in one file - see `NameContext::
+        // build`'s own doc comment for a real, corpus-found instance of
+        // the latter) is rare enough in real application code that the
+        // extra positional-tracking precision isn't worth it here; a
+        // mismatch in such a rare file risks a wrong or missed
+        // diagnostic for declarations under any namespace but the
+        // file's last one, not the silent method-table corruption the
+        // registry itself had to guard against (that risk is specific
+        // to `Registry::classes` being a single global, FQN-keyed table
+        // every file writes into - `Checker::name_ctx` is rebuilt fresh
+        // per file and never shared, so getting it wrong for one file
+        // can't corrupt another's).
         self.name_ctx = NameContext::build(program);
         // Phase 48: `ExistingNamesInUseRule`'s own function-import half -
         // see `check_use_function_imports`'s own doc comment for why a

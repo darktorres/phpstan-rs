@@ -36,11 +36,27 @@ pub(crate) struct NameContext {
 
 impl NameContext {
     /// Scans a file's top-level statements for `namespace`/`use`
-    /// declarations. PHP only allows one semicolon-style `namespace Foo;`
-    /// per file (the brace-delimited multi-namespace-per-file form is
-    /// rare enough, and unsupported by the parser's own StmtKind::Namespace
-    /// handling already, to not be worth modeling here) - once found, it
-    /// applies to the rest of the file, so a single linear scan suffices.
+    /// declarations, applying whichever `namespace` statement comes
+    /// *last* in the file to every declaration, regardless of where each
+    /// one actually appears - a real, if rare, inaccuracy: real PHP
+    /// genuinely allows *more than one* semicolon-style `namespace Foo;`
+    /// in a single file (each one switches the active namespace for
+    /// everything that follows, until the next one - not a "one per
+    /// file" rule, whatever an earlier version of this comment claimed;
+    /// confirmed the hard way via a real corpus file, `jetbrains/
+    /// phpstorm-stubs`' own `relay/Cluster.php`, which declares `namespace
+    /// Relay;` for its own `Cluster` class and then a later, empty
+    /// `namespace Relay\Cluster;` for the rest of the file - this
+    /// whole-file scan wrongly resolved `Cluster`'s own self-referencing
+    /// return type as `Relay\Cluster\Cluster` instead of `Relay\Cluster`,
+    /// a real false-positive `class.notFound`, not merely a missed
+    /// diagnostic as `Checker::check_program`'s own doc comment,
+    /// intentionally accepting *this exact* imprecision, assumes).
+    /// `Registry::index_with_context`'s sibling, positional
+    /// `ctx.set_namespace` walk gets this right; `Checker::name_ctx`
+    /// deliberately doesn't pay that same per-statement tracking cost -
+    /// see its own doc comment for the reasoning newly confirmed, rather
+    /// than invalidated, by this.
     pub(crate) fn build(stmts: &[Stmt]) -> NameContext {
         let mut ctx = NameContext::default();
         for stmt in stmts {
