@@ -758,3 +758,106 @@ fn a_public_static_method_called_through_static_is_never_flagged_for_the_static_
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// PHP 8.4 asymmetric visibility (`public private(set) string $x;`): the
+// write-side visibility can be narrower than the read-side one -
+// `PropertySig::write_visibility` is what a write is actually checked
+// against, `visibility` (unchanged) is still what a read uses.
+
+#[test]
+fn writing_a_public_private_set_property_from_outside_its_class_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public private(set) int $x = 1;
+            }
+            function test(Foo $f): void {
+                $f->x = 2;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "property.private");
+}
+
+#[test]
+fn reading_a_public_private_set_property_from_outside_its_class_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public private(set) int $x = 1;
+            }
+            function test(Foo $f): int {
+                return $f->x;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn writing_a_public_private_set_property_from_inside_its_own_class_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public private(set) int $x = 1;
+                public function setX(int $x): void {
+                    $this->x = $x;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn writing_a_public_protected_set_property_from_a_subclass_is_never_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public protected(set) int $x = 1;
+            }
+            class Bar extends Foo {
+                public function setX(int $x): void {
+                    $this->x = $x;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn writing_a_public_protected_set_property_from_outside_the_hierarchy_is_flagged() {
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                public protected(set) int $x = 1;
+            }
+            function test(Foo $f): void {
+                $f->x = 2;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "property.protected");
+}
+
+#[test]
+fn writing_a_plain_symmetric_property_is_unaffected_by_write_visibility() {
+    // No `(set)` marker at all - `write_visibility` defaults to
+    // `visibility`, so behavior must stay exactly what it was before
+    // this field existed.
+    let d = visibility_diagnostics(
+        r#"<?php
+            class Foo {
+                private int $x = 1;
+            }
+            function test(Foo $f): void {
+                $f->x = 2;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "property.private");
+}

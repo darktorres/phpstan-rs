@@ -23,6 +23,14 @@ pub struct PropertySig {
     // enum's own built-in `name`/`value` are always `Visibility::Public`
     // - real PHP has no way to declare either any other way.
     pub visibility: Visibility,
+    // PHP 8.4 asymmetric visibility (`public private(set) string $x;`) -
+    // the write-side visibility, defaulting to `visibility` itself (the
+    // read side) for an ordinary, symmetric property, or one with no
+    // established per-item place to write a separate write-visibility
+    // (a promoted constructor property, a magic `@property` tag, an
+    // enum's own built-in `name`/`value`) - same restriction
+    // `is_internal` below already has.
+    pub write_visibility: Visibility,
     // PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook
     // can accept a wider type than the property's own backing/read type
     // (`public array $x { set(array $value) { $this->x =
@@ -246,6 +254,10 @@ impl ClassInfo {
                         is_readonly: p.is_readonly,
                         set_ty,
                         visibility: p.visibility.clone(),
+                        write_visibility: p
+                            .write_visibility
+                            .clone()
+                            .unwrap_or(p.visibility.clone()),
                         is_internal: doc_ty.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc_ty.as_ref().and_then(|d| d.deprecated.clone()),
                     },
@@ -277,6 +289,10 @@ impl ClassInfo {
                         is_readonly: p.promoted_readonly,
                         set_ty: None,
                         visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
+                        write_visibility: p
+                            .promoted_visibility
+                            .clone()
+                            .unwrap_or(Visibility::Public),
                         is_internal: false,
                         deprecated: None,
                     },
@@ -305,6 +321,7 @@ impl ClassInfo {
                         is_readonly: tag.readable && !tag.writable,
                         set_ty: None,
                         visibility: Visibility::Public,
+                        write_visibility: Visibility::Public,
                         is_internal: false,
                         deprecated: None,
                     }
@@ -514,6 +531,7 @@ impl ClassInfo {
                 is_internal: false,
                 has_override_attr: false,
                 deprecated: None,
+                throws: None,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -536,6 +554,10 @@ impl ClassInfo {
                     is_internal: false,
                     has_override_attr: false,
                     deprecated: None,
+                    // `from()` throws a real `ValueError` when no case
+                    // matches (confirmed directly via `php -r`) - unlike
+                    // `tryFrom()`, which returns `null` instead.
+                    throws: Some(Type::Object("ValueError".to_string(), Vec::new())),
                 },
             );
             methods.insert(
@@ -549,6 +571,7 @@ impl ClassInfo {
                     is_internal: false,
                     has_override_attr: false,
                     deprecated: None,
+                    throws: None,
                 },
             );
         }
@@ -632,6 +655,7 @@ impl ClassInfo {
                 is_readonly: false,
                 set_ty: None,
                 visibility: Visibility::Public,
+                write_visibility: Visibility::Public,
                 is_internal: false,
                 deprecated: None,
             },
@@ -668,6 +692,7 @@ impl ClassInfo {
                     is_readonly: false,
                     set_ty: None,
                     visibility: Visibility::Public,
+                    write_visibility: Visibility::Public,
                     is_internal: false,
                     deprecated: None,
                 },

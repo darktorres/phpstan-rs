@@ -151,6 +151,7 @@ impl Parser {
             }
 
             let mut visibility = Visibility::Public;
+            let mut write_visibility = None;
             let mut is_static = false;
             let mut is_abstract_member = false;
             let mut is_final_member = false;
@@ -161,17 +162,18 @@ impl Parser {
                     // `protected(set)` as a *second* visibility modifier
                     // narrowing writes only (e.g. `public private(set)
                     // string $x`, or standalone `private(set) string $x`
-                    // for public-read/private-write). Not modeled as its
-                    // own concept - just consumed so the read-side
-                    // `visibility` above (already set, or defaulted to
-                    // Public) is left alone.
+                    // for public-read/private-write) - captured into
+                    // `write_visibility` below, kept separate from the
+                    // read-side `visibility` above.
                     Token::Keyword(Keyword::Private) if self.peek_is_set_visibility_marker() => {
+                        write_visibility = Some(Visibility::Private);
                         self.advance();
                         self.advance();
                         self.expect_ident()?;
                         self.expect(&Token::RParen)?;
                     }
                     Token::Keyword(Keyword::Protected) if self.peek_is_set_visibility_marker() => {
+                        write_visibility = Some(Visibility::Protected);
                         self.advance();
                         self.advance();
                         self.expect_ident()?;
@@ -181,6 +183,7 @@ impl Parser {
                     // write-visibility as public too (e.g. `public
                     // public(set) string $x`).
                     Token::Keyword(Keyword::Public) if self.peek_is_set_visibility_marker() => {
+                        write_visibility = Some(Visibility::Public);
                         self.advance();
                         self.advance();
                         self.expect_ident()?;
@@ -302,6 +305,7 @@ impl Parser {
                     properties.push(PropertyDecl {
                         name,
                         visibility: visibility.clone(),
+                        write_visibility: write_visibility.clone(),
                         is_static,
                         is_readonly,
                         type_hint: type_hint.clone(),
@@ -319,6 +323,7 @@ impl Parser {
                 properties.push(PropertyDecl {
                     name,
                     visibility: visibility.clone(),
+                    write_visibility: write_visibility.clone(),
                     is_static,
                     is_readonly,
                     type_hint: type_hint.clone(),

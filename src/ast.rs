@@ -174,6 +174,13 @@ pub enum Visibility {
 pub struct PropertyDecl {
     pub name: String,
     pub visibility: Visibility,
+    // PHP 8.4 asymmetric visibility (`public private(set) string $x;`) -
+    // the narrower write-side visibility, when one was declared
+    // separately from `visibility` above (which always stays the
+    // *read*-side visibility). `None` for an ordinary, symmetric
+    // property, in which case a write is checked against `visibility`
+    // itself, same as before this field existed.
+    pub write_visibility: Option<Visibility>,
     pub is_static: bool,
     pub is_readonly: bool,
     pub type_hint: Option<String>,

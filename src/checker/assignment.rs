@@ -288,16 +288,20 @@ impl<'a> Checker<'a> {
         // Phase 57: visibility - shares the same "property.private"/
         // "property.protected" identifiers a read gets (`ExprKind::
         // PropertyAccess`, `checker/expr.rs`), matching real PHPStan's
-        // own `AccessPropertiesCheck::check()`, which both the read
-        // rule and this project's own write-side equivalent delegate to
-        // identically (only the separate, PHP-8.4-specific asymmetric-
-        // visibility identifiers this project doesn't model differ
-        // between the two).
+        // own `AccessPropertiesCheck::check()`, which both the read rule
+        // and this project's own write-side equivalent delegate to
+        // identically. Checked against `write_visibility`, not
+        // `visibility` - PHP 8.4 asymmetric visibility
+        // (`public private(set) string $x;`) means a write can be
+        // legal/illegal at a strictly narrower scope than a read of the
+        // exact same property; for an ordinary, symmetric property the
+        // two are identical, so this is a no-op change for every case
+        // that isn't asymmetric.
         self.check_member_visibility(MemberVisibilityCheck {
             kind: "property",
             owner: &owner,
             member_name: prop,
-            visibility: &prop_sig.visibility,
+            visibility: &prop_sig.write_visibility,
             describe: &format!("property {owner}::${prop}"),
             span: lhs.span,
             label,
