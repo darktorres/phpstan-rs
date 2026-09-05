@@ -276,6 +276,43 @@ impl<'a> Checker<'a> {
                     return strip_accessory_markers(arr_ty);
                 }
             }
+            // Phase 73: real PHP always takes every kept key/value pair's
+            // own *type* straight from `$array` (the first argument) -
+            // every other argument only narrows *which* keys survive,
+            // never what type a surviving one holds. List-ness doesn't
+            // survive (a matching key can be anywhere in `$array`,
+            // leaving a gap in whatever sequential keys remain), same
+            // "don't guess past what's certain" leniency `array_unique`
+            // just above already applies to its own similar shape.
+            "array_intersect_key" if args.len() >= 2 => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if Self::is_array_like(&arr_ty) {
+                    return strip_accessory_markers(arr_ty);
+                }
+            }
+            // Phase 73: swaps keys and values - the result's own key
+            // type is `$array`'s *value* type, and vice versa. Verified
+            // directly via `php`: list-ness never survives (the new keys
+            // come from the old values, essentially never already
+            // `0, 1, 2, ...`), but non-emptiness does (flipping can't
+            // change whether there's at least one element).
+            "array_flip" if args.len() == 1 => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if Self::is_array_like(&arr_ty) {
+                    let key_ty =
+                        Self::array_key_type(&arr_ty).unwrap_or_else(Type::unknown_array_key);
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed);
+                    let flipped = Type::Array(Box::new(elem_ty), Box::new(key_ty));
+                    return if Self::is_known_non_empty_array(&arr_ty) {
+                        Type::Intersection(vec![
+                            flipped,
+                            Type::Accessory(AccessoryKind::NonEmptyArray),
+                        ])
+                    } else {
+                        flipped
+                    };
+                }
+            }
             // A round of Piwigo-corpus bucketing after Phase 14 found this
             // was the single largest remaining false-positive source:
             // `array_merge(['a', 'b'], someListReturningCall())`, real
@@ -397,9 +434,16 @@ impl<'a> Checker<'a> {
                     Box::new(self.infer_expr(&args[2].value, locals)),
                 );
             }
+            // Phase 73: `$keys`' own *elements* become the result's real
+            // keys - `array_fill_keys(['a', 'b'], 0)` really is
+            // `array<string, int>`, not the `array<int|string, int>`
+            // `unknown_array_key()` used to settle for unconditionally.
             "array_fill_keys" if args.len() == 2 => {
+                let keys_ty = self.infer_expr(&args[0].value, locals);
+                let key_ty =
+                    Self::array_element_type(&keys_ty).unwrap_or_else(Type::unknown_array_key);
                 return Type::Array(
-                    Box::new(Type::unknown_array_key()),
+                    Box::new(key_ty),
                     Box::new(self.infer_expr(&args[1].value, locals)),
                 );
             }
@@ -541,8 +585,19 @@ impl<'a> Checker<'a> {
             // haystack, narrowed to `int` after the caller's own
             // `$index === false` guard).
             "array_search" if args.len() >= 2 => {
-                if Checker::is_list_like(&self.infer_expr(&args[1].value, locals)) {
+                let haystack_ty = self.infer_expr(&args[1].value, locals);
+                if Checker::is_list_like(&haystack_ty) {
                     return union_types(Type::Int, Type::False);
+                }
+                // Phase 73: the same idea, one level less precise - a
+                // haystack whose own key type is confidently known (not
+                // just "definitely a list") narrows the found-key half
+                // of the result the same way, e.g. an `array<string,
+                // V>` haystack can only ever find a `string` key.
+                if let Some(key_ty) = Self::array_key_type(&haystack_ty)
+                    && key_ty != Type::unknown_array_key()
+                {
+                    return union_types(key_ty, Type::False);
                 }
             }
             // The real stub declares `version_compare(string, string,

@@ -294,19 +294,35 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
 /// in place.
 fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
     let has = |k: AccessoryKind| members.contains(&Type::Accessory(k));
-    if let Some(elem) = members.iter().find_map(|m| match m {
-        Type::Array(_, e) => Some(e.as_ref()),
+    if let Some((key, elem)) = members.iter().find_map(|m| match m {
+        Type::Array(k, e) => Some((k.as_ref(), e.as_ref())),
         _ => None,
     }) {
-        let elem_str = if *elem == Type::Mixed {
+        let is_list = has(AccessoryKind::ArrayList);
+        // Phase 73 corpus find: this used to discard the key type
+        // entirely, always formatting via the plain, key-less `<V>`
+        // form (or nothing, for `Mixed`) - harmless while every
+        // accessory-marked array this project produced also had an
+        // unknown key, but `array_flip()`'s own new key/value-swapping
+        // return type can genuinely carry a known, non-default key
+        // (e.g. `non-empty-array<string, int>`) that this was silently
+        // rendering as `non-empty-array<int>`. Mirrors `Type::Array`'s
+        // own `Display` arm just above: a known key always shows both
+        // positions, even when the value happens to be `Mixed`. Never
+        // shown for a `list`/`non-empty-list`, though, even though its
+        // own key really is a "known" `Type::Int` under the same
+        // `!= unknown_array_key()` test - a list's keys are *always*
+        // sequential ints by definition, so real PHPStan's own
+        // `list<V>` convention never states it either.
+        let known_key = !is_list && *key != Type::unknown_array_key();
+        let elem_str = if known_key {
+            format!("<{key}, {elem}>")
+        } else if *elem == Type::Mixed {
             String::new()
         } else {
             format!("<{elem}>")
         };
-        return match (
-            has(AccessoryKind::ArrayList),
-            has(AccessoryKind::NonEmptyArray),
-        ) {
+        return match (is_list, has(AccessoryKind::NonEmptyArray)) {
             (true, true) => Some(format!("non-empty-list{elem_str}")),
             (true, false) => Some(format!("list{elem_str}")),
             (false, true) => Some(format!("non-empty-array{elem_str}")),

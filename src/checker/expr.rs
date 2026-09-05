@@ -2942,6 +2942,24 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 73: `array_element_type`'s own key-side counterpart -
+    /// deliberately narrower, since only a bare `Type::Array` (or one
+    /// wrapped in the `list<T>`/`non-empty-array<T>` `Intersection`
+    /// shape) carries a real key type to report at all. An `ArrayShape`
+    /// has no such field (each field's own key is a literal `String`,
+    /// not a `Type`) - `is_list_like` already covers its one precise,
+    /// commonly-useful key fact (are the keys exactly `0, 1, 2, ...`),
+    /// so this returns `None` for one rather than trying to synthesize
+    /// a real `Type::Int`/`Type::String`/`unknown_array_key()` from its
+    /// field names, which none of this phase's own callers need.
+    pub(crate) fn array_key_type(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Array(key, _) => Some((**key).clone()),
+            Type::Intersection(members) => members.iter().find_map(Self::array_key_type),
+            _ => None,
+        }
+    }
+
     /// Phase 14: whether `ty` is array-shaped at all - for sites that
     /// only need "is this even an array," not the unwrapped element
     /// type `array_element_type` above provides. Sees through a

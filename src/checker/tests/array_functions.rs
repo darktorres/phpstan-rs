@@ -355,6 +355,111 @@ fn array_fill_and_array_fill_keys_infer_the_fill_value_s_type() {
     assert!(d.iter().all(|x| x.message.contains("needsStrings")));
 }
 
+// Phase 73: array_fill_keys()'s own key-type precision - $keys' own
+// elements become the result's real keys, not the generic
+// unknown_array_key() default.
+
+#[test]
+fn array_fill_keys_infers_the_key_type_from_the_keys_array() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<string> $keys */
+            function f(array $keys): void {
+                assertType('array<string, 42>', array_fill_keys($keys, 42));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 73: array_search()'s own key-type precision, one level less
+// precise than the pre-existing "definitely a list" case just above -
+// a haystack with a confidently-known key type (not just "definitely a
+// list") narrows the found-key half of the result the same way.
+
+#[test]
+fn array_search_narrows_to_the_haystack_s_own_known_key_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, int> $haystack */
+            function f(array $haystack): void {
+                assertType('string|false', array_search(1, $haystack));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_search_stays_generic_for_an_unknown_key_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(array $haystack): void {
+                assertType('int|string|false', array_search(1, $haystack));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 73: array_intersect_key() - every surviving key/value pair's own
+// type comes straight from the first argument; only which keys survive
+// is narrowed by the rest. List-ness never survives (a gap can open up
+// anywhere).
+
+#[test]
+fn array_intersect_key_preserves_the_first_array_s_own_key_and_value_types() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param array<string, int> $a
+             * @param array<string, bool> $b
+             */
+            function f(array $a, array $b): void {
+                assertType('array<string, int>', array_intersect_key($a, $b));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 73: array_flip() swaps keys and values - confirmed directly via
+// php that list-ness never survives (the new keys come from the old
+// values, essentially never already 0, 1, 2, ...) but non-emptiness
+// does.
+
+#[test]
+fn array_flip_swaps_key_and_value_types() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<string> $xs */
+            function f(array $xs): void {
+                assertType('array<string, int>', array_flip($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_flip_preserves_non_emptiness_but_not_list_ness() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<string> $xs */
+            function f(array $xs): void {
+                assertType('non-empty-array<string, int>', array_flip($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn array_chunk_wraps_the_original_element_type_in_an_extra_array_layer() {
     let d = diagnostics_for(
