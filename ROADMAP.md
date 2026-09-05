@@ -1739,8 +1739,14 @@ function calls (`function.internal`), instance/static method calls
 (`method.internal(Class|Interface|Trait|Enum)`, `staticMethod.*`),
 instance/static property reads (`property.*`, `staticProperty.*`),
 class-constant reads (`classConstant.*`, declaring-class-internal only -
-no per-constant `@internal` tracking exists yet, would need a real struct
-in place of `ClassInfo::consts`'s current bare `HashMap<String, Type>`),
+no per-constant `@internal` tracking exists yet; this originally needed
+a real struct in place of `ClassInfo::consts`'s then-bare
+`HashMap<String, Type>`, but Phase 57's own later `ConstSig` (added for
+class-constant *visibility* enforcement, mirroring `PropertySig`) is
+that exact struct - per-constant `@internal` tracking is no longer
+blocked on new infrastructure, just on adding an `is_internal` field to
+`ConstSig` and reading a constant declaration's own `@internal` tag the
+same way `PropertySig::from_decl` already does),
 and instantiation (`new.*`). Needed new `is_internal` fields on
 `FunctionSig` (covers both plain functions and methods for free),
 `ClassInfo`, and `PropertySig`, plus a new `Registry::
@@ -1768,8 +1774,11 @@ additionally covers `extends`/`implements`/param-and-return-type-hints/
 instantiation of the several `ClassNameUsageLocation` variants);
 `RestrictedUsageOfDeprecatedStringCastRule` (extends the method-call
 check to an implicit `(string)`-cast-triggered `__toString()` call - easy
-to add once needed, just not wired); per-property-write and per-constant
-`@internal` tracking (see above); `RestrictedClassConstantUsageRule`/
+to add once needed, just not wired); per-property-write `@internal`
+tracking (property *reads* are covered, writes aren't - a separate gap
+from the constant one); per-constant `@internal` tracking (see above -
+no longer blocked on new infrastructure now that `ConstSig` exists,
+just not yet wired); `RestrictedClassConstantUsageRule`/
 `RestrictedFunctionCallableUsageRule`/`RestrictedMethodCallableUsageRule`/
 `RestrictedPropertyUsageRule`/`RestrictedStaticMethodCallableUsageRule`/
 `RestrictedStaticPropertyUsageRule` (a separate, *user-configured*
