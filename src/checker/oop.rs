@@ -317,6 +317,75 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
     }
 
+    /// Phase 65 follow-up: three small, independent PHP-version/modifier-
+    /// consistency checks on a class constant's own declaration, all
+    /// confirmed directly via `php -l`/`php -r` and matching real
+    /// PHPStan's own identifiers exactly:
+    ///
+    /// `classConstant.finalNotSupported` (`FinalConstantRule`) - `final
+    /// const` needs PHP 8.1+; `classConstant.finalPrivate`
+    /// (`FinalPrivateConstantRule`) - a `private` constant can never be
+    /// `final` too, since nothing outside its own declaring class could
+    /// ever see it to override in the first place (real PHP's own exact
+    /// wording: "Private constant Foo::X cannot be final as it is not
+    /// visible to other classes") - unconditional, no PHP-version gate at
+    /// all; `classConstant.nativeTypeNotSupported`
+    /// (`NativeTypedClassConstantRule`) - a typed constant (`const TYPE
+    /// NAME = value;`) needs PHP 8.3+. All three reuse `PhpFeature`
+    /// variants (`FinalClassConstants`/`NativeTypedClassConstants`)
+    /// Phase 38 already defined but never wired to anything.
+    pub(crate) fn check_class_constant_modifiers(&mut self, fqn: &str, consts: &[ClassConst]) {
+        let version = self.registry.php_version;
+        for c in consts {
+            if c.is_final
+                && let Some(version) = version
+                && !crate::php_version::PhpFeature::FinalClassConstants.is_available(version)
+            {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        "Final class constants are supported only on PHP 8.1 and later."
+                            .to_string(),
+                        c.span,
+                        0,
+                        "classConstant.finalNotSupported",
+                    )
+                    .non_ignorable(),
+                );
+            }
+            if c.is_final && c.visibility == Visibility::Private {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "Private constant {fqn}::{} cannot be final as it is never overridden by other classes.",
+                            c.name
+                        ),
+                        c.span,
+                        0,
+                        "classConstant.finalPrivate",
+                    )
+                    .non_ignorable(),
+                );
+            }
+            if c.type_hint.is_some()
+                && let Some(version) = version
+                && !crate::php_version::PhpFeature::NativeTypedClassConstants.is_available(version)
+            {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        "Class constants with native types are supported only on PHP 8.3 and later.".to_string(),
+                        c.span,
+                        0,
+                        "classConstant.nativeTypeNotSupported",
+                    )
+                    .non_ignorable(),
+                );
+            }
+        }
+    }
+
     /// Phase 65: a batch of small, independent method-declaration
     /// boolean-flag-combination checks real PHP enforces unconditionally
     /// at compile time, all confirmed directly against real `php -l` -

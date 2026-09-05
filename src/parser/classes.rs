@@ -250,6 +250,7 @@ impl Parser {
                         visibility: visibility.clone(),
                         attrs: attrs.clone(),
                         type_hint: type_hint.clone(),
+                        is_final: is_final_member,
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),
@@ -728,6 +729,7 @@ impl Parser {
                         visibility: visibility.clone(),
                         attrs: attrs.clone(),
                         type_hint: type_hint.clone(),
+                        is_final: is_final_member,
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),

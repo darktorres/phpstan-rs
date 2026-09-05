@@ -278,6 +278,8 @@ impl Parser {
                         // A top-level `const` has no PHP 8.3 typed-
                         // constant syntax either - that's class-const-only.
                         type_hint: None,
+                        // Nor any `final` syntax - also class-const-only.
+                        is_final: false,
                         span: Span {
                             start: const_start,
                             end: self.previous_end(),

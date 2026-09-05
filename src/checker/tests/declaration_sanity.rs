@@ -472,3 +472,159 @@ fn a_typed_constant_referencing_another_constant_is_checked_via_full_inference()
         "got: {d:?}"
     );
 }
+
+// Phase 65 follow-up: `final const`/typed-constant PHP-version gating,
+// plus `final private const`'s own unconditional modifier conflict -
+// all confirmed directly via `php -l`/`php -r`.
+
+#[test]
+fn a_final_constant_below_php_8_1_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                final const X = 1;
+            }
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "classConstant.finalNotSupported"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_constant_on_php_8_1_or_later_is_never_flagged_for_version_support() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                final const X = 1;
+            }
+        "#,
+        |r| r.php_version = Some((8, 1)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "classConstant.finalNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_constant_with_no_configured_php_version_is_never_flagged_for_version_support() {
+    // With no configured version, this project has nothing to check
+    // against - matches every other `PhpFeature`-gated rule's own
+    // "unset means unconfigured, stay silent" convention.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                final const X = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "classConstant.finalNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_private_constant_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                final private const X = 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "classConstant.finalPrivate"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_public_constant_is_never_flagged_as_final_private() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                final public const X = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "classConstant.finalPrivate"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_final_private_constant_is_never_flagged_as_final_private() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                private const X = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "classConstant.finalPrivate"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_typed_constant_below_php_8_3_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                const int X = 1;
+            }
+        "#,
+        |r| r.php_version = Some((8, 2)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "classConstant.nativeTypeNotSupported"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_typed_constant_on_php_8_3_or_later_is_never_flagged_for_version_support() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                const int X = 1;
+            }
+        "#,
+        |r| r.php_version = Some((8, 3)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "classConstant.nativeTypeNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_untyped_constant_is_never_flagged_for_native_type_version_support() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                const X = 1;
+            }
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "classConstant.nativeTypeNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

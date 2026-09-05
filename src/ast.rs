@@ -286,6 +286,14 @@ pub struct ClassConst {
     // applies to every name in a comma-separated list" cloning as
     // `visibility`/`doc_comment`/`attrs` above.
     pub type_hint: Option<String>,
+    // PHP 8.1+ `final const` - parsed by both `parser/classes.rs` call
+    // sites' own shared modifier loop already (into a local
+    // `is_final_member` shared with methods/properties), but never kept
+    // on the node itself until `FinalConstantRule`/`FinalPrivateConstantRule`
+    // needed to tell a `final` constant apart from an ordinary one.
+    // Always `false` for the top-level (non-class) `const NAME = value;`
+    // statement - real PHP has no `final` syntax there at all.
+    pub is_final: bool,
     pub span: Span,
 }
 
