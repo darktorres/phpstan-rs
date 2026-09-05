@@ -2020,19 +2020,42 @@ would need genuinely new infrastructure this project doesn't have yet
 (no existing Reflection-specific registry surface, no existing magic-
 property-resolution mechanism).
 
-**Phase 78 - DateTime/DateInterval/DOM/SimpleXML literal-probing (NEW,
-PLANNED, low priority).** Real PHPStan validates these by constructing
-the actual PHP object (`DateInterval`, `DOMDocument`, `SimpleXMLElement`)
-at analysis time and observing whether it throws - phpstan-rs has no
-embedded PHP runtime or XML parser to replicate this. Would need a
-hand-written relative-date-string parser and/or XML validator from
-scratch. Flagged as low-priority/possibly-permanent-boundary rather
-than concretely scheduled - several of the underlying PHPStan classes
-(`DateIntervalConstructorThrowTypeExtension`,
-`SimpleXMLElementConstructorThrowTypeExtension`) were independently
-marked `not_applicable` elsewhere in the audit for the identical "no
-PHP runtime to shell out to" reason (see Won't-port list). Size: XL,
-low value.
+**Phase 78 - DateTime/DateInterval/DOM/SimpleXML literal-probing
+(PARTIAL).** Real PHPStan validates these by constructing the actual PHP
+object (`DateInterval`, `DOMDocument`, `SimpleXMLElement`) at analysis
+time and observing whether it throws - phpstan-rs has no embedded PHP
+runtime or XML parser to replicate this.
+
+**Done**: `DateInterval::__construct()`'s own duration-string
+validation (`src/checker/date_interval.rs`) - a hand-rolled grammar for
+both of PHP's real accepted spec formats (the letter-designator
+duration form and the fixed-width alternate ISO date-time form),
+flagging a *literal* spec argument provably malformed at runtime. Every
+grammar edge case (designator ordering, `W`'s unusual free-mixing with
+`M`/`D` unlike strict ISO-8601, the alternate form's mandatory
+`T`-suffix, case sensitivity, leading zeros, whitespace tolerance) was
+confirmed directly against real `php` 8.5, not guessed - real PHPStan's
+own `DateIntervalConstructorThrowTypeExtension` shells out to a real
+interpreter for this instead, which this project can't do, but the
+ISO-8601 duration grammar itself turned out small and stable enough to
+hand-port directly with no such shortcut needed. Corpus-verified: no
+diagnostic-count change (all 16 real `DateInterval()` call sites in the
+Piwigo+vendor corpus use an already-valid literal spec) and zero
+regressions.
+
+**Still open**: `DOMDocument`/`SimpleXMLElement`'s own XML-content
+validation - a full XML well-formedness grammar is a substantially
+bigger undertaking than `DateInterval`'s own small, precisely-specified
+duration syntax, with no comparable "verify against real php case by
+case" shortcut; `DateTime`'s own relative-date-string parsing (`"+1
+day"`, `"next monday"`, ...) is a much larger and fuzzier grammar than
+`DateInterval`'s, not attempted here either. Flagged as low-priority/
+possibly-permanent-boundary rather than concretely scheduled - several
+of the underlying PHPStan classes
+(`SimpleXMLElementConstructorThrowTypeExtension`) were independently
+marked `not_applicable` elsewhere in the audit for the identical "no PHP
+runtime to shell out to" reason (see Won't-port list). Size: L
+remaining, low value.
 
 **Phase 79 - Enum-case singleton type + `BackedEnum::from()`/`::tryFrom()`
 narrowing (DONE).** Enum case fetches used to resolve through the generic
