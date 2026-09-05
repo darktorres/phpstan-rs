@@ -207,6 +207,20 @@ impl<'a> Checker<'a> {
                         // has no "prove empty" counterpart).
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         locals.insert(key, upgrade_array_to_non_empty(&current));
+                    } else if name == "array_is_list" && branch_true {
+                        // Phase 55's own still-open list: a real, named
+                        // gap - webmozart/assert's own `Assert::isList()`
+                        // (a real, common assertion-library idiom) proves
+                        // list-ness via `is_array($x) && array_is_list
+                        // ($x)`, the same shape `count($x)`'s own
+                        // truthiness upgrade just above already covers
+                        // for non-emptiness. Only the true branch is
+                        // narrowable - failing `array_is_list()` proves
+                        // nothing more specific than "not proven a list",
+                        // the same asymmetry `count`/`empty` already
+                        // accept above.
+                        let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                        locals.insert(key, upgrade_array_to_list(&current));
                     } else if name == "is_numeric" {
                         // Phase 32 Finding G: deliberately its own arm,
                         // not a `narrowing_type_for_predicate` table entry
@@ -1331,6 +1345,32 @@ fn upgrade_array_to_non_empty(ty: &Type) -> Type {
         {
             let mut members = members.clone();
             members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+            Type::Intersection(members)
+        }
+        _ => ty.clone(),
+    }
+}
+
+/// `array_is_list($x)`'s own true-branch narrowing - mirrors `upgrade_
+/// array_to_non_empty` exactly, just adding `ArrayList` instead of
+/// `NonEmptyArray`. Doesn't force the key type itself to `Type::Int` -
+/// every other list-producing call site in this project (`preg_split`,
+/// `array_values`, ...) leaves the stored key as `unknown_array_key()`
+/// too, relying on `describe_accessory_intersection`'s own display-layer
+/// guard (a list's key is always `int` by definition, so showing it
+/// would be redundant) rather than encoding it twice.
+fn upgrade_array_to_list(ty: &Type) -> Type {
+    match ty {
+        Type::Array(key, inner) => Type::Intersection(vec![
+            Type::Array(key.clone(), inner.clone()),
+            Type::Accessory(AccessoryKind::ArrayList),
+        ]),
+        Type::Intersection(members)
+            if members.iter().any(|m| matches!(m, Type::Array(_, _)))
+                && !members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
+        {
+            let mut members = members.clone();
+            members.push(Type::Accessory(AccessoryKind::ArrayList));
             Type::Intersection(members)
         }
         _ => ty.clone(),

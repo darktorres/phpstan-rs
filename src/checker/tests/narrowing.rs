@@ -437,6 +437,61 @@ fn a_bare_count_truthiness_check_narrows_to_non_empty_array() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 55's own still-open list: `array_is_list($x)` - a real,
+// webmozart/assert-style `is_array($x) && array_is_list($x)` idiom.
+
+#[test]
+fn array_is_list_narrows_to_a_real_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $x */
+            function sink($x): void {}
+            function f(array $x): void {
+                if (array_is_list($x)) {
+                    sink($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_is_list_composes_with_the_is_array_guard() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<mixed> $x */
+            function sink($x): void {}
+            function f(mixed $x): void {
+                if (is_array($x) && array_is_list($x)) {
+                    sink($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn failing_array_is_list_proves_nothing_more_specific() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function f(array $x): void {
+                if (array_is_list($x)) {
+                } else {
+                    sink($x);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "the false branch shouldn't be narrowed to non-empty at all: {d:?}"
+    );
+}
+
 #[test]
 fn a_guard_clause_on_a_negated_bare_count_still_narrows_past_it() {
     // `!count($x)` composes through the existing `Unary(Not)` arm
