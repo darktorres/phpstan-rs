@@ -99,11 +99,20 @@ impl Parser {
     /// files: `php -r '$e=true; if ($e && $x = "hi") { echo $x; }'`
     /// prints `hi`, and `$x` stays genuinely unset when `$e` is falsy
     /// (real short-circuiting, not eager evaluation) - so `&&`/`||` get
-    /// the identical treatment `==`/`<` already had. Still deliberately
-    /// not extended to every other binary operator (`+`, `.`, the
-    /// bitwise `|`/`^`/`&`, ...) - unconfirmed either way, and not
-    /// corpus-evidenced as a real gap the way comparison/`&&`/`||` all
-    /// were.
+    /// the identical treatment `==`/`<` already had. `parse_additive`
+    /// (`+`/`-`/`.`) and the cast arm of `parse_unary_inner` (`(int)`/
+    /// etc.) later got the same fix too, via a real corpus
+    /// `variable.undefined` false positive - confirmed the identical
+    /// idiom generalizes to these as well (`php -r '$v=0; $r="x".$v="y";
+    /// var_dump($r,$v);'` prints `string(3) "xy"` and `$v` becomes
+    /// `"y"`, i.e. `"x" . ($v = "y")`). The bitwise `|`/`^`/`&` operators
+    /// show the identical quirk when spot-tested directly via `php -r`
+    /// too (real PHP's grammar allows a bare assignment as an operand
+    /// essentially everywhere, not just at these specific precedence
+    /// levels) - deliberately still left unextended here, since there's
+    /// no corpus evidence calling for it the way every operator above
+    /// had, and this project's own convention is to extend on
+    /// evidence, not on a grammar property alone.
     pub(crate) fn parse_assignment_tail(
         &mut self,
         lhs: Expr,
@@ -367,7 +376,16 @@ impl Parser {
                 _ => break,
             };
             self.advance();
+            let rhs_start = self.current_pos();
             let rhs = self.parse_multiplicative()?;
+            // See `parse_logical_or`'s own identical fix (and `parse_
+            // assignment_tail`'s own doc comment) - the same real-PHP
+            // "assignment as a bare operand" idiom extends here too,
+            // confirmed directly (`php -r '$v=0; $r="x".$v="y";
+            // var_dump($r,$v);'` prints `string(3) "xy"` and `$v`
+            // becomes `"y"`, i.e. `"x" . ($v = "y")`). Real corpus find:
+            // a top-10-bucket `variable.undefined` scoping round.
+            let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
         Ok(lhs)
@@ -454,7 +472,15 @@ impl Parser {
     pub(crate) fn parse_unary_inner(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         if let Some(cast_ty) = self.try_parse_cast() {
+            let operand_start = self.current_pos();
             let operand = self.parse_unary()?;
+            // Same real-PHP "assignment as a bare operand" idiom as
+            // `parse_additive`'s own identical fix just above - confirmed
+            // directly (`php -r '$v=0; $r=(int)$v=5; var_dump($r,$v);'`
+            // prints `int(5) int(5)`, i.e. `(int)($v = 5)`, not
+            // `((int)$v) = 5` (which isn't even a valid assignment
+            // target).
+            let operand = self.parse_assignment_tail(operand, operand_start)?;
             return Ok(self.expr(ExprKind::Cast(cast_ty, Box::new(operand)), start));
         }
 

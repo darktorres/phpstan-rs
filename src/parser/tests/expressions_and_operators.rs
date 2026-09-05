@@ -187,6 +187,86 @@ fn a_bang_negated_assignment_nested_in_a_logical_or_still_assigns() {
     assert!(matches!(&inner.kind, ExprKind::Assign(..)));
 }
 
+// `.`/cast get the identical "assignment as a bare operand" treatment -
+// confirmed directly (`php -r '$v=0; $r="x".$v="y"; var_dump($r,$v);'`
+// prints `string(3) "xy"` and `$v` becomes `"y"`).
+#[test]
+fn an_assignment_nested_as_a_concat_rhs_parses_as_real_php_does() {
+    let program = parse("<?php $r = 'x' . $v = 'y';");
+    let StmtKind::Expression(e) = &program[0].kind else {
+        panic!(
+            "expected an Expression statement, got {:?}",
+            program[0].kind
+        );
+    };
+    let ExprKind::Assign(_, value) = &e.kind else {
+        panic!("expected the statement to be an Assign, got {:?}", e.kind);
+    };
+    let ExprKind::Binary(BinOp::Concat, _, rhs) = &value.kind else {
+        panic!("expected a top-level Concat binary expression, got {value:?}");
+    };
+    let ExprKind::Assign(target, inner_value) = &rhs.kind else {
+        panic!(
+            "expected the Concat's RHS to be an Assign, got {:?}",
+            rhs.kind
+        );
+    };
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "v"));
+    assert!(matches!(
+        &inner_value.kind,
+        ExprKind::Literal(Literal::String(s)) if s == "y"
+    ));
+}
+
+#[test]
+fn an_ordinary_concat_with_no_trailing_assignment_is_unaffected() {
+    let program = parse("<?php $r = 'x' . $v;");
+    let StmtKind::Expression(e) = &program[0].kind else {
+        panic!(
+            "expected an Expression statement, got {:?}",
+            program[0].kind
+        );
+    };
+    let ExprKind::Assign(_, value) = &e.kind else {
+        panic!("expected the statement to be an Assign, got {:?}", e.kind);
+    };
+    let ExprKind::Binary(BinOp::Concat, _, rhs) = &value.kind else {
+        panic!("expected a top-level Concat binary expression, got {value:?}");
+    };
+    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "v"));
+}
+
+#[test]
+fn an_assignment_nested_as_a_cast_operand_parses_as_real_php_does() {
+    // `php -r '$v=0; $r=(int)$v=5; var_dump($r,$v);'` prints `int(5)
+    // int(5)`, i.e. `(int)($v = 5)`, not `((int)$v) = 5` (which isn't
+    // even a valid assignment target).
+    let program = parse("<?php $r = (int) $v = 5;");
+    let StmtKind::Expression(e) = &program[0].kind else {
+        panic!(
+            "expected an Expression statement, got {:?}",
+            program[0].kind
+        );
+    };
+    let ExprKind::Assign(_, value) = &e.kind else {
+        panic!("expected the statement to be an Assign, got {:?}", e.kind);
+    };
+    let ExprKind::Cast(_, operand) = &value.kind else {
+        panic!("expected a top-level Cast expression, got {value:?}");
+    };
+    let ExprKind::Assign(target, inner_value) = &operand.kind else {
+        panic!(
+            "expected the Cast's operand to be an Assign, got {:?}",
+            operand.kind
+        );
+    };
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "v"));
+    assert!(matches!(
+        &inner_value.kind,
+        ExprKind::Literal(Literal::Int(5))
+    ));
+}
+
 #[test]
 fn a_bare_anonymous_function_statement_parses_as_an_expression_not_a_declaration() {
     // `function () { ... };` with no assignment at all - a real, if

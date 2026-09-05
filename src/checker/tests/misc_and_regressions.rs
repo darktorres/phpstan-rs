@@ -129,6 +129,42 @@ fn a_variable_assigned_inside_a_bang_negated_or_condition_is_defined_afterward()
     );
 }
 
+// Same underlying idiom, `.`/cast operand positions instead of `!` - a
+// top-10-bucket `variable.undefined` scoping round found `parse_
+// additive`/the cast arm of `parse_unary_inner` missing the identical
+// `parse_assignment_tail` fix, confirmed via a real PHP interpreter.
+#[test]
+fn a_variable_assigned_as_a_concat_operand_is_defined_afterward() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $prefix, string $suffix) {
+                echo $prefix . $joined = $suffix;
+                echo $joined;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("undefined variable")),
+        "expected $joined to be recognized as defined, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_variable_assigned_as_a_cast_operand_is_defined_afterward() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $raw) {
+                $n = (int) $bound = $raw;
+                echo $bound;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("undefined variable")),
+        "expected $bound to be recognized as defined, got: {d:?}"
+    );
+}
+
 #[test]
 fn check_expr_recurses_into_every_simple_wrapper_expression() {
     // Coverage measurement found none of these check_expr arms had
