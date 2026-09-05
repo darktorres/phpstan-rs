@@ -873,6 +873,23 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::IntRange(None, Some(-1)),
             Type::IntRange(Some(1), None),
         ]),
+        // `int-mask<Flag::*>`/`int-mask-of<Flag::*>` - real PHPStan
+        // expands these into a real union of every combinable bitmask
+        // value, which this project has no way to enumerate without
+        // resolving the referenced class constants (the same "no lazy/
+        // deferred resolution" boundary `value-of`/`key-of` below already
+        // hit). Falling through to the generic class-name branch instead
+        // produced a bogus namespace-qualified "class" like `Composer\
+        // Pcre\int-mask<Composer\Pcre\PREG_UNMATCHED_AS_NULL>`, which
+        // then failed every ordinary `int`-typed assignability check -
+        // a real corpus false positive. Degrading to plain `Type::Int`
+        // (the pseudo-type's own real underlying kind) is a strict
+        // improvement, matching this project's own "don't guess past
+        // what's verifiable" convention for the string-identity pseudo-
+        // types just below. Any `<...>` generic argument is parsed (via
+        // the caller's existing generic-arg splitting) and simply
+        // discarded here, not left unconsumed.
+        "int-mask" | "int-mask-of" => Type::Int,
         "float" | "double" => Type::Float,
         // Phase 14: the four accessory-refined string pseudo-types are
         // now real `Intersection([String, Accessory(_)])` types, mirroring
@@ -883,7 +900,16 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // specific kind of identifier," with no literal-based or
         // narrowing-based way for this project to ever verify content -
         // `class-string`'s own optional `<Foo>` generic argument is
-        // similarly just dropped rather than tracked.
+        // similarly just dropped rather than tracked. `lowercase-string`/
+        // `uppercase-string`/`non-empty-lowercase-string`/`non-empty-
+        // uppercase-string` join the same "can't verify content" group
+        // for an identical reason (case-content isn't something this
+        // project can prove from a type alone) - previously missing
+        // entirely, falling through to the generic class-name branch and
+        // producing bogus namespace-qualified "class" names (e.g.
+        // `Psl\HPACK\non-empty-lowercase-string`) that then failed every
+        // ordinary `string`-typed assignability check, a real corpus
+        // false positive.
         "non-empty-string" => Type::Intersection(vec![
             Type::String,
             Type::Accessory(AccessoryKind::NonEmptyString),
@@ -900,9 +926,15 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::String,
             Type::Accessory(AccessoryKind::NumericString),
         ]),
-        "string" | "callable-string" | "trait-string" | "interface-string" | "enum-string" => {
-            Type::String
-        }
+        "string"
+        | "callable-string"
+        | "trait-string"
+        | "interface-string"
+        | "enum-string"
+        | "lowercase-string"
+        | "uppercase-string"
+        | "non-empty-lowercase-string"
+        | "non-empty-uppercase-string" => Type::String,
         // Unlike its string-refinement neighbors above, `class-string<T>`
         // carries a real, template-bindable inner type when given one -
         // needed for `@template R of Base` / `@param class-string<R> $x`

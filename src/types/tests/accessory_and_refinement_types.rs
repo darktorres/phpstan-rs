@@ -45,6 +45,44 @@ fn string_refinement_pseudo_types_with_no_verifiable_content_stay_plain_string()
     }
 }
 
+// A top-10-bucket corpus round found `lowercase-string`/`uppercase-
+// string`/`non-empty-lowercase-string`/`non-empty-uppercase-string`
+// missing from the list above entirely - real PHPStan/Psalm pseudo-
+// types (real corpus shape: `symfony/polyfill-php84`'s own `Php84.php`,
+// `amphp/hpack`'s own header-name typing) that fell through to the
+// generic-user-class branch and got namespace-qualified into a bogus
+// "class" (e.g. `Psl\HPACK\non-empty-lowercase-string`), which then
+// failed every ordinary `string`-typed assignability check.
+#[test]
+fn case_refinement_string_pseudo_types_also_stay_plain_string() {
+    for name in [
+        "lowercase-string",
+        "uppercase-string",
+        "non-empty-lowercase-string",
+        "non-empty-uppercase-string",
+    ] {
+        assert_eq!(parse_type_string(name), Type::String, "for {name}");
+    }
+}
+
+// Same corpus round: `int-mask<Flag::*>`/`int-mask-of<Flag::*>` -
+// real PHPStan expands these into every combinable bitmask value, which
+// this project can't enumerate without resolving the referenced class
+// constants. Falling through to the generic-class branch produced a
+// bogus `Composer\Pcre\int-mask<Composer\Pcre\PREG_UNMATCHED_AS_NULL>`-
+// style "class" that then failed ordinary `int` assignability checks -
+// a real corpus false positive. Degrading to the pseudo-type's own real
+// underlying kind, `Type::Int`, is a strict improvement.
+#[test]
+fn int_mask_pseudo_types_degrade_to_plain_int() {
+    assert_eq!(parse_type_string("int-mask"), Type::Int);
+    assert_eq!(
+        parse_type_string("int-mask-of<Foo::*>"),
+        Type::Int,
+        "the generic argument is parsed and discarded, not left unconsumed"
+    );
+}
+
 #[test]
 fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_types() {
     // Phase 14: real, common PHPStan/Psalm-ecosystem refinement types
