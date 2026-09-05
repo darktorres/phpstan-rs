@@ -1687,6 +1687,21 @@ impl<'a> Checker<'a> {
                         .lookup_property_with_owner(&fqn, prop)
                         .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
                         .unwrap_or(Type::Mixed),
+                    // Phase 80: a declared `object{...}` shape's own
+                    // field, resolved by name directly - no registry
+                    // lookup needed, the shape's own fields already carry
+                    // real types. An unlisted property name falls to
+                    // `Mixed` rather than a new "undefined property"
+                    // diagnostic - this project doesn't add that check
+                    // for `ArrayShape`'s own unlisted keys either (see
+                    // Phase 50's own still-open `InvalidKeyInArrayDimFetchRule`
+                    // note), matching the identical "don't guess a shape
+                    // is exhaustive" caution here.
+                    Type::ObjectShape(fields) => fields
+                        .iter()
+                        .find(|(name, _, _)| name == prop)
+                        .map(|(_, ty, _)| ty.clone())
+                        .unwrap_or(Type::Mixed),
                     _ => Type::Mixed,
                 };
                 if *nullsafe && result != Type::Mixed {
@@ -2403,6 +2418,13 @@ impl<'a> Checker<'a> {
                         .registry
                         .lookup_property_with_owner(&fqn, prop)
                         .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
+                        .unwrap_or(Type::Mixed),
+                    // Phase 80: mirrors `check_expr`'s own identical
+                    // `ObjectShape` arm - see its comment.
+                    Type::ObjectShape(fields) => fields
+                        .iter()
+                        .find(|(name, _, _)| name == prop)
+                        .map(|(_, ty, _)| ty.clone())
                         .unwrap_or(Type::Mixed),
                     _ => Type::Mixed,
                 };

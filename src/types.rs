@@ -43,6 +43,18 @@ pub enum Type {
     // `array{name: string, age?: int}` - PHPDoc's structural array type.
     // (field name, field type, optional)
     ArrayShape(Vec<(String, Type, bool)>),
+    // Phase 80: `object{name: string, age?: int}` - PHPDoc's structural
+    // *object* shape, the `object`-flavored sibling of `ArrayShape`
+    // right above (identical (name, type, optional) field shape,
+    // identical parsing precedent in `parse_type_atom`). Before this
+    // variant existed, the raw `object{...}` text itself was mangled
+    // into a bogus, namespace-qualified "class name" - a real, active
+    // false positive (`class.notFound`) on every real use of this
+    // syntax, not just a missing-precision gap. Structural, not a real
+    // registered class: `registry::is_assignable`'s own `ObjectShape`
+    // arm is where a real class instance gets checked against it
+    // property-by-property.
+    ObjectShape(Vec<(String, Type, bool)>),
     // A class name plus its resolved `@template` type arguments, if any
     // (`Collection<User>` -> `Object("Collection", [Object("User", [])])`)
     // - empty for a non-generic class, or a generic one referenced bare
@@ -248,6 +260,16 @@ impl fmt::Display for Type {
                     })
                     .collect();
                 write!(f, "array{{{}}}", parts.join(", "))
+            }
+            Type::ObjectShape(fields) => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(name, ty, optional)| {
+                        let q = if *optional { "?" } else { "" };
+                        format!("{name}{q}: {ty}")
+                    })
+                    .collect();
+                write!(f, "object{{{}}}", parts.join(", "))
             }
             Type::Object(name, args) => {
                 write!(f, "{name}")?;
@@ -544,6 +566,53 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
     Some(Type::ArrayShape(fields))
 }
 
+/// `object{name: string, age?: int}` - PHPDoc's structural object shape.
+/// Mirrors `try_parse_array_shape` exactly (same field grammar, same
+/// per-field `parse_type_string` recursion) - just builds `ObjectShape`
+/// instead of `ArrayShape`, and has no positional-field/`...`-unsealed-
+/// marker concept to carry over (an object's own properties are always
+/// named, never positional).
+fn try_parse_object_shape(s: &str) -> Option<Type> {
+    let lower = s.to_ascii_lowercase();
+    if !lower.starts_with("object") {
+        return None;
+    }
+    let rest = s[6..].trim_start();
+    if !rest.starts_with('{') || !rest.ends_with('}') {
+        return None;
+    }
+    let inner = &rest[1..rest.len() - 1];
+
+    let mut fields = Vec::new();
+    for field_str in split_top_level(inner, ',') {
+        let field_str = field_str.trim();
+        if field_str.is_empty() {
+            continue;
+        }
+        let Some((key_part, type_part)) = field_str
+            .split_once(':')
+            .filter(|(key_part, _)| looks_like_shape_key(key_part.trim()))
+        else {
+            // Same "degrade just this one field" leniency `try_parse_
+            // array_shape`'s own `...`-marker arm documents - an
+            // unrecognized field shouldn't abort every other real field
+            // alongside it.
+            continue;
+        };
+        let key_part = key_part.trim();
+        let (key, optional) = match key_part.strip_suffix('?') {
+            Some(k) => (k.trim(), true),
+            None => (key_part, false),
+        };
+        fields.push((
+            key.to_string(),
+            parse_type_string(type_part.trim()),
+            optional,
+        ));
+    }
+    Some(Type::ObjectShape(fields))
+}
+
 /// Whether `key_part` (the text before a candidate `:` inside an
 /// `array{...}` field) actually looks like a shape key - a bare
 /// identifier (hyphen included: `Translator::toDictionaryEntry`'s real
@@ -598,6 +667,9 @@ fn split_generic_args(s: &str) -> (&str, Vec<&str>) {
 fn parse_type_atom(s: &str) -> Type {
     let s = s.trim();
     if let Some(shape) = try_parse_array_shape(s) {
+        return shape;
+    }
+    if let Some(shape) = try_parse_object_shape(s) {
         return shape;
     }
     // PHP 8.2 DNF (disjunctive normal form) group: `(Countable&Iterator)`
@@ -1091,6 +1163,16 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // Two shapes are only related via the general `a == b` case above -
         // no shape subtyping (e.g. "has at least these keys") is modeled.
         (Type::ArrayShape(_), Type::Array(_, b)) => matches!(**b, Type::Mixed),
+
+        // Phase 80: an object shape is structurally an object, so it
+        // satisfies the bare native `object` hint - the same "shape
+        // satisfies the ordinary bare hint" rule `ArrayShape` gets just
+        // above, one type family over. Checking whether some *real*
+        // class (`Type::Object(class, _)`) structurally has these exact
+        // properties needs the registry - `registry::is_assignable`'s
+        // own `ObjectShape` arm handles that hierarchy/property-aware
+        // direction; this function has no class context to consult.
+        (Type::ObjectShape(_), Type::Object(name, _)) if name == "object" => true,
 
         (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(..)) => true,
 

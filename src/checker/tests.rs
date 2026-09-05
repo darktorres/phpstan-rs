@@ -19,6 +19,7 @@ mod misc_and_regressions;
 mod missing_typehint;
 mod narrowing;
 mod null_probes;
+mod object_shapes;
 mod oop_overrides_and_inheritance;
 mod operator_overloading;
 mod operator_validity;

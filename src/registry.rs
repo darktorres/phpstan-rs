@@ -1043,6 +1043,36 @@ impl Registry {
                     }
                 })
             }
+            // Phase 80: the `object{...}`-flavored sibling of the two
+            // `ArrayShape` rules just above - a real class instance
+            // satisfies a declared object shape when it has every
+            // property the shape actually requires (an optional field
+            // may be missing) with an assignable type, checked via
+            // `lookup_property` rather than an array field lookup;
+            // extra properties the class has beyond what's required are
+            // ignored, the same "structural, not exact" spirit. `object`/
+            // `stdClass` (dynamic-property bags this project doesn't
+            // track the real fields of) are accepted unconditionally,
+            // matching `Array(Mixed)`'s own established leniency for the
+            // identical "can't verify, don't guess wrong" situation.
+            (Type::Object(class, _), Type::ObjectShape(fields)) => {
+                class == "object"
+                    || class == "stdClass"
+                    || fields.iter().all(|(name, sup_ty, optional)| {
+                        match self.lookup_property(class, name) {
+                            Some(p) => self.is_assignable(&p.ty, sup_ty),
+                            None => *optional,
+                        }
+                    })
+            }
+            (Type::ObjectShape(sub_fields), Type::ObjectShape(sup_fields)) => {
+                sup_fields.iter().all(|(name, sup_ty, optional)| {
+                    match sub_fields.iter().find(|(n, _, _)| n == name) {
+                        Some((_, sub_ty, _)) => self.is_assignable(sub_ty, sup_ty),
+                        None => *optional,
+                    }
+                })
+            }
             // Same unresolved-`@phpstan-type`-alias leniency as the
             // Object-vs-Object arm above, generalized to every other
             // `sub` shape: Doctrine DBAL's own `DriverManager::
