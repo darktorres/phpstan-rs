@@ -895,6 +895,35 @@ fn a_trait_method_calling_a_host_only_method_is_flagged_for_a_sibling_host_missi
     assert!(d[0].message.contains("undefined method"), "got: {d:?}");
 }
 
+// Real corpus shape: symfony/cache's own `if (version_compare(phpversion(
+// 'redis'), '6.3.0', '>=')) { trait Redis63ProxyTrait { ... } }` -
+// `check_program`'s own top-level `StmtKind::ClassDecl` handling already
+// dispatches a trait through `check_trait_methods` (this same per-host
+// re-checking), but a trait declared *inside* a conditional block
+// reaches `check_stmt`'s own nested `StmtKind::ClassDecl` arm instead,
+// which used to check every trait method with `current_class` set to
+// the trait's own name unconditionally, regardless of `ClassKind` -
+// `$this->hostOnlyMethod()` (real shape: `initializeLazyObject()`,
+// provided by a sibling trait on the real host) was wrongly flagged as
+// undefined on the trait itself.
+#[test]
+fn a_conditionally_declared_trait_still_checks_against_its_real_host() {
+    let d = diagnostics_for(
+        r#"<?php
+            if (true) {
+                trait Greeter {
+                    public function greet(): string { return $this->name(); }
+                }
+            }
+            class Person {
+                use Greeter;
+                public function name(): string { return "Alice"; }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_host_independent_trait_bug_is_reported_once_not_once_per_host() {
     let d = diagnostics_for(

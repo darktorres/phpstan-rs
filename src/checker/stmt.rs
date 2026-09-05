@@ -873,8 +873,28 @@ impl<'a> Checker<'a> {
                 for cc in &c.consts {
                     self.check_attributes(&cc.attrs, &fqn);
                 }
-                for m in &c.methods {
-                    self.check_function(&m.function, Some(&fqn), m.is_static);
+                // A conditionally-declared trait (the common `if
+                // (version_compare(...)) { trait Foo {...} }`/`if
+                // (PHP_VERSION_ID ...) { trait Foo {...} }` shape - real
+                // corpus example, symfony/cache's own `Redis63ProxyTrait`)
+                // reaches this nested arm instead of `check_program`'s own
+                // top-level one, which already knows to dispatch a trait
+                // through `check_trait_methods` (Phase 13 Finding E) so
+                // its `$this->hostOnlyMethod()` calls are checked against
+                // a real using class, not standalone. This arm's own
+                // unconditional per-method loop below skipped that
+                // entirely, checking every trait method with `current_
+                // class` set to the *trait's own* name regardless - a
+                // real false positive (`$this->initializeLazyObject()`,
+                // provided by a sibling trait on the real host `RedisProxy`,
+                // not by `Redis63ProxyTrait` itself) invisible to a
+                // top-level-only trait but real for one declared here.
+                if c.kind == ClassKind::Trait {
+                    self.check_trait_methods(&fqn, c);
+                } else {
+                    for m in &c.methods {
+                        self.check_function(&m.function, Some(&fqn), m.is_static);
+                    }
                 }
             }
             StmtKind::EnumDecl(e) => {
