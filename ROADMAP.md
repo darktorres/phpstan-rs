@@ -365,6 +365,56 @@ parsing only (cheap, unlocks synthesized-member inference the way
 diagnostic layer on top (per-tag rules above) - this mirrors the pattern
 that already worked for `@property` in this codebase.
 
+**Update**: `@phpstan-assert`/`-if-true`/`-if-false` shipped after all -
+found while bucketing the full corpus's own diagnostic set by identifier
+(not a phase, an ad hoc false-positive hunt), which surfaced a real,
+widespread false-positive class this project had no way to see: PHPUnit's
+own accessor-pair idiom (`hasTestFilesFile(): bool` tagged `@phpstan-
+assert-if-true !null $this->testFilesFile`, then `testFilesFile():
+string`'s own body guarding on it) looked like a genuine null-vs-string
+return mismatch with no way to know the guard method's own tag proved
+otherwise. This entry's own earlier text (just above, from the
+exhaustive audit) characterized real PHPStan's own `AssertRuleHelper` as
+"a self-contained declaration-consistency check... doesn't touch
+narrowing either" - a real PHPStan source-reading gap in that earlier
+pass, not something this update's own implementation confirmed: the
+`@phpstan-assert`-family tags' entire practical value (confirmed
+directly, via the corpus fix's own real effect) *is* the narrowing they
+drive at call sites, not merely validating the tag itself.
+
+New `DocBlock::assert_if_true`/`assert_if_false`/`assert` (docblock.rs)
+parse the tag text into a negation flag, a type, and a target - `$name`
+(a parameter), bare `$this`, or `$this->prop` (single-level property
+access only). Two real shapes real PHPStan also supports are
+deliberately not modeled: a method-call target (`$this->parseError()`,
+a real corpus shape) - this project's narrowing has no way to key a
+call's own return value the way it keys a variable/property - and the
+`=Type`/`!=value` template-equality/value-equality forms, a genuinely
+different kind of check (comparing against a generic argument or a
+literal value, not a subtype check) `take_type_token` couldn't parse
+meaningfully as a type anyway; both are dropped at parse/resolution
+time rather than misclassified. Resolved into `FunctionSig::
+assert_if_true`/`assert_if_false`/`assert` (registry/function_sig.rs)
+once a declaration's own parameter list and generic template map are
+available - a `Param` target naming something that isn't actually one
+of this declaration's own parameters is silently dropped too, the usual
+"don't guess" leniency. Wired into `apply_narrowing`'s `MethodCall`/
+`StaticCall`/`Call` arms (the `-if-true`/`-if-false` half, gated on
+which branch actually held) and `check_stmt`'s own statement-position
+handling (the unconditional half, mirroring `assert($cond)`'s existing
+"narrows for the rest of scope, no branch needed" treatment).
+
+Verified against the ~20,300-file corpus: 46,724 -> 46,511 (-213),
+concentrated in `return.type` (-177, phpunit's own `Configuration`
+classes and several others sharing the identical accessor idiom), plus
+knock-on drops in `property.notFound`/`assign.propertyType`/
+`argument.type`/`method.notFound` from code paths reading the
+now-correctly-narrowed value afterward. No increases in any bucket.
+`AssertRuleHelper`/`FunctionAssertRule`/`MethodAssertRule`'s own
+declaration-consistency *validation* half (checking the tag itself
+against the parameter's own declared type, independent of any call
+site) remains unbuilt - still open.
+
 **Phase 37 - Attribute (`#[...]`) AST support (PARTIAL).** This
 entry's own status was never updated after an earlier pilot batch
 landed it (commits `65983a0`/`bff7145`) - `#[Attribute(...)]` used to
