@@ -1273,6 +1273,8 @@ impl<'a> Checker<'a> {
                     // just below (this check does its own, separate
                     // registry lookup) since it needs `&mut self`.
                     self.check_internal_instantiation(class, e.span, label);
+                    // Phase 39 follow-up: `@deprecated`.
+                    self.check_deprecated_instantiation(class, e.span, label);
                     // Phase 78: `DateInterval`'s own duration-string
                     // constructor validation - independent of whether
                     // the class is otherwise instantiable at all, so
@@ -1544,6 +1546,8 @@ impl<'a> Checker<'a> {
                     } else if let Some((owner, sig)) = &prop_with_owner {
                         // Phase 67: `@internal`.
                         self.check_internal_property_access(owner, prop_name, sig, e.span, label);
+                        // Phase 39 follow-up: `@deprecated`.
+                        self.check_deprecated_property_access(owner, prop_name, sig, e.span, label);
                         // Phase 57 follow-up: a static property shares
                         // the exact same visibility rules as an instance
                         // one - confirmed directly via `php -r` as a real
@@ -1584,6 +1588,10 @@ impl<'a> Checker<'a> {
                     } else if let Some((owner, cs)) = &const_with_owner {
                         // Phase 67: `@internal`.
                         self.check_internal_class_constant_access(owner, member, cs, e.span, label);
+                        // Phase 39 follow-up: `@deprecated`.
+                        self.check_deprecated_class_constant_access(
+                            owner, member, cs, e.span, label,
+                        );
                         // Phase 57's own still-open item: constant
                         // visibility.
                         self.check_member_visibility(MemberVisibilityCheck {
@@ -1700,6 +1708,8 @@ impl<'a> Checker<'a> {
                     });
                     // Phase 67: `@internal`.
                     self.check_internal_property_access(&owner, prop, p, e.span, label);
+                    // Phase 39 follow-up: `@deprecated`.
+                    self.check_deprecated_property_access(&owner, prop, p, e.span, label);
                 }
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))

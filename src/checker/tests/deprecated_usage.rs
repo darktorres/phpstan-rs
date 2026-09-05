@@ -147,3 +147,134 @@ fn calling_a_deprecated_function_from_inside_its_own_declaring_scope_is_still_fl
         "got: {d:?}"
     );
 }
+
+#[test]
+fn accessing_a_deprecated_instance_property_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @deprecated */
+                public int $oldProp;
+            }
+            function f(Foo $foo): int {
+                return $foo->oldProp;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.deprecated"
+            && x.message == "Call to deprecated property Foo::$oldProp."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn accessing_a_deprecated_static_property_is_flagged_as_static() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @deprecated */
+                public static int $oldProp = 1;
+            }
+            function f(): int {
+                return Foo::$oldProp;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "staticProperty.deprecated"
+            && x.message == "Call to deprecated property Foo::$oldProp."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn accessing_a_plain_non_deprecated_property_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public int $niceProp;
+            }
+            function f(Foo $foo): int {
+                return $foo->niceProp;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.deprecated"
+            || x.identifier == "staticProperty.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn accessing_a_deprecated_class_constant_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @deprecated use NEW_CONST instead */
+                public const OLD_CONST = 1;
+            }
+            function f(): int {
+                return Foo::OLD_CONST;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "classConstant.deprecated"
+            && x.message == "Call to deprecated constant Foo::OLD_CONST (use NEW_CONST instead)."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn accessing_a_plain_non_deprecated_class_constant_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public const NICE_CONST = 1;
+            }
+            function f(): int {
+                return Foo::NICE_CONST;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "classConstant.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn instantiating_a_deprecated_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            class OldFoo {}
+            function f(): OldFoo {
+                return new OldFoo();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "new.deprecated"
+            && x.message == "Instantiation of deprecated class OldFoo."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn instantiating_a_plain_non_deprecated_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class NiceFoo {}
+            function f(): NiceFoo {
+                return new NiceFoo();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "new.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

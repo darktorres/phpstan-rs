@@ -3,7 +3,10 @@
 //! Mirrors the highest-value shapes of real PHPStan's own separate
 //! `phpstan/phpstan-deprecation-rules` package: a plain function call
 //! (`function.deprecated`), an instance method call (`method.deprecated`),
-//! and a static method call (`staticMethod.deprecated`).
+//! a static method call (`staticMethod.deprecated`), an instance/static
+//! property access (`property.deprecated`/`staticProperty.deprecated`), a
+//! class-constant access (`classConstant.deprecated`), and instantiation
+//! (`new.deprecated`).
 //!
 //! Unlike `checker::internal_usage`, there's no "declaring class also
 //! counts" fallback and no namespace-based allowance - `@deprecated` isn't
@@ -14,10 +17,12 @@
 //! deprecates every member too (the actual detection logic lives in
 //! `ondrejmirtes/better-reflection`, not vendored here) - left unclaimed
 //! rather than guessed, matching `FunctionSig::deprecated`'s own doc
-//! comment.
+//! comment. `check_deprecated_instantiation` is a separate, unrelated
+//! question (is the *class itself* tagged), not an instance of that
+//! unclaimed fallback.
 
 use crate::checker::Checker;
-use crate::registry::FunctionSig;
+use crate::registry::{ConstSig, FunctionSig, PropertySig};
 use crate::token::Span;
 
 impl<'a> Checker<'a> {
@@ -65,6 +70,83 @@ impl<'a> Checker<'a> {
             0,
             &format!("{kind_word}.deprecated"),
         );
+    }
+
+    /// `property.deprecated`/`staticProperty.deprecated` - an instance or
+    /// static property access.
+    pub(crate) fn check_deprecated_property_access(
+        &mut self,
+        owner: &str,
+        prop_name: &str,
+        sig: &PropertySig,
+        span: Span,
+        label: &str,
+    ) {
+        if !self.registry.check_deprecated_usage {
+            return;
+        }
+        let Some(reason) = &sig.deprecated else {
+            return;
+        };
+        let kind_word = if sig.is_static {
+            "staticProperty"
+        } else {
+            "property"
+        };
+        let message = deprecation_message(&format!("property {owner}::${prop_name}"), reason);
+        self.report(
+            label.to_string(),
+            message,
+            span,
+            0,
+            &format!("{kind_word}.deprecated"),
+        );
+    }
+
+    /// `classConstant.deprecated` - a class-constant access.
+    pub(crate) fn check_deprecated_class_constant_access(
+        &mut self,
+        owner: &str,
+        const_name: &str,
+        sig: &ConstSig,
+        span: Span,
+        label: &str,
+    ) {
+        if !self.registry.check_deprecated_usage {
+            return;
+        }
+        let Some(reason) = &sig.deprecated else {
+            return;
+        };
+        let message = deprecation_message(&format!("constant {owner}::{const_name}"), reason);
+        self.report(
+            label.to_string(),
+            message,
+            span,
+            0,
+            "classConstant.deprecated",
+        );
+    }
+
+    /// `new.deprecated` - instantiation (`new Foo()`) of a class whose own
+    /// docblock carries `@deprecated`. Independent of whether any of its
+    /// members are individually tagged too.
+    pub(crate) fn check_deprecated_instantiation(&mut self, class: &str, span: Span, label: &str) {
+        if !self.registry.check_deprecated_usage {
+            return;
+        }
+        let Some(info) = self.registry.classes.get(class) else {
+            return;
+        };
+        let Some(reason) = &info.deprecated else {
+            return;
+        };
+        let message = if reason.is_empty() {
+            format!("Instantiation of deprecated class {class}.")
+        } else {
+            format!("Instantiation of deprecated class {class} ({reason}).")
+        };
+        self.report(label.to_string(), message, span, 0, "new.deprecated");
     }
 }
 

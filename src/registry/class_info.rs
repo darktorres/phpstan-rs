@@ -39,6 +39,12 @@ pub struct PropertySig {
     // built-in `name`/`value` all stay `false` - none of them has an
     // established per-item place to write the tag.
     pub is_internal: bool,
+    // Phase 39 follow-up: `@deprecated` on this property's own doc
+    // comment - direct mirror of `FunctionSig::deprecated`'s identical
+    // "own tag only, no class-level fallback" scoping. Only ever set for
+    // a real, plainly-declared property with its own doc comment, same
+    // restriction `is_internal` above already has.
+    pub deprecated: Option<String>,
 }
 
 // Phase 57's own still-open item: a class constant's own `public`/
@@ -61,6 +67,11 @@ pub struct ConstSig {
     // case (no doc-comment/`@internal` convention of its own, same as
     // its own always-`Visibility::Public`).
     pub is_internal: bool,
+    // Phase 39 follow-up: `@deprecated` on this constant's own doc
+    // comment - direct mirror of `PropertySig::deprecated` just above.
+    // Always `None` for an enum case, same reasoning as its own always-
+    // `false` `is_internal`.
+    pub deprecated: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +151,12 @@ pub struct ClassInfo {
     // Phase 67: `@internal` on this class/interface/trait/enum's own
     // docblock - see `docblock::DocBlock::internal`'s own doc comment.
     pub is_internal: bool,
+    // Phase 39 follow-up: `@deprecated` on this class's own docblock -
+    // consulted only at `new Foo()` (`checker::check_deprecated_instantiation`).
+    // Deliberately doesn't imply anything about this class's own members
+    // (see `FunctionSig::deprecated`'s doc comment for why that question
+    // is left unclaimed) - this is purely "is the class itself tagged."
+    pub deprecated: Option<String>,
     // Phase 79: for a backed enum only, each case's own literal backing
     // value (`StringLiteral`/`IntLiteral`), keyed by case name - lets
     // `::from()`/`::tryFrom()` narrow a literal-argument call to the
@@ -230,6 +247,7 @@ impl ClassInfo {
                         set_ty,
                         visibility: p.visibility.clone(),
                         is_internal: doc_ty.as_ref().is_some_and(|d| d.internal),
+                        deprecated: doc_ty.as_ref().and_then(|d| d.deprecated.clone()),
                     },
                 )
             })
@@ -260,6 +278,7 @@ impl ClassInfo {
                         set_ty: None,
                         visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
                         is_internal: false,
+                        deprecated: None,
                     },
                 );
             }
@@ -287,6 +306,7 @@ impl ClassInfo {
                         set_ty: None,
                         visibility: Visibility::Public,
                         is_internal: false,
+                        deprecated: None,
                     }
                 });
             }
@@ -325,6 +345,7 @@ impl ClassInfo {
                         // `PropertySig::is_internal`'s identical doc
                         // comment for the convention this mirrors.
                         is_internal: doc.as_ref().is_some_and(|d| d.internal),
+                        deprecated: doc.as_ref().and_then(|d| d.deprecated.clone()),
                     },
                 )
             })
@@ -399,6 +420,7 @@ impl ClassInfo {
         let is_api = class_doc.as_ref().is_some_and(|d| d.api);
         let is_api_do_not_implement = class_doc.as_ref().is_some_and(|d| d.api_do_not_implement);
         let is_internal = class_doc.as_ref().is_some_and(|d| d.internal);
+        let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
 
         ClassInfo {
             kind: c.kind,
@@ -423,6 +445,7 @@ impl ClassInfo {
             is_api,
             is_api_do_not_implement,
             is_internal,
+            deprecated,
             enum_case_values: HashMap::new(),
         }
     }
@@ -533,16 +556,14 @@ impl ClassInfo {
             .consts
             .iter()
             .map(|cc| {
+                let doc = cc.doc_comment.as_deref().map(docblock::parse);
                 (
                     cc.name.clone(),
                     ConstSig {
                         ty: infer_const_type(&cc.value),
                         visibility: cc.visibility.clone(),
-                        is_internal: cc
-                            .doc_comment
-                            .as_deref()
-                            .map(docblock::parse)
-                            .is_some_and(|d| d.internal),
+                        is_internal: doc.as_ref().is_some_and(|d| d.internal),
+                        deprecated: doc.as_ref().and_then(|d| d.deprecated.clone()),
                     },
                 )
             })
@@ -563,10 +584,12 @@ impl ClassInfo {
                 ConstSig {
                     ty: Type::EnumCase(fqn.clone(), case.name.clone()),
                     visibility: Visibility::Public,
-                    // A case has no doc-comment/`@internal` convention
-                    // of its own in real PHP either - same reasoning as
-                    // its own always-`Visibility::Public` just above.
+                    // A case has no doc-comment/`@internal`/`@deprecated`
+                    // convention of its own in real PHP either - same
+                    // reasoning as its own always-`Visibility::Public`
+                    // just above.
                     is_internal: false,
+                    deprecated: None,
                 },
             );
         }
@@ -610,6 +633,7 @@ impl ClassInfo {
                 set_ty: None,
                 visibility: Visibility::Public,
                 is_internal: false,
+                deprecated: None,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -645,6 +669,7 @@ impl ClassInfo {
                     set_ty: None,
                     visibility: Visibility::Public,
                     is_internal: false,
+                    deprecated: None,
                 },
             );
         }
@@ -711,6 +736,7 @@ impl ClassInfo {
             is_api: false,
             is_api_do_not_implement: false,
             is_internal: class_doc.as_ref().is_some_and(|d| d.internal),
+            deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             enum_case_values,
         }
     }
@@ -752,6 +778,7 @@ impl ClassInfo {
         self.is_api_do_not_implement =
             self.is_api_do_not_implement || other.is_api_do_not_implement;
         self.is_internal = self.is_internal || other.is_internal;
+        self.deprecated = self.deprecated.or(other.deprecated);
         if self.extends.is_empty() {
             self.extends = other.extends;
         }

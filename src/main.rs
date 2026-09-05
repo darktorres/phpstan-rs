@@ -503,13 +503,15 @@ enum Command {
         #[arg(long)]
         check_internal_usage: bool,
         /// Enables `@deprecated` usage warnings (`function.deprecated`/
-        /// `method.deprecated`/`staticMethod.deprecated` diagnostics) -
-        /// flags a call to a function/method whose own doc comment
-        /// carries `@deprecated`. Off by default - real PHPStan's own
-        /// equivalent isn't part of core `phpstan/phpstan` at all, but a
-        /// separate, opt-in Composer package
-        /// (`phpstan/phpstan-deprecation-rules`) - see
-        /// `registry::Registry::check_deprecated_usage`'s own doc
+        /// `method.deprecated`/`staticMethod.deprecated`/
+        /// `property.deprecated`/`staticProperty.deprecated`/
+        /// `classConstant.deprecated`/`new.deprecated` diagnostics) -
+        /// flags a call/access/instantiation whose own doc comment (or,
+        /// for instantiation, the class's own doc comment) carries
+        /// `@deprecated`. Off by default - real PHPStan's own equivalent
+        /// isn't part of core `phpstan/phpstan` at all, but a separate,
+        /// opt-in Composer package (`phpstan/phpstan-deprecation-rules`),
+        /// see `registry::Registry::check_deprecated_usage`'s own doc
         /// comment for why.
         #[arg(long)]
         check_deprecated_usage: bool,
