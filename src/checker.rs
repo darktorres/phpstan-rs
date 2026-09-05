@@ -587,23 +587,18 @@ impl<'a> Checker<'a> {
 
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[Stmt]) {
-        // A simple whole-file pass (last `namespace` seen wins), unlike
-        // `Registry::index`'s positional tracking - a file with more
-        // than one `namespace` statement (brace-delimited, or real PHP's
-        // own less obvious allowance for several semicolon-style
-        // `namespace Foo;` statements in one file - see `NameContext::
-        // build`'s own doc comment for a real, corpus-found instance of
-        // the latter) is rare enough in real application code that the
-        // extra positional-tracking precision isn't worth it here; a
-        // mismatch in such a rare file risks a wrong or missed
-        // diagnostic for declarations under any namespace but the
-        // file's last one, not the silent method-table corruption the
-        // registry itself had to guard against (that risk is specific
-        // to `Registry::classes` being a single global, FQN-keyed table
-        // every file writes into - `Checker::name_ctx` is rebuilt fresh
-        // per file and never shared, so getting it wrong for one file
-        // can't corrupt another's).
-        self.name_ctx = NameContext::build(program);
+        // A whole-file scan (last `namespace` seen wins, same as
+        // `NameContext::build` itself does) purely for the three
+        // file-wide, position-independent questions right below - "does
+        // this file import symbol X anywhere," "what classes anywhere in
+        // it are rebind targets," "does it have a file-local Pest
+        // `uses()`" - each already scans the *entire* program regardless
+        // of where in it something appears, so there's no one "current
+        // position" for them to need in the first place. Deliberately
+        // NOT reused for `self.name_ctx` itself below - see the main
+        // per-statement loop's own comment for why that one has to be
+        // positional instead.
+        let whole_file_ctx = NameContext::build(program);
         // Phase 48: `ExistingNamesInUseRule`'s own function-import half -
         // see `check_use_function_imports`'s own doc comment for why a
         // plain, class-shaped `use Foo;` is deliberately NOT
@@ -613,7 +608,7 @@ impl<'a> Checker<'a> {
         // once per file, ahead of `check_unused_private_members`'s own
         // per-class use below.
         let (rebind_targets, rebind_escape_all) =
-            unused::scan_program_for_rebind_targets(program, &self.name_ctx);
+            unused::scan_program_for_rebind_targets(program, &whole_file_ctx);
         self.rebind_target_classes = rebind_targets;
         self.rebind_escape_all = rebind_escape_all;
         // Finding 1: a file-local `uses(...)` call (no `->in(...)`) wins
@@ -622,7 +617,7 @@ impl<'a> Checker<'a> {
         // matches real Pest's own resolution order (file-local checked
         // first). A file with no such call leaves `pest_this_type`
         // exactly as `Project::check_file` set it.
-        if let Some(local_ty) = pest_config::file_local_this_type(program, &self.name_ctx) {
+        if let Some(local_ty) = pest_config::file_local_this_type(program, &whole_file_ctx) {
             self.pest_this_type = local_ty;
         }
         // Unlike `pest_this_type` just above, file-local and
@@ -634,8 +629,29 @@ impl<'a> Checker<'a> {
 
         let mut top_locals: Locals = Locals::default();
         let diagnostics_before = self.diagnostics.len();
+        // `self.name_ctx` is tracked *positionally* here, mirroring
+        // `Registry::index_with_context`'s own identical walk exactly -
+        // real PHP only ever allows a `namespace`/`use` statement at the
+        // top level of a file (never nested inside a class/function/
+        // block), so a single left-to-right pass over `program`'s own
+        // top-level statements, mutating `self.name_ctx` in place when
+        // one is seen, is already enough: by the time this loop reaches
+        // a `ClassDecl`/`FunctionDecl`/`EnumDecl`, `self.name_ctx`
+        // already correctly reflects whichever `namespace` was actually
+        // active *at that declaration's own position*, not merely "the
+        // last one anywhere in the file" the old whole-file `NameContext
+        // ::build` pre-pass used to apply even to declarations under an
+        // *earlier* one - a real, corpus-found false positive
+        // (`jetbrains/phpstorm-stubs`' own `relay/Cluster.php`: `namespace
+        // Relay;` for its own `Cluster` class, then a later, empty
+        // `namespace Relay\Cluster;` for the rest of the file, wrongly
+        // resolving `Cluster`'s own self-referencing return type as
+        // `Relay\Cluster\Cluster` instead of `Relay\Cluster`).
+        self.name_ctx = NameContext::default();
         for stmt in program {
             match &stmt.kind {
+                StmtKind::Namespace(name) => self.name_ctx.set_namespace(name),
+                StmtKind::Use(imports) => self.name_ctx.add_uses(imports),
                 StmtKind::FunctionDecl(f) => self.check_function(f, None, false),
                 StmtKind::ClassDecl(c) => {
                     // `current_class` must be the fully-qualified name -

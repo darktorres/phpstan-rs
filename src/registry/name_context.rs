@@ -53,10 +53,13 @@ impl NameContext {
     /// diagnostic as `Checker::check_program`'s own doc comment,
     /// intentionally accepting *this exact* imprecision, assumes).
     /// `Registry::index_with_context`'s sibling, positional
-    /// `ctx.set_namespace` walk gets this right; `Checker::name_ctx`
-    /// deliberately doesn't pay that same per-statement tracking cost -
-    /// see its own doc comment for the reasoning newly confirmed, rather
-    /// than invalidated, by this.
+    /// `ctx.set_namespace` walk gets this right, and so now does
+    /// `Checker::check_program`'s own main per-statement loop (fixed
+    /// once this got found) - this whole-file `build` function itself is
+    /// kept only for a few genuinely position-independent, whole-file
+    /// questions that `check_program` still uses it for (see its own
+    /// call sites' doc comments), where "last namespace wins" was never
+    /// actually the bug to begin with.
     pub(crate) fn build(stmts: &[Stmt]) -> NameContext {
         let mut ctx = NameContext::default();
         for stmt in stmts {

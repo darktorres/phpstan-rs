@@ -637,3 +637,24 @@ fn an_anonymous_class_self_and_static_typed_return_is_never_flagged() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Real corpus shape (jetbrains/phpstorm-stubs' own `relay/Cluster.php`):
+// a file can have more than one semicolon-style `namespace Foo;`
+// statement, each switching the active namespace for everything that
+// follows - `Checker::name_ctx` used to be built once, whole-file (last
+// `namespace` seen wins), which wrongly resolved a self-referencing
+// return type declared under an *earlier* namespace as if it were under
+// the file's *last* one.
+#[test]
+fn a_self_referencing_type_before_a_later_namespace_switch_in_the_same_file_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Relay;
+            class Cluster {
+                public function append(): Cluster {}
+            }
+            namespace Relay\Cluster;
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
