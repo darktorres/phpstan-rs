@@ -512,6 +512,7 @@ impl<'a> Checker<'a> {
             no_discard: sig.no_discard,
             visibility: sig.visibility.clone(),
             is_internal: sig.is_internal,
+            has_override_attr: sig.has_override_attr,
         }
     }
 }

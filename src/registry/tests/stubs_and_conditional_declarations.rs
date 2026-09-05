@@ -230,6 +230,7 @@ fn merge_stubs_does_not_override_user_functions() {
             no_discard: false,
             visibility: crate::ast::Visibility::Public,
             is_internal: false,
+            has_override_attr: false,
         },
     )]);
     assert_eq!(r.functions["strlen"].return_type, Type::Int);

@@ -54,6 +54,20 @@ pub struct FunctionSig {
     // has the declaring class in hand - this field only ever reflects
     // the member's own tag.
     pub is_internal: bool,
+    // Phase 64 follow-up: PHP 8.3's `#[\Override]` marker - `true` when
+    // this declaration carries one. Stored here (mirroring `no_discard`
+    // exactly, including its "short-name-only, no namespace resolution"
+    // matching convention) rather than checked straight off a fresh
+    // `MethodDecl`'s own AST, because a method needs this checked in the
+    // context of whichever *using class*'s ancestor chain applies - a
+    // trait's own method carrying `#[Override]` is only ever a real
+    // fatal error relative to a class that later `use`s it (confirmed
+    // directly: the same trait method is fine when the using class has a
+    // real ancestor to satisfy it, and fatals - attributed to the
+    // *using class's* own method name, not the trait's - when it
+    // doesn't), so this needs to survive `flatten_traits`' merge the
+    // same way `no_discard` already does.
+    pub has_override_attr: bool,
 }
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -421,6 +435,24 @@ pub(crate) fn is_no_discard_attribute_name(name: &str) -> bool {
         .eq_ignore_ascii_case("NoDiscard")
 }
 
+/// Phase 64 follow-up: same idea as `is_no_discard_attribute_name` just
+/// above, for PHP 8.3's `#[\Override]` marker - real PHPStan's own
+/// `OverridingMethodRule::hasOverrideAttribute` matches the identical way
+/// (`$attr->name->toLowerString() === 'override'` - short-name-only,
+/// case-insensitive, no fully-resolved namespace check), deliberately
+/// *not* the stricter engine-level namespace resolution the real PHP
+/// runtime itself performs for this same attribute (confirmed directly:
+/// a userland `App\Override` class doesn't trigger the real fatal error
+/// at all) - this project follows real PHPStan's own rule here, not the
+/// engine.
+pub(crate) fn is_override_attribute_name(name: &str) -> bool {
+    name.trim_start_matches('\\')
+        .rsplit('\\')
+        .next()
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("Override")
+}
+
 /// Builds this docblock's own `@template` metadata - bound (`T of X`),
 /// variance (`@template-covariant`/`-contravariant`), and default
 /// (`T = X`, Phase 54) - keyed by name, shared by class-level
@@ -555,6 +587,7 @@ impl FunctionSig {
             .attrs
             .iter()
             .any(|a| is_no_discard_attribute_name(&a.name));
+        let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
 
@@ -565,6 +598,7 @@ impl FunctionSig {
             no_discard,
             visibility,
             is_internal,
+            has_override_attr,
         }
     }
 
@@ -584,6 +618,7 @@ impl FunctionSig {
         // (of what's really the same underlying declaration, PHP-version-
         // split) happened not to repeat the attribute.
         let no_discard = self.no_discard || other.no_discard;
+        let has_override_attr = self.has_override_attr || other.has_override_attr;
         let len = self.params.len().max(other.params.len());
         let mut self_params = self.params.into_iter();
         let mut other_params = other.params.into_iter();
@@ -637,6 +672,7 @@ impl FunctionSig {
             // Same permissive "either overload's own marker wins" as
             // `no_discard` just above.
             is_internal: self.is_internal || other.is_internal,
+            has_override_attr,
         }
     }
 }

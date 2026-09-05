@@ -479,6 +479,7 @@ impl ClassInfo {
                 no_discard: false,
                 visibility: Visibility::Public,
                 is_internal: false,
+                has_override_attr: false,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -499,6 +500,7 @@ impl ClassInfo {
                     no_discard: false,
                     visibility: Visibility::Public,
                     is_internal: false,
+                    has_override_attr: false,
                 },
             );
             methods.insert(
@@ -510,6 +512,7 @@ impl ClassInfo {
                     no_discard: false,
                     visibility: Visibility::Public,
                     is_internal: false,
+                    has_override_attr: false,
                 },
             );
         }

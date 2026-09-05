@@ -1,5 +1,5 @@
 use rustc_hash::FxHashMap;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use crate::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use crate::types::{self, Type};
@@ -714,6 +714,93 @@ impl Registry {
             }
         }
         None
+    }
+
+    /// Phase 64 follow-up: whether `class` directly `use`s a trait that
+    /// declares a method named `method` *abstract* - used only by
+    /// `#[\Override]`-attribute checking, which needs to treat
+    /// implementing a *trait's own* abstract method as a real override
+    /// too (confirmed directly via `php -r`: a class implementing a
+    /// trait's own `abstract protected function twist()` with
+    /// `#[\Override]` is real, legal PHP - a genuine corpus false
+    /// positive: `Psl\RandomSequence\MersenneTwisterSequence::twist()`
+    /// overrides `Internal\MersenneTwisterTrait`'s own abstract
+    /// declaration this exact way). Deliberately checks the trait's own
+    /// `abstract_methods` set, not merely "does the trait have a method
+    /// of this name at all" - a trait supplying a *concrete* method the
+    /// using class never separately redeclares (own_sig IS the trait's
+    /// own contribution, unmodified) is a different case entirely, with
+    /// its own already-correct handling: `check_method_overrides`'s own
+    /// trait-derived-method sweep re-runs this same function keyed on the
+    /// using class, so a genuinely ancestor-less concrete trait method
+    /// still fatals there exactly as real PHP does (confirmed directly:
+    /// `trait T { #[\Override] function foo() {} } class Standalone {
+    /// use T; }` still fatals on `Standalone::foo()`) - this check must
+    /// not accidentally swallow that real case too. Deliberately narrower
+    /// than folding `uses` into `lookup_ancestor_method_with_owner`'s own
+    /// general walk (the "Still open: interface-first/trait-abstract-
+    /// method ancestor-lookup priority" item this project's own roadmap
+    /// already tracks separately) - that would also change every *other*
+    /// check in `check_one_method_override` (Liskov parameter/return-type
+    /// comparisons) in ways not verified here; this only answers the one
+    /// yes/no question the override-attribute check itself needs.
+    pub fn trait_declares_abstract_method(&self, class: &str, method: &str) -> bool {
+        let Some(info) = self.classes.get(class) else {
+            return false;
+        };
+        info.uses.iter().any(|used_trait| {
+            self.classes
+                .get(used_trait)
+                .is_some_and(|trait_info| trait_info.abstract_methods.contains(method))
+        })
+    }
+
+    /// Phase 64 follow-up: whether `class`'s own `extends`/`implements`
+    /// ancestor chain includes a name this project's registry has no
+    /// declaration for at all, at any depth - used only by
+    /// `#[\Override]`-attribute checking, which must never confidently
+    /// claim "no matching parent method exists" when the real reason
+    /// nothing was found is a missing dependency rather than a genuine
+    /// absence (a genuine corpus false positive: `CycloneDX\Composer\
+    /// Plugin implements ... Composer\Plugin\PluginInterface` and
+    /// `CycloneDX\Composer\_internal\MakeBom\Command extends Composer\
+    /// Command\BaseCommand` - neither vendored anywhere in this project's
+    /// own verification corpus at all, so this registry has no way to
+    /// know whether the real `activate()`/`configure()`/... methods being
+    /// overridden are declared there, the same "don't guess wrong" rule
+    /// this project applies elsewhere). Every other check in
+    /// `check_one_method_override` stays as lenient-by-omission as it
+    /// already was (an unresolved ancestor simply yields no comparison,
+    /// same as a genuinely absent one) - only this specific check's
+    /// polarity (firing exactly when *nothing* is found) makes an
+    /// unresolved-vs-absent distinction actually matter.
+    pub fn has_unresolvable_ancestor(&self, class: &str) -> bool {
+        let Some(info) = self.classes.get(class) else {
+            return false;
+        };
+        let mut seen = HashSet::new();
+        let mut queue: VecDeque<String> = info
+            .extends
+            .iter()
+            .chain(info.implements.iter())
+            .cloned()
+            .collect();
+        while let Some(current) = queue.pop_front() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            let Some(current_info) = self.classes.get(&current) else {
+                return true;
+            };
+            queue.extend(
+                current_info
+                    .extends
+                    .iter()
+                    .chain(current_info.implements.iter())
+                    .cloned(),
+            );
+        }
+        false
     }
 
     /// Phase 64's own still-open property-override half: same idea as

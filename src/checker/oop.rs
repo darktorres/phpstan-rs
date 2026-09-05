@@ -841,25 +841,83 @@ impl<'a> Checker<'a> {
                 "method.overrideFinal",
             );
         }
-        // Real PHP deliberately exempts constructors from override-
-        // compatibility checking - a subclass's own __construct is
-        // allowed an entirely different, otherwise-incompatible signature
-        // from its parent's, unlike every other method.
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        let Some(own_sig) = info.methods.get(method_name) else {
+            return;
+        };
+        let ancestor = self
+            .registry
+            .lookup_ancestor_method_with_owner(fqn, method_name);
+        // Phase 64 follow-up: the unconditional-fatal-error half of PHP
+        // 8.3's `#[\Override]` attribute (confirmed directly via
+        // `php -r`: `Child::foo() has #[\Override] attribute, but no
+        // matching parent method exists`) - real PHPStan's own
+        // `method.override` identifier
+        // (`OverridingMethodRule::hasOverrideAttribute`/`processNode`).
+        // The *other* direction (`method.missingOverride` - a real
+        // override missing the attribute) is a real PHPStan opt-in rule
+        // gated behind `checkMissingOverrideMethodAttribute`, off by
+        // default and not enabled anywhere in this project's own corpus
+        // config - not attempted here. A private ancestor method doesn't
+        // count as "a matching parent method" either (confirmed
+        // directly) - same `has_real_ancestor` check the signature-
+        // compatibility exemption just below also needs. A *trait's own*
+        // declaration is exempted entirely (`info.kind`, not just
+        // "ancestor not found") - real PHP defers this whole check to
+        // whichever class eventually `use`s the trait, since a trait has
+        // no ancestor chain of its own to check against at all
+        // (confirmed directly: the identical trait method fatals when
+        // the using class lacks a real ancestor, but is completely fine
+        // when it has one - and the fatal error is attributed to the
+        // *using class's* own method name, not the trait's, which is
+        // exactly what running this same check from both of
+        // `check_method_overrides`'s own call sites above, keyed on the
+        // using class's `fqn`, already produces for free). Implementing a
+        // *trait's own abstract* method also counts as a real override
+        // (confirmed directly, and a genuine corpus false positive:
+        // `trait_declares_abstract_method` - deliberately not folded into
+        // the general `ancestor` lookup above, which stays extends/
+        // implements only for every other check in this function).
+        // Likewise, an unresolved name anywhere in `fqn`'s own extends/
+        // implements chain (`has_unresolvable_ancestor` - a dependency
+        // this project's own registry has no declaration for at all)
+        // means "no matching parent method" can't be confidently claimed
+        // - another genuine corpus false positive, "don't guess wrong"
+        // the same way elsewhere in this project.
+        let has_real_ancestor = ancestor
+            .as_ref()
+            .is_some_and(|(_, sig)| sig.visibility != Visibility::Private)
+            || self
+                .registry
+                .trait_declares_abstract_method(fqn, method_name);
+        if own_sig.has_override_attr
+            && !has_real_ancestor
+            && info.kind != ClassKind::Trait
+            && !self.registry.has_unresolvable_ancestor(fqn)
+        {
+            self.report(
+                fqn.to_string(),
+                format!(
+                    "{fqn}::{method_name}() has #[\\Override] attribute but does not override any method"
+                ),
+                span,
+                0,
+                "method.override",
+            );
+        }
+        // Real PHP deliberately exempts constructors from the
+        // *signature-compatibility* checking below - a subclass's own
+        // __construct is allowed an entirely different, otherwise-
+        // incompatible signature from its parent's, unlike every other
+        // method. The `#[\Override]` check above is unaffected by this -
+        // confirmed directly, `#[\Override]` on a `__construct()` with no
+        // ancestor `__construct()` fatals exactly like any other method.
         if method_name == "__construct" {
             return;
         }
-        let Some(own_sig) = self
-            .registry
-            .classes
-            .get(fqn)
-            .and_then(|i| i.methods.get(method_name))
-        else {
-            return;
-        };
-        let Some((ancestor_owner, ancestor_sig)) = self
-            .registry
-            .lookup_ancestor_method_with_owner(fqn, method_name)
-        else {
+        let Some((ancestor_owner, ancestor_sig)) = ancestor else {
             return;
         };
         // A `private` ancestor method isn't a real override target at

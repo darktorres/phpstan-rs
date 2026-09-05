@@ -1767,3 +1767,278 @@ fn an_unimplemented_abstract_trait_method_is_not_flagged_by_the_trait_override_s
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 64 follow-up: PHP 8.3's `#[\Override]` attribute - the
+// unconditional-fatal-error direction only (a real override *missing*
+// the attribute is a real PHPStan opt-in rule, off by default and not
+// enabled in this project's own corpus config - not attempted).
+
+#[test]
+fn an_override_attribute_with_no_matching_ancestor_method_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                #[\Override]
+                public function bar(): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.override" && x.message.contains("Child::bar")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_matching_a_real_ancestor_method_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                #[\Override]
+                public function foo(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.override"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_matching_an_interface_method_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {
+                public function foo(): void;
+            }
+            class Impl implements Iface {
+                #[\Override]
+                public function foo(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.override"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_on_a_constructor_with_no_ancestor_constructor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Child extends Base {
+                #[\Override]
+                public function __construct() {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.override" && x.message.contains("Child::__construct")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_matching_only_a_private_ancestor_method_is_flagged() {
+    // A `private` ancestor method isn't a real override target - same
+    // exemption `check_one_method_override`'s own checks already use.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                private function foo(): void {}
+            }
+            class Child extends Base {
+                #[\Override]
+                public function foo(): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.override"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_plain_method_with_no_override_attribute_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                public function bar(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.override"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_on_a_standalone_trait_method_is_never_flagged_by_itself() {
+    // Real, previously-live bug found via this project's own corpus:
+    // a trait has no ancestor chain of its own at all - real PHP defers
+    // this whole check to whichever class eventually `use`s the trait
+    // (confirmed directly: the identical trait method is fine when the
+    // using class has a real ancestor, and only fatals - attributed to
+    // the *using class's* own method name - when it doesn't). Checking
+    // the trait's own declaration in isolation must never flag it.
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {
+                #[\Override]
+                public function foo(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.override"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_on_a_trait_method_used_by_a_class_with_a_real_ancestor_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {
+                #[\Override]
+                public function foo(): void {}
+            }
+            class Base {
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                use T;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.override"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_on_a_trait_method_used_by_a_class_with_no_ancestor_is_flagged_on_the_using_class()
+ {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {
+                #[\Override]
+                public function foo(): void {}
+            }
+            class Standalone {
+                use T;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.override" && x.message.contains("Standalone::foo")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_implementing_a_trait_s_own_abstract_method_is_never_flagged() {
+    // Real, previously-live bug found via this project's own corpus
+    // (`Psl\RandomSequence\MersenneTwisterSequence::twist()`): a class's
+    // own concrete method satisfying a *trait's own* abstract method
+    // declaration is a real override too, confirmed directly via
+    // `php -r` - `lookup_ancestor_method_with_owner` only ever walks
+    // extends/implements, never `uses`, so this needed its own check.
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {
+                abstract protected function twist(): int;
+            }
+            class C {
+                use T;
+                #[\Override]
+                protected function twist(): int { return 1; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.override"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_with_an_unresolved_interface_in_the_implements_chain_is_never_flagged() {
+    // Real, previously-live bug found via this project's own corpus
+    // (`CycloneDX\Composer\Plugin::activate()` implementing a real
+    // `Composer\Plugin\PluginInterface` this corpus doesn't vendor a
+    // copy of at all): "no matching parent method exists" can't be
+    // confidently claimed when part of the ancestor chain is a name this
+    // registry has no declaration for - "don't guess wrong", the same
+    // rule this project applies elsewhere.
+    let d = diagnostics_for(
+        r#"<?php
+            class Impl implements TotallyUnknownInterface {
+                #[\Override]
+                public function activate(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.override"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_with_an_unresolved_parent_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Impl extends TotallyUnknownBaseClass {
+                #[\Override]
+                public function configure(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.override"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_with_a_real_but_still_wrong_ancestor_is_still_flagged() {
+    // Guards against the two false-positive fixes above becoming so
+    // lenient they stop catching the genuine case: a fully-resolved
+    // ancestor chain that simply doesn't declare the method at all must
+    // still be flagged.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                #[\Override]
+                public function bar(): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.override" && x.message.contains("Child::bar")),
+        "got: {d:?}"
+    );
+}
