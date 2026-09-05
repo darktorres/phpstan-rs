@@ -2061,13 +2061,27 @@ from several of `rector/rector`'s own rules). The identical fix was
 applied to the brand new `@deprecated` property check at the same time
 (see Phase 39's own entry) since it shared the exact same gap.
 
+**Update**: `RestrictedUsageOfDeprecatedStringCastRule` (and the
+internal-tag equivalent) is done too - an implicit `(string) $obj` cast
+invokes `__toString()` at runtime exactly like an explicit
+`->__toString()` call, so it now runs through the same
+`check_internal_method_call`/`check_deprecated_method_call` pair,
+wired into the existing `ExprKind::Cast` arm's `"string"` case (same
+"first Object member" representative-class extraction
+`ExprKind::MethodCall`'s own `recv_class` already uses for a
+Union/Intersection operand). Corpus-verified: byte-identical with both
+flags off; +32 `method.internalClass` findings with
+`--check-internal-usage` (all real implicit `(string)` casts of
+`nikic/php-parser`'s own `@internal` `PhpParser\Internal\TokenPolyfill`,
+from several of `rector/rector`'s own rules); zero delta with
+`--check-deprecated-usage` (no corpus call site implicitly
+string-casts a class whose `__toString` is itself `@deprecated`).
+
 Still open: real PHPStan's own `RestrictedInternalClassNameUsageExtension`
 additionally covers `extends`/`implements`/param-and-return-type-hints/
 `catch`/`instanceof`/first-class-callables (this phase only covers
 instantiation of the several `ClassNameUsageLocation` variants);
-`RestrictedUsageOfDeprecatedStringCastRule` (extends the method-call
-check to an implicit `(string)`-cast-triggered `__toString()` call - easy
-to add once needed, just not wired); `RestrictedClassConstantUsageRule`/
+`RestrictedClassConstantUsageRule`/
 `RestrictedFunctionCallableUsageRule`/`RestrictedMethodCallableUsageRule`/
 `RestrictedPropertyUsageRule`/`RestrictedStaticMethodCallableUsageRule`/
 `RestrictedStaticPropertyUsageRule` (a separate, *user-configured*
