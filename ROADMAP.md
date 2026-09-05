@@ -659,12 +659,30 @@ both confirmed necessary by real failing tests otherwise:
 argument shouldn't be guessed as "missing"), and `class_name_exists`
 exempts the parser's own synthetic `class@anonymous` name.
 
+**Update**: `ClassConstantRule`'s own typed-constant half is now done -
+PHP 8.3's `const TYPE NAME = value;` syntax was already parsed (both
+class-body call sites) but its own type discarded immediately, only
+consumed to advance past the tokens. A new `ClassConst::type_hint`
+field keeps it; `check_typed_class_constant_values` (wired for both
+class and enum bodies) validates the declared value against it via
+full `self.infer_expr` (not the registry's narrower, already-resolved
+`ConstSig.ty`), so a value referencing another constant (`self::BASE`,
+a real, common idiom) gets this checker's complete expression
+inference. Confirmed directly via `php -l` as a real, unconditional
+fatal error when violated. Corpus-verified: 163 real `private`/
+`protected` typed-constant declarations exist in Piwigo's own first-
+party code alone; caught and fixed one real false positive during the
+pass itself (an unresolved global constant, `DEBUG_BACKTRACE_IGNORE_ARGS`,
+reading as `Mixed` - guarded the same way `check_method_overrides`'s own
+parameter-narrowing check already handles the identical situation)
+before the final run landed byte-identical to baseline - a genuine "no
+real violations found" result, not a dormant check.
+
 **Still open**: `ExistingNamesInGroupUseRule` (case-sensitivity/
 forbidden-name folding specifically, not existence - deferred the same
 way `ClassNameCheck` below is); `ExistingClassesInPropertyHookTypehintsRule`
 (hook bodies aren't type-checked at all yet, a larger pre-existing
-gap); `ClassConstantRule`'s typed-constant half (PHP 8.3 typed class
-constants aren't modeled); `ClassNameCheck`/`ClassCaseSensitivityCheck`/
+gap); `ClassNameCheck`/`ClassCaseSensitivityCheck`/
 `ClassForbiddenNameCheck` (the phase's own explicitly-labeled stretch
 goal). Also still open, and explicitly out of this MVP's own scope by
 design (confirmed against the real `ExistingNamesInUseRule` source): a
