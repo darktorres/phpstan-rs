@@ -20,6 +20,7 @@ mod key_value_of;
 mod misc_and_regressions;
 mod missing_typehint;
 mod narrowing;
+mod noop;
 mod null_probes;
 mod object_shapes;
 mod oop_overrides_and_inheritance;

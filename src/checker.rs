@@ -437,6 +437,7 @@ mod generics;
 mod internal_usage;
 mod missing_typehint;
 mod narrowing;
+mod noop;
 mod oop;
 mod operators;
 pub(crate) mod phpstan_api;
