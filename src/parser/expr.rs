@@ -83,15 +83,27 @@ impl Parser {
     /// This is the reusable "did an assignment operator follow this
     /// operand" half of that logic, factored out of `parse_assignment_
     /// inner`'s own top-level case so `parse_equality`/`parse_
-    /// relational` (Phase 85) can apply it to their own RHS the moment
-    /// it's parsed, before wrapping it in the outer `Binary` node -
-    /// exactly mirroring how real PHP's grammar treats assignment as
-    /// available at that operand position, not only at the very top of
-    /// the whole expression. Deliberately not extended to every other
-    /// binary operator (`+`, `.`, `&&`, ...) - real PHP's own precedence
-    /// table doesn't uniformly allow this everywhere, and comparison
-    /// operators are both the evidenced real-world shape (a real Piwigo-
-    /// corpus false positive traced here) and the safest to be sure of.
+    /// relational` (Phase 85) and `parse_logical_and`/`parse_logical_or`
+    /// (found later, via the exact same corpus-false-positive pattern -
+    /// symfony/console's own `Application.php`, `$e instanceof
+    /// CommandNotFoundException && $namespace = $this->findNamespace(
+    /// $name)`) can apply it to their own RHS the moment it's parsed,
+    /// before wrapping it in the outer `Binary` node - exactly mirroring
+    /// how real PHP's grammar treats assignment as available at that
+    /// operand position, not only at the very top of the whole
+    /// expression. An earlier version of this comment claimed real PHP's
+    /// own precedence table "doesn't uniformly allow this everywhere,"
+    /// singling out `&&` by name as an example of an operator this
+    /// wasn't extended to - confirmed wrong the same way this project's
+    /// own `NameContext::build` doc comment was about multi-namespace
+    /// files: `php -r '$e=true; if ($e && $x = "hi") { echo $x; }'`
+    /// prints `hi`, and `$x` stays genuinely unset when `$e` is falsy
+    /// (real short-circuiting, not eager evaluation) - so `&&`/`||` get
+    /// the identical treatment `==`/`<` already had. Still deliberately
+    /// not extended to every other binary operator (`+`, `.`, the
+    /// bitwise `|`/`^`/`&`, ...) - unconfirmed either way, and not
+    /// corpus-evidenced as a real gap the way comparison/`&&`/`||` all
+    /// were.
     pub(crate) fn parse_assignment_tail(
         &mut self,
         lhs: Expr,
@@ -182,7 +194,24 @@ impl Parser {
         let start = self.current_pos();
         let mut lhs = self.parse_logical_and()?;
         while self.eat(&Token::PipePipe) {
+            let rhs_start = self.current_pos();
             let rhs = self.parse_logical_and()?;
+            // Phase 85 follow-up: `$e instanceof Foo || $x = fn()` - a
+            // real, confirmed PHP idiom (`php -r` proves `$x` really is
+            // assigned whenever the right side actually runs, exactly
+            // like `false === $x = fn()` already gets via `parse_
+            // assignment_tail`'s own doc comment) that this project's
+            // own naive precedence-table reading previously assumed
+            // real PHP didn't extend to `&&`/`||` - it does. Without
+            // this, `$e instanceof CommandNotFoundException && $namespace
+            // = $this->findNamespace($name)` (symfony/console's own
+            // `Application.php`) parsed as the nonsensical `($e
+            // instanceof CommandNotFoundException && $namespace) =
+            // $this->findNamespace($name)`, leaving `$namespace` looking
+            // completely unassigned to every later use inside the `if`
+            // body (a real, corpus-found `variable.undefined` false
+            // positive).
+            let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(
                 ExprKind::Binary(BinOp::Or, Box::new(lhs), Box::new(rhs)),
                 start,
@@ -195,7 +224,11 @@ impl Parser {
         let start = self.current_pos();
         let mut lhs = self.parse_bit_or()?;
         while self.eat(&Token::AmpAmp) {
+            let rhs_start = self.current_pos();
             let rhs = self.parse_bit_or()?;
+            // See `parse_logical_or`'s own identical fix just above -
+            // same real idiom, same confirmed-via-`php -r` fix.
+            let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(
                 ExprKind::Binary(BinOp::And, Box::new(lhs), Box::new(rhs)),
                 start,

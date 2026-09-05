@@ -87,6 +87,59 @@ fn an_ordinary_comparison_with_no_trailing_assignment_is_unaffected() {
     assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "params"));
 }
 
+// Phase 85 follow-up: an assignment nested (unparenthesized) as `&&`'s/
+// `||`'s own RHS - the identical real idiom the comparison-operator
+// fixes above cover, just one operand position looser in the precedence
+// chain. Real PHP's own grammar allows this here too (confirmed directly:
+// `php -r '$e=true; if ($e && $x = "hi") { echo $x; }'` prints `hi`, and
+// `$x` stays genuinely unset when `$e` is falsy - real short-circuiting,
+// not eager evaluation), found via a real corpus false positive
+// (symfony/console's own `Application.php`: `$e instanceof
+// CommandNotFoundException && $namespace = $this->findNamespace($name)`
+// used to parse as `($e instanceof CommandNotFoundException &&
+// $namespace) = $this->findNamespace($name)`, leaving `$namespace`
+// looking undefined to every reference inside the `if` body).
+#[test]
+fn an_assignment_nested_as_a_logical_and_rhs_parses_as_real_php_does() {
+    let program = parse("<?php if ($e instanceof Foo && $x = find($e)) { return; }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(BinOp::And, lhs, rhs) = &cond.kind else {
+        panic!("expected a top-level And binary expression, got {cond:?}");
+    };
+    assert!(matches!(&lhs.kind, ExprKind::Instanceof(..)));
+    let ExprKind::Assign(target, value) = &rhs.kind else {
+        panic!("expected the RHS to be an Assign, got {:?}", rhs.kind);
+    };
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "x"));
+    assert!(matches!(&value.kind, ExprKind::Call(..)));
+}
+
+#[test]
+fn an_assignment_nested_as_a_logical_or_rhs_parses_as_real_php_does() {
+    let program = parse("<?php if ($e === null || $x = find($e)) { return; }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(BinOp::Or, _, rhs) = &cond.kind else {
+        panic!("expected a top-level Or binary expression, got {cond:?}");
+    };
+    assert!(matches!(&rhs.kind, ExprKind::Assign(..)));
+}
+
+#[test]
+fn an_ordinary_logical_and_with_no_trailing_assignment_is_unaffected() {
+    let program = parse("<?php if ($e instanceof Foo && $x) { return; }");
+    let StmtKind::If { cond, .. } = &program[0].kind else {
+        panic!("expected an If statement, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(BinOp::And, _, rhs) = &cond.kind else {
+        panic!("expected a top-level And binary expression, got {cond:?}");
+    };
+    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "x"));
+}
+
 #[test]
 fn a_bare_anonymous_function_statement_parses_as_an_expression_not_a_declaration() {
     // `function () { ... };` with no assignment at all - a real, if
