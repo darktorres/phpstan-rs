@@ -16,6 +16,25 @@ pub(crate) fn strip_leading_backslash(name: &str) -> String {
     name.trim_start_matches('\\').to_string()
 }
 
+/// If `name` starts with a case-insensitive `namespace\` segment (the
+/// real PHP `namespace\foo`/`namespace\Foo\Bar` construct - "relative to
+/// the current namespace, explicitly," distinct from an ordinary bare
+/// reference which would also try a `use`-import first), returns
+/// whatever comes after that prefix. `Keyword::try_from_str` already
+/// lowercases before matching, so `NAMESPACE\foo`/`Namespace\foo` tokenize
+/// identically to the lowercase spelling - matched the same way here for
+/// consistency, not because real PHP is actually case-sensitive here.
+fn strip_namespace_relative_prefix(name: &str) -> Option<&str> {
+    if !name.is_char_boundary(9) {
+        return None;
+    }
+    let (head, rest) = name.split_at(9);
+    if !head.eq_ignore_ascii_case("namespace") {
+        return None;
+    }
+    rest.strip_prefix('\\')
+}
+
 /// Resolves a bare class-name reference (`use`-imports and same-namespace
 /// relative references both apply) to a fully-qualified one, so two
 /// unrelated classes with the same short name in different namespaces get
@@ -127,6 +146,25 @@ impl NameContext {
     pub(crate) fn resolve(&self, name: &str) -> String {
         if let Some(fq) = name.strip_prefix('\\') {
             return fq.to_string();
+        }
+        // `namespace\foo` (the keyword `namespace`, case-insensitive per
+        // `Keyword::try_from_str` lowercasing before it's ever compared,
+        // then a literal `\`) is a real, distinct PHP construct - not an
+        // ordinary qualified reference to a symbol literally named
+        // "namespace" - meaning "resolve `foo` against the *current*
+        // namespace only, never via a `use`-import and never falling
+        // back to the global namespace the way an unqualified function
+        // call otherwise would." Without this, `take_name_segment`
+        // parsing the bare keyword as an ordinary name segment left the
+        // literal word "namespace" sitting in the string past this
+        // point, and falling through to `declared_name(name)` below
+        // re-qualified the *whole* thing against the current namespace
+        // a second time - a real corpus false positive
+        // (`php-standard-library`/Psl's own house style, 663 real call
+        // sites): `Psl\Str\namespace\chunk()` instead of the real
+        // `Psl\Str\chunk`.
+        if let Some(rest) = strip_namespace_relative_prefix(name) {
+            return self.declared_name(rest);
         }
         let mut segments = name.splitn(2, '\\');
         let first = segments.next().unwrap_or(name);

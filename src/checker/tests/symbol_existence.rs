@@ -546,6 +546,72 @@ fn a_genuinely_undefined_function_is_still_flagged_regardless_of_case() {
     );
 }
 
+// `namespace\foo()` is a real, distinct PHP construct - "call `foo`
+// relative to the current namespace only, no use-import lookup, no
+// global-namespace fallback" - used as a deliberate house style by
+// `php-standard-library`/Psl (663 real call sites in the corpus) to
+// force resolution against a sibling function of the same short name
+// that also exists globally. Without recognizing the `namespace\`
+// prefix, `take_name_segment` accepting the keyword as an ordinary name
+// segment left the literal word "namespace" in the resolved string,
+// which then got re-qualified against the current namespace a *second*
+// time (`Psl\Str\namespace\chunk` instead of the real `Psl\Str\chunk`).
+#[test]
+fn a_namespace_relative_call_resolves_against_the_current_namespace() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Psl\Str;
+            function chunk(string $s): array { return [$s]; }
+            function f(string $s): array {
+                return namespace\chunk($s);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_namespace_relative_call_never_falls_back_to_the_global_namespace() {
+    // The real function only exists *globally* here, not in the
+    // current namespace - `namespace\` must not fall back to it the
+    // way a bare unqualified call otherwise would.
+    let d = diagnostics_for(
+        r#"<?php
+            function chunk(string $s): array { return [$s]; }
+            namespace Psl\Str {
+                function f(string $s): array {
+                    return namespace\chunk($s);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.notFound"),
+        "expected namespace\\chunk() to be reported as not found (no \
+         global fallback), got: {d:?}"
+    );
+}
+
+#[test]
+fn a_namespace_relative_call_is_case_insensitive() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Psl\Str;
+            function chunk(string $s): array { return [$s]; }
+            function f(string $s): array {
+                return NAMESPACE\chunk($s);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_group_use_function_import_is_checked_per_member() {
     // Group-use expands to individually-kinded `UseImport`s, each
