@@ -442,6 +442,15 @@ with the flag off; +215 more findings on top of the existing pass with
 `Command::$defaultName`, Doctrine DBAL's `MariaDB*Platform` classes'
 own `@deprecated` tags matched verbatim).
 
+**Update**: `check_deprecated_property_access` had the identical write-
+side blind spot Phase 67's own property-write fix just closed (a plain
+`$obj->prop = ...` never reached it) - fixed in the same commit, same
+root cause. Corpus-verified: byte-identical with the flag off; +17
+`property.deprecated` findings with `--check-deprecated-usage` on,
+spot-checked genuine (Doctrine DBAL's `AbstractAsset::$_quoted`/
+`$_namespace`, `ForeignKeyConstraint::$options` writes, each matched
+against its own real `@deprecated` tag).
+
 **Still open**: whether a class-level `@deprecated` tag should imply
 deprecation of its members is left unclaimed - real PHPStan's own
 behavior here couldn't be verified without the un-vendored package.
@@ -2037,15 +2046,28 @@ IMPORT_TYPE_CLASS`/`_CONST`/`_FUNCTION`, each individually marked
 `@internal`, accessed from `phar-io/manifest`'s own
 `.php-cs-fixer.dist.php` outside `PhpCsFixer`'s root namespace).
 
+**Update**: the property-*write* blind spot noted below is now closed -
+`check_property_assignment` (`checker/assignment.rs`, a plain `$obj->prop
+= ...`) never called `check_internal_property_access` at all; only the
+`ExprKind::PropertyAccess` *read* arm in `checker/expr.rs` did, since
+`check_assignment_target`'s own `PropertyAccess` handling deliberately
+only checks the write's base (to avoid misflagging dynamic-property
+creation as an undefined-property read). Corpus-verified: byte-
+identical with the flag off; +15 `property.internalClass` findings with
+`--check-internal-usage` on, spot-checked genuine (e.g. Symfony Cache's
+`AbstractTagAwareAdapter::$logger` write via `psr/log`'s own
+`LoggerAwareTrait`, `PhpParser\Internal\TokenPolyfill::$text` writes
+from several of `rector/rector`'s own rules). The identical fix was
+applied to the brand new `@deprecated` property check at the same time
+(see Phase 39's own entry) since it shared the exact same gap.
+
 Still open: real PHPStan's own `RestrictedInternalClassNameUsageExtension`
 additionally covers `extends`/`implements`/param-and-return-type-hints/
 `catch`/`instanceof`/first-class-callables (this phase only covers
 instantiation of the several `ClassNameUsageLocation` variants);
 `RestrictedUsageOfDeprecatedStringCastRule` (extends the method-call
 check to an implicit `(string)`-cast-triggered `__toString()` call - easy
-to add once needed, just not wired); per-property-write `@internal`
-tracking (property *reads* are covered, writes aren't - a separate gap
-from the constant one, now fully closed); `RestrictedClassConstantUsageRule`/
+to add once needed, just not wired); `RestrictedClassConstantUsageRule`/
 `RestrictedFunctionCallableUsageRule`/`RestrictedMethodCallableUsageRule`/
 `RestrictedPropertyUsageRule`/`RestrictedStaticMethodCallableUsageRule`/
 `RestrictedStaticPropertyUsageRule` (a separate, *user-configured*
