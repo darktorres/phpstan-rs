@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::ast::{Stmt, StmtKind};
 use crate::checker::{self, Checker, Diagnostic};
 use crate::deps;
+use crate::ignore_comments;
 use crate::lexer::Lexer;
 use crate::parser::{ParseError, Parser};
 use crate::pest_config::PestConfig;
@@ -22,6 +23,12 @@ struct FileState {
     functions: Vec<String>,
     classes: Vec<String>,
     references: HashSet<String>,
+    // Phase 44 (partial): `@phpstan-ignore-line`/`-next-line` - computed
+    // once here, while the raw source is still on hand, rather than at
+    // `check_file` time (the AST alone doesn't carry comment text at all,
+    // and re-reading the file from disk there would be new, avoidable
+    // I/O coupling `check_file` doesn't otherwise have).
+    ignore_lines: HashSet<u32>,
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one
@@ -156,6 +163,7 @@ impl Project {
         let ast = parse(source)?;
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
+        let ignore_lines = ignore_comments::ignored_lines(source);
         self.registry.index(&ast);
         register_references(&mut self.dependents, &path, &references);
         self.files.insert(
@@ -165,6 +173,7 @@ impl Project {
                 functions,
                 classes,
                 references,
+                ignore_lines,
             },
         );
         Ok(())
@@ -202,6 +211,7 @@ impl Project {
         let ast = parse(new_source)?;
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
+        let ignore_lines = ignore_comments::ignored_lines(new_source);
         // `changed_symbols` seeds transitive_affected_files' BFS, which
         // looks names up in `self.dependents` - keyed by the *bare* names
         // deps::referenced_names collects (a deliberate simplification,
@@ -231,6 +241,7 @@ impl Project {
                 functions,
                 classes,
                 references,
+                ignore_lines,
             },
         );
         self.rebuild_pest_config();
@@ -330,6 +341,16 @@ impl Project {
             // consistent, fully span-ordered list regardless of whether
             // this gate is on.
             diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+        }
+        // Phase 44 (partial): `@phpstan-ignore-line`/`-next-line` -
+        // `non_ignorable` diagnostics are exempt, mirroring real
+        // PHPStan's own identical exemption (reserved for a handful of
+        // its own rules, e.g. flagging a malformed `@phpstan-ignore`
+        // comment itself - nonsensical to let another ignore comment
+        // suppress).
+        if !file.ignore_lines.is_empty() {
+            diagnostics
+                .retain(|d| d.non_ignorable || !file.ignore_lines.contains(&d.span.start.line));
         }
         diagnostics
     }

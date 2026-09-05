@@ -13,6 +13,7 @@ pub mod composer;
 pub mod config;
 pub mod deps;
 pub mod docblock;
+pub mod ignore_comments;
 pub mod lexer;
 pub mod lsp;
 pub mod output;
