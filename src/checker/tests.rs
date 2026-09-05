@@ -6,6 +6,7 @@ mod builtin_checks;
 mod cast_and_coercion;
 mod closures_and_callables;
 mod control_flow;
+mod date_interval;
 mod declaration_sanity;
 mod diagnostic_identifiers;
 mod doctrine_and_stdlib_specials;

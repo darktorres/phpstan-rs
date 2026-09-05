@@ -429,6 +429,7 @@ mod assignment;
 mod calls;
 mod coercion;
 mod control_flow;
+mod date_interval;
 mod duplicates;
 mod expr;
 mod generics;

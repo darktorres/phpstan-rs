@@ -1267,6 +1267,11 @@ impl<'a> Checker<'a> {
                     // just below (this check does its own, separate
                     // registry lookup) since it needs `&mut self`.
                     self.check_internal_instantiation(class, e.span, label);
+                    // Phase 78: `DateInterval`'s own duration-string
+                    // constructor validation - independent of whether
+                    // the class is otherwise instantiable at all, so
+                    // this runs unconditionally before that dispatch.
+                    self.check_date_interval_constructor(class, args, e.span, label);
                     if let Some(info) = self.registry.classes.get(class) {
                         if info.kind == ClassKind::Interface {
                             self.report(
