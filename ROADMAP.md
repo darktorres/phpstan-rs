@@ -423,13 +423,28 @@ enforcement lives in a separate, NOT-vendored Composer package
 The three identifiers used are well-established, publicly documented
 ones from that package rather than ones confirmed line-by-line here.
 
-**Still open**: property fetches, class constant fetches, and
-`new`-instantiation of a `@deprecated`-tagged class aren't covered yet
-(this pass only covers plain calls, mirroring Phase 67's own narrower
-first pass before its later per-constant follow-up). Whether a
-class-level `@deprecated` tag should imply deprecation of its members
-is left unclaimed - real PHPStan's own behavior here couldn't be
-verified without the un-vendored package.
+**Update**: follow-up landed the three shapes left open above -
+instance/static property access (`property.deprecated`/
+`staticProperty.deprecated`), class-constant access
+(`classConstant.deprecated`), and instantiation of a
+`@deprecated`-tagged class (`new.deprecated`), mirroring Phase 67's own
+"narrow first pass, then a follow-up for the rest" arc exactly. New
+`PropertySig::deprecated`/`ConstSig::deprecated` (identical "own tag
+only" scoping to `FunctionSig::deprecated`) and `ClassInfo::deprecated`
+(the class's own tag, consulted only at `new Foo()` - a separate
+question from "does a class-level tag imply member deprecation,"
+answered independently and left unclaimed for the exact same
+un-vendored-package reason as before). Corpus-verified: byte-identical
+with the flag off; +215 more findings on top of the existing pass with
+`--check-deprecated-usage` on (97 `classConstant`, 58 `property`, 58
+`new`, 2 `staticProperty`), spot-checked genuine (Doctrine DBAL's
+`AbstractAsset::$_namespace`, Symfony Console's
+`Command::$defaultName`, Doctrine DBAL's `MariaDB*Platform` classes'
+own `@deprecated` tags matched verbatim).
+
+**Still open**: whether a class-level `@deprecated` tag should imply
+deprecation of its members is left unclaimed - real PHPStan's own
+behavior here couldn't be verified without the un-vendored package.
 
 **Phase 40 - PHPStan-API-usage checks (PARTIAL).** This entry's own
 status was never updated after an earlier pilot batch landed it
