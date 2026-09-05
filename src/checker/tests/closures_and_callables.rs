@@ -309,6 +309,121 @@ fn first_class_callable_of_an_undefined_static_method_is_flagged() {
 }
 
 #[test]
+fn first_class_callable_of_a_private_method_from_outside_its_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                private function secret(): void {}
+            }
+            function test(Foo $foo): void {
+                $g = $foo->secret(...);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.private"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn first_class_callable_of_a_private_static_method_from_outside_its_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                private static function secret(): void {}
+            }
+            function test(): void {
+                $h = Foo::secret(...);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "staticMethod.private"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn first_class_callable_of_a_deprecated_function_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            /** @deprecated */
+            function oldFunc(): void {}
+            function test(): void {
+                $f = oldFunc(...);
+            }
+        "#,
+        |r| r.check_deprecated_usage = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.deprecated"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn first_class_callable_of_a_deprecated_method_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                /** @deprecated */
+                public function oldMethod(): void {}
+            }
+            function test(Foo $foo): void {
+                $g = $foo->oldMethod(...);
+            }
+        "#,
+        |r| r.check_deprecated_usage = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.deprecated"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn first_class_callable_of_a_deprecated_static_method_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                /** @deprecated */
+                public static function oldMethod(): void {}
+            }
+            function test(): void {
+                $h = Foo::oldMethod(...);
+            }
+        "#,
+        |r| r.check_deprecated_usage = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "staticMethod.deprecated"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn first_class_callable_of_an_internal_function_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            function make(): void {}
+
+            namespace Other\App;
+            function test(): void {
+                $f = \Vendor\Internal\make(...);
+            }
+        "#,
+        |r| r.check_internal_usage = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.internal"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
 fn first_class_callable_does_not_flag_too_few_arguments() {
     // A real, previously-plausible regression: naively dispatching
     // the wrapped call through its own ordinary arm (which also runs

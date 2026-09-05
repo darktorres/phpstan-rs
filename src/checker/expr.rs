@@ -2137,6 +2137,14 @@ impl<'a> Checker<'a> {
             // that doesn't depend on argument count at all - mirroring
             // each inner arm's own existence-check logic without its
             // argument handling.
+            //
+            // Also runs visibility/`@internal`/`@deprecated` (real
+            // PHPStan's own version, per its own `StaticMethodCallableRule`,
+            // just re-runs the *ordinary* call-site checks against this
+            // same shape) - a real, previously-undetected gap: `Foo::
+            // method(...)`/`$obj->method(...)` used to run none of them,
+            // even though both produce a real, callable `Closure` bound to
+            // that exact method the same as an ordinary call would.
             ExprKind::FirstClassCallable(inner) => {
                 match &inner.kind {
                     ExprKind::Call(callee, _) => {
@@ -2144,18 +2152,41 @@ impl<'a> Checker<'a> {
                             if !is_language_construct(name) {
                                 let (primary, fallback) =
                                     self.name_ctx.resolve_function_candidates(name);
-                                let found = self.registry.lookup_function(&primary).is_some()
-                                    || fallback.as_deref().is_some_and(|g| {
-                                        self.registry.lookup_function(g).is_some()
+                                let resolved_sig = self
+                                    .registry
+                                    .lookup_function(&primary)
+                                    .map(|s| (primary.clone(), s))
+                                    .or_else(|| {
+                                        fallback.as_deref().and_then(|g| {
+                                            self.registry
+                                                .lookup_function(g)
+                                                .map(|s| (g.to_string(), s))
+                                        })
                                     });
-                                if !found {
-                                    self.report(
-                                        label.to_string(),
-                                        format!("call to undefined function {primary}()"),
-                                        e.span,
-                                        0,
-                                        "function.notFound",
-                                    );
+                                match resolved_sig {
+                                    Some((resolved_name, sig)) => {
+                                        self.check_internal_function_call(
+                                            &resolved_name,
+                                            sig,
+                                            e.span,
+                                            label,
+                                        );
+                                        self.check_deprecated_function_call(
+                                            &resolved_name,
+                                            sig,
+                                            e.span,
+                                            label,
+                                        );
+                                    }
+                                    None => {
+                                        self.report(
+                                            label.to_string(),
+                                            format!("call to undefined function {primary}()"),
+                                            e.span,
+                                            0,
+                                            "function.notFound",
+                                        );
+                                    }
                                 }
                             }
                         } else {
@@ -2176,36 +2207,80 @@ impl<'a> Checker<'a> {
                         };
                         if let Some(class) = &recv_class
                             && self.registry.classes.contains_key(class)
-                            && self.member_confirmed_missing(&recv_ty, |c| {
+                        {
+                            if self.member_confirmed_missing(&recv_ty, |c| {
                                 self.registry.lookup_method(c, method).is_some()
                                     || self.registry.lookup_method(c, "__call").is_some()
-                            })
-                        {
-                            self.report(
-                                label.to_string(),
-                                format!("call to undefined method {recv_ty}::{method}()"),
-                                e.span,
-                                0,
-                                "method.notFound",
-                            );
+                            }) {
+                                self.report(
+                                    label.to_string(),
+                                    format!("call to undefined method {recv_ty}::{method}()"),
+                                    e.span,
+                                    0,
+                                    "method.notFound",
+                                );
+                            } else if let Some((owner, sig)) =
+                                self.registry.lookup_method_with_owner(class, method)
+                            {
+                                self.check_member_visibility(MemberVisibilityCheck {
+                                    kind: "method",
+                                    owner: &owner,
+                                    member_name: method,
+                                    visibility: &sig.visibility,
+                                    describe: &format!("method {owner}::{method}()"),
+                                    span: e.span,
+                                    label,
+                                });
+                                self.check_internal_method_call(
+                                    &owner, method, sig, false, e.span, label,
+                                );
+                                self.check_deprecated_method_call(
+                                    &owner, method, sig, false, e.span, label,
+                                );
+                            }
                         }
                     }
                     ExprKind::StaticCall(class_name, method, _) => {
                         if let Some(class) = self.resolve_static_class_name(class_name)
                             && self.registry.classes.contains_key(&class)
-                            && self.registry.lookup_method(&class, method).is_none()
-                            && self
-                                .registry
-                                .lookup_method(&class, "__callStatic")
-                                .is_none()
                         {
-                            self.report(
-                                label.to_string(),
-                                format!("call to undefined static method {class}::{method}()"),
-                                e.span,
-                                0,
-                                "staticMethod.notFound",
-                            );
+                            if self.registry.lookup_method(&class, method).is_none()
+                                && self
+                                    .registry
+                                    .lookup_method(&class, "__callStatic")
+                                    .is_none()
+                            {
+                                self.report(
+                                    label.to_string(),
+                                    format!("call to undefined static method {class}::{method}()"),
+                                    e.span,
+                                    0,
+                                    "staticMethod.notFound",
+                                );
+                            } else if let Some((owner, sig)) =
+                                self.registry.lookup_method_with_owner(&class, method)
+                            {
+                                self.check_member_visibility(MemberVisibilityCheck {
+                                    kind: "staticMethod",
+                                    owner: &owner,
+                                    member_name: method,
+                                    visibility: &sig.visibility,
+                                    describe: &format!("static method {owner}::{method}()"),
+                                    span: e.span,
+                                    label,
+                                });
+                                self.check_internal_method_call(
+                                    &owner, method, sig, true, e.span, label,
+                                );
+                                self.check_deprecated_method_call(
+                                    &owner, method, sig, true, e.span, label,
+                                );
+                                if class_name == "static" && sig.visibility == Visibility::Private {
+                                    self.check_static_private_method_access(
+                                        &owner, method, e.span, label,
+                                    );
+                                }
+                            }
                         }
                     }
                     ExprKind::DynamicMethodCall(recv, name_expr, _) => {
