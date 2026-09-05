@@ -1148,6 +1148,36 @@ not attempted here. Cross-class `@phpstan-import-type Name from Class`
 implementation) remains open too, needed by real corpus consumers of
 this same alias, e.g. `json-schema`'s own `ErrorBagProxy` trait.
 
+**Update**: the *second*, independent gap this same investigation named
+(`int-mask-of<...>` falling back to an ordinary, unparsed generic class
+reference) turned out to generalize cleanly on its own, separate from
+the still-not-reattempted `@phpstan-type` feature above -
+`parse_type_keyword_or_class` (`types.rs`) had no arms at all for
+`int-mask`/`int-mask-of`/`lowercase-string`/`uppercase-string`/
+`non-empty-lowercase-string`/`non-empty-uppercase-string`, so any of
+these produced a bogus namespace-qualified "class" (e.g. `Composer\
+Pcre\int-mask<Composer\Pcre\PREG_UNMATCHED_AS_NULL>`) that then failed
+ordinary `int`/`string` assignability checks *and* was separately
+reported as a missing class - the same failure mode `value-of`/`key-of`
+(Phase 80) already exists to avoid for its own two pseudo-types.
+`int-mask`/`int-mask-of` degrade to plain `Type::Int` (this project has
+no way to enumerate bitmask combinations without resolving the
+referenced class constants); the four case-refinement string variants
+degrade to plain `Type::String`, joining the existing `callable-string`/
+`trait-string`/`interface-string`/`enum-string` "can't verify content"
+group. Verified against the ~20,300-file corpus, combined with the
+`#[PhpVersionAware]` fix above (Phase 24's own update) in one round:
+45,873 -> 45,377 (-496) - 315 `argument.type` and 185 `class.notFound`
+cleared directly by this fix alone, plus knock-on drops in `return.type`
+(-11) and `method.childParameterType` (-10) from code paths reading the
+now-correctly-typed value afterward. Every one of the 29 new lines in
+the diff turned out to be either the exact same diagnostic reworded
+with the now-accurate type name (verified line-for-line against the
+pre-fix wording) or a genuine, separately-confirmed upstream bug
+(`thecodingmachine/safe`'s own stale `@param resource $link` docblocks,
+covered under Phase 24's own update above) - zero new false-positive
+classes.
+
 **Phase 49 - Call-argument binding generalization (named args, spread,
 by-ref legality) (PARTIAL).** This entry's own status was never
 updated after an earlier pilot batch landed it (commit `76fc86e`) -
@@ -5202,6 +5232,36 @@ precedent) and parameter-type gating (injects synthetic native type-hint
 tokens before the parameter, since a parameter has no guaranteed
 docblock tag to overwrite the way a return does) - accounted for roughly
 a quarter of everything left at the time.
+
+**Update**: a full-corpus top-10-bucket workflow (analysing/scoping the
+~45,873-diagnostic full corpus, not just Piwigo's own `src/`) found the
+identical attribute under a second spelling: `jetbrains/phpstorm-stubs`'
+own `ldap/ldap.php` does `use JetBrains\PhpStorm\Internal\
+LanguageLevelTypeAware as PhpVersionAware;` and spells every `ldap_*`
+function's own version-gated parameter as `#[PhpVersionAware(...)]`
+exclusively - a plain PHP `use`-import alias for the identical attribute
+class, not a different one. The lexer's own recognition
+(`self.starts_with("#[LanguageLevelTypeAware(")`) is a raw literal-text
+substring check done during lexing, before any alias resolution exists,
+so it never matched the aliased spelling - confirmed the only file in
+the whole corpus using it (106 occurrences), leaving every `ldap_*`
+parameter/return stuck on its stale pre-8.1 `@param resource $ldap`
+doc comment instead of the real `LDAP\Connection`/`LDAP\Result` object
+types PHP 8.1 introduced. `skip_language_level_type_aware_attribute`
+now takes the matched prefix as a parameter instead of hardcoding the
+one literal spelling, so a second call site can reuse it verbatim for
+`#[PhpVersionAware(`. Verified against the ~20,300-file corpus as part
+of a combined round with the pseudo-type fix below (see that entry's
+own numbers) - in isolation, this closed dozens of `argument.type`/
+`return.type` false positives across every PHP-version-targeted copy of
+`thecodingmachine/safe`'s generated `ldap.php` wrapper (`expects
+resource, LDAP\Connection given`), and separately *revealed* a small,
+genuine upstream bug: `thecodingmachine/safe`'s own generated wrappers
+themselves still declare `@param resource $link` (never updated for
+the PHP 8.1 LDAP connection object change) while passing that value
+straight through to the real, now-correctly-typed native function -
+real PHPStan would flag this identically once the underlying stub type
+is accurate, so left as-is rather than "fixed" further.
 
 **Phase 25 (792 -> 732) - class-declaration merging.** Piwigo ships a
 project-local `Imagick.stub.php` overriding one stale method (real
