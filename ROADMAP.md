@@ -572,20 +572,50 @@ property typed `T` is actually a legitimate covariant-safe position,
 per this document's own "Known limitations" entry) and before the
 `UnsetRule` hooked-property sub-diagnostic can be built.
 
-**Phase 44 - `@phpstan-ignore` inline suppression (PLANNED).** Only
-whole-file baseline suppression exists today (Phase 11). Real PHPStan's
-`@phpstan-ignore-line`/`-next-line` are simple line markers, but bare
-`@phpstan-ignore` takes a real comma-separated identifier list (each
-optionally followed by a parenthesized comment) matching against a
-diagnostic's own stable identifier - which `Diagnostic` doesn't have at
-all today (just `location`/`message`/`span`/`level`). The exhaustive
-audit's `Ignore/` category findings (`IgnoreParseErrorRule`) fold into
-Phase 56's grammar-level PHPDoc parser work instead of here (parse-error
-recovery is a parser concern); this phase's own suppression-matching
-logic is unaffected. Its stated prerequisite is now concretely tracked
-as Phase 47 (diagnostic identifier & metadata infrastructure) rather
-than an unscheduled "worth retrofitting regardless" note - build Phase
-47 first.
+**Phase 44 - `@phpstan-ignore` inline suppression (PARTIAL).** Only
+whole-file baseline suppression existed before this phase (Phase 11).
+Real PHPStan's `@phpstan-ignore-line`/`-next-line` are simple line
+markers; bare `@phpstan-ignore` takes a real comma-separated identifier
+list (each optionally followed by a parenthesized comment) matching
+against a diagnostic's own stable identifier. Its stated prerequisite
+(Phase 47, diagnostic identifier & metadata infrastructure) is done, so
+this phase was unblocked - built now.
+
+**Done**: the two simple line-marker forms, `@phpstan-ignore-line`
+(suppresses every diagnostic on its own line) and `@phpstan-ignore-
+next-line` (suppresses every diagnostic on the line immediately after
+it). New `ignore_comments::ignored_lines` - a one-time plain-text scan
+over a file's raw source at `Project::load_file`/`update_file` time
+(stored on `FileState`, applied as a post-processing filter in
+`check_file`) - deliberately not a lexer-level change: this project's
+own lexer already discards every non-doc comment entirely
+(`Lexer::skip_whitespace_and_comments`), and `FileState` doesn't keep
+the raw source around after parsing either, so recovering comment text
+at diagnostic-filtering time would need real, more invasive plumbing
+either way a plain source scan sidesteps. `Diagnostic::non_ignorable`
+is honored (exempt from suppression), mirroring real PHPStan's own
+identical exemption. Corpus-verified: 49995 -> 49901 (-98, zero new
+findings) - every removed diagnostic individually spot-checked against
+a real, pre-existing `@phpstan-ignore-line`/`-next-line` comment
+already in the corpus (`nunomaduro/collision`, `monolog`,
+`composer-unused/symbol-parser`, ...), confirming the feature was
+previously non-functional noise these packages' own authors had
+already written expecting real PHPStan (or this project) to honor.
+
+Still open: the fuller bare `@phpstan-ignore <identifier list>` form -
+needs real per-identifier matching against a diagnostic's own
+`identifier` (now available, Phase 47), plus real PHPStan's own
+genuinely tricky trailing-vs-standalone-comment placement logic (a
+comment trailing real code on its own line targets that same line; a
+comment standing alone targets the *next* line of real code, skipping
+over blank lines/other comments in between) - deliberately not
+attempted with this phase's own simpler per-physical-line text scan,
+which has no way to tell "trailing" from "standalone" without real
+comment-token/AST-position awareness. The exhaustive audit's `Ignore/`
+category findings (`IgnoreParseErrorRule`) still fold into Phase 56's
+grammar-level PHPDoc parser work instead of here (parse-error recovery
+is a parser concern); this phase's own suppression-matching logic is
+unaffected by that.
 
 **Phase 45 - Declared-vs-actual-narrowest-type inference
 (TooWideTypehints) (PLANNED).** No mechanism compares a declared type
