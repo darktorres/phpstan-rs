@@ -194,10 +194,15 @@ fn an_anonymous_class_inherits_explicit_mixed_from_an_implemented_interface() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// The inverse - an anonymous class implementing an interface whose own
-// docblock does *not* spell out `mixed` must still be flagged normally.
+// Phase 92: an anonymous class relying entirely on an implemented
+// interface's own real, non-`mixed` documented type (not merely an
+// explicit-`mixed` one, Phase 90's own narrower fix) must inherit the
+// actual type, not just have the finding suppressed - real corpus
+// false positive: `MailRecipientRepositoryInterface::
+// findAdminsAndWebmasters(): list<MailRecipient>`, implemented inline
+// with no own doc.
 #[test]
-fn an_anonymous_class_without_an_explicit_mixed_ancestor_is_still_flagged() {
+fn an_anonymous_class_inherits_a_precise_ancestor_type_not_just_the_mixed_suppression() {
     let d = all_diagnostics_for(
         r#"<?php
             interface PreciseComparator {
@@ -208,6 +213,53 @@ fn an_anonymous_class_without_an_explicit_mixed_ancestor_is_still_flagged() {
             }
             function make(): PreciseComparator {
                 return new class implements PreciseComparator {
+                    public function compare(array $a): int {
+                        return 0;
+                    }
+                };
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Same as above, for the return position specifically - the exact real
+// corpus shape (`findAdminsAndWebmasters(): list<MailRecipient>`).
+#[test]
+fn an_anonymous_class_inherits_a_precise_ancestor_return_type() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class Recipient92 {}
+            interface RecipientRepository92 {
+                /**
+                 * @return list<Recipient92>
+                 */
+                public function findAll(): array;
+            }
+            function make(): RecipientRepository92 {
+                return new class implements RecipientRepository92 {
+                    public function findAll(): array {
+                        return [];
+                    }
+                };
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The inverse - when neither the anonymous class's own docblock nor the
+// implemented interface's has anything to say about a position, it must
+// still be flagged normally (nothing anywhere to inherit).
+#[test]
+fn an_anonymous_class_with_no_doc_anywhere_is_still_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            interface UndocumentedComparator {
+                public function compare(array $a): int;
+            }
+            function make(): UndocumentedComparator {
+                return new class implements UndocumentedComparator {
                     public function compare(array $a): int {
                         return 0;
                     }

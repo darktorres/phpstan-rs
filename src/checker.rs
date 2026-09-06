@@ -1089,10 +1089,49 @@ impl<'a> Checker<'a> {
             // registry-side merge step this whole branch otherwise skips.
             None => {
                 let doc = f.doc_comment.as_deref().map(docblock::parse);
-                for p in &f.params {
+                for (i, p) in f.params.iter().enumerate() {
                     let doc_ty = doc.as_ref().and_then(|d| d.params.get(&p.name));
                     let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                     let ty = resolve_names_in_type(ty, &self.name_ctx);
+                    // Phase 92: `doc_ty` being `None` means this exact
+                    // declaration has nothing of its own to say about
+                    // this position - but an anonymous class relying on
+                    // an implemented interface's own real, non-`mixed`
+                    // documented type (Phase 90's own `explicit_mixed_
+                    // hint` fallback only ever suppresses a *mixed*
+                    // finding, never backfills a *specific* one) never
+                    // got the actual type at all. Mirrors `Registry::
+                    // flatten_phpdoc_inheritance_one_pass`'s own three
+                    // safety guards exactly (see their own doc comments)
+                    // - `__construct` matches by name, everything else
+                    // positionally, the same real-PHP-constructor-
+                    // signature-compatibility distinction that pass
+                    // draws. Real corpus false positive: `new readonly
+                    // class(...) implements MailRecipientRepositoryInterface
+                    // { public function findAdminsAndWebmasters(array
+                    // $userStatuses, ...): array {...} }`, no own doc,
+                    // relying entirely on the interface's own `@return
+                    // list<MailRecipient>`.
+                    let ty = if doc_ty.is_none() {
+                        ancestor_sig_hint
+                            .and_then(|s| {
+                                if f.name == "__construct" {
+                                    s.params.iter().find(|ap| ap.name == p.name)
+                                } else {
+                                    s.params.get(i)
+                                }
+                            })
+                            .filter(|ap| {
+                                ap.has_own_doc
+                                    && Registry::safe_to_backfill_mixed(&ap.ty, &ty)
+                                    && !Registry::type_mentions_template_param(&ap.ty)
+                                    && Registry::safe_to_backfill_object_type(&ap.ty, &ty)
+                            })
+                            .map(|ap| ap.ty.clone())
+                            .unwrap_or(ty)
+                    } else {
+                        ty
+                    };
                     let ty = match class_name {
                         Some(c) => self.resolve_pseudo(&ty, c),
                         None => ty,
@@ -1142,6 +1181,21 @@ impl<'a> Checker<'a> {
                 .and_then(|d| d.return_type);
             let ty = resolve_type(doc_return.as_deref(), f.return_type.as_deref());
             let ty = resolve_names_in_type(ty, &self.name_ctx);
+            // Phase 92: same ancestor-backfill as the param loop above,
+            // for the return position - see its own doc comment.
+            let ty = if doc_return.is_none() {
+                ancestor_sig_hint
+                    .filter(|s| {
+                        s.return_has_own_doc
+                            && Registry::safe_to_backfill_mixed(&s.return_type, &ty)
+                            && !Registry::type_mentions_template_param(&s.return_type)
+                            && Registry::safe_to_backfill_object_type(&s.return_type, &ty)
+                    })
+                    .map(|s| s.return_type.clone())
+                    .unwrap_or(ty)
+            } else {
+                ty
+            };
             Some(match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
                 None => ty,

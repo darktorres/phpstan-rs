@@ -375,7 +375,7 @@ impl Registry {
     /// via its own `@extends AbstractClassMetadataFactory<ClassMetadata>`)
     /// left `T` resolved against the *interface* bound instead, silently
     /// losing `Doctrine\ORM\Mapping\ClassMetadata::getTableName()`.
-    fn type_mentions_template_param(ty: &Type) -> bool {
+    pub(crate) fn type_mentions_template_param(ty: &Type) -> bool {
         match ty {
             Type::TemplateParam(_) => true,
             Type::Object(_, args) => args.iter().any(Registry::type_mentions_template_param),
@@ -414,7 +414,7 @@ impl Registry {
     /// concrete, non-template type on both sides (so neither of the two
     /// guards above catches it), but backfilling it would still silently
     /// widen away the already-correct, more specific native class.
-    fn safe_to_backfill_object_type(ancestor_ty: &Type, native_ty: &Type) -> bool {
+    pub(crate) fn safe_to_backfill_object_type(ancestor_ty: &Type, native_ty: &Type) -> bool {
         match (ancestor_ty, native_ty) {
             (Type::Object(a, _), Type::Object(n, _)) => a == n,
             _ => true,
@@ -436,7 +436,7 @@ impl Registry {
     /// what correctly propagates `explicit_mixed_hint` (Phase 88) down
     /// from wherever it was genuinely, deliberately written, rather than
     /// leaving the position looking entirely undocumented.
-    fn safe_to_backfill_mixed(ancestor_ty: &Type, native_ty: &Type) -> bool {
+    pub(crate) fn safe_to_backfill_mixed(ancestor_ty: &Type, native_ty: &Type) -> bool {
         *ancestor_ty != Type::Mixed || *native_ty == Type::Mixed
     }
 
