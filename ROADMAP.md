@@ -3719,6 +3719,36 @@ an anonymous class's own `__construct`, documented with a real
 `@param ArrayObject<TKey, TValue>` but never read for the identical
 reason).
 
+**Phase 92 - an anonymous class inherits an ancestor's actual type,
+not just its `explicit_mixed_hint` (DONE).** Phase 90 only fed an
+ancestor's own signature into `check_missing_function_typehints`'s
+`explicit_mixed_hint` fallback - enough to suppress a false "no value
+type specified" when the ancestor's own tag was `mixed`, but useless
+when the ancestor documents something genuinely specific:
+`MailRecipientRepositoryInterface::findAdminsAndWebmasters(): list
+<MailRecipient>`, implemented inline with no own doc, still resolved
+to plain array-of-mixed and got flagged. `check_function`'s `None`
+branch (the one anonymous classes always take) now backfills the
+actual `ty`/return type from `ancestor_sig_hint` when this exact
+declaration has no own doc for that position, reusing `Registry::
+flatten_phpdoc_inheritance_one_pass`'s own three safety guards
+verbatim (now `pub(crate)`): never backfill an ancestor's `Mixed` tag
+unless the child's own native resolution is already `Mixed` too, never
+a template-parameterized type, never a same-family-but-different-class
+`Object` type - `__construct` matches by name, every other method
+positionally, the same real-PHP-constructor-signature-compatibility
+distinction that pass already draws. Corpus-verified: Piwigo-scoped
+`check-project` drops from 119 to 106, a location-based diff
+confirming zero new false-positive locations and 11 genuinely resolved
+ones. Full unscoped corpus drops by 48 (44 resolved against 4 new) -
+the 4 new ones are all deep Doctrine internals
+(`AbstractClassMetadataFactory`'s own anonymous `ClassNameResolver`
+trick) where an ancestor's own method-scoped `@template` name wasn't
+marked as a `TemplateParam` at indexing time for reasons not fully
+traced, letting the existing template guard miss it; narrow,
+vendor-only, and not chased further given how deep it is relative to
+its four-line impact.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
