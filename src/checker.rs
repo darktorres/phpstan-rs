@@ -1090,8 +1090,20 @@ impl<'a> Checker<'a> {
             None => {
                 let doc = f.doc_comment.as_deref().map(docblock::parse);
                 for (i, p) in f.params.iter().enumerate() {
-                    let doc_ty = doc.as_ref().and_then(|d| d.params.get(&p.name));
-                    let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
+                    // Phase 93: same inline-`@var`-on-a-promoted-property
+                    // fallback as `FunctionSig::from_decl`'s own param
+                    // loop - see that one's doc comment.
+                    let doc_ty: Option<String> = doc
+                        .as_ref()
+                        .and_then(|d| d.params.get(&p.name))
+                        .cloned()
+                        .or_else(|| {
+                            p.doc_comment
+                                .as_deref()
+                                .map(docblock::parse)
+                                .and_then(|d| d.var_type)
+                        });
+                    let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
                     let ty = resolve_names_in_type(ty, &self.name_ctx);
                     // Phase 92: `doc_ty` being `None` means this exact
                     // declaration has nothing of its own to say about

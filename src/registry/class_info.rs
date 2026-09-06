@@ -297,8 +297,25 @@ impl ClassInfo {
                 if p.promoted_visibility.is_none() {
                     continue;
                 }
-                let doc_ty = ctor_doc.as_ref().and_then(|d| d.params.get(&p.name));
-                let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
+                // Phase 93: same inline-`@var`-on-a-promoted-property
+                // fallback as `FunctionSig::from_decl`'s own param loop -
+                // see that one's doc comment. Needed here too, separately -
+                // this builds the property's own `PropertySig` (read by
+                // `$this->details`-style property access elsewhere in the
+                // class), a completely different construction from the
+                // `ParamSig` `FunctionSig::from_decl` builds for the same
+                // parameter.
+                let doc_ty: Option<String> = ctor_doc
+                    .as_ref()
+                    .and_then(|d| d.params.get(&p.name))
+                    .cloned()
+                    .or_else(|| {
+                        p.doc_comment
+                            .as_deref()
+                            .map(docblock::parse)
+                            .and_then(|d| d.var_type)
+                    });
+                let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);

@@ -527,6 +527,59 @@ fn phpdoc_types_a_promoted_constructor_property_via_param_tag() {
     );
 }
 
+// Phase 93: a promoted property's own inline `/** @var T */` (real
+// idiom - it doubles as that property's own docblock) is a second, more
+// common real-corpus source than an `@param $name` tag on the enclosing
+// `__construct()`'s own docblock.
+#[test]
+fn phpdoc_types_a_promoted_constructor_property_via_its_own_inline_var_tag() {
+    let r = build_registry(
+        r#"<?php
+            class Point93 {
+                public function __construct(
+                    /**
+                     * @var array<int, int>
+                     */
+                    public $coords,
+                ) {}
+            }
+        "#,
+    );
+    assert_eq!(
+        r.lookup_property("Point93", "coords").unwrap().ty,
+        Type::Array(Box::new(Type::Int), Box::new(Type::Int))
+    );
+}
+
+// The same, with a real attribute sitting between the inline doc
+// comment and the parameter itself (the exact real corpus shape -
+// Doctrine's `#[ORM\Column(...)]`) - confirms the doc comment attaches
+// to the parameter, not silently discarded once an attribute comes
+// between the two.
+#[test]
+fn an_inline_var_tag_survives_an_attribute_between_it_and_the_parameter() {
+    let r = build_registry(
+        r#"<?php
+            #[Attribute]
+            class Column93 {}
+            class Entity93 {
+                public function __construct(
+                    /**
+                     * @var array<string, mixed>|null
+                     */
+                    #[Column93]
+                    public ?array $details,
+                ) {}
+            }
+        "#,
+    );
+    let ty = &r.lookup_property("Entity93", "details").unwrap().ty;
+    assert!(
+        matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Array(_, v) if **v == Type::Mixed))),
+        "got: {ty:?}"
+    );
+}
+
 #[test]
 fn missing_doc_comment_falls_back_to_native_hint() {
     let r = build_registry(r#"<?php function f(string $s): string { return $s; }"#);

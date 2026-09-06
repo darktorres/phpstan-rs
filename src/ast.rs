@@ -144,6 +144,12 @@ pub struct Param {
     // (`function f(#[SensitiveParameter] string $password) {}`) - empty
     // for the overwhelming majority of parameters, which have none.
     pub attrs: Vec<Attribute>,
+    // Phase 93: raw `/** ... */` text immediately preceding this
+    // parameter, if any - real, idiomatic PHP for a promoted
+    // constructor property (`/** @var array<string, mixed>|null */
+    // public ?array $details,`), since it doubles as that property's own
+    // docblock. `None` for the overwhelming majority of parameters.
+    pub doc_comment: Option<String>,
     pub span: Span,
 }
 

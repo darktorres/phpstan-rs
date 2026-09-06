@@ -460,6 +460,7 @@ impl Parser {
                     promoted_readonly: false,
                     hooks: None,
                     attrs,
+                    doc_comment: None,
                     span: Span {
                         start: param_start,
                         end: self.previous_end(),

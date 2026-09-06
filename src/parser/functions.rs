@@ -13,7 +13,18 @@ impl Parser {
             // Phase 37: `#[Attr]` groups on a parameter precede everything
             // else about it, including constructor-promotion visibility
             // modifiers (`function f(#[Attr] private int $id) {}`).
-            let attrs = self.parse_attributes()?;
+            //
+            // Phase 93: `parse_leading_attributes` (not the plain
+            // `parse_attributes`) - a promoted property's own inline
+            // `/** @var ... */` doc comment very commonly sits *before*
+            // an `#[ORM\Column(...)]`-style attribute
+            // (`/** @var array<string, mixed>|null */ #[ORM\Column(...)]
+            // public ?array $details,`), the exact same doc-comment-
+            // before-an-attribute-group shape that helper already exists
+            // to re-key past the attributes for - `take_doc_comment()`
+            // right after correctly finds it either way.
+            let attrs = self.parse_leading_attributes()?;
+            let doc_comment = self.take_doc_comment();
             // A visibility modifier here means constructor property
             // promotion (`public function __construct(private int $id) {}`)
             // - `readonly` can appear alongside it but doesn't itself imply
@@ -82,6 +93,7 @@ impl Parser {
                 promoted_readonly,
                 hooks,
                 attrs,
+                doc_comment,
                 span: Span {
                     start: param_start,
                     end: self.previous_end(),

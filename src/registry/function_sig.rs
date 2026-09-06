@@ -832,8 +832,27 @@ impl FunctionSig {
             .params
             .iter()
             .map(|p| {
-                let doc_ty = doc.as_ref().and_then(|d| d.params.get(&p.name));
-                let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
+                // Phase 93: a promoted constructor property very commonly
+                // carries its own inline `/** @var T */` directly above
+                // it (real idiom - it doubles as that property's own
+                // docblock), rather than an `@param $name` tag on the
+                // enclosing `__construct()`'s own docblock. Only
+                // consulted when the outer method-level tag is absent -
+                // an explicit `@param` naming this exact parameter always
+                // wins, the same "more specific declaration wins" rule
+                // every other doc-source precedence in this project
+                // already follows.
+                let doc_ty: Option<String> = doc
+                    .as_ref()
+                    .and_then(|d| d.params.get(&p.name))
+                    .cloned()
+                    .or_else(|| {
+                        p.doc_comment
+                            .as_deref()
+                            .map(docblock::parse)
+                            .and_then(|d| d.var_type)
+                    });
+                let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, class_type_aliases);
@@ -873,7 +892,7 @@ impl FunctionSig {
                     has_own_doc: doc_ty.is_some(),
                     explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
                         p.type_hint.as_deref(),
-                        doc_ty.map(String::as_str),
+                        doc_ty.as_deref(),
                     ),
                 }
             })
