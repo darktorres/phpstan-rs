@@ -12,11 +12,11 @@
 //! Covers the highest-value access shapes: a plain function call, an
 //! instance/static method call, an instance/static property read, a
 //! class-constant read (both a constant's own individual `@internal` tag
-//! and its declaring class's), and instantiation (`new Foo()`). Real
-//! PHPStan's own
+//! and its declaring class's), instantiation (`new Foo()`), `instanceof`,
+//! and a `catch` clause's own caught type. Real PHPStan's own
 //! `RestrictedInternalClassNameUsageExtension` additionally covers
-//! `extends`/`implements`/param-and-return-type-hints/`catch`/
-//! `instanceof`, and `RestrictedUsageOfDeprecatedStringCastRule` extends
+//! `extends`/`implements`/param-and-return-type-hints/first-class-
+//! callables, and `RestrictedUsageOfDeprecatedStringCastRule` extends
 //! the method-call check to an implicit `(string)`-cast-triggered
 //! `__toString()` call - neither is implemented here (see ROADMAP.md's
 //! own Phase 67 entry for the full list of what's still open).
@@ -276,11 +276,49 @@ impl<'a> Checker<'a> {
     }
 
     /// `RestrictedInternalClassNameUsageExtension`, narrowed to
-    /// instantiation (`new Foo()`) only - the single highest-value shape
-    /// of the several `ClassNameUsageLocation` variants that extension
-    /// covers (`extends`/`implements`/param-and-return-type-hints/
-    /// `catch`/`instanceof` aren't checked here - see ROADMAP.md).
+    /// instantiation (`new Foo()`) - one of the several
+    /// `ClassNameUsageLocation` variants that extension covers
+    /// (`extends`/`implements`/param-and-return-type-hints/first-class-
+    /// callables aren't checked here - see ROADMAP.md).
     pub(crate) fn check_internal_instantiation(&mut self, class: &str, span: Span, label: &str) {
+        self.check_internal_class_name_usage(class, "Instantiation of", "new", span, label);
+    }
+
+    /// `RestrictedInternalClassNameUsageExtension`, narrowed to
+    /// `instanceof`'s own target class.
+    pub(crate) fn check_internal_instanceof(&mut self, class: &str, span: Span, label: &str) {
+        self.check_internal_class_name_usage(
+            class,
+            "Instanceof references",
+            "instanceof",
+            span,
+            label,
+        );
+    }
+
+    /// `RestrictedInternalClassNameUsageExtension`, narrowed to a `catch`
+    /// clause's own caught type - fires independently of, and in addition
+    /// to, `catch.notThrowable` (a real Throwable-implementing class can
+    /// still be `@internal`).
+    pub(crate) fn check_internal_catch(&mut self, class: &str, span: Span, label: &str) {
+        self.check_internal_class_name_usage(class, "Catching", "catch", span, label);
+    }
+
+    /// Shared by `check_internal_instantiation`/`check_internal_instanceof`/
+    /// `check_internal_catch` - the three `ClassNameUsageLocation` variants
+    /// with no member/receiver context of their own (unlike the method/
+    /// property/constant checks above, a class-name-only reference has
+    /// nothing to check beyond the class's own `is_internal` bit), so real
+    /// PHPStan's own per-location message text differs only in its leading
+    /// verb phrase and identifier prefix - both threaded in by the caller.
+    fn check_internal_class_name_usage(
+        &mut self,
+        class: &str,
+        verb_phrase: &str,
+        identifier_prefix: &str,
+        span: Span,
+        label: &str,
+    ) {
         if !self.registry.check_internal_usage {
             return;
         }
@@ -295,7 +333,7 @@ impl<'a> Checker<'a> {
         }
         let type_word = class_type_word(info.kind);
         let message = format!(
-            "Instantiation of internal {} {class}.",
+            "{verb_phrase} internal {} {class}.",
             type_word.to_lowercase()
         );
         self.report(
@@ -303,7 +341,7 @@ impl<'a> Checker<'a> {
             message,
             span,
             0,
-            &format!("new.internal{type_word}"),
+            &format!("{identifier_prefix}.internal{type_word}"),
         );
     }
 }

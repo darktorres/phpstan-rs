@@ -583,3 +583,127 @@ fn writing_a_property_of_an_internal_class_from_the_same_root_namespace_is_never
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn an_instanceof_check_against_an_internal_class_from_a_different_root_namespace_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+            }
+
+            namespace Other\App;
+            function f(object $o) {
+                $o instanceof \Vendor\Internal\Thing;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "instanceof.internalClass"
+            && x.message == "Instanceof references internal class Vendor\\Internal\\Thing."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_instanceof_check_against_an_internal_class_from_the_same_root_namespace_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+            }
+
+            namespace Vendor\App;
+            function f(object $o) {
+                $o instanceof \Vendor\Internal\Thing;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "instanceof.internalClass"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn catching_an_internal_exception_class_from_a_different_root_namespace_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class ThingException extends \Exception {
+            }
+
+            namespace Other\App;
+            function f() {
+                try {
+                    doStuff();
+                } catch (\Vendor\Internal\ThingException $e) {
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "catch.internalClass"
+            && x.message == "Catching internal class Vendor\\Internal\\ThingException."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn catching_an_internal_exception_class_from_the_same_root_namespace_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class ThingException extends \Exception {
+            }
+
+            namespace Vendor\App;
+            function f() {
+                try {
+                    doStuff();
+                } catch (\Vendor\Internal\ThingException $e) {
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "catch.internalClass"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn catching_a_non_throwable_internal_class_still_reports_both_diagnostics_independently() {
+    // `catch.notThrowable` and `catch.internalClass` are two entirely
+    // separate rules in real PHPStan (`CaughtExceptionExistenceRule` vs
+    // `RestrictedInternalClassNameUsageExtension`) - a class that's both
+    // non-Throwable and `@internal` should get both, not just one.
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class NotAnException {
+            }
+
+            namespace Other\App;
+            function f() {
+                try {
+                    doStuff();
+                } catch (\Vendor\Internal\NotAnException $e) {
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "catch.notThrowable"),
+        "got: {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "catch.internalClass"),
+        "got: {d:?}"
+    );
+}

@@ -776,16 +776,19 @@ impl<'a> Checker<'a> {
                                     // identifier this rule has.
                                     "class.notFound",
                                 );
-                            } else if !self.registry.is_subclass_of(&class, "Throwable") {
-                                self.report(
-                                    label.to_string(),
-                                    format!(
-                                        "cannot catch {class}: it does not implement Throwable"
-                                    ),
-                                    c.span,
-                                    0,
-                                    "catch.notThrowable",
-                                );
+                            } else {
+                                if !self.registry.is_subclass_of(&class, "Throwable") {
+                                    self.report(
+                                        label.to_string(),
+                                        format!(
+                                            "cannot catch {class}: it does not implement Throwable"
+                                        ),
+                                        c.span,
+                                        0,
+                                        "catch.notThrowable",
+                                    );
+                                }
+                                self.check_internal_catch(&class, c.span, label);
                             }
                         }
                     }

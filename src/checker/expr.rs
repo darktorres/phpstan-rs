@@ -1133,16 +1133,18 @@ impl<'a> Checker<'a> {
                     // `Object` here is a genuine bare class-name
                     // reference.
                     InstanceofTarget::Name(name) => {
-                        if let Type::Object(class, _) = self.resolve_name_expr(name)
-                            && !self.class_name_exists(&class)
-                        {
-                            self.report(
-                                label.to_string(),
-                                format!("instanceof check target class {class} not found"),
-                                e.span,
-                                0,
-                                "class.notFound",
-                            );
+                        if let Type::Object(class, _) = self.resolve_name_expr(name) {
+                            if !self.class_name_exists(&class) {
+                                self.report(
+                                    label.to_string(),
+                                    format!("instanceof check target class {class} not found"),
+                                    e.span,
+                                    0,
+                                    "class.notFound",
+                                );
+                            } else {
+                                self.check_internal_instanceof(&class, e.span, label);
+                            }
                         }
                     }
                 }
