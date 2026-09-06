@@ -3749,6 +3749,28 @@ traced, letting the existing template guard miss it; narrow,
 vendor-only, and not chased further given how deep it is relative to
 its four-line impact.
 
+**Phase 93 - a promoted constructor property's own inline `@var`
+docblock was never read (DONE).** A promoted property very commonly
+carries its own `/** @var T */` directly above it (it doubles as that
+property's own docblock), often with a real attribute (Doctrine's
+`#[ORM\Column(...)]`) sitting between the doc comment and the
+parameter itself - `Param` had no `doc_comment` field at all, so this
+was silently discarded everywhere: the parser's own `parse_params`
+never captured it, and every consumer (`FunctionSig::from_decl`'s
+`ParamSig`, `ClassInfo::from_decl`'s own separate promoted-property
+`PropertySig` construction, and `check_function`'s anonymous-class
+fallback) only ever looked at the enclosing `__construct()`'s own
+docblock for a matching `@param $name` tag. `Param` now has
+`doc_comment: Option<String>`, captured via `parse_leading_attributes`
+(not the plain `parse_attributes`) so the doc comment is found whether
+or not an attribute sits in between, mirroring the identical existing
+pattern for a declaration's own leading attributes. All three
+consumers now fall back to this inline `@var` tag when the outer
+method-level `@param` is absent, an explicit `@param` naming the
+parameter still winning when present. Corpus-verified: Piwigo-scoped
+`check-project` drops from 106 to 99, a location-based diff confirming
+zero new false-positive locations and 7 genuinely resolved ones.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
