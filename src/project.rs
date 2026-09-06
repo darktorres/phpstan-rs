@@ -23,12 +23,17 @@ struct FileState {
     functions: Vec<String>,
     classes: Vec<String>,
     references: HashSet<String>,
-    // Phase 44 (partial): `@phpstan-ignore-line`/`-next-line` - computed
-    // once here, while the raw source is still on hand, rather than at
-    // `check_file` time (the AST alone doesn't carry comment text at all,
-    // and re-reading the file from disk there would be new, avoidable
-    // I/O coupling `check_file` doesn't otherwise have).
+    // Phase 44: `@phpstan-ignore-line`/`-next-line` - computed once here,
+    // while the raw source is still on hand, rather than at `check_file`
+    // time (the AST alone doesn't carry comment text at all, and
+    // re-reading the file from disk there would be new, avoidable I/O
+    // coupling `check_file` doesn't otherwise have).
     ignore_lines: HashSet<u32>,
+    // Phase 44 follow-up: the fuller bare `@phpstan-ignore <identifier
+    // list>` form - which diagnostic identifiers are suppressed on a
+    // given line, computed alongside `ignore_lines` above for the
+    // identical reason.
+    ignore_identifiers: HashMap<u32, Vec<String>>,
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one
@@ -172,6 +177,7 @@ impl Project {
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
         let ignore_lines = ignore_comments::ignored_lines(source);
+        let ignore_identifiers = ignore_comments::ignored_identifiers(source);
         self.registry.index(&ast);
         register_references(&mut self.dependents, &path, &references);
         self.files.insert(
@@ -182,6 +188,7 @@ impl Project {
                 classes,
                 references,
                 ignore_lines,
+                ignore_identifiers,
             },
         );
         Ok(())
@@ -221,6 +228,7 @@ impl Project {
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
         let ignore_lines = ignore_comments::ignored_lines(new_source);
+        let ignore_identifiers = ignore_comments::ignored_identifiers(new_source);
         // `changed_symbols` seeds transitive_affected_files' BFS, which
         // looks names up in `self.dependents` - keyed by the *bare* names
         // deps::referenced_names collects (a deliberate simplification,
@@ -252,6 +260,7 @@ impl Project {
                 classes,
                 references,
                 ignore_lines,
+                ignore_identifiers,
             },
         );
         self.rebuild_pest_config();
@@ -352,15 +361,27 @@ impl Project {
             // this gate is on.
             diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
         }
-        // Phase 44 (partial): `@phpstan-ignore-line`/`-next-line` -
-        // `non_ignorable` diagnostics are exempt, mirroring real
-        // PHPStan's own identical exemption (reserved for a handful of
-        // its own rules, e.g. flagging a malformed `@phpstan-ignore`
-        // comment itself - nonsensical to let another ignore comment
-        // suppress).
+        // Phase 44: `@phpstan-ignore-line`/`-next-line` - `non_ignorable`
+        // diagnostics are exempt, mirroring real PHPStan's own identical
+        // exemption (reserved for a handful of its own rules, e.g.
+        // flagging a malformed `@phpstan-ignore` comment itself -
+        // nonsensical to let another ignore comment suppress).
         if !file.ignore_lines.is_empty() {
             diagnostics
                 .retain(|d| d.non_ignorable || !file.ignore_lines.contains(&d.span.start.line));
+        }
+        // Phase 44 follow-up: the fuller bare `@phpstan-ignore
+        // <identifier list>` form - unlike the two line markers above,
+        // this only suppresses a diagnostic whose own `identifier`
+        // exactly matches one named on that line.
+        if !file.ignore_identifiers.is_empty() {
+            diagnostics.retain(|d| {
+                d.non_ignorable
+                    || !file
+                        .ignore_identifiers
+                        .get(&d.span.start.line)
+                        .is_some_and(|ids| ids.iter().any(|id| id == &d.identifier))
+            });
         }
         diagnostics
     }

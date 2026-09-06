@@ -1,7 +1,8 @@
-//! Phase 44 (partial): `@phpstan-ignore-line`/`@phpstan-ignore-next-line`
-//! inline suppression - end-to-end through `Project::load_file`/
-//! `check_file`, on top of `ignore_comments::ignored_lines`'s own
-//! already-tested pure text-scanning logic.
+//! Phase 44: `@phpstan-ignore-line`/`@phpstan-ignore-next-line` inline
+//! suppression, and (Phase 44 follow-up) the fuller bare `@phpstan-ignore
+//! <identifier list>` form - end-to-end through `Project::load_file`/
+//! `check_file`, on top of `ignore_comments`'s own already-tested pure
+//! text-scanning logic.
 
 use std::path::PathBuf;
 
@@ -124,5 +125,62 @@ fn update_file_recomputes_ignore_lines_too() {
             .iter()
             .any(|d| d.message.contains("totallyUndefinedFunction")),
         "unexpected diagnostics after adding the ignore comment: {after:?}"
+    );
+}
+
+#[test]
+fn an_identifier_list_suppresses_only_the_matching_identifier() {
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("f.php"),
+            "<?php\nfunction f() {\n    totallyUndefinedFunction(); // @phpstan-ignore function.notFound\n}\n",
+        )
+        .unwrap();
+    project.finish_loading();
+    let diagnostics = project.check_file(&PathBuf::from("f.php"));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.message.contains("totallyUndefinedFunction")),
+        "unexpected diagnostics: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn an_identifier_list_with_the_wrong_identifier_does_not_suppress() {
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("f.php"),
+            "<?php\nfunction f() {\n    totallyUndefinedFunction(); // @phpstan-ignore argument.type\n}\n",
+        )
+        .unwrap();
+    project.finish_loading();
+    let diagnostics = project.check_file(&PathBuf::from("f.php"));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("totallyUndefinedFunction")),
+        "expected the mismatched-identifier ignore to leave the real diagnostic in place, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn a_standalone_identifier_list_suppresses_the_following_line() {
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("f.php"),
+            "<?php\nfunction f() {\n    // @phpstan-ignore function.notFound\n    totallyUndefinedFunction();\n}\n",
+        )
+        .unwrap();
+    project.finish_loading();
+    let diagnostics = project.check_file(&PathBuf::from("f.php"));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.message.contains("totallyUndefinedFunction")),
+        "unexpected diagnostics: {diagnostics:?}"
     );
 }
