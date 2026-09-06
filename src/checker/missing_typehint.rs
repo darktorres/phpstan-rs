@@ -49,6 +49,7 @@
 use crate::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use crate::checker::{Checker, DiagnosticBuilder};
 use crate::docblock;
+use crate::registry::FunctionSig;
 use crate::token::Span;
 use crate::types::Type;
 
@@ -193,7 +194,19 @@ fn text_mentions_mixed(text: &str) -> bool {
 /// out `mixed`) but for the nested-value-type case `text_mentions_mixed`
 /// covers - see its own doc comment for why a substring/whole-word check
 /// is the right (and only practical) level of precision here.
-fn has_explicit_mixed_nested_somewhere(native_hint: Option<&str>, doc_type: Option<&str>) -> bool {
+///
+/// `pub(crate)` (Phase 88) - `registry::function_sig::FunctionSig::
+/// from_decl` calls this too, to compute `ParamSig::explicit_mixed_hint`/
+/// `FunctionSig::return_explicit_mixed_hint` once, from *this*
+/// declaration's own text, at the same time it resolves `ty`/
+/// `return_type` - see those fields' own doc comments for why a fresh
+/// per-check re-derivation (this function's only use before Phase 88)
+/// isn't enough once a type can be *inherited* from a different
+/// declaration's own docblock.
+pub(crate) fn has_explicit_mixed_nested_somewhere(
+    native_hint: Option<&str>,
+    doc_type: Option<&str>,
+) -> bool {
     native_hint.is_some_and(text_mentions_mixed) || doc_type.is_some_and(text_mentions_mixed)
 }
 
@@ -510,6 +523,26 @@ impl<'a> Checker<'a> {
     /// variadic-collects-into-`array` rewrite, which would otherwise mask
     /// e.g. a genuinely untyped `...$args`'s own per-argument `mixed`
     /// behind a already-array-shaped `Type::Array(Mixed)`).
+    ///
+    /// `sig` (Phase 88) is the same `Option<&FunctionSig>` `check_function`
+    /// itself already looked up - when present, its `ParamSig::
+    /// explicit_mixed_hint`/`FunctionSig::return_explicit_mixed_hint`
+    /// (computed once in `from_decl`, from *whichever* declaration's
+    /// docblock `ty`/`return_type` actually came from - this declaration's
+    /// own, or an ancestor's via `Registry::flatten_phpdoc_inheritance`)
+    /// are used instead of re-deriving "was `mixed` written explicitly"
+    /// from `f`'s own raw text. Re-deriving from `f` alone was correct
+    /// before Phase 87 could exist (a type only ever came from this exact
+    /// declaration's own docblock), but silently misses every inherited
+    /// `array<string, mixed>`/nested-`mixed` type since - real corpus
+    /// false positive this fixes: every `ExposesPageData`/
+    /// `UrlServiceInterface`/... implementor and test double that
+    /// correctly has no docblock of its own, relying on the interface's.
+    /// `sig` is only ever `None` for an anonymous class (never indexed
+    /// into the registry - see `lookup_own_signature`'s own doc comment),
+    /// where the text-based fallback below still applies exactly as
+    /// before Phase 88 - a separate, already-tracked gap (`ROADMAP.md`'s
+    /// "anonymous class's own PHPDoc never parsed").
     pub(crate) fn check_missing_function_typehints(
         &mut self,
         f: &FunctionDecl,
@@ -517,6 +550,7 @@ impl<'a> Checker<'a> {
         label: &str,
         resolved_params: &[(String, Type, Span)],
         declared_return: Option<&Type>,
+        sig: Option<&FunctionSig>,
     ) {
         let doc = f.doc_comment.as_deref().map(docblock::parse);
         let kind_word = if class_name.is_some() {
@@ -525,7 +559,7 @@ impl<'a> Checker<'a> {
             "Function"
         };
 
-        for (name, ty, span) in resolved_params {
+        for (i, (name, ty, span)) in resolved_params.iter().enumerate() {
             let native_hint = f
                 .params
                 .iter()
@@ -535,7 +569,11 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .and_then(|d| d.params.get(name))
                 .map(String::as_str);
-            if is_implicit_mixed(ty, native_hint, doc_ty) {
+            let explicit_mixed = match sig.and_then(|s| s.params.get(i)) {
+                Some(param_sig) => param_sig.explicit_mixed_hint,
+                None => has_explicit_mixed_nested_somewhere(native_hint, doc_ty),
+            };
+            if *ty == Type::Mixed && !explicit_mixed {
                 self.report(
                     label.to_string(),
                     format!("{kind_word} {label}() has parameter ${name} with no type specified."),
@@ -559,7 +597,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 ty,
-                has_explicit_mixed_nested_somewhere(native_hint, doc_ty),
+                explicit_mixed,
             );
         }
 
@@ -581,8 +619,12 @@ impl<'a> Checker<'a> {
             return;
         }
 
+        let return_explicit_mixed = match sig {
+            Some(s) => s.return_explicit_mixed_hint,
+            None => has_explicit_mixed_nested_somewhere(native_return, doc_return),
+        };
         let return_ty = declared_return.cloned().unwrap_or(Type::Mixed);
-        if is_implicit_mixed(&return_ty, native_return, doc_return) {
+        if return_ty == Type::Mixed && !return_explicit_mixed {
             self.report(
                 label.to_string(),
                 format!("{kind_word} {label}() has no return type specified."),
@@ -602,7 +644,7 @@ impl<'a> Checker<'a> {
                 )
             },
             &return_ty,
-            has_explicit_mixed_nested_somewhere(native_return, doc_return),
+            return_explicit_mixed,
         );
     }
 }

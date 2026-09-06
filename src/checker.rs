@@ -458,6 +458,7 @@ pub(crate) use control_flow::{
     type_allows_generator_return,
 };
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
+pub(crate) use missing_typehint::has_explicit_mixed_nested_somewhere;
 pub(crate) use throws::body_contains_explicit_throw;
 // Only ever called by `union_types` itself in real code (`checker/expr.rs`) -
 // this crate-level re-export exists solely so this module's own test
@@ -1230,6 +1231,7 @@ impl<'a> Checker<'a> {
             &label,
             &resolved_params,
             declared_return.as_ref(),
+            sig,
         );
 
         let previous_class = self.current_class.take();

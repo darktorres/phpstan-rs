@@ -561,6 +561,7 @@ impl ClassInfo {
                 // treats a synthesized enum method as an inheritance
                 // candidate.
                 return_has_own_doc: true,
+                return_explicit_mixed_hint: false,
                 no_discard: false,
                 visibility: Visibility::Public,
                 is_internal: false,
@@ -582,6 +583,7 @@ impl ClassInfo {
                 has_default: false,
                 by_ref: false,
                 has_own_doc: true,
+                explicit_mixed_hint: false,
             };
             methods.insert(
                 "from".to_string(),
@@ -590,6 +592,7 @@ impl ClassInfo {
                     return_type: self_ty.clone(),
                     return_type_native: self_ty.clone(),
                     return_has_own_doc: true,
+                    return_explicit_mixed_hint: false,
                     no_discard: false,
                     visibility: Visibility::Public,
                     is_internal: false,
@@ -611,6 +614,7 @@ impl ClassInfo {
                     return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_has_own_doc: true,
+                    return_explicit_mixed_hint: false,
                     no_discard: false,
                     visibility: Visibility::Public,
                     is_internal: false,

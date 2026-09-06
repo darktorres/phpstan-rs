@@ -420,6 +420,25 @@ impl Registry {
         }
     }
 
+    /// Whether backfilling an ancestor's own `Mixed` tag is safe: `false`
+    /// only when the child's own *native* resolution (`ty_native`/
+    /// `return_type_native`, computed with no docblock merge at all) is
+    /// itself something more specific than `Mixed` - inheriting a `Mixed`
+    /// tag can only ever destroy that kind of real information, never add
+    /// any (`Doctrine\DBAL\Types\Type::convertToPHPValue(): mixed`
+    /// backfilling onto `AbstractStringVoType::convertToPHPValue():
+    /// ?StringVo`, a real corpus false positive caught verifying this
+    /// pass). When the child's own native resolution is *already*
+    /// `Mixed` too (a genuinely untyped native parameter, PSR-3's own
+    /// `LoggerInterface::log(mixed $level, ...)` shape), there is nothing
+    /// to lose - inheriting the ancestor's own `Mixed` here is exactly
+    /// what correctly propagates `explicit_mixed_hint` (Phase 88) down
+    /// from wherever it was genuinely, deliberately written, rather than
+    /// leaving the position looking entirely undocumented.
+    fn safe_to_backfill_mixed(ancestor_ty: &Type, native_ty: &Type) -> bool {
+        *ancestor_ty != Type::Mixed || *native_ty == Type::Mixed
+    }
+
     /// One pass of `flatten_phpdoc_inheritance` - see its own doc comment.
     /// Returns whether anything was actually changed, so the caller knows
     /// when a fixed point has been reached.
@@ -452,7 +471,12 @@ impl Registry {
     /// later pass, the same never-revisit-a-filled-slot shape
     /// `flatten_traits_one_pass`'s own `Entry::Vacant` check already has.
     fn flatten_phpdoc_inheritance_one_pass(&mut self) -> bool {
-        type Backfill = (String, String, Vec<(usize, Type)>, Option<Type>);
+        type Backfill = (
+            String,
+            String,
+            Vec<(usize, Type, bool)>,
+            Option<(Type, bool)>,
+        );
 
         let class_names: Vec<String> = self.classes.keys().cloned().collect();
         let mut backfills: Vec<Backfill> = Vec::new();
@@ -536,14 +560,21 @@ impl Registry {
                             if let Some(ancestor_param) =
                                 ancestor_sig.params.iter().find(|ap| ap.name == p.name)
                                 && ancestor_param.has_own_doc
-                                && ancestor_param.ty != Type::Mixed
+                                && Registry::safe_to_backfill_mixed(
+                                    &ancestor_param.ty,
+                                    &p.ty_native,
+                                )
                                 && !Registry::type_mentions_template_param(&ancestor_param.ty)
                                 && Registry::safe_to_backfill_object_type(
                                     &ancestor_param.ty,
                                     &p.ty_native,
                                 )
                             {
-                                param_fills.push((i, ancestor_param.ty.clone()));
+                                param_fills.push((
+                                    i,
+                                    ancestor_param.ty.clone(),
+                                    ancestor_param.explicit_mixed_hint,
+                                ));
                             }
                         }
                     } else {
@@ -553,45 +584,50 @@ impl Registry {
                             }
                             if let Some(ancestor_param) = ancestor_sig.params.get(i)
                                 && ancestor_param.has_own_doc
-                                && ancestor_param.ty != Type::Mixed
+                                && Registry::safe_to_backfill_mixed(
+                                    &ancestor_param.ty,
+                                    &p.ty_native,
+                                )
                                 && !Registry::type_mentions_template_param(&ancestor_param.ty)
                                 && Registry::safe_to_backfill_object_type(
                                     &ancestor_param.ty,
                                     &p.ty_native,
                                 )
                             {
-                                param_fills.push((i, ancestor_param.ty.clone()));
+                                param_fills.push((
+                                    i,
+                                    ancestor_param.ty.clone(),
+                                    ancestor_param.explicit_mixed_hint,
+                                ));
                             }
                         }
                     }
                 }
-                // Skipping a `Mixed` ancestor tag (both here and in the
-                // param loops above) isn't about `__construct` at all -
-                // real corpus false positive: `Doctrine\DBAL\Types\Type`
-                // (the actual Doctrine base class, not this project's
-                // own `Type` enum) declares `@return mixed` on
-                // `convertToPHPValue()`/`convertToDatabaseValue()` quite
-                // literally (its own value genuinely varies by column
-                // type at that level of abstraction) - inheriting that
-                // onto a concrete subclass overriding it with a real,
-                // specific native return type (`AbstractStringVoType::
-                // convertToPHPValue(): ?StringVo`, no own doc, since the
-                // native hint alone is already fully precise) would
-                // *destroy* real information the child already had
-                // rather than add any (a `mixed` tag can never usefully
-                // narrow anything) - exactly the failure mode real
-                // PHPStan's own type-combining logic (`TypehintHelper::
-                // decideType`, preferring a concrete native type over an
-                // uninformative `mixed` docblock one) never falls into.
+                // `safe_to_backfill_mixed` (both here and in the param
+                // loops above) isn't about `__construct` at all - see its
+                // own doc comment for the two real corpus shapes it
+                // reconciles (Doctrine DBAL's `Type::convertToPHPValue():
+                // mixed` must never overwrite a concrete native return
+                // type, but PSR-3's `LoggerInterface::log(mixed $level,
+                // ...)` must still propagate onto an equally-untyped
+                // override, or `explicit_mixed_hint` never reaches it).
                 let return_fill = (needs_return
                     && ancestor_sig.return_has_own_doc
-                    && ancestor_sig.return_type != Type::Mixed
+                    && Registry::safe_to_backfill_mixed(
+                        &ancestor_sig.return_type,
+                        &sig.return_type_native,
+                    )
                     && !Registry::type_mentions_template_param(&ancestor_sig.return_type)
                     && Registry::safe_to_backfill_object_type(
                         &ancestor_sig.return_type,
                         &sig.return_type_native,
                     ))
-                .then(|| ancestor_sig.return_type.clone());
+                .then(|| {
+                    (
+                        ancestor_sig.return_type.clone(),
+                        ancestor_sig.return_explicit_mixed_hint,
+                    )
+                });
                 if !param_fills.is_empty() || return_fill.is_some() {
                     backfills.push((
                         class_name.clone(),
@@ -610,16 +646,18 @@ impl Registry {
                 .get_mut(&class_name)
                 .and_then(|info| info.methods.get_mut(&method_name))
             {
-                for (i, ty) in param_fills {
+                for (i, ty, explicit_mixed_hint) in param_fills {
                     if let Some(p) = sig.params.get_mut(i) {
                         p.ty = ty;
                         p.has_own_doc = true;
+                        p.explicit_mixed_hint = explicit_mixed_hint;
                         changed = true;
                     }
                 }
-                if let Some(ty) = return_fill {
+                if let Some((ty, explicit_mixed_hint)) = return_fill {
                     sig.return_type = ty;
                     sig.return_has_own_doc = true;
+                    sig.return_explicit_mixed_hint = explicit_mixed_hint;
                     changed = true;
                 }
             }

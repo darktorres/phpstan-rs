@@ -115,6 +115,54 @@ fn array_return_type_with_an_explicit_mixed_value_type_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 88: an inherited `array<string, mixed>` (no own docblock on the
+// implementor at all, relying entirely on the interface's) must be
+// recognized as deliberately, explicitly `mixed` the same way an own
+// docblock already is - real corpus false positive: every
+// `UrlServiceInterface`/`ExposesPageData`/... implementor and test
+// double in Piwigo that correctly omits its own docblock.
+#[test]
+fn an_inherited_explicit_mixed_array_value_type_is_not_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            interface I {
+                /**
+                 * @param array<string, mixed> $options
+                 */
+                public function f(array $options): void;
+            }
+            class C implements I {
+                public function f(array $options): void {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 88: an ancestor's own genuinely, deliberately untyped `mixed`
+// parameter (no native hint at all - PSR-3's real `LoggerInterface::
+// log(mixed $level, ...)` shape) must still propagate its "explicit"
+// provenance onto an equally-untyped override - nothing about
+// backfilling a bare `Mixed` here can lose information, since the
+// child's own native resolution was already `Mixed` too.
+#[test]
+fn an_inherited_explicit_mixed_untyped_parameter_is_not_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            interface LoggerLike {
+                /**
+                 * @param mixed $level
+                 */
+                public function log($level, string $message): void;
+            }
+            class SpyLogger implements LoggerLike {
+                public function log($level, string $message): void {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn list_with_an_explicit_mixed_value_type_is_not_flagged() {
     let d = all_diagnostics_for(

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{Expr, ExprKind, FunctionDecl, Literal, Visibility};
-use crate::checker::union_types;
+use crate::checker::{has_explicit_mixed_nested_somewhere, union_types};
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{NameContext, resolve_names_in_type};
 use crate::types::{self, TemplateParam, Type};
@@ -45,6 +45,26 @@ pub struct ParamSig {
     // inherit, not even from a bare native hint) must gate the merge
     // rather than the ancestor's `ty` being merely present.
     pub has_own_doc: bool,
+    // Phase 88: whether *this declaration's own* native hint/`@param`
+    // text (whichever produced `ty`) spells out `mixed` somewhere,
+    // explicitly - computed once in `from_decl` via `checker::
+    // has_explicit_mixed_nested_somewhere`, the exact same text this
+    // parameter's own `doc_ty`/native hint locals already are. Exists
+    // because `checker::missing_typehint`'s own "was `mixed` written on
+    // purpose" rule used to *re-derive* this by re-reading the checked
+    // declaration's own raw AST text at check time - correct as long as
+    // a type only ever came from that same declaration's own docblock,
+    // which stopped being true the moment `Registry::
+    // flatten_phpdoc_inheritance` (Phase 87) could hand `ty` down from a
+    // *different* declaration's docblock instead. That pass copies this
+    // field alongside `ty` whenever it backfills a position, so an
+    // inherited `array<string, mixed>`/nested-`mixed` type is still
+    // correctly recognized as deliberate, not "no type given at all" -
+    // real corpus false positive this fixes: every one of Piwigo's
+    // `UrlServiceInterface`/`ExposesPageData`/... implementors and test
+    // doubles that correctly omit their own docblock in favor of the
+    // interface's.
+    pub explicit_mixed_hint: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +90,9 @@ pub struct FunctionSig {
     // comment for why `flatten_phpdoc_inheritance` also sets this to
     // `true` once it backfills `return_type` from an ancestor.
     pub return_has_own_doc: bool,
+    // Phase 88: the `ParamSig::explicit_mixed_hint` equivalent for the
+    // return position - see that field's own doc comment.
+    pub return_explicit_mixed_hint: bool,
     // Phase 37: PHP 8.5's `#[\NoDiscard]` marker attribute - `true` when
     // this declaration carries one, meaning a bare, unused call to it
     // (`foo();` on its own line, return value neither assigned nor
@@ -848,6 +871,10 @@ impl FunctionSig {
                     has_default,
                     by_ref: p.by_ref,
                     has_own_doc: doc_ty.is_some(),
+                    explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
+                        p.type_hint.as_deref(),
+                        doc_ty.map(String::as_str),
+                    ),
                 }
             })
             .collect();
@@ -903,6 +930,10 @@ impl FunctionSig {
             return_type,
             return_type_native,
             return_has_own_doc: doc_return.is_some(),
+            return_explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
+                f.return_type.as_deref(),
+                doc_return,
+            ),
             no_discard,
             visibility,
             is_internal,
@@ -967,6 +998,9 @@ impl FunctionSig {
                     // documents this position, the merged signature
                     // shouldn't look like a further-inheritance candidate.
                     has_own_doc: a.has_own_doc || b.has_own_doc,
+                    // Same permissive either-overload-wins rule as
+                    // `has_own_doc` just above, for the identical reason.
+                    explicit_mixed_hint: a.explicit_mixed_hint || b.explicit_mixed_hint,
                 },
                 // A position present in only one real overload can't be
                 // required in the merged callable either.
@@ -985,6 +1019,8 @@ impl FunctionSig {
             // Same permissive "either overload's own marker wins" as
             // `no_discard`/`is_internal` below.
             return_has_own_doc: self.return_has_own_doc || other.return_has_own_doc,
+            return_explicit_mixed_hint: self.return_explicit_mixed_hint
+                || other.return_explicit_mixed_hint,
             no_discard,
             // Both real overloads share one declaration (a stub-modeled
             // PHP-version split of the same underlying function/method,
