@@ -3620,7 +3620,30 @@ impl<'a> Checker<'a> {
         // which should still be checking a real `Mixed`, not a value
         // this checker had already convinced itself could only be null.
         if r_ty == Type::Null {
-            return self.infer_expr(l, locals);
+            let l_ty = self.infer_expr(l, locals);
+            // Phase 94: the no-op reasoning above only actually holds
+            // when `l` is a bare variable - `locals`'s own tracked type
+            // for one already reflects every way it can be null (a
+            // prior narrowing, an untyped param, ...), so trusting it
+            // completely is correct. An array/property access (or any
+            // other expression `??` exists specifically *because* this
+            // checker can't otherwise prove is always set) is different:
+            // `infer_expr` for `$group[$index]` on an `array<int,
+            // string>`-typed `$group` returns plain `string`, with no
+            // notion of "the key might not exist" folded in at all - the
+            // exact real-PHP case `?? null` idiomatically guards
+            // against. Real corpus false positive: `$val = $group[$index]
+            // ?? null; return $val ?? '';` - `$val`'s own stored type
+            // came out non-nullable, so the second, genuinely-needed
+            // `?? ''` was flagged as checking an already-non-nullable
+            // variable. Unioning `Null` back in here is always safe for
+            // the already-covered `Mixed` case too (`union_types` already
+            // collapses `Mixed | Null` back to plain `Mixed`).
+            return if matches!(l.kind, ExprKind::Variable(_)) {
+                l_ty
+            } else {
+                union_types(l_ty, Type::Null)
+            };
         }
         let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::Null);
         // `$x ?? throw new Foo();` (or any other never-returning right

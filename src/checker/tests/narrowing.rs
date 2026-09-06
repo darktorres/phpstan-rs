@@ -1019,6 +1019,33 @@ fn coalesce_with_a_null_fallback_keeps_the_left_sides_own_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 94: the no-op reasoning above only actually holds for a bare
+// variable on the left - an array-index access whose own value type is
+// concrete and non-nullable (unlike the Mixed case above) must still
+// have `Null` unioned back in, since `infer_expr` for a plain
+// `array<int, string>`-typed array's index access has no notion of "the
+// key might not exist" at all, the exact real-PHP case `?? null` exists
+// to guard against. Real corpus false positive: `Piwigo\Core\Lang::
+// fromLangArray()` - `$val = $group[$index] ?? null; return $val ?? '';`
+// - `$val`'s own stored type came out non-nullable, so the second,
+// genuinely-needed `?? ''` was flagged as checking an already-
+// non-nullable variable.
+#[test]
+fn coalesce_with_a_null_fallback_still_unions_null_for_a_non_nullable_array_access() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return array<int, string> */
+            function group(): array { return []; }
+            function fromLangArray(int $index): string {
+                $data = group();
+                $val = $data[$index] ?? null;
+                return $val ?? '';
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn in_array_without_the_strict_flag_narrows_nothing() {
     let d = diagnostics_for(
