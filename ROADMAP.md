@@ -5517,6 +5517,40 @@ a matching blind spot in `union_types`'s own construction-time
 absorption. Left four new Known Limitations rows, all closed the very
 next phase.
 
+**Update**: item (C)'s own function-declaration-merging concept later
+grew a sibling, `conditional_declaration_may_replace_stub` (a real
+arity/type-precision tiebreak for a *conditional* declaration
+attempting to replace an already-`merge_stubs`-provided registry slot -
+undocumented here at the time it shipped), and a top-10-bucket workflow
+scoping the full corpus found the one case it still missed: it only
+ever ran when the existing slot was still exactly what `merge_stubs`
+had put there, so two real, non-stub conditional declarations of the
+same global function competing directly with each other (two separate
+`if (!function_exists(...)) {...}` guards in two unrelated vendor
+files) fell straight to a plain first-wins insert, never tiebroken at
+all. Real corpus find: an alphabetically-earlier `scoper-autoload.php`-
+style `func_get_args()`-forwarding 0-param shim won registry-wide over
+the real, correctly-typed 3-required-plus-variadic `symfony/
+deprecation-contracts` declaration, producing phantom `arguments.count`
+false positives at every real call site matching the real signature.
+Fixed by decoupling *when* the comparison runs from `stub_provided_
+functions.remove`'s own side effect, and adding a new, slightly more
+permissive `better_conditional_function_declaration` (lets a real,
+non-zero-parameter declaration replace an entirely parameter-less
+existing one, on top of the stricter exact-arity-match rule the
+original function still enforces the rest of the time - safe to reuse
+for the stub case too, since a stub is realistically never itself
+zero-parameter). That same fix then unmasked a second, unrelated,
+genuine bug once it let `\RectorPrefix202608\trigger_deprecation(...)`
+finally resolve to its own real, `void`-typed signature: `StmtKind::
+Return`'s own `return.void` check fired unconditionally whenever a
+void-declared function's `return` statement carried an expression, with
+no exception for the expression's own type *also* being void -
+`return anotherVoidFn();` delegating to another void-returning call is
+legal, common PHP (real PHPStan doesn't flag it either), but was always
+reported as the nonsensical "expected void, got void". Fixed by adding
+the missing `actual != Type::Void` exception.
+
 **Phase 33 (350 -> 295) - closing Phase 32's own disclosed rows.**
 `instanceof`'s false branch now drops the checked class from a `Union`
 (reusing the existing `narrow_type_excluding`, since the false branch
