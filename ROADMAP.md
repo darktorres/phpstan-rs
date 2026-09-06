@@ -1218,6 +1218,57 @@ false-positive classes. The `@phpstan-type` feature itself remains
 not reattempted; whether this prerequisite alone is now enough to make
 that reattempt net-positive hasn't been re-checked.
 
+**Update**: reattempted, this time net-positive with the define()
+prerequisite above in place. `ClassInfo` gained `type_aliases:
+HashMap<String, Type>`, built once per class from its own `@phpstan-
+type Name TypeExpr` docblock tags and spliced into every member's own
+merged `ty` (params, returns, properties, consts) - strictly *after*
+`resolve_names_in_type` on the surrounding type, keyed by each alias's
+own resolved FQN, the exact ordering the original attempt's own
+tripling bug (recorded above) already found necessary. Also wired into
+`Checker::inline_var_annotation`, a separate check-time `/** @var Name
+$x */` local-variable path `ClassInfo::from_decl` never touches at all
+(real corpus shape: `league/uri-interfaces`'s own `UriString::parse()`).
+Cross-class `@phpstan-import-type` remains unimplemented, matching the
+original scope. Five real, independent bugs were found and fixed via
+corpus verification before shipping, none specific to this feature
+alone - full detail in the commit itself:
+- `docblock.rs`'s `take_type_token` (shared by every type-bearing tag)
+  didn't recognize the real `@phpstan-type Name = TypeExpr` variant
+  (`doctrine/orm`'s own convention) or track a quoted string-literal
+  segment as opaque (`sabberworm/php-css-parser`'s own `' '|'>'|'+'|
+  '~'`, a space inside the quotes wrongly read as the token's own end).
+- `types.rs`'s `split_top_level` (every union/intersection/array-shape
+  split) had the identical, deeper quote gap: a bracket-shaped
+  character *inside* a quoted literal (the `>` in `phpunit`'s own
+  `'->'|'::' `) permanently corrupted its own depth counter, silently
+  swallowing every top-level separator for the rest of the string.
+- `define('PHP_INT_MIN', -9223372036854775808)` - the literal's own
+  positive magnitude is exactly one past `i64::MAX`, so this project's
+  real-PHP-matching integer-overflow-to-float rule mistypes it (real
+  PHPStan reads `PHP_INT_MIN`/`PHP_INT_MAX` via reflection instead) -
+  registration for this one name is skipped entirely.
+- The `@phpstan-assert-if-true`/`-if-false` method-call handler only
+  ever matched a bare `Type::Object` receiver - widened to pick a
+  representative member out of a `Union`/`Intersection` too, mirroring
+  `checker/expr.rs`'s own `MethodCall` arm (real corpus shape:
+  `doctrine/orm`'s own alias-expanded six-member mapping union).
+- `narrow_type_to`'s own `Union`-member filter used plain, hierarchy-
+  unaware `types::is_subtype` instead of the registry-aware `Registry::
+  is_assignable`, so narrowing to an interface implemented only
+  *transitively* (through an intermediate abstract class - `doctrine/
+  orm`'s own `ToOneAssociationMapping`) kept zero members and fell back
+  to the bare interface type, discarding every member's own additional
+  properties/methods entirely.
+
+Corpus: 38983 -> 38608 (-375), verified in multiple rounds - every
+remaining addition traced to either a genuine, newly-enforceable
+finding or an already-known, separately-scoped checker limitation
+(`SplFixedArray`/`ArrayAccess` has no generic element-type modeling at
+all; the cross-class import gap noted above; `isset()`'s own existence-
+probe narrowing doesn't reach a deep property/array-index chain) - none
+introduced by this change itself.
+
 **Phase 49 - Call-argument binding generalization (named args, spread,
 by-ref legality) (PARTIAL).** This entry's own status was never
 updated after an earlier pilot batch landed it (commit `76fc86e`) -
