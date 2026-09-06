@@ -820,13 +820,32 @@ false-positived as "not `Throwable`" before the fix.
 Still open: (4) the rest of the `*ThrowsRule` family (transitive
 `throws` union across the call graph, `MethodThrowTypeCovarianceRule`,
 `MissingCheckedExceptionIn{Function,Method}ThrowsRule`,
-`TooWideFunctionThrowTypeRule`/`MethodThrowTypeRule`,
-`OverwrittenExitPointByFinallyRule`) and (5) the dynamic per-callee
-throw-type extensions (`Type/Php/*ThrowTypeExtension` cluster).
-`MethodThrowTypeCovarianceRule` specifically was considered and
-declined for this pass: its "implicit `void` when no `@throws` tag is
-present" default would create a large false-positive class given how
-inconsistently real corpus code tags `@throws` at all.
+`TooWideFunctionThrowTypeRule`/`MethodThrowTypeRule`) and (5) the
+dynamic per-callee throw-type extensions
+(`Type/Php/*ThrowTypeExtension` cluster). `MethodThrowTypeCovarianceRule`
+specifically was considered and declined for this pass: its "implicit
+`void` when no `@throws` tag is present" default would create a large
+false-positive class given how inconsistently real corpus code tags
+`@throws` at all.
+
+**Update**: `OverwrittenExitPointByFinallyRule` (`finally.exitPoint`)
+shipped, needing no per-callee throw-type model - a real, well-known
+PHP gotcha (a `finally` block's own `return`/`throw`/`break`/`continue`
+always wins, even over an in-flight exception, silently discarding the
+try/catch side's own exit point). New `collect_exit_point_statements`/
+`exit_point_description` (`checker/control_flow.rs`) name which
+concrete statement(s) make a block terminate, alongside the existing
+`always_terminates` (which already answers the bare-`bool` version of
+the same question) - deliberately narrower than `always_terminates`
+itself, recursing only into `Block`/`If` rather than guessing at a
+`Switch`/`Try`/loop body's own specific line. Verified byte-for-byte
+against a real `vendor/bin/phpstan` run (message text, line numbers,
+identifier) across four shapes: an unconditional return, if/else-nested
+returns on both sides, a catch clause's own return, and a loop's
+`break`/`continue`. Zero diagnostics and zero regressions across both
+the Piwigo-scoped and full ~20,300-file corpus - this anti-pattern
+doesn't occur in either, the same "ship a genuinely tested capability
+even with no current corpus incidence" precedent Phase 69 already set.
 
 **Phase 43 - Property-hook checker validation (PLANNED).** PHP 8.4
 property hooks are fully parsed (`PropertyDecl.hooks`, and
