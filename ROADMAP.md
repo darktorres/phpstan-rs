@@ -2782,10 +2782,36 @@ specifically - the corpus's own implicit-`(string)`-cast usages of
 `@internal`/`@deprecated` classes were already the ones caught before
 this change.
 
+**Update**: `instanceof` and a `catch` clause's own caught type are now
+covered too - both wired into their existing call sites
+(`ExprKind::Instanceof`'s `InstanceofTarget::Name` arm in
+`checker/expr.rs`, `StmtKind::Try`'s per-catch-type loop in
+`checker/stmt.rs`), both of which already resolve the class name for an
+existing, unrelated check (`class.notFound`/`catch.notThrowable`
+respectively) - no new name-resolution needed, just a call to a new
+shared `Checker::check_internal_class_name_usage` helper (factored out
+of what `check_internal_instantiation` used to do standalone) at the
+point each already-resolved class is confirmed to exist. `catch.internalClass`
+fires independently of, and in addition to, `catch.notThrowable` -
+confirmed directly this is what real PHPStan does too (they're two
+unrelated rules). Verified byte-for-byte against real
+`vendor/bin/phpstan` with `featureToggles.internalTag: true`. Corpus-
+verified: byte-identical with the flag off; Piwigo's own scope adds zero
+new findings from either check with the flag on (no real `instanceof`/
+`catch` against an `@internal` class anywhere in Piwigo's own first-
+party code); full-corpus scope surfaces 38 genuine findings (`Pest`'s
+own test-framework glue code `catch`ing/`instanceof`-checking PHPUnit's
+own explicitly `@internal`-tagged `AssertionFailedError`/`TestSuite`/
+`TestCase`/etc., `rector/rector` reaching into `nikic/php-parser`'s own
+`@internal` `PhpParser\Internal\TokenStream`, `symfony/doctrine-messenger`
+reaching into Doctrine DBAL's own `@internal` `AbstractAsset`), spot-
+checked genuine directly.
+
 Still open: real PHPStan's own `RestrictedInternalClassNameUsageExtension`
 additionally covers `extends`/`implements`/param-and-return-type-hints/
-`catch`/`instanceof`/first-class-callables (this phase only covers
-instantiation of the several `ClassNameUsageLocation` variants);
+first-class-callables (this phase covers every other `ClassNameUsageLocation`
+variant now: calls, property/constant access, instantiation, `instanceof`,
+`catch`);
 `RestrictedClassConstantUsageRule`/
 `RestrictedFunctionCallableUsageRule`/`RestrictedMethodCallableUsageRule`/
 `RestrictedPropertyUsageRule`/`RestrictedStaticMethodCallableUsageRule`/
