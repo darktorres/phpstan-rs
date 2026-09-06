@@ -1888,7 +1888,7 @@ Wave B - not a hard prerequisite, but doing it first avoids rework.
 Size: XL.
 
 **Phase 57 - Property/method/constant visibility enforcement
-(PARTIAL).** `PropertySig` and `FunctionSig` now carry their own
+(DONE).** `PropertySig` and `FunctionSig` now carry their own
 `Visibility`, and four call sites - property read (`ExprKind::
 PropertyAccess`), property write (`check_property_assignment`), method
 call (`ExprKind::MethodCall`), and static method call (`ExprKind::
@@ -2344,23 +2344,48 @@ tell the two declarations apart, on top of the lexer already discarding
 needs touching shared lexer infrastructure Phase 32's own parameter-
 deduplication idiom also depends on, out of scope for this pass.
 
-Still open, per this entry's original batched scope: a same-file case-
-insensitive collision between a class's own declarations and its
-`use`-alias imports (`UsedNamesRule`), and duplicate top-level function
-declarations (`DuplicateFunctionDeclarationRule` - the registry's
-`FxHashMap<String, FunctionSig>` still silently last-write-wins) -
-investigated but deferred: real PHPStan's own version is a whole-
-project, cross-file, `Reflector`-backed scan (not a single-file check
-like the class-member case above), and this project's own registry
-already has an established, *legitimate* multi-declaration pattern for
-top-level functions specifically (phpstorm-stubs' own real-overload
-representation, `strtr`'s 2-/3-argument split, Phase 32 Finding C) that
-a naive "second declaration = bug" scan would conflict with the same
-way the class-member case's own false positives did, needing the
-identical structural-signature-difference treatment *plus* real
-cross-file tracking neither of the class-member check's simpler,
-single-body scope needed. (Whole-*project* duplicate-class-name
-detection is a separate, lower-priority item - see Phase 83.)
+**Update**: `UsedNamesRule` (`{type}.nameInUse`/`use.nameInUse`) shipped
+- a same-file, case-insensitive collision between a class-like
+declaration's own name and a `use`-imported alias (`use function`/`use
+const` imports exempt, matching real PHPStan's own `shouldBeIgnored`).
+A single left-to-right pass over top-level statements, mirroring
+`check_program`'s own existing positional namespace-tracking walk
+(`current_namespace`'s *lowercased* form used only as the internal
+lookup key; the original-case form kept separately for the human-
+facing message, so a namespace like `Piwigo\Foo` still displays with
+its own declared casing rather than being flattened to lowercase).
+Verified byte-for-byte against real `vendor/bin/phpstan`: the
+class-vs-import collision reproduces exactly
+(`class.nameInUse`/`"Cannot declare class Piwigo\Foo\Bar because the
+name is already in use."`); a same-shape import-vs-import collision, by
+contrast, turns out to be a PHP compile-time fatal in every case tried
+(`phpstan.parse`, not `UsedNamesRule`'s own `use.nameInUse` identifier)
+- real PHP itself already rejects two `use` imports resolving to the
+same alias before PHPStan ever runs, case-insensitively too, so this
+project's own `use.nameInUse` branch (kept for parity with real
+PHPStan's source and this project's usual tolerance of code shapes real
+PHP would reject) is expected to stay corpus-silent. Corpus-verified:
+zero change to Piwigo's own already-clean scope and zero change
+full-corpus (`vendor/` included) - no existing name collisions
+anywhere in either scope, so this is a correctness/coverage addition
+with no measured diagnostic-count impact yet.
+
+Still open, per this entry's original batched scope: duplicate
+top-level function declarations (`DuplicateFunctionDeclarationRule` -
+the registry's `FxHashMap<String, FunctionSig>` still silently
+last-write-wins) - investigated but deferred: real PHPStan's own
+version is a whole-project, cross-file, `Reflector`-backed scan (not a
+single-file check like the class-member case above), and this
+project's own registry already has an established, *legitimate*
+multi-declaration pattern for top-level functions specifically
+(phpstorm-stubs' own real-overload representation, `strtr`'s 2-/3-
+argument split, Phase 32 Finding C) that a naive "second declaration =
+bug" scan would conflict with the same way the class-member case's own
+false positives did, needing the identical structural-signature-
+difference treatment *plus* real cross-file tracking neither of the
+class-member check's simpler, single-body scope needed. (Whole-
+*project* duplicate-class-name detection is a separate, lower-priority
+item - see Phase 83.)
 
 **Phase 64 - Override-compatibility check rewrite (methods +
 properties) (PARTIAL - method half only).** Extended
