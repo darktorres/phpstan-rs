@@ -483,29 +483,63 @@ impl Registry {
                     );
                     if conditional {
                         // Gated on arity *and* not losing any type
-                        // precision the stub already had (see
+                        // precision the existing slot already had (see
                         // `conditional_declaration_may_replace_stub`'s own
                         // doc comment for both real corpus shapes this
                         // guards against) - keeps the door open for
                         // whichever real conditional declaration actually
-                        // matches the stub's own shape, wherever in the
-                        // corpus that turns out to be, rather than
-                        // committing to the first one seen regardless of
-                        // quality.
-                        let may_replace = self.functions.get(&name).is_none_or(|existing| {
-                            conditional_declaration_may_replace_stub(&new_sig, existing)
-                        });
-                        if may_replace && self.stub_provided_functions.remove(&name) {
-                            // This slot is still exactly what `merge_stubs`
-                            // put there - a real, in-source conditional
-                            // declaration (a polyfill's whole reason for
-                            // existing) is always more trustworthy than
-                            // the built-in stub it's meant to substitute
-                            // for, so it wins outright rather than being
-                            // silently dropped by `or_insert_with` below.
-                            self.functions.insert(name, new_sig);
-                        } else {
-                            self.functions.entry(name).or_insert_with(|| new_sig);
+                        // matches best, wherever in the corpus that turns
+                        // out to be, rather than committing to the first
+                        // one seen regardless of quality. Runs the
+                        // identical comparison whether the existing slot
+                        // came from a built-in stub *or* an earlier
+                        // ordinary conditional declaration of the same
+                        // global function - a plain `self.stub_provided_
+                        // functions.remove(&name)` gate here used to
+                        // decide *when this comparison even runs at all*,
+                        // so two real, non-stub conditional declarations
+                        // of the same name (two separate `if (!function_
+                        // exists(...)) { function foo(...) {...} }`
+                        // guards in two unrelated vendor files) fell
+                        // straight to a plain first-wins `or_insert_with`
+                        // below, never tiebroken at all - real corpus
+                        // find: an alphabetically-earlier, `func_get_args(
+                        // )`-forwarding 0-param shim (`scoper-autoload.
+                        // php`) won registry-wide over the real,
+                        // correctly-typed 3-required-plus-variadic
+                        // `symfony/deprecation-contracts` declaration,
+                        // producing phantom `arguments.count` false
+                        // positives at every real call site matching the
+                        // real signature. `.remove(&name)` on a name that
+                        // was never stub-provided in the first place is a
+                        // harmless no-op (`HashSet::remove` returns
+                        // `false`, nothing else), so unconditionally
+                        // clearing the marker whenever the new
+                        // declaration wins is correct either way. Uses
+                        // `better_conditional_function_declaration`
+                        // (which also lets a real, non-zero-parameter
+                        // declaration replace an entirely parameter-less
+                        // `existing` one, on top of the exact-arity-match
+                        // rule `conditional_declaration_may_replace_stub`
+                        // alone still enforces the rest of the time) -
+                        // safe to use uniformly for both origins: a stub
+                        // is realistically never itself zero-parameter,
+                        // so this never weakens the existing stub-
+                        // protection tests.
+                        match self.functions.get(&name) {
+                            Some(existing)
+                                if !better_conditional_function_declaration(&new_sig, existing) =>
+                            {
+                                // `existing` already wins this comparison
+                                // - leave it in place, matching `or_insert_
+                                // with`'s own "first one seen (that's good
+                                // enough) wins" behavior for the case this
+                                // fix doesn't change.
+                            }
+                            _ => {
+                                self.stub_provided_functions.remove(&name);
+                                self.functions.insert(name, new_sig);
+                            }
                         }
                     } else if self.unconditionally_declared_functions.contains(&name) {
                         // Phase 32 Finding C: a *second* unconditional
@@ -1381,6 +1415,34 @@ fn conditional_declaration_may_replace_stub(new_sig: &FunctionSig, existing: &Fu
         .iter()
         .zip(&new_sig.params)
         .all(|(old, new)| !(old.ty != Type::Mixed && new.ty == Type::Mixed))
+}
+
+/// The identical question as `conditional_declaration_may_replace_stub`
+/// just above, but for two *ordinary* conditional declarations of the
+/// same global function name - neither one an already-known-good stub
+/// worth being this conservative about protecting. Reuses that same
+/// exact-arity-match comparison when arities agree (the "don't downgrade
+/// an already-known type" reasoning applies identically either way), but
+/// additionally lets a real, non-zero-parameter declaration replace an
+/// `existing` one that's *entirely* parameter-less - a real corpus find:
+/// `scoper-autoload.php`-style `func_get_args()`-forwarding shims
+/// (`function trigger_deprecation() { return \Prefix\trigger_
+/// deprecation(...func_get_args()); }`) are recognizable by exactly this
+/// shape, and compete with the real, correctly-typed declaration
+/// (`symfony/deprecation-contracts`' own 3-required-plus-variadic
+/// `trigger_deprecation()`) for the same name - the strict arity-match
+/// rule above would refuse the swap in *either* direction, permanently
+/// freezing in whichever one happened to be indexed first. The reverse
+/// (a real declaration already won the slot, a later 0-param shim trying
+/// to displace it) stays correctly refused: a 0-param `new_sig` against
+/// a non-zero-param `existing` still fails the ordinary arity-match
+/// check below, and `existing.params.is_empty()` is false, so neither
+/// branch here fires for it.
+fn better_conditional_function_declaration(new_sig: &FunctionSig, existing: &FunctionSig) -> bool {
+    if existing.params.is_empty() && !new_sig.params.is_empty() {
+        return true;
+    }
+    conditional_declaration_may_replace_stub(new_sig, existing)
 }
 
 #[cfg(test)]

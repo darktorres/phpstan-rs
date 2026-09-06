@@ -338,6 +338,70 @@ fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
     assert_eq!(r.functions["grapheme_strrev"].params[0].name, "string");
 }
 
+// A top-10-bucket workflow found the identical arity-mismatch shape one
+// level down from the two tests just above: neither of *these* two
+// conditional declarations ever occupies a *stub*-provided slot at all
+// (no `merge_stubs` call anywhere here) - real corpus shape: an
+// alphabetically-earlier `scoper-autoload.php`-style `func_get_args()`-
+// forwarding shim and the real, correctly-typed `symfony/deprecation-
+// contracts` declaration, both real, ordinary conditional declarations
+// of the same global function name, competing directly with each
+// other. Before this fix, `conditional_declaration_may_replace_stub`'s
+// own comparison only ever ran when the existing slot was still exactly
+// what `merge_stubs` had put there - a plain `or_insert_with` (first
+// one indexed wins, arity or not) applied here instead, so whichever
+// file happened to be indexed first won regardless of quality.
+#[test]
+fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
+    let mut r = Registry::default();
+
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('trigger_deprecation')) {
+                function trigger_deprecation() { return \Prefix\trigger_deprecation(...func_get_args()); }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+    assert_eq!(r.functions["trigger_deprecation"].params.len(), 0);
+
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('trigger_deprecation')) {
+                function trigger_deprecation(string $package, string $version, string $message, mixed ...$args): void {}
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+    assert_eq!(
+        r.functions["trigger_deprecation"].params.len(),
+        4,
+        "the real, correctly-typed declaration must win over the earlier 0-param shim"
+    );
+
+    // Order-independence: a later, *worse* (0-param shim) conditional
+    // declaration must not un-seat the real one that already won.
+    let tokens = Lexer::new(
+        r#"<?php
+            if (!function_exists('trigger_deprecation')) {
+                function trigger_deprecation() { return \Prefix\trigger_deprecation(...func_get_args()); }
+            }
+        "#,
+    )
+    .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program);
+    assert_eq!(
+        r.functions["trigger_deprecation"].params.len(),
+        4,
+        "the real declaration must not be displaced by a later, worse shim"
+    );
+}
+
 // Phase 60 corpus find, fourth half: even at matching arity, a polyfill
 // package can bundle several PHP-version-gated variants of the same
 // function behind separate `function_exists()` guards - real shape:
