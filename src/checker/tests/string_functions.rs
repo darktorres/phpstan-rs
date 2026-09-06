@@ -64,6 +64,40 @@ fn concatenating_two_unknown_strings_does_not_falsely_claim_non_falsy() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
+// A top-10-bucket workflow found the identical `non-falsy-string`
+// inference this file's own Concat tests above cover was missing for
+// interpolated strings specifically: `ExprKind::Interpolated` returned
+// bare `Type::String` unconditionally, even when one of its own parts
+// was a real, non-falsy literal segment - the exact same fact
+// `"prefix-" . $unknown` already proved via Concat.
+#[test]
+fn an_interpolated_string_with_a_non_falsy_literal_segment_narrows_to_non_falsy_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $unknown): void {
+                sink("prefix-{$unknown}");
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_interpolated_string_with_no_non_falsy_part_does_not_falsely_claim_it() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $a, string $b): void {
+                sink("{$a}{$b}");
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
 #[test]
 fn str_replace_falls_back_to_the_generic_path_for_a_non_string_subject() {
     // Scoped to "subject is exactly Type::String" - a Mixed subject

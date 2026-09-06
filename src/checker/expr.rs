@@ -2627,7 +2627,30 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
-            ExprKind::Interpolated(_) => Type::String,
+            // Same reasoning as `BinOp::Concat`'s own identical check
+            // just below - real corpus false positive this fix closes:
+            // an interpolated string with a provably non-falsy literal
+            // segment (`"prefix-{$suffix}"`) always produces a real
+            // `non-falsy-string`, the same way `'prefix-' . $suffix`
+            // already did, but this arm unconditionally returned bare
+            // `Type::String` regardless of any part's own content -
+            // `check_expr`'s own separate `Interpolated` arm already
+            // walks each part for a *different* purpose (implicit
+            // `__toString()`/array-to-string checks), not reused here
+            // since it doesn't compute or return a refined type.
+            ExprKind::Interpolated(parts) => {
+                if parts
+                    .iter()
+                    .any(|p| is_non_falsy_string(&self.infer_expr(p, locals)))
+                {
+                    Type::Intersection(vec![
+                        Type::String,
+                        Type::Accessory(AccessoryKind::NonFalsyString),
+                    ])
+                } else {
+                    Type::String
+                }
+            }
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
@@ -3582,14 +3605,13 @@ impl<'a> Checker<'a> {
             // `assertStringStartsWith()`/`assertStringEndsWith()` whose
             // stub declares its needle as `non-empty-string`.
             BinOp::Concat => {
-                let non_falsy_string = Type::Intersection(vec![
-                    Type::String,
-                    Type::Accessory(AccessoryKind::NonFalsyString),
-                ]);
-                if types::is_subtype(&self.infer_expr(l, locals), &non_falsy_string)
-                    || types::is_subtype(&self.infer_expr(r, locals), &non_falsy_string)
+                if is_non_falsy_string(&self.infer_expr(l, locals))
+                    || is_non_falsy_string(&self.infer_expr(r, locals))
                 {
-                    non_falsy_string
+                    Type::Intersection(vec![
+                        Type::String,
+                        Type::Accessory(AccessoryKind::NonFalsyString),
+                    ])
                 } else {
                     Type::String
                 }
@@ -3799,6 +3821,21 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
 /// each subsequent `contains`-based dedup scan below (and each member's own
 /// recursive `PartialEq`) growing right along with it.
 const MAX_UNION_MEMBERS: usize = 12;
+
+/// Whether `ty` is provably a `non-falsy-string` (non-empty and never
+/// exactly `"0"`) - shared by `BinOp::Concat` and `ExprKind::
+/// Interpolated`'s own identical "does any one operand/part guarantee
+/// the whole result is non-falsy" check, factored out so both build the
+/// same `Intersection([String, Accessory(NonFalsyString)])` target type
+/// and run the same `is_subtype` check against it, rather than each
+/// constructing it independently.
+fn is_non_falsy_string(ty: &Type) -> bool {
+    let non_falsy_string = Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::NonFalsyString),
+    ]);
+    types::is_subtype(ty, &non_falsy_string)
+}
 
 /// Union of two types for a scope-merge join point - flattens nested
 /// unions and keeps `Mixed` "unknown" rather than let it compose into a
