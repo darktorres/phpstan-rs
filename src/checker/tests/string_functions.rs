@@ -113,6 +113,85 @@ fn str_replace_falls_back_to_the_generic_path_for_a_non_string_subject() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// A top-10-bucket workflow found sprintf()/vsprintf() had zero dynamic-
+// return-type handling at all - real PHPStan narrows to
+// `non-falsy-string` whenever the format string's own literal (non-
+// specifier) text is itself provably non-falsy, the same reasoning
+// Concat/Interpolated already use.
+#[test]
+fn sprintf_with_a_non_falsy_literal_segment_narrows_to_non_falsy_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(int $n): void {
+                sink(sprintf('value: %d', $n));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn vsprintf_with_a_non_falsy_literal_segment_narrows_to_non_falsy_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(array $args): void {
+                sink(vsprintf('value: %d', $args));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sprintf_with_only_specifiers_does_not_falsely_claim_non_falsy() {
+    // Every specifier could expand to an empty string, so a format
+    // string with no real literal text left over can't be proven
+    // non-falsy - real shape: `sprintf('%s', '')` is itself `''`.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $s): void {
+                sink(sprintf('%s', $s));
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn sprintf_with_a_literal_zero_remainder_does_not_falsely_claim_non_falsy() {
+    // `sprintf('0%s', '')` really does produce the falsy string `"0"`.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $s): void {
+                sink(sprintf('0%s', $s));
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn sprintf_with_a_non_literal_format_is_unaffected() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            function f(string $format, int $n): void {
+                sink(sprintf($format, $n));
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
 // Phase 32 Finding E: same subject-dependent-return-type family as
 // `str_replace` above, missed by Phase 23/31 - `substr_replace`'s own
 // subject is argument index 0, not 2.

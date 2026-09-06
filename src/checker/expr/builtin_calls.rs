@@ -1,12 +1,12 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, literal_string_key, narrow_type_excluding, narrow_type_excluding_falsy,
-    narrow_type_to, resolve_call_args, to_absolute_number,
+    Checker, Locals, literal_string_key, literal_string_value, narrow_type_excluding,
+    narrow_type_excluding_falsy, narrow_type_to, resolve_call_args, to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
 use crate::types::{self, AccessoryKind, Type};
 
-use super::{is_canonical_int_key, is_false_literal, union_types};
+use super::{is_canonical_int_key, is_false_literal, is_non_falsy_string, union_types};
 
 impl<'a> Checker<'a> {
     /// Phase 12's bespoke per-function return-type extensions (real
@@ -51,6 +51,33 @@ impl<'a> Checker<'a> {
             // this project's own Piwigo+vendor verification corpus).
             "strlen" if args.len() == 1 => {
                 return Type::IntRange(Some(0), None);
+            }
+            // A top-10-bucket workflow found `sprintf()`/`vsprintf()` had
+            // zero dynamic-return-type handling at all - real PHPStan
+            // narrows to `non-falsy-string` whenever the format string is
+            // a literal whose own non-specifier literal text (with every
+            // real `%[argnum$][flags][width][.precision]specifier`
+            // sequence removed, matching this project's own existing
+            // `parse_format_specifiers`/`parse_positional_format_
+            // specifiers` grammar in `calls.rs`) is itself provably
+            // non-falsy - the same reasoning `BinOp::Concat`/`ExprKind::
+            // Interpolated` already use (a guaranteed-present, non-empty,
+            // non-`'0'` literal chunk means the whole result can never be
+            // exactly `""`/`"0"`, regardless of what any specifier
+            // expands to). `sprintf_literal_remainder` returns `None` on
+            // anything it can't confidently parse (an unknown specifier
+            // character, mainly) - the same "don't guess" standard,
+            // never wrongly claiming non-falsy.
+            "sprintf" | "vsprintf" if !args.is_empty() => {
+                if let Some(fmt) = literal_string_value(&args[0].value)
+                    && let Some(remainder) = sprintf_literal_remainder(&fmt)
+                    && is_non_falsy_string(&Type::StringLiteral(remainder))
+                {
+                    return Type::Intersection(vec![
+                        Type::String,
+                        Type::Accessory(AccessoryKind::NonFalsyString),
+                    ]);
+                }
             }
             // Real PHPStan's own `CountFunctionReturnTypeExtension` -
             // narrowed to the plain 1-argument form (no `$mode` argument,
@@ -2022,6 +2049,80 @@ fn parse_url_component_type(name: &str) -> Option<Type> {
 enum SscanfSpecifier {
     Char(char),
     Bracket,
+}
+
+/// Strips every real `sprintf()`/`vsprintf()` conversion specifier
+/// (`%[argnum$][flags][width][.precision]specifier`, PHP's own actual
+/// grammar) from a literal format string, returning the concatenation of
+/// whatever literal text is left (`%%` collapsing to one literal `%`,
+/// same as real PHP). `None` on the first specifier this can't
+/// confidently parse to the end (an unrecognized conversion character,
+/// mainly) - the whole point here is proving the *remaining* literal
+/// text is non-falsy, so silently guessing past an unparseable specifier
+/// would risk claiming that about a format string this hasn't actually
+/// verified. A hand-rolled scan for the identical "no regex engine
+/// available" reason `parse_sscanf_format` just below already documents.
+fn sprintf_literal_remainder(fmt: &str) -> Option<String> {
+    let chars: Vec<char> = fmt.chars().collect();
+    let mut i = 0;
+    let mut out = String::new();
+    while i < chars.len() {
+        if chars[i] != '%' {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i >= chars.len() {
+            return None;
+        }
+        if chars[i] == '%' {
+            out.push('%');
+            i += 1;
+            continue;
+        }
+        // Optional positional argument number (`1$`) - backtracks to
+        // `start` if the digits aren't actually followed by `$` (they're
+        // real width digits instead, handled below).
+        let start = i;
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i > start && i < chars.len() && chars[i] == '$' {
+            i += 1;
+        } else {
+            i = start;
+        }
+        // Optional custom padding character (`'x`).
+        if i < chars.len() && chars[i] == '\'' && i + 1 < chars.len() {
+            i += 2;
+        }
+        // Optional flags.
+        while i < chars.len() && matches!(chars[i], '-' | '+' | ' ' | '0') {
+            i += 1;
+        }
+        // Optional width.
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        // Optional precision.
+        if i < chars.len() && chars[i] == '.' {
+            i += 1;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+        }
+        if i >= chars.len() {
+            return None;
+        }
+        match chars[i] {
+            'b' | 'c' | 'd' | 'e' | 'E' | 'f' | 'F' | 'g' | 'G' | 'o' | 's' | 'u' | 'x' | 'X' => {
+                i += 1;
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
 }
 
 /// Walks a literal `sscanf()`/`fscanf()` format string for every real
