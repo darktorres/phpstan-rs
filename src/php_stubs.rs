@@ -71,6 +71,40 @@ pub fn generate_from_source(source: &str) -> Vec<(String, FunctionSig)> {
     registry.functions.into_iter().collect()
 }
 
+/// Phase 89: phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
+/// genuinely accurate) declaration of `array_multisort`'s variadic tail
+/// is `&...$rest` - every "rest" argument marked by-reference uniformly.
+/// Real PHP's own actual runtime behavior for this specific function is
+/// looser than that declaration suggests, though: a call like
+/// `array_multisort($a, SORT_DESC, SORT_NUMERIC, $b)` legitimately
+/// passes literal sort-order/sort-flag constants into by-ref-declared
+/// positions, which every *other* by-ref parameter in the entire
+/// language would reject outright ("Only variables can be passed by
+/// reference"). Real PHPStan's own bundled `resources/functionMap.php`
+/// (confirmed directly) declares this same function with a *plain*,
+/// non-`&`-prefixed signature (`SignatureMapParser`'s own convention:
+/// a `&`-prefixed parameter *name* is what marks by-ref, and this
+/// project's entry has none) - i.e. real PHPStan deliberately treats
+/// none of `array_multisort`'s arguments as reference-checked at all,
+/// the exact trade-off (losing precision on the genuinely-by-ref array
+/// slots to avoid a false positive on the interleaved sort-flag ones)
+/// mirrored here. This project has no general hand-curated stub-overlay
+/// mechanism any more (see this module's own doc comment - the last one
+/// was dead code, removed before Phase 8) - a single, narrow, explicitly
+/// justified post-generation patch for the one function this project's
+/// own real corpus actually evidenced the gap on is more honest than
+/// reintroducing a whole overlay system for it.
+fn patch_array_multisort_by_ref(stubs: &mut [(String, FunctionSig)]) {
+    for (name, sig) in stubs.iter_mut() {
+        if name != "array_multisort" {
+            continue;
+        }
+        for param in &mut sig.params {
+            param.by_ref = false;
+        }
+    }
+}
+
 /// All signatures generated from the vendored phpstorm-stubs sources,
 /// merged (first occurrence wins). A few functions are declared more than
 /// once across the corpus (e.g. a version-conditional pair of signatures
@@ -105,6 +139,7 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
                     }
                 }
             }
+            patch_array_multisort_by_ref(&mut result);
             result
         });
     CACHE.clone()

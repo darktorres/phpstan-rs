@@ -896,6 +896,30 @@ fn passing_an_array_index_by_reference_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 89: phpstorm-stubs' own real declaration
+// (`&$array, &...$rest`) marks every one of `array_multisort`'s
+// variadic-tail arguments by-reference uniformly - but real PHP itself
+// lets a `SORT_*` constant (not a variable at all) sit in one of those
+// same positions, interleaved with the genuinely-by-ref additional
+// arrays being sorted. Real PHPStan's own bundled `functionMap.php`
+// resolves this by not treating any of this function's own parameters
+// as by-ref-checked at all - `php_stubs::patch_array_multisort_by_ref`
+// mirrors that exact choice as a narrow post-generation patch.
+#[test]
+fn array_multisort_sort_flag_constants_interleaved_with_arrays_are_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(array $q, array $i): void {
+                array_multisort($q, SORT_DESC, SORT_NUMERIC, $i, SORT_ASC, SORT_NUMERIC);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "argument.byRef"),
+        "unexpected by-ref diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn passing_a_deeply_nested_nullsafe_chain_by_reference_is_still_flagged() {
     // The chain-walk needs to look past the immediate node - the
