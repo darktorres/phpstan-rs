@@ -4911,6 +4911,19 @@ propertyType`), zero new findings - the 2 lines that changed in the
 diff were both the exact same pre-existing mismatch reworded with a
 more precise type, not new.
 
+**Update**: the same round's last narrow return-type fix -
+`var_export($x, true)`'s native/stub signature is unconditionally
+`?string` (`$return` defaults to `false`, printing to stdout and
+returning `null`), but a literal `true` second argument means it always
+returns the real representation string instead. New `is_true_literal`
+mirrors the existing `is_false_literal` helper; scoped to the
+2-argument, literal-`true` form only. Verified against the ~20,300-file
+corpus: 32 diagnostics cleared, 1 line reworded (a `preg_replace()`
+subject correctly narrowing from `string|array<string>|null` to plain
+`string`, its own separately-genuine `?string` return possibility -
+real PHP's own regex-error case, unrelated to this fix - left
+untouched and unreworded-further).
+
 **A thirteenth round** (182 -> 158) found the corpus's largest single
 remaining `list<T>` gap, the same shape `array_values()` already got
 fixed for in Phase 14 itself:
