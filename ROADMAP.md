@@ -3698,6 +3698,27 @@ the class never actually redeclared. Corpus-verified: Piwigo-scoped
 confirming zero new false-positive locations and 18 genuinely resolved
 ones.
 
+**Phase 91 - an anonymous class method's own docblock was never
+parsed at all (DONE).** `check_function`'s fallback branch (always
+taken for an anonymous class, since its synthetic name is never
+indexed into the registry) built every parameter/return type purely
+from the native hint, never once parsing `f.doc_comment` - the one
+registry-side merge step (`FunctionSig::from_decl`'s own `resolve_type`
+call) every other declaration in the project already gets. Real corpus
+false positive: an anonymous class's own `/** @return array<string,
+object> */` above a fully native-typed `getConnections(): array` was
+silently discarded. Both the per-param loop and the return-type
+fallback now call the same `resolve_type(doc_type, native_hint)`
+`FunctionSig::from_decl` itself uses, newly re-exported as
+`pub(crate)` from `registry` for this. Corpus-verified: Piwigo-scoped
+`check-project` drops from 127 to 119, a location-based diff
+confirming zero new false-positive locations and 8 genuinely resolved
+ones - including, as a side effect, every remaining
+`missingType.generics` false positive (a bare `ArrayObject` param on
+an anonymous class's own `__construct`, documented with a real
+`@param ArrayObject<TKey, TValue>` but never read for the identical
+reason).
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
