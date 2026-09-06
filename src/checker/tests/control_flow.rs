@@ -570,6 +570,150 @@ fn unrelated_catch_clauses_are_never_flagged() {
     );
 }
 
+// Phase 42(4), `OverwrittenExitPointByFinallyRule`: a real, well-known
+// PHP gotcha - a `finally` block's own `return`/`throw`/`break`/
+// `continue` always wins, even over an in-flight exception or the try
+// body's own return, silently discarding it. Verified byte-for-byte
+// against real PHPStan (message text, line numbers, and identifier)
+// via a direct `vendor/bin/phpstan` run on this exact file.
+#[test]
+fn a_finally_block_unconditionally_returning_overwrites_the_try_bodys_return() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                try {
+                    return 1;
+                } finally {
+                    return 2;
+                }
+            }
+        "#,
+    );
+    let exit_points: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "finally.exitPoint")
+        .collect();
+    assert_eq!(exit_points.len(), 2, "got: {d:?}");
+    assert!(
+        exit_points[0]
+            .message
+            .contains("This return is overwritten by a different one in the finally block below.")
+    );
+    assert!(
+        exit_points[1]
+            .message
+            .contains("The overwriting return is on this line.")
+    );
+}
+
+#[test]
+fn a_finally_block_with_no_exit_point_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                try {
+                    return 1;
+                } finally {
+                    echo "cleanup";
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "finally.exitPoint"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Both sides nested inside an if/else - `collect_exit_point_statements`
+// must recurse into both branches, not just the block's own last
+// top-level statement.
+#[test]
+fn a_finally_block_exit_point_nested_in_if_else_is_still_detected() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $cond): int {
+                try {
+                    if ($cond) {
+                        return 1;
+                    } else {
+                        return 2;
+                    }
+                } finally {
+                    if ($cond) {
+                        return 3;
+                    } else {
+                        return 4;
+                    }
+                }
+            }
+        "#,
+    );
+    let exit_points: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "finally.exitPoint")
+        .collect();
+    assert_eq!(exit_points.len(), 4, "got: {d:?}");
+}
+
+// The try side's own catch clause, not just its main body, is a real
+// source of overwritten exit points too.
+#[test]
+fn a_finally_block_overwrites_a_catch_clauses_own_return() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                try {
+                    return 1;
+                } catch (\Exception $e) {
+                    return 2;
+                } finally {
+                    return 3;
+                }
+            }
+        "#,
+    );
+    let exit_points: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "finally.exitPoint")
+        .collect();
+    assert_eq!(exit_points.len(), 3, "got: {d:?}");
+}
+
+// `break`/`continue` inside a loop are exit points too, not just
+// `return`/`throw` - real PHPStan's own rule treats all four uniformly.
+#[test]
+fn a_finally_blocks_break_overwrites_the_try_bodys_continue() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $items): void {
+                foreach ($items as $item) {
+                    try {
+                        continue;
+                    } finally {
+                        break;
+                    }
+                }
+            }
+        "#,
+    );
+    let exit_points: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "finally.exitPoint")
+        .collect();
+    assert_eq!(exit_points.len(), 2, "got: {d:?}");
+    assert!(
+        exit_points[0]
+            .message
+            .contains("This continue is overwritten")
+    );
+    assert!(
+        exit_points[1]
+            .message
+            .contains("The overwriting break is on this line.")
+    );
+}
+
 // Phase 23 Finding 5, real shape:
 // tests/Unit/Mail/MailServiceTestFakeSmtpServer.php's `$conn =
 // stream_socket_accept(...); if ($conn === false) { fwrite(STDERR,

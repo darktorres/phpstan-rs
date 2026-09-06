@@ -176,6 +176,61 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     merged
 }
 
+/// Phase 42(4), `OverwrittenExitPointByFinallyRule`: collects the
+/// concrete `return`/`throw`/`break`/`continue` statement(s) that make
+/// `stmt` genuinely exit - the same question `always_terminates` already
+/// answers as a bare `bool`, but naming *which* statement(s) so a
+/// `finally` block that also unconditionally exits can be reported as
+/// silently overwriting them (a well-known, real PHP gotcha - a
+/// `finally`'s own exit point always wins, even over an in-flight
+/// exception). Deliberately narrower than `always_terminates` itself:
+/// only recurses into `Block`/`If` (common enough in real code to name
+/// every contributing line for without guessing) - a `Switch`/`Try`/
+/// loop body can still make `always_terminates` return `true`, but this
+/// returns nothing for one rather than picking an arbitrary nested line,
+/// the same "don't guess" leniency this project applies elsewhere. An
+/// empty result here means "no diagnostic for this side," never a false
+/// positive - `always_terminates`'s own gate gets checked independently
+/// wherever this is called, so the two can never disagree about whether
+/// something is being overwritten, only about whether this can *name* it.
+pub(crate) fn collect_exit_point_statements(stmt: &Stmt) -> Vec<&Stmt> {
+    match &stmt.kind {
+        StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break(_) | StmtKind::Continue(_) => {
+            vec![stmt]
+        }
+        StmtKind::Block(stmts) => stmts
+            .last()
+            .map(collect_exit_point_statements)
+            .unwrap_or_default(),
+        StmtKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            let mut out = collect_exit_point_statements(then_branch);
+            if let Some(e) = else_branch {
+                out.extend(collect_exit_point_statements(e));
+            }
+            out
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// `OverwrittenExitPointByFinallyRule`'s own `describeExitPoint` -
+/// matches its exact wording (`RuleErrorBuilder::message` interpolates
+/// this directly into "This %s is overwritten..."/"The overwriting %s
+/// is on this line.").
+pub(crate) fn exit_point_description(stmt: &Stmt) -> &'static str {
+    match &stmt.kind {
+        StmtKind::Return(_) => "return",
+        StmtKind::Throw(_) => "throw",
+        StmtKind::Break(_) => "break",
+        StmtKind::Continue(_) => "continue",
+        _ => "exit point",
+    }
+}
+
 /// Does this function/method/closure body contain a `yield`/`yield from`
 /// anywhere, making it a real PHP generator? A generator always returns a
 /// real `Generator` object when called, regardless of whether it has an

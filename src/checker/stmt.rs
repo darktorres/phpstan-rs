@@ -1,5 +1,8 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, is_truthy_literal, merge_scopes, purge_stale_narrowing_for};
+use crate::checker::{
+    Checker, Locals, collect_exit_point_statements, exit_point_description, is_truthy_literal,
+    merge_scopes, purge_stale_narrowing_for,
+};
 use crate::docblock;
 use crate::types::Type;
 
@@ -687,6 +690,22 @@ impl<'a> Checker<'a> {
                 let try_terminates = body
                     .last()
                     .is_some_and(|s| self.always_terminates(s, &try_end_locals));
+                // Phase 42(4), `OverwrittenExitPointByFinallyRule`:
+                // gathers every concrete exit-point statement from the
+                // try body and each catch clause that itself always
+                // terminates - if the `finally` block below *also*
+                // unconditionally exits, every one of these gets
+                // silently discarded at runtime (real PHP's own well-
+                // known gotcha: a `finally`'s own `return`/`throw`/
+                // `break`/`continue` always wins, even over an in-
+                // flight exception). See `collect_exit_point_statements`'s
+                // own doc comment for why this only names the common
+                // `Block`/`If`-nested shapes rather than every construct
+                // `always_terminates` itself recognizes.
+                let mut try_catch_exit_points: Vec<&Stmt> = Vec::new();
+                if try_terminates && let Some(s) = body.last() {
+                    try_catch_exit_points.extend(collect_exit_point_statements(s));
+                }
                 // Every reachable state after the whole try/catch - the
                 // try body's own full-completion state, plus each catch
                 // clause's own ending state (a variable a catch clause
@@ -820,11 +839,15 @@ impl<'a> Checker<'a> {
                         catch_locals.insert(var.clone(), ty);
                     }
                     self.check_block(&c.body, &mut catch_locals, declared_return, label);
-                    if !c
+                    let catch_terminates = c
                         .body
                         .last()
-                        .is_some_and(|s| self.always_terminates(s, &catch_locals))
-                    {
+                        .is_some_and(|s| self.always_terminates(s, &catch_locals));
+                    if catch_terminates {
+                        if let Some(s) = c.body.last() {
+                            try_catch_exit_points.extend(collect_exit_point_statements(s));
+                        }
+                    } else {
                         end_states.push(catch_locals);
                     }
                 }
@@ -836,6 +859,44 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(f) = finally {
                     self.check_block(f, locals, declared_return, label);
+                    // Phase 42(4): only worth naming the finally block's
+                    // own exit point(s) if there's actually something
+                    // real on the try/catch side for them to overwrite -
+                    // mirrors `OverwrittenExitPointByFinallyRule`'s own
+                    // `count($node->getTryCatchExitPoints()) === 0`
+                    // early return exactly.
+                    if !try_catch_exit_points.is_empty()
+                        && let Some(last) = f.last()
+                        && self.always_terminates(last, locals)
+                    {
+                        let finally_exit_points = collect_exit_point_statements(last);
+                        if !finally_exit_points.is_empty() {
+                            for exit in &try_catch_exit_points {
+                                self.report(
+                                    label.to_string(),
+                                    format!(
+                                        "This {} is overwritten by a different one in the finally block below.",
+                                        exit_point_description(exit)
+                                    ),
+                                    exit.span,
+                                    4,
+                                    "finally.exitPoint",
+                                );
+                            }
+                            for exit in &finally_exit_points {
+                                self.report(
+                                    label.to_string(),
+                                    format!(
+                                        "The overwriting {} is on this line.",
+                                        exit_point_description(exit)
+                                    ),
+                                    exit.span,
+                                    4,
+                                    "finally.exitPoint",
+                                );
+                            }
+                        }
+                    }
                 }
             }
             StmtKind::Throw(e) => {
