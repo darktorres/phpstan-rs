@@ -953,6 +953,35 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
         is_static: bool,
     ) {
+        self.check_function_with_ancestor_hint(f, class_name, is_static, None);
+    }
+
+    /// `check_function`'s real body - `ancestor_sig_hint` (Phase 90) is
+    /// `Some` only for an anonymous class's own method, where it's the
+    /// first ancestor's own signature found by walking `decl.extends`/
+    /// `decl.implements` directly at the call site (`ExprKind::
+    /// NewAnonymousClass`'s own handling in `checker/expr.rs`) - an
+    /// anonymous class is never indexed into the registry under any
+    /// stable name (see `lookup_own_signature`'s own doc comment), so
+    /// `sig` below is always `None` for one, and every registry-aware
+    /// check in this function (bound/variance-enforcement, the per-param
+    /// type resolution above) stays exactly as lenient-by-omission as it
+    /// already was. `ancestor_sig_hint` is deliberately used *only* at
+    /// `check_missing_function_typehints`'s own call site below, not
+    /// substituted in for `sig` throughout this whole function - correct
+    /// there (that check only ever reads a signature's own docblock-
+    /// provenance bits, `has_own_doc`/`explicit_mixed_hint`, which an
+    /// ancestor's genuinely still is), but not obviously safe for every
+    /// other `Some(sig)`-gated check here (e.g. variance/bound
+    /// enforcement checking the anonymous class's *own* body against a
+    /// signature it never actually redeclared).
+    fn check_function_with_ancestor_hint(
+        &mut self,
+        f: &FunctionDecl,
+        class_name: Option<&str>,
+        is_static: bool,
+        ancestor_sig_hint: Option<&FunctionSig>,
+    ) {
         let sig = self.lookup_own_signature(f, class_name);
         // Moved up from its original position right before the bound-
         // enforcement block below - Phase 48's own per-parameter/return
@@ -1231,7 +1260,7 @@ impl<'a> Checker<'a> {
             &label,
             &resolved_params,
             declared_return.as_ref(),
-            sig,
+            sig.or(ancestor_sig_hint),
         );
 
         let previous_class = self.current_class.take();

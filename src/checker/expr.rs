@@ -1429,8 +1429,42 @@ impl<'a> Checker<'a> {
                 // checking, even though the class itself isn't indexed
                 // into the registry under any stable name - check_function
                 // only needs a FunctionDecl and a label to check against.
+                //
+                // Phase 90: `ancestor_sig` looks up the same method name
+                // directly against whichever real, already-registered
+                // interface/parent this anonymous class implements/
+                // extends (`extends` first, matching `Registry::
+                // lookup_ancestor_method_with_owner`'s own order) - real
+                // corpus false positive this fixes: the extremely common
+                // test-double shape (`new class implements
+                // HtmlRenderingInterface { public function
+                // nameCompare(array $a, array $b): int {...} }`, no own
+                // docblock, relying entirely on the interface's own
+                // `@param array<string, mixed>`) was never checked
+                // against the interface's own docblock at all, since an
+                // anonymous class's synthetic name is never indexed into
+                // the registry for `check_function`'s own `sig` lookup to
+                // find. Passed only as `check_missing_function_typehints`'s
+                // own fallback (see `check_function_with_ancestor_hint`'s
+                // doc comment for why it isn't substituted in more
+                // broadly) - this project still doesn't otherwise type-
+                // check an anonymous class's body against its own
+                // implemented interfaces at all (a separate, larger gap).
                 for m in &decl.methods {
-                    self.check_function(&m.function, Some(&decl.name), m.is_static);
+                    let ancestor_sig =
+                        decl.extends
+                            .iter()
+                            .chain(decl.implements.iter())
+                            .find_map(|name| {
+                                self.registry
+                                    .lookup_method(&self.name_ctx.resolve(name), &m.function.name)
+                            });
+                    self.check_function_with_ancestor_hint(
+                        &m.function,
+                        Some(&decl.name),
+                        m.is_static,
+                        ancestor_sig,
+                    );
                 }
                 // Phase 37: its own properties'/consts' attributes too -
                 // method/param attributes are already covered inside

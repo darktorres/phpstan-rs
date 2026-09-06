@@ -163,6 +163,65 @@ fn an_inherited_explicit_mixed_untyped_parameter_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 90: an anonymous class is never indexed into the registry
+// under any stable name, so `check_function`'s own `sig` lookup always
+// misses for one - without a direct ancestor lookup at the
+// `ExprKind::NewAnonymousClass` call site, a same-named method
+// implementing a real interface's own documented `array<string,
+// mixed>` parameter was never recognized as deliberately, explicitly
+// `mixed`. Real corpus shape: PHPUnit-style test doubles implementing
+// a real project interface inline.
+#[test]
+fn an_anonymous_class_inherits_explicit_mixed_from_an_implemented_interface() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            interface Comparator {
+                /**
+                 * @param array<string, mixed> $a
+                 * @param array<string, mixed> $b
+                 */
+                public function compare(array $a, array $b): int;
+            }
+            function make(): Comparator {
+                return new class implements Comparator {
+                    public function compare(array $a, array $b): int {
+                        return 0;
+                    }
+                };
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The inverse - an anonymous class implementing an interface whose own
+// docblock does *not* spell out `mixed` must still be flagged normally.
+#[test]
+fn an_anonymous_class_without_an_explicit_mixed_ancestor_is_still_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            interface PreciseComparator {
+                /**
+                 * @param list<int> $a
+                 */
+                public function compare(array $a): int;
+            }
+            function make(): PreciseComparator {
+                return new class implements PreciseComparator {
+                    public function compare(array $a): int {
+                        return 0;
+                    }
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "missingType.iterableValue"),
+        "expected a missing-value-type diagnostic, got: {d:?}"
+    );
+}
+
 #[test]
 fn list_with_an_explicit_mixed_value_type_is_not_flagged() {
     let d = all_diagnostics_for(
