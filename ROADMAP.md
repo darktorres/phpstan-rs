@@ -4876,6 +4876,21 @@ beyond plain `Type::String` at all:
   `assertStringStartsWith()`/`assertStringEndsWith()` whose stub
   declares its needle as `non-empty-string`.
 
+**Update**: a top-10-bucket workflow scoping the full corpus found the
+identical gap left standing for the interpolated form of the same
+idiom - `ExprKind::Interpolated` (`"prefix-{$unknown}"`) still returned
+bare `Type::String` unconditionally, even with a real, non-falsy
+literal segment among its own parts, unlike `BinOp::Concat`'s
+already-fixed `'prefix-' . $unknown`. Fixed the same way, checking
+every part for the identical `non-falsy-string` subtype proof (factored
+into a shared `is_non_falsy_string` helper both arms now call). Real
+corpus shape: `php-standard-library`'s own `Psl\TCP`/`Psl\Unix`
+socket/connect/listen functions building a URI via `"tcp://{$host}:
+{$port}"`/`"unix://{$path}"`-style interpolation, then passing it to
+`Psl\Network\Internal\socket_connect()`/`server_listen()`, both
+declared `non-empty-string`. Verified against the ~20,300-file corpus:
+8 diagnostics cleared, zero new findings.
+
 **A thirteenth round** (182 -> 158) found the corpus's largest single
 remaining `list<T>` gap, the same shape `array_values()` already got
 fixed for in Phase 14 itself:
