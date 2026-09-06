@@ -561,6 +561,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .map(|p| ParamSig {
                     ty: subst(&p.ty),
+                    ty_native: subst(&p.ty_native),
                     ..p.clone()
                 })
                 .collect(),

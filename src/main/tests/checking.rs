@@ -27,6 +27,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
             registry::ParamSig {
                 name: "x".to_string(),
                 ty: types::Type::Int,
+                ty_native: types::Type::Int,
                 variadic: false,
                 has_default: false,
                 by_ref: false,
@@ -34,6 +35,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
             registry::ParamSig {
                 name: "rest".to_string(),
                 ty: types::Type::String,
+                ty_native: types::Type::String,
                 variadic: true,
                 has_default: false,
                 by_ref: false,

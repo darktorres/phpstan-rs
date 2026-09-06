@@ -541,7 +541,8 @@ impl ClassInfo {
             let backing_ty = types::parse_type_string(backing);
             let value_param = ParamSig {
                 name: "value".to_string(),
-                ty: backing_ty,
+                ty: backing_ty.clone(),
+                ty_native: backing_ty,
                 variadic: false,
                 has_default: false,
                 by_ref: false,

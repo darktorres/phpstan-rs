@@ -10,6 +10,21 @@ use crate::types::{self, TemplateParam, Type};
 pub struct ParamSig {
     pub name: String,
     pub ty: Type,
+    // The native, no-docblock-merge type this parameter alone declares -
+    // the exact `ty`-vs-`ty_native` split `FunctionSig::return_type`/
+    // `return_type_native` already has, and for the identical reason
+    // (see that field's own doc comment): real PHP/PHPStan only enforce
+    // method-override Liskov-compatibility at this native level by
+    // default. `check_one_method_override`'s own param-narrowing check
+    // used to compare the merged `ty` instead - real corpus false
+    // positive, the extremely common Rector/PHPStan-`Collector<T>` idiom
+    // of narrowing a parameter via `@param` alone while leaving a wide
+    // native hint (`refactor(Node $node)`, narrowed only via `@param
+    // SpecificNode $node`) was wrongly flagged as an LSP violation real
+    // PHPStan doesn't, by default, check at all. Every other reader of
+    // `ty` correctly wants the merged, docblock-refined type and must
+    // keep using it unchanged.
+    pub ty_native: Type,
     pub variadic: bool,
     pub has_default: bool,
     pub by_ref: bool,
@@ -664,6 +679,20 @@ impl FunctionSig {
                 let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
+                // Mirrors `ty` just above exactly, but with `doc_ty`
+                // forced to `None` - the same "native signature alone,
+                // no docblock refinement" split `return_type_native`
+                // already has. Still passes through `apply_implicit_
+                // nullable_default`, unlike `return_type_native` (which
+                // has no equivalent default-value-implies-nullable rule
+                // to apply) - that transformation reflects a genuinely
+                // native-level PHP fact (an untyped-`?` native hint with
+                // a `null` default is implicitly nullable), independent
+                // of any docblock merge.
+                let ty_native = resolve_type(None, p.type_hint.as_deref());
+                let ty_native = mark_template_params(ty_native, &template_params);
+                let ty_native = resolve_names_in_type(ty_native, ctx);
+                let ty_native = apply_implicit_nullable_default(ty_native, p.default.as_ref());
                 // A real `= value` default always wins; failing that, a
                 // `[optional]` marker on this param's own `@param` tag is
                 // trusted too (see `DocBlock::optional_params` - phpstorm-
@@ -678,6 +707,7 @@ impl FunctionSig {
                 ParamSig {
                     name: p.name.clone(),
                     ty,
+                    ty_native,
                     variadic: p.variadic,
                     has_default,
                     by_ref: p.by_ref,
@@ -776,6 +806,7 @@ impl FunctionSig {
                     // `ClassInfo::merge`'s own convention.
                     name: b.name,
                     ty: union_types(a.ty, b.ty),
+                    ty_native: union_types(a.ty_native, b.ty_native),
                     // Permissive: accepting a variadic-style tail call
                     // when *either* real overload allows it costs nothing
                     // a stricter rule would have caught.

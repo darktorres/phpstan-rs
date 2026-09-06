@@ -1144,7 +1144,23 @@ impl<'a> Checker<'a> {
             // cost of missing the rare genuine `mixed`-narrows-a-real-
             // type case - the same "don't guess wrong on Mixed" tradeoff
             // `is_assignable` already makes elsewhere in this project.
-            if own_param.ty == Type::Mixed || ancestor_param.ty == Type::Mixed {
+            //
+            // Checked at the *native* level only (`ty_native`, ignoring
+            // any `@param` docblock refinement on either side) - real PHP
+            // itself only ever enforces override-compatibility on the
+            // native signature, and by default so does real PHPStan
+            // (`checkPhpDocMethodSignatures` is off unless a project
+            // explicitly opts in - confirmed neither Piwigo's own corpus
+            // config nor this project's own does), the identical
+            // reasoning the return-type check below already applies via
+            // `return_type_native`. Using the merged, docblock-aware `ty`
+            // here wrongly flagged the extremely common Rector/PHPStan-
+            // `Collector<T>` idiom of narrowing a parameter via `@param`
+            // alone while leaving a wide native hint unchanged
+            // (`refactor(Node $node)`, narrowed only via `@param
+            // SpecificNode $node`) as an LSP violation real PHPStan
+            // doesn't, by default, check at all.
+            if own_param.ty_native == Type::Mixed || ancestor_param.ty_native == Type::Mixed {
                 continue;
             }
             // A bare `self`/`static` in either signature means "an
@@ -1162,8 +1178,8 @@ impl<'a> Checker<'a> {
             // actually the exact same type. Resolving both sides first,
             // same as any other pseudo-type use, fixes this without
             // weakening the check for a genuine narrowing.
-            let own_ty = self.resolve_pseudo(&own_param.ty, fqn);
-            let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty, &ancestor_owner);
+            let own_ty = self.resolve_pseudo(&own_param.ty_native, fqn);
+            let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty_native, &ancestor_owner);
             if !self.registry.is_assignable(&ancestor_ty, &own_ty) {
                 self.report(fqn.to_string(), format!(
                         "{fqn}::{method_name}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",

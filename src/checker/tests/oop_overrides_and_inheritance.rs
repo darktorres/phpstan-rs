@@ -559,6 +559,60 @@ fn a_method_narrowing_an_inherited_parameter_type_is_flagged() {
     );
 }
 
+// A top-10-bucket workflow found this exact check compared the merged,
+// docblock-aware parameter type instead of the native-only one - real
+// PHP/PHPStan only enforce override-compatibility at the native level
+// by default (`checkPhpDocMethodSignatures` is off unless a project
+// opts in), the identical distinction this project's own return-type
+// check already makes via `return_type_native`. Real, extremely common
+// corpus shape (Rector's own `RectorInterface::refactor(Node $node)`,
+// narrowed per-rule only via `@param SpecificNode $node`, native type
+// left as the wide `Node` on every single implementation): real
+// PHPStan does not flag this by default.
+#[test]
+fn a_param_narrowed_only_via_docblock_with_an_unchanged_native_type_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Node4 {}
+            class SpecificNode4 extends Node4 {}
+            interface Rule4 { public function refactor(Node4 $node): ?Node4; }
+            class MyRector4 implements Rule4 {
+                /** @param SpecificNode4 $node */
+                public function refactor(Node4 $node): ?Node4 { return $node; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.childParameterType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// The reverse: a genuine *native*-level narrowing must still be
+// flagged even when an `@param` docblock is also present (repeating or
+// further narrowing the same native type) - this fix must not weaken
+// the check for the case it's not about.
+#[test]
+fn a_param_narrowed_at_the_native_level_is_still_flagged_even_with_a_docblock_present() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Node5 {}
+            class SpecificNode5 extends Node5 {}
+            interface Rule5 { public function refactor(Node5 $node): ?Node5; }
+            class MyRector5 implements Rule5 {
+                /** @param SpecificNode5 $node */
+                public function refactor(SpecificNode5 $node): ?Node5 { return $node; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.childParameterType"),
+        "expected a narrowed-parameter diagnostic, got: {d:?}"
+    );
+}
+
 // Real corpus find (Doctrine\Common\Collections\ReadableCollection::
 // exists(Closure $p), overridden identically by AbstractLazyCollection):
 // an ancestor's own `@phpstan-param Closure(TKey, T):bool $p` (the
