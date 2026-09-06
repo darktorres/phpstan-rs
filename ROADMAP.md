@@ -1178,6 +1178,46 @@ pre-fix wording) or a genuine, separately-confirmed upstream bug
 covered under Phase 24's own update above) - zero new false-positive
 classes.
 
+**Update**: the `@phpstan-type` investigation's own named prerequisite -
+a real `define()`/`const`-based global-constant registry - is now done.
+`Registry::global_constants` captures every declaration site's own
+literal-shaped value (`infer_const_type`'s existing scope), keyed the
+way each construct really resolves (`const` namespace-qualified,
+`define()` never namespace-relative, matching real PHP); `Checker::
+global_constant_type` looks it up via `resolve_function_candidates`'s
+same fallback-to-global rule real PHP functions and constants share,
+consulted before `bare_name_literal_type`'s existing `Mixed` default.
+Two declaration-time hazards needed reconciling before this was safe to
+ship, both found via corpus verification: two *conflicting* sites for
+the same name (`squizlabs/php_codesniffer`'s own `PHP_CODESNIFFER_
+VERBOSITY` - genuinely dynamic in production code, hardcoded to a
+literal in a separate test bootstrap) now poison the entry back to
+`Mixed` rather than letting file-indexing order arbitrarily pick one;
+and three real stub declarations that *look* like ordinary constants
+but aren't - `jetbrains/phpstorm-stubs`' own `define('true', ...)`/
+`define('false', ...)`/`define('null', ...)` (real language keywords,
+merely reflection-documented this way) and its sibling `define(
+'__DIR__', '', true)` plus eight other magic constants (parser-resolved,
+never actually backed by the stub's own placeholder value) both needed
+excluding by name entirely, and `define('PHP_INT_MIN', -9223372036854775808)`
+needed excluding too - that literal's own positive magnitude is exactly
+one past `i64::MAX`, so this project's own (real-PHP-matching) integer-
+overflow-to-float rule mistypes it, unlike real PHPStan (which reads
+`PHP_INT_MIN`/`PHP_INT_MAX` via reflection against a live interpreter
+instead of evaluating stub source text at all). Corpus-verified in
+isolation from the still-not-reattempted `@phpstan-type` feature itself:
+38974 -> 38983 (+9), every addition individually traced to a genuine,
+newly-enforceable finding (`Ruleset::processRuleset`'s own unguarded
+`$rulesetPath = Common::realpath($rulesetPath)` reassignment really
+does leak `string|false` into `dirname()`; `nette/utils`'s own `Image::
+isTypeSupported(): bool` genuinely returns raw `IMG_*` int constants;
+jetbrains' own `curl_share_setopt()` docblock says `@param string
+$value` while real callers pass `CURL_LOCK_DATA_*` ints - a vendored-
+stub inaccuracy, not a false positive from this change) - zero new
+false-positive classes. The `@phpstan-type` feature itself remains
+not reattempted; whether this prerequisite alone is now enough to make
+that reattempt net-positive hasn't been re-checked.
+
 **Phase 49 - Call-argument binding generalization (named args, spread,
 by-ref legality) (PARTIAL).** This entry's own status was never
 updated after an earlier pilot batch landed it (commit `76fc86e`) -
