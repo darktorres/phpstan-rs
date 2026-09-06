@@ -14,6 +14,7 @@ mod doctrine_and_stdlib_specials;
 mod duplicates;
 mod enums;
 mod generics_and_templates;
+mod global_constants;
 mod helpers;
 mod internal_usage;
 mod key_value_of;

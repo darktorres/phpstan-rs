@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::collections::{HashSet, VecDeque};
 
-use crate::ast::{ClassKind, Stmt, StmtKind, Visibility};
+use crate::ast::{ClassKind, Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use crate::types::{self, Type};
 
 mod class_info;
@@ -24,6 +24,34 @@ pub(crate) use name_context::{NameContext, resolve_names_in_type};
 pub struct Registry {
     pub classes: FxHashMap<String, ClassInfo>,
     pub functions: FxHashMap<String, FunctionSig>,
+    // A global-constant name -> inferred-value-type table, covering both
+    // real `const NAME = value;` top-level declarations and `define(
+    // 'NAME', value)` calls (jetbrains/phpstorm-stubs' own
+    // `define('T_WHITESPACE', 397);`-style constants, real corpus scale:
+    // hundreds across that one vendored tree alone). Before this, a bare
+    // reference to *any* global constant resolved to plain `Mixed`
+    // unconditionally (no table existed at all - see `checker/expr.rs`'s
+    // own `bare_name_literal_type` doc comment) - real PHPStan resolves
+    // both the same way (`ReflectionConstant`'s own value-based type
+    // inference doesn't distinguish how the constant was declared), so
+    // this table doesn't either. Only a `const`'s own literal-shaped
+    // value (`infer_const_type`'s existing scope: int/float/string/bool/
+    // null/negative-int/string-concat literals) or a `define()`'s own
+    // literal second argument is captured - anything more dynamic
+    // (referencing another constant, a function call, ...) is left
+    // unindexed, the identical "don't know, don't guess" leniency
+    // `infer_const_type` itself already documents. Keyed the same way as
+    // `functions`: a `const` gets its own namespace-qualified name
+    // (`NameContext::declared_name`, real PHP's own resolution for `const`
+    // declarations); a `define()`'s own name is *never* namespace-relative
+    // (real PHP evaluates it as a plain runtime string regardless of the
+    // surrounding `namespace` block), so it's inserted verbatim instead.
+    // Looked up via `NameContext::resolve_function_candidates` at
+    // check-time (`Checker::global_constant_type`) - constants share
+    // exactly the same "check the current namespace first, fall back to
+    // the global namespace for an unqualified reference" resolution rule
+    // real PHP functions do, unlike class names.
+    pub global_constants: FxHashMap<String, Type>,
     // Phase 11 Stage 5's strictness-parameter half (real PHPStan's own
     // 7-10-style progressively-stricter handling, here narrowed to the
     // one real leniency `is_assignable` has purely on its own: an
@@ -619,6 +647,18 @@ impl Registry {
                 // ensures (see `set_namespace`). Inherits whatever
                 // `conditional` its enclosing context already has.
                 StmtKind::Block(inner) => self.index_with_context(inner, ctx, conditional),
+                StmtKind::GlobalConst(consts) => {
+                    for c in consts {
+                        let name = ctx.declared_name(&c.name);
+                        let ty = infer_const_type(&c.value);
+                        register_global_constant(&mut self.global_constants, name, ty);
+                    }
+                }
+                StmtKind::Expression(e) => {
+                    if let Some((name, ty)) = define_call_constant(e) {
+                        register_global_constant(&mut self.global_constants, name, ty);
+                    }
+                }
                 _ => {}
             }
         }
@@ -1403,6 +1443,161 @@ impl Registry {
 /// race. Never letting a replacement *downgrade* a parameter or return
 /// position that the stub already had typed down to `Mixed` closes this
 /// without needing to fully rank two arbitrary types against each other.
+/// Recognizes a top-level `define('NAME', value)` (or `\define(...)`)
+/// call statement, returning the constant's own literal name plus its
+/// inferred value type (`infer_const_type`, the same literal-only scope
+/// a `const` declaration's own value already gets). `None` for anything
+/// else a bare `StmtKind::Expression` could be, a call to some other
+/// function, a spread/named argument (real `define()` never takes
+/// either), a non-literal first argument (a dynamic constant name this
+/// project has no way to know without evaluating it), or - critically -
+/// a name that's really the case-insensitive language keyword `true`/
+/// `false`/`null` rather than an ordinary constant: real corpus shape,
+/// `jetbrains/phpstorm-stubs/Core/Core_d.php`'s own `define('true',
+/// (bool)1, true); define('false', (bool)0, true); define('null', null,
+/// true);` - legitimate reflection-level documentation of PHP's own
+/// pseudo-constants, present in essentially every real corpus. On a real
+/// PHP runtime these three names are parser-level keywords resolved
+/// before `define()` could ever apply to them - the call itself is
+/// syntactically valid but semantically inert, never actually
+/// redefining what the bare token `true`/`false`/`null` means anywhere.
+/// Registering them anyway - with whatever `infer_const_type` makes of
+/// a `(bool)1` cast expression it doesn't recognize, plain `Mixed` -
+/// would let a *global* lookup miss (`Checker::global_constant_type`
+/// returning `Some(Mixed)`) silently pre-empt `bare_name_literal_type`'s
+/// own already-correct handling of a fully-qualified `\false`/`\true`/
+/// `\null` reference (see that function's own doc comment) for every
+/// file in the corpus, not just this stub's own - a real, corpus-wide
+/// regression caught before shipping: every `!== \false`-style
+/// narrowing idiom (extremely common, e.g. `squizlabs/php_codesniffer`'s
+/// own `while (($x = $file->findNext(...)) !== \false)`) silently
+/// stopped narrowing away `false` at all once this stub was indexed.
+fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
+    let ExprKind::Call(callee, args) = &e.kind else {
+        return None;
+    };
+    let ExprKind::Name(name) = &callee.kind else {
+        return None;
+    };
+    if !name
+        .rsplit('\\')
+        .next()
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("define")
+    {
+        return None;
+    }
+    if args.len() < 2 || args.iter().any(|a| a.spread || a.name.is_some()) {
+        return None;
+    }
+    let ExprKind::Literal(Literal::String(const_name)) = &args[0].value.kind else {
+        return None;
+    };
+    if ["true", "false", "null"]
+        .iter()
+        .any(|kw| const_name.eq_ignore_ascii_case(kw))
+    {
+        return None;
+    }
+    // `jetbrains/phpstorm-stubs/standard/basic.php`'s own `define('__DIR__',
+    // '', true); define('__LINE__', 0, true); ...` (and identically for
+    // `__FILE__`/`__CLASS__`/`__FUNCTION__`/`__METHOD__`/`__TRAIT__`/
+    // `__NAMESPACE__`/`__PROPERTY__`) - the exact same class of problem
+    // the `true`/`false`/`null` exclusion above closes, for a different
+    // reason: these nine names are real PHP *magic constants*, resolved
+    // by the parser itself from the surrounding source location, never
+    // actually backed by a real `define()`-registered value at all - the
+    // stub's own placeholder value (an empty string, or `0` for
+    // `__LINE__`) exists purely so the declaration type-checks, and was
+    // never meant to be read literally. Registering `__DIR__` as
+    // `StringLiteral("")` broke every real call passing it onward (real
+    // corpus regression caught before shipping: `ExcludeList::
+    // addDirectory(__DIR__)`, `@param non-empty-string` on the receiving
+    // end, flagged as `''` given). This project has no dedicated magic-
+    // constant `Expr` kind of its own (a bare `__DIR__`/`__LINE__`/...
+    // reference parses as an ordinary `ExprKind::Name`, already
+    // `Type::Mixed` via `bare_name_literal_type`'s own default arm) -
+    // excluding them here just protects that existing, already-correct
+    // "don't know" behavior from being overwritten by this stub's own
+    // placeholder.
+    if [
+        "__DIR__",
+        "__FILE__",
+        "__LINE__",
+        "__CLASS__",
+        "__FUNCTION__",
+        "__METHOD__",
+        "__TRAIT__",
+        "__NAMESPACE__",
+        "__PROPERTY__",
+    ]
+    .contains(&const_name.as_str())
+    {
+        return None;
+    }
+    // `jetbrains/phpstorm-stubs/Core/Core_d.php`'s own `define('PHP_INT_MIN',
+    // -9223372036854775808);` - real PHPStan never evaluates this source
+    // text at all (it reads `PHP_INT_MIN`/`PHP_INT_MAX` via reflection
+    // against the real, already-running PHP interpreter it needs anyway),
+    // but this project has no such interpreter and would otherwise take
+    // this literal at face value - and `9223372036854775808` (the
+    // positive magnitude *before* the unary minus applies) is exactly
+    // one past `i64::MAX`, so the lexer correctly represents it as a
+    // `Literal::Float` the same way real PHP's own literal-overflow rule
+    // would for this exact source text (confirmed: `var_dump(-9223372036854775808)`
+    // truly does print a float, not `PHP_INT_MIN`'s real int value - PHP's
+    // own C-level constant is never round-tripped through this decimal
+    // text at runtime). `infer_const_type`'s `Neg` arm then correctly
+    // types the whole expression `Type::Float`, silently breaking every
+    // real `random_int(PHP_INT_MIN, PHP_INT_MAX)`-shaped call (a common,
+    // real corpus idiom) the moment this table stopped being uniformly
+    // `Mixed`. `PHP_INT_MAX` itself needs no equivalent exclusion -
+    // `9223372036854775807` fits exactly, no `Neg`/overflow involved.
+    if const_name == "PHP_INT_MIN" {
+        return None;
+    }
+    Some((const_name.clone(), infer_const_type(&args[1].value)))
+}
+
+/// Records one `const`/`define()` declaration site for `name`, reconciling
+/// it against anything already recorded for the same name rather than
+/// letting whichever site happened to index first win unconditionally.
+/// Real corpus shape this closes (`squizlabs/php_codesniffer`):
+/// `Runner.php` does `define('PHP_CODESNIFFER_VERBOSITY',
+/// $this->config->verbosity)` (a genuinely dynamic, config-driven value -
+/// `infer_const_type` returns `Mixed`, this project's own "don't know"
+/// signal) while a separate `tests/bootstrap.php` does `define(
+/// 'PHP_CODESNIFFER_VERBOSITY', 0)` for test isolation - an entirely
+/// unrelated, narrower value that has nothing to do with the constant's
+/// real production meaning. A plain first-wins insert let file-indexing
+/// order alone decide which of the two `Registry` believed - if the
+/// literal `0` won, every real `PHP_CODESNIFFER_VERBOSITY > 1` comparison
+/// elsewhere in the corpus collapsed to a compile-time-false constant
+/// once this feature existed, marking an otherwise-live `if` branch
+/// unreachable and corrupting that branch's own local-variable merge for
+/// everything after it (found via a real corpus regression: `Ruleset::
+/// expandRulesetReference`'s own `$ref` reassignment losing its narrowed
+/// type this way, several call sites downstream). Any two declarations
+/// that don't perfectly agree - including a *first* declaration that's
+/// itself unknowable (`Mixed`) - poison the entry to `Mixed` instead,
+/// the same "don't guess wrong" leniency every other real ambiguity in
+/// this registry already resolves in favor of no information over wrong
+/// information. Once poisoned, a later, more literal-looking declaration
+/// can never un-poison it back to a specific type - the true value is
+/// still just as undetermined regardless of which site happens to run at
+/// this constant's real, load-order-dependent definition time.
+fn register_global_constant(map: &mut FxHashMap<String, Type>, name: String, ty: Type) {
+    match map.get(&name) {
+        None => {
+            map.insert(name, ty);
+        }
+        Some(existing) if *existing == ty && ty != Type::Mixed => {}
+        Some(_) => {
+            map.insert(name, Type::Mixed);
+        }
+    }
+}
+
 fn conditional_declaration_may_replace_stub(new_sig: &FunctionSig, existing: &FunctionSig) -> bool {
     if new_sig.params.len() != existing.params.len() {
         return false;
