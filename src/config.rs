@@ -18,6 +18,10 @@
 //! scan_paths = ["vendor/some-manual-extra"]
 //! no_composer = false
 //! php_version = "8.1"
+//!
+//! [[ignore_errors]]
+//! identifier = "missingType.iterableValue"
+//! path = "_analysis/phpstan-latte/*"
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -61,6 +65,14 @@ pub struct Config {
     /// `main.rs`, the same place `baseline`/`scan_paths` are resolved
     /// against the config file's own directory.
     pub php_version: Option<String>,
+    /// A hand-mirrored subset of real PHPStan's own `ignoreErrors:` -
+    /// this project has no NEON parser and one isn't otherwise justified
+    /// (see `baseline.rs`'s own identical judgment for a related
+    /// mechanism), so a project's real `phpstan.neon` config is manually
+    /// re-typed here, the same way `paths`/`scan_paths` already are.
+    /// See `ignore_errors::IgnoreErrorEntry`'s own doc comment for the
+    /// exact field semantics.
+    pub ignore_errors: Option<Vec<crate::ignore_errors::IgnoreErrorEntry>>,
 }
 
 impl Config {

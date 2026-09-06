@@ -14,6 +14,7 @@ pub mod config;
 pub mod deps;
 pub mod docblock;
 pub mod ignore_comments;
+pub mod ignore_errors;
 pub mod lexer;
 pub mod lsp;
 pub mod output;

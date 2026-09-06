@@ -9,8 +9,8 @@ use lexer::Lexer;
 use output::OutputFormat;
 use parser::Parser;
 use phpstan_rs::{
-    baseline, checker, composer, config, lexer, lsp, output, parser, php_stubs, php_version,
-    project, registry,
+    baseline, checker, composer, config, ignore_errors, lexer, lsp, output, parser, php_stubs,
+    php_version, project, registry,
 };
 use registry::{FunctionSig, Registry};
 
@@ -318,6 +318,7 @@ fn run_check_project(
     php_version: Option<php_version::PhpVersion>,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
+    ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
     phpstan_api_check_enabled: bool,
     format: OutputFormat,
 ) {
@@ -385,6 +386,7 @@ fn run_check_project(
         .map(|path| (path.clone(), project.check_file(path)))
         .collect();
     let mut results = apply_level_filter(results, level);
+    ignore_errors::filter(&mut results, ignore_error_entries);
 
     if let Some(generate_baseline_path) = generate_baseline_path {
         match baseline::generate(generate_baseline_path, &results) {
@@ -650,6 +652,7 @@ fn main() {
                 None => None,
             };
             let baseline = baseline.or(config.baseline.map(resolve_against_config));
+            let ignore_error_entries = config.ignore_errors.unwrap_or_default();
 
             let mut scan_dirs = if !scan_dirs.is_empty() {
                 scan_dirs
@@ -692,6 +695,7 @@ fn main() {
                 php_version,
                 generate_baseline.as_deref(),
                 baseline.as_deref(),
+                &ignore_error_entries,
                 phpstan_api_check_enabled,
                 format.unwrap_or_default(),
             )

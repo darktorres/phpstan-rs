@@ -702,6 +702,7 @@ dependencies = [
  "imbl",
  "lsp-server",
  "lsp-types",
+ "regex",
  "rustc-hash",
  "serde",
  "serde_json",
