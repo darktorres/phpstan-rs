@@ -170,14 +170,30 @@ impl<'a> Checker<'a> {
                             3,
                             "return.never",
                         );
-                    } else if expected == Type::Void {
+                    } else if expected == Type::Void && actual != Type::Void {
                         // Phase 61: same idea, one position over - a
                         // `void` function returning an actual value is
                         // real PHPStan's own dedicated `return.void`,
                         // not the generic mismatch path (`void` isn't a
                         // "wrong type" the way e.g. `string` vs `int`
                         // is - it's "no value was ever supposed to come
-                        // back").
+                        // back"). `actual != Type::Void` is a real,
+                        // necessary exception, not a defensive
+                        // afterthought: `return anotherVoidFn();`
+                        // delegating to another void-returning call is
+                        // legal, common PHP (real PHPStan doesn't flag
+                        // it either - a `void` function returning
+                        // *nothing new*, just handing back void-ness
+                        // itself, isn't "returning a value" at all).
+                        // Without this, every such delegation reported
+                        // the nonsensical "expected void, got void" -
+                        // a real corpus false positive this project's
+                        // own registry fix for conditional-function-
+                        // declaration arity tiebreaking (a top-10-bucket
+                        // scoping round) unmasked by finally resolving
+                        // `\RectorPrefix202608\trigger_deprecation(...)`
+                        // to its own real, correctly-`void`-typed
+                        // signature instead of leaving it unresolved.
                         self.report(
                             label.to_string(),
                             format!("return type mismatch: expected void, got {actual}"),

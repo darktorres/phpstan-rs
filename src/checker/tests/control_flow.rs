@@ -987,6 +987,27 @@ fn a_void_function_returning_a_value_gets_return_void() {
     assert_eq!(d[0].identifier, "return.void", "got: {d:?}");
 }
 
+// `return anotherVoidFn();` delegating to another void-returning call is
+// legal, common PHP - real PHPStan doesn't flag it either, since it's
+// not "returning a value" at all, just handing back void-ness itself.
+// Real corpus false positive this exact idiom used to hit ("expected
+// void, got void"): `RectorPrefix202608\trigger_deprecation`-style
+// `function shim() { return \Prefix\shim(...func_get_args()); }`
+// forwarding wrappers, once the delegate's own signature correctly
+// resolves to `void`.
+#[test]
+fn a_void_function_delegating_to_another_void_function_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function inner(): void {}
+            function outer(): void {
+                return inner();
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_void_function_with_a_bare_return_is_not_flagged() {
     let d = diagnostics_for(
