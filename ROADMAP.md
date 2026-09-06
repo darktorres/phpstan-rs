@@ -1927,6 +1927,35 @@ collapses both a bare `callable` and a signature-carrying
 time, so there's no way to tell them apart post-parse without Phase
 53's still-open structural `Callable`/`Closure` type first).
 
+**Update**: `missingType.iterableValue` had the identical explicit-vs-
+implicit-`mixed` gap this phase's own top-level `mixed` check already
+solves, but one level down - an iterable's own *value* type of `Mixed`
+was always treated as "missing", whether the source wrote nothing at
+all or explicitly opted into `mixed` (`array<string, mixed>`, a common,
+deliberate idiom for "don't nag about this array's element type").
+Real PHPStan's own `getIterableTypesWithMissingValueTypehint` guards
+this with `!$iterableValue->isExplicitMixed()` (confirmed directly
+against `vendor/phpstan-src/src/Rules/MissingTypehintCheck.php`).
+Recovered the same way the top-level check already does - straight
+from the original source text, since `Type` has no room to carry the
+bit through parsing - but scoped per declaration rather than per
+nested position (`Type::Mixed` alone can't tell "the source's `mixed`
+was written right here" from "somewhere else in this same type"): if
+a declaration's own native hint or PHPDoc type text mentions the word
+`mixed` anywhere, every `Mixed`-valued finding within that one
+declaration's type is suppressed, a small, deliberate over-suppression
+that only ever trades a new false positive for a rare false negative
+(a bare array member sharing a union with an explicit-`mixed` one) -
+matching this whole checker's own stated priority. Corpus-verified:
+43356 -> 38974 (-4382), all `missingType.iterableValue`, zero new
+findings - larger than a naive grep for `array<string, mixed>`-shaped
+message text suggested, since a key type that normalizes to the
+default (`array-key`, `int|string`, ...) displays as bare `"array"`
+even when the value type was explicitly `mixed`, confirmed by hand
+against the larger removed groups (`array<array-key, mixed>`,
+`array<int|string, mixed>`, `array<mixed>`, `iterable<mixed, mixed>`,
+`list<mixed>`).
+
 **Phase 59 - Unused-symbol detection subsystem (DONE).** This entry's
 own status was never updated after an earlier pilot batch landed it
 (commit `10a2fb7`) - phpstan-rs used to have no dead-code/unused-
