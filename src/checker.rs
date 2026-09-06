@@ -458,6 +458,7 @@ pub(crate) use control_flow::{
     body_contains_yield, collect_exit_point_statements, exit_point_description,
     expr_contains_yield, is_truthy_literal, merge_scopes, type_allows_generator_return,
 };
+pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
 pub(crate) use missing_typehint::has_explicit_mixed_nested_somewhere;
 pub(crate) use throws::body_contains_explicit_throw;
@@ -607,6 +608,11 @@ impl<'a> Checker<'a> {
         // plain, class-shaped `use Foo;` is deliberately NOT
         // existence-checked here.
         self.check_use_function_imports(program);
+        // Phase 63: `UsedNamesRule`'s own case-insensitive
+        // declaration-vs-import collision check - a whole-file,
+        // position-independent scan for the identical reason as the
+        // other checks in this block.
+        self.check_used_names(program);
         // Phase 59: see `rebind_target_classes`'s own doc comment - built
         // once per file, ahead of `check_unused_private_members`'s own
         // per-class use below.
@@ -817,6 +823,119 @@ impl<'a> Checker<'a> {
                         "function.notFound",
                     );
                 }
+            }
+        }
+    }
+
+    /// Phase 63 follow-up, `UsedNamesRule`: a same-file, case-insensitive
+    /// collision between a class-like declaration's own name and a
+    /// `use`-imported (class-shaped only - `use function`/`use const`
+    /// are exempt, matching real PHPStan's own `shouldBeIgnored`) alias,
+    /// in either direction - `use Foo\Bar; class Bar {}` and `class Bar
+    /// {} use Foo\Bar;` are both real, unconditional PHP fatal errors
+    /// ("Cannot declare class Bar because the name is already in use"/
+    /// "Cannot use Foo\Bar as Bar because the name is already in use"),
+    /// confirmed directly via `php -l`. A single left-to-right pass over
+    /// `program`'s own top-level statements, mirroring `check_program`'s
+    /// own identical positional `namespace`-tracking walk exactly (a
+    /// `use`/class-like declaration is only ever legal at file top
+    /// level, and this project's own parser already flattens both real
+    /// PHP `namespace` forms - braced and semicolon - into one flat
+    /// statement list, so there's no separate nested-block case to
+    /// handle here) - `used_names` is keyed by the lowercased namespace
+    /// active at each point, matching real PHPStan's own per-namespace
+    /// scoping (and real PHP's: two same-named classes in two different
+    /// namespaces never collide).
+    fn check_used_names(&mut self, program: &[Stmt]) {
+        // Original-case (for display in a message) and lowercased (the
+        // real map key, since PHP namespace/name comparison here is
+        // case-insensitive) kept side by side.
+        let mut current_namespace = String::new();
+        let mut current_namespace_lower = String::new();
+        let mut used_names: HashMap<String, HashSet<String>> = HashMap::new();
+        for stmt in program {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => {
+                    current_namespace = name.clone();
+                    current_namespace_lower = name.to_ascii_lowercase();
+                }
+                StmtKind::Use(imports) => {
+                    for import in imports {
+                        if import.kind != UseKind::Class {
+                            continue;
+                        }
+                        let path = import.path.trim_start_matches('\\');
+                        let bare = path.rsplit('\\').next().unwrap_or(path);
+                        let alias = import.alias.as_deref().unwrap_or(bare);
+                        let scope = used_names
+                            .entry(current_namespace_lower.clone())
+                            .or_default();
+                        if !scope.insert(alias.to_ascii_lowercase()) {
+                            self.report_builder(
+                                DiagnosticBuilder::new(
+                                    "<main>".to_string(),
+                                    format!(
+                                        "Cannot use {path} as {alias} because the name is already in use."
+                                    ),
+                                    stmt.span,
+                                    0,
+                                    "use.nameInUse".to_string(),
+                                )
+                                .non_ignorable(),
+                            );
+                        }
+                    }
+                }
+                StmtKind::ClassDecl(c) => {
+                    let kind = class_kind_identifier(&c.kind);
+                    let scope = used_names
+                        .entry(current_namespace_lower.clone())
+                        .or_default();
+                    if !scope.insert(c.name.to_ascii_lowercase()) {
+                        let qualified = if current_namespace.is_empty() {
+                            c.name.clone()
+                        } else {
+                            format!("{current_namespace}\\{}", c.name)
+                        };
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                "<main>".to_string(),
+                                format!(
+                                    "Cannot declare {kind} {qualified} because the name is already in use."
+                                ),
+                                c.span,
+                                0,
+                                format!("{kind}.nameInUse"),
+                            )
+                            .non_ignorable(),
+                        );
+                    }
+                }
+                StmtKind::EnumDecl(e) => {
+                    let scope = used_names
+                        .entry(current_namespace_lower.clone())
+                        .or_default();
+                    if !scope.insert(e.name.to_ascii_lowercase()) {
+                        let qualified = if current_namespace.is_empty() {
+                            e.name.clone()
+                        } else {
+                            format!("{current_namespace}\\{}", e.name)
+                        };
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                "<main>".to_string(),
+                                format!(
+                                    "Cannot declare enum {qualified} because the name is already in use."
+                                ),
+                                e.span,
+                                0,
+                                "enum.nameInUse".to_string(),
+                            )
+                            .non_ignorable(),
+                        );
+                    }
+                }
+                _ => {}
             }
         }
     }

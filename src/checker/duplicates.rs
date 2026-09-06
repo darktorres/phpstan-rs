@@ -174,7 +174,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn class_kind_identifier(kind: &ClassKind) -> &'static str {
+pub(crate) fn class_kind_identifier(kind: &ClassKind) -> &'static str {
     match kind {
         ClassKind::Class => "class",
         ClassKind::Interface => "interface",

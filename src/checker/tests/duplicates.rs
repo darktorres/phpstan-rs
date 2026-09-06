@@ -339,3 +339,140 @@ fn two_properties_of_the_exact_same_shape_are_still_flagged() {
         "got: {d:?}"
     );
 }
+
+// `UsedNamesRule`: a same-file, case-insensitive collision between a
+// class-like declaration's own name and a `use`-imported alias.
+
+#[test]
+fn a_class_declared_with_the_same_name_as_a_use_import_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            use Foo\Bar;
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameInUse"
+            && x.message == "Cannot declare class Bar because the name is already in use."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn the_collision_check_is_case_insensitive() {
+    let d = diagnostics_for(
+        r#"<?php
+            use Foo\Bar;
+            class bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameInUse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_unrelated_class_and_import_are_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            use Foo\Bar;
+            class Baz {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.nameInUse"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_interface_declared_with_the_same_name_as_an_aliased_import_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            use Foo\Qux as Iface;
+            interface Iface {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "interface.nameInUse"
+            && x.message == "Cannot declare interface Iface because the name is already in use."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_declared_with_the_same_name_as_a_use_import_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            use Foo\Bar;
+            enum Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.nameInUse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn two_use_imports_resolving_to_the_same_alias_are_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            use Foo\Bar;
+            use Baz\Bar;
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "use.nameInUse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_function_use_import_is_exempt_from_the_class_collision_check() {
+    // `use function`/`use const` imports live in their own PHP
+    // namespaces - real PHPStan's own `shouldBeIgnored` exempts them,
+    // matching real PHP's own name-resolution rules.
+    let d = diagnostics_for(
+        r#"<?php
+            use function Foo\Bar;
+            class Bar {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.nameInUse"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn the_qualified_name_in_the_message_keeps_the_namespaces_own_declared_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Piwigo\Foo;
+            use Piwigo\Foo\Bar;
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameInUse"
+            && x.message
+                == "Cannot declare class Piwigo\\Foo\\Bar because the name is already in use."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_group_use_members_bare_name_is_compared_against_a_declaration() {
+    let d = diagnostics_for(
+        r#"<?php
+            use Foo\{Bar, Baz};
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameInUse"),
+        "got: {d:?}"
+    );
+}
