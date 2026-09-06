@@ -2388,7 +2388,8 @@ class-member check's simpler, single-body scope needed. (Whole-
 item - see Phase 83.)
 
 **Phase 64 - Override-compatibility check rewrite (methods +
-properties) (PARTIAL - method half only).** Extended
+properties) (PARTIAL - property hooks and native-type-variance
+remaining; see this entry's own "Still open" below).** Extended
 `check_method_overrides` (`src/checker/oop.rs`) with three real,
 unconditional PHP fatal errors it previously missed entirely, all
 confirmed directly against real `php -l`: narrowing a method's own
