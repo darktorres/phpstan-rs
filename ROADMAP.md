@@ -3657,6 +3657,25 @@ that doesn't reproduce in an isolated repro, lives in vendored stub
 code rather than Piwigo's own, and wasn't chased further given how
 narrow it is.
 
+**Phase 89 - `array_multisort()`'s sort-flag constants wrongly
+flagged as by-ref (DONE).** First of the Cause-3 backlog's small,
+isolated Tier 1 clusters. phpstorm-stubs' own real declaration marks
+`array_multisort`'s entire variadic tail (`&...$rest`) by-reference
+uniformly, matching real PHP's own `arg_info` - but real PHP itself
+lets a `SORT_*` constant occupy one of those same positions,
+interleaved with the genuinely by-ref additional arrays being sorted,
+looser than any other by-ref parameter in the language. Real PHPStan's
+own bundled `functionMap.php` resolves this by not treating any of
+this function's parameters as by-ref-checked at all (confirmed
+directly: its entry has no `&`-prefixed parameter names, the
+convention `SignatureMapParser` uses to mark one) -
+`php_stubs::patch_array_multisort_by_ref` mirrors that exact choice as
+a narrow post-generation patch, since this project has no general
+hand-curated stub-overlay mechanism any more (removed as dead code
+before Phase 8). Corpus-verified: Piwigo-scoped `check-project` drops
+from 153 to 151, exactly `UserService.php`'s two false positives and
+nothing else.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
