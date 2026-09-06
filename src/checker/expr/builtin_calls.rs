@@ -357,7 +357,7 @@ impl<'a> Checker<'a> {
                         // real `list<TagId>` this way.
                         if let Some(class_name) = is_instanceof_filter_callback(&args[1].value) {
                             let target = self.resolve_name_expr(class_name);
-                            return narrow_array_element_type_to(stripped, &target);
+                            return narrow_array_element_type_to(self.registry, stripped, &target);
                         }
                     } else {
                         // No callback at all - real PHP's own default
@@ -1519,9 +1519,11 @@ fn contains_flag_name(e: &Expr, target: &str) -> bool {
 /// `array_filter`'s own `instanceof`-filter callback (recognized by
 /// `is_instanceof_filter_callback` above) narrows the retained element
 /// type to `target` specifically - verified via dumpType().
-fn narrow_array_element_type_to(ty: Type, target: &Type) -> Type {
+fn narrow_array_element_type_to(registry: &Registry, ty: Type, target: &Type) -> Type {
     match ty {
-        Type::Array(key, elem) => Type::Array(key, Box::new(narrow_type_to(&elem, target))),
+        Type::Array(key, elem) => {
+            Type::Array(key, Box::new(narrow_type_to(registry, &elem, target)))
+        }
         other => other,
     }
 }

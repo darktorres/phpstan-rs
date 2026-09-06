@@ -152,6 +152,18 @@ pub struct DocBlock {
     pub assert_if_true: Vec<AssertTag>,
     pub assert_if_false: Vec<AssertTag>,
     pub assert: Vec<AssertTag>,
+    // `@phpstan-type Name TypeExpr` - a local type alias, conventionally
+    // declared on a class's own docblock and referenced bare (by `Name`
+    // alone) from that same class's `@param`/`@return`/`@var` tags (real
+    // corpus shape: `justinrainbow/json-schema`'s own `ErrorBag`,
+    // `@phpstan-type Error array{...}` then `@phpstan-type ErrorList
+    // list<Error>`). Kept as raw text here, same "parse now, resolve
+    // later" split every other type-bearing tag has - resolved into a
+    // real `Type` (and substituted into every member that references it)
+    // at `ClassInfo::from_decl` time, where name resolution is actually
+    // available. Cross-class `@phpstan-import-type Name from Class` is a
+    // distinct, separate tag this project doesn't parse.
+    pub type_aliases: HashMap<String, String>,
 }
 
 /// One parsed `@phpstan-assert`-family tag - see `DocBlock::assert_if_true`'s
@@ -402,6 +414,27 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     block.contravariant_templates.insert(name);
                 }
             }
+            "type" => {
+                let mut parts = rest.splitn(2, char::is_whitespace);
+                let name = parts.next().unwrap_or("");
+                let remainder = parts.next().unwrap_or("").trim_start();
+                // A real, common variant of this tag's own syntax writes
+                // an `=` between the alias name and its type expression
+                // (real corpus shape: `doctrine/orm`'s own `@phpstan-type
+                // ConcreteAssociationMapping = OneToOneOwningSideMapping|
+                // ...`) - without stripping it, `take_type_token` stopped
+                // at the first whitespace and took the bare `=` itself as
+                // the whole "type", later resolved into a bogus namespace-
+                // qualified class name ending in `\=`.
+                let remainder = remainder
+                    .strip_prefix('=')
+                    .unwrap_or(remainder)
+                    .trim_start();
+                let ty = take_type_token(remainder);
+                if !name.is_empty() && !ty.is_empty() {
+                    block.type_aliases.insert(name.to_string(), ty.to_string());
+                }
+            }
             "extends" => {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
@@ -500,11 +533,25 @@ fn parse_template_tag(rest: &str) -> Option<(String, Option<String>, Option<Stri
 /// Takes the leading type expression off `s`, stopping at the first
 /// whitespace that occurs outside any `<>`/`{}`/`()`/`[]` nesting - a plain
 /// `split_whitespace().next()` would wrongly cut an array shape or generic
-/// off at its first internal space (`array{count: int, ...}`).
+/// off at its first internal space (`array{count: int, ...}`). A `'...'`/
+/// `"..."` string-literal segment (a real, legal PHPStan literal-string-
+/// union member, e.g. `' '|'>'|'+'|'~'`) is tracked as one opaque run
+/// too - without this, a space *inside* the quotes (a real corpus shape:
+/// `sabberworm/php-css-parser`'s own `@phpstan-type ValidCombinatorValue
+/// ' '|'>'|'+'|'~'`) was wrongly treated as the token's own end, cutting
+/// the whole type down to a bare, dangling `'`.
 fn take_type_token(s: &str) -> &str {
     let mut depth = 0i32;
+    let mut quote: Option<char> = None;
     for (i, c) in s.char_indices() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
         match c {
+            '\'' | '"' => quote = Some(c),
             '<' | '{' | '(' | '[' => depth += 1,
             '>' | '}' | ')' | ']' => depth -= 1,
             c if c.is_whitespace() && depth == 0 => return &s[..i],

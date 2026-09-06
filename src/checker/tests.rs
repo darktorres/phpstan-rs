@@ -32,6 +32,7 @@ mod preg_and_regex;
 mod string_functions;
 mod symbol_existence;
 mod throws;
+mod type_aliases;
 mod uninitialized;
 mod unused_symbols;
 mod visibility;

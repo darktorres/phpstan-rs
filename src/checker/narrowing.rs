@@ -3,6 +3,7 @@ use crate::checker::{
     Checker, Locals, build_matched_shape, literal_string_key, literal_string_value, union_types,
 };
 use crate::regex_groups;
+use crate::registry::Registry;
 use crate::types::{AccessoryKind, Type, is_subtype};
 
 impl<'a> Checker<'a> {
@@ -68,7 +69,7 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(BinOp::Or, ..) if branch_true => {
                 if let Some((key, target_ty, repr_expr)) = self.or_chain_narrowing_target(cond) {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
-                    locals.insert(key, narrow_type_to(&current, &target_ty));
+                    locals.insert(key, narrow_type_to(self.registry, &current, &target_ty));
                 }
             }
             // A round of Piwigo-corpus bucketing found a real, common
@@ -100,7 +101,7 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(BinOp::And, ..) if !branch_true => {
                 if let Some((key, target_ty, repr_expr)) = self.and_chain_narrowing_target(cond) {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
-                    locals.insert(key, narrow_type_to(&current, &target_ty));
+                    locals.insert(key, narrow_type_to(self.registry, &current, &target_ty));
                 }
             }
             // Deliberately `===`/`!==` only, not `==`/`!=` - a loose
@@ -267,7 +268,7 @@ impl<'a> Checker<'a> {
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         let narrowed = if branch_true {
-                            narrow_type_to(&current, &target_ty)
+                            narrow_type_to(self.registry, &current, &target_ty)
                         } else {
                             narrow_type_excluding(&current, &target_ty)
                         };
@@ -288,7 +289,7 @@ impl<'a> Checker<'a> {
                 {
                     let current = self.current_narrowed_type(&needle.value, &key, locals);
                     let narrowed = if branch_true {
-                        narrow_type_to(&current, &target_ty)
+                        narrow_type_to(self.registry, &current, &target_ty)
                     } else {
                         narrow_type_excluding(&current, &target_ty)
                     };
@@ -378,11 +379,36 @@ impl<'a> Checker<'a> {
             // `hasTestFilesFile(): bool` tagged `@phpstan-assert-if-true
             // !null $this->testFilesFile`) - see `FunctionSig::
             // assert_if_true`'s own doc comment for the full picture.
-            // Scoped to a resolvable `Type::Object` receiver, the same
-            // "don't guess through a Union" leniency every other
-            // receiver-typed check in this project already has.
+            // `recv_class` picks a *representative* member out of a
+            // `Union`/`Intersection` receiver the exact same way
+            // `checker/expr.rs`'s own `MethodCall` arm already does for
+            // ordinary method-call checking - real corpus shape this
+            // fixes: Doctrine ORM's own `AssociationMapping::
+            // isToOneOwningSide(): bool` (`@phpstan-assert-if-true
+            // OneToOneOwningSideMapping|ManyToOneAssociationMapping
+            // $this`), called on a variable typed as the *union* of all
+            // six concrete mapping subclasses - every one of which
+            // inherits the identical method, so any single member
+            // resolves the same `AssertInfo` the others would. Once
+            // resolved, `apply_assert_infos`/`narrow_type_to` already
+            // narrow the receiver's own *full* current type generically,
+            // Union or not - only the lookup itself needed to stop
+            // requiring a bare `Type::Object`.
             ExprKind::MethodCall(recv, method, args, _) => {
-                if let Type::Object(class, _) = self.infer_expr(recv, locals)
+                let recv_ty = self.infer_expr(recv, locals);
+                let class = match &recv_ty {
+                    Type::Object(class, _) => Some(class.clone()),
+                    Type::EnumCase(fqn, _) => Some(fqn.clone()),
+                    Type::Union(members) | Type::Intersection(members) => {
+                        members.iter().find_map(|m| match m {
+                            Type::Object(class, _) => Some(class.clone()),
+                            Type::EnumCase(fqn, _) => Some(fqn.clone()),
+                            _ => None,
+                        })
+                    }
+                    _ => None,
+                };
+                if let Some(class) = class
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                 {
                     let infos = if branch_true {
@@ -609,7 +635,7 @@ impl<'a> Checker<'a> {
         // regardless of whether `target_ty` is a literal or a general
         // type, so only the exclusion branch needs gating here.
         let narrowed = if matches_when_true {
-            narrow_type_to(&current, &target_ty)
+            narrow_type_to(self.registry, &current, &target_ty)
         } else if is_known_single_value(&target_ty) {
             narrow_type_excluding(&current, &target_ty)
         } else {
@@ -687,7 +713,7 @@ impl<'a> Checker<'a> {
                 && let Some(key) = narrowing_key(&arg.value)
             {
                 let current = self.current_narrowed_type(&arg.value, &key, locals);
-                locals.insert(key, narrow_type_to(&current, target));
+                locals.insert(key, narrow_type_to(self.registry, &current, target));
             }
         };
         let narrow_excluding = |locals: &mut Locals, idx: usize, excluded: &Type| {
@@ -764,7 +790,7 @@ impl<'a> Checker<'a> {
             let narrowed = if info.negated {
                 narrow_type_excluding(&current, &info.ty)
             } else {
-                narrow_type_to(&current, &info.ty)
+                narrow_type_to(self.registry, &current, &info.ty)
             };
             locals.insert(key, narrowed);
         }
@@ -1337,12 +1363,26 @@ fn is_object_like(ty: &Type) -> bool {
     }
 }
 
-pub(crate) fn narrow_type_to(original: &Type, target: &Type) -> Type {
+/// `registry` is needed for the `Union` arm's own member filter below -
+/// plain `types::is_subtype` has no class-hierarchy awareness at all
+/// (`types.rs` doesn't depend on `registry.rs`), so it only ever matched
+/// a union member against `target` by exact structural equality. A real
+/// corpus regression this missed: Doctrine ORM's own `@phpstan-assert-
+/// if-true ToOneAssociationMapping $this` (an interface every concrete
+/// mapping class implements only *transitively*, through an intermediate
+/// abstract class) narrowed the full six-member union down to *zero*
+/// matching members, falling through to the `target.clone()` case below
+/// and discarding every member's own additional properties/methods
+/// entirely - `Registry::is_assignable` is the identical hierarchy-aware
+/// check `is_subtype` is documented as a non-hierarchy-aware subset of,
+/// so using it here can only keep strictly more genuinely-compatible
+/// members than before, never fewer.
+pub(crate) fn narrow_type_to(registry: &Registry, original: &Type, target: &Type) -> Type {
     match original {
         Type::Union(members) => {
             let kept: Vec<Type> = members
                 .iter()
-                .filter(|m| is_subtype(m, target))
+                .filter(|m| registry.is_assignable(m, target))
                 .cloned()
                 .collect();
             match kept.len() {
@@ -1364,7 +1404,12 @@ pub(crate) fn narrow_type_to(original: &Type, target: &Type) -> Type {
         // proves nothing new about it - keep it unchanged; only fall
         // back to `target` when it's the narrower side (the literal-
         // narrowing case this fallback exists for, `$x === 'foo'`).
-        _ if is_subtype(original, target) => original.clone(),
+        // Same hierarchy-aware upgrade as the `Union` arm above: a single
+        // concrete class that only transitively implements `target` (an
+        // interface inherited from an ancestor, not declared directly)
+        // must still keep its own, more specific type here rather than
+        // needlessly widening to the bare interface.
+        _ if registry.is_assignable(original, target) => original.clone(),
         _ => target.clone(),
     }
 }

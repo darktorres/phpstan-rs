@@ -9,8 +9,8 @@ mod function_sig;
 mod name_context;
 
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
-pub(crate) use function_sig::infer_const_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
+pub(crate) use function_sig::{infer_const_type, substitute_type_aliases};
 pub(crate) use name_context::{NameContext, resolve_names_in_type};
 
 /// A symbol table built by indexing already-parsed source, standing in for
@@ -506,6 +506,7 @@ impl Registry {
                     let new_sig = FunctionSig::from_decl(
                         f,
                         ctx,
+                        &std::collections::HashMap::new(),
                         &std::collections::HashMap::new(),
                         Visibility::Public,
                     );

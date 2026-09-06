@@ -375,3 +375,36 @@ fn fully_qualified_closure_shape_syntax_also_degrades_to_plain_callable() {
         Type::Callable
     );
 }
+
+// Real corpus shape: PHPUnit's own literal-string union `'->'|'::' `
+// (documenting a real property-access-vs-static-call operator) - a
+// bracket-shaped character *inside* one quoted member (the `>` in
+// `'->'.`) used to be read as a real closing bracket by `split_top_level`,
+// permanently corrupting its own depth counter and swallowing the `|`
+// separator for the rest of the string entirely, mangling the whole
+// thing into the single, nonsensical `Type::StringLiteral("->'|'::")`.
+#[test]
+fn a_quoted_literal_containing_a_bracket_shaped_character_does_not_corrupt_the_union_split() {
+    assert_eq!(
+        parse_type_string("'->'|'::'"),
+        Type::Union(vec![
+            Type::StringLiteral("->".to_string()),
+            Type::StringLiteral("::".to_string()),
+        ])
+    );
+}
+
+#[test]
+fn a_quoted_literal_containing_a_bracket_shaped_character_inside_an_array_shape() {
+    assert_eq!(
+        parse_type_string("array{type?: '->'|'::'}"),
+        Type::ArrayShape(vec![(
+            "type".to_string(),
+            Type::Union(vec![
+                Type::StringLiteral("->".to_string()),
+                Type::StringLiteral("::".to_string()),
+            ]),
+            true,
+        )])
+    );
+}

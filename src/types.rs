@@ -437,12 +437,30 @@ pub fn parse_type_string(raw: &str) -> Type {
 /// `<>`/`{}`/`()`/`[]` nesting. Always returns at least one part, mirroring
 /// `str::split` - callers check `.len() > 1` to know whether a real
 /// top-level separator was found at all.
+///
+/// A `'...'`/`"..."` string-literal segment is tracked as one opaque run,
+/// the exact same fix `docblock.rs`'s own `take_type_token` needed for the
+/// identical reason - without it, a bracket-shaped character *inside* the
+/// quotes (a real corpus shape: PHPUnit's own literal-string union
+/// `'->'|'::' `, documenting a real property-access-vs-static-call
+/// operator) was read as a real closing bracket, permanently decrementing
+/// `depth` below zero and silently swallowing every top-level separator
+/// for the rest of the string - `'->'|'::' ` mangled into the single,
+/// nonsensical literal `Type::StringLiteral("->'|'::")`.
 fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0i32;
     let mut start = 0usize;
+    let mut quote: Option<char> = None;
     for (i, c) in s.char_indices() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
         match c {
+            '\'' | '"' => quote = Some(c),
             '<' | '{' | '(' | '[' => depth += 1,
             '>' | '}' | ')' | ']' => depth -= 1,
             c if c == sep && depth == 0 => {

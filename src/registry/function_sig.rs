@@ -505,6 +505,105 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
 /// occurrence of a given name gets the *same* cloned metadata, since it's
 /// one declaration (`@template T of Shape`) applying everywhere `T` is
 /// written, not a fresh one per site.
+/// Rewrites every `Object(name, _)` in `ty` whose `name` matches a key in
+/// `aliases` into that alias's own (already fully-resolved) `Type` -
+/// `ClassInfo::from_decl`'s own local `@phpstan-type` support. Mirrors
+/// `mark_template_params`'s exact recursive shape (both are a one-time
+/// post-processing walk over an already-parsed `Type`), but must run
+/// strictly *after* `resolve_names_in_type` has already resolved `ty`
+/// itself, with `aliases` keyed by each alias's own *resolved* FQN (the
+/// same name a bare, unqualified reference to it would resolve to) -
+/// substituting first and re-resolving the (already-resolved) result
+/// afterward double-qualifies every name the alias's own value already
+/// carries (a real bug caught during this feature's own first attempt:
+/// `json-schema`'s own unparsed `int-mask-of<...>` pseudo-type tripled
+/// into `JsonSchema\Entity\JsonSchema\Entity\JsonSchema\Entity\int-mask-of`
+/// this way). `aliases` itself needs no equivalent care to avoid
+/// re-resolving *its own* values further - each entry is inserted once,
+/// already fully resolved, and never touched by `resolve_names_in_type`
+/// again after that.
+pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>) -> Type {
+    match ty {
+        Type::Object(name, _) if aliases.contains_key(&name) => aliases[&name].clone(),
+        Type::Object(name, args) => Type::Object(
+            name,
+            args.into_iter()
+                .map(|a| substitute_type_aliases(a, aliases))
+                .collect(),
+        ),
+        Type::Array(key, inner) => Type::Array(
+            Box::new(substitute_type_aliases(*key, aliases)),
+            Box::new(substitute_type_aliases(*inner, aliases)),
+        ),
+        Type::ClassString(inner) => {
+            Type::ClassString(Box::new(substitute_type_aliases(*inner, aliases)))
+        }
+        Type::Union(members) => Type::Union(
+            members
+                .into_iter()
+                .map(|m| substitute_type_aliases(m, aliases))
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .into_iter()
+                .map(|m| substitute_type_aliases(m, aliases))
+                .collect(),
+        ),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, substitute_type_aliases(t, aliases), opt))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+/// Builds a class's own `@phpstan-type` alias table (`Registry::
+/// ClassInfo` doesn't keep a `type_aliases` field of its own - every
+/// member's own `ty` is fully expanded once here, at registry-build
+/// time, unlike a `@template` placeholder, which stays unresolved until
+/// a real call site's own type arguments are known). Each entry is
+/// keyed by the alias's own resolved FQN (`ctx.resolve`, the identical
+/// resolution a bare reference to that same name anywhere else in this
+/// class would go through) mapping to its value, itself run through
+/// `mark_template_params`/`resolve_names_in_type` exactly once (a
+/// generic class's own alias body may reference its `@template`s, e.g.
+/// `@phpstan-type Result array{value: T, error: string|null}`).
+///
+/// A second pass resolves exactly one level of alias-to-alias nesting
+/// (`ErrorList` referencing `Error`, `json-schema`'s own real shape) by
+/// substituting the freshly-built map into each of its own entries -
+/// deeper chains (three or more aliases referencing each other in turn)
+/// aren't attempted; the innermost reference in such a chain would stay
+/// an unresolved `Object` reference to the next alias's own resolved
+/// name, the same "don't know, don't guess further" leniency this
+/// project already accepts elsewhere rather than a full fixed-point
+/// solve for a shape not yet confirmed to occur in practice.
+pub(crate) fn build_type_aliases(
+    class_doc: Option<&DocBlock>,
+    template_params: &HashMap<String, TemplateParam>,
+    ctx: &NameContext,
+) -> HashMap<String, Type> {
+    let Some(class_doc) = class_doc else {
+        return HashMap::new();
+    };
+    let raw: HashMap<String, Type> = class_doc
+        .type_aliases
+        .iter()
+        .map(|(name, ty_text)| {
+            let ty = types::parse_type_string(ty_text);
+            let ty = mark_template_params(ty, template_params);
+            let ty = resolve_names_in_type(ty, ctx);
+            (ctx.resolve(name), ty)
+        })
+        .collect();
+    raw.iter()
+        .map(|(name, ty)| (name.clone(), substitute_type_aliases(ty.clone(), &raw)))
+        .collect()
+}
+
 pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplateParam>) -> Type {
     match ty {
         Type::Object(name, _) if params.contains_key(&name) => {
@@ -653,10 +752,20 @@ impl FunctionSig {
     /// ordinary (nonexistent) class name. This function/method's own
     /// same-named template (rare, but not invalid PHP) wins on a
     /// collision, matching a nested scope shadowing an outer one.
+    // `class_type_aliases` is this method's own declaring class's
+    // `@phpstan-type` table (`ClassInfo::from_decl`'s own `build_type_
+    // aliases`) - empty for a plain top-level function or an enum's own
+    // synthesized method (neither has a class-level docblock these could
+    // meaningfully come from). A method's *own* docblock declaring
+    // further `@phpstan-type`s of its own isn't supported - real
+    // PHPStan allows this too, but every real corpus shape found so far
+    // (`json-schema`'s own `ErrorBag`) declares aliases once, on the
+    // class, referenced from many members - not attempted here.
     pub(crate) fn from_decl(
         f: &FunctionDecl,
         ctx: &NameContext,
         class_templates: &HashMap<String, TemplateParam>,
+        class_type_aliases: &HashMap<String, Type>,
         visibility: Visibility,
     ) -> FunctionSig {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
@@ -678,6 +787,7 @@ impl FunctionSig {
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
+                let ty = substitute_type_aliases(ty, class_type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
                 // Mirrors `ty` just above exactly, but with `doc_ty`
                 // forced to `None` - the same "native signature alone,
@@ -720,6 +830,7 @@ impl FunctionSig {
         let return_type = resolve_type(doc_return, f.return_type.as_deref());
         let return_type = mark_template_params(return_type, &template_params);
         let return_type = resolve_names_in_type(return_type, ctx);
+        let return_type = substitute_type_aliases(return_type, class_type_aliases);
 
         let return_type_native = resolve_type(None, f.return_type.as_deref());
         let return_type_native = mark_template_params(return_type_native, &template_params);

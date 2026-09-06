@@ -1039,7 +1039,26 @@ impl<'a> Checker<'a> {
                 _ => None,
             }
         })?;
-        Some((name, self.resolve_type_hint(Some(&ty_str))))
+        let ty = self.resolve_type_hint(Some(&ty_str));
+        // `resolve_type_hint` alone has no idea this text came from a
+        // docblock rather than a native hint, so it can't tell "Options"
+        // apart from a genuine, unresolvable class reference - a
+        // `@phpstan-type` alias declared on the current class needs the
+        // same expansion here that `ClassInfo::from_decl` already gives
+        // every member's own `@param`/`@return`/`@var` (real corpus
+        // shape: `league/uri-interfaces`'s own `UriString::parse()`,
+        // `/** @var ComponentMap $components */`). Silently a no-op
+        // outside any class, or one with no `@phpstan-type` tags at all.
+        let ty = match &self.current_class {
+            Some(class) => match self.registry.classes.get(class) {
+                Some(info) if !info.type_aliases.is_empty() => {
+                    crate::registry::substitute_type_aliases(ty, &info.type_aliases)
+                }
+                _ => ty,
+            },
+            None => ty,
+        };
+        Some((name, ty))
     }
 }
 

@@ -6,7 +6,8 @@ use crate::ast::{
 use crate::docblock::{self, DocBlock};
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
-    infer_const_type, mark_template_params, resolve_type,
+    build_type_aliases, infer_const_type, mark_template_params, resolve_type,
+    substitute_type_aliases,
 };
 use crate::registry::name_context::{NameContext, resolve_names_in_type};
 use crate::types::{self, TemplateParam, Type};
@@ -175,6 +176,17 @@ pub struct ClassInfo {
     // applies) - empty for a non-enum, an unbacked enum, or a backed enum
     // with any non-literal case value (a case naming a class constant).
     pub enum_case_values: HashMap<String, Type>,
+    // This class's own `@phpstan-type Name TypeExpr` local alias table
+    // (`function_sig::build_type_aliases`), keyed by each alias's own
+    // resolved FQN - already spliced into every member's own `ty` at
+    // `from_decl` time (see `substitute_type_aliases`'s doc comment), but
+    // kept here too for `Checker::inline_var_annotation`'s own separate,
+    // check-time `@var` resolution path, which needs the same table to
+    // expand a local variable annotated `/** @var Name $x */` inside one
+    // of this class's own method bodies (real corpus shape: `league/uri-
+    // interfaces`'s own `UriString::parse()`, `/** @var ComponentMap
+    // $components */`). Empty for a class with no such tags at all.
+    pub type_aliases: HashMap<String, Type>,
 }
 
 impl ClassInfo {
@@ -197,6 +209,13 @@ impl ClassInfo {
             .as_ref()
             .map(|d| build_template_params(d, &class_scope, ctx))
             .unwrap_or_default();
+        // `@phpstan-type Name TypeExpr` local aliases - resolved once,
+        // here, and spliced into every member's own `ty` below (never
+        // `ty_native`, which by definition never reflects a docblock at
+        // all) via `substitute_type_aliases`. See that function's own
+        // doc comment for why this must run *after* `resolve_names_in_
+        // type` on each member's surrounding type, not before.
+        let type_aliases = build_type_aliases(class_doc.as_ref(), &template_params, ctx);
 
         let methods: HashMap<String, FunctionSig> = c
             .methods
@@ -208,6 +227,7 @@ impl ClassInfo {
                         &m.function,
                         ctx,
                         &template_params,
+                        &type_aliases,
                         m.visibility.clone(),
                     ),
                 )
@@ -245,6 +265,7 @@ impl ClassInfo {
                 );
                 let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
+                let ty = substitute_type_aliases(ty, &type_aliases);
                 let set_ty = property_hook_set_type(p, &template_params, ctx);
                 (
                     p.name.clone(),
@@ -280,6 +301,7 @@ impl ClassInfo {
                 let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
+                let ty = substitute_type_aliases(ty, &type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
                 properties.insert(
                     p.name.clone(),
@@ -348,7 +370,8 @@ impl ClassInfo {
                     Some(doc_ty) => {
                         let ty = types::parse_type_string(&doc_ty);
                         let ty = mark_template_params(ty, &template_params);
-                        resolve_names_in_type(ty, ctx)
+                        let ty = resolve_names_in_type(ty, ctx);
+                        substitute_type_aliases(ty, &type_aliases)
                     }
                     None => infer_const_type(&cc.value),
                 };
@@ -464,6 +487,7 @@ impl ClassInfo {
             is_internal,
             deprecated,
             enum_case_values: HashMap::new(),
+            type_aliases,
         }
     }
 
@@ -501,7 +525,13 @@ impl ClassInfo {
             .map(|m| {
                 (
                     m.function.name.clone(),
-                    FunctionSig::from_decl(&m.function, ctx, &HashMap::new(), m.visibility.clone()),
+                    FunctionSig::from_decl(
+                        &m.function,
+                        ctx,
+                        &HashMap::new(),
+                        &HashMap::new(),
+                        m.visibility.clone(),
+                    ),
                 )
             })
             .collect();
@@ -773,6 +803,7 @@ impl ClassInfo {
             is_internal: class_doc.as_ref().is_some_and(|d| d.internal),
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             enum_case_values,
+            type_aliases: HashMap::new(),
         }
     }
 
@@ -796,6 +827,7 @@ impl ClassInfo {
         self.properties.extend(other.properties);
         self.consts.extend(other.consts);
         self.enum_case_values.extend(other.enum_case_values);
+        self.type_aliases.extend(other.type_aliases);
         self.abstract_methods.extend(other.abstract_methods);
         self.final_methods.extend(other.final_methods);
         self.resolved_trait_conflicts
