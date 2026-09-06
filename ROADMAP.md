@@ -3524,6 +3524,35 @@ against the ~20,300-file corpus (combined with a separate `namespace\
 foo()` resolution fix in the same round): `variable.undefined` dropped
 by 96 on its own.
 
+**Phase 86 - `ignoreErrors` config support (DONE).** A real Piwigo
+checkout, verified clean under actual PHPStan at level 10
+(`{"totals":{"errors":0,"file_errors":0}}`), still produced 788
+diagnostics from phpstan-rs against the identical scope - not a
+checker bug for 233 of them, but a missing config feature: Piwigo's
+own `phpstan.neon` `ignoreErrors:` block suppresses exactly that many
+`missingType.iterableValue` diagnostics under
+`_analysis/phpstan-latte/*` (Latte's own compiled-template codegen,
+not hand-written code), and phpstan-rs had no equivalent of
+`ignoreErrors:` at all. New `[[ignore_errors]]` TOML section
+(`src/ignore_errors.rs`), hand-mirrored the same way `paths`/
+`scan_paths` already are (no NEON parser, `src/baseline.rs`'s own
+identical judgment) - `identifier`/`path`(glob)/`message`(regex)/
+`count` fields, AND-combined when more than one is set on an entry,
+`Diagnostic::non_ignorable` exempt exactly like the existing inline
+`@phpstan-ignore-line` suppression. `count` is parsed but not enforced
+yet - most real `ignoreErrors` entries in a real `phpstan.neon` target
+check families phpstan-rs doesn't implement at all (`dba.*`,
+`shipmonk.*`, `cast.useless` in Piwigo's own config), so strict
+"unmatched ignore" enforcement would permanently fail every run for an
+unrelated, already-known gap.
+
+**Corpus impact**: adding the one entry Piwigo's own config actually
+needs (`identifier = "missingType.iterableValue"`, `path =
+"_analysis/phpstan-latte/*"`) to `phpstan-rs.toml` drops `check-project`
+from 788 to exactly 555 diagnostics - the removed 233 lines confirmed
+to be precisely that identifier/path pair and nothing else, zero other
+changes either direction.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
