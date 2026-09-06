@@ -879,7 +879,7 @@ property typed `T` is actually a legitimate covariant-safe position,
 per this document's own "Known limitations" entry) and before the
 `UnsetRule` hooked-property sub-diagnostic can be built.
 
-**Phase 44 - `@phpstan-ignore` inline suppression (PARTIAL).** Only
+**Phase 44 - `@phpstan-ignore` inline suppression (DONE).** Only
 whole-file baseline suppression existed before this phase (Phase 11).
 Real PHPStan's `@phpstan-ignore-line`/`-next-line` are simple line
 markers; bare `@phpstan-ignore` takes a real comma-separated identifier
@@ -909,20 +909,42 @@ already in the corpus (`nunomaduro/collision`, `monolog`,
 previously non-functional noise these packages' own authors had
 already written expecting real PHPStan (or this project) to honor.
 
-Still open: the fuller bare `@phpstan-ignore <identifier list>` form -
-needs real per-identifier matching against a diagnostic's own
-`identifier` (now available, Phase 47), plus real PHPStan's own
-genuinely tricky trailing-vs-standalone-comment placement logic (a
-comment trailing real code on its own line targets that same line; a
-comment standing alone targets the *next* line of real code, skipping
-over blank lines/other comments in between) - deliberately not
-attempted with this phase's own simpler per-physical-line text scan,
-which has no way to tell "trailing" from "standalone" without real
-comment-token/AST-position awareness. The exhaustive audit's `Ignore/`
-category findings (`IgnoreParseErrorRule`) still fold into Phase 56's
-grammar-level PHPDoc parser work instead of here (parse-error recovery
-is a parser concern); this phase's own suppression-matching logic is
-unaffected by that.
+**Update**: the fuller bare `@phpstan-ignore <identifier list>` form
+shipped. New `ignore_comments::ignored_identifiers` matches real
+PHPStan's own `RichParser::parseString` trailing-vs-standalone
+placement rule exactly, once its actual logic was read directly rather
+than guessed at: a comment trailing real code on its own line targets
+that same line; a standalone comment targets the line *immediately*
+after it - real PHPStan's own rule turned out to be simpler than this
+phase's own earlier text assumed, with no forward-skip over blank
+lines/other comments at all (confirmed directly reading its own
+pending-token merge: a gap falls back to the comment's own line, which
+has nothing on it to ever match a diagnostic against - functionally a
+no-op, not a skip-forward). One refinement beyond a literal port: a
+multi-line `/** ... */` doc comment whose closing `*/` sits on its own
+following line (the common `/**\n * @phpstan-ignore ...\n */\n$real;`
+shape) skips past that bare closing line so "standalone" still lands
+on the real code below it. A malformed identifier list drops that
+line's suppression silently rather than reporting a parse error the
+way real PHPStan does - a deliberate, permanent leniency (matching
+`ignore_errors.rs`'s own identical choice for a related mechanism),
+not a gap; "unmatched ignore" count-style enforcement is unimplemented
+for the same reason. Verified byte-for-byte against a real
+`vendor/bin/phpstan` run across six shapes (trailing, standalone,
+multi-line doc comment, multiple identifiers, a parenthesized comment,
+a mismatched identifier). Corpus-verified: zero change on the
+Piwigo-scoped corpus; the full ~20,300-file corpus drops by 32 with
+zero new findings, every removed diagnostic spot-checked against a
+real, pre-existing `@phpstan-ignore` comment already written in
+Doctrine DBAL/Migrations' own vendored source, previously
+non-functional noise - the same verification precedent this phase's
+own original two-marker pass already set.
+
+The exhaustive audit's `Ignore/` category findings
+(`IgnoreParseErrorRule`) still fold into Phase 56's grammar-level
+PHPDoc parser work instead of here (parse-error recovery is a parser
+concern); this phase's own suppression-matching logic is unaffected by
+that.
 
 **Phase 45 - Declared-vs-actual-narrowest-type inference
 (TooWideTypehints) (PLANNED).** No mechanism compares a declared type
