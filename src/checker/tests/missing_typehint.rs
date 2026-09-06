@@ -73,6 +73,76 @@ fn precisely_typed_array_property_is_not_flagged() {
 }
 
 #[test]
+fn array_property_with_an_explicit_mixed_value_type_is_not_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                /** @var array<string, mixed> */
+                public array $items;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_parameter_with_an_explicit_mixed_value_type_is_not_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                /**
+                 * @param array<string, mixed> $options
+                 */
+                public function f(array $options): void {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_return_type_with_an_explicit_mixed_value_type_is_not_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                /**
+                 * @return array<string, mixed>
+                 */
+                public function f(): array { return []; }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn list_with_an_explicit_mixed_value_type_is_not_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                /** @var list<mixed> */
+                public array $items;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_union_member_with_no_explicit_mixed_still_flags_normally() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                /** @var array<string, int>|array $items */
+                public $items;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "missingType.iterableValue");
+}
+
+#[test]
 fn class_constant_with_a_bare_array_doc_type_is_flagged() {
     let d = all_diagnostics_for(
         r#"<?php
