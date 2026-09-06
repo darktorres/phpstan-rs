@@ -556,6 +556,11 @@ impl ClassInfo {
                     Box::new(Type::unknown_array_key()),
                     Box::new(self_ty.clone()),
                 ),
+                // Fully authoritative built-in shapes, not from any real
+                // docblock - `true` so `flatten_phpdoc_inheritance` never
+                // treats a synthesized enum method as an inheritance
+                // candidate.
+                return_has_own_doc: true,
                 no_discard: false,
                 visibility: Visibility::Public,
                 is_internal: false,
@@ -576,6 +581,7 @@ impl ClassInfo {
                 variadic: false,
                 has_default: false,
                 by_ref: false,
+                has_own_doc: true,
             };
             methods.insert(
                 "from".to_string(),
@@ -583,6 +589,7 @@ impl ClassInfo {
                     params: vec![value_param.clone()],
                     return_type: self_ty.clone(),
                     return_type_native: self_ty.clone(),
+                    return_has_own_doc: true,
                     no_discard: false,
                     visibility: Visibility::Public,
                     is_internal: false,
@@ -603,6 +610,7 @@ impl ClassInfo {
                     params: vec![value_param],
                     return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
+                    return_has_own_doc: true,
                     no_discard: false,
                     visibility: Visibility::Public,
                     is_internal: false,

@@ -172,6 +172,7 @@ impl Registry {
         let mut registry = Registry::default();
         registry.index(program);
         registry.flatten_traits();
+        registry.flatten_phpdoc_inheritance();
         registry
     }
 
@@ -308,6 +309,317 @@ impl Registry {
                 let before = info.abstract_methods.len();
                 info.abstract_methods.extend(abstract_from_traits);
                 if info.abstract_methods.len() != before {
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    /// Phase 87: real PHPStan backfills a method's own missing `@param`/
+    /// `@return` from its parent class (first) or first-declared
+    /// implemented interface, whenever the child's own docblock lacks a
+    /// tag for that position *at all* - verified directly against
+    /// `vendor/phpstan-src/src/PhpDoc/ResolvedPhpDocBlock.php`'s own
+    /// `mergeParamTags`/`mergeReturnTags` (`array_key_exists($name,
+    /// $paramTags)` / `$returnTag !== null`), unconditional and
+    /// unrelated to whether the resolved type happens to be `Mixed`.
+    /// Reuses `lookup_ancestor_method_with_owner`'s already-correct
+    /// parent-then-implements, first-hit-wins order - no new ordering
+    /// logic. Runs after `flatten_traits` (so a trait-derived method
+    /// already looks like the class's own), to a fixed point exactly
+    /// like `flatten_traits` itself, for the identical reason: a
+    /// multi-level chain where *each* level textually redeclares the
+    /// method without its own docblock needs more than one pass to fully
+    /// resolve.
+    ///
+    /// Scope, deliberately narrow for this first slice (see ROADMAP.md's
+    /// Phase 87 entry for the full rationale): methods only, no
+    /// properties (real PHP interfaces can't declare them, so the
+    /// existing `lookup_ancestor_property_with_owner`'s parent-only walk
+    /// already covers the one real path); no trait-abstract-method
+    /// fallback; ancestor conflicts aren't reconciled, first-match-wins
+    /// (already this project's behavior, and real PHPStan's too); an
+    /// ancestor's `private` method is never inherited from (a `private`
+    /// method can't be overridden at all, so its own docblock says
+    /// nothing about what an unrelated same-named child method means).
+    #[hotpath::measure]
+    pub(crate) fn flatten_phpdoc_inheritance(&mut self) {
+        let max_iterations = self.classes.len().max(1);
+        for _ in 0..max_iterations {
+            if !self.flatten_phpdoc_inheritance_one_pass() {
+                break;
+            }
+        }
+    }
+
+    /// Whether `ty` mentions a `Type::TemplateParam` anywhere in its tree -
+    /// mirrors `function_sig::mark_template_params`'s own recursive-case
+    /// list (`Object`'s type args, `Array`'s key/value, `ClassString`,
+    /// `Union`/`Intersection`, `ArrayShape`/`ObjectShape` fields).
+    /// `flatten_phpdoc_inheritance_one_pass` uses this to refuse
+    /// backfilling a template-parameterized ancestor type at all: a
+    /// `Type::TemplateParam` is only meaningful within the *ancestor's
+    /// own* `@template` scope, and (per `Type::Object`'s own doc comment)
+    /// this project does not model cross-inheritance template binding
+    /// (`@extends Base<Concrete>` fixing a parent's own type parameter) -
+    /// cloning the raw value onto an unrelated descendant would silently
+    /// keep it bound to the *ancestor's* own (often wider) bound instead.
+    /// Real corpus false positive caught verifying this pass: Doctrine's
+    /// `AbstractClassMetadataFactory implements ClassMetadataFactory`
+    /// (`@template T of ClassMetadata`, `@phpstan-return list<T>` on
+    /// `getAllMetadata()`) backfilling verbatim onto
+    /// `Doctrine\ORM\Mapping\ClassMetadataFactory` (which real PHPStan
+    /// binds `T` to the *concrete* `Doctrine\ORM\Mapping\ClassMetadata`
+    /// via its own `@extends AbstractClassMetadataFactory<ClassMetadata>`)
+    /// left `T` resolved against the *interface* bound instead, silently
+    /// losing `Doctrine\ORM\Mapping\ClassMetadata::getTableName()`.
+    fn type_mentions_template_param(ty: &Type) -> bool {
+        match ty {
+            Type::TemplateParam(_) => true,
+            Type::Object(_, args) => args.iter().any(Registry::type_mentions_template_param),
+            Type::Array(key, inner) => {
+                Registry::type_mentions_template_param(key)
+                    || Registry::type_mentions_template_param(inner)
+            }
+            Type::ClassString(inner) => Registry::type_mentions_template_param(inner),
+            Type::Union(members) | Type::Intersection(members) => {
+                members.iter().any(Registry::type_mentions_template_param)
+            }
+            Type::ArrayShape(fields) | Type::ObjectShape(fields) => fields
+                .iter()
+                .any(|(_, t, _)| Registry::type_mentions_template_param(t)),
+            _ => false,
+        }
+    }
+
+    /// Whether backfilling `ancestor_ty` onto a position whose own native
+    /// hint alone already resolves to `native_ty` is safe: `false` only
+    /// when both sides are a concrete `Type::Object` naming *different*
+    /// classes - PHP's own native hint is authoritative about what a
+    /// position's real static type is (enforced at runtime), so a
+    /// same-family-but-different-class ancestor docblock type can only
+    /// ever be an ancestor-scoped generic that doesn't correctly apply to
+    /// *this* override, never a legitimate narrowing (a real narrowing
+    /// covariant override always keeps the *same* class name, or one the
+    /// child's own native hint should already name more specifically
+    /// itself). Real corpus false positive caught verifying this pass:
+    /// `Doctrine\ORM\EntityManagerInterface::getMetadataFactory()` (no
+    /// own doc, native hint already resolves - via its own `use Doctrine\
+    /// ORM\Mapping\ClassMetadataFactory` - to the concrete ORM factory)
+    /// sits under `Doctrine\Persistence\ObjectManager`'s own `@phpstan-
+    /// return ClassMetadataFactory<ClassMetadata<object>>` (that file's
+    /// own `use` resolves the *unqualified* interface instead) - a real,
+    /// concrete, non-template type on both sides (so neither of the two
+    /// guards above catches it), but backfilling it would still silently
+    /// widen away the already-correct, more specific native class.
+    fn safe_to_backfill_object_type(ancestor_ty: &Type, native_ty: &Type) -> bool {
+        match (ancestor_ty, native_ty) {
+            (Type::Object(a, _), Type::Object(n, _)) => a == n,
+            _ => true,
+        }
+    }
+
+    /// One pass of `flatten_phpdoc_inheritance` - see its own doc comment.
+    /// Returns whether anything was actually changed, so the caller knows
+    /// when a fixed point has been reached.
+    ///
+    /// Gates each backfill on the *ancestor's* own `has_own_doc`/
+    /// `return_has_own_doc` bit, not merely on the ancestor having *a*
+    /// type at all - real PHPStan's own merge only ever pulls from an
+    /// ancestor's own parsed `@param`/`@return` *tag*; an ancestor with
+    /// no tag of its own has nothing to contribute, even though its
+    /// `ty`/`return_type` field is never literally empty (it still holds
+    /// whatever the native hint alone resolved to). Confirmed necessary
+    /// by a real corpus regression caught while implementing this pass:
+    /// `Base14::make(): int` / `Sub14::make(): string`, a genuine
+    /// Liskov-violating override with no docblock anywhere - naively
+    /// backfilling `int` onto `Sub14` from `Base14`'s bare native
+    /// resolution would have both hidden the real override diagnostic
+    /// behind a fabricated docblock type and produced a bogus
+    /// `return.type` mismatch against the still-native-`string` return
+    /// body.
+    ///
+    /// A successful backfill *does* flip `has_own_doc`/
+    /// `return_has_own_doc` to `true` - once resolved, a position counts
+    /// as "documented" (own or inherited) for any *further* descendant's
+    /// own lookup, which is exactly what makes multi-level transitivity
+    /// work one level per pass (an interface only two levels up from a
+    /// concrete class, itself redeclaring the method with no doc of its
+    /// own, only becomes a usable source on the pass *after* it was
+    /// itself backfilled) - and, as a side effect, is what makes a
+    /// resolved position permanently ineligible for re-visiting on a
+    /// later pass, the same never-revisit-a-filled-slot shape
+    /// `flatten_traits_one_pass`'s own `Entry::Vacant` check already has.
+    fn flatten_phpdoc_inheritance_one_pass(&mut self) -> bool {
+        type Backfill = (String, String, Vec<(usize, Type)>, Option<Type>);
+
+        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let mut backfills: Vec<Backfill> = Vec::new();
+
+        for class_name in &class_names {
+            let Some(info) = self.classes.get(class_name) else {
+                continue;
+            };
+            for (method_name, sig) in &info.methods {
+                let needs_param = sig.params.iter().any(|p| !p.has_own_doc);
+                let needs_return = !sig.return_has_own_doc;
+                if !needs_param && !needs_return {
+                    continue;
+                }
+                let Some((owner, ancestor_sig)) =
+                    self.lookup_ancestor_method_with_owner(class_name, method_name)
+                else {
+                    continue;
+                };
+                if ancestor_sig.visibility == Visibility::Private {
+                    continue;
+                }
+                // Real PHPStan's own identical carve-out
+                // (`PhpDocInheritanceResolver::resolvePhpDocForMethod`:
+                // `$parentMethod->getName() !== '__construct' ||
+                // !$parentMethod->getDeclaringClass()->isBuiltin()`) - a
+                // subclass's own `__construct` legitimately takes
+                // completely unrelated parameters from a native/engine
+                // ancestor's own constructor (real PHP doesn't require
+                // constructor signature compatibility at all), so
+                // `RuntimeException`/`Exception`'s own `@param string
+                // $message` must never backfill onto e.g. `final class
+                // ResponseReadyException extends RuntimeException {
+                // public function __construct(private readonly
+                // ResponseInterface $response) {...} }` - a genuine
+                // corpus false positive caught verifying this pass.
+                // `built_in_stub_classes` (populated by
+                // `merge_stub_classes`, phpstorm-stubs' own native/
+                // engine-class declarations) is this project's
+                // equivalent of `ClassReflection::isBuiltin()` (real
+                // PHP's `ReflectionClass::isInternal()`) - true for
+                // `Exception`/`ArrayObject`/... but not for a real
+                // vendored userland base class (Symfony's `Command`,
+                // Doctrine's console commands, ...), which must still
+                // participate in this pass normally.
+                if method_name == "__construct" && self.built_in_stub_classes.contains(&owner) {
+                    continue;
+                }
+                let mut param_fills = Vec::new();
+                if needs_param {
+                    // Real PHP never enforces constructor-signature
+                    // compatibility (arity, order, or names can differ
+                    // freely between a class and its parent), so
+                    // `remapParameterNames`'s usual by-*position*
+                    // correspondence - correct for a real, LSP-bound
+                    // override, where PHP itself guarantees positions
+                    // line up - cannot be trusted for `__construct`.
+                    // Real PHPStan special-cases exactly this
+                    // (`resolveMethodPhpDocFromParentClass`'s own
+                    // `$lowercaseMethodName !== '__construct'` guard
+                    // around building the real positional-name list, vs.
+                    // falling back to the child's own names, which makes
+                    // its later remap a same-name-only match): match by
+                    // parameter *name* instead. Real corpus false
+                    // positive caught verifying this pass: `Doctrine
+                    // Migrations\Tools\Console\Command\DoctrineCommand`'s
+                    // own `__construct(?DependencyFactory
+                    // $dependencyFactory, ?string $name)` has no own
+                    // doc; positional matching against `Symfony\
+                    // Component\Console\Command\Command::__construct(
+                    // ?string $name)` (own `@param string|null $name`)
+                    // would wrongly stamp `string|null` onto position 0
+                    // (`$dependencyFactory`) - name matching correctly
+                    // leaves it alone and still lets the genuinely
+                    // same-named `$name` inherit.
+                    if method_name == "__construct" {
+                        for (i, p) in sig.params.iter().enumerate() {
+                            if p.has_own_doc {
+                                continue;
+                            }
+                            if let Some(ancestor_param) =
+                                ancestor_sig.params.iter().find(|ap| ap.name == p.name)
+                                && ancestor_param.has_own_doc
+                                && ancestor_param.ty != Type::Mixed
+                                && !Registry::type_mentions_template_param(&ancestor_param.ty)
+                                && Registry::safe_to_backfill_object_type(
+                                    &ancestor_param.ty,
+                                    &p.ty_native,
+                                )
+                            {
+                                param_fills.push((i, ancestor_param.ty.clone()));
+                            }
+                        }
+                    } else {
+                        for (i, p) in sig.params.iter().enumerate() {
+                            if p.has_own_doc {
+                                continue;
+                            }
+                            if let Some(ancestor_param) = ancestor_sig.params.get(i)
+                                && ancestor_param.has_own_doc
+                                && ancestor_param.ty != Type::Mixed
+                                && !Registry::type_mentions_template_param(&ancestor_param.ty)
+                                && Registry::safe_to_backfill_object_type(
+                                    &ancestor_param.ty,
+                                    &p.ty_native,
+                                )
+                            {
+                                param_fills.push((i, ancestor_param.ty.clone()));
+                            }
+                        }
+                    }
+                }
+                // Skipping a `Mixed` ancestor tag (both here and in the
+                // param loops above) isn't about `__construct` at all -
+                // real corpus false positive: `Doctrine\DBAL\Types\Type`
+                // (the actual Doctrine base class, not this project's
+                // own `Type` enum) declares `@return mixed` on
+                // `convertToPHPValue()`/`convertToDatabaseValue()` quite
+                // literally (its own value genuinely varies by column
+                // type at that level of abstraction) - inheriting that
+                // onto a concrete subclass overriding it with a real,
+                // specific native return type (`AbstractStringVoType::
+                // convertToPHPValue(): ?StringVo`, no own doc, since the
+                // native hint alone is already fully precise) would
+                // *destroy* real information the child already had
+                // rather than add any (a `mixed` tag can never usefully
+                // narrow anything) - exactly the failure mode real
+                // PHPStan's own type-combining logic (`TypehintHelper::
+                // decideType`, preferring a concrete native type over an
+                // uninformative `mixed` docblock one) never falls into.
+                let return_fill = (needs_return
+                    && ancestor_sig.return_has_own_doc
+                    && ancestor_sig.return_type != Type::Mixed
+                    && !Registry::type_mentions_template_param(&ancestor_sig.return_type)
+                    && Registry::safe_to_backfill_object_type(
+                        &ancestor_sig.return_type,
+                        &sig.return_type_native,
+                    ))
+                .then(|| ancestor_sig.return_type.clone());
+                if !param_fills.is_empty() || return_fill.is_some() {
+                    backfills.push((
+                        class_name.clone(),
+                        method_name.clone(),
+                        param_fills,
+                        return_fill,
+                    ));
+                }
+            }
+        }
+
+        let mut changed = false;
+        for (class_name, method_name, param_fills, return_fill) in backfills {
+            if let Some(sig) = self
+                .classes
+                .get_mut(&class_name)
+                .and_then(|info| info.methods.get_mut(&method_name))
+            {
+                for (i, ty) in param_fills {
+                    if let Some(p) = sig.params.get_mut(i) {
+                        p.ty = ty;
+                        p.has_own_doc = true;
+                        changed = true;
+                    }
+                }
+                if let Some(ty) = return_fill {
+                    sig.return_type = ty;
+                    sig.return_has_own_doc = true;
                     changed = true;
                 }
             }

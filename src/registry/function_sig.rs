@@ -28,6 +28,23 @@ pub struct ParamSig {
     pub variadic: bool,
     pub has_default: bool,
     pub by_ref: bool,
+    // Phase 87 (PHPDoc-inheritance backfill): starts as `true` only when
+    // this parameter's own `@param` tag was present on this
+    // declaration's own docblock (i.e. `from_decl`'s own `doc_ty` was
+    // `Some`) - `false` means `ty` is really just `ty_native` (or a
+    // phpDoc-less default), making this position eligible for
+    // `Registry`'s own `flatten_phpdoc_inheritance` pass to backfill
+    // from an ancestor, mirroring real PHPStan's `ResolvedPhpDocBlock::
+    // mergeOneParentParamTags` (`array_key_exists($name, $paramTags)`).
+    // That pass also *sets* this to `true` once it successfully
+    // backfills `ty` from an ancestor - a position is then "documented"
+    // (own or inherited) for the purposes of any *further* descendant's
+    // own lookup, which is what makes multi-level transitivity resolve
+    // one level per fixed-point pass; see that pass's own doc comment
+    // for why an ancestor's own bit being `false` (nothing real to
+    // inherit, not even from a bare native hint) must gate the merge
+    // rather than the ancestor's `ty` being merely present.
+    pub has_own_doc: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +61,15 @@ pub struct FunctionSig {
     // reader - every other consumer of a function's return type wants
     // the docblock-refined `return_type` above instead.
     pub return_type_native: Type,
+    // Phase 87 (PHPDoc-inheritance backfill): the `ParamSig::has_own_doc`
+    // equivalent for the return position - starts `true` only when this
+    // declaration's own docblock carried an `@return` tag (`from_decl`'s
+    // own `doc_return` was `Some`), mirroring real PHPStan's
+    // `ResolvedPhpDocBlock::mergeOneParentReturnTag`'s own trigger
+    // (`$returnTag !== null`). See `ParamSig::has_own_doc`'s own doc
+    // comment for why `flatten_phpdoc_inheritance` also sets this to
+    // `true` once it backfills `return_type` from an ancestor.
+    pub return_has_own_doc: bool,
     // Phase 37: PHP 8.5's `#[\NoDiscard]` marker attribute - `true` when
     // this declaration carries one, meaning a bare, unused call to it
     // (`foo();` on its own line, return value neither assigned nor
@@ -821,6 +847,7 @@ impl FunctionSig {
                     variadic: p.variadic,
                     has_default,
                     by_ref: p.by_ref,
+                    has_own_doc: doc_ty.is_some(),
                 }
             })
             .collect();
@@ -875,6 +902,7 @@ impl FunctionSig {
             params,
             return_type,
             return_type_native,
+            return_has_own_doc: doc_return.is_some(),
             no_discard,
             visibility,
             is_internal,
@@ -934,6 +962,11 @@ impl FunctionSig {
                     // merged signature only as strict as every real
                     // overload agrees it should be.
                     by_ref: a.by_ref && b.by_ref,
+                    // Permissive, same direction as `has_default` above:
+                    // if either real overload's own docblock already
+                    // documents this position, the merged signature
+                    // shouldn't look like a further-inheritance candidate.
+                    has_own_doc: a.has_own_doc || b.has_own_doc,
                 },
                 // A position present in only one real overload can't be
                 // required in the merged callable either.
@@ -949,6 +982,9 @@ impl FunctionSig {
             params,
             return_type,
             return_type_native,
+            // Same permissive "either overload's own marker wins" as
+            // `no_discard`/`is_internal` below.
+            return_has_own_doc: self.return_has_own_doc || other.return_has_own_doc,
             no_discard,
             // Both real overloads share one declaration (a stub-modeled
             // PHP-version split of the same underlying function/method,

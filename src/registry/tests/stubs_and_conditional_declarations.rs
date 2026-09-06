@@ -227,6 +227,7 @@ fn merge_stubs_does_not_override_user_functions() {
             params: vec![],
             return_type: Type::Bool,
             return_type_native: Type::Bool,
+            return_has_own_doc: true,
             no_discard: false,
             visibility: crate::ast::Visibility::Public,
             is_internal: false,

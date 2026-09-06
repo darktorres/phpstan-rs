@@ -567,6 +567,7 @@ impl<'a> Checker<'a> {
                 .collect(),
             return_type: subst(&sig.return_type),
             return_type_native: subst(&sig.return_type_native),
+            return_has_own_doc: sig.return_has_own_doc,
             no_discard: sig.no_discard,
             visibility: sig.visibility.clone(),
             is_internal: sig.is_internal,

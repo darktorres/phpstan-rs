@@ -191,6 +191,7 @@ impl Project {
     #[hotpath::measure]
     pub fn finish_loading(&mut self) {
         self.registry.flatten_traits();
+        self.registry.flatten_phpdoc_inheritance();
         self.rebuild_pest_config();
     }
 
@@ -240,6 +241,7 @@ impl Project {
         // re-run it. Still far cheaper than a full reload: a HashMap scan
         // over already-parsed ClassInfo, not a re-parse of anything.
         self.registry.flatten_traits();
+        self.registry.flatten_phpdoc_inheritance();
         register_references(&mut self.dependents, path, &references);
 
         self.files.insert(
