@@ -3771,6 +3771,28 @@ parameter still winning when present. Corpus-verified: Piwigo-scoped
 `check-project` drops from 106 to 99, a location-based diff confirming
 zero new false-positive locations and 7 genuinely resolved ones.
 
+**Phase 94 - `?? null` on a non-variable left side silently dropped
+its own nullability (DONE).** `widen_coalesce_result`'s own "`?? null`
+is a no-op, trust the left side's type as-is" rule (added to stop an
+unshaped-array `Mixed` read collapsing to bare `Null`) was too broad:
+for an array-index/property access whose own value type is concrete
+and non-nullable, `infer_expr` has no notion of "the key might not
+exist" folded in at all - the exact real-PHP case `?? null` exists to
+guard against. Real corpus false positive: `Piwigo\Core\Lang::
+fromLangArray()` - `$val = $group[$index] ?? null; return $val ?? '';`
+- `$val`'s own stored type came out non-nullable, so the second,
+genuinely-needed `?? ''` was flagged as checking an already-
+non-nullable variable. Now unions `Null` back in unless the left side
+is a bare variable (whose tracked type in `locals` already reflects
+every way it can be null, so trusting it completely stays correct
+there) - safe for the already-covered `Mixed` case too, since
+`union_types` already collapses `Mixed | Null` back to plain `Mixed`.
+Corpus-verified: Piwigo-scoped `check-project` drops from 99 to 94, a
+location-based diff confirming zero new false-positive locations and 5
+genuinely resolved ones - including, as a side effect, both remaining
+`nullsafe.neverNull` false positives (the identical root cause, one
+step further downstream).
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
