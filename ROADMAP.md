@@ -3611,6 +3611,52 @@ generics-heavy vendored libraries (Rector's own namespace-prefixed
 `react/promise` copies, Doctrine DBAL drivers) - never Piwigo's own
 first-party code.
 
+**Phase 88 - explicit-vs-implicit `Mixed` provenance through
+inheritance (DONE).** A follow-up investigation into Phase 87's own
+remaining 364-diagnostic gap (requested directly rather than assumed
+closed) found real PHPStan tracks "was `mixed` written explicitly, on
+purpose" as a property of the `MixedType` object itself
+(`MixedType::isExplicitMixed()`, confirmed directly against
+`vendor/phpstan-src/src/Rules/MissingTypehintCheck.php`) - it survives
+being inherited from a completely different declaration's own
+docblock. phpstan-rs instead faked this by re-reading the *checked*
+declaration's own raw source text at check time
+(`missing_typehint.rs`'s `is_explicit_mixed_text`/
+`has_explicit_mixed_nested_somewhere`) - a reasonable proxy right up
+until Phase 87's `flatten_phpdoc_inheritance` became the first code
+path in this project's history to hand a type from *one* declaration's
+docblock down to a *different* declaration's `FunctionSig` at all.
+
+New `ParamSig::explicit_mixed_hint`/`FunctionSig::
+return_explicit_mixed_hint` fields, computed once in `from_decl` from
+the exact same text the existing check already used, and copied
+alongside `ty`/`return_type` by `flatten_phpdoc_inheritance`'s own
+backfill - so a position inheriting an ancestor's genuinely explicit
+`array<string, mixed>` (or a fully bare `mixed`) keeps that provenance
+no matter how many inheritance levels away the docblock that wrote it
+actually lives. `check_missing_function_typehints` reads these fields
+off the current declaration's own `FunctionSig` when one exists,
+falling back to the original text-based heuristic only for an
+anonymous class (never indexed into the registry - the separately-
+tracked "anonymous class's own PHPDoc never parsed" gap). Also refined
+Phase 87's own "never backfill an ancestor's `Mixed` tag" guard: it now
+only blocks backfilling `Mixed` when the child's own native resolution
+is itself something more specific - PSR-3's `LoggerInterface::
+log(mixed $level, ...)` must still propagate its own explicit `Mixed`
+onto an equally-untyped override (nothing concrete to lose there),
+unlike Doctrine's `Type::convertToPHPValue(): mixed` overwriting a
+concrete `?StringVo`.
+
+**Corpus impact**: Piwigo-scoped `check-project` drops from 364 to 153
+diagnostics - a location-based diff confirmed zero new false-positive
+locations and 211 genuinely resolved ones, almost entirely
+`missingType.iterableValue` (262 -> 52). The full unscoped corpus
+(~20,300 files) drops by 2565, with 1912 genuinely resolved locations
+against exactly one new one - a phpstorm-stubs `get_debug_type()` line
+that doesn't reproduce in an isolated repro, lives in vendored stub
+code rather than Piwigo's own, and wasn't chased further given how
+narrow it is.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
