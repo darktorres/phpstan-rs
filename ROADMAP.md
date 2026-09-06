@@ -4891,6 +4891,26 @@ socket/connect/listen functions building a URI via `"tcp://{$host}:
 declared `non-empty-string`. Verified against the ~20,300-file corpus:
 8 diagnostics cleared, zero new findings.
 
+**Update**: same round also found `sprintf()`/`vsprintf()` had zero
+dynamic-return-type handling at all - real PHPStan narrows both to
+`non-falsy-string` under the identical condition once more: the format
+string's own literal (non-specifier) text is itself provably non-falsy.
+New `sprintf_literal_remainder` (`builtin_calls.rs`) strips every real
+`%[argnum$][flags][width][.precision]specifier` sequence from a literal
+format string via a hand-rolled scan (no regex engine in this project,
+matching `parse_sscanf_format`'s own identical precedent), returning
+`None` on anything it can't confidently parse to the end rather than
+guessing; the remainder is passed straight through the same
+`is_non_falsy_string` helper the update above introduced. Deliberately
+scoped to `sprintf`/`vsprintf` only - `implode`/`join`'s own narrowing
+rule depends on array-*content* analysis this round couldn't verify
+with confidence against real PHPStan's own extension logic, left open
+rather than guessed at. Verified against the ~20,300-file corpus: 183
+diagnostics cleared (94 `return.type`, 88 `argument.type`, 1 `assign.
+propertyType`), zero new findings - the 2 lines that changed in the
+diff were both the exact same pre-existing mismatch reworded with a
+more precise type, not new.
+
 **A thirteenth round** (182 -> 158) found the corpus's largest single
 remaining `list<T>` gap, the same shape `array_values()` already got
 fixed for in Phase 14 itself:
