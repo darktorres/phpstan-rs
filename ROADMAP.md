@@ -3553,6 +3553,64 @@ from 788 to exactly 555 diagnostics - the removed 233 lines confirmed
 to be precisely that identifier/path pair and nothing else, zero other
 changes either direction.
 
+**Phase 87 - PHPDoc-inheritance backfill (DONE).** ~438 of the
+remaining 555 diagnostics from Phase 86's own investigation turned out
+to share one root cause: real PHPStan's `PhpDocInheritanceResolver`
+backfills a method's own missing `@param`/`@return` from its parent
+class (first) or an implemented interface's own documented tag,
+whenever the child's own declaration never wrote one for that position
+at all - phpstan-rs had no equivalent, so a method correctly omitting
+its own docblock in favor of an ancestor's (a real, idiomatic PHP
+pattern, not an oversight) was treated as genuinely untyped instead.
+
+New `flatten_phpdoc_inheritance` pass in `Registry::build` (after
+`flatten_traits`, run to a fixed point the same bounded-by-class-count
+way) backfills `ty`/`return_type` from the nearest ancestor
+(`lookup_ancestor_method_with_owner`'s already-correct parent-then-
+implements order) whenever the position's own declaration never
+carried a tag (`has_own_doc`/`return_has_own_doc`, new fields on
+`ParamSig`/`FunctionSig` computed once in `from_decl`) - never
+`ty_native`/`return_type_native`, which `check_one_method_override`'s
+Liskov check must keep comparing at the native level alone (Phase 13's
+own fix, for the identical Rector/`Collector<T>` reason).
+
+Four guards, each found by running the pass against the real corpus
+and tracing a resulting false positive to root cause rather than
+trusting the naive design: an ancestor's own tag must itself be real,
+not merely a native-hint resolution (`Base14::make(): int` /
+`Sub14::make(): string`, a genuine Liskov violation with no docblock
+anywhere, must stay flagged rather than hidden behind a fabricated
+inherited type); `__construct` matches ancestor params by *name*, not
+position, since real PHP never enforces constructor-signature
+compatibility (Doctrine Migrations' `DoctrineCommand::__construct(
+?DependencyFactory, ?string $name)` sitting under Symfony's `Command::
+__construct(?string $name)` must not have its unrelated first
+parameter stamped with `$name`'s own type); a `Mixed` ancestor tag is
+never inherited (Doctrine DBAL's own `Type::convertToPHPValue(): mixed`
+docblock can only ever destroy a concrete native return type on a
+subclass, never add information); and an ancestor type mentioning a
+`Type::TemplateParam`, or naming an `Object` class different from what
+the child's own native hint already resolves to, is never inherited -
+this project does not model cross-inheritance `@template` binding
+(`Type::Object`'s own doc comment already documents this gap), so a
+template-scoped or differently-resolved ancestor type is not
+trustworthy to clone verbatim onto an unrelated descendant (Doctrine's
+`AbstractClassMetadataFactory<T>`/`ObjectManager::getMetadataFactory()`
+chains).
+
+**Corpus impact**: Piwigo-scoped `check-project` drops from 555 to 364
+diagnostics. A location-based diff (not a raw line diff - many reshapes
+just replace a generic "array" description with a more precise
+"array<K, V>" once the value type is genuinely known from an inherited
+tag) confirmed zero new false-positive locations and 146 genuinely
+resolved ones. The full unscoped corpus (~20,300 files including
+`vendor/`) drops by 3938 diagnostics; its 607 new locations there are
+exclusively deeper instances of the same already-documented,
+pre-existing cross-inheritance template-binding gap, concentrated in
+generics-heavy vendored libraries (Rector's own namespace-prefixed
+`react/promise` copies, Doctrine DBAL drivers) - never Piwigo's own
+first-party code.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
