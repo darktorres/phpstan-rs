@@ -192,6 +192,68 @@ fn sprintf_with_a_non_literal_format_is_unaffected() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
+// A top-10-bucket workflow found var_export($x, true) typed too loosely
+// - the native/stub signature is unconditionally `?string`, but a
+// literal `true` second argument means it always returns the real
+// representation string instead of printing to stdout and returning
+// null.
+#[test]
+fn var_export_with_a_literal_true_flag_narrows_to_plain_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($x): string {
+                return var_export($x, true);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn var_export_with_a_literal_false_flag_stays_nullable() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($x): string {
+                return var_export($x, false);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.type"),
+        "expected a return.type mismatch (still nullable), got: {d:?}"
+    );
+}
+
+#[test]
+fn var_export_with_the_default_omitted_flag_stays_nullable() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($x): string {
+                return var_export($x);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.type"),
+        "expected a return.type mismatch (still nullable), got: {d:?}"
+    );
+}
+
+#[test]
+fn var_export_with_a_non_literal_flag_stays_nullable() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($x, bool $flag): string {
+                return var_export($x, $flag);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.type"),
+        "expected a return.type mismatch (still nullable), got: {d:?}"
+    );
+}
+
 // Phase 32 Finding E: same subject-dependent-return-type family as
 // `str_replace` above, missed by Phase 23/31 - `substr_replace`'s own
 // subject is argument index 0, not 2.

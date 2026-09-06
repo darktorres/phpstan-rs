@@ -6,7 +6,9 @@ use crate::checker::{
 use crate::registry::{FunctionSig, Registry};
 use crate::types::{self, AccessoryKind, Type};
 
-use super::{is_canonical_int_key, is_false_literal, is_non_falsy_string, union_types};
+use super::{
+    is_canonical_int_key, is_false_literal, is_non_falsy_string, is_true_literal, union_types,
+};
 
 impl<'a> Checker<'a> {
     /// Phase 12's bespoke per-function return-type extensions (real
@@ -78,6 +80,20 @@ impl<'a> Checker<'a> {
                         Type::Accessory(AccessoryKind::NonFalsyString),
                     ]);
                 }
+            }
+            // Real PHPStan's own `VarExportFunctionReturnTypeExtension` -
+            // the native/stub signature is unconditionally `?string`
+            // (`$return` defaults to `false`, in which case `var_export`
+            // prints to stdout and returns `null`), but a literal `true`
+            // second argument means it always returns the real
+            // representation string instead - confirmed the stub's own
+            // declared `bool $return = false` shape via `phpstorm-stubs`.
+            // Scoped to the 2-argument, literal-`true` form specifically
+            // - anything else (omitted, a variable, `false`) keeps
+            // today's existing, correctly-nullable stub return type
+            // unchanged.
+            "var_export" if args.len() == 2 && is_true_literal(&args[1].value) => {
+                return Type::String;
             }
             // Real PHPStan's own `CountFunctionReturnTypeExtension` -
             // narrowed to the plain 1-argument form (no `$mode` argument,

@@ -4095,6 +4095,15 @@ fn is_false_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(false)))
 }
 
+/// The `true`-literal mirror of `is_false_literal` just above - used by
+/// `var_export()`'s own dynamic-return-type narrowing (`builtin_calls.rs`)
+/// to recognize its `$return` argument's default-matching-but-inverted
+/// case (explicitly `true`, unlike `$preserve_keys`'s "omitted or
+/// `false`" default).
+fn is_true_literal(e: &Expr) -> bool {
+    matches!(&e.kind, ExprKind::Literal(Literal::Bool(true)))
+}
+
 /// Whether `class::$method()` is Doctrine's own `AbstractQuery::getResult()`
 /// (or an override/inheritor of it, e.g. `Query::getResult()`) - the native
 /// stub declares a bare `mixed` return with no docblock refinement at all.
