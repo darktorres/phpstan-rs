@@ -3676,6 +3676,28 @@ before Phase 8). Corpus-verified: Piwigo-scoped `check-project` drops
 from 153 to 151, exactly `UserService.php`'s two false positives and
 nothing else.
 
+**Phase 90 - anonymous classes never got Phase 88's `explicit_mixed_hint`
+fix (DONE).** An anonymous class is never indexed into the registry
+under any stable name (`lookup_own_signature` always misses for one),
+so `check_function`'s own `sig` was always `None` there - Phase 88's
+fix never reached an anonymous class implementing a real interface
+with no docblock of its own, the single most common shape left in the
+corpus (PHPUnit-style inline test doubles implementing a real project
+interface, e.g. `HtmlRenderingInterface`). New
+`check_function_with_ancestor_hint` accepts an optional ancestor
+signature, looked up directly at the `ExprKind::NewAnonymousClass`
+call site by walking `decl.extends`/`decl.implements` against the
+registry (both are real, already-indexed interfaces/classes even
+though the anonymous class itself isn't) - used only as
+`check_missing_function_typehints`'s own fallback, not substituted
+into every other `sig`-gated check in `check_function`, since only
+that one check ever reads a signature's docblock-provenance bits
+rather than something not obviously safe to borrow from an ancestor
+the class never actually redeclared. Corpus-verified: Piwigo-scoped
+`check-project` drops from 151 to 127, a location-based diff
+confirming zero new false-positive locations and 18 genuinely resolved
+ones.
+
 ## Known limitations
 
 Every deliberate "this checker doesn't model X" boundary, gathered in
