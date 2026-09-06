@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
+use crate::docblock;
 use crate::pest_config;
-use crate::registry::{FunctionSig, NameContext, Registry, resolve_names_in_type};
+use crate::registry::{FunctionSig, NameContext, Registry, resolve_names_in_type, resolve_type};
 use crate::token::Span;
 use crate::types::{self, Type};
 
@@ -1074,14 +1075,24 @@ impl<'a> Checker<'a> {
             // resolved against - since this branch (unlike the `Some`
             // one) builds each `Type` fresh from a raw string on every
             // call anyway, with no immutable-AST obstacle to work around.
+            //
+            // Phase 91: this branch used to build `ty` from `p.type_hint`
+            // alone, never once looking at `f.doc_comment` - real corpus
+            // false positive: an anonymous class's own `/** @return
+            // array<string, object> */` above a fully-typed `getConnections
+            // (): array` was silently discarded, since nothing here ever
+            // parsed it, leaving `array`'s own value type looking
+            // implicitly `Mixed` even though the source spelled out a real
+            // one. `doc`/`resolve_type` below mirror `FunctionSig::
+            // from_decl`'s own param-resolution exactly (see that
+            // function's own `doc_ty`/`resolve_type` call) - the one
+            // registry-side merge step this whole branch otherwise skips.
             None => {
+                let doc = f.doc_comment.as_deref().map(docblock::parse);
                 for p in &f.params {
-                    let ty = p
-                        .type_hint
-                        .as_deref()
-                        .map(types::parse_type_string)
-                        .map(|ty| resolve_names_in_type(ty, &self.name_ctx))
-                        .unwrap_or(Type::Mixed);
+                    let doc_ty = doc.as_ref().and_then(|d| d.params.get(&p.name));
+                    let ty = resolve_type(doc_ty.map(String::as_str), p.type_hint.as_deref());
+                    let ty = resolve_names_in_type(ty, &self.name_ctx);
                     let ty = match class_name {
                         Some(c) => self.resolve_pseudo(&ty, c),
                         None => ty,
@@ -1119,11 +1130,18 @@ impl<'a> Checker<'a> {
         // return type" from "declared mixed" the way the fallback below
         // does with an Option.
         let declared_return = sig.map(|s| s.return_type.clone()).or_else(|| {
-            let ty = f
-                .return_type
+            // Phase 91: same "the registry-side merge this branch
+            // otherwise skips" fix as the param loop above, for the
+            // return position - an anonymous class's own `@return`
+            // docblock tag is only ever reached here, never via `sig`
+            // (always `None` for one).
+            let doc_return = f
+                .doc_comment
                 .as_deref()
-                .map(types::parse_type_string)
-                .map(|ty| resolve_names_in_type(ty, &self.name_ctx))?;
+                .map(docblock::parse)
+                .and_then(|d| d.return_type);
+            let ty = resolve_type(doc_return.as_deref(), f.return_type.as_deref());
+            let ty = resolve_names_in_type(ty, &self.name_ctx);
             Some(match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
                 None => ty,

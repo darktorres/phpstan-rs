@@ -222,6 +222,52 @@ fn an_anonymous_class_without_an_explicit_mixed_ancestor_is_still_flagged() {
     );
 }
 
+// Phase 91: an anonymous class's own signature is never looked up from
+// the registry at all (always `sig: None` in `check_function`), so the
+// `None` branch used to build every parameter/return type purely from
+// the native hint, never once parsing `f.doc_comment` itself - real
+// corpus false positive: `new readonly class(...) implements
+// ConnectionRegistry { /** @return array<string, object> */ public
+// function getConnections(): array {...} }` was flagged even though
+// its own docblock fully specifies the value type.
+#[test]
+fn an_anonymous_class_methods_own_return_docblock_is_read() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            function make(): object {
+                return new class {
+                    /**
+                     * @return array<string, object>
+                     */
+                    public function getConnections(): array {
+                        return [];
+                    }
+                };
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_anonymous_class_methods_own_param_docblock_is_read() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            function make(): object {
+                return new class {
+                    /**
+                     * @param array<string, int> $counts
+                     */
+                    public function tally(array $counts): int {
+                        return 0;
+                    }
+                };
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn list_with_an_explicit_mixed_value_type_is_not_flagged() {
     let d = all_diagnostics_for(

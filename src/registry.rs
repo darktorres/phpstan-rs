@@ -9,6 +9,7 @@ mod function_sig;
 mod name_context;
 
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
+pub(crate) use function_sig::resolve_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
 pub(crate) use function_sig::{infer_const_type, substitute_type_aliases};
 pub(crate) use name_context::{NameContext, resolve_names_in_type};
