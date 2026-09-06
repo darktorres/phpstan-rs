@@ -2368,6 +2368,37 @@ comment already found and fixed for methods; needs that split first.
 `is_final`/`is_abstract` added to `PropertyDecl`/`PropertySig` - genuine
 new parser work, not currently tracked by any phase.
 
+**Update**: `method.childParameterType`'s own comparison had the exact
+same merged-vs-native bug the return-type check's "fourth round" fix
+above already found and fixed for `return_type_native` - it compared
+`ParamSig`'s PHPDoc-merged `ty` on both sides instead of a native-only
+view, wrongly flagging any override that faithfully keeps the
+ancestor's own native parameter type while a docblock alone (on either
+side) narrows it further. Real PHP's own Liskov override check, and
+real PHPStan's by default (`checkPhpDocMethodSignatures` off unless a
+project opts in - confirmed neither Piwigo's own `phpstan.neon` nor
+this project's own corpus config does), only ever enforces this at the
+native level. `ParamSig` gained `ty_native: Type`, computed the same
+way `return_type_native` is and threaded through the same construction
+sites (`from_decl`, `merge`, enum-synthesized methods, generic template
+substitution); `check_one_method_override`'s param-narrowing block now
+compares this native-only view on both sides instead. By far the
+single largest fix of this phase's whole update chain: 44451 -> 43356
+diagnostics, all of them real - the dominant shape is Rector's own
+`RectorInterface::refactor(Node $node)` implemented across hundreds of
+rule classes, each narrowing only via `@param SomeSpecificNode $node`
+while keeping the interface's own native `Node $node` untouched. Two
+companion tests now confirm both directions: a docblock-only narrowing
+is not flagged, and a genuine native-level narrowing still is. Five new
+findings surfaced in `jetbrains/phpstorm-stubs`' own `yaf` stubs,
+confirmed genuine (if practically inert): a qualified native type hint
+with no matching `use` import for its first segment resolves relative
+to the *current* namespace under real PHP's own name-resolution rules,
+not the global namespace - `Yaf\Request_Abstract` written inside
+`namespace Yaf\Route` (no `use Yaf;` there, unlike the sibling `Yaf`
+namespace block) genuinely means `Yaf\Route\Yaf\Request_Abstract`, a
+real native/PHPDoc mismatch baked into that one stub file.
+
 **Phase 65 - Declaration-site modifier-consistency + constructor-shape
 checks (DONE).** Landed nine of the batch's own small, independent
 boolean-flag-combination checks, all confirmed directly against real
