@@ -33,7 +33,7 @@ methodology behind every corpus number cited above.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   32,498 diagnostics. Re-run before citing - it drifts as vendored
   dependencies change and isn't re-measured every round.
-- Test suite: 2023+ unit tests, all passing.
+- Test suite: 2049+ unit tests, all passing.
 
 ---
 
@@ -238,12 +238,29 @@ own trailing-vs-standalone placement rule exactly. `ignoreErrors:`
 config support (`[[ignore_errors]]` TOML, identifier/path-glob/message-
 regex/count fields). `--level`/`--php-version`-gated portability
 checks. Incremental multi-file `Project` with cross-file dependency
-invalidation; a real Content-Length-framed JSON-RPC LSP server. An
-8MiB worker stack (fixing a real stack-overflow crash on deeply-nested
-expressions), persistent structurally-shared `Locals` (O(1) clone),
-`FxHashMap` for hot build-once maps, a criterion regression-guard
-benchmark, and `hotpath`, an opt-in in-process instrumentation profiler
-that catches effects system-wide `perf` sampling is too coarse to see.
+invalidation; a real Content-Length-framed JSON-RPC LSP server, now with
+hover/go-to-definition (Phase 17 Stage A - see Pending for what's still
+open). An 8MiB worker stack (fixing a real stack-overflow crash on
+deeply-nested expressions), persistent structurally-shared `Locals`
+(O(1) clone), `FxHashMap` for hot build-once maps, a criterion
+regression-guard benchmark, and `hotpath`, an opt-in in-process
+instrumentation profiler that catches effects system-wide `perf`
+sampling is too coarse to see.
+
+Phase 17 Stage A: a new `Project::decl_locations` index (name ->
+declaring `(path, Span)`, gated behind `Project::set_retain_source` so a
+batch `check-project` run pays nothing for it) plus a new `lsp::
+navigation`/`lsp::text_split` pair - the former walks a file's AST for
+the innermost reference at a cursor position, the latter recovers a real
+per-name sub-span from an AST span whose own source text holds more than
+one name (`Foo::CONST`, `?Foo|Bar`) by re-lexing just that span's text.
+Needed a small, purely additive AST change first: every name reference
+the parser previously flattened into a bare `String` with no span of its
+own (`extends`/`implements`/`uses` lists, `InstanceofTarget::Name`,
+`CatchClause.types`, every declaration's own name) now also carries a
+real `Span`, populated by the parser at the exact point it already
+parses each one - no existing field's value changed, so every existing
+consumer (checker, registry, hundreds of tests) needed no change at all.
 
 ---
 
@@ -276,8 +293,22 @@ impossible-`instanceof`/redundant-`is_string()`-etc. detection.
 it for convergence), and `goto`/label CFG edges are unmodeled - neither
 owned by any phase.
 
-**17 - LSP hover/go-to-definition (PLANNED).** Needs a position-keyed
-lookup index; today's `Registry`/`Project` lookups are all name-keyed.
+**17 - LSP hover/go-to-definition (PARTIAL).** Stage A is done (see Done):
+hover/definition for every name reference resolvable without receiver-
+type inference (function calls, `new Foo()`, `Foo::CONST`/`method()`/
+`$prop` including `self`/`static`/`parent`, `$this->method()`/
+`$this->prop`, `instanceof`/`catch` targets, `extends`/`implements`/
+`uses`, compound type hints). Still open (Stage B): an instance
+receiver's own type (`$x->method()`/`$x->prop` where `$x` isn't `$this`)
+- needs a new, additive `Checker` probe mechanism (a `probe_position`/
+`probe_hit` pair, checked once at the top of `check_expr`) to capture
+`Locals` at the cursor's exact program point by running the checker over
+just the enclosing function/method, then `infer_expr` the receiver
+against that snapshot. Also still open, disclosed and out of scope for
+either stage: local-variable-declaration navigation (jump from a read to
+its own assignment site) - a same-file, registry-independent problem
+with its own control-flow-dependent ambiguity, genuinely distinct from
+this phase's "resolve a name via the registry" shape.
 
 **18 - Extension/plugin API (PLANNED).** Deliberately last - premature
 before the rule/type-extension catalog is rich enough for a third party
