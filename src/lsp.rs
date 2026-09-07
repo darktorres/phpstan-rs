@@ -491,19 +491,23 @@ impl Server {
     fn definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
         let path = uri_to_path(uri)?;
         let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
-        // A local variable's own declaration site is same-file and
-        // already a real `Span` - no registry/`decl_locations` lookup
-        // needed at all, unlike every other variant below.
-        if let navigation::Resolved::Variable(span) = &resolved {
-            let target_uri = self
-                .open_uris
-                .get(&path)
-                .cloned()
-                .unwrap_or_else(|| path_to_uri(&path));
-            return Some(GotoDefinitionResponse::Scalar(Location {
-                uri: target_uri,
-                range: to_lsp_range(*span),
-            }));
+        // A local variable's own declaration site(s) are same-file and
+        // already real `Span`s - no registry/`decl_locations` lookup
+        // needed at all, unlike every other variant below. Usually one
+        // location; more than one exactly when the read is only reachable
+        // through mutually exclusive branches that assign it differently
+        // (see `navigation::Resolved::Variable`'s own doc comment) - the
+        // same `Array`-vs-`Scalar` choice the `Instance` arm below makes
+        // for a `Union`/`Intersection` receiver.
+        if let navigation::Resolved::Variable(spans) = &resolved {
+            let locs: Vec<Location> = spans.iter().map(|s| self.location(&path, *s)).collect();
+            return match locs.len() {
+                0 => None,
+                1 => Some(GotoDefinitionResponse::Scalar(
+                    locs.into_iter().next().unwrap(),
+                )),
+                _ => Some(GotoDefinitionResponse::Array(locs)),
+            };
         }
         let locations = self.project.decl_locations();
         match &resolved {

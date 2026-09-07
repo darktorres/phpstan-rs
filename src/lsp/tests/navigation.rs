@@ -520,6 +520,177 @@ fn a_variable_declared_in_one_function_does_not_leak_into_another() {
     assert_eq!(response_result(&messages, 2), Value::Null);
 }
 
+// Phase 17 follow-up: branch-aware variable navigation. A read only
+// reachable through mutually exclusive arms that assign the name
+// differently offers every real candidate (an LSP `Array` of locations),
+// rather than silently picking the textually-last one.
+
+#[test]
+fn definition_on_a_variable_read_after_if_else_offers_both_branches() {
+    let dir = TempDir::new("var_if_else");
+    let src = "<?php function f($cond) { if ($cond) { $x = 1; } else { $x = 2; } return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    let locations = result.as_array().expect("expected an array of locations");
+    assert_eq!(locations.len(), 2);
+}
+
+#[test]
+fn definition_on_a_variable_read_after_a_one_sided_if_offers_the_original_too() {
+    let dir = TempDir::new("var_if_no_else");
+    let src = "<?php function f($cond) { $x = 0; if ($cond) { $x = 1; } return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    // The `if` might not have run at all - the pre-`if` `$x = 0` is a
+    // real, live alternative to `$x = 1`, not superseded by it.
+    let locations = result.as_array().expect("expected an array of locations");
+    assert_eq!(locations.len(), 2);
+}
+
+#[test]
+fn definition_on_a_variable_read_after_a_straight_line_reassignment_stays_a_scalar() {
+    // Regression guard: sequential, unconditional reassignment (no
+    // branch/loop involved at all) must still resolve to exactly one
+    // location, not get swept up into the new branch-merge machinery.
+    let dir = TempDir::new("var_straight_line");
+    let src = "<?php function f() { $x = 1; $x = 2; return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert!(
+        result.is_object(),
+        "expected a single Location object, got {result:?}"
+    );
+}
+
+#[test]
+fn definition_on_a_variable_read_after_a_loop_offers_the_pre_loop_value_too() {
+    let dir = TempDir::new("var_loop");
+    let src = "<?php function f(array $items) { $x = 0; foreach ($items as $item) { $x = $item; } return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    // The loop might run zero times - `$x = 0` (before the loop) is a
+    // real alternative to the loop body's own `$x = $item`.
+    let locations = result.as_array().expect("expected an array of locations");
+    assert_eq!(locations.len(), 2);
+}
+
+#[test]
+fn definition_on_a_variable_read_after_a_do_while_stays_a_scalar() {
+    // Unlike every other loop shape, `do { ... } while (...);` always
+    // runs its body at least once - a read after it should resolve to
+    // exactly one location, not offer the pre-loop value as a spurious
+    // alternative.
+    let dir = TempDir::new("var_do_while");
+    let src = "<?php function f($cond) { $x = 0; do { $x = 1; } while ($cond); return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert!(
+        result.is_object(),
+        "expected a single Location object, got {result:?}"
+    );
+    let expected = lsp_pos(src, "$x = 1");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+// Phase 17 follow-up: list-destructuring targets are now tracked as
+// declarations too.
+
+#[test]
+fn definition_on_a_read_resolves_to_its_destructuring_assignment_target() {
+    let dir = TempDir::new("var_destructure");
+    let src = "<?php function f() { [$a, $b] = [1, 2]; echo $a; echo $b; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let a_pos = lsp_pos(src, "$a;");
+    let b_pos = lsp_pos(src, "$b;");
+
+    let messages = run(
+        &dir,
+        &[
+            definition_request(2, &uri, a_pos),
+            definition_request(3, &uri, b_pos),
+        ],
+    );
+    let a_result = response_result(&messages, 2);
+    let b_result = response_result(&messages, 3);
+    let expected_a = lsp_pos(src, "$a, $b");
+    let expected_b = lsp_pos(src, "$b] =");
+    assert_eq!(
+        a_result["range"]["start"]["character"],
+        expected_a["character"]
+    );
+    assert_eq!(
+        b_result["range"]["start"]["character"],
+        expected_b["character"]
+    );
+}
+
+#[test]
+fn definition_on_a_read_resolves_to_its_foreach_destructuring_target() {
+    let dir = TempDir::new("var_destructure_foreach");
+    let src = "<?php function f(array $rows) { foreach ($rows as [$a, $b]) { echo $a; } }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$a;");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+}
+
+// Phase 17 follow-up: `global $x;` links back to a top-level declaration.
+
+#[test]
+fn definition_on_a_global_variable_links_back_to_its_top_level_declaration() {
+    let dir = TempDir::new("var_global");
+    let src = "<?php $x = 1; function f() { global $x; return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$x = 1");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn definition_on_a_global_variable_declared_later_in_the_file_still_resolves() {
+    // The order-independent pre-scan (`collect_top_level_vars`) is what
+    // makes this work - a single forward walk wouldn't have reached the
+    // top-level assignment yet by the time it reaches the function above it.
+    let dir = TempDir::new("var_global_forward_ref");
+    let src = "<?php function f() { global $x; return $x; } $x = 1;";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+}
+
 #[test]
 fn the_probe_hook_does_not_perturb_ordinary_diagnostics() {
     // Regression guard that Checker::probe_span/probe_hit (Stage B) is a

@@ -62,15 +62,18 @@ pub(crate) enum Resolved {
         is_static: bool,
         class: Option<String>,
     },
-    /// A local variable read, resolved to its own declaration site (a
-    /// parameter, an assignment's left-hand side, a `foreach` key/value
-    /// binding, or a `catch (...) $e` binding) - always same-file, so no
-    /// registry lookup is needed, unlike every other variant here. Found
-    /// via a plain textual-order heuristic (the nearest preceding
-    /// declaration to the same name in the walk, see `Walker::var_decls`'s
-    /// own doc comment), not real control-flow analysis - deliberately
-    /// disclosed as an approximation, never a wrong-file guess.
-    Variable(Span),
+    /// A local variable read, resolved to every declaration site it could
+    /// really have come from (a parameter, an assignment's left-hand
+    /// side, a `foreach` key/value binding, a `catch (...) $e` binding, or
+    /// a `global $x;` linked back to a top-level assignment) - always
+    /// same-file, so no registry lookup is needed, unlike every other
+    /// variant here. Usually exactly one entry; more than one when the
+    /// read is only reachable through mutually exclusive branches that
+    /// each assign the name differently (see `Walker::var_decls`'s own
+    /// doc comment) - offered as real alternatives (an LSP definition
+    /// response can hand the editor more than one location), never
+    /// silently collapsed to an arbitrary single guess.
+    Variable(Vec<Span>),
 }
 
 /// The entry point: what's declared/referenced at `pos` in the file
@@ -89,9 +92,129 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Optio
         current_function: None,
         current_is_static: false,
         var_decls: Vec::new(),
+        conditional_depth: 0,
+        // A dedicated, order-independent pre-scan (not the position-aware
+        // walk below) - a `global $x;` inside a function can reference a
+        // top-level assignment that appears *later* in the file than the
+        // function's own declaration, which a single forward pass
+        // wouldn't have seen yet.
+        top_level_vars: collect_top_level_vars(stmts),
     };
     w.stmts(stmts, &mut ctx, None, &mut best);
     best
+}
+
+/// Every variable bound directly by `e` - a plain `$var`, or (recursing)
+/// each leaf of a list-destructuring target (`[$a, $b] = ...`,
+/// `foreach ($rows as [$a, $b])`). Shared by `Walker::bind_var` (the
+/// position-aware walk) and `collect_top_level_vars` (the order-
+/// independent pre-scan) below - the same "what names does this left-hand
+/// side declare" question, asked in two different contexts.
+fn collect_bound_names(e: &Expr, out: &mut Vec<(String, Span)>) {
+    match &e.kind {
+        ExprKind::Variable(name) => out.push((name.clone(), e.span)),
+        ExprKind::ArrayLiteral(items) => {
+            for item in items {
+                collect_bound_names(&item.value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every top-level (script-scope) variable declaration in the file, in
+/// document order - the same shapes `Walker::declare_var`/`bind_var`
+/// recognize (an assignment, a `foreach` binding, a `catch` binding, a
+/// `static` declaration), but collected up front, order-independently,
+/// purely so `global $x;` can link back to one even when it's declared
+/// later in the file than the function using it. Recurses into ordinary
+/// control-flow bodies (an `if`, a loop, ...) - real top-level code - but
+/// never into a `FunctionDecl`/`ClassDecl`/`EnumDecl`/`Closure`/`ArrowFn`
+/// body, each its own separate variable scope.
+fn collect_top_level_vars(stmts: &[Stmt]) -> Vec<(String, Span)> {
+    fn walk_stmt(stmt: &Stmt, out: &mut Vec<(String, Span)>) {
+        match &stmt.kind {
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => return,
+            StmtKind::Foreach { key, value, .. } => {
+                if let Some(k) = key {
+                    collect_bound_names(k, out);
+                }
+                collect_bound_names(value, out);
+            }
+            StmtKind::Try { catches, .. } => {
+                for c in catches {
+                    if let (Some(var), Some(span)) = (&c.var, c.var_span) {
+                        out.push((var.clone(), span));
+                    }
+                }
+            }
+            StmtKind::StaticVar(vars) => {
+                for (name, _) in vars {
+                    out.push((name.clone(), stmt.span));
+                }
+            }
+            _ => {}
+        }
+        walk_expr_for_assigns(stmt, out);
+        for child in stmt_children(stmt) {
+            walk_stmt(child, out);
+        }
+    }
+    // Assignments can appear inside any expression position (a condition,
+    // an argument, ...), not just a standalone `Expression` statement -
+    // reusing `ast_walk::expr_children` for a full expression-tree walk
+    // rather than hand-enumerating every `StmtKind` field that might hold
+    // one.
+    fn walk_expr(e: &Expr, out: &mut Vec<(String, Span)>) {
+        if let ExprKind::Assign(lhs, _) | ExprKind::CompoundAssign(_, lhs, _) = &e.kind {
+            collect_bound_names(lhs, out);
+        }
+        // A closure/arrow-fn body is its own separate scope - never
+        // descended into here, matching `walk_stmt`'s own exclusion of
+        // `FunctionDecl`/`ClassDecl`/`EnumDecl` above.
+        if matches!(e.kind, ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }) {
+            return;
+        }
+        for child in expr_children(e) {
+            walk_expr(child, out);
+        }
+    }
+    fn walk_expr_for_assigns(stmt: &Stmt, out: &mut Vec<(String, Span)>) {
+        match &stmt.kind {
+            StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr(e, out),
+            StmtKind::Return(Some(e)) => walk_expr(e, out),
+            StmtKind::Echo(exprs) => {
+                for e in exprs {
+                    walk_expr(e, out);
+                }
+            }
+            StmtKind::If { cond, .. }
+            | StmtKind::While { cond, .. }
+            | StmtKind::DoWhile { cond, .. } => walk_expr(cond, out),
+            StmtKind::For {
+                init, cond, step, ..
+            } => {
+                for e in init.iter().chain(cond).chain(step) {
+                    walk_expr(e, out);
+                }
+            }
+            StmtKind::Foreach { subject, .. } => walk_expr(subject, out),
+            StmtKind::Switch { subject, cases } => {
+                walk_expr(subject, out);
+                for case in cases {
+                    if let Some(t) = &case.test {
+                        walk_expr(t, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for stmt in stmts {
+        walk_stmt(stmt, &mut out);
+    }
+    out
 }
 
 /// 1-indexed, half-open (`span.end` is one past the last real character -
@@ -129,6 +252,31 @@ fn resolve_class_ref(
     }
 }
 
+/// Every declaration `name` could really resolve to, scanning `entries`
+/// (a `var_decls`-shaped `(name, span, conditional)` list) in reverse:
+/// the most recent *unconditional* declaration is collected and scanning
+/// stops there - nothing further back could still be live, since an
+/// unconditional write is guaranteed to have happened on every path that
+/// reaches this point. Every *conditional* declaration found along the
+/// way (a loop body that may run zero times, or one arm of a branch that
+/// may not be the one that ran) is collected too, as a genuine
+/// alternative rather than being silently dropped - see `Resolved::
+/// Variable`'s own doc comment for why a caller then offers all of them.
+/// Empty when `name` was never declared among `entries` at all.
+fn lookup_in(entries: &[(String, Span, bool)], name: &str) -> Vec<Span> {
+    let mut spans = Vec::new();
+    for (n, span, conditional) in entries.iter().rev() {
+        if n != name {
+            continue;
+        }
+        spans.push(*span);
+        if !conditional {
+            break;
+        }
+    }
+    spans
+}
+
 struct Walker<'a> {
     registry: &'a Registry,
     source: &'a str,
@@ -154,11 +302,20 @@ struct Walker<'a> {
     current_function: Option<FunctionDecl>,
     current_is_static: bool,
     // Phase 17 follow-up: local-variable-declaration navigation. Every
-    // `(name, span)` binding seen so far in the *current* function/
-    // closure/top-level scope, in document order - a plain, deliberately
-    // approximate "nearest preceding declaration wins" heuristic (see
-    // `Resolved::Variable`'s own doc comment), not real control-flow
-    // analysis. Reset to a fresh, empty `Vec` on entry to a named
+    // `(name, span, conditional)` binding seen so far in the *current*
+    // function/closure/top-level scope, in document order.
+    // `conditional` (true whenever `conditional_depth > 0` at the moment
+    // it's pushed) marks a declaration made somewhere that might not have
+    // executed at all by the time a later read is reached - a loop body
+    // (may run zero times), or one arm of an `if`/`switch`/`try` (only
+    // one of several sibling arms ever really runs). `lookup_var` uses
+    // this to decide how far back it's safe to stop looking: the most
+    // recent *unconditional* declaration is always a real answer (nothing
+    // before it could still be "the" value), but every conditional
+    // declaration found on the way there is also a real, live possibility
+    // and gets offered as an alternative rather than silently dropped -
+    // see `Resolved::Variable`'s own doc comment. Reset to a fresh, empty
+    // `Vec` (and `conditional_depth` reset to 0) on entry to a named
     // function/method or a `Closure` (PHP's own two real variable-scope
     // boundaries - a `Closure` only sees its own params plus whatever its
     // `use (...)` clause explicitly names, copied in from the *outer*
@@ -167,7 +324,18 @@ struct Walker<'a> {
     // value, the real PHP semantics `checker/expr.rs`'s own `ArrowFn` arm
     // already relies on) - its own params are pushed and popped around
     // just its one body expression instead.
-    var_decls: Vec<(String, Span)>,
+    var_decls: Vec<(String, Span, bool)>,
+    // Incremented while walking a loop body or a branch arm (`if`/
+    // `switch`/`try`'s own then/else/case/catch bodies), decremented on
+    // exit - see `var_decls`'s own doc comment for what this drives.
+    conditional_depth: u32,
+    // Phase 17 follow-up: `global $x;` linking. Every top-level (script-
+    // scope) variable declaration in the whole file, order-independently
+    // pre-scanned once by `collect_top_level_vars` - `global` needs this
+    // rather than `var_decls` itself because the top-level assignment it
+    // refers to is very often declared *after* the function using it,
+    // textually, which a single forward walk wouldn't have reached yet.
+    top_level_vars: Vec<(String, Span)>,
 }
 
 impl<'a> Walker<'a> {
@@ -178,20 +346,36 @@ impl<'a> Walker<'a> {
     /// call in this module does.
     fn declare_var(&mut self, name: &str, span: Span, best: &mut Option<Resolved>) {
         if contains(span, self.pos) {
-            *best = Some(Resolved::Variable(span));
+            *best = Some(Resolved::Variable(vec![span]));
         }
-        self.var_decls.push((name.to_string(), span));
+        self.var_decls
+            .push((name.to_string(), span, self.conditional_depth > 0));
     }
 
-    /// The nearest-preceding declaration for `name` in the current scope,
-    /// by walking `var_decls` in reverse - the last (innermost/most
-    /// recent) entry wins, matching plain sequential document order.
-    fn lookup_var(&self, name: &str) -> Option<Span> {
-        self.var_decls
-            .iter()
-            .rev()
-            .find(|(n, _)| n == name)
-            .map(|(_, s)| *s)
+    /// Every declaration `name` could really resolve to in the current
+    /// scope - see `lookup_in`'s own doc comment for the algorithm.
+    fn lookup_var(&self, name: &str) -> Vec<Span> {
+        lookup_in(&self.var_decls, name)
+    }
+
+    /// One branch arm's own newly-added declarations (`var_decls[base..]`
+    /// after walking it), collapsed to each name's own *last* write
+    /// within just this arm - an arm reassigning the same name twice in a
+    /// row should only ever contribute its final value as a merge
+    /// candidate, not every intermediate one. Used by `If`/`Switch`/
+    /// `Try`'s own arm-by-arm walk: truncate back to `base`, walk one
+    /// arm, call this, repeat for the next arm, then merge every arm's
+    /// own result back together (see each call site's own comment).
+    fn take_arm_result(&self, base: usize) -> Vec<(String, Span, bool)> {
+        let mut per_name_last: Vec<(String, Span, bool)> = Vec::new();
+        for (n, s, c) in &self.var_decls[base..] {
+            if let Some(existing) = per_name_last.iter_mut().find(|(en, _, _)| en == n) {
+                *existing = (n.clone(), *s, *c);
+            } else {
+                per_name_last.push((n.clone(), *s, *c));
+            }
+        }
+        per_name_last
     }
 
     fn record(&self, best: &mut Option<Resolved>, span: Span, value: Resolved) {
@@ -259,36 +443,122 @@ impl<'a> Walker<'a> {
                     self.expr(e, ctx, current_class, best);
                 }
             }
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => {
+            // Phase 17 follow-up: `if`/`else` are mutually exclusive arms
+            // - at most one of them ever really runs. Each is walked from
+            // the same starting point (`base`, truncated back to between
+            // arms so one arm's own declarations can't leak into the
+            // other), then their own results are merged back together:
+            // a name reassigned differently by each arm keeps *both*
+            // candidates (a later ambiguous read can't know which one
+            // ran - see `Resolved::Variable`'s own doc comment), while a
+            // name only one arm touches simply adds that one candidate
+            // alongside whatever was already declared before the `if`
+            // (still present, untouched, behind `base`).
+            StmtKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 self.expr(cond, ctx, current_class, best);
+                let base = self.var_decls.len();
+                self.conditional_depth += 1;
+                self.stmt(then_branch, ctx, current_class, best);
+                let mut merged = self.take_arm_result(base);
+                if let Some(else_branch) = else_branch {
+                    self.var_decls.truncate(base);
+                    self.stmt(else_branch, ctx, current_class, best);
+                    merged.extend(self.take_arm_result(base));
+                }
+                self.conditional_depth -= 1;
+                self.var_decls.truncate(base);
+                self.var_decls.extend(merged);
+                return;
+            }
+            // A `while`/`for`/`foreach` body may run zero times - no
+            // arm-merging needed (there's no sibling "else"), just a
+            // single conditional region wrapping the body/step, so a read
+            // after the loop still sees whatever was declared before it
+            // as a live alternative alongside anything the body itself
+            // declared.
+            StmtKind::While { cond, body } => {
+                self.expr(cond, ctx, current_class, best);
+                self.conditional_depth += 1;
+                self.stmt(body, ctx, current_class, best);
+                self.conditional_depth -= 1;
+                return;
+            }
+            // Unlike every other loop shape, `do { ... } while (...);`
+            // guarantees its body runs at least once - genuinely
+            // unconditional relative to code after the loop (`break`
+            // aside, not modeled - the same disclosed approximation every
+            // other construct here makes), so no conditional region at
+            // all, straight-line the same as ordinary sequential code.
+            StmtKind::DoWhile { body, cond } => {
+                self.stmt(body, ctx, current_class, best);
+                self.expr(cond, ctx, current_class, best);
+                return;
             }
             StmtKind::For {
-                init, cond, step, ..
+                init,
+                cond,
+                step,
+                body,
             } => {
-                for e in init.iter().chain(cond).chain(step) {
+                for e in init.iter().chain(cond) {
                     self.expr(e, ctx, current_class, best);
                 }
+                self.conditional_depth += 1;
+                self.stmt(body, ctx, current_class, best);
+                for e in step {
+                    self.expr(e, ctx, current_class, best);
+                }
+                self.conditional_depth -= 1;
+                return;
             }
             StmtKind::Foreach {
                 subject,
                 key,
                 value,
+                body,
                 ..
             } => {
                 self.expr(subject, ctx, current_class, best);
+                self.conditional_depth += 1;
                 // `foreach`'s own key/value are *bindings*, not reads -
-                // recorded as declaration sites (`declare_var`), not
+                // recorded as declaration sites (`bind_var`), not
                 // resolved as if they were references to some earlier
-                // declaration. A non-`Variable` shape (list destructuring,
-                // `foreach ($rows as [$a, $b])`) falls back to an ordinary
-                // read-walk instead - its own inner names aren't tracked
-                // as declarations, a disclosed, narrower residual gap.
+                // declaration.
                 if let Some(k) = key {
                     self.bind_var(k, ctx, current_class, best);
                 }
                 self.bind_var(value, ctx, current_class, best);
+                self.stmt(body, ctx, current_class, best);
+                self.conditional_depth -= 1;
+                return;
+            }
+            // A `global $x;` inside a function links back to the
+            // top-level (script-scope) declaration `collect_top_level_
+            // vars` already found, order-independently, for the whole
+            // file - the single most recent one, the same "one
+            // representative answer" convention `global`'s own coarse,
+            // non-block-scoped semantics already accept elsewhere. No
+            // per-name span exists on this statement to pin an exact
+            // click-here-in-the-`global`-line target to (only `stmt.span`
+            // covers the whole `global $a, $b;`), so this only makes a
+            // later *read* of the name resolve, not a click directly on
+            // its mention in the `global` statement itself.
+            StmtKind::Global(names) => {
+                for name in names {
+                    if let Some(span) = self
+                        .top_level_vars
+                        .iter()
+                        .rev()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, s)| *s)
+                    {
+                        self.declare_var(name, span, best);
+                    }
+                }
             }
             StmtKind::FunctionDecl(f) => {
                 self.record(
@@ -319,15 +589,46 @@ impl<'a> Walker<'a> {
                     self.declare_var(name, stmt.span, best);
                 }
             }
+            // Each `case` is its own exclusive arm (real PHP fallthrough
+            // between cases without a `break` isn't modeled - a real,
+            // disclosed approximation, not this construct's main
+            // purpose), merged back the same way `If`'s then/else are.
             StmtKind::Switch { subject, cases } => {
                 self.expr(subject, ctx, current_class, best);
+                let base = self.var_decls.len();
+                self.conditional_depth += 1;
+                let mut merged: Vec<(String, Span, bool)> = Vec::new();
                 for case in cases {
                     if let Some(t) = &case.test {
                         self.expr(t, ctx, current_class, best);
                     }
+                    self.var_decls.truncate(base);
+                    self.stmts(&case.body, ctx, current_class, best);
+                    merged.extend(self.take_arm_result(base));
                 }
+                self.conditional_depth -= 1;
+                self.var_decls.truncate(base);
+                self.var_decls.extend(merged);
+                return;
             }
-            StmtKind::Try { catches, .. } => {
+            // The `try` body and each `catch` are mutually exclusive arms
+            // (approximating: real PHP semantics are subtler - an
+            // exception can interrupt the `try` body partway through,
+            // making even *its own* declarations before that point real,
+            // but modeling exactly where is its own control-flow problem
+            // this heuristic doesn't attempt), merged the same way. A
+            // `finally` block always runs after either, so it's walked
+            // *after* the merge, back at the outer (non-conditional)
+            // depth, seeing the merged, possibly-ambiguous result.
+            StmtKind::Try {
+                body,
+                catches,
+                finally,
+            } => {
+                let base = self.var_decls.len();
+                self.conditional_depth += 1;
+                self.stmts(body, ctx, current_class, best);
+                let mut merged = self.take_arm_result(base);
                 for c in catches {
                     for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
                         if contains(*span, self.pos)
@@ -337,15 +638,24 @@ impl<'a> Walker<'a> {
                             *best = Some(Resolved::Class(fqn));
                         }
                     }
+                    self.var_decls.truncate(base);
                     // The catch's own bound variable (`catch (Foo $e)`) is
-                    // a declaration site too - recorded here, before
-                    // `stmt_children`'s own generic recursion walks the
-                    // catch body below, so a read inside that body already
+                    // a declaration site too - recorded before the catch
+                    // body itself is walked, so a read inside it already
                     // sees it.
                     if let (Some(var), Some(span)) = (&c.var, c.var_span) {
                         self.declare_var(var, span, best);
                     }
+                    self.stmts(&c.body, ctx, current_class, best);
+                    merged.extend(self.take_arm_result(base));
                 }
+                self.conditional_depth -= 1;
+                self.var_decls.truncate(base);
+                self.var_decls.extend(merged);
+                if let Some(finally_body) = finally {
+                    self.stmts(finally_body, ctx, current_class, best);
+                }
+                return;
             }
             _ => {}
         }
@@ -456,10 +766,11 @@ impl<'a> Walker<'a> {
             // locally-declared variable, and is resolved separately via
             // `current_class` wherever it appears as a receiver).
             ExprKind::Variable(name) if name != "this" => {
-                if contains(expr.span, self.pos)
-                    && let Some(decl_span) = self.lookup_var(name)
-                {
-                    *best = Some(Resolved::Variable(decl_span));
+                if contains(expr.span, self.pos) {
+                    let spans = self.lookup_var(name);
+                    if !spans.is_empty() {
+                        *best = Some(Resolved::Variable(spans));
+                    }
                 }
             }
             // `$this->method()`/`$this->prop` resolve directly (only
@@ -514,14 +825,15 @@ impl<'a> Walker<'a> {
                 // `var_decls` at this exact point, not the whole outer
                 // scope wholesale the way an `ArrowFn` gets below.
                 let outer_var_decls = std::mem::take(&mut self.var_decls);
+                let outer_conditional_depth = std::mem::replace(&mut self.conditional_depth, 0);
                 for u in uses {
-                    if let Some(span) = outer_var_decls
-                        .iter()
-                        .rev()
-                        .find(|(n, _)| n == &u.name)
-                        .map(|(_, s)| *s)
-                    {
-                        self.var_decls.push((u.name.clone(), span));
+                    // Every real candidate the outer scope has for this
+                    // captured name becomes the closure's own starting
+                    // point for it too - a captured variable can be just
+                    // as ambiguous at the closure literal's own position
+                    // as an ordinary read would be there.
+                    for span in lookup_in(&outer_var_decls, &u.name) {
+                        self.var_decls.push((u.name.clone(), span, true));
                     }
                 }
                 for p in params {
@@ -529,6 +841,7 @@ impl<'a> Walker<'a> {
                 }
                 self.stmts(body, &mut ctx.clone(), current_class, best);
                 self.var_decls = outer_var_decls;
+                self.conditional_depth = outer_conditional_depth;
                 return;
             }
             ExprKind::ArrowFn { params, body, .. } => {
@@ -563,11 +876,13 @@ impl<'a> Walker<'a> {
         self.declare_var(&p.name, p.name_span, best);
     }
 
-    /// A `foreach` key/value's own binding - a declaration site, not a
-    /// read. Falls back to an ordinary read-walk for anything that isn't a
-    /// plain `$var` (list-destructuring, `foreach ($rows as [$a, $b])`),
-    /// whose own inner names then aren't tracked as declarations - a
-    /// disclosed, narrower residual gap than "not supported at all".
+    /// A binding target - an assignment's left-hand side, or a `foreach`
+    /// key/value - is a declaration site, not a read, including every
+    /// leaf of a list-destructuring target (`[$a, $b] = ...`, `foreach
+    /// ($rows as [$a, $b])`). Anything else (a property/index write
+    /// target, `$this->x = ...`/`$arr[$i] = ...`) falls back to an
+    /// ordinary read-walk - correct, not a fallback-of-convenience: that
+    /// shape doesn't declare a new local variable at all.
     fn bind_var(
         &mut self,
         e: &Expr,
@@ -575,10 +890,21 @@ impl<'a> Walker<'a> {
         current_class: Option<&str>,
         best: &mut Option<Resolved>,
     ) {
-        if let ExprKind::Variable(name) = &e.kind {
-            self.declare_var(name, e.span, best);
-        } else {
-            self.expr(e, ctx, current_class, best);
+        match &e.kind {
+            ExprKind::Variable(name) => self.declare_var(name, e.span, best),
+            // List-destructuring (`[$a, $b] = ...`, `foreach ($rows as
+            // [$a, $b])`) - each leaf is its own declaration site; a
+            // key expression (`['k' => $v]`) is an ordinary read, not a
+            // binding.
+            ExprKind::ArrayLiteral(items) => {
+                for item in items {
+                    if let Some(k) = &item.key {
+                        self.expr(k, ctx, current_class, best);
+                    }
+                    self.bind_var(&item.value, ctx, current_class, best);
+                }
+            }
+            _ => self.expr(e, ctx, current_class, best),
         }
     }
 
@@ -592,8 +918,12 @@ impl<'a> Walker<'a> {
     ) {
         // A named function/method is one of PHP's two real variable-scope
         // boundaries (the other is a `Closure` literal, see `var_decls`'s
-        // own doc comment) - fresh scope, seeded below by its own params.
+        // own doc comment) - fresh scope, seeded below by its own params,
+        // and a fresh (unconditional) `conditional_depth` too: whatever
+        // branch/loop nesting textually surrounds this declaration is
+        // irrelevant to what's unconditionally true *inside* its own body.
         let previous_var_decls = std::mem::take(&mut self.var_decls);
+        let previous_conditional_depth = std::mem::replace(&mut self.conditional_depth, 0);
         for p in &f.params {
             self.param(p, ctx, current_class, best);
         }
@@ -606,6 +936,7 @@ impl<'a> Walker<'a> {
         self.current_function = previous_function;
         self.current_is_static = previous_is_static;
         self.var_decls = previous_var_decls;
+        self.conditional_depth = previous_conditional_depth;
     }
 
     fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, best: &mut Option<Resolved>) {
