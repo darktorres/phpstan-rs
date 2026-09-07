@@ -722,6 +722,10 @@ impl<'a> Checker<'a> {
                 } else {
                     self.check_expr(recv, locals, label)
                 };
+                // Phase 17 Stage B: see `probe_span`'s own doc comment.
+                if self.probe_span == Some(recv.span) {
+                    self.probe_hit = Some(recv_ty.clone());
+                }
                 // Phase 60: `$x?->method()` is pointless once `$x`'s own
                 // type already proves it's never null - mirrors real
                 // PHPStan's `NullsafeMethodCallRule` exactly (same
@@ -1759,6 +1763,10 @@ impl<'a> Checker<'a> {
                 // union-typed parameter, used to skip this check
                 // entirely rather than fall to `_ => {}`.
                 let base_ty = self.check_expr(base, locals, label);
+                // Phase 17 Stage B: see `probe_span`'s own doc comment.
+                if self.probe_span == Some(base.span) {
+                    self.probe_hit = Some(base_ty.clone());
+                }
                 // Phase 60: `$x?->prop` is pointless once `$x`'s own type
                 // already proves it's never null - mirrors real PHPStan's
                 // `NullsafePropertyFetchRule` exactly (same identifier,

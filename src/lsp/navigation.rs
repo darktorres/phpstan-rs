@@ -34,7 +34,7 @@ use std::path::Path;
 
 use super::text_split::{split_identifier_spans, type_hint_identifiers};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) enum Resolved {
     Class(String),
     Function(String),
@@ -43,6 +43,25 @@ pub(crate) enum Resolved {
     /// `lookup_const`, tried in that order by the caller) since a plain
     /// name reference alone doesn't say which kind it is.
     Member(String, String),
+    /// Phase 17 Stage B: an instance receiver's own member access
+    /// (`$x->method()`/`$x->prop`, `$x` not `$this`) - resolving *which*
+    /// member this is needs `$x`'s inferred type, which needs the
+    /// checker's own machinery, not just a name lookup. Everything
+    /// `lsp.rs`'s own orchestration needs to run that probe: the
+    /// receiver's own span (`Checker::probe_span`'s target - matched by
+    /// exact span, not position, so a chained call's own inner/outer
+    /// receivers are never ambiguous), which member name, whether it's a
+    /// method call or a property read, and a clone of the enclosing
+    /// function/method to re-check (owned, not borrowed - keeps this
+    /// enum free of `Project`'s own lifetime, at the cost of one clone of
+    /// a typically-small function body per request).
+    Instance {
+        receiver_span: Span,
+        member: String,
+        function: Box<FunctionDecl>,
+        is_static: bool,
+        class: Option<String>,
+    },
 }
 
 /// The entry point: what's declared/referenced at `pos` in the file
@@ -58,6 +77,8 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Optio
         registry,
         source,
         pos,
+        current_function: None,
+        current_is_static: false,
     };
     w.stmts(stmts, &mut ctx, None, &mut best);
     best
@@ -102,6 +123,17 @@ struct Walker<'a> {
     registry: &'a Registry,
     source: &'a str,
     pos: Position,
+    // Phase 17 Stage B: an owned clone (not a borrow - see `Resolved::
+    // Instance`'s own doc comment for why) of whichever `FunctionDecl`
+    // currently encloses the statement being walked, updated on entry to
+    // `function` and restored on exit - `None` at top-level script scope
+    // (Stage B doesn't support probing there; a real, disclosed, low-
+    // impact gap, see ROADMAP). Deliberately *not* updated for a
+    // `Closure`/`ArrowFn` body - probing inside one would need a
+    // different `Checker` entry point than `check_function`, out of
+    // scope for this stage.
+    current_function: Option<FunctionDecl>,
+    current_is_static: bool,
 }
 
 impl<'a> Walker<'a> {
@@ -200,7 +232,7 @@ impl<'a> Walker<'a> {
                     f.name_span,
                     Resolved::Function(ctx.declared_name(&f.name)),
                 );
-                self.function(f, &mut ctx.clone(), current_class, best);
+                self.function(f, &mut ctx.clone(), current_class, false, best);
             }
             StmtKind::ClassDecl(c) => self.class(c, ctx, best),
             StmtKind::EnumDecl(e) => self.enum_decl(e, ctx, best),
@@ -327,21 +359,33 @@ impl<'a> Walker<'a> {
                     *best = Some(Resolved::Class(fqn));
                 }
             }
-            // `$this->method()`/`$this->prop`, and any *other* receiver
-            // - the latter needs Stage B's own type-inference probe, not
-            // built yet, so only the `$this` case (needing just
-            // `current_class`, already in hand) resolves here.
+            // `$this->method()`/`$this->prop` resolve directly (only
+            // `current_class` is needed, already in hand); any *other*
+            // receiver needs Stage B's own type-inference probe - this
+            // records enough (the receiver's own span, the member name,
+            // and a clone of the enclosing function/method to re-check)
+            // for `lsp.rs`'s own orchestration to run that probe.
             ExprKind::MethodCall(recv, method, _, _)
             | ExprKind::PropertyAccess(recv, method, _) => {
                 self.expr(recv, ctx, current_class, best);
-                if matches!(&recv.kind, ExprKind::Variable(v) if v == "this")
-                    && contains(expr.span, self.pos)
-                    && let Some(owner) = current_class
+                if contains(expr.span, self.pos)
                     && let Some(spans) =
                         split_identifier_spans(self.source, expr.span, &[method.as_str()])
                     && contains(spans[0], self.pos)
                 {
-                    *best = Some(Resolved::Member(owner.to_string(), method.clone()));
+                    if matches!(&recv.kind, ExprKind::Variable(v) if v == "this")
+                        && let Some(owner) = current_class
+                    {
+                        *best = Some(Resolved::Member(owner.to_string(), method.clone()));
+                    } else if let Some(function) = self.current_function.clone() {
+                        *best = Some(Resolved::Instance {
+                            receiver_span: recv.span,
+                            member: method.clone(),
+                            function: Box::new(function),
+                            is_static: self.current_is_static,
+                            class: current_class.map(str::to_string),
+                        });
+                    }
                 }
                 for a in expr_children(expr) {
                     if !std::ptr::eq(a, recv.as_ref()) {
@@ -395,6 +439,7 @@ impl<'a> Walker<'a> {
         f: &FunctionDecl,
         ctx: &mut NameContext,
         current_class: Option<&str>,
+        is_static: bool,
         best: &mut Option<Resolved>,
     ) {
         for p in &f.params {
@@ -403,7 +448,11 @@ impl<'a> Walker<'a> {
         if let (Some(rt), Some(span)) = (&f.return_type, f.return_type_span) {
             self.record_type_hint(best, rt, span, current_class, ctx);
         }
+        let previous_function = self.current_function.replace(f.clone());
+        let previous_is_static = std::mem::replace(&mut self.current_is_static, is_static);
         self.stmts(&f.body, ctx, current_class, best);
+        self.current_function = previous_function;
+        self.current_is_static = previous_is_static;
     }
 
     fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, best: &mut Option<Resolved>) {
@@ -449,7 +498,7 @@ impl<'a> Walker<'a> {
                 m.function.name_span,
                 Resolved::Member(fqn.clone(), m.function.name.clone()),
             );
-            self.function(&m.function, &mut ctx.clone(), Some(&fqn), best);
+            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
         }
         for cst in &c.consts {
             self.record(
@@ -487,7 +536,7 @@ impl<'a> Walker<'a> {
                 m.function.name_span,
                 Resolved::Member(fqn.clone(), m.function.name.clone()),
             );
-            self.function(&m.function, &mut ctx.clone(), Some(&fqn), best);
+            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
         }
         for cst in &e.consts {
             self.record(

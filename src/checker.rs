@@ -440,6 +440,25 @@ pub struct Checker<'a> {
     // report on a member a rebound closure actually reaches.
     pub(crate) rebind_target_classes: HashSet<String>,
     pub(crate) rebind_escape_all: bool,
+    // Phase 17 Stage B: the LSP's own one-off "what type is this instance
+    // receiver" probe. `probe_span` is the exact `Span` of the receiver
+    // `Expr` (`lsp::navigation` already knows it precisely - the same
+    // `MethodCall`/`PropertyAccess` node its own Stage A walk already
+    // identifies) the caller wants typed; `check_expr`'s own `MethodCall`/
+    // `PropertyAccess` arms already compute the receiver's real `Type` as
+    // part of ordinary checking (`recv_ty`) - this just also stashes it
+    // in `probe_hit` when the receiver's own span matches. Matching by
+    // exact span (not "nearest enclosing") sidesteps any inner-vs-outer
+    // receiver ambiguity for a chained call (`$x->foo()->bar()`) entirely
+    // - `lsp::navigation` already resolved *which* receiver it wants
+    // before ever constructing this `Checker`, so there's nothing left
+    // for this to disambiguate. `None` (every existing call site,
+    // `check-project` included) is a complete no-op - `probe_span` never
+    // equals a real span, so the extra check at each call site is the
+    // only added cost, and it's checked only where `recv_ty` was already
+    // being computed anyway.
+    pub(crate) probe_span: Option<Span>,
+    pub(crate) probe_hit: Option<Type>,
 }
 
 mod assignment;
@@ -514,6 +533,8 @@ impl<'a> Checker<'a> {
             static_var_names: HashSet::new(),
             rebind_target_classes: HashSet::new(),
             rebind_escape_all: false,
+            probe_span: None,
+            probe_hit: None,
         }
     }
 

@@ -261,3 +261,108 @@ fn definition_repopulates_after_a_did_change_moves_the_declaration() {
     assert_eq!(result["range"]["start"]["line"], expected["line"]);
     assert_eq!(result["range"]["start"]["character"], expected["character"]);
 }
+
+// Phase 17 Stage B: an instance receiver's own type, resolved via a
+// one-off checker probe (Checker::probe_span/probe_hit) rather than a
+// name lookup - $x isn't $this, self, or any other syntactically-known
+// target, so Stage A alone can't resolve it.
+
+#[test]
+fn hover_and_definition_on_an_instance_method_call_resolve_via_the_receivers_type() {
+    let dir = TempDir::new("instance_method");
+    let src = "<?php class Widget { public function greet(): string { return 'hi'; } } function useWidget(Widget $w): string { return $w->greet(); }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "greet();");
+
+    let messages = run(
+        &dir,
+        &[
+            hover_request(2, &uri, pos.clone()),
+            definition_request(3, &uri, pos),
+        ],
+    );
+    assert_eq!(
+        response_result(&messages, 2)["contents"],
+        "Widget::greet(): string"
+    );
+    let def = response_result(&messages, 3);
+    assert_eq!(def["uri"], uri);
+    let expected = lsp_pos(src, "greet(): string { return 'hi'; }");
+    assert_eq!(def["range"]["start"]["line"], expected["line"]);
+    assert_eq!(def["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn hover_on_an_instance_property_access_resolves_via_the_receivers_type() {
+    let dir = TempDir::new("instance_property");
+    let src = "<?php class Widget { public int $count = 0; } function useWidget(Widget $w): int { return $w->count; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "count;");
+
+    let messages = run(&dir, &[hover_request(2, &uri, pos)]);
+    assert_eq!(
+        response_result(&messages, 2)["contents"],
+        "Widget::$count: int"
+    );
+}
+
+#[test]
+fn an_uninferrable_receiver_resolves_to_null_not_a_guess() {
+    let dir = TempDir::new("uninferrable_receiver");
+    // $w has no type hint at all - its type is Mixed, which type_to_class
+    // deliberately never resolves to any class.
+    let src = "<?php function useWidget($w) { return $w->greet(); }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "greet();");
+
+    let messages = run(
+        &dir,
+        &[
+            hover_request(2, &uri, pos.clone()),
+            definition_request(3, &uri, pos),
+        ],
+    );
+    assert_eq!(response_result(&messages, 2), Value::Null);
+    assert_eq!(response_result(&messages, 3), Value::Null);
+}
+
+#[test]
+fn the_probe_hook_does_not_perturb_ordinary_diagnostics() {
+    // Regression guard that Checker::probe_span/probe_hit (Stage B) is a
+    // true no-op outside an active probe: a hover request against an
+    // instance-receiver call (which internally builds its own throwaway,
+    // probe-armed Checker) followed by a real didOpen on the same file
+    // must still publish exactly the diagnostics ordinary checking always
+    // produces - proving the probe never leaks into the shared Project's
+    // own checking path.
+    let dir = TempDir::new("probe_no_perturb");
+    let src = "<?php class Widget { public function greet(): string { return 'hi'; } } function useWidget(Widget $w): string { return $w->greet(); } function f(): int { return 'not an int'; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "greet();");
+
+    let messages = run(
+        &dir,
+        &[
+            hover_request(2, &uri, pos),
+            notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": uri, "languageId": "php", "version": 1, "text": src}}),
+            ),
+        ],
+    );
+    let diag_notification = messages
+        .iter()
+        .find(|m| m["method"] == "textDocument/publishDiagnostics")
+        .expect("expected a publishDiagnostics notification");
+    let diagnostics = diag_notification["params"]["diagnostics"]
+        .as_array()
+        .unwrap();
+    assert!(
+        diagnostics.iter().any(|d| d["code"] == "return.type"),
+        "expected f()'s own real return.type mismatch to still be reported, got: {diagnostics:?}"
+    );
+}

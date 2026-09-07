@@ -34,11 +34,12 @@ use lsp_types::{
     TextDocumentSyncKind, Uri,
 };
 
-use crate::ast::ClassKind;
-use crate::checker::Diagnostic;
+use crate::ast::{ClassKind, FunctionDecl};
+use crate::checker::{Checker, Diagnostic};
 use crate::project::Project;
 use crate::registry::format_signature;
 use crate::token::{Position, Span};
+use crate::types::Type;
 
 mod navigation;
 mod text_split;
@@ -192,6 +193,22 @@ fn from_lsp_position(pos: LspPosition) -> Position {
     }
 }
 
+/// Phase 17 Stage B: resolves a `Checker::probe_hit` result down to a
+/// single class name - a bare `Object`, or (a real, common shape for a
+/// receiver built from more than one code path) the first `Object`
+/// member of a `Union`/`Intersection`. `None` for anything else
+/// (`Mixed`, a scalar, ...) - an un-inferrable receiver resolves to
+/// nothing, never a guess.
+fn type_to_class(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Object(class, _) => Some(class.as_str()),
+        Type::Union(members) | Type::Intersection(members) => {
+            members.iter().find_map(type_to_class)
+        }
+        _ => None,
+    }
+}
+
 fn publish_diagnostics_notification(uri: Uri, diagnostics: &[Diagnostic]) -> Message {
     Message::Notification(LspNotification::new(
         "textDocument/publishDiagnostics".to_string(),
@@ -338,19 +355,60 @@ impl Server {
                 }
                 Some(text)
             }
-            navigation::Resolved::Member(owner, name) => {
-                if let Some((_, sig)) = registry.lookup_method_with_owner(owner, name) {
-                    return Some(format_signature(&format!("{owner}::{name}"), sig));
-                }
-                if let Some((_, sig)) = registry.lookup_property_with_owner(owner, name) {
-                    return Some(format!("{owner}::${name}: {}", sig.ty));
-                }
-                if let Some((_, sig)) = registry.lookup_const_with_owner(owner, name) {
-                    return Some(format!("{owner}::{name}: {}", sig.ty));
-                }
-                None
+            navigation::Resolved::Member(owner, name) => self.format_member_hover(owner, name),
+            navigation::Resolved::Instance {
+                receiver_span,
+                member,
+                function,
+                is_static,
+                class,
+                ..
+            } => {
+                let owner = self.probe_receiver_class(
+                    *receiver_span,
+                    function,
+                    *is_static,
+                    class.as_deref(),
+                )?;
+                self.format_member_hover(&owner, member)
             }
         }
+    }
+
+    fn format_member_hover(&self, owner: &str, name: &str) -> Option<String> {
+        let registry = self.project.registry();
+        if let Some((_, sig)) = registry.lookup_method_with_owner(owner, name) {
+            return Some(format_signature(&format!("{owner}::{name}"), sig));
+        }
+        if let Some((_, sig)) = registry.lookup_property_with_owner(owner, name) {
+            return Some(format!("{owner}::${name}: {}", sig.ty));
+        }
+        if let Some((_, sig)) = registry.lookup_const_with_owner(owner, name) {
+            return Some(format!("{owner}::{name}: {}", sig.ty));
+        }
+        None
+    }
+
+    /// Phase 17 Stage B: runs the checker over just `function` (a
+    /// throwaway `Checker`, scoped to this one request - see
+    /// `Checker::probe_span`'s own doc comment) to learn `receiver_span`'s
+    /// own inferred type, then resolves that type down to a single class
+    /// name to look the member up against. A `Union`/`Intersection`
+    /// receiver resolves to its first `Object` member - real, if narrow,
+    /// precision (a chained-type receiver's *other* possible classes
+    /// aren't offered as alternatives), not a correctness bug: every
+    /// member this finds really is reachable through that receiver.
+    fn probe_receiver_class(
+        &self,
+        receiver_span: Span,
+        function: &FunctionDecl,
+        is_static: bool,
+        class: Option<&str>,
+    ) -> Option<String> {
+        let mut checker = Checker::new(self.project.registry());
+        checker.probe_span = Some(receiver_span);
+        checker.check_function(function, class, is_static);
+        type_to_class(&checker.probe_hit?).map(str::to_string)
     }
 
     /// Phase 17 Stage A: the `navigation::Resolved` symbol's own
@@ -363,11 +421,35 @@ impl Server {
         let path = uri_to_path(uri)?;
         let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
         let locations = self.project.decl_locations();
+        // An Instance receiver's own owner class needs the Stage B probe
+        // *before* it can be looked up the same way an ordinary Member
+        // is - resolved into one here so the `members` lookup itself
+        // stays a single, shared call for both cases.
+        let member_key = match &resolved {
+            navigation::Resolved::Member(owner, name) => Some((owner.clone(), name.clone())),
+            navigation::Resolved::Instance {
+                receiver_span,
+                member,
+                function,
+                is_static,
+                class,
+                ..
+            } => {
+                let owner = self.probe_receiver_class(
+                    *receiver_span,
+                    function,
+                    *is_static,
+                    class.as_deref(),
+                )?;
+                Some((owner, member.clone()))
+            }
+            navigation::Resolved::Class(_) | navigation::Resolved::Function(_) => None,
+        };
         let (target_path, span) = match &resolved {
             navigation::Resolved::Class(fqn) => locations.classes.get(fqn)?,
             navigation::Resolved::Function(fqn) => locations.functions.get(fqn)?,
-            navigation::Resolved::Member(owner, name) => {
-                locations.members.get(&(owner.clone(), name.clone()))?
+            navigation::Resolved::Member(_, _) | navigation::Resolved::Instance { .. } => {
+                locations.members.get(member_key.as_ref()?)?
             }
         };
         let target_uri = self
