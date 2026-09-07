@@ -816,6 +816,38 @@ fn instanceof_against_an_unrelated_interface_also_narrows_to_the_new_interface()
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real bug found and fixed this session: `check_expr`'s/`infer_expr`'s
+// own `PropertyAccess` arms matched `Object`/`EnumCase`/`ObjectShape`
+// directly with no `Union`/`Intersection` arm at all, so a *property*
+// access (unlike the `MethodCall` case just above, which already handled
+// this) on the exact same kind of `View&HasPageAssets` intersection fell
+// straight to `Type::Mixed`. Real corpus false positive this traces to:
+// `PhpParser\Node\Stmt\ClassMethod::$stmts` resolving to bare `Mixed`
+// the moment its receiver was narrowed via `instanceof` from the
+// `PhpParser\Node` interface (PhpParser's own AST routes every concrete
+// node type through an interface this way, not a common base class).
+#[test]
+fn instanceof_against_an_unrelated_class_also_resolves_a_property_on_the_intersection() {
+    // Interfaces can't declare properties in real PHP, so the property-
+    // bearing side here is a plain, otherwise-unrelated class - matching
+    // the real bug's own shape exactly (`PhpParser\Node`, an interface,
+    // narrowed via `instanceof PhpParser\Node\Stmt\ClassMethod`, a class
+    // with its own real `$stmts` property).
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            interface View {}
+            class ClassMethod { public array $stmts = []; }
+            function f(View $view): void {
+                if ($view instanceof ClassMethod) {
+                    assertType('array', $view->stmts);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Real corpus false positive: amphp/http-client's own `Http1Connection::
 // watchIdleConnection()` - a *nullable* property/variable checked against
 // an unrelated interface. `?Socket instanceof ResourceStream` used to

@@ -2736,3 +2736,110 @@ fn a_negated_literal_true_as_a_last_elseif_without_else_is_exempt() {
         "got: {d:?}"
     );
 }
+
+// Real corpus false positive found while corpus-verifying the family
+// above: `strpos()`'s own `$offset` parameter (typed `int<0, max>`)
+// collapsed to bare `Int` the moment it was reassigned via `$offset =
+// $pos + 1;` inside a loop, surfacing only once the `While`-condition
+// convergence fix made `strpos()`'s own later, real re-check of
+// `$offset` visible at all (`Tools\p58\assign.php`). `infer_binary`'s
+// `Add`/`Sub` arms gained real, narrow `int<min,max>` arithmetic -
+// confirmed directly against `vendor/phpstan-src`'s own
+// `InitializerExprTypeResolver::integerRangeMath` (deliberately not the
+// *full* range-arithmetic surface: `Mul`/`Div`'s own negative/positive-
+// interval splitting isn't replicated, and `Sub` only handles a constant
+// right operand, not the full range-minus-range case - no corpus
+// evidence needs either, and both are meaningfully more involved to
+// transcribe correctly).
+#[test]
+fn adding_a_literal_to_a_bounded_int_range_shifts_both_ends() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param int<0, 10> $x */
+            function f(int $x): void {
+                assertType('int<1, 11>', $x + 1);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn adding_a_literal_to_an_upper_unbounded_int_range_keeps_it_unbounded() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param int<0, max> $x */
+            function f(int $x): void {
+                assertType('int<1, max>', $x + 1);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn subtracting_a_literal_from_a_bounded_int_range_shifts_both_ends() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param int<0, 10> $x */
+            function f(int $x): void {
+                assertType('int<-1, 9>', $x - 1);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn subtracting_a_literal_from_an_upper_unbounded_int_range_keeps_it_unbounded() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param int<0, max> $x */
+            function f(int $x): void {
+                assertType('int<-1, max>', $x - 1);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn adding_two_int_ranges_with_a_shared_unbounded_end_stays_unbounded() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param int<0, 10> $x
+             * @param int<0, max> $y
+             */
+            function f(int $x, int $y): void {
+                assertType('int<0, max>', $x + $y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn subtracting_a_non_constant_int_range_falls_back_to_plain_int() {
+    // The narrower, undocumented-as-general `Sub` case: a genuinely
+    // ranged (not single-valued) right operand isn't handled, matching
+    // this fix's own disclosed scope.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param int<0, 10> $x
+             * @param int<0, 5> $y
+             */
+            function f(int $x, int $y): void {
+                assertType('int', $x - $y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

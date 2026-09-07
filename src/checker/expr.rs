@@ -80,6 +80,33 @@ fn type_definitely_excludes_null(ty: &Type) -> bool {
     !matches!(ty, Type::Mixed | Type::Never) && narrow_type_excluding(ty, &Type::Null) == *ty
 }
 
+/// Phase 15 continuation: `ty`'s own `(min, max)` bound pair when it's
+/// range-representable at all - an `IntLiteral` is a degenerate range
+/// with `min == max`, matching `IntRange`'s own doc comment ("the same
+/// relationship `IntLiteral` has to `Int`"). `infer_binary`'s own
+/// `Add`/`Sub` arms use this to compute a real, narrow arithmetic result
+/// range instead of collapsing straight to bare `Int`.
+fn int_range_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
+    match ty {
+        Type::IntLiteral(n) => Some((Some(*n), Some(*n))),
+        Type::IntRange(min, max) => Some((*min, *max)),
+        _ => None,
+    }
+}
+
+/// The inverse of `int_range_bounds`: collapses back to the most precise
+/// representable type - `Type::Int` when both ends are unbounded (an
+/// `IntRange(None, None)` is never constructed elsewhere in this
+/// project), `Type::IntLiteral` when both ends coincide, `Type::IntRange`
+/// otherwise.
+fn normalize_int_range(min: Option<i64>, max: Option<i64>) -> Type {
+    match (min, max) {
+        (None, None) => Type::Int,
+        (Some(a), Some(b)) if a == b => Type::IntLiteral(a),
+        (min, max) => Type::IntRange(min, max),
+    }
+}
+
 /// Phase 60: real PHPStan's own `isset()`/`empty()`/`??`/`??=` "does this
 /// null-probe make sense" verdict, condensed to the one shape this
 /// project scopes to (a bare, guaranteed-defined variable - see
@@ -1983,61 +2010,14 @@ impl<'a> Checker<'a> {
                 {
                     return narrowed.clone();
                 }
-                let result = match narrow_type_excluding(&base_ty, &Type::Null) {
-                    Type::Object(class, type_args) => self
-                        .registry
-                        .lookup_property_with_owner(&class, prop)
-                        .map(|(owner, p)| {
-                            let bindings = self.class_template_bindings(&class, &type_args, &owner);
-                            let resolved = types::substitute_template(&p.ty, &bindings);
-                            self.resolve_pseudo(&resolved, &class)
-                        })
-                        .unwrap_or(Type::Mixed),
-                    // Phase 79: `->name`/`->value` on a specific known
-                    // case narrows past the enum-wide property type
-                    // registered in `ClassInfo` (a generic `string` /
-                    // union-of-every-case's-value) to this exact case's
-                    // own literal - real PHPStan's own `->name`/`->value`
-                    // precision (`EnumCaseObjectType`). Enums can't
-                    // declare any instance property of their own in real
-                    // PHP, so no other property name is ever legitimate
-                    // here - the fallback still does an ordinary by-class
-                    // lookup rather than assuming that, in case this
-                    // checker's own synthesized `properties` map (or a
-                    // future language change) ever disagrees.
-                    Type::EnumCase(_, case) if prop == "name" => Type::StringLiteral(case),
-                    Type::EnumCase(fqn, case) if prop == "value" => self
-                        .registry
-                        .enum_case_value(&fqn, &case)
-                        .cloned()
-                        .or_else(|| {
-                            self.registry
-                                .lookup_property(&fqn, "value")
-                                .map(|p| p.ty.clone())
-                        })
-                        .unwrap_or(Type::Mixed),
-                    Type::EnumCase(fqn, _) => self
-                        .registry
-                        .lookup_property_with_owner(&fqn, prop)
-                        .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
-                        .unwrap_or(Type::Mixed),
-                    // Phase 80: a declared `object{...}` shape's own
-                    // field, resolved by name directly - no registry
-                    // lookup needed, the shape's own fields already carry
-                    // real types. An unlisted property name falls to
-                    // `Mixed` rather than a new "undefined property"
-                    // diagnostic - this project doesn't add that check
-                    // for `ArrayShape`'s own unlisted keys either (see
-                    // Phase 50's own still-open `InvalidKeyInArrayDimFetchRule`
-                    // note), matching the identical "don't guess a shape
-                    // is exhaustive" caution here.
-                    Type::ObjectShape(fields) => fields
-                        .iter()
-                        .find(|(name, _, _)| name == prop)
-                        .map(|(_, ty, _)| ty.clone())
-                        .unwrap_or(Type::Mixed),
-                    _ => Type::Mixed,
-                };
+                // Phase 79/80's own `EnumCase`/`ObjectShape` precision and
+                // the general `Object` lookup all now live in
+                // `property_access_type` (shared with `infer_expr`'s own
+                // identical arm) - see its own doc comment for the real
+                // bug this factoring-out fixed (`Union`/`Intersection`
+                // bases silently falling to `Mixed`).
+                let result =
+                    self.property_access_type(&narrow_type_excluding(&base_ty, &Type::Null), prop);
                 if *nullsafe && result != Type::Mixed {
                     union_types(result, Type::Null)
                 } else {
@@ -2551,6 +2531,72 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Real bug found and fixed this session: both `check_expr`'s and
+    /// `infer_expr`'s own `PropertyAccess` arms matched `base_ty` against
+    /// `Object`/`EnumCase`/`ObjectShape` directly, with no `Union`/
+    /// `Intersection` arm at all - falling to the `_ => Type::Mixed`
+    /// catch-all discarded every bit of type information whenever the
+    /// base's own type happened to be a `Union`/`Intersection` (a real,
+    /// common shape: `narrow_instanceof_true`'s own deliberate design
+    /// intersects an unrelated-looking `instanceof` target with the
+    /// original type - see its own doc comment - and a plain `A|B`
+    /// property/parameter type is exactly as common). Recurses through
+    /// both, trying each member in turn and keeping the first real
+    /// (non-`Mixed`) answer - correct for an `Intersection` (the property
+    /// only needs to exist on *one* member) and a reasonable, consistent
+    /// best-effort for a `Union` (matches this project's own general
+    /// "fewer false positives over more precision" bias elsewhere, e.g.
+    /// `MethodCall`'s own identical `Union`/`Intersection` receiver-class
+    /// extraction just above). Real corpus false positive this fixes:
+    /// `PhpParser\Node\Stmt\ClassMethod::$stmts` (a real, docblock-typed
+    /// `Node\Stmt[]|null` property) resolving to bare `Mixed` the moment
+    /// its receiver was narrowed via `instanceof` from the `PhpParser\
+    /// Node` interface - `PhpParser`'s own AST hierarchy routes every
+    /// concrete node type through an interface this way, not a common
+    /// base *class*, so this shape was never rare there.
+    fn property_access_type(&self, base_ty: &Type, prop: &str) -> Type {
+        match base_ty {
+            Type::Object(class, type_args) => self
+                .registry
+                .lookup_property_with_owner(class, prop)
+                .map(|(owner, p)| {
+                    let bindings = self.class_template_bindings(class, type_args, &owner);
+                    let resolved = types::substitute_template(&p.ty, &bindings);
+                    self.resolve_pseudo(&resolved, class)
+                })
+                .unwrap_or(Type::Mixed),
+            Type::EnumCase(_, case) if prop == "name" => Type::StringLiteral(case.clone()),
+            Type::EnumCase(fqn, case) if prop == "value" => self
+                .registry
+                .enum_case_value(fqn, case)
+                .cloned()
+                .or_else(|| {
+                    self.registry
+                        .lookup_property(fqn, "value")
+                        .map(|p| p.ty.clone())
+                })
+                .unwrap_or(Type::Mixed),
+            Type::EnumCase(fqn, _) => self
+                .registry
+                .lookup_property_with_owner(fqn, prop)
+                .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
+                .unwrap_or(Type::Mixed),
+            Type::ObjectShape(fields) => fields
+                .iter()
+                .find(|(name, _, _)| name == prop)
+                .map(|(_, ty, _)| ty.clone())
+                .unwrap_or(Type::Mixed),
+            Type::Union(members) | Type::Intersection(members) => members
+                .iter()
+                .find_map(|m| {
+                    let ty = self.property_access_type(m, prop);
+                    (ty != Type::Mixed).then_some(ty)
+                })
+                .unwrap_or(Type::Mixed),
+            _ => Type::Mixed,
+        }
+    }
+
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::Literal(lit) => match lit {
@@ -2868,43 +2914,9 @@ impl<'a> Checker<'a> {
                     return narrowed.clone();
                 }
                 let base_ty = narrow_type_excluding(&self.infer_expr(base, locals), &Type::Null);
-                let result = match base_ty {
-                    Type::Object(class, type_args) => self
-                        .registry
-                        .lookup_property_with_owner(&class, prop)
-                        .map(|(owner, p)| {
-                            let bindings = self.class_template_bindings(&class, &type_args, &owner);
-                            let resolved = types::substitute_template(&p.ty, &bindings);
-                            self.resolve_pseudo(&resolved, &class)
-                        })
-                        .unwrap_or(Type::Mixed),
-                    // Phase 79: mirrors `check_expr`'s own identical
-                    // `EnumCase` arm just above - see its comment.
-                    Type::EnumCase(_, case) if prop == "name" => Type::StringLiteral(case),
-                    Type::EnumCase(fqn, case) if prop == "value" => self
-                        .registry
-                        .enum_case_value(&fqn, &case)
-                        .cloned()
-                        .or_else(|| {
-                            self.registry
-                                .lookup_property(&fqn, "value")
-                                .map(|p| p.ty.clone())
-                        })
-                        .unwrap_or(Type::Mixed),
-                    Type::EnumCase(fqn, _) => self
-                        .registry
-                        .lookup_property_with_owner(&fqn, prop)
-                        .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
-                        .unwrap_or(Type::Mixed),
-                    // Phase 80: mirrors `check_expr`'s own identical
-                    // `ObjectShape` arm - see its comment.
-                    Type::ObjectShape(fields) => fields
-                        .iter()
-                        .find(|(name, _, _)| name == prop)
-                        .map(|(_, ty, _)| ty.clone())
-                        .unwrap_or(Type::Mixed),
-                    _ => Type::Mixed,
-                };
+                // See `property_access_type`'s own doc comment - shared
+                // with `check_expr`'s identical arm.
+                let result = self.property_access_type(&base_ty, prop);
                 // Same implicit nullability as `?->method()` just above,
                 // for `$x?->prop`.
                 if *nullsafe && result != Type::Mixed {
@@ -3965,12 +3977,69 @@ impl<'a> Checker<'a> {
                     return Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
                 }
                 if lt == Type::Float || rt == Type::Float {
-                    Type::Float
-                } else {
-                    Type::Int
+                    return Type::Float;
                 }
+                // Phase 15 continuation: real, if narrow, `int<min,max>`
+                // arithmetic - confirmed directly against `vendor/
+                // phpstan-src`'s own `InitializerExprTypeResolver::
+                // getPlusType`/`integerRangeMath`'s `BinaryOp\Plus` arm
+                // (an unbounded end propagates as unbounded; a bounded one
+                // shifts by the same amount, exactly mirrored here). Real
+                // corpus false positive this fixes: `strpos()`'s own
+                // `$offset` parameter (typed `int<0, max>`) collapsing to
+                // bare `Int` the moment it's reassigned via `$offset =
+                // $pos + 1;` inside a loop - surfaced only once the
+                // `While`-condition convergence fix (this session) made
+                // `strpos()`'s own later, real re-check of `$offset`
+                // visible at all. Deliberately narrower than real
+                // PHPStan's own full range-arithmetic surface (`Mul`/`Div`'s
+                // own negative/positive-interval splitting isn't
+                // replicated - no corpus evidence needs it, and it's
+                // meaningfully more involved to transcribe correctly) -
+                // falls through to the existing plain `Int` answer
+                // whenever either side isn't range-representable.
+                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
+                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                {
+                    let min = l_min.zip(r_min).map(|(a, b)| a + b);
+                    let max = l_max.zip(r_max).map(|(a, b)| a + b);
+                    return normalize_int_range(min, max);
+                }
+                Type::Int
             }
-            BinOp::Sub | BinOp::Mul | BinOp::Pow => {
+            BinOp::Sub => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                    return ty;
+                }
+                if lt == Type::Float || rt == Type::Float {
+                    return Type::Float;
+                }
+                // Same real, narrow range-arithmetic as `Add` above, but
+                // only for a *constant* right operand (`$x - 1`) - a
+                // fixed value shifts both bounds by the same amount with
+                // no swap ever needed, unlike real PHPStan's own full
+                // range-minus-range case (`integerRangeMath`'s own
+                // `BinaryOp\Minus` arm has extra branches specifically for
+                // when the *subtracted* side is itself an unbounded
+                // range, which can flip which end stays bounded) - not
+                // replicated here, no corpus evidence needs it, and
+                // transcribing it exactly risks a subtle sign/swap bug
+                // this project has no way to cross-check against a real
+                // PHPStan run. Falls through to plain `Int` for a
+                // non-constant right operand.
+                if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
+                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    && c == rc
+                {
+                    let min = l_min.map(|m| m - c);
+                    let max = l_max.map(|m| m - c);
+                    return normalize_int_range(min, max);
+                }
+                Type::Int
+            }
+            BinOp::Mul | BinOp::Pow => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
                 if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
