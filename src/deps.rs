@@ -31,7 +31,7 @@ pub fn referenced_names(stmts: &[Stmt]) -> HashSet<String> {
     names
 }
 
-fn is_primitive_type_name(name: &str) -> bool {
+pub(crate) fn is_primitive_type_name(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "int"

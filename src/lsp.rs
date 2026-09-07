@@ -27,13 +27,21 @@ use std::str::FromStr;
 use lsp_server::{ErrorCode, Message, Notification as LspNotification, Request, Response};
 use lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, NumberOrString,
-    Position as LspPosition, PublishDiagnosticsParams, Range as LspRange, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
+    MarkedString, NumberOrString, OneOf, Position as LspPosition, PublishDiagnosticsParams,
+    Range as LspRange, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Uri,
 };
 
+use crate::ast::ClassKind;
 use crate::checker::Diagnostic;
 use crate::project::Project;
+use crate::registry::format_signature;
+use crate::token::{Position, Span};
+
+mod navigation;
+mod text_split;
 
 /// The outcome of trying to read one framed LSP message. `Eof` (a clean
 /// transport disconnection) and `Disconnected` (a real I/O failure
@@ -146,21 +154,41 @@ fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
         None => format!("{}: {}", d.location, d.message),
     };
     LspDiagnostic {
-        range: LspRange {
-            start: LspPosition {
-                line: d.span.start.line.saturating_sub(1),
-                character: d.span.start.col.saturating_sub(1),
-            },
-            end: LspPosition {
-                line: d.span.end.line.saturating_sub(1),
-                character: d.span.end.col.saturating_sub(1),
-            },
-        },
+        range: to_lsp_range(d.span),
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String(d.identifier.clone())),
         source: Some("phpstan-rs".to_string()),
         message,
         ..Default::default()
+    }
+}
+
+/// `Span`'s 1-indexed line/col becomes LSP's 0-indexed line/character -
+/// shared by every diagnostic/hover/definition response this server
+/// sends, so the same approximation (this project's own `Span` counts
+/// UTF-8 characters; LSP wants UTF-16 code units - see this module's own
+/// doc comment) is made exactly once.
+fn to_lsp_range(span: Span) -> LspRange {
+    LspRange {
+        start: LspPosition {
+            line: span.start.line.saturating_sub(1),
+            character: span.start.col.saturating_sub(1),
+        },
+        end: LspPosition {
+            line: span.end.line.saturating_sub(1),
+            character: span.end.col.saturating_sub(1),
+        },
+    }
+}
+
+/// The inverse of `to_lsp_range`'s own position half - a request's cursor
+/// position, converted from LSP's 0-indexed/UTF-16 convention to this
+/// project's own 1-indexed/UTF-8-character one. Same accepted
+/// approximation, just applied in the other direction.
+fn from_lsp_position(pos: LspPosition) -> Position {
+    Position {
+        line: pos.line + 1,
+        col: pos.character + 1,
     }
 }
 
@@ -186,8 +214,13 @@ struct Server {
 
 impl Server {
     fn new() -> Self {
+        let mut project = Project::new();
+        // Phase 17: hover/definition's own text-split technique needs
+        // each file's exact source text - see `Project::retain_source`'s
+        // own doc comment for why this is opt-in and off elsewhere.
+        project.set_retain_source(true);
         Server {
-            project: Project::new(),
+            project,
             open_uris: HashMap::new(),
         }
     }
@@ -265,6 +298,88 @@ impl Server {
             })
             .collect()
     }
+
+    /// Phase 17 Stage A: `navigation::resolve_at` finds *what* symbol is
+    /// under the cursor; this formats *what the registry already knows*
+    /// about it into hover text. `None` for anything Stage A can't
+    /// resolve (including an instance-receiver call, e.g. `$x->method()`
+    /// where `$x` isn't `$this` - Stage B's own job) - a valid "no hover
+    /// here" per the LSP spec, not an error.
+    fn hover(&self, uri: &Uri, position: LspPosition) -> Option<Hover> {
+        let path = uri_to_path(uri)?;
+        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let text = self.format_hover(&resolved)?;
+        Some(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(text)),
+            range: None,
+        })
+    }
+
+    fn format_hover(&self, resolved: &navigation::Resolved) -> Option<String> {
+        let registry = self.project.registry();
+        match resolved {
+            navigation::Resolved::Function(fqn) => {
+                Some(format_signature(fqn, registry.lookup_function(fqn)?))
+            }
+            navigation::Resolved::Class(fqn) => {
+                let info = registry.classes.get(fqn)?;
+                let kind = match info.kind {
+                    ClassKind::Class => "class",
+                    ClassKind::Interface => "interface",
+                    ClassKind::Trait => "trait",
+                    ClassKind::Enum => "enum",
+                };
+                let mut text = format!("{kind} {fqn}");
+                if !info.extends.is_empty() {
+                    text.push_str(&format!(" extends {}", info.extends.join(", ")));
+                }
+                if !info.implements.is_empty() {
+                    text.push_str(&format!(" implements {}", info.implements.join(", ")));
+                }
+                Some(text)
+            }
+            navigation::Resolved::Member(owner, name) => {
+                if let Some((_, sig)) = registry.lookup_method_with_owner(owner, name) {
+                    return Some(format_signature(&format!("{owner}::{name}"), sig));
+                }
+                if let Some((_, sig)) = registry.lookup_property_with_owner(owner, name) {
+                    return Some(format!("{owner}::${name}: {}", sig.ty));
+                }
+                if let Some((_, sig)) = registry.lookup_const_with_owner(owner, name) {
+                    return Some(format!("{owner}::{name}: {}", sig.ty));
+                }
+                None
+            }
+        }
+    }
+
+    /// Phase 17 Stage A: the `navigation::Resolved` symbol's own
+    /// declaration site, via `Project::decl_locations` - `None` when
+    /// nothing resolved, or (a real, if rare, possibility) a symbol
+    /// resolved by name but declared nowhere this project has loaded
+    /// (an undefined reference - already flagged by an ordinary
+    /// diagnostic, not this method's job to report again).
+    fn definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
+        let path = uri_to_path(uri)?;
+        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let locations = self.project.decl_locations();
+        let (target_path, span) = match &resolved {
+            navigation::Resolved::Class(fqn) => locations.classes.get(fqn)?,
+            navigation::Resolved::Function(fqn) => locations.functions.get(fqn)?,
+            navigation::Resolved::Member(owner, name) => {
+                locations.members.get(&(owner.clone(), name.clone()))?
+            }
+        };
+        let target_uri = self
+            .open_uris
+            .get(target_path)
+            .cloned()
+            .unwrap_or_else(|| path_to_uri(target_path));
+        Some(GotoDefinitionResponse::Scalar(Location {
+            uri: target_uri,
+            range: to_lsp_range(*span),
+        }))
+    }
 }
 
 pub fn run() {
@@ -339,6 +454,8 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     text_document_sync: Some(TextDocumentSyncCapability::Kind(
                         TextDocumentSyncKind::FULL,
                     )),
+                    hover_provider: Some(HoverProviderCapability::Simple(true)),
+                    definition_provider: Some(OneOf::Left(true)),
                     ..Default::default()
                 },
                 server_info: Some(ServerInfo {
@@ -353,6 +470,32 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 writer,
                 &Message::Response(Response::new_ok(req.id, serde_json::Value::Null)),
             );
+        }
+        "textDocument/hover" => {
+            let result = serde_json::from_value::<HoverParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    server.hover(
+                        &params.text_document_position_params.text_document.uri,
+                        params.text_document_position_params.position,
+                    )
+                })
+                .map(|hover| serde_json::to_value(hover).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
+        }
+        "textDocument/definition" => {
+            let result = serde_json::from_value::<GotoDefinitionParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    server.definition(
+                        &params.text_document_position_params.text_document.uri,
+                        params.text_document_position_params.position,
+                    )
+                })
+                .map(|loc| serde_json::to_value(loc).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
         }
         other => {
             let _ = write_message(
