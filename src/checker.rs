@@ -375,25 +375,41 @@ pub struct Checker<'a> {
     // be open, matching real PHP's "innermost loop-or-switch" rule for an
     // unqualified `break;`.
     pub(crate) loop_break_states: Vec<Vec<Locals>>,
+    // Phase 55: the `continue` counterpart of `loop_break_states` above -
+    // one frame per currently-open loop, collecting the `locals` snapshot
+    // at every `continue` reached inside it. Unlike `break`'s states
+    // (folded once, after all of a loop's convergence passes finish, into
+    // what flows *past* the loop), `continue`'s states are consumed
+    // *between* passes, inside `converge_loop_body` itself: a `continue`
+    // jumps back to the top of the loop, so whatever it reached is
+    // exactly as much a real "entry to the next iteration" as the body's
+    // own ordinary fall-through exit is. Pushed/popped once per pass
+    // (not once per loop, unlike `loop_break_states`) - each pass's own
+    // continue-reached states only ever inform *that* pass's contribution
+    // to the next entry, never a later pass's. Without this, a variable
+    // reassigned *only* on a path that ends in `continue` (a real, common
+    // shape: `if ($x === null) { ...; $x = compute(); continue; }`) never
+    // fed its new value into the next convergence pass at all - the
+    // pass-to-pass entry computation only ever saw the body's ordinary
+    // fall-through exit, which such a variable never reaches, so
+    // convergence silently converged after a single pass and kept that
+    // pass's own diagnostics, computed against the *stale* pre-loop
+    // entry - reintroducing the exact false-positive class Phase 15's
+    // `UnreachableStatementRule` was reverted over in the first place
+    // (real corpus find: sebastian/diff's `Parser::parse`).
+    pub(crate) loop_continue_states: Vec<Vec<Locals>>,
     // Phase 60: how many loop bodies (`While`/`DoWhile`/`For`/`Foreach`,
     // nesting included - a `Switch` doesn't count, it runs its body
     // exactly once) currently enclose whatever's being checked right
-    // now. Every loop-body check in `checker/stmt.rs` is a single,
-    // non-iterated pass (see `StmtKind::Foreach`'s own doc comment on
-    // why this project doesn't do real per-loop fixed-point analysis) -
-    // a variable's tracked type at any point *inside* that one pass can
-    // never reflect what an *earlier* iteration's own write to the same
-    // variable would have produced, even though that's exactly what a
-    // second-or-later real iteration would see. `check_pointless_null_
-    // probe`'s own "is this variable ever null" verdict is unsound
-    // exactly there - real corpus false positive: Symfony's own
-    // `AbstractObjectNormalizer::validateAndDenormalize`'s `$extraAttributesException
-    // ??= $e;` inside a loop's own `catch` block, initialized to `null`
-    // once before the loop and self-referentially widened only via this
-    // same statement - wrongly read as "always null" by a check that
-    // can only ever see the very first pass through. Scoped to a real
-    // loop depth counter, not reused from `loop_break_states` (which
-    // also counts an enclosing `Switch` frame, not vulnerable to this).
+    // now. Originally motivated by this project's own single-pass loop
+    // model (superseded by Phase 55's `converge_loop_body` - a variable's
+    // tracked type at a given point can now reflect an earlier
+    // iteration's own write, within the pass budget) - kept as its own
+    // counter regardless, since `check_pointless_null_probe` and similar
+    // "is this ever true across the whole function" checks still need a
+    // simple "any loop at all, at any depth, still open right now" signal
+    // distinct from `loop_break_states`'s own stack (which also counts an
+    // enclosing `Switch` frame, not relevant to this one).
     pub(crate) loop_depth: u32,
     // Phase 60 corpus find: every variable name seen bound via
     // `static $x = ...;` anywhere in the file being checked - real
@@ -493,6 +509,7 @@ impl<'a> Checker<'a> {
             pest_this_type: Type::Mixed,
             pest_hook_properties: HashSet::new(),
             loop_break_states: Vec::new(),
+            loop_continue_states: Vec::new(),
             loop_depth: 0,
             static_var_names: HashSet::new(),
             rebind_target_classes: HashSet::new(),
@@ -1510,9 +1527,11 @@ impl<'a> Checker<'a> {
         self.current_function_is_generator = body_contains_yield(&f.body);
         self.check_generator_return_type(native_return.as_ref(), f.span, &label);
 
-        for stmt in &f.body {
-            self.check_stmt(stmt, &mut locals, declared_return.as_ref(), &label);
-        }
+        // `check_block`, not a bare loop over `check_stmt`: a function's
+        // top-level body is exactly as eligible for Phase 15's
+        // `deadCode.unreachable` as any nested `{ ... }` block is - it
+        // just wasn't routed through the one place that check lives.
+        self.check_block(&f.body, &mut locals, declared_return.as_ref(), &label);
 
         // A function that falls off the end of its body with no `return`
         // at all implicitly returns `null` too - equally a real mismatch
@@ -1526,9 +1545,16 @@ impl<'a> Checker<'a> {
         // ends the *generator's* iteration, not the function's own return
         // value - real PHPStan never checks either against the function's
         // declared Generator/Iterator/Traversable return type.
+        // Not just `f.body.last()`: a statement anywhere in the body
+        // unconditionally terminating (the rest being dead code, now
+        // itself flagged by `check_block`'s own `deadCode.unreachable`
+        // above) is equally sound proof the function never falls off the
+        // end, the same reasoning `always_terminates`'s own `Block` arm
+        // uses for a nested `{ ... }` - `f.body` just isn't itself one
+        // `Stmt`, so it needs the same check spelled out here directly.
         if let Some(expected) = &declared_return
-            && let Some(last) = f.body.last()
-            && !self.always_terminates(last, &locals)
+            && !f.body.is_empty()
+            && !f.body.iter().any(|s| self.always_terminates(s, &locals))
             && !self.current_function_is_generator
         {
             let expected = match &self.current_class {

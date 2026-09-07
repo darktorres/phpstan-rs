@@ -14,28 +14,41 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        // Phase 15 item (1), `UnreachableStatementRule`: investigated and
-        // declined - see ROADMAP.md. Implemented, corpus-verified, and
-        // reverted: wiring `always_terminates` into a `deadCode.
-        // unreachable` diagnostic here surfaced a genuine, deep, pre-
-        // existing gap in the checker's own narrowing - a variable
-        // reassigned inside a loop keeps its pre-loop-entry type for the
-        // *entire* single-pass body check (no fixed-point iteration
-        // across loop bodies), so a later `if ($x !== null)` guard on a
-        // variable the loop itself reassigns away from `null` can
-        // wrongly narrow to `Type::Never`, which this check then
-        // (incorrectly) read as "this statement always terminates."
-        // Fixing that belongs to Phase 55's own tracked narrowing-engine
-        // generalization (real fixed-point loop analysis), not a quick
-        // patch here. Two narrower, genuinely-safe bugs this same
-        // verification pass *did* find and fix outright (independent of
-        // whether this diagnostic itself ships): `widen_coalesce_result`
-        // wrongly inferring `$x ?? throw ...;` as `Type::Never` for the
-        // whole expression, and `always_terminates`'s own `Switch` arm
-        // wrongly treating a trailing, entirely-empty `case`/`default`
-        // group as vacuously terminating.
-        for stmt in stmts {
+        // Phase 15 item (1), `UnreachableStatementRule`: investigated,
+        // corpus-verified, reverted, and now reinstated. The original
+        // revert's root cause - a variable reassigned inside a loop kept
+        // its pre-loop-entry type for the whole single-pass body check,
+        // so a later guard on it could wrongly narrow to `Type::Never`,
+        // read here as "this statement always terminates" - is fixed by
+        // Phase 55's fixed-point loop-body convergence (`converge_loop_
+        // body`). Real PHPStan's own equivalent (`UnreachableStatementRule`,
+        // `deadCode.unreachable`, level 4) reports exactly once per
+        // maximal unreachable run, at its first statement - matched here
+        // via `reported_unreachable`, gating further reports without
+        // gating further checking. Every statement is still run through
+        // `check_stmt` regardless - real PHPStan still fully analyzes
+        // code after an `UnreachableStatementNode` for every other rule,
+        // and this project's own corpus verification confirmed why:
+        // stopping early here silently dropped real, unrelated diagnostics
+        // that happened to sit in a since-dead branch (amphp/http-client's
+        // `Http1Parser::parse`, verified against an early, since-reverted
+        // version of this change that did stop).
+        let mut reported_unreachable = false;
+        for (i, stmt) in stmts.iter().enumerate() {
             self.check_stmt(stmt, locals, declared_return, label);
+            if !reported_unreachable
+                && self.always_terminates(stmt, locals)
+                && let Some(next) = stmts.get(i + 1)
+            {
+                self.report(
+                    label.to_string(),
+                    "Unreachable statement - code above always terminates.".to_string(),
+                    next.span,
+                    4,
+                    "deadCode.unreachable",
+                );
+                reported_unreachable = true;
+            }
         }
     }
 
@@ -708,7 +721,17 @@ impl<'a> Checker<'a> {
                 // loop happens to be open around this switch. This
                 // switch's own `exit_states` mechanism above already
                 // handles `break` completely on its own.
+                //
+                // Phase 55: `loop_continue_states` gets the identical
+                // push/pop, for the identical reason - real PHP's own
+                // `continue`/`break` both count a `switch` as one level
+                // (the well-known "bare `continue;` directly inside a
+                // `switch` behaves like `break;`" gotcha), so the two
+                // stacks must stay depth-aligned or `continue N`'s own
+                // frame-index math would attribute a level to the wrong
+                // enclosing loop.
                 self.loop_break_states.push(Vec::new());
+                self.loop_continue_states.push(Vec::new());
                 for (i, case) in cases.iter().enumerate() {
                     if let Some(t) = &case.test {
                         self.check_expr(t, locals, label);
@@ -744,6 +767,7 @@ impl<'a> Checker<'a> {
                     previous_terminates = case_terminates;
                 }
                 self.loop_break_states.pop();
+                self.loop_continue_states.pop();
                 // If no path reaches past the switch (every case
                 // return/throw/continues, and a `default:` exists), the
                 // code after it is dead - leave `locals` alone rather
@@ -1114,6 +1138,17 @@ impl<'a> Checker<'a> {
                 let depth = level.unwrap_or(1).max(1) as usize;
                 if let Some(idx) = self.loop_break_states.len().checked_sub(depth) {
                     self.loop_break_states[idx].push(locals.clone());
+                }
+            }
+            // Phase 55: the `continue` counterpart of `Break` just above -
+            // see `loop_continue_states`'s own doc comment on `Checker`
+            // for why this exists (feeding a `continue`-reached state
+            // into the *next* convergence pass, not just past-the-loop
+            // exit state the way `break`'s states are used).
+            StmtKind::Continue(level) => {
+                let depth = level.unwrap_or(1).max(1) as usize;
+                if let Some(idx) = self.loop_continue_states.len().checked_sub(depth) {
+                    self.loop_continue_states[idx].push(locals.clone());
                 }
             }
             _ => {}

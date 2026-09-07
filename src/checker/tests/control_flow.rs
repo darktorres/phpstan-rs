@@ -1864,6 +1864,45 @@ fn a_variable_reassigned_in_a_loop_body_is_visible_to_a_narrowing_check_on_a_lat
     );
 }
 
+// Real corpus false positive (sebastian/diff's `Parser::parse`, found
+// while corpus-verifying Phase 15's reinstated `UnreachableStatementRule`):
+// a variable reassigned *only* on a path that ends in `continue` never
+// fed its new value into the next convergence pass at all, since the
+// pass-to-pass entry computation only looked at the body's own ordinary
+// fall-through exit - which this shape never reaches. Convergence wrongly
+// concluded "nothing changed" after a single pass and kept that pass's
+// own diagnostics, computed against the stale, guaranteed-null entry -
+// so `$diff !== null` narrowed to `Type::Never` on *every* pass, not just
+// the first, and a read inside that guard looked unreachable.
+#[test]
+fn a_variable_reassigned_only_on_a_path_ending_in_continue_still_converges() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Diff {}
+            function needsString(string $x): void {}
+            function f(bool $cond): array {
+                $diffs = [];
+                $diff  = null;
+                while ($cond) {
+                    if ($cond) {
+                        if ($diff !== null) {
+                            needsString($diff);
+                            $diffs[] = $diff;
+                        }
+                        $diff = new Diff();
+                        continue;
+                    }
+                }
+                return $diffs;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "deadCode.unreachable"),
+        "expected the continue-carried reassignment to converge, got: {d:?}"
+    );
+}
+
 #[test]
 fn a_loop_counter_incremented_each_iteration_converges_to_a_plain_int() {
     // `converge_loop_body` is hard-capped at 3 passes regardless of
@@ -1946,6 +1985,120 @@ fn a_diagnostic_unrelated_to_convergence_is_reported_exactly_once_not_once_per_p
     );
 }
 
-// Phase 15 item (1), UnreachableStatementRule (`deadCode.unreachable`):
-// investigated and declined - see `checker::check_block`'s own doc
-// comment and ROADMAP.md for why.
+// Phase 15 item (1), `UnreachableStatementRule` (`deadCode.unreachable`):
+// reinstated once Phase 55's fixed-point loop convergence removed the
+// false-positive class that got it reverted in the first place - see
+// `checker::check_block`'s own doc comment and ROADMAP.md.
+#[test]
+fn a_statement_after_an_unconditional_return_is_flagged_as_unreachable() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                return 1;
+                echo "dead";
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "deadCode.unreachable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn only_the_first_statement_after_a_terminator_is_flagged_not_every_one_after() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                return 1;
+                echo "dead one";
+                echo "dead two";
+                echo "dead three";
+            }
+        "#,
+    );
+    let matches: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "deadCode.unreachable")
+        .collect();
+    assert_eq!(matches.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn a_statement_after_an_unconditional_throw_is_flagged_as_unreachable() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                throw new \Exception();
+                echo "dead";
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "deadCode.unreachable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_statement_after_a_conditionally_reachable_return_is_never_flagged() {
+    // The `if` has no `else`, so control can still reach the `echo` -
+    // only an *unconditional* terminator makes what follows unreachable.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $cond): void {
+                if ($cond) {
+                    return;
+                }
+                echo "reachable";
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "deadCode.unreachable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn dead_code_inside_a_nested_block_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $cond): void {
+                if ($cond) {
+                    return;
+                } else {
+                    return;
+                    echo "dead";
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "deadCode.unreachable"),
+        "got: {d:?}"
+    );
+}
+
+// Regression guard for a real bug this reinstatement surfaced and fixed:
+// both `check_function`'s own falls-off-the-end check and
+// `always_terminates`'s own `Block` arm only ever looked at a block's
+// *last* statement to decide whether it always terminates - so a
+// function ending in dead code after a real, unconditional `return`
+// wrongly reported `return.missing` (the dead trailing statement, not
+// the `return`, was the last one `always_terminates` ever looked at).
+#[test]
+fn dead_code_after_a_return_does_not_also_trigger_a_spurious_return_missing() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                return 1;
+                echo "dead";
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.missing"),
+        "got: {d:?}"
+    );
+}

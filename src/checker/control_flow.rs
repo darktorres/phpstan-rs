@@ -20,9 +20,15 @@ impl<'a> Checker<'a> {
             | StmtKind::Break(_)
             | StmtKind::Continue(_) => true,
             StmtKind::Expression(e) => self.infer_expr(e, locals) == Type::Never,
-            StmtKind::Block(stmts) => stmts
-                .last()
-                .is_some_and(|s| self.always_terminates(s, locals)),
+            // Any statement in the block unconditionally terminating,
+            // not just the last one, is sound proof the whole block
+            // does - once reached, execution never falls through to
+            // whatever (if anything) comes after it, dead code or not.
+            // Phase 15's own `deadCode.unreachable` (`check_block`) is
+            // this arm's mirror image: it's the one that actually names
+            // that dead code, while this arm just needs to know it
+            // exists.
+            StmtKind::Block(stmts) => stmts.iter().any(|s| self.always_terminates(s, locals)),
             StmtKind::If {
                 then_branch,
                 else_branch,
@@ -185,6 +191,24 @@ impl<'a> Checker<'a> {
     /// `loop_break_states` is pushed/popped once per pass here (not by the
     /// caller) so a pre-convergence pass's own break states never leak;
     /// only the returned, kept pass's break states matter to the caller.
+    ///
+    /// `loop_continue_states` gets the identical per-pass push/pop, but is
+    /// used completely differently: a `continue` jumps back to the top of
+    /// *this* loop, so whatever state it reached is exactly as much a real
+    /// entry to the next iteration as the body's own ordinary fall-through
+    /// exit (`body_locals`) is - folded into `next_entry` alongside it,
+    /// every pass, not just carried forward for the final kept one the way
+    /// `break_states` is. Without this, a variable reassigned *only* on a
+    /// path that ends in `continue` never contributed to `next_entry` at
+    /// all (the fall-through-only `merge_scopes(entry, &body_locals)`
+    /// below never reflects it), so convergence wrongly concluded
+    /// "nothing changed" after a single pass and kept that pass's own
+    /// diagnostics - computed against the stale, pre-reassignment entry.
+    /// Real corpus false positive this fixes: sebastian/diff's own
+    /// `Parser::parse`, whose `if ($diff !== null) { ... }` guard sits
+    /// inside a branch that always ends in `continue` - `$diff` never
+    /// looked reassignable at all without this, so the guard's own
+    /// `!== null` narrowing wrongly saw `Type::Never` on every pass.
     pub(crate) fn converge_loop_body(
         &mut self,
         entry: &Locals,
@@ -198,10 +222,15 @@ impl<'a> Checker<'a> {
             let is_last_allowed_pass = pass == MAX_PASSES - 1;
             let mut body_locals = pass_entry.clone();
             self.loop_break_states.push(Vec::new());
+            self.loop_continue_states.push(Vec::new());
             let diagnostics_before = self.diagnostics.len();
             run_pass(self, &mut body_locals, declared_return, label);
             let break_states = self.loop_break_states.pop().unwrap_or_default();
-            let next_entry = merge_scopes(entry, &body_locals);
+            let continue_states = self.loop_continue_states.pop().unwrap_or_default();
+            let mut next_entry = merge_scopes(entry, &body_locals);
+            for state in &continue_states {
+                next_entry = merge_scopes(&next_entry, state);
+            }
             if next_entry == pass_entry || is_last_allowed_pass {
                 return (body_locals, break_states);
             }
