@@ -306,11 +306,11 @@ impl<'a> Checker<'a> {
             }
             ExprKind::MethodCall(recv, method, _, _) => {
                 let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::Null);
-                let Type::Object(class, _) = recv_ty else {
-                    return;
-                };
-                let Some((owner, sig)) = self.registry.lookup_method_with_owner(&class, method)
-                else {
+                // Real bug found and fixed this session: this used to
+                // require `recv_ty` to be literally `Type::Object`,
+                // silently skipping the check for a `Union`/
+                // `Intersection` receiver.
+                let Some((owner, sig)) = self.find_method_owner(&recv_ty, method) else {
                     return;
                 };
                 (

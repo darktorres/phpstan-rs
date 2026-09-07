@@ -8,7 +8,7 @@ use crate::checker::{
 };
 use crate::pest_config;
 use crate::regex_groups;
-use crate::registry::FunctionSig;
+use crate::registry::{FunctionSig, PropertySig};
 use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
 
@@ -1219,9 +1219,8 @@ impl<'a> Checker<'a> {
                 // accepts only a real Throwable just as unconditionally
                 // (a real PHP fatal error otherwise), but never ran this
                 // check at all until now.
-                if let Type::Object(class, _) = self.check_expr(inner, locals, label)
-                    && !self.registry.is_subclass_of(&class, "Throwable")
-                {
+                let inner_ty = self.check_expr(inner, locals, label);
+                if let Some(class) = self.thrown_value_not_throwable(&inner_ty) {
                     self.report(
                         label.to_string(),
                         format!("cannot throw {class}: it does not implement Throwable"),
@@ -1984,16 +1983,31 @@ impl<'a> Checker<'a> {
                 }
                 // Phase 57: visibility - only meaningful once the
                 // property is confirmed to exist at all (the block just
-                // above already handles "doesn't exist"), so this reuses
-                // the identical class-narrowing shape the real type-
-                // resolution just below performs anyway.
-                if let Type::Object(class, _) = narrow_type_excluding(&base_ty, &Type::Null)
-                    && let Some((owner, p)) = self.registry.lookup_property_with_owner(&class, prop)
-                {
+                // above already handles "doesn't exist"). Real bug found
+                // and fixed this session: this used to match `Type::
+                // Object` directly, with no `Union`/`Intersection` case at
+                // all, silently skipping the check entirely for either
+                // shape. Deliberately *not* the same "just the first
+                // Object/EnumCase member, regardless of whether it
+                // actually has the property" shortcut `MethodCall`'s own
+                // `recv_class` extraction settles for a few hundred lines
+                // up: for an `Intersection` specifically, the property
+                // can easily live on a *different* member than whichever
+                // happens to come first (`View&Foo` where `View` is an
+                // unrelated interface and `$secret` is `Foo`'s own private
+                // property - the first-found `View` would never have it,
+                // silently skipping the check for exactly the shape this
+                // fix exists to catch). `find_property_owner` recurses
+                // through both `Union` and `Intersection`, keeping the
+                // first member that actually declares it.
+                let owner_and_sig = self
+                    .find_property_owner(&narrow_type_excluding(&base_ty, &Type::Null), prop)
+                    .map(|(owner, p)| (owner, p.clone()));
+                if let Some((owner, p)) = &owner_and_sig {
                     let visibility = p.visibility.clone();
                     self.check_member_visibility(MemberVisibilityCheck {
                         kind: "property",
-                        owner: &owner,
+                        owner,
                         member_name: prop,
                         visibility: &visibility,
                         describe: &format!("property {owner}::${prop}"),
@@ -2001,9 +2015,9 @@ impl<'a> Checker<'a> {
                         label,
                     });
                     // Phase 67: `@internal`.
-                    self.check_internal_property_access(&owner, prop, p, e.span, label);
+                    self.check_internal_property_access(owner, prop, p, e.span, label);
                     // Phase 39 follow-up: `@deprecated`.
-                    self.check_deprecated_property_access(&owner, prop, p, e.span, label);
+                    self.check_deprecated_property_access(owner, prop, p, e.span, label);
                 }
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
@@ -2528,6 +2542,132 @@ impl<'a> Checker<'a> {
             ExprKind::Name(name) => self
                 .global_constant_type(name)
                 .unwrap_or_else(|| bare_name_literal_type(name)),
+        }
+    }
+
+    /// The declaring class/`PropertySig` pair for `prop` on `base_ty`,
+    /// used by `ExprKind::PropertyAccess`'s own visibility/`@internal`/
+    /// `@deprecated` checks - see that call site's own doc comment for
+    /// why this recurses through `Union`/`Intersection` instead of using
+    /// `MethodCall`'s own simpler "first Object/EnumCase member,
+    /// regardless of whether it actually declares the member" shortcut.
+    fn find_property_owner(&self, base_ty: &Type, prop: &str) -> Option<(String, &PropertySig)> {
+        match base_ty {
+            Type::Object(class, _) => self.registry.lookup_property_with_owner(class, prop),
+            Type::EnumCase(fqn, _) => self.registry.lookup_property_with_owner(fqn, prop),
+            Type::Union(members) | Type::Intersection(members) => members
+                .iter()
+                .find_map(|m| self.find_property_owner(m, prop)),
+            _ => None,
+        }
+    }
+
+    /// `find_property_owner`'s own method counterpart, used by
+    /// `checker::calls::check_no_discard_statement` - real bug found and
+    /// fixed this session, the identical gap: a `#[\NoDiscard]`-marked
+    /// method called through a `Union`/`Intersection` receiver (a value
+    /// narrowed via `instanceof` from an unrelated interface) used to be
+    /// silently skipped, since the receiver's own type had to be
+    /// literally `Type::Object`.
+    pub(crate) fn find_method_owner(
+        &self,
+        base_ty: &Type,
+        method: &str,
+    ) -> Option<(String, &FunctionSig)> {
+        match base_ty {
+            Type::Object(class, _) => self.registry.lookup_method_with_owner(class, method),
+            Type::EnumCase(fqn, _) => self.registry.lookup_method_with_owner(fqn, method),
+            Type::Union(members) | Type::Intersection(members) => members
+                .iter()
+                .find_map(|m| self.find_method_owner(m, method)),
+            _ => None,
+        }
+    }
+
+    /// Whether `ty` (a thrown value's own type) fails real PHP's
+    /// unconditional "must be Throwable" rule - `Some(name)` names a
+    /// concrete non-Throwable class to report, `None` when nothing's
+    /// wrong or `ty` isn't concrete enough to judge at all (matching this
+    /// project's usual "don't guess" leniency - an unmodeled member
+    /// anywhere in a `Union`/`Intersection` makes the whole thing
+    /// unconfirmed, not a guess either way). Used by both `StmtKind::
+    /// Throw` (`checker/stmt.rs`) and `ExprKind::Throw` just below - real
+    /// bug found and fixed this session, the same shape as `PropertyAccess`'s
+    /// own: both call sites used to require the thrown value's own type
+    /// to be literally `Type::Object`, silently skipping the check for a
+    /// `Union`/`Intersection` - a value narrowed via `instanceof` from an
+    /// unrelated interface, then thrown, is exactly as real a shape here
+    /// as it was for property access. A `Union` member fails if *any one*
+    /// of them isn't Throwable (the runtime value could be that one); an
+    /// `Intersection` fails only if *every* member is confirmed non-
+    /// Throwable (any single Throwable member is enough to satisfy
+    /// `throw`) - mirrors `member_confirmed_missing`'s own identical
+    /// Union/Intersection asymmetry exactly.
+    ///
+    /// `class_name_exists` is checked *first*, same as `StmtKind::Try`'s
+    /// own multi-catch handling a few hundred lines up (`Finding 57`'s own
+    /// comment there) - `is_subclass_of` silently treats a name the
+    /// registry has no entry for as "not a subclass of Throwable",
+    /// indistinguishable from a real, known, non-Throwable class. Real
+    /// bug this exact guard fixes, found via the Union case above newly
+    /// making an existing multi-catch `throw $e;` reachable at all: real
+    /// PHP multi-catch binds a real union type, and a caught interface
+    /// that happens to live in an unresolvable/unscanned vendored
+    /// package (`RectorPrefix202608\Symfony\Component\Messenger\Exception\
+    /// UnrecoverableExceptionInterface` - a PHP-Scoper-prefixed name this
+    /// project's vendor scan never actually indexes a declaration for,
+    /// confirmed directly - not merely assumed) was wrongly reported as
+    /// not implementing `Throwable`, even though the real, unprefixed
+    /// interface genuinely does.
+    pub(crate) fn thrown_value_not_throwable(&self, ty: &Type) -> Option<String> {
+        match ty {
+            Type::Object(class, _) => (self.class_name_exists(class)
+                && !self.registry.is_subclass_of(class, "Throwable"))
+            .then(|| class.clone()),
+            Type::Union(members) => members
+                .iter()
+                .find_map(|m| self.thrown_value_not_throwable(m)),
+            Type::Intersection(members) => {
+                let failures: Vec<String> = members
+                    .iter()
+                    .filter_map(|m| self.thrown_value_not_throwable(m))
+                    .collect();
+                (failures.len() == members.len()).then(|| failures.into_iter().next().unwrap())
+            }
+            _ => None,
+        }
+    }
+
+    /// `find_property_owner`'s own richer sibling, used by `checker::
+    /// assignment::check_property_assignment` - real bug found and fixed
+    /// this session, the identical shape as the read-side one just above:
+    /// the write side matched `Type::Object` directly too, silently
+    /// skipping *every* one of its checks (readonly, visibility,
+    /// `@internal`/`@deprecated`, and the assigned value's own type) for
+    /// a `Union`/`Intersection`-typed target. Also returns the *matching
+    /// member's own* class/type-args (not just the ultimate declaring
+    /// owner) - `class_template_bindings` needs the receiver's own real
+    /// generic parameterization to substitute correctly up to whichever
+    /// ancestor actually declares the property, the same relationship
+    /// the original single-`Object` code already relied on.
+    pub(crate) fn find_property_receiver(
+        &self,
+        base_ty: &Type,
+        prop: &str,
+    ) -> Option<(String, Vec<Type>, String, PropertySig)> {
+        match base_ty {
+            Type::Object(class, type_args) => self
+                .registry
+                .lookup_property_with_owner(class, prop)
+                .map(|(owner, sig)| (class.clone(), type_args.clone(), owner, sig.clone())),
+            Type::EnumCase(fqn, _) => self
+                .registry
+                .lookup_property_with_owner(fqn, prop)
+                .map(|(owner, sig)| (fqn.clone(), Vec::new(), owner, sig.clone())),
+            Type::Union(members) | Type::Intersection(members) => members
+                .iter()
+                .find_map(|m| self.find_property_receiver(m, prop)),
+            _ => None,
         }
     }
 

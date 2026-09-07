@@ -316,15 +316,23 @@ impl<'a> Checker<'a> {
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             return;
         };
-        let Type::Object(class, type_args) = self.infer_expr(base, locals) else {
-            return;
-        };
-        let Some((owner, prop_sig)) = self.registry.lookup_property_with_owner(&class, prop) else {
+        // Real bug found and fixed this session: this used to require
+        // `base`'s own type to be literally `Type::Object`, silently
+        // skipping *every* check below (readonly, visibility, `@internal`/
+        // `@deprecated`, and the assigned value's own type) whenever it
+        // was a `Union`/`Intersection` instead - the exact same shape the
+        // read side (`ExprKind::PropertyAccess` above) had, and just as
+        // reachable here: a receiver narrowed via `instanceof` from an
+        // unrelated interface, then written to.
+        let base_ty = self.infer_expr(base, locals);
+        let Some((class, type_args, owner, prop_sig)) = self.find_property_receiver(&base_ty, prop)
+        else {
             // Not a declared property: could be a dynamic property, which
             // is legal (if deprecated) PHP - not flagged here, only wrong
             // types on properties we do know about.
             return;
         };
+        let prop_sig = &prop_sig;
         // Finding 47: a `readonly` property may only be initialized once,
         // from within the scope of the class that declares it - in
         // practice, almost always its own constructor. Pragmatic first

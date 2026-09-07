@@ -125,6 +125,36 @@ fn an_unconditional_assert_tag_narrows_unconditionally_after_the_call() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real bug found and fixed this session: the bare, unconditional
+// `@phpstan-assert` lookup for an instance `MethodCall` required the
+// receiver's own type to be literally `Type::Object`, silently skipping
+// the narrowing for a `Union`/`Intersection` receiver - a value narrowed
+// via `instanceof` from an unrelated interface, then called through.
+#[test]
+fn an_unconditional_assert_tag_narrows_through_an_intersection_receiver() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface View {}
+            class Assertions {
+                /** @phpstan-assert string $value */
+                public function string($value): void {
+                    if (!is_string($value)) {
+                        throw new \RuntimeException('not a string');
+                    }
+                }
+            }
+            function needsString(string $s): void {}
+            function f(View $view, mixed $x): void {
+                if ($view instanceof Assertions) {
+                    $view->string($x);
+                    needsString($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_negated_assert_excludes_the_type_instead_of_narrowing_to_it() {
     let d = diagnostics_for(

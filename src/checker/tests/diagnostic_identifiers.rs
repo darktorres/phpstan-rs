@@ -524,6 +524,34 @@ fn a_bare_call_to_a_no_discard_method_is_flagged() {
     assert_eq!(d[0].identifier, "method.resultDiscarded");
 }
 
+// Real bug found and fixed this session: `check_no_discard_statement`
+// required the receiver's own type to be literally `Type::Object`,
+// silently skipping the check for a `Union`/`Intersection` receiver - a
+// value narrowed via `instanceof` from an unrelated interface, then
+// called through, same as the other bugs this session found via the
+// exact same anti-pattern.
+#[test]
+fn a_bare_call_to_a_no_discard_method_through_an_intersection_receiver_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface View {}
+            class C {
+                #[NoDiscard]
+                function m(): int { return 1; }
+            }
+            function test(View $view) {
+                if ($view instanceof C) {
+                    $view->m();
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.resultDiscarded"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_bare_call_to_a_no_discard_static_method_is_flagged() {
     let d = diagnostics_for(

@@ -122,8 +122,13 @@ impl<'a> Checker<'a> {
                 // (see `FunctionSig::assert_if_true`'s own doc comment).
                 match &e.kind {
                     ExprKind::MethodCall(recv, method, args, _) => {
-                        if let Type::Object(class, _) = self.infer_expr(recv, locals)
-                            && let Some(sig) = self.registry.lookup_method(&class, method)
+                        // Real bug found and fixed this session: this used
+                        // to require the receiver's own type to be
+                        // literally `Type::Object`, silently skipping a
+                        // `@phpstan-assert` narrowing opportunity for a
+                        // `Union`/`Intersection` receiver.
+                        let recv_ty = self.infer_expr(recv, locals);
+                        if let Some((_, sig)) = self.find_method_owner(&recv_ty, method)
                             && !sig.assert.is_empty()
                         {
                             self.apply_assert_infos(&sig.assert, sig, Some(recv), args, locals);
@@ -1134,14 +1139,16 @@ impl<'a> Checker<'a> {
                 // Finding 57: `throw` only accepts a real Throwable - a
                 // real, unconditional PHP fatal error otherwise,
                 // independent of anything about the thrown value at
-                // runtime. Only checked when the thrown expression's own
-                // class is actually known (a concrete `Type::Object`) -
-                // anything else (Mixed, a dynamic expression) isn't
-                // guessed at, matching this project's usual leniency for
-                // "we don't know" cases.
-                if let Type::Object(class, _) = self.check_expr(e, locals, label)
-                    && !self.registry.is_subclass_of(&class, "Throwable")
-                {
+                // runtime. `thrown_value_not_throwable` (`checker/expr.rs`)
+                // handles the "don't guess" leniency for anything not
+                // concrete enough to judge (Mixed, a dynamic expression),
+                // and now also a `Union`/`Intersection`-typed value - a
+                // real bug found and fixed this session, this call site
+                // used to require literally `Type::Object` too, matching
+                // `ExprKind::Throw`'s own identical gap just fixed
+                // alongside it.
+                let thrown_ty = self.check_expr(e, locals, label);
+                if let Some(class) = self.thrown_value_not_throwable(&thrown_ty) {
                     self.report(
                         label.to_string(),
                         format!("cannot throw {class}: it does not implement Throwable"),

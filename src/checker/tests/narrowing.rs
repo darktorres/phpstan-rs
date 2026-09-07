@@ -848,6 +848,72 @@ fn instanceof_against_an_unrelated_class_also_resolves_a_property_on_the_interse
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real bug found and fixed this session, immediately after the one
+// above: the visibility/`@internal`/`@deprecated` checks right next to
+// the type-resolution fix also matched `Type::Object` directly, with no
+// `Union`/`Intersection` case, silently skipping the check entirely for
+// either shape - unlike `MethodCall`'s own identical checks, which
+// already extract a representative class from a `Union`/`Intersection`
+// receiver. Deliberately verifies the property lives on the *second*
+// intersection member (`Foo`, not the first-checked `View`) - a plain
+// "first Object member found" shortcut (the one `MethodCall` itself
+// settles for) would still miss this.
+#[test]
+fn instanceof_against_an_unrelated_class_still_flags_a_private_property_on_the_intersection() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface View {}
+            class Foo {
+                private int $secret = 1;
+                public function useIt(): int { return $this->secret; }
+            }
+            function f(View $view): void {
+                if ($view instanceof Foo) {
+                    echo $view->secret;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.private"),
+        "got: {d:?}"
+    );
+}
+
+// The write-side counterpart of the test above: `check_property_
+// assignment` (`checker/assignment.rs`) had the identical bug - required
+// the target's own type to be literally `Type::Object`, silently
+// skipping *every* one of its checks (visibility, readonly, `@internal`/
+// `@deprecated`, and the assigned value's own type) for a `Union`/
+// `Intersection`-typed target instead. Both the visibility violation and
+// the type mismatch are checked in one test since both come from the
+// same now-fixed early-return.
+#[test]
+fn instanceof_against_an_unrelated_class_still_checks_a_write_to_a_property_on_the_intersection() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface View {}
+            class Foo {
+                private int $secret = 1;
+                public function useIt(): int { return $this->secret; }
+            }
+            function f(View $view): void {
+                if ($view instanceof Foo) {
+                    $view->secret = "not an int";
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.private"),
+        "got: {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "assign.propertyType"),
+        "got: {d:?}"
+    );
+}
+
 // Real corpus false positive: amphp/http-client's own `Http1Connection::
 // watchIdleConnection()` - a *nullable* property/variable checked against
 // an unrelated interface. `?Socket instanceof ResourceStream` used to

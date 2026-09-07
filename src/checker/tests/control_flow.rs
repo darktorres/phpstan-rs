@@ -418,6 +418,87 @@ fn throw_expression_of_a_non_throwable_class_is_flagged() {
     );
 }
 
+// Real bug found and fixed this session: both `StmtKind::Throw` and
+// `ExprKind::Throw` required the thrown value's own type to be literally
+// `Type::Object`, silently skipping the check for a `Union`/
+// `Intersection` - a value narrowed via `instanceof` from an unrelated
+// interface, then thrown, is exactly as real a shape here as it was for
+// property access (see `checker::tests::narrowing`'s own tests for that
+// bug). Neither `View` nor `NotThrowable` implements `Throwable`, so
+// every member of the resulting intersection fails.
+#[test]
+fn throwing_a_value_narrowed_to_an_intersection_of_two_non_throwables_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface View {}
+            class NotThrowable {}
+            function test(View $view): void {
+                if ($view instanceof NotThrowable) {
+                    throw $view;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throw.notThrowable"),
+        "got: {d:?}"
+    );
+}
+
+// Same shape, but the intersection's *second* member genuinely is
+// Throwable - real PHP only needs the runtime value to satisfy the
+// property once, so this must NOT be flagged.
+#[test]
+fn throwing_a_value_narrowed_to_an_intersection_including_a_real_throwable_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface View {}
+            class RealException extends \Exception {}
+            function test(View $view): void {
+                if ($view instanceof RealException) {
+                    throw $view;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throw.notThrowable"),
+        "got: {d:?}"
+    );
+}
+
+// Real bug found and fixed this session, discovered via a real corpus
+// line the Union fix above newly made reachable: `is_subclass_of`
+// silently treats a name the registry has no entry for as "not a
+// subclass of Throwable," indistinguishable from a real, known,
+// non-Throwable class - `class_name_exists` must be checked first,
+// mirroring `StmtKind::Try`'s own multi-catch handling a few hundred
+// lines up (which already guards this exact case). Real corpus shape:
+// a multi-catch `catch (A|B $e) { throw $e; }` binds `$e` to a real
+// union type - one of `A`/`B` living in an unresolvable/unscanned
+// vendored package wrongly reported "does not implement Throwable"
+// even though the real interface genuinely does.
+#[test]
+fn throwing_a_union_including_an_unresolvable_class_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(bool $cond): void {
+                try {
+                    if ($cond) {
+                        throw new \RuntimeException('x');
+                    }
+                } catch (\SomeUnresolvableInterface|\RuntimeException $e) {
+                    throw $e;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throw.notThrowable"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn throw_expression_of_a_real_exception_is_not_flagged() {
     let d = diagnostics_for(
