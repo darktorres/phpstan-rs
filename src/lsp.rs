@@ -34,7 +34,7 @@ use lsp_types::{
     TextDocumentSyncKind, Uri,
 };
 
-use crate::ast::{ClassKind, FunctionDecl};
+use crate::ast::ClassKind;
 use crate::checker::{Checker, Diagnostic};
 use crate::project::Project;
 use crate::registry::format_signature;
@@ -403,17 +403,13 @@ impl Server {
             navigation::Resolved::Instance {
                 receiver_span,
                 member,
-                function,
+                scope,
                 is_static,
                 class,
                 ..
             } => {
-                let ty = self.probe_receiver_type(
-                    *receiver_span,
-                    function,
-                    *is_static,
-                    class.as_deref(),
-                )?;
+                let ty =
+                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
                 let owners = resolve_member_owners(registry, &ty, member);
                 self.format_member_hover_multi(&owners, member)
             }
@@ -461,26 +457,29 @@ impl Server {
         }
     }
 
-    /// Phase 17 Stage B: runs the checker over just `function` (a
-    /// throwaway `Checker`, scoped to this one request - see
-    /// `Checker::probe_span`'s own doc comment) to learn `receiver_span`'s
-    /// own inferred type. Also the mechanism a receiver inside a nested
-    /// closure/arrow-fn body resolves through: `function` is always the
+    /// Phase 17 Stage B: runs the checker over just `scope` (a throwaway
+    /// `Checker`, scoped to this one request - see `Checker::probe_span`'s
+    /// own doc comment) to learn `receiver_span`'s own inferred type.
+    /// Also the mechanism a receiver inside a nested closure/arrow-fn
+    /// body resolves through: a `ProbeScope::Function` is always the
     /// enclosing *named* function/method (`lsp::navigation`'s own
     /// `current_function` never resets for a closure literal - see its
     /// doc comment for why), and `check_function`'s own ordinary
     /// recursion into that closure's body already reaches `probe_span`
-    /// the same way a real `check-project` pass would.
+    /// the same way a real `check-project` pass would. `ProbeScope::
+    /// TopLevel` (Phase 17 follow-up) is the same idea one level up: a
+    /// receiver/read at top-level script scope re-checks the whole
+    /// file's own top-level statements via `check_program` instead.
     fn probe_receiver_type(
         &self,
         receiver_span: Span,
-        function: &FunctionDecl,
+        scope: &navigation::ProbeScope,
         is_static: bool,
         class: Option<&str>,
     ) -> Option<Type> {
         let mut checker = Checker::new(self.project.registry());
         checker.probe_span = Some(receiver_span);
-        checker.check_function(function, class, is_static);
+        self.run_probe_scope(&mut checker, scope, is_static, class);
         checker.probe_hit
     }
 
@@ -489,26 +488,48 @@ impl Server {
     /// mechanism, reading back `probe_var_provenance` instead of `probe_
     /// hit`. See `Checker::probe_var_provenance`'s own doc comment
     /// (`checker.rs`) for the full reaching-definitions design this reads
-    /// the result of. `None` when nothing was tracked for this read at
-    /// all (`Locals::track` was off - can't happen here, since this
-    /// method itself is what turns it on via `probe_span` - or the name
+    /// the result of. Empty when nothing was tracked for this read at all
+    /// (`Locals::track` was off - can't happen here, since this method
+    /// itself is what turns it on via `probe_span` - or the name
     /// genuinely has no known declaration in scope, a real, if unusual,
     /// possibility this project's own `variable.undefined` diagnostic
     /// would already have flagged).
     fn probe_variable_provenance(
         &self,
         span: Span,
-        function: &FunctionDecl,
+        scope: &navigation::ProbeScope,
         is_static: bool,
         class: Option<&str>,
     ) -> Vec<Span> {
         let mut checker = Checker::new(self.project.registry());
         checker.probe_span = Some(span);
-        checker.check_function(function, class, is_static);
+        self.run_probe_scope(&mut checker, scope, is_static, class);
         checker
             .probe_var_provenance
             .map(|set| set.into_iter().collect())
             .unwrap_or_default()
+    }
+
+    /// Shared by both probe methods above: runs `checker` over whichever
+    /// scope `navigation::resolve_at` identified - `check_function` for
+    /// an ordinary named function/method, `check_program` for top-level
+    /// script scope (`is_static`/`class` are meaningless there and
+    /// ignored, matching how neither concept applies to top-level code).
+    fn run_probe_scope(
+        &self,
+        checker: &mut Checker,
+        scope: &navigation::ProbeScope,
+        is_static: bool,
+        class: Option<&str>,
+    ) {
+        match scope {
+            navigation::ProbeScope::Function(function) => {
+                checker.check_function(function, class, is_static);
+            }
+            navigation::ProbeScope::TopLevel(stmts) => {
+                checker.check_program(stmts);
+            }
+        }
     }
 
     /// Phase 17 Stage A: the `navigation::Resolved` symbol's own
@@ -538,12 +559,12 @@ impl Server {
             // receiver.
             navigation::Resolved::VariableRead {
                 span,
-                function,
+                scope,
                 is_static,
                 class,
             } => {
                 let locs: Vec<Location> = self
-                    .probe_variable_provenance(*span, function, *is_static, class.as_deref())
+                    .probe_variable_provenance(*span, scope, *is_static, class.as_deref())
                     .into_iter()
                     .map(|s| self.location(&path, s))
                     .collect();
@@ -587,17 +608,13 @@ impl Server {
             navigation::Resolved::Instance {
                 receiver_span,
                 member,
-                function,
+                scope,
                 is_static,
                 class,
                 ..
             } => {
-                let ty = self.probe_receiver_type(
-                    *receiver_span,
-                    function,
-                    *is_static,
-                    class.as_deref(),
-                )?;
+                let ty =
+                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
                 let owners = resolve_member_owners(self.project.registry(), &ty, member);
                 let mut locs: Vec<Location> = Vec::new();
                 for owner in &owners {

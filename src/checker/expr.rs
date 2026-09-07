@@ -629,7 +629,18 @@ impl<'a> Checker<'a> {
                     // this unconditional type itself.
                     let shape = union_types(matched, Type::ArrayShape(vec![]));
                     purge_stale_narrowing_for(locals, matches_name);
-                    locals.insert(matches_name.clone(), shape);
+                    // Phase 17 follow-up: `$matches` is very commonly
+                    // undeclared before this exact call - its real
+                    // first appearance, so `declare` when there's
+                    // nothing here yet to preserve (an already-existing
+                    // `$matches` keeps its own real provenance instead,
+                    // matching this file's own "call-effected type
+                    // change, not a new declaration" rule elsewhere).
+                    if locals.contains_key(matches_name) {
+                        locals.insert(matches_name.clone(), shape);
+                    } else {
+                        locals.declare(matches_name.clone(), shape, matches_arg.span);
+                    }
                 }
                 // Phase 12 Finding D: `preg_match_all`'s by-ref
                 // `$matches` shape - a sibling special case to
@@ -672,7 +683,13 @@ impl<'a> Checker<'a> {
                         )
                     };
                     purge_stale_narrowing_for(locals, matches_name);
-                    locals.insert(matches_name.clone(), shape);
+                    // Phase 17 follow-up: same reasoning as `preg_match`'s
+                    // own identical treatment just above.
+                    if locals.contains_key(matches_name) {
+                        locals.insert(matches_name.clone(), shape);
+                    } else {
+                        locals.declare(matches_name.clone(), shape, matches_arg.span);
+                    }
                 }
                 // Reuses the `resolved_name`/`sig` already resolved above
                 // - the same lookup `infer_expr`'s own `Call` arm would

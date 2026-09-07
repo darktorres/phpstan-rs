@@ -58,14 +58,12 @@ pub(crate) enum Resolved {
     /// (`Checker::probe_span`'s target - matched by exact span, not
     /// position, so a chained call's own inner/outer receivers are never
     /// ambiguous), which member name, whether it's a method call or a
-    /// property read, and a clone of the enclosing function/method to
-    /// re-check (owned, not borrowed - keeps this enum free of
-    /// `Project`'s own lifetime, at the cost of one clone of a typically-
-    /// small function body per request).
+    /// property read, and the enclosing scope to re-check (see
+    /// `ProbeScope`'s own doc comment).
     Instance {
         receiver_span: Span,
         member: String,
-        function: Box<FunctionDecl>,
+        scope: ProbeScope,
         is_static: bool,
         class: Option<String>,
     },
@@ -85,10 +83,25 @@ pub(crate) enum Resolved {
     /// (a `GotoDefinitionResponse::Array`), never an arbitrary guess.
     VariableRead {
         span: Span,
-        function: Box<FunctionDecl>,
+        scope: ProbeScope,
         is_static: bool,
         class: Option<String>,
     },
+}
+
+/// What `lsp.rs`'s own throwaway `Checker` probe re-checks to answer an
+/// `Instance`/`VariableRead` request - a clone of the enclosing named
+/// function/method (owned, not borrowed, so `Resolved` stays free of
+/// `Project`'s own lifetime, at the cost of one clone of a typically-small
+/// function body per request), or, at top-level script scope (no
+/// enclosing function at all), a clone of the *whole file's* own top-level
+/// statement list, re-checked via `Checker::check_program` instead of
+/// `check_function` - real top-level PHP code is exactly as checkable as
+/// a function body, just through a different entry point.
+#[derive(Debug, Clone)]
+pub(crate) enum ProbeScope {
+    Function(Box<FunctionDecl>),
+    TopLevel(Vec<Stmt>),
 }
 
 /// The entry point: what's declared/referenced at `pos` in the file
@@ -103,6 +116,7 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Optio
         registry,
         source,
         pos,
+        top_level_stmts: stmts,
         current_function: None,
         current_is_static: false,
     };
@@ -149,13 +163,18 @@ struct Walker<'a> {
     registry: &'a Registry,
     source: &'a str,
     pos: Position,
+    // The whole file's own top-level statement list - `ProbeScope::
+    // TopLevel`'s own source when a probe request lands at script scope
+    // (`current_function` is `None`), cloned only then (one clone per
+    // request, the same cost `ProbeScope::Function` already accepts for
+    // an ordinary function-scoped probe).
+    top_level_stmts: &'a [Stmt],
     // Phase 17 Stage B / follow-up: an owned clone (not a borrow - see
-    // `Resolved::Instance`'s own doc comment for why) of whichever
-    // *named* `FunctionDecl`/`MethodDecl` currently encloses the
-    // statement being walked, updated on entry to `function` and
-    // restored on exit - `None` at top-level script scope (neither an
-    // instance-receiver probe nor a variable-read probe is supported
-    // there; a real, disclosed, low-impact gap, see ROADMAP). Deliberately
+    // `ProbeScope`'s own doc comment for why) of whichever *named*
+    // `FunctionDecl`/`MethodDecl` currently encloses the statement being
+    // walked, updated on entry to `function` and restored on exit -
+    // `None` at top-level script scope, in which case a probe request
+    // uses `top_level_stmts` instead (see `probe_scope`). Deliberately
     // *not* updated for a `Closure`/`ArrowFn` body: those aren't a
     // separate `Checker` entry point at all - `check_expr`'s own
     // `Closure`/`ArrowFn` arms already recurse into a closure's body as
@@ -171,6 +190,18 @@ struct Walker<'a> {
 }
 
 impl<'a> Walker<'a> {
+    /// The `ProbeScope` for a probe request at the current position - the
+    /// enclosing named function/method if there is one, else the whole
+    /// file's own top-level statements (real, checkable PHP in its own
+    /// right, just via `Checker::check_program` instead of `check_
+    /// function` - see `ProbeScope`'s own doc comment).
+    fn probe_scope(&self) -> ProbeScope {
+        match &self.current_function {
+            Some(f) => ProbeScope::Function(Box::new(f.clone())),
+            None => ProbeScope::TopLevel(self.top_level_stmts.to_vec()),
+        }
+    }
+
     fn record(&self, best: &mut Option<Resolved>, span: Span, value: Resolved) {
         if contains(span, self.pos) {
             *best = Some(value);
@@ -445,17 +476,14 @@ impl<'a> Walker<'a> {
             // `current_class` wherever it appears as a receiver). Needs
             // a real checker probe to resolve (see `Resolved::
             // VariableRead`'s own doc comment) - this only records enough
-            // for `lsp.rs`'s own orchestration to run it. Only resolves
-            // inside a named function/method (`current_function`); a
-            // top-level script-scope read is a real, disclosed gap (see
-            // ROADMAP), the same boundary `Instance` already has.
+            // for `lsp.rs`'s own orchestration to run it, at either scope
+            // `probe_scope` covers (a named function/method, or top-level
+            // script scope).
             ExprKind::Variable(name) if name != "this" => {
-                if contains(expr.span, self.pos)
-                    && let Some(function) = self.current_function.clone()
-                {
+                if contains(expr.span, self.pos) {
                     *best = Some(Resolved::VariableRead {
                         span: expr.span,
-                        function: Box::new(function),
+                        scope: self.probe_scope(),
                         is_static: self.current_is_static,
                         class: current_class.map(str::to_string),
                     });
@@ -465,8 +493,8 @@ impl<'a> Walker<'a> {
             // `current_class` is needed, already in hand); any *other*
             // receiver needs Stage B's own type-inference probe - this
             // records enough (the receiver's own span, the member name,
-            // and a clone of the enclosing function/method to re-check)
-            // for `lsp.rs`'s own orchestration to run that probe.
+            // and the enclosing scope to re-check) for `lsp.rs`'s own
+            // orchestration to run that probe.
             ExprKind::MethodCall(recv, method, _, _)
             | ExprKind::PropertyAccess(recv, method, _) => {
                 self.expr(recv, ctx, current_class, best);
@@ -479,11 +507,11 @@ impl<'a> Walker<'a> {
                         && let Some(owner) = current_class
                     {
                         *best = Some(Resolved::Member(owner.to_string(), method.clone()));
-                    } else if let Some(function) = self.current_function.clone() {
+                    } else {
                         *best = Some(Resolved::Instance {
                             receiver_span: recv.span,
                             member: method.clone(),
-                            function: Box::new(function),
+                            scope: self.probe_scope(),
                             is_static: self.current_is_static,
                             class: current_class.map(str::to_string),
                         });

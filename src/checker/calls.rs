@@ -66,7 +66,17 @@ impl<'a> Checker<'a> {
                 let ExprKind::Variable(name) = &arg.value.kind else {
                     continue;
                 };
-                locals.entry(name.clone()).or_insert(Type::Mixed);
+                // Phase 17 follow-up: real PHP's own by-ref argument
+                // auto-vivification (real, common - an unhinted
+                // `function(&$x)` called with an as-yet-undefined `$x`)
+                // is this variable's genuine first appearance when
+                // there's nothing here yet to preserve - `declare`, not a
+                // plain `insert`, matching `bind_assignment_target`'s own
+                // identical index-write auto-vivification treatment
+                // (`checker/assignment.rs`).
+                if !locals.contains_key(name) {
+                    locals.declare(name.clone(), Type::Mixed, arg.value.span);
+                }
             }
             return;
         };
@@ -93,7 +103,9 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !locals.contains_key(name) {
-                locals.insert(name.clone(), Type::Mixed);
+                // Phase 17 follow-up: same auto-vivification reasoning as
+                // the `sig`-less branch above.
+                locals.declare(name.clone(), Type::Mixed, arg_expr.span);
                 continue;
             }
             // A round of Piwigo-corpus bucketing found the sort() family's

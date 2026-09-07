@@ -191,19 +191,6 @@ impl Locals {
         self.types.remove(key)
     }
 
-    pub(crate) fn entry(
-        &mut self,
-        key: String,
-    ) -> imbl::hashmap::Entry<
-        '_,
-        String,
-        Type,
-        rustc_hash::FxBuildHasher,
-        imbl::shared_ptr::DefaultSharedPtr,
-    > {
-        self.types.entry(key)
-    }
-
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Type)> {
         self.types.iter()
     }
@@ -905,6 +892,10 @@ impl<'a> Checker<'a> {
             .extend(pest_config::file_local_hook_properties(program));
 
         let mut top_locals: Locals = Locals::default();
+        // Phase 17 follow-up: mirrors `check_function_with_ancestor_
+        // hint`'s own identical wiring - a top-level-script-scope probe
+        // (`lsp::navigation::ProbeScope::TopLevel`) needs this too.
+        top_locals.set_track(self.probe_span.is_some());
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here, mirroring
         // `Registry::index_with_context`'s own identical walk exactly -

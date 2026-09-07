@@ -520,6 +520,118 @@ fn a_variable_declared_in_one_function_does_not_leak_into_another() {
     assert_eq!(response_result(&messages, 2), Value::Null);
 }
 
+// Phase 17 follow-up: top-level script-scope navigation. `ProbeScope::
+// TopLevel` re-checks the whole file's own top-level statements via
+// `Checker::check_program` instead of `check_function` - real top-level
+// PHP code is exactly as checkable as a function body.
+
+#[test]
+fn definition_on_a_top_level_variable_read_resolves_via_check_program() {
+    let dir = TempDir::new("var_top_level");
+    let src = "<?php $x = 1; echo $x;";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x;");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$x = 1");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn hover_and_definition_on_a_top_level_instance_call_resolve_via_the_receivers_type() {
+    let dir = TempDir::new("top_level_instance");
+    let src = "<?php class Widget { public function greet(): string { return 'hi'; } } $w = new Widget(); $w->greet();";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "greet();");
+
+    let messages = run(
+        &dir,
+        &[
+            hover_request(2, &uri, pos.clone()),
+            definition_request(3, &uri, pos),
+        ],
+    );
+    assert_eq!(
+        response_result(&messages, 2)["contents"],
+        "Widget::greet(): string"
+    );
+    let def = response_result(&messages, 3);
+    assert_eq!(def["uri"], uri);
+}
+
+// Phase 17 follow-up: auto-vivification. A by-ref call argument, an
+// array index-write, or preg_match's own $matches out-parameter is a
+// variable's real first appearance when there's nothing declared for it
+// yet - `declare`d there, not left with no provenance at all.
+
+#[test]
+fn definition_on_a_read_resolves_to_a_byref_call_argument_that_first_defined_it() {
+    let dir = TempDir::new("var_byref_arg");
+    let src = "<?php function f(array &$a) {} function g() { f($items); return $items; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$items; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$items);");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn definition_on_a_read_resolves_to_its_own_array_auto_vivification_write() {
+    let dir = TempDir::new("var_index_write");
+    let src = "<?php function f() { $x['key'] = 1; return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$x['key']");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn definition_on_a_read_resolves_to_the_preg_match_call_that_first_defined_matches() {
+    let dir = TempDir::new("var_preg_match");
+    let src = "<?php function f($s) { preg_match('/x/', $s, $matches); return $matches; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$matches; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$matches);");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn definition_on_a_read_after_an_existing_variable_is_widened_by_ref_keeps_its_real_declaration() {
+    // Regression guard for the "only when genuinely new" half: an
+    // already-declared variable passed by-ref must keep resolving to its
+    // own real declaration, not the incidental by-ref call site.
+    let dir = TempDir::new("var_byref_existing");
+    let src =
+        "<?php function f(array &$a) {} function g() { $items = []; f($items); return $items; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$items; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$items = []");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
 // Phase 17 follow-up: branch-aware variable navigation. A read only
 // reachable through mutually exclusive arms that assign the name
 // differently offers every real candidate (an LSP `Array` of locations),

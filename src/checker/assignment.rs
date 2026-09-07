@@ -260,6 +260,13 @@ impl<'a> Checker<'a> {
                     // exists for exactly this "read before any real
                     // assignment appears in locals" case - reused
                     // verbatim rather than re-deriving it.
+                    // Phase 17 follow-up: was `name` genuinely undefined
+                    // before this write? A superglobal never really is
+                    // (PHP populates it before the script runs, even
+                    // though it's typically absent from `locals` too) -
+                    // only a real local's own first `$x[...] = ...`
+                    // write is this variable's true declaration site.
+                    let was_defined = locals.contains_key(name);
                     let current = locals.get(name).cloned().unwrap_or_else(|| {
                         if is_superglobal(name) {
                             superglobal_default_type(name)
@@ -268,7 +275,11 @@ impl<'a> Checker<'a> {
                         }
                     });
                     if let Some(new_ty) = write_index_into(&current, idx.as_deref(), ty) {
-                        locals.insert(name.clone(), new_ty);
+                        if was_defined || is_superglobal(name) {
+                            locals.insert(name.clone(), new_ty);
+                        } else {
+                            locals.declare(name.clone(), new_ty, base.span);
+                        }
                     }
                 }
                 ExprKind::Index(..) => {
