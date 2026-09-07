@@ -33,7 +33,7 @@ methodology behind every corpus number cited above.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   32,498 diagnostics. Re-run before citing - it drifts as vendored
   dependencies change and isn't re-measured every round.
-- Test suite: 2053+ unit tests, all passing.
+- Test suite: 2062+ unit tests, all passing.
 
 ---
 
@@ -239,8 +239,9 @@ config support (`[[ignore_errors]]` TOML, identifier/path-glob/message-
 regex/count fields). `--level`/`--php-version`-gated portability
 checks. Incremental multi-file `Project` with cross-file dependency
 invalidation; a real Content-Length-framed JSON-RPC LSP server, now with
-hover/go-to-definition (Phase 17, both stages - see Pending for what's
-still disclosed as out of scope). An 8MiB worker stack (fixing a real
+hover/go-to-definition (Phase 17, both stages plus its own follow-up -
+see Pending for what's still disclosed as out of scope). An 8MiB worker
+stack (fixing a real
 stack-overflow crash on
 deeply-nested expressions), persistent structurally-shared `Locals`
 (O(1) clone), `FxHashMap` for hot build-once maps, a criterion
@@ -278,6 +279,49 @@ entanglement with `Project`, at the cost of one clone per request) -
 real, bounded per-request cost, no caching, matching any real language
 server's own "hover" cost profile.
 
+Phase 17 follow-up (closing out all three gaps the original two-stage
+plan disclosed as out of scope):
+
+- **Closure/arrow-fn body probing** turned out to already work with no
+  code change at all - the original disclosure was overly conservative.
+  `lsp::navigation`'s `current_function` was already left pointing at the
+  *enclosing named* function/method through a `Closure`/`ArrowFn` (never
+  reset - it isn't a separate `Checker` entry point), so `probe_receiver_
+  type`'s re-run of `check_function` on that named function already
+  reaches a receiver nested inside a closure/arrow-fn body the same way
+  ordinary `check_expr` recursion does during a real `check-project` pass.
+  Confirmed empirically (both a `use (...)`-captured closure variable and
+  an arrow-fn's own implicit capture resolve correctly) before writing it
+  up as fixed - only the stale doc comment and a real regression test
+  needed to change.
+- **A `Union`/`Intersection` receiver** now resolves every class that
+  actually declares the member being navigated to, not just the first
+  (`lsp.rs`'s new `type_to_classes`/`resolve_member_owners`, deduped by
+  the member's real *declaring* owner via the existing `lookup_*_with_
+  owner` hierarchy walk). Hover joins every match with `" | "`;
+  definition returns `GotoDefinitionResponse::Array` when more than one
+  real owner is found (LSP's own way to offer a picker) and stays a plain
+  `Scalar` for the overwhelming majority-case single match, so every
+  existing single-owner test kept its original assertions unchanged.
+- **Local-variable-declaration navigation** (a read resolving to its own
+  declaration): new `Resolved::Variable(Span)`, same-file only (no
+  registry lookup needed). `lsp::navigation::Walker` now tracks
+  `var_decls: Vec<(String, Span)>` - every parameter/assignment/`foreach`
+  key-value/`catch (...) $e`/`static $x` binding seen so far in the
+  current scope, in document order - and a read resolves to the *nearest
+  preceding* entry for that name: a deliberate, disclosed textual-order
+  heuristic, not real control-flow analysis (see Pending for where this
+  approximation can point somewhere less useful than the "real" answer).
+  Two small additive AST spans made this possible without a text-split
+  hack: `Param.name_span` and `CatchClause.var_span`, populated by the
+  parser at the same point each is already consumed. Scope reset mirrors
+  real PHP semantics: a named function/`Closure` gets a fresh scope
+  (`Closure` seeded only from its own params plus whatever its `use
+  (...)` clause explicitly names, copied from the *outer* scope at that
+  point); an `ArrowFn` does not get a fresh scope (it implicitly captures
+  the whole enclosing scope by value) - its own params are pushed and
+  popped around just its one body expression instead.
+
 ---
 
 # Pending / partial
@@ -309,18 +353,26 @@ impossible-`instanceof`/redundant-`is_string()`-etc. detection.
 it for convergence), and `goto`/label CFG edges are unmodeled - neither
 owned by any phase.
 
-**17 - LSP hover/go-to-definition (PARTIAL).** Both stages are done (see
-Done): every name reference resolvable without receiver-type inference,
-*and* an instance receiver's own type (`$x->method()`/`$x->prop`, `$x`
-not `$this`) via a real, if throwaway, per-request checker run. Still
-open, disclosed and out of scope for either stage: local-variable-
-declaration navigation (jump from a read to its own assignment site) - a
-same-file, registry-independent problem with its own control-flow-
-dependent ambiguity, genuinely distinct from this phase's "resolve a
-name via the registry" shape. Also disclosed: Stage B doesn't probe
-inside a closure/arrow-fn body (a different `Checker` entry point than
-`check_function` would be needed), and a `Union`/`Intersection` receiver
-resolves to its first `Object` member only, not every possible class.
+**17 - LSP hover/go-to-definition (PARTIAL).** Both stages, plus the
+follow-up closing all three originally-disclosed gaps, are done (see
+Done): every name reference resolvable without receiver-type inference;
+an instance receiver's own type (`$x->method()`/`$x->prop`, including
+inside a closure/arrow-fn body); a `Union`/`Intersection` receiver
+resolving to every declaring class, not just the first; and local-
+variable-declaration navigation (a read resolving to its own parameter/
+assignment/`foreach`/`catch` binding). What's left is narrower than any
+of those: local-variable-declaration navigation is a plain nearest-
+preceding-in-document-order heuristic, not real control-flow analysis -
+it can point to a *textually* earlier assignment that a real CFG would
+know is unreachable on the path actually taken (an `if`/`else` each
+assigning the same name, then a read after the `if` - the heuristic
+picks whichever branch's assignment is later in the file, not
+necessarily the one that ran). List-destructuring targets (`[$a, $b] =
+...`, `foreach ($rows as [$a, $b])`) aren't tracked as declarations at
+all - only a plain `$var` binding is. `global $x;` isn't linked back to
+a top-level declaration. A `Closure`'s own `use (&$x)`/`use ($x)` capture
+resolves only when the outer scope already has a tracked declaration for
+that name at the closure's own point in the file.
 
 **18 - Extension/plugin API (PLANNED).** Deliberately last - premature
 before the rule/type-extension catalog is rich enough for a third party
