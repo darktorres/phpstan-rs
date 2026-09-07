@@ -975,7 +975,17 @@ fn a_conditionally_declared_trait_still_checks_against_its_real_host() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    // Phase 15 item (2): the literal `if (true)` wrapping here (this
+    // test's own scenario shape - a conditionally-declared trait, e.g.
+    // real code's own `if (!trait_exists(...)) { trait Foo {...} }`
+    // idiom) now legitimately also gets its own `if.alwaysTrue` -
+    // unrelated to what this test actually checks (that the trait's own
+    // members still resolve against its real host), so it's excluded
+    // here rather than changing the fixture's own scenario shape.
+    assert!(
+        !d.iter().any(|x| x.identifier != "if.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]

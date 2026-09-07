@@ -1281,7 +1281,15 @@ fn a_while_true_loop_with_no_break_and_a_return_inside_is_not_flagged() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    // Phase 15 item (2): this breakless `while (true)` now legitimately
+    // gets its own `while.alwaysTrue` (a `return` inside doesn't
+    // disqualify it - matches real PHPStan's own rule, confirmed
+    // against `vendor/phpstan-src`) - this test's own actual purpose is
+    // narrower than "no diagnostics at all", see the doc comment above.
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.missing"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]
@@ -2099,6 +2107,151 @@ fn dead_code_after_a_return_does_not_also_trigger_a_spurious_return_missing() {
     );
     assert!(
         !d.iter().any(|x| x.identifier == "return.missing"),
+        "got: {d:?}"
+    );
+}
+
+// Phase 15 item (2): the constant-boolean-condition family, reinstated
+// deliberately narrower than the original (reverted) design -
+// `literal_truthiness` only ever trusts a *syntactic* literal, never the
+// condition's own inferred type, sidestepping the two real narrowing
+// gaps (loop staleness, `?? false` collapse) that got the type-
+// inference-trusting version reverted. See `checker::stmt`'s own `If`/
+// `While`/`DoWhile` arms for the real-PHPStan-grounded exclusions.
+
+#[test]
+fn an_if_with_a_literal_true_condition_is_flagged() {
+    let d = diagnostics_for("<?php function f() { if (true) { echo 1; } }");
+    assert!(
+        d.iter().any(|x| x.identifier == "if.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_if_with_a_literal_false_condition_is_flagged() {
+    let d = diagnostics_for("<?php function f() { if (false) { echo 1; } }");
+    assert!(
+        d.iter().any(|x| x.identifier == "if.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_if_with_a_real_variable_condition_is_not_flagged() {
+    // Regression guard that this stays syntax-only, not a return to
+    // trusting the condition's own inferred type.
+    let d = diagnostics_for("<?php function f(bool $x) { if ($x) { echo 1; } }");
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "if.alwaysTrue" || x.identifier == "if.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn negated_and_grouped_literals_still_resolve() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f() {
+                if (!false) { echo 1; }
+                if ((true)) { echo 2; }
+            }
+        "#,
+    );
+    let true_count = d.iter().filter(|x| x.identifier == "if.alwaysTrue").count();
+    assert_eq!(true_count, 2, "got: {d:?}");
+}
+
+#[test]
+fn a_while_with_a_literal_false_condition_is_flagged() {
+    let d = diagnostics_for("<?php function f() { while (false) { echo 1; } }");
+    assert!(
+        d.iter().any(|x| x.identifier == "while.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_breakless_while_true_is_flagged() {
+    let d = diagnostics_for("<?php function f() { while (true) { echo 1; } }");
+    assert!(
+        d.iter().any(|x| x.identifier == "while.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_while_true_with_a_break_is_not_flagged() {
+    let d = diagnostics_for("<?php function f() { while (true) { break; } }");
+    assert!(
+        !d.iter().any(|x| x.identifier == "while.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_yielding_while_true_is_not_flagged() {
+    let d = diagnostics_for("<?php function f() { while (true) { yield 1; } }");
+    assert!(
+        !d.iter().any(|x| x.identifier == "while.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_while_true_in_a_never_returning_function_is_not_flagged() {
+    let d = diagnostics_for("<?php function f(): never { while (true) { echo 1; } }");
+    assert!(
+        !d.iter().any(|x| x.identifier == "while.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_breakless_do_while_false_is_flagged() {
+    let d = diagnostics_for("<?php function f() { do { echo 1; } while (false); }");
+    assert!(
+        d.iter().any(|x| x.identifier == "doWhile.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_do_while_false_with_a_break_is_not_flagged() {
+    // The real, common "structured goto" idiom - not dead code.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $x) {
+                do {
+                    if ($x) {
+                        break;
+                    }
+                    echo 1;
+                } while (false);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "doWhile.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_breakless_do_while_true_is_flagged() {
+    let d = diagnostics_for("<?php function f() { do { echo 1; } while (true); }");
+    assert!(
+        d.iter().any(|x| x.identifier == "doWhile.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_do_while_true_with_a_break_is_not_flagged() {
+    let d = diagnostics_for("<?php function f() { do { break; } while (true); }");
+    assert!(
+        !d.iter().any(|x| x.identifier == "doWhile.alwaysTrue"),
         "got: {d:?}"
     );
 }

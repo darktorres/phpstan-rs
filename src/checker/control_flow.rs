@@ -446,7 +446,41 @@ pub(crate) fn is_truthy_literal(e: &Expr) -> bool {
 /// own" only ever causes a missed simplification, never a wrong
 /// termination conclusion, so there's no need to track which specific
 /// loop/switch a given `break`'s own level actually targets.
-fn stmt_contains_break(stmt: &Stmt) -> bool {
+///
+/// Phase 15: widened from private to `pub(crate)` - `checker/stmt.rs`'s
+/// own new constant-condition checks (`literal_truthiness`'s callers)
+/// reuse this exact same conservatism for their own `while (true)`/
+/// `do {} while (true)`/`do {} while (false)` exclusions, real PHPStan's
+/// own `WhileLoopAlwaysTrueConditionRule`/`DoWhileLoopConstantCondition
+/// Rule` breakless-detection.
+pub(crate) fn stmt_contains_break(stmt: &Stmt) -> bool {
     matches!(stmt.kind, StmtKind::Break(_))
         || stmt_children(stmt).into_iter().any(stmt_contains_break)
+}
+
+/// Whether `e` is a syntactically-literal boolean condition, and if so,
+/// its own constant truth value - `None` for anything else, including a
+/// *named* constant or any expression whose truthiness would need real
+/// type inference to know. Deliberately narrower than "the condition's
+/// inferred type is a constant boolean" (this project's own original,
+/// reverted design - see Phase 15's own Pending entry in ROADMAP.md): a
+/// bare literal is never wrong regardless of any narrowing gap
+/// elsewhere, sidestepping the demonstrated false-positive source
+/// (loop-staleness, and separately `widen_coalesce_result`'s own `??
+/// false` collapse) that got the type-inference-trusting version
+/// reverted. Kept fully separate from `is_truthy_literal` above (used
+/// for real control-flow decisions, not diagnostics) rather than merged
+/// into it - zero risk of this new, diagnostic-only logic perturbing
+/// already-verified control-flow behavior.
+pub(crate) fn literal_truthiness(e: &Expr) -> Option<bool> {
+    match &e.kind {
+        ExprKind::Literal(Literal::Bool(b)) => Some(*b),
+        ExprKind::Literal(Literal::Int(n)) => Some(*n != 0),
+        ExprKind::Literal(Literal::Float(f)) => Some(*f != 0.0),
+        ExprKind::Literal(Literal::String(s)) => Some(!s.is_empty() && s != "0"),
+        ExprKind::Literal(Literal::Null) => Some(false),
+        ExprKind::Unary(UnaryOp::Not, inner) => literal_truthiness(inner).map(|b| !b),
+        ExprKind::Grouping(inner) => literal_truthiness(inner),
+        _ => None,
+    }
 }

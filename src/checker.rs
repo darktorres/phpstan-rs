@@ -702,7 +702,8 @@ pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{
     body_contains_yield, collect_exit_point_statements, exit_point_description,
-    expr_contains_yield, is_truthy_literal, merge_scopes, type_allows_generator_return,
+    expr_contains_yield, is_truthy_literal, literal_truthiness, merge_scopes, stmt_contains_break,
+    type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};

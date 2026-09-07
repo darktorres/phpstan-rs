@@ -2317,7 +2317,7 @@ fn an_inline_var_override_is_invalidated_by_a_later_real_reassignment() {
             function f($it): void {
                 $file = $it;
                 /** @var FakeFileInfo9921 $file */
-                if (true) {
+                if ($it) {
                 }
                 $file = 5;
                 needsInt($file);

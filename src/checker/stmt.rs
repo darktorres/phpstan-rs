@@ -1,7 +1,8 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, collect_exit_point_statements, exit_point_description, is_truthy_literal,
-    merge_scopes, purge_stale_narrowing_for,
+    Checker, Locals, body_contains_yield, collect_exit_point_statements, exit_point_description,
+    is_truthy_literal, literal_truthiness, merge_scopes, purge_stale_narrowing_for,
+    stmt_contains_break,
 };
 use crate::docblock;
 use crate::types::Type;
@@ -304,25 +305,43 @@ impl<'a> Checker<'a> {
                 else_branch,
             } => {
                 self.check_expr(cond, locals, label);
-                // Phase 15 item (2), `IfConstantConditionRule`: investigated
-                // and declined - see ROADMAP.md. Implemented and corpus-
-                // verified as "the condition's own inferred type is exactly
-                // `Type::True`/`Type::False`", then reverted: real corpus
-                // testing found this project's own narrowing has two
-                // separate, pervasive gaps that each independently make a
-                // plain variable's type wrongly collapse to a literal
-                // `True`/`False` long after it should have widened back to
-                // `bool` - a `foreach`-scoped "first iteration" flag
-                // (`$first = true; foreach (...) { if ($first) { $first =
-                // false; } else { ... } }`, one of the most common PHP
-                // idioms there is) never gets fixed-point-merged across
-                // loop iterations, and `$x = $expr ?? false;` collapses to
-                // the bare literal `false` whenever `$expr`'s own type
-                // isn't confidently known, discarding the "or whatever
-                // `$expr` actually was" half entirely. Both are real,
-                // pre-existing gaps this check merely exposed, not new
-                // bugs - fixing them belongs to Phase 55's own tracked
-                // narrowing-engine generalization, not a quick patch here.
+                // Phase 15 item (2), `IfConstantConditionRule`: the
+                // original design (trusting the condition's own *full
+                // inferred* type being exactly `Type::True`/`Type::False`)
+                // was investigated, corpus-verified, then reverted - real
+                // corpus testing found this project's own narrowing has
+                // two separate, pervasive gaps that each independently
+                // make a plain variable's type wrongly collapse to a
+                // literal `True`/`False` long after it should have
+                // widened back to `bool`: a `foreach`-scoped "first
+                // iteration" flag never getting fixed-point-merged across
+                // loop iterations (fixed by Phase 55's own convergence
+                // work, see Done), and `$x = $expr ?? false;` collapsing
+                // to the bare literal `false` whenever `$expr`'s own type
+                // isn't confidently known (still open - Phase 55's own
+                // tracked comparison-outcome/range-API item). Reinstated
+                // here deliberately narrower than the reverted version:
+                // `literal_truthiness` only ever trusts a *syntactic*
+                // literal (`if (true)`, `if (0)`, `if (!false)`, ...),
+                // never the condition's own inferred type - sidesteps
+                // both gaps above entirely, since a bare literal's own
+                // truthiness never depends on narrowing precision at all.
+                if let Some(value) = literal_truthiness(cond) {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "If condition is always {}.",
+                            if value { "true" } else { "false" }
+                        ),
+                        cond.span,
+                        4,
+                        if value {
+                            "if.alwaysTrue"
+                        } else {
+                            "if.alwaysFalse"
+                        },
+                    );
+                }
 
                 let mut then_locals = locals.clone();
                 self.apply_narrowing(cond, &mut then_locals, true);
@@ -355,11 +374,44 @@ impl<'a> Checker<'a> {
             StmtKind::While { cond, body } => {
                 self.check_expr(cond, locals, label);
                 // Phase 15 item (2), `WhileLoopAlwaysFalseConditionRule`/
-                // `WhileLoopAlwaysTrueConditionRule`: investigated and
-                // declined alongside `StmtKind::If`'s own identical
-                // check - see that arm's doc comment and ROADMAP.md for
-                // the real, corpus-found narrowing gaps that make this
-                // unsafe to ship.
+                // `WhileLoopAlwaysTrueConditionRule`: same syntactic-
+                // literal-only reinstatement as `StmtKind::If`'s own
+                // identical check just above - see that arm's doc
+                // comment. `alwaysFalse` has no exclusions, matching real
+                // PHPStan's own rule exactly. `alwaysTrue` is gated the
+                // same way real PHPStan's own `WhileLoopAlwaysTrueCondition
+                // Rule` is (confirmed directly against `vendor/phpstan-src`):
+                // skipped when the loop is breakless (`stmt_contains_break`
+                // - this project's own already-existing, deliberately
+                // conservative "any break anywhere" check, reused rather
+                // than re-deriving real PHPStan's own more precise
+                // per-level break/`continue N` analysis - a narrow,
+                // disclosed simplification, see ROADMAP), when the body
+                // yields (a legitimate infinite generator, not dead code),
+                // or when the enclosing function is declared `: never`
+                // (already documents "this never returns" on its own,
+                // redundant to also flag the loop).
+                if literal_truthiness(cond) == Some(false) {
+                    self.report(
+                        label.to_string(),
+                        "While loop condition is always false.".to_string(),
+                        cond.span,
+                        4,
+                        "while.alwaysFalse",
+                    );
+                } else if literal_truthiness(cond) == Some(true)
+                    && !stmt_contains_break(body)
+                    && !body_contains_yield(std::slice::from_ref(body.as_ref()))
+                    && declared_return != Some(&Type::Never)
+                {
+                    self.report(
+                        label.to_string(),
+                        "While loop condition is always true.".to_string(),
+                        cond.span,
+                        4,
+                        "while.alwaysTrue",
+                    );
+                }
                 let entry = locals.clone();
                 self.loop_depth += 1;
                 let (body_locals, break_states) = self.converge_loop_body(
@@ -449,6 +501,40 @@ impl<'a> Checker<'a> {
                 // "no zero-iterations merge" choice this arm already made.
                 *locals = body_locals;
                 self.check_expr(cond, locals, label);
+                // Phase 15 item (2), `DoWhileLoopConstantConditionRule`:
+                // same syntactic-literal-only reinstatement as `If`/
+                // `While` above. Both directions are gated on
+                // breakless-ness here (confirmed directly against real
+                // PHPStan's own rule): `alwaysFalse` skips when the body
+                // has a `break` (`do { ...; if ($x) break; ... } while
+                // (false);` is a real, common "structured goto" idiom,
+                // not dead code); `alwaysTrue` skips on the same
+                // `stmt_contains_break` check plus a yield check (no
+                // `declared_return: never` exclusion here - confirmed
+                // real PHPStan's own rule doesn't have one, unlike
+                // `While`'s).
+                if literal_truthiness(cond) == Some(false) {
+                    if !stmt_contains_break(body) {
+                        self.report(
+                            label.to_string(),
+                            "Do-while loop condition is always false.".to_string(),
+                            cond.span,
+                            4,
+                            "doWhile.alwaysFalse",
+                        );
+                    }
+                } else if literal_truthiness(cond) == Some(true)
+                    && !stmt_contains_break(body)
+                    && !body_contains_yield(std::slice::from_ref(body.as_ref()))
+                {
+                    self.report(
+                        label.to_string(),
+                        "Do-while loop condition is always true.".to_string(),
+                        cond.span,
+                        4,
+                        "doWhile.alwaysTrue",
+                    );
+                }
                 // Same as `While` - reaching code after a do-while always
                 // means `cond` just evaluated false. Applied *before*
                 // folding in break-reached states below, same reasoning
