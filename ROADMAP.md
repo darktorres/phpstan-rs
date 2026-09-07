@@ -33,7 +33,7 @@ methodology behind every corpus number cited above.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   32,498 diagnostics. Re-run before citing - it drifts as vendored
   dependencies change and isn't re-measured every round.
-- Test suite: 2071+ unit tests, all passing.
+- Test suite: 2072+ unit tests, all passing.
 
 ---
 
@@ -304,56 +304,93 @@ plan disclosed as out of scope):
   `Scalar` for the overwhelming majority-case single match, so every
   existing single-owner test kept its original assertions unchanged.
 - **Local-variable-declaration navigation** (a read resolving to its own
-  declaration): new `Resolved::Variable(Vec<Span>)`, same-file only (no
-  registry lookup needed). `lsp::navigation::Walker` tracks
-  `var_decls: Vec<(String, Span, bool)>` - every parameter/assignment/
-  `foreach` key-value/`catch (...) $e`/`static $x` binding seen so far in
-  the current scope, in document order, each tagged `conditional` (pushed
-  while `conditional_depth > 0`). Two small additive AST spans made this
-  possible without a text-split hack: `Param.name_span` and
-  `CatchClause.var_span`, populated by the parser at the same point each
-  is already consumed. Scope reset mirrors real PHP semantics: a named
-  function/`Closure` gets a fresh scope (`Closure` seeded only from its
-  own params plus whatever its `use (...)` clause explicitly names,
-  copied from the *outer* scope at that point); an `ArrowFn` does not get
-  a fresh scope (it implicitly captures the whole enclosing scope by
-  value) - its own params are pushed and popped around just its one body
-  expression instead.
-- **Branch-aware variable resolution** (follow-up to the follow-up above,
-  same commit): a read no longer silently picks the textually-last
-  candidate when that's a real guess. `If`/`Switch`/`Try`'s own
-  then/else/case/catch bodies are each walked as an isolated arm from the
-  same starting point (`var_decls` truncated back between arms so one
-  arm's declarations can't leak into a sibling's), then merged back
-  together - a name reassigned differently by two arms keeps *both*
-  candidates; a name only one arm touches adds just that one, alongside
-  whatever was declared before the branch (never removed, since arms only
-  truncate *forward* from a saved length). A loop body (`while`/`do`/
-  `for`/`foreach`) is simpler - no sibling arm to merge against, just a
-  single conditional region wrapping it, so a post-loop read still sees
-  the pre-loop value as a live alternative to whatever the body itself
-  assigned. `lookup_in` (shared by ordinary lookups and a `Closure`'s own
-  captured-variable seeding) scans backward and stops at the first
-  *unconditional* declaration found - collecting every *conditional* one
-  along the way as a genuine alternative, not real control-flow analysis,
-  but no longer a silent single guess either: an ambiguous read now
-  returns every real candidate, and `lsp.rs`'s `definition` offers them
-  as a `GotoDefinitionResponse::Array` (a picker) exactly the way a
-  `Union`/`Intersection` receiver's own multiple owners already do,
-  falling back to a plain `Scalar` for the overwhelming single-candidate
-  case so no existing test's assertions needed to change.
-- **List-destructuring targets** (`[$a, $b] = ...`, `foreach ($rows as
-  [$a, $b])`) are now tracked as declarations too - `bind_var` recurses
-  into an `ArrayLiteral`'s own items (a key expression, if any, walked as
-  an ordinary read; each value recursively bound), shared by both the
-  `Assign`/`CompoundAssign` and `foreach`-binding call sites.
-- **`global $x;`** now links back to a top-level (script-scope)
-  declaration, via a new, order-independent pre-scan
-  (`collect_top_level_vars`, run once up front rather than folded into
-  the position-aware walk) - needed specifically because the top-level
-  assignment a `global` statement refers to very often appears *later* in
-  the file than the function using it, which a single forward walk
-  wouldn't have reached yet.
+  declaration) shipped twice: first as `lsp::navigation`'s own hand-rolled
+  arm-merging heuristic (a `var_decls`/`conditional_depth` walk local to
+  the LSP module), then - once asked "is this the *most* proper approach,
+  or are you still avoiding churn?" - replaced entirely with real,
+  checker-driven reaching-definitions, riding along the exact same
+  flow-sensitive traversal `check-project` itself already trusts (branch
+  merging via `merge_scopes`, loop fixed-point convergence via
+  `converge_loop_body`, termination-pruning via `always_terminates`, real
+  `break`/`continue` handling via `loop_break_states`/`loop_continue_
+  states`) rather than a second, independent approximation of it that
+  could silently drift from the real one. The old heuristic's own code is
+  gone from `lsp::navigation` entirely.
+  - `Locals` (`checker.rs`) changed from a bare `imbl::HashMap` type alias
+    to a small wrapper struct: `types` (unchanged) plus an opt-in,
+    parallel `provenance: imbl::HashMap<String, imbl::HashSet<Span>>`
+    side-channel, gated by a `track: bool` field carried alongside every
+    clone (so it turns on/off atomically with the scope it belongs to,
+    including a closure's own fresh scope via the new `fresh_scope`
+    constructor). `types`/`provenance` are two separate fields, not one
+    `(Type, ProvenanceSet)` pair, specifically so the ~40 existing call
+    sites that only ever touch `Type` (type-narrowing: `instanceof`/null/
+    array-shape checks, a by-ref call's own type-widening effect) needed
+    zero changes - plain `Locals::insert` leaves `provenance` for that key
+    completely untouched, correct for a refinement that isn't a new
+    declaration. Two new primitives cover the two ways provenance
+    *does* need to change: `Locals::declare` (a fresh, single-span
+    provenance, replacing whatever was there - used at every genuine
+    syntactic binding site: an assignment's left-hand side, including
+    each leaf of a list-destructuring target; a parameter; a `foreach`/
+    `catch`/`static`/`global` binding; `$x++`/`$x--`/`$x += 1`) and
+    `Locals::insert_with_provenance` (copies an *existing* provenance set
+    across unchanged - used where a value moves between two `Locals`
+    without being redeclared: `merge_scopes`'s own union, a closure's
+    `use (...)` capture, `&&`/`||`'s own short-circuit new-definition
+    propagation). `PartialEq` for `Locals` deliberately compares `types`
+    only, never `provenance` - `converge_loop_body`'s own fixed-point
+    check keeps converging purely on type stability, unchanged.
+  - `merge_scopes` (`checker/control_flow.rs`) is the one function every
+    multi-way join in the checker already routes through (`If`'s own
+    then/else selection, `Switch`'s `exit_states` fold, `Try`'s `end_
+    states` fold, and `converge_loop_body`'s own fixed-point loop, which
+    is built entirely out of `merge_scopes` calls) - fixing provenance-
+    merging here once (union both sides' known spans for a name present
+    in both) is what makes every one of those inherit real reaching-
+    definitions precision with **no other call site needing any change at
+    all**, including this project's own already-correct termination-
+    pruning and break/continue handling.
+  - `Checker::probe_var_provenance: Option<HashSet<Span>>` mirrors
+    `probe_hit` exactly (Stage B's own precedent): checked in `check_expr`'s
+    `ExprKind::Variable` arm the same way `probe_hit` is checked in
+    `MethodCall`/`PropertyAccess`. `lsp.rs`'s new `probe_variable_
+    provenance` builds one throwaway `Checker` per request and reads it
+    back, the direct sibling of `probe_receiver_type`.
+  - `lsp::navigation::Resolved` gained `VariableSelf(Span)` (a declaration
+    clicked directly - a parameter, a `foreach`/`catch`/`static`/`global`
+    binding's own name - resolves to itself, no probe needed) and
+    `VariableRead { span, function, is_static, class }` (a genuine read,
+    resolved via the probe above, mirroring `Instance`'s own shape).
+  - Two small additive AST spans made `VariableSelf` possible without a
+    text-split hack: `Param.name_span` and `CatchClause.var_span`,
+    populated by the parser at the same point each is already consumed.
+  - `global $x;` deliberately does **not** try to link to a specific
+    top-level assignment (the earlier heuristic's own order-independent
+    pre-scan did, and was removed) - the real `Checker` itself already
+    treats `global $x;` as binding `Mixed` with no attempt to track real
+    PHP's own global scope (`checker/stmt.rs`'s own doc comment: a
+    principled scoping decision, not an oversight), so a read now
+    resolves to the `global $x;` statement itself, matching that same
+    honest boundary instead of reintroducing a separate, less-principled
+    LSP-only guess alongside a now-much-more-rigorous system.
+  - Real, corpus-verified checker nuances a hand-rolled LSP-side
+    heuristic could never have known about are now inherited for free:
+    `foreach` deliberately does *not* merge with its own pre-loop state
+    (Phase 29's own corpus-verified decision - a common idiom relies on
+    the loop variable's post-loop type being trusted as if the loop body
+    definitely ran), so a post-`foreach` read correctly stays a single
+    candidate, unlike `while`/`for` (which do merge, so a post-loop read
+    there correctly offers the pre-loop value as a live alternative). A
+    guard clause (`if ($cond) { $x = 1; } else { $x = 2; return; }`)
+    correctly excludes the terminated `else` branch's own `$x = 2` from
+    ever becoming a candidate at all.
+  - Zero corpus impact confirmed directly, not assumed: the full
+    checker test suite (1449 `checker::` tests) passes unchanged, and a
+    before/after diff of `check-project` on both the Piwigo-scoped and
+    full (`vendor/`-included) corpus is byte-identical - `Locals::track`
+    defaults to `false` everywhere except the one throwaway, per-request
+    `Checker` an LSP variable-navigation probe builds.
 
 ---
 
@@ -386,26 +423,35 @@ impossible-`instanceof`/redundant-`is_string()`-etc. detection.
 it for convergence), and `goto`/label CFG edges are unmodeled - neither
 owned by any phase.
 
-**17 - LSP hover/go-to-definition (PARTIAL).** Both stages plus two
+**17 - LSP hover/go-to-definition (PARTIAL).** Both stages plus three
 follow-ups are done (see Done): every name reference resolvable without
 receiver-type inference; an instance receiver's own type (`$x->method()`/
 `$x->prop`, including inside a closure/arrow-fn body); a `Union`/
-`Intersection` receiver resolving to every declaring class; local-
-variable-declaration navigation, branch-aware (an ambiguous read across
-mutually exclusive `if`/`switch`/`try` arms or a loop body offers every
-real candidate as a `GotoDefinitionResponse::Array`, not a silent guess);
-list-destructuring targets; and `global $x;` linking to a top-level
-declaration. What's left is real but narrow: this is arm-merging over the
-AST's own document order, not a true control-flow graph, so it can offer
-an alternative a real CFG would know is unreachable (a branch that always
-`return`s/`throw`s before falling through still contributes its own
-declarations as "alternatives" to code after the whole construct, even
-though that code could only actually be reached via the *other* arm) -
-overly cautious, never wrong-file. `break`/`continue`'s own early-exit
-effect on which loop-body statements really ran isn't modeled either. A
-`Closure`'s own `use (&$x)`/`use ($x)` capture resolves only when the
-outer scope already has a tracked declaration for that name at the
-closure's own point in the file.
+`Intersection` receiver resolving to every declaring class; and local-
+variable-declaration navigation, now backed by real, checker-driven
+reaching-definitions (not a hand-rolled approximation of it) - an
+ambiguous read across mutually exclusive `if`/`switch`/`try` arms or a
+`while`/`for` loop offers every real candidate as a `GotoDefinitionResponse
+::Array`; a guard clause correctly excludes a branch that always
+`return`s/`throw`s from ever becoming a candidate; `break`/`continue` are
+handled precisely (`loop_break_states`/`loop_continue_states`); a
+`foreach` correctly does *not* offer its own pre-loop value as an
+alternative (matching Phase 29's own corpus-verified checker design);
+list-destructuring targets are tracked; `global $x;` resolves to the
+`global` statement itself (a deliberate, principled boundary - see Done -
+not a gap). What's left is genuinely narrow: a top-level script-scope
+read isn't supported (no enclosing named function/method to build a
+probe from - the same boundary `Instance` already has). Only *lexically
+visible* binding syntax updates provenance (an assignment, a parameter, a
+`foreach`/`catch`/`static`/`global` binding, `$x++`/`$x--`/`$x += 1`) -
+deliberately, not a call's own *effect* on a variable's type (a by-ref
+call argument, `preg_match`'s own `$matches` out-parameter, `$arr['k'] =
+v`'s own array-shape mutation): a read after one of those still resolves
+to wherever the variable was *really* declared, not the incidental call
+site, by design, not oversight (see `Locals::insert`'s own doc comment in
+`checker.rs`). A `Closure`'s own `use (&$x)`/`use ($x)` capture resolves
+only when the outer scope already has tracked provenance for that name at
+the closure literal's own point in the file.
 
 **18 - Extension/plugin API (PLANNED).** Deliberately last - premature
 before the rule/type-extension catalog is rich enough for a third party
