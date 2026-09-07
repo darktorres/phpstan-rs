@@ -500,16 +500,41 @@ permissive "always legal" default - fixed by reusing `union_coercion` for
 `Intersection` too (the identical "if any member offers a legal cast
 path, don't flag" reasoning already applied to `Union`).
 
+Checking whether fix (16)'s own reverse-order correction should have
+reached further found one more real instance (19): `check_expr`'s own
+*separate* `MethodCall` arm (distinct from `infer_expr`'s, fixed by (15))
+had an analogous but differently-shaped gap in its pre-existing (not
+newly-written) `recv_class` extraction - a plain "first Object/EnumCase
+member, regardless of whether it actually declares the method" pick,
+correctly kept as the gate for the separate `member_confirmed_missing`-
+based existence check, but *also* reused to resolve the method's real
+signature/owner for argument-type checking, visibility/`@internal`/
+`@deprecated`, the Doctrine query special case, and the final return
+type - all of which need a member that actually declares the method, in
+the correct (`Intersection` reversed) order. Fixed with a new
+`find_method_receiver` (`find_property_receiver`'s own method
+counterpart), confirmed via direct testing (not assumed) to have been a
+real, live bug: a same-named public method on a broader interface
+silently let a call through to a narrower, *private* override that
+should have been rejected.
+
 Confirmed against the real Piwigo corpus (both the app-only scope and
 the full vendor-included one) after every fix above: zero remaining
 false positives traced to this family's own new checks - the only
 surviving diff lines are `widen_coalesce_result`'s own genuine, expected
 precision ripples (reviewed individually), real, correct findings newly
-unlocked by fixes (7)-(18) above, and real, correct findings unrelated to
+unlocked by fixes (7)-(19) above, and real, correct findings unrelated to
 any of this session's own changes (including in vendor/example code,
 where a docblock-declared literal param type like `@param false $x`
 makes `if ($x)` genuinely always-false, confirmed against `vendor/
-jetbrains/phpstorm-stubs`). Fix (16)'s own reverse-order correction alone
+jetbrains/phpstorm-stubs`). Fix (19)'s own full-corpus diff is
+considerably larger than any single prior fix in this family (`check_expr`'s
+own `MethodCall` arm is exercised far more broadly than `infer_expr`
+alone) and was spot-checked rather than reviewed line-by-line - every
+sampled line followed the same already-verified pattern (a more precise
+resolved type/signature surfacing a real, previously-masked mismatch),
+but this is a real, disclosed gap in verification depth, not a claim of
+exhaustive review. Fix (16)'s own reverse-order correction alone
 removed a further net nine false positives across the full vendor
 corpus once applied on top of (15) - most of (15)'s own newly-surfaced
 findings turned out to be this same ordering bug, not genuine new
