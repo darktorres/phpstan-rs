@@ -447,7 +447,7 @@ impl<'a> Checker<'a> {
                 // A dynamic target (`$x instanceof $className`) still
                 // doesn't name a concrete class to narrow to either way.
                 if let Some(key) = narrowing_key(inner)
-                    && let InstanceofTarget::Name(class_name) = target
+                    && let InstanceofTarget::Name(class_name, _) = target
                 {
                     let resolved = self.resolve_name_expr(class_name);
                     if branch_true {
@@ -1241,7 +1241,7 @@ impl<'a> Checker<'a> {
             // $className`) still doesn't name a concrete class to narrow
             // to, same as the single-condition `ExprKind::Instanceof` arm
             // above already requires.
-            ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name)) => {
+            ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name, _)) => {
                 let key = narrowing_key(inner)?;
                 let target_ty = self.resolve_name_expr(class_name);
                 Some((key, target_ty, inner))

@@ -1132,7 +1132,7 @@ impl<'a> Checker<'a> {
                     // comment), so anything that comes back as an
                     // `Object` here is a genuine bare class-name
                     // reference.
-                    InstanceofTarget::Name(name) => {
+                    InstanceofTarget::Name(name, _) => {
                         if let Type::Object(class, _) = self.resolve_name_expr(name) {
                             if !self.class_name_exists(&class) {
                                 self.report(

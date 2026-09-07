@@ -455,7 +455,8 @@ impl Parser {
             let target = if matches!(self.peek(), Token::Variable(_) | Token::LParen) {
                 InstanceofTarget::Expr(Box::new(self.parse_unary()?))
             } else {
-                InstanceofTarget::Name(self.parse_qualified_name())
+                let (name, span) = self.parse_qualified_name_spanned();
+                InstanceofTarget::Name(name, span)
             };
             return Ok(self.expr(ExprKind::Instanceof(Box::new(lhs), target), start));
         }

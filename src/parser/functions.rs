@@ -65,7 +65,12 @@ impl Parser {
                 self.advance();
             }
 
+            let type_hint_start = self.current_pos();
             let type_hint = self.parse_type_hint()?;
+            let type_hint_span = type_hint.as_ref().map(|_| Span {
+                start: type_hint_start,
+                end: self.previous_end(),
+            });
             let by_ref = self.eat(&Token::Amp);
             let variadic = self.eat(&Token::Ellipsis);
             let name = self.expect_variable()?;
@@ -86,6 +91,7 @@ impl Parser {
             params.push(Param {
                 name,
                 type_hint,
+                type_hint_span,
                 default,
                 by_ref,
                 variadic,
@@ -111,10 +117,22 @@ impl Parser {
         let start = self.current_pos();
         self.expect(&Token::Keyword(Keyword::Function))?;
         self.eat(&Token::Amp); // by-ref return marker
+        let name_start = self.current_pos();
         let name = self.expect_ident()?;
+        let name_span = Span {
+            start: name_start,
+            end: self.previous_end(),
+        };
         let params = self.parse_params()?;
+        let mut return_type_span = None;
         let return_type = if self.eat(&Token::Colon) {
-            self.parse_type_hint()?
+            let return_type_start = self.current_pos();
+            let ty = self.parse_type_hint()?;
+            return_type_span = ty.as_ref().map(|_| Span {
+                start: return_type_start,
+                end: self.previous_end(),
+            });
+            ty
         } else {
             None
         };
@@ -127,8 +145,10 @@ impl Parser {
         };
         Ok(FunctionDecl {
             name,
+            name_span,
             params,
             return_type,
+            return_type_span,
             body,
             // Callers that saw a preceding doc comment overwrite this -
             // parse_function_decl itself is entered after any modifiers

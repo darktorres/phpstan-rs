@@ -528,7 +528,7 @@ fn instanceof_with_dynamic_class_name_parses() {
     let ExprKind::Instanceof(_, target) = &rhs.kind else {
         panic!("expected Instanceof");
     };
-    assert!(matches!(target, InstanceofTarget::Name(n) if n == "Foo"));
+    assert!(matches!(target, InstanceofTarget::Name(n, _) if n == "Foo"));
 }
 
 #[test]

@@ -215,6 +215,22 @@ impl Parser {
         s
     }
 
+    /// Phase 17: `parse_qualified_name`, plus the span it occupied - kept
+    /// as a thin wrapper rather than changing `parse_qualified_name`'s own
+    /// signature, which has ~30 existing call sites that have no use for
+    /// the span. Used only at the smaller set of call sites (`extends`/
+    /// `implements`/`uses`/`instanceof`/`catch`) that feed the LSP's own
+    /// declaration-location index or position-walker.
+    pub(crate) fn parse_qualified_name_spanned(&mut self) -> (String, Span) {
+        let start = self.current_pos();
+        let name = self.parse_qualified_name();
+        let span = Span {
+            start,
+            end: self.previous_end(),
+        };
+        (name, span)
+    }
+
     /// Phase 37: parses zero or more consecutive `#[Name(args), ...]`
     /// attribute groups sitting at the current position - real PHP allows
     /// several bracket groups back-to-back on one declaration

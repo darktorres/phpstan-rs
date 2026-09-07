@@ -262,11 +262,17 @@ impl Parser {
                 let mut consts = Vec::new();
                 loop {
                     let const_start = self.current_pos();
+                    let name_start = self.current_pos();
                     let name = self.expect_ident()?;
+                    let name_span = Span {
+                        start: name_start,
+                        end: self.previous_end(),
+                    };
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
                         name,
+                        name_span,
                         value,
                         doc_comment: None,
                         // A top-level `const` has no `public`/`private`
@@ -278,6 +284,7 @@ impl Parser {
                         // A top-level `const` has no PHP 8.3 typed-
                         // constant syntax either - that's class-const-only.
                         type_hint: None,
+                        type_hint_span: None,
                         // Nor any `final` syntax - also class-const-only.
                         is_final: false,
                         span: Span {
@@ -653,9 +660,13 @@ impl Parser {
         while self.eat(&Token::Keyword(Keyword::Catch)) {
             let catch_start = self.previous_end();
             self.expect(&Token::LParen)?;
-            let mut types = vec![self.parse_qualified_name()];
+            let (first_type, first_span) = self.parse_qualified_name_spanned();
+            let mut types = vec![first_type];
+            let mut types_spans = vec![first_span];
             while self.eat(&Token::Pipe) {
-                types.push(self.parse_qualified_name());
+                let (name, span) = self.parse_qualified_name_spanned();
+                types.push(name);
+                types_spans.push(span);
             }
             let var = if matches!(self.peek(), Token::Variable(_)) {
                 Some(self.expect_variable()?)
@@ -666,6 +677,7 @@ impl Parser {
             let body = self.parse_stmt_list_block()?;
             catches.push(CatchClause {
                 types,
+                types_spans,
                 var,
                 body,
                 span: Span {

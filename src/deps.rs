@@ -271,7 +271,7 @@ fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
         ExprKind::Name(n) => {
             names.insert(n.clone());
         }
-        ExprKind::Instanceof(_, InstanceofTarget::Name(n)) => {
+        ExprKind::Instanceof(_, InstanceofTarget::Name(n, _)) => {
             names.insert(n.clone());
         }
         ExprKind::NewAnonymousClass(decl, _) => {

@@ -487,7 +487,7 @@ impl<'a> Walker<'a> {
                     self.check_expr(&a.value, ctx, param_types, label);
                 }
             }
-            ExprKind::Instanceof(inner, InstanceofTarget::Name(n)) => {
+            ExprKind::Instanceof(inner, InstanceofTarget::Name(n, _)) => {
                 if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
                     let action = format!("instanceof {fqn}");
                     self.report_not_covered(

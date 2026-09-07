@@ -51,37 +51,64 @@ impl Parser {
         };
 
         let mut extends = Vec::new();
+        let mut extends_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
-            extends.push(self.parse_qualified_name());
+            let (name, span) = self.parse_qualified_name_spanned();
+            extends.push(name);
+            extends_spans.push(span);
             while self.eat(&Token::Comma) {
-                extends.push(self.parse_qualified_name());
+                let (name, span) = self.parse_qualified_name_spanned();
+                extends.push(name);
+                extends_spans.push(span);
             }
         }
         let mut implements = Vec::new();
+        let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            implements.push(self.parse_qualified_name());
+            let (name, span) = self.parse_qualified_name_spanned();
+            implements.push(name);
+            implements_spans.push(span);
             while self.eat(&Token::Comma) {
-                implements.push(self.parse_qualified_name());
+                let (name, span) = self.parse_qualified_name_spanned();
+                implements.push(name);
+                implements_spans.push(span);
             }
         }
 
-        let (properties, methods, consts, uses, trait_aliases, resolved_trait_conflicts) =
-            self.parse_class_body(class_is_readonly)?;
+        let (
+            properties,
+            methods,
+            consts,
+            uses,
+            uses_spans,
+            trait_aliases,
+            resolved_trait_conflicts,
+        ) = self.parse_class_body(class_is_readonly)?;
 
+        let decl_span = Span {
+            start: decl_start,
+            end: self.previous_end(),
+        };
         let decl = ClassDecl {
             // No name multiple anonymous classes in the same file could
             // share safely - never indexed into the registry by this name,
             // only used structurally within this one expression.
             name: "class@anonymous".to_string(),
+            // No real name token to point at - see `ClassDecl::name_span`'s
+            // own doc comment.
+            name_span: decl_span,
             kind: ClassKind::Class,
             extends,
+            extends_spans,
             implements,
+            implements_spans,
             is_abstract: false,
             is_final: false,
             properties,
             methods,
             consts,
             uses,
+            uses_spans,
             trait_aliases,
             resolved_trait_conflicts,
             doc_comment: None,
@@ -90,10 +117,7 @@ impl Parser {
             // syntax at all (`new #[Attr] class {}` doesn't parse in real
             // PHP either).
             attrs: Vec::new(),
-            span: Span {
-                start: decl_start,
-                end: self.previous_end(),
-            },
+            span: decl_span,
         };
 
         Ok(self.expr(ExprKind::NewAnonymousClass(Box::new(decl), args), start))
@@ -112,6 +136,7 @@ impl Parser {
             Vec<MethodDecl>,
             Vec<ClassConst>,
             Vec<String>,
+            Vec<Span>,
             Vec<TraitAlias>,
             Vec<String>,
         ),
@@ -122,6 +147,7 @@ impl Parser {
         let mut methods = Vec::new();
         let mut consts = Vec::new();
         let mut uses = Vec::new();
+        let mut uses_spans = Vec::new();
         let mut trait_aliases = Vec::new();
         let mut resolved_trait_conflicts = Vec::new();
 
@@ -136,9 +162,13 @@ impl Parser {
             let doc = self.take_doc_comment();
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
-                uses.push(self.parse_qualified_name());
+                let (name, span) = self.parse_qualified_name_spanned();
+                uses.push(name);
+                uses_spans.push(span);
                 while self.eat(&Token::Comma) {
-                    uses.push(self.parse_qualified_name());
+                    let (name, span) = self.parse_qualified_name_spanned();
+                    uses.push(name);
+                    uses_spans.push(span);
                 }
                 if self.check(&Token::LBrace) {
                     let (aliases, resolved) = self.parse_trait_adaptations()?;
@@ -235,24 +265,36 @@ impl Parser {
                 // is followed by *another* identifier (the real name)
                 // rather than `=` - `const FOO = 1;`'s `FOO` is followed
                 // directly by `=`, so nothing is consumed as a type there.
+                let type_hint_start = self.current_pos();
                 let type_hint = if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals)
                 {
                     self.parse_type_hint()?
                 } else {
                     None
                 };
+                let type_hint_span = type_hint.as_ref().map(|_| Span {
+                    start: type_hint_start,
+                    end: self.previous_end(),
+                });
                 loop {
                     let const_start = self.current_pos();
+                    let name_start = self.current_pos();
                     let cname = self.expect_ident()?;
+                    let cname_span = Span {
+                        start: name_start,
+                        end: self.previous_end(),
+                    };
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
                         name: cname,
+                        name_span: cname_span,
                         value,
                         doc_comment: doc.clone(),
                         visibility: visibility.clone(),
                         attrs: attrs.clone(),
                         type_hint: type_hint.clone(),
+                        type_hint_span,
                         is_final: is_final_member,
                         span: Span {
                             start: const_start,
@@ -286,11 +328,21 @@ impl Parser {
             }
 
             // property, possibly with a type hint
+            let type_hint_start = self.current_pos();
             let type_hint = self.parse_type_hint()?;
+            let type_hint_span = type_hint.as_ref().map(|_| Span {
+                start: type_hint_start,
+                end: self.previous_end(),
+            });
             let is_readonly = class_is_readonly || is_readonly_member;
             loop {
                 let prop_start = self.current_pos();
+                let name_start = self.current_pos();
                 let name = self.expect_variable()?;
+                let name_span = Span {
+                    start: name_start,
+                    end: self.previous_end(),
+                };
                 let default = if self.eat(&Token::Equals) {
                     Some(self.parse_expression()?)
                 } else {
@@ -304,11 +356,13 @@ impl Parser {
                     let hooks = self.parse_property_hooks()?;
                     properties.push(PropertyDecl {
                         name,
+                        name_span,
                         visibility: visibility.clone(),
                         write_visibility: write_visibility.clone(),
                         is_static,
                         is_readonly,
                         type_hint: type_hint.clone(),
+                        type_hint_span,
                         default,
                         doc_comment: doc.clone(),
                         hooks: Some(hooks),
@@ -322,11 +376,13 @@ impl Parser {
                 }
                 properties.push(PropertyDecl {
                     name,
+                    name_span,
                     visibility: visibility.clone(),
                     write_visibility: write_visibility.clone(),
                     is_static,
                     is_readonly,
                     type_hint: type_hint.clone(),
+                    type_hint_span,
                     default,
                     doc_comment: doc.clone(),
                     hooks: None,
@@ -349,6 +405,7 @@ impl Parser {
             methods,
             consts,
             uses,
+            uses_spans,
             trait_aliases,
             resolved_trait_conflicts,
         ))
@@ -446,13 +503,19 @@ impl Parser {
             let param = if is_set && self.eat(&Token::LParen) {
                 let param_start = self.previous_end();
                 let attrs = self.parse_attributes()?;
+                let type_hint_start = self.current_pos();
                 let type_hint = self.parse_type_hint()?;
+                let type_hint_span = type_hint.as_ref().map(|_| Span {
+                    start: type_hint_start,
+                    end: self.previous_end(),
+                });
                 let by_ref = self.eat(&Token::Amp);
                 let name = self.expect_variable()?;
                 self.expect(&Token::RParen)?;
                 Some(Param {
                     name,
                     type_hint,
+                    type_hint_span,
                     default: None,
                     by_ref,
                     variadic: false,
@@ -544,42 +607,68 @@ impl Parser {
                 });
             }
         };
+        let name_start = self.current_pos();
         let name = self.expect_ident()?;
+        let name_span = Span {
+            start: name_start,
+            end: self.previous_end(),
+        };
 
         // A class extends at most one class, but an interface can extend
         // several other interfaces (`interface C extends A, B {}`) - both
         // are accepted here since the parser doesn't distinguish the two
         // declaration kinds structurally.
         let mut extends = Vec::new();
+        let mut extends_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
-            extends.push(self.parse_qualified_name());
+            let (name, span) = self.parse_qualified_name_spanned();
+            extends.push(name);
+            extends_spans.push(span);
             while self.eat(&Token::Comma) {
-                extends.push(self.parse_qualified_name());
+                let (name, span) = self.parse_qualified_name_spanned();
+                extends.push(name);
+                extends_spans.push(span);
             }
         }
 
         let mut implements = Vec::new();
+        let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            implements.push(self.parse_qualified_name());
+            let (name, span) = self.parse_qualified_name_spanned();
+            implements.push(name);
+            implements_spans.push(span);
             while self.eat(&Token::Comma) {
-                implements.push(self.parse_qualified_name());
+                let (name, span) = self.parse_qualified_name_spanned();
+                implements.push(name);
+                implements_spans.push(span);
             }
         }
 
-        let (properties, methods, consts, uses, trait_aliases, resolved_trait_conflicts) =
-            self.parse_class_body(class_is_readonly)?;
+        let (
+            properties,
+            methods,
+            consts,
+            uses,
+            uses_spans,
+            trait_aliases,
+            resolved_trait_conflicts,
+        ) = self.parse_class_body(class_is_readonly)?;
 
         Ok(ClassDecl {
             name,
+            name_span,
             kind,
             extends,
+            extends_spans,
             implements,
+            implements_spans,
             is_abstract,
             is_final,
             properties,
             methods,
             consts,
             uses,
+            uses_spans,
             trait_aliases,
             resolved_trait_conflicts,
             doc_comment,
@@ -609,7 +698,12 @@ impl Parser {
         // generic; PHP has no `enum Foo<T>` syntax at all).
         let doc_comment = self.take_doc_comment();
         self.expect(&Token::Keyword(Keyword::Enum))?;
+        let name_start = self.current_pos();
         let name = self.expect_ident()?;
+        let name_span = Span {
+            start: name_start,
+            end: self.previous_end(),
+        };
 
         let backing_type = if self.eat(&Token::Colon) {
             self.parse_type_hint()?
@@ -618,10 +712,15 @@ impl Parser {
         };
 
         let mut implements = Vec::new();
+        let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
-            implements.push(self.parse_qualified_name());
+            let (name, span) = self.parse_qualified_name_spanned();
+            implements.push(name);
+            implements_spans.push(span);
             while self.eat(&Token::Comma) {
-                implements.push(self.parse_qualified_name());
+                let (name, span) = self.parse_qualified_name_spanned();
+                implements.push(name);
+                implements_spans.push(span);
             }
         }
 
@@ -630,6 +729,7 @@ impl Parser {
         let mut methods = Vec::new();
         let mut consts = Vec::new();
         let mut uses = Vec::new();
+        let mut uses_spans = Vec::new();
         let mut trait_aliases = Vec::new();
         let mut resolved_trait_conflicts = Vec::new();
 
@@ -640,7 +740,12 @@ impl Parser {
             let doc = self.take_doc_comment();
 
             if self.eat(&Token::Keyword(Keyword::Case)) {
+                let case_name_start = self.current_pos();
                 let case_name = self.expect_ident()?;
+                let case_name_span = Span {
+                    start: case_name_start,
+                    end: self.previous_end(),
+                };
                 let value = if self.eat(&Token::Equals) {
                     Some(self.parse_expression()?)
                 } else {
@@ -649,6 +754,7 @@ impl Parser {
                 self.expect_semicolon()?;
                 cases.push(EnumCase {
                     name: case_name,
+                    name_span: case_name_span,
                     value,
                     attrs,
                     span: Span {
@@ -660,9 +766,13 @@ impl Parser {
             }
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
-                uses.push(self.parse_qualified_name());
+                let (name, span) = self.parse_qualified_name_spanned();
+                uses.push(name);
+                uses_spans.push(span);
                 while self.eat(&Token::Comma) {
-                    uses.push(self.parse_qualified_name());
+                    let (name, span) = self.parse_qualified_name_spanned();
+                    uses.push(name);
+                    uses_spans.push(span);
                 }
                 if self.check(&Token::LBrace) {
                     let (aliases, resolved) = self.parse_trait_adaptations()?;
@@ -717,24 +827,36 @@ impl Parser {
                 // is followed by *another* identifier (the real name)
                 // rather than `=` - `const FOO = 1;`'s `FOO` is followed
                 // directly by `=`, so nothing is consumed as a type there.
+                let type_hint_start = self.current_pos();
                 let type_hint = if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals)
                 {
                     self.parse_type_hint()?
                 } else {
                     None
                 };
+                let type_hint_span = type_hint.as_ref().map(|_| Span {
+                    start: type_hint_start,
+                    end: self.previous_end(),
+                });
                 loop {
                     let const_start = self.current_pos();
+                    let name_start = self.current_pos();
                     let cname = self.expect_ident()?;
+                    let cname_span = Span {
+                        start: name_start,
+                        end: self.previous_end(),
+                    };
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
                         name: cname,
+                        name_span: cname_span,
                         value,
                         doc_comment: doc.clone(),
                         visibility: visibility.clone(),
                         attrs: attrs.clone(),
                         type_hint: type_hint.clone(),
+                        type_hint_span,
                         is_final: is_final_member,
                         span: Span {
                             start: const_start,
@@ -776,12 +898,15 @@ impl Parser {
 
         Ok(EnumDecl {
             name,
+            name_span,
             backing_type,
             implements,
+            implements_spans,
             cases,
             methods,
             consts,
             uses,
+            uses_spans,
             trait_aliases,
             resolved_trait_conflicts,
             doc_comment,

@@ -117,6 +117,9 @@ pub struct SwitchCase {
 #[derive(Debug, Clone)]
 pub struct CatchClause {
     pub types: Vec<String>,
+    // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment,
+    // one span per `types` entry (same index).
+    pub types_spans: Vec<Span>,
     pub var: Option<String>,
     pub body: Vec<Stmt>,
     pub span: Span,
@@ -126,6 +129,9 @@ pub struct CatchClause {
 pub struct Param {
     pub name: String,
     pub type_hint: Option<String>,
+    // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment -
+    // identical shape and purpose, one level down.
+    pub type_hint_span: Option<Span>,
     pub default: Option<Expr>,
     pub by_ref: bool,
     pub variadic: bool,
@@ -156,8 +162,19 @@ pub struct Param {
 #[derive(Debug, Clone)]
 pub struct FunctionDecl {
     pub name: String,
+    // Phase 17: this function/method's own name token's span - `span`
+    // below covers the *whole* declaration (from `function`/its
+    // modifiers through the closing brace), which is where the LSP's own
+    // go-to-definition would otherwise have to land instead of on the
+    // identifier itself.
+    pub name_span: Span,
     pub params: Vec<Param>,
     pub return_type: Option<String>,
+    // Phase 17: the return type hint's own span (covering the whole
+    // hint text - `?Foo`, `Foo|Bar`, ... - not a per-identifier span;
+    // the LSP's own text-split utility recovers those on demand from
+    // this span's source text). `None` exactly when `return_type` is.
+    pub return_type_span: Option<Span>,
     pub body: Vec<Stmt>,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
     pub doc_comment: Option<String>,
@@ -179,6 +196,8 @@ pub enum Visibility {
 #[derive(Debug, Clone)]
 pub struct PropertyDecl {
     pub name: String,
+    // Phase 17: see `FunctionDecl::name_span`'s own doc comment.
+    pub name_span: Span,
     pub visibility: Visibility,
     // PHP 8.4 asymmetric visibility (`public private(set) string $x;`) -
     // the narrower write-side visibility, when one was declared
@@ -190,6 +209,8 @@ pub struct PropertyDecl {
     pub is_static: bool,
     pub is_readonly: bool,
     pub type_hint: Option<String>,
+    // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment.
+    pub type_hint_span: Option<Span>,
     pub default: Option<Expr>,
     pub doc_comment: Option<String>,
     // PHP 8.4 property hooks (`{ get => ...; set(Type $value) { ... } }`).
@@ -265,6 +286,8 @@ pub enum UseKind {
 #[derive(Debug, Clone)]
 pub struct ClassConst {
     pub name: String,
+    // Phase 17: see `FunctionDecl::name_span`'s own doc comment.
+    pub name_span: Span,
     pub value: Expr,
     // Phase 59: the `public`/`private`/`protected` modifier a real class's
     // own `const` declaration can carry (PHP 7.1+) - parsed by both
@@ -299,6 +322,9 @@ pub struct ClassConst {
     // applies to every name in a comma-separated list" cloning as
     // `visibility`/`doc_comment`/`attrs` above.
     pub type_hint: Option<String>,
+    // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment -
+    // also cloned onto every name in a comma-separated list.
+    pub type_hint_span: Option<Span>,
     // PHP 8.1+ `final const` - parsed by both `parser/classes.rs` call
     // sites' own shared modifier loop already (into a local
     // `is_final_member` shared with methods/properties), but never kept
@@ -321,9 +347,18 @@ pub enum ClassKind {
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
     pub name: String,
+    // Phase 17: see `FunctionDecl::name_span`'s own doc comment. For an
+    // anonymous class (which has no real name to navigate to at all -
+    // `name` is the synthetic placeholder `"class@anonymous"`) this is
+    // just `span` again, never actually looked up by name.
+    pub name_span: Span,
     pub kind: ClassKind,
     pub extends: Vec<String>,
+    // Phase 17: one span per `extends` entry, same index, same purpose
+    // as `FunctionDecl::return_type_span`.
+    pub extends_spans: Vec<Span>,
     pub implements: Vec<String>,
+    pub implements_spans: Vec<Span>,
     pub is_abstract: bool,
     pub is_final: bool,
     pub properties: Vec<PropertyDecl>,
@@ -331,6 +366,7 @@ pub struct ClassDecl {
     pub consts: Vec<ClassConst>,
     // `use TraitA, TraitB;` inside the class body.
     pub uses: Vec<String>,
+    pub uses_spans: Vec<Span>,
     // `use A, B { B::hello as helloB; }` - each `as`-clause that
     // introduces a new name for an existing trait method (a
     // visibility-only `as public;` with no new name isn't captured, since
@@ -360,6 +396,8 @@ pub struct ClassDecl {
 #[derive(Debug, Clone)]
 pub struct EnumCase {
     pub name: String,
+    // Phase 17: see `FunctionDecl::name_span`'s own doc comment.
+    pub name_span: Span,
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
     // one (`case Hearts;`).
     pub value: Option<Expr>,
@@ -371,14 +409,17 @@ pub struct EnumCase {
 #[derive(Debug, Clone)]
 pub struct EnumDecl {
     pub name: String,
+    pub name_span: Span,
     // "int" | "string" for a backed enum, None for a pure one. Enums can't
     // extend anything or declare instance properties, unlike ClassDecl.
     pub backing_type: Option<String>,
     pub implements: Vec<String>,
+    pub implements_spans: Vec<Span>,
     pub cases: Vec<EnumCase>,
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
     pub uses: Vec<String>,
+    pub uses_spans: Vec<Span>,
     pub trait_aliases: Vec<TraitAlias>,
     pub resolved_trait_conflicts: Vec<String>,
     // The enum's own `/** ... */` doc comment, if any (Phase 66) - needed
@@ -507,7 +548,10 @@ pub struct ClosureUse {
 // $className`, `$x instanceof $obj`) for a runtime-determined class.
 #[derive(Debug, Clone)]
 pub enum InstanceofTarget {
-    Name(String),
+    // Phase 17: the `Span` is the class-name token's own span - see
+    // `FunctionDecl::name_span`'s own doc comment for why this differs
+    // from `Instanceof`'s own (whole-expression) span.
+    Name(String, Span),
     Expr(Box<Expr>),
 }
 
