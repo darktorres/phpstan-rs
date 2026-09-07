@@ -2584,6 +2584,39 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `find_method_owner`'s own sibling, used by `ExprKind::
+    /// FirstClassCallable`'s own `MethodCall` arm: returns the *concrete
+    /// receiver class actually queried* alongside the signature, not the
+    /// (possibly different, inherited-from) declaring owner - late static
+    /// binding needs the real runtime receiver a `self`/`static` pseudo-
+    /// return type resolves against, the same reasoning the pre-existing
+    /// single-`Object` code already relied on (it used the receiver's own
+    /// class for exactly this, via a plain `lookup_method`, never
+    /// `_with_owner`). Real bug found and fixed this session: this call
+    /// site required the receiver's own type to be literally `Type::
+    /// Object` too, silently skipping the check for a `Union`/
+    /// `Intersection` receiver, the same anti-pattern found and fixed
+    /// project-wide.
+    fn find_method_receiver_class(
+        &self,
+        base_ty: &Type,
+        method: &str,
+    ) -> (Option<&FunctionSig>, Option<String>) {
+        match base_ty {
+            Type::Object(class, _) => (
+                self.registry.lookup_method(class, method),
+                Some(class.clone()),
+            ),
+            Type::EnumCase(fqn, _) => (self.registry.lookup_method(fqn, method), Some(fqn.clone())),
+            Type::Union(members) | Type::Intersection(members) => members
+                .iter()
+                .map(|m| self.find_method_receiver_class(m, method))
+                .find(|(sig, _)| sig.is_some())
+                .unwrap_or((None, None)),
+            _ => (None, None),
+        }
+    }
+
     /// Whether `ty` (a thrown value's own type) fails real PHP's
     /// unconditional "must be Throwable" rule - `Some(name)` names a
     /// concrete non-Throwable class to report, `None` when nothing's
@@ -2694,7 +2727,7 @@ impl<'a> Checker<'a> {
     /// Node` interface - `PhpParser`'s own AST hierarchy routes every
     /// concrete node type through an interface this way, not a common
     /// base *class*, so this shape was never rare there.
-    fn property_access_type(&self, base_ty: &Type, prop: &str) -> Type {
+    pub(crate) fn property_access_type(&self, base_ty: &Type, prop: &str) -> Type {
         match base_ty {
             Type::Object(class, type_args) => self
                 .registry
@@ -3860,13 +3893,8 @@ impl<'a> Checker<'a> {
                         }
                     }
                     ExprKind::MethodCall(recv, method, _, _) => {
-                        match self.infer_expr(recv, locals) {
-                            Type::Object(class, _) => {
-                                let sig = self.registry.lookup_method(&class, method);
-                                (sig, Some(class))
-                            }
-                            _ => (None, None),
-                        }
+                        let recv_ty = self.infer_expr(recv, locals);
+                        self.find_method_receiver_class(&recv_ty, method)
                     }
                     _ => (None, None),
                 };

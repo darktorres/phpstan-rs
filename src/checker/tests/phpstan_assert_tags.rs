@@ -155,6 +155,41 @@ fn an_unconditional_assert_tag_narrows_through_an_intersection_receiver() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real bug found and fixed this session: `AssertTarget::ThisProp`'s own
+// "not already narrowed" fallback (`assert_target_key_and_current`,
+// `checker/narrowing.rs`) matched the receiver's own type against
+// `Type::Object` directly, silently falling to `Type::Mixed` (discarding
+// the property's real declared type entirely) for a `Union`/
+// `Intersection` receiver - reachable even through the *already*-correct
+// `ThisSelf`/branch-conditional call site above, since this fallback
+// re-infers the receiver's own type independently.
+#[test]
+fn assert_if_true_narrows_a_this_property_through_a_union_typed_receiver() {
+    // Asserts the narrowed *type* directly (`assertType`), not merely the
+    // absence of diagnostics - `Type::Mixed` (the bug's own fallback) is
+    // itself permissive enough to pass a plain `string $s` argument
+    // without complaint, so a bare "no diagnostics" check would pass
+    // vacuously whether or not the fix is in place.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Base {
+                public ?string $flag = null;
+                /** @phpstan-assert-if-true !null $this->flag */
+                public function isReady(): bool { return $this->flag !== null; }
+            }
+            class A extends Base {}
+            class B extends Base {}
+            function run(A|B $v): void {
+                if ($v->isReady()) {
+                    assertType('string', $v->flag);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_negated_assert_excludes_the_type_instead_of_narrowing_to_it() {
     let d = diagnostics_for(

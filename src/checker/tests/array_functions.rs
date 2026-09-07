@@ -132,6 +132,35 @@ fn array_map_resolves_a_first_class_callables_own_self_return_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real bug found and fixed this session: the `ExprKind::MethodCall` arm
+// resolving a first-class callable's own signature required the
+// receiver's own type to be literally `Type::Object`, silently skipping
+// it (and discarding the mapped element type entirely, the same
+// regression the tests above guard for a `Call`/`StaticCall` callable)
+// for a `Union`/`Intersection` receiver.
+#[test]
+fn array_map_resolves_a_first_class_callable_to_an_instance_method_on_a_union_typed_receiver() {
+    let d = diagnostics_for(
+        r#"<?php
+            class TagId18 {
+                private function __construct(public int $value) {}
+                public function from(int $value): self { return new self($value); }
+            }
+            class OtherTagId18 {
+                private function __construct(public int $value) {}
+                public function from(int $value): self { return new self($value); }
+            }
+            /** @param list<int> $ids
+             *  @return list<TagId18>
+             */
+            function f(TagId18|OtherTagId18 $first, array $ids): array {
+                return array_map($first->from(...), $ids);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn array_filter_preserves_the_input_array_s_element_type() {
     let d = diagnostics_for(

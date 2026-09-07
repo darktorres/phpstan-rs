@@ -838,14 +838,14 @@ impl<'a> Checker<'a> {
                 let key = format!("{base_key}->{prop}");
                 let current = match locals.get(&key) {
                     Some(t) => t.clone(),
-                    None => match self.infer_expr(recv, locals) {
-                        Type::Object(class, _) => self
-                            .registry
-                            .lookup_property(&class, prop)
-                            .map(|p| p.ty.clone())
-                            .unwrap_or(Type::Mixed),
-                        _ => Type::Mixed,
-                    },
+                    // Real bug found and fixed this session: this used to
+                    // match `Type::Object` directly, silently falling to
+                    // `Type::Mixed` (discarding the property's own real
+                    // type for narrowing purposes) for a `Union`/
+                    // `Intersection` receiver. `property_access_type`
+                    // (`checker/expr.rs`, shared with `ExprKind::
+                    // PropertyAccess`) already recurses through both.
+                    None => self.property_access_type(&self.infer_expr(recv, locals), prop),
                 };
                 Some((key, current))
             }
