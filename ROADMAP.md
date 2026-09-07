@@ -33,7 +33,7 @@ methodology behind every corpus number cited above.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   32,498 diagnostics. Re-run before citing - it drifts as vendored
   dependencies change and isn't re-measured every round.
-- Test suite: 2049+ unit tests, all passing.
+- Test suite: 2053+ unit tests, all passing.
 
 ---
 
@@ -239,8 +239,9 @@ config support (`[[ignore_errors]]` TOML, identifier/path-glob/message-
 regex/count fields). `--level`/`--php-version`-gated portability
 checks. Incremental multi-file `Project` with cross-file dependency
 invalidation; a real Content-Length-framed JSON-RPC LSP server, now with
-hover/go-to-definition (Phase 17 Stage A - see Pending for what's still
-open). An 8MiB worker stack (fixing a real stack-overflow crash on
+hover/go-to-definition (Phase 17, both stages - see Pending for what's
+still disclosed as out of scope). An 8MiB worker stack (fixing a real
+stack-overflow crash on
 deeply-nested expressions), persistent structurally-shared `Locals`
 (O(1) clone), `FxHashMap` for hot build-once maps, a criterion
 regression-guard benchmark, and `hotpath`, an opt-in in-process
@@ -261,6 +262,21 @@ own (`extends`/`implements`/`uses` lists, `InstanceofTarget::Name`,
 real `Span`, populated by the parser at the exact point it already
 parses each one - no existing field's value changed, so every existing
 consumer (checker, registry, hundreds of tests) needed no change at all.
+
+Phase 17 Stage B: an instance receiver's own type (`$x->method()`/
+`$x->prop`, `$x` not `$this`/`self`/`static`/`parent`) resolves via a
+new, additive `Checker::probe_span`/`probe_hit` pair, checked exactly
+where `check_expr`'s own `MethodCall`/`PropertyAccess` arms already
+compute the receiver's real type as part of ordinary checking - matched
+by *exact span equality* against the one specific receiver `lsp::
+navigation` already identified, which sidesteps any inner-vs-outer
+ambiguity a chained call (`$x->foo()->bar()`) could otherwise raise,
+entirely. The LSP side builds one throwaway `Checker` per request and
+re-runs `check_function` over just the enclosing function/method (a
+clone of it, carried on `navigation::Resolved::Instance` - no lifetime
+entanglement with `Project`, at the cost of one clone per request) -
+real, bounded per-request cost, no caching, matching any real language
+server's own "hover" cost profile.
 
 ---
 
@@ -293,22 +309,18 @@ impossible-`instanceof`/redundant-`is_string()`-etc. detection.
 it for convergence), and `goto`/label CFG edges are unmodeled - neither
 owned by any phase.
 
-**17 - LSP hover/go-to-definition (PARTIAL).** Stage A is done (see Done):
-hover/definition for every name reference resolvable without receiver-
-type inference (function calls, `new Foo()`, `Foo::CONST`/`method()`/
-`$prop` including `self`/`static`/`parent`, `$this->method()`/
-`$this->prop`, `instanceof`/`catch` targets, `extends`/`implements`/
-`uses`, compound type hints). Still open (Stage B): an instance
-receiver's own type (`$x->method()`/`$x->prop` where `$x` isn't `$this`)
-- needs a new, additive `Checker` probe mechanism (a `probe_position`/
-`probe_hit` pair, checked once at the top of `check_expr`) to capture
-`Locals` at the cursor's exact program point by running the checker over
-just the enclosing function/method, then `infer_expr` the receiver
-against that snapshot. Also still open, disclosed and out of scope for
-either stage: local-variable-declaration navigation (jump from a read to
-its own assignment site) - a same-file, registry-independent problem
-with its own control-flow-dependent ambiguity, genuinely distinct from
-this phase's "resolve a name via the registry" shape.
+**17 - LSP hover/go-to-definition (PARTIAL).** Both stages are done (see
+Done): every name reference resolvable without receiver-type inference,
+*and* an instance receiver's own type (`$x->method()`/`$x->prop`, `$x`
+not `$this`) via a real, if throwaway, per-request checker run. Still
+open, disclosed and out of scope for either stage: local-variable-
+declaration navigation (jump from a read to its own assignment site) - a
+same-file, registry-independent problem with its own control-flow-
+dependent ambiguity, genuinely distinct from this phase's "resolve a
+name via the registry" shape. Also disclosed: Stage B doesn't probe
+inside a closure/arrow-fn body (a different `Checker` entry point than
+`check_function` would be needed), and a `Union`/`Intersection` receiver
+resolves to its first `Object` member only, not every possible class.
 
 **18 - Extension/plugin API (PLANNED).** Deliberately last - premature
 before the rule/type-extension catalog is rich enough for a third party
