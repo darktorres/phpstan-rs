@@ -73,7 +73,12 @@ impl Parser {
             });
             let by_ref = self.eat(&Token::Amp);
             let variadic = self.eat(&Token::Ellipsis);
+            let name_start = self.current_pos();
             let name = self.expect_variable()?;
+            let name_span = Span {
+                start: name_start,
+                end: self.previous_end(),
+            };
             let default = if self.eat(&Token::Equals) {
                 Some(self.parse_expression()?)
             } else {
@@ -90,6 +95,7 @@ impl Parser {
             };
             params.push(Param {
                 name,
+                name_span,
                 type_hint,
                 type_hint_span,
                 default,

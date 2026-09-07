@@ -193,20 +193,64 @@ fn from_lsp_position(pos: LspPosition) -> Position {
     }
 }
 
-/// Phase 17 Stage B: resolves a `Checker::probe_hit` result down to a
-/// single class name - a bare `Object`, or (a real, common shape for a
-/// receiver built from more than one code path) the first `Object`
-/// member of a `Union`/`Intersection`. `None` for anything else
+/// Phase 17 Stage B: every `Object` class name reachable from a
+/// `Checker::probe_hit` result, in order - a bare `Object`, or (a real,
+/// common shape for a receiver built from more than one code path) *every*
+/// `Object` member of a `Union`/`Intersection`, not just the first -
+/// `resolve_member_owners` below decides which of these candidates
+/// actually has the member being navigated to. Empty for anything else
 /// (`Mixed`, a scalar, ...) - an un-inferrable receiver resolves to
 /// nothing, never a guess.
-fn type_to_class(ty: &Type) -> Option<&str> {
+fn type_to_classes(ty: &Type, out: &mut Vec<String>) {
     match ty {
-        Type::Object(class, _) => Some(class.as_str()),
+        Type::Object(class, _) => out.push(class.clone()),
         Type::Union(members) | Type::Intersection(members) => {
-            members.iter().find_map(type_to_class)
+            for m in members {
+                type_to_classes(m, out);
+            }
         }
-        _ => None,
+        _ => {}
     }
+}
+
+/// Phase 17 follow-up: resolves a receiver's own (possibly multi-class)
+/// type down to every class that actually declares `member` - a
+/// `Union`/`Intersection` receiver can have more than one real answer
+/// (`(Foo&Bar) $x` where both declare `greet()`), each a genuinely
+/// separate, correct navigation target, not an arbitrary "first one
+/// wins" guess. Deduped by the member's *declaring* owner (not the
+/// candidate class itself), via `lookup_*_with_owner`'s own hierarchy
+/// walk - two union members that both inherit the same declaration
+/// collapse to one entry, not a spurious duplicate.
+fn resolve_member_owners(
+    registry: &crate::registry::Registry,
+    ty: &Type,
+    member: &str,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    type_to_classes(ty, &mut candidates);
+    let mut owners: Vec<String> = Vec::new();
+    for class in candidates {
+        let owner = registry
+            .lookup_method_with_owner(&class, member)
+            .map(|(o, _)| o)
+            .or_else(|| {
+                registry
+                    .lookup_property_with_owner(&class, member)
+                    .map(|(o, _)| o)
+            })
+            .or_else(|| {
+                registry
+                    .lookup_const_with_owner(&class, member)
+                    .map(|(o, _)| o)
+            });
+        if let Some(o) = owner
+            && !owners.contains(&o)
+        {
+            owners.push(o);
+        }
+    }
+    owners
 }
 
 fn publish_diagnostics_notification(uri: Uri, diagnostics: &[Diagnostic]) -> Message {
@@ -318,10 +362,10 @@ impl Server {
 
     /// Phase 17 Stage A: `navigation::resolve_at` finds *what* symbol is
     /// under the cursor; this formats *what the registry already knows*
-    /// about it into hover text. `None` for anything Stage A can't
-    /// resolve (including an instance-receiver call, e.g. `$x->method()`
-    /// where `$x` isn't `$this` - Stage B's own job) - a valid "no hover
-    /// here" per the LSP spec, not an error.
+    /// about it into hover text. `None` for anything unresolved (a local
+    /// variable's own read/declaration included - a real position, just
+    /// not one hover has anything useful to say about) - a valid "no
+    /// hover here" per the LSP spec, not an error.
     fn hover(&self, uri: &Uri, position: LspPosition) -> Option<Hover> {
         let path = uri_to_path(uri)?;
         let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
@@ -364,14 +408,21 @@ impl Server {
                 class,
                 ..
             } => {
-                let owner = self.probe_receiver_class(
+                let ty = self.probe_receiver_type(
                     *receiver_span,
                     function,
                     *is_static,
                     class.as_deref(),
                 )?;
-                self.format_member_hover(&owner, member)
+                let owners = resolve_member_owners(registry, &ty, member);
+                self.format_member_hover_multi(&owners, member)
             }
+            // A local variable's own declaration/read - no registry
+            // signature exists for it, and its inferred type isn't
+            // computed here (that would need its own probe, a further,
+            // undisclosed-as-needed follow-up) - no hover text, but a
+            // real, resolved position (`definition` still answers it).
+            navigation::Resolved::Variable(_) => None,
         }
     }
 
@@ -389,26 +440,46 @@ impl Server {
         None
     }
 
+    /// Phase 17 follow-up: `owners` is every class (from
+    /// `resolve_member_owners`) that actually declares `name` - almost
+    /// always exactly one, but a real `Union`/`Intersection` receiver can
+    /// have more than one genuinely correct answer. Joins every one that
+    /// resolves with `" | "` rather than picking an arbitrary first, the
+    /// same "don't guess, show everything real" principle `definition`'s
+    /// own multi-location response applies below.
+    fn format_member_hover_multi(&self, owners: &[String], name: &str) -> Option<String> {
+        let texts: Vec<String> = owners
+            .iter()
+            .filter_map(|o| self.format_member_hover(o, name))
+            .collect();
+        match texts.len() {
+            0 => None,
+            1 => Some(texts.into_iter().next().unwrap()),
+            _ => Some(texts.join(" | ")),
+        }
+    }
+
     /// Phase 17 Stage B: runs the checker over just `function` (a
     /// throwaway `Checker`, scoped to this one request - see
     /// `Checker::probe_span`'s own doc comment) to learn `receiver_span`'s
-    /// own inferred type, then resolves that type down to a single class
-    /// name to look the member up against. A `Union`/`Intersection`
-    /// receiver resolves to its first `Object` member - real, if narrow,
-    /// precision (a chained-type receiver's *other* possible classes
-    /// aren't offered as alternatives), not a correctness bug: every
-    /// member this finds really is reachable through that receiver.
-    fn probe_receiver_class(
+    /// own inferred type. Also the mechanism a receiver inside a nested
+    /// closure/arrow-fn body resolves through: `function` is always the
+    /// enclosing *named* function/method (`lsp::navigation`'s own
+    /// `current_function` never resets for a closure literal - see its
+    /// doc comment for why), and `check_function`'s own ordinary
+    /// recursion into that closure's body already reaches `probe_span`
+    /// the same way a real `check-project` pass would.
+    fn probe_receiver_type(
         &self,
         receiver_span: Span,
         function: &FunctionDecl,
         is_static: bool,
         class: Option<&str>,
-    ) -> Option<String> {
+    ) -> Option<Type> {
         let mut checker = Checker::new(self.project.registry());
         checker.probe_span = Some(receiver_span);
         checker.check_function(function, class, is_static);
-        type_to_class(&checker.probe_hit?).map(str::to_string)
+        checker.probe_hit
     }
 
     /// Phase 17 Stage A: the `navigation::Resolved` symbol's own
@@ -420,13 +491,47 @@ impl Server {
     fn definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
         let path = uri_to_path(uri)?;
         let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        // A local variable's own declaration site is same-file and
+        // already a real `Span` - no registry/`decl_locations` lookup
+        // needed at all, unlike every other variant below.
+        if let navigation::Resolved::Variable(span) = &resolved {
+            let target_uri = self
+                .open_uris
+                .get(&path)
+                .cloned()
+                .unwrap_or_else(|| path_to_uri(&path));
+            return Some(GotoDefinitionResponse::Scalar(Location {
+                uri: target_uri,
+                range: to_lsp_range(*span),
+            }));
+        }
         let locations = self.project.decl_locations();
-        // An Instance receiver's own owner class needs the Stage B probe
-        // *before* it can be looked up the same way an ordinary Member
-        // is - resolved into one here so the `members` lookup itself
-        // stays a single, shared call for both cases.
-        let member_key = match &resolved {
-            navigation::Resolved::Member(owner, name) => Some((owner.clone(), name.clone())),
+        match &resolved {
+            navigation::Resolved::Class(fqn) => {
+                let (target_path, span) = locations.classes.get(fqn)?;
+                Some(GotoDefinitionResponse::Scalar(
+                    self.location(target_path, *span),
+                ))
+            }
+            navigation::Resolved::Function(fqn) => {
+                let (target_path, span) = locations.functions.get(fqn)?;
+                Some(GotoDefinitionResponse::Scalar(
+                    self.location(target_path, *span),
+                ))
+            }
+            navigation::Resolved::Member(owner, name) => {
+                let (target_path, span) = locations.members.get(&(owner.clone(), name.clone()))?;
+                Some(GotoDefinitionResponse::Scalar(
+                    self.location(target_path, *span),
+                ))
+            }
+            // Phase 17 follow-up: a `Union`/`Intersection` receiver can
+            // resolve `member` against more than one real owner class -
+            // every one that actually declares it becomes its own
+            // `Location`, not just the first found. `GotoDefinitionResponse
+            // ::Array` is exactly LSP's own way to offer an editor more
+            // than one real jump target (rendered as a picker), rather
+            // than this server silently guessing which one the user meant.
             navigation::Resolved::Instance {
                 receiver_span,
                 member,
@@ -435,32 +540,43 @@ impl Server {
                 class,
                 ..
             } => {
-                let owner = self.probe_receiver_class(
+                let ty = self.probe_receiver_type(
                     *receiver_span,
                     function,
                     *is_static,
                     class.as_deref(),
                 )?;
-                Some((owner, member.clone()))
+                let owners = resolve_member_owners(self.project.registry(), &ty, member);
+                let mut locs: Vec<Location> = Vec::new();
+                for owner in &owners {
+                    if let Some((target_path, span)) =
+                        locations.members.get(&(owner.clone(), member.clone()))
+                    {
+                        locs.push(self.location(target_path, *span));
+                    }
+                }
+                match locs.len() {
+                    0 => None,
+                    1 => Some(GotoDefinitionResponse::Scalar(
+                        locs.into_iter().next().unwrap(),
+                    )),
+                    _ => Some(GotoDefinitionResponse::Array(locs)),
+                }
             }
-            navigation::Resolved::Class(_) | navigation::Resolved::Function(_) => None,
-        };
-        let (target_path, span) = match &resolved {
-            navigation::Resolved::Class(fqn) => locations.classes.get(fqn)?,
-            navigation::Resolved::Function(fqn) => locations.functions.get(fqn)?,
-            navigation::Resolved::Member(_, _) | navigation::Resolved::Instance { .. } => {
-                locations.members.get(member_key.as_ref()?)?
-            }
-        };
+            navigation::Resolved::Variable(_) => unreachable!("handled above"),
+        }
+    }
+
+    fn location(&self, target_path: &Path, span: Span) -> Location {
         let target_uri = self
             .open_uris
             .get(target_path)
             .cloned()
             .unwrap_or_else(|| path_to_uri(target_path));
-        Some(GotoDefinitionResponse::Scalar(Location {
+        Location {
             uri: target_uri,
-            range: to_lsp_range(*span),
-        }))
+            range: to_lsp_range(span),
+        }
     }
 }
 

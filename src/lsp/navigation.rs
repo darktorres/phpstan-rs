@@ -62,6 +62,15 @@ pub(crate) enum Resolved {
         is_static: bool,
         class: Option<String>,
     },
+    /// A local variable read, resolved to its own declaration site (a
+    /// parameter, an assignment's left-hand side, a `foreach` key/value
+    /// binding, or a `catch (...) $e` binding) - always same-file, so no
+    /// registry lookup is needed, unlike every other variant here. Found
+    /// via a plain textual-order heuristic (the nearest preceding
+    /// declaration to the same name in the walk, see `Walker::var_decls`'s
+    /// own doc comment), not real control-flow analysis - deliberately
+    /// disclosed as an approximation, never a wrong-file guess.
+    Variable(Span),
 }
 
 /// The entry point: what's declared/referenced at `pos` in the file
@@ -79,6 +88,7 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Optio
         pos,
         current_function: None,
         current_is_static: false,
+        var_decls: Vec::new(),
     };
     w.stmts(stmts, &mut ctx, None, &mut best);
     best
@@ -124,19 +134,66 @@ struct Walker<'a> {
     source: &'a str,
     pos: Position,
     // Phase 17 Stage B: an owned clone (not a borrow - see `Resolved::
-    // Instance`'s own doc comment for why) of whichever `FunctionDecl`
-    // currently encloses the statement being walked, updated on entry to
-    // `function` and restored on exit - `None` at top-level script scope
-    // (Stage B doesn't support probing there; a real, disclosed, low-
-    // impact gap, see ROADMAP). Deliberately *not* updated for a
-    // `Closure`/`ArrowFn` body - probing inside one would need a
-    // different `Checker` entry point than `check_function`, out of
-    // scope for this stage.
+    // Instance`'s own doc comment for why) of whichever *named*
+    // `FunctionDecl`/`MethodDecl` currently encloses the statement being
+    // walked, updated on entry to `function` and restored on exit - `None`
+    // at top-level script scope (Stage B doesn't support probing there; a
+    // real, disclosed, low-impact gap, see ROADMAP). Deliberately *not*
+    // updated for a `Closure`/`ArrowFn` body: those aren't a separate
+    // `Checker` entry point at all - `check_expr`'s own `Closure`/`ArrowFn`
+    // arms already recurse into a closure's body as part of ordinarily
+    // checking whatever named function contains the closure literal, so
+    // leaving `current_function` pointing at that enclosing named function
+    // (not resetting it) is exactly what lets `probe_receiver_type` find a
+    // receiver inside a closure body too - re-running `check_function` on
+    // the *named* function reaches the nested closure the same way a real
+    // `check-project` pass already does. Confirmed empirically this
+    // follow-up (a closure-body `$captured->method()` and an arrow-fn body
+    // already resolved correctly with no further change needed here - the
+    // original disclosed gap was overly conservative).
     current_function: Option<FunctionDecl>,
     current_is_static: bool,
+    // Phase 17 follow-up: local-variable-declaration navigation. Every
+    // `(name, span)` binding seen so far in the *current* function/
+    // closure/top-level scope, in document order - a plain, deliberately
+    // approximate "nearest preceding declaration wins" heuristic (see
+    // `Resolved::Variable`'s own doc comment), not real control-flow
+    // analysis. Reset to a fresh, empty `Vec` on entry to a named
+    // function/method or a `Closure` (PHP's own two real variable-scope
+    // boundaries - a `Closure` only sees its own params plus whatever its
+    // `use (...)` clause explicitly names, copied in from the *outer*
+    // scope's own `var_decls` at that point). An `ArrowFn` does *not* get
+    // a fresh scope (it implicitly captures the whole enclosing scope by
+    // value, the real PHP semantics `checker/expr.rs`'s own `ArrowFn` arm
+    // already relies on) - its own params are pushed and popped around
+    // just its one body expression instead.
+    var_decls: Vec<(String, Span)>,
 }
 
 impl<'a> Walker<'a> {
+    /// Records `span` as `name`'s own declaration site, and - if the
+    /// cursor lands directly on the declaration itself (clicking an
+    /// assignment's own left-hand side, a parameter, ...) - resolves it
+    /// to itself right here, same as every other declaration-site `record`
+    /// call in this module does.
+    fn declare_var(&mut self, name: &str, span: Span, best: &mut Option<Resolved>) {
+        if contains(span, self.pos) {
+            *best = Some(Resolved::Variable(span));
+        }
+        self.var_decls.push((name.to_string(), span));
+    }
+
+    /// The nearest-preceding declaration for `name` in the current scope,
+    /// by walking `var_decls` in reverse - the last (innermost/most
+    /// recent) entry wins, matching plain sequential document order.
+    fn lookup_var(&self, name: &str) -> Option<Span> {
+        self.var_decls
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, s)| *s)
+    }
+
     fn record(&self, best: &mut Option<Resolved>, span: Span, value: Resolved) {
         if contains(span, self.pos) {
             *best = Some(value);
@@ -221,10 +278,17 @@ impl<'a> Walker<'a> {
                 ..
             } => {
                 self.expr(subject, ctx, current_class, best);
+                // `foreach`'s own key/value are *bindings*, not reads -
+                // recorded as declaration sites (`declare_var`), not
+                // resolved as if they were references to some earlier
+                // declaration. A non-`Variable` shape (list destructuring,
+                // `foreach ($rows as [$a, $b])`) falls back to an ordinary
+                // read-walk instead - its own inner names aren't tracked
+                // as declarations, a disclosed, narrower residual gap.
                 if let Some(k) = key {
-                    self.expr(k, ctx, current_class, best);
+                    self.bind_var(k, ctx, current_class, best);
                 }
-                self.expr(value, ctx, current_class, best);
+                self.bind_var(value, ctx, current_class, best);
             }
             StmtKind::FunctionDecl(f) => {
                 self.record(
@@ -242,10 +306,17 @@ impl<'a> Walker<'a> {
                 }
             }
             StmtKind::StaticVar(vars) => {
-                for (_, d) in vars {
+                for (name, d) in vars {
                     if let Some(e) = d {
                         self.expr(e, ctx, current_class, best);
                     }
+                    // `static $x = ...;` declares `$x` in the enclosing
+                    // function's own scope - no per-name span exists for
+                    // it (only the whole statement's), so the statement's
+                    // own span stands in; imprecise (definition lands on
+                    // the whole `static $x = 1, $y;` line rather than just
+                    // `$x`) but never wrong-file.
+                    self.declare_var(name, stmt.span, best);
                 }
             }
             StmtKind::Switch { subject, cases } => {
@@ -265,6 +336,14 @@ impl<'a> Walker<'a> {
                         {
                             *best = Some(Resolved::Class(fqn));
                         }
+                    }
+                    // The catch's own bound variable (`catch (Foo $e)`) is
+                    // a declaration site too - recorded here, before
+                    // `stmt_children`'s own generic recursion walks the
+                    // catch body below, so a read inside that body already
+                    // sees it.
+                    if let (Some(var), Some(span)) = (&c.var, c.var_span) {
+                        self.declare_var(var, span, best);
                     }
                 }
             }
@@ -359,6 +438,30 @@ impl<'a> Walker<'a> {
                     *best = Some(Resolved::Class(fqn));
                 }
             }
+            // Phase 17 follow-up: local-variable-declaration navigation.
+            // The right-hand side is a read (of whatever the variable held
+            // *before* this assignment) and is walked first; the left-hand
+            // side, when it's a plain `$var` (not a destructuring target -
+            // see `bind_var`'s own doc comment for that residual gap), is
+            // then recorded as a fresh declaration site, not walked as an
+            // ordinary read - so `$x = $x + 1;`'s own right-hand `$x`
+            // still resolves to whichever declaration preceded this
+            // statement, not to itself.
+            ExprKind::Assign(lhs, rhs) | ExprKind::CompoundAssign(_, lhs, rhs) => {
+                self.expr(rhs, ctx, current_class, best);
+                self.bind_var(lhs, ctx, current_class, best);
+                return;
+            }
+            // A plain variable read (`$this` excluded - it's never a
+            // locally-declared variable, and is resolved separately via
+            // `current_class` wherever it appears as a receiver).
+            ExprKind::Variable(name) if name != "this" => {
+                if contains(expr.span, self.pos)
+                    && let Some(decl_span) = self.lookup_var(name)
+                {
+                    *best = Some(Resolved::Variable(decl_span));
+                }
+            }
             // `$this->method()`/`$this->prop` resolve directly (only
             // `current_class` is needed, already in hand); any *other*
             // receiver needs Stage B's own type-inference probe - this
@@ -401,18 +504,43 @@ impl<'a> Walker<'a> {
                 }
                 return;
             }
-            ExprKind::Closure { params, body, .. } => {
+            ExprKind::Closure {
+                params, uses, body, ..
+            } => {
+                // A `Closure` only ever sees its own params plus whatever
+                // its `use (...)` clause explicitly names (the real PHP
+                // rule `checker/expr.rs`'s own `Closure` arm already
+                // relies on) - copied in from the *outer* scope's own
+                // `var_decls` at this exact point, not the whole outer
+                // scope wholesale the way an `ArrowFn` gets below.
+                let outer_var_decls = std::mem::take(&mut self.var_decls);
+                for u in uses {
+                    if let Some(span) = outer_var_decls
+                        .iter()
+                        .rev()
+                        .find(|(n, _)| n == &u.name)
+                        .map(|(_, s)| *s)
+                    {
+                        self.var_decls.push((u.name.clone(), span));
+                    }
+                }
                 for p in params {
                     self.param(p, ctx, current_class, best);
                 }
                 self.stmts(body, &mut ctx.clone(), current_class, best);
+                self.var_decls = outer_var_decls;
                 return;
             }
             ExprKind::ArrowFn { params, body, .. } => {
+                // An `ArrowFn` implicitly captures the whole enclosing
+                // scope by value - no fresh scope, just its own params
+                // pushed and popped around its one body expression.
+                let scope_mark = self.var_decls.len();
                 for p in params {
                     self.param(p, ctx, current_class, best);
                 }
                 self.expr(body, &mut ctx.clone(), current_class, best);
+                self.var_decls.truncate(scope_mark);
                 return;
             }
             _ => {}
@@ -432,6 +560,26 @@ impl<'a> Walker<'a> {
         if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
             self.record_type_hint(best, hint, span, current_class, ctx);
         }
+        self.declare_var(&p.name, p.name_span, best);
+    }
+
+    /// A `foreach` key/value's own binding - a declaration site, not a
+    /// read. Falls back to an ordinary read-walk for anything that isn't a
+    /// plain `$var` (list-destructuring, `foreach ($rows as [$a, $b])`),
+    /// whose own inner names then aren't tracked as declarations - a
+    /// disclosed, narrower residual gap than "not supported at all".
+    fn bind_var(
+        &mut self,
+        e: &Expr,
+        ctx: &mut NameContext,
+        current_class: Option<&str>,
+        best: &mut Option<Resolved>,
+    ) {
+        if let ExprKind::Variable(name) = &e.kind {
+            self.declare_var(name, e.span, best);
+        } else {
+            self.expr(e, ctx, current_class, best);
+        }
     }
 
     fn function(
@@ -442,6 +590,10 @@ impl<'a> Walker<'a> {
         is_static: bool,
         best: &mut Option<Resolved>,
     ) {
+        // A named function/method is one of PHP's two real variable-scope
+        // boundaries (the other is a `Closure` literal, see `var_decls`'s
+        // own doc comment) - fresh scope, seeded below by its own params.
+        let previous_var_decls = std::mem::take(&mut self.var_decls);
         for p in &f.params {
             self.param(p, ctx, current_class, best);
         }
@@ -453,6 +605,7 @@ impl<'a> Walker<'a> {
         self.stmts(&f.body, ctx, current_class, best);
         self.current_function = previous_function;
         self.current_is_static = previous_is_static;
+        self.var_decls = previous_var_decls;
     }
 
     fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, best: &mut Option<Resolved>) {

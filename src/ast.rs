@@ -121,6 +121,10 @@ pub struct CatchClause {
     // one span per `types` entry (same index).
     pub types_spans: Vec<Span>,
     pub var: Option<String>,
+    // Phase 17: `var`'s own `$name` token span, populated at the same
+    // parse point `var` itself is consumed - `None` exactly when `var` is
+    // (a catch clause with no bound variable, `catch (Foo) {}`).
+    pub var_span: Option<Span>,
     pub body: Vec<Stmt>,
     pub span: Span,
 }
@@ -128,6 +132,11 @@ pub struct CatchClause {
 #[derive(Debug, Clone)]
 pub struct Param {
     pub name: String,
+    // Phase 17: this parameter's own `$name` token's span - populated by
+    // the parser at the exact point it consumes it (`expect_variable`),
+    // needed for local-variable-declaration navigation (a read inside the
+    // function body jumping back to its own parameter).
+    pub name_span: Span,
     pub type_hint: Option<String>,
     // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment -
     // identical shape and purpose, one level down.

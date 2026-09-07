@@ -214,9 +214,13 @@ fn nothing_resolvable_returns_null_not_an_error() {
     let src = "<?php function f(int $x) { return $x; }";
     let path = dir.write("a.php", src);
     let uri = path_to_uri(&path).to_string();
-    // Land on the bare parameter variable `$x` - a real, common position
-    // with nothing this stage resolves (no receiver-type probe yet).
-    let pos = lsp_pos(src, "$x) {");
+    // Land on the primitive type keyword `int` - filtered out of
+    // `type_hint_identifiers` on purpose (it's never a real class), so
+    // still a real position with nothing resolvable. (The bare parameter
+    // `$x`, previously used for this test, now *does* resolve - to its
+    // own declaration - since local-variable-declaration navigation
+    // shipped; see the `variable_navigation` tests below.)
+    let pos = lsp_pos(src, "int $x");
     let messages = run(
         &dir,
         &[
@@ -327,6 +331,193 @@ fn an_uninferrable_receiver_resolves_to_null_not_a_guess() {
     );
     assert_eq!(response_result(&messages, 2), Value::Null);
     assert_eq!(response_result(&messages, 3), Value::Null);
+}
+
+// Phase 17 follow-up: closure/arrow-fn body probing. The original Stage B
+// disclosure claimed this needed a different `Checker` entry point - false
+// on inspection: `check_expr`'s own `Closure`/`ArrowFn` arms already
+// recurse into a closure's body as part of ordinarily checking whatever
+// *named* function contains the closure literal, and `lsp::navigation`'s
+// `current_function` was already left pointing at that enclosing named
+// function through a closure/arrow-fn (never reset) - so re-running
+// `check_function` on it already reaches a receiver nested inside one.
+// These are regression guards for that, not new capability being added.
+
+#[test]
+fn hover_and_definition_resolve_an_instance_call_inside_a_closure_body() {
+    let dir = TempDir::new("closure_instance_probe");
+    let src = "<?php class Widget { public function greet(): string { return 'hi'; } } function useWidget(Widget $w) { $f = function () use ($w) { return $w->greet(); }; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "greet(); };");
+
+    let messages = run(
+        &dir,
+        &[
+            hover_request(2, &uri, pos.clone()),
+            definition_request(3, &uri, pos),
+        ],
+    );
+    assert_eq!(
+        response_result(&messages, 2)["contents"],
+        "Widget::greet(): string"
+    );
+    assert_eq!(response_result(&messages, 3)["uri"], uri);
+}
+
+#[test]
+fn hover_resolves_an_instance_call_inside_an_arrow_fn_body() {
+    let dir = TempDir::new("arrow_instance_probe");
+    let src = "<?php class Widget { public function greet(): string { return 'hi'; } } function useWidget(Widget $w) { $f = fn() => $w->greet(); }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "greet();");
+
+    let messages = run(&dir, &[hover_request(2, &uri, pos)]);
+    assert_eq!(
+        response_result(&messages, 2)["contents"],
+        "Widget::greet(): string"
+    );
+}
+
+// Phase 17 follow-up: a `Union`/`Intersection` receiver resolving to
+// *every* class that declares the member, not just the first.
+
+#[test]
+fn hover_and_definition_on_a_union_receiver_resolve_every_declaring_class() {
+    let dir = TempDir::new("union_receiver");
+    let src = "<?php class Foo { public function greet(): string { return 'foo'; } } class Bar { public function greet(): string { return 'bar'; } } function f(Foo|Bar $x) { return $x->greet(); }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "greet();");
+
+    let messages = run(
+        &dir,
+        &[
+            hover_request(2, &uri, pos.clone()),
+            definition_request(3, &uri, pos),
+        ],
+    );
+    assert_eq!(
+        response_result(&messages, 2)["contents"],
+        "Foo::greet(): string | Bar::greet(): string"
+    );
+    let def = response_result(&messages, 3);
+    let locations = def.as_array().expect("expected an array of locations");
+    assert_eq!(locations.len(), 2);
+}
+
+#[test]
+fn definition_on_a_union_receiver_stays_a_scalar_when_only_one_side_has_the_member() {
+    let dir = TempDir::new("union_receiver_partial");
+    let src = "<?php class Foo { public function greet(): string { return 'foo'; } } class Bar {} function f(Foo|Bar $x) { return $x->greet(); }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "greet();");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let def = response_result(&messages, 2);
+    assert!(
+        def.is_object(),
+        "expected a single Location object, got {def:?}"
+    );
+}
+
+// Phase 17 follow-up: local-variable-declaration navigation - a read
+// resolves to its own nearest-preceding declaration in the same scope
+// (a parameter, an assignment, a `foreach` binding, or a `catch (...) $e`
+// binding), a plain textual-order heuristic, not full control-flow
+// analysis (see `Resolved::Variable`'s own doc comment).
+
+#[test]
+fn definition_on_a_variable_read_resolves_to_its_own_parameter() {
+    let dir = TempDir::new("var_param");
+    let src = "<?php function f(int $x) { return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$x) {");
+    assert_eq!(result["range"]["start"]["line"], expected["line"]);
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn definition_on_a_variable_read_resolves_to_its_nearest_preceding_assignment() {
+    let dir = TempDir::new("var_reassign");
+    let src = "<?php function f() { $x = 1; $x = 2; return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    // The *second* assignment, not the first.
+    let expected = lsp_pos(src, "$x = 2");
+    assert_eq!(result["range"]["start"]["line"], expected["line"]);
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn definition_on_a_variable_read_resolves_to_its_foreach_binding() {
+    let dir = TempDir::new("var_foreach");
+    let src =
+        "<?php function f(array $items) { foreach ($items as $k => $v) { echo $k; echo $v; } }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let k_pos = lsp_pos(src, "$k;");
+    let v_pos = lsp_pos(src, "$v;");
+
+    let messages = run(
+        &dir,
+        &[
+            definition_request(2, &uri, k_pos),
+            definition_request(3, &uri, v_pos),
+        ],
+    );
+    let k_result = response_result(&messages, 2);
+    let v_result = response_result(&messages, 3);
+    let expected_k = lsp_pos(src, "$k =>");
+    let expected_v = lsp_pos(src, "$v)");
+    assert_eq!(
+        k_result["range"]["start"]["character"],
+        expected_k["character"]
+    );
+    assert_eq!(
+        v_result["range"]["start"]["character"],
+        expected_v["character"]
+    );
+}
+
+#[test]
+fn definition_on_a_variable_read_resolves_to_its_catch_binding() {
+    let dir = TempDir::new("var_catch");
+    let src = "<?php function f() { try { doStuff(); } catch (\\Exception $e) { echo $e; } }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$e;");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$e) {");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn a_variable_declared_in_one_function_does_not_leak_into_another() {
+    let dir = TempDir::new("var_scope");
+    let src = "<?php function f() { $x = 1; } function g() { return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    assert_eq!(response_result(&messages, 2), Value::Null);
 }
 
 #[test]

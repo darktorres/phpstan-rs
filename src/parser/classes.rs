@@ -510,10 +510,16 @@ impl Parser {
                     end: self.previous_end(),
                 });
                 let by_ref = self.eat(&Token::Amp);
+                let name_start = self.current_pos();
                 let name = self.expect_variable()?;
+                let name_span = Span {
+                    start: name_start,
+                    end: self.previous_end(),
+                };
                 self.expect(&Token::RParen)?;
                 Some(Param {
                     name,
+                    name_span,
                     type_hint,
                     type_hint_span,
                     default: None,

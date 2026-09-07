@@ -668,8 +668,15 @@ impl Parser {
                 types.push(name);
                 types_spans.push(span);
             }
+            let mut var_span = None;
             let var = if matches!(self.peek(), Token::Variable(_)) {
-                Some(self.expect_variable()?)
+                let var_start = self.current_pos();
+                let name = self.expect_variable()?;
+                var_span = Some(Span {
+                    start: var_start,
+                    end: self.previous_end(),
+                });
+                Some(name)
             } else {
                 None
             };
@@ -679,6 +686,7 @@ impl Parser {
                 types,
                 types_spans,
                 var,
+                var_span,
                 body,
                 span: Span {
                     start: catch_start,
