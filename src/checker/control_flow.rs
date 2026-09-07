@@ -160,6 +160,56 @@ impl<'a> Checker<'a> {
             _ => false,
         }
     }
+
+    /// Phase 55: fixed-point convergence for a loop body (`While`/
+    /// `DoWhile`/`For`/`Foreach` in `checker/stmt.rs`), replacing what used
+    /// to be a single `check_stmt(body, ...)` call. Without this, a
+    /// variable reassigned inside the loop body keeps its pre-loop-entry
+    /// type for the *entire* single-pass check - `check_block`'s own doc
+    /// comment (above `Phase 15 item (1)`) traces the exact false-positive
+    /// this caused for the reverted `UnreachableStatementRule`.
+    ///
+    /// Mirrors real PHPStan's own approach (`NodeScopeResolver::
+    /// LOOP_SCOPE_ITERATIONS = 3`, confirmed directly against
+    /// `vendor/phpstan-src`): run the body against a candidate entry state,
+    /// see whether unioning the result back with the true pre-loop `entry`
+    /// changes anything: if not, the state has converged and this pass's
+    /// diagnostics are correct as reported; if so, its diagnostics were
+    /// computed against a stale entry and must be discarded (the existing
+    /// `diagnostics.truncate` pattern `check_program` already uses for
+    /// `saw_dynamic_var_construct`), and one more pass runs with the
+    /// unioned entry. Capped at 3 total passes - always keeps whichever
+    /// pass is last, converged or not, rather than looping forever on a
+    /// body that can't stabilize.
+    ///
+    /// `loop_break_states` is pushed/popped once per pass here (not by the
+    /// caller) so a pre-convergence pass's own break states never leak;
+    /// only the returned, kept pass's break states matter to the caller.
+    pub(crate) fn converge_loop_body(
+        &mut self,
+        entry: &Locals,
+        declared_return: Option<&Type>,
+        label: &str,
+        mut run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str),
+    ) -> (Locals, Vec<Locals>) {
+        const MAX_PASSES: usize = 3;
+        let mut pass_entry = entry.clone();
+        for pass in 0..MAX_PASSES {
+            let is_last_allowed_pass = pass == MAX_PASSES - 1;
+            let mut body_locals = pass_entry.clone();
+            self.loop_break_states.push(Vec::new());
+            let diagnostics_before = self.diagnostics.len();
+            run_pass(self, &mut body_locals, declared_return, label);
+            let break_states = self.loop_break_states.pop().unwrap_or_default();
+            let next_entry = merge_scopes(entry, &body_locals);
+            if next_entry == pass_entry || is_last_allowed_pass {
+                return (body_locals, break_states);
+            }
+            self.diagnostics.truncate(diagnostics_before);
+            pass_entry = next_entry;
+        }
+        unreachable!("the loop above always returns by its last iteration")
+    }
 }
 
 /// Joins two branch-local scopes back into one after an `if`/`while`. A

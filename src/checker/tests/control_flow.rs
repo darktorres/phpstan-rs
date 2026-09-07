@@ -1822,6 +1822,130 @@ fn a_generator_arrow_function_with_a_wrong_declared_return_type_is_flagged() {
     );
 }
 
+// Phase 55: fixed-point loop-body convergence (`Checker::
+// converge_loop_body`). Before this, a loop body was checked exactly
+// once against the pre-loop entry state, so a variable reassigned inside
+// the body on one iteration was invisible to a narrowing check reading
+// it on a later one - exactly the gap `check_block`'s own doc comment
+// (above `Phase 15 item (1)`) traces as the reverted
+// `UnreachableStatementRule`'s real root cause.
+#[test]
+fn a_variable_reassigned_in_a_loop_body_is_visible_to_a_narrowing_check_on_a_later_iteration() {
+    // Concrete shape of the bug: `$x` starts `null`; a guard reads it
+    // before this iteration's own reassignment reaches the bottom of the
+    // loop. Under the old single-pass model, `$x !== null` narrowed a
+    // `null`-only entry type to `Type::Never` inside the branch, and a
+    // method call on `Never` was silently never checked - a real false
+    // negative, not merely imprecision. Once convergence feeds a prior
+    // iteration's `$x = new Foo();` back in as part of the entry state,
+    // `$x` is correctly seen as `Foo` inside the guard, and calling an
+    // undefined method on it is caught.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function bar(): int { return 1; }
+            }
+            function f() {
+                $x = null;
+                while (rand(0, 1)) {
+                    if ($x !== null) {
+                        $x->totallyMadeUp();
+                    }
+                    $x = new Foo();
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.notFound" && x.message.contains("totallyMadeUp")),
+        "expected the loop-carried reassignment to be visible on a later \
+         iteration's narrowing check, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_loop_counter_incremented_each_iteration_converges_to_a_plain_int() {
+    // `converge_loop_body` is hard-capped at 3 passes regardless of
+    // whether types stabilize, so this can't hang - what this test
+    // actually confirms is that the existing `union_types` generalize-
+    // before-collapse machinery (see `accessory_and_refinement_types.rs`)
+    // is already enough to widen a repeatedly-incremented `IntLiteral`
+    // to plain `Int` within that budget, without needing a bespoke
+    // scalar-literal-generalization pass on top.
+    let d = diagnostics_for(
+        r#"<?php
+            function needsArray(array $x): void {}
+            function f() {
+                $i = 0;
+                while (rand(0, 1)) {
+                    $i = $i + 1;
+                }
+                needsArray($i);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("int given")),
+        "expected $i to converge to plain int, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn() {
+    // Regression guard: a loop body that never reassigns anything it
+    // reads converges after its very first pass (`converge_loop_body`'s
+    // own early-exit), so this must behave identically to the old
+    // single-pass model - no diagnostic should fire from convergence
+    // itself running the body more than once.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $n): int {
+                $total = 0;
+                while ($n > 0) {
+                    $total = $total + $n;
+                    $n = $n - 1;
+                }
+                return $total;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_diagnostic_unrelated_to_convergence_is_reported_exactly_once_not_once_per_pass() {
+    // `$x`'s own reassignment forces more than one convergence pass
+    // (entry `null` != post-body `Foo`), so this body is checked at
+    // least twice before a result is kept. An unrelated, unconditional
+    // diagnostic inside the same body must still be reported exactly
+    // once - proving every non-final pass's diagnostics are actually
+    // discarded (`diagnostics.truncate`), not accumulated alongside the
+    // kept pass's.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            function f() {
+                $x = null;
+                while (rand(0, 1)) {
+                    totallyUndefinedFunction();
+                    $x = new Foo();
+                }
+            }
+        "#,
+    );
+    let matches: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "function.notFound")
+        .collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one function.notFound diagnostic, got: {d:?}"
+    );
+}
+
 // Phase 15 item (1), UnreachableStatementRule (`deadCode.unreachable`):
 // investigated and declined - see `checker::check_block`'s own doc
 // comment and ROADMAP.md for why.

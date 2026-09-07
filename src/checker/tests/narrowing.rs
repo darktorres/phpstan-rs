@@ -1394,6 +1394,29 @@ fn assert_instanceof_narrows_for_the_rest_of_the_block() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive, surfaced by Phase 55's own fixed-point loop
+// convergence: amphp/http-client's `FollowRedirects::removeDotSegments`
+// opens every loop iteration with `\assert(\is_string($input));`, written
+// fully-qualified throughout (a common defensive-global-namespace style).
+// `apply_narrowing`'s own `ExprKind::Call` arm already strips a leading
+// backslash before comparing against `is_string`/`is_array`/etc (see its
+// own comment), but this statement-level `assert(...)` recognition didn't
+// - so the fully-qualified form was silently never treated as a narrowing
+// statement at all, only its bare (`assert(...)`) spelling.
+#[test]
+fn a_fully_qualified_assert_call_still_narrows() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $x): int { return $x; }
+            function f(int|string $input) {
+                \assert(\is_int($input));
+                needsInt($input);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn assert_without_a_matching_narrowing_shape_is_a_harmless_no_op() {
     // apply_narrowing already no-ops on condition shapes it doesn't

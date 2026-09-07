@@ -70,8 +70,21 @@ impl<'a> Checker<'a> {
                 // Deliberately not `instanceof`-specific: apply_narrowing
                 // already handles whatever condition shapes it
                 // understands and no-ops harmlessly on the rest.
+                //
+                // `name.trim_start_matches('\\')`: a fully-qualified call
+                // (`\assert(...)`) keeps its leading backslash in
+                // `ExprKind::Name`, unlike ordinary call resolution - the
+                // same gap `apply_narrowing`'s own `ExprKind::Call` arm
+                // already fixed for `is_string`/`is_array`/etc (see its
+                // own comment). Confirmed by a real corpus false positive
+                // this exact miss caused: amphp/http-client's
+                // `FollowRedirects::removeDotSegments`, whose loop opens
+                // every iteration with `\assert(\is_string($input));` -
+                // written with the fully-qualified form throughout (a
+                // common defensive-global-namespace style), so the
+                // narrowing this whole block exists for never ran at all.
                 if let ExprKind::Call(callee, args) = &e.kind
-                    && matches!(&callee.kind, ExprKind::Name(name) if name == "assert")
+                    && matches!(&callee.kind, ExprKind::Name(name) if name.trim_start_matches('\\') == "assert")
                     && let Some(cond_arg) = args.first()
                 {
                     self.apply_narrowing(&cond_arg.value, locals, true);
@@ -334,13 +347,18 @@ impl<'a> Checker<'a> {
                 // check - see that arm's doc comment and ROADMAP.md for
                 // the real, corpus-found narrowing gaps that make this
                 // unsafe to ship.
-                let mut body_locals = locals.clone();
-                self.apply_narrowing(cond, &mut body_locals, true);
-                self.loop_break_states.push(Vec::new());
+                let entry = locals.clone();
                 self.loop_depth += 1;
-                self.check_stmt(body, &mut body_locals, declared_return, label);
+                let (body_locals, break_states) = self.converge_loop_body(
+                    &entry,
+                    declared_return,
+                    label,
+                    |this, pass_locals, declared_return, label| {
+                        this.apply_narrowing(cond, pass_locals, true);
+                        this.check_stmt(body, pass_locals, declared_return, label);
+                    },
+                );
                 self.loop_depth -= 1;
-                let break_states = self.loop_break_states.pop().unwrap_or_default();
                 if is_truthy_literal(cond) {
                     // The condition can never itself become false (a
                     // literal `while (true)`/`while (1)`), so the *only*
@@ -402,11 +420,21 @@ impl<'a> Checker<'a> {
             StmtKind::DoWhile { body, cond } => {
                 // The condition is only evaluated after the body has
                 // already run once, so there's nothing to narrow going in.
-                self.loop_break_states.push(Vec::new());
+                let entry = locals.clone();
                 self.loop_depth += 1;
-                self.check_stmt(body, locals, declared_return, label);
+                let (body_locals, break_states) = self.converge_loop_body(
+                    &entry,
+                    declared_return,
+                    label,
+                    |this, pass_locals, declared_return, label| {
+                        this.check_stmt(body, pass_locals, declared_return, label);
+                    },
+                );
                 self.loop_depth -= 1;
-                let break_states = self.loop_break_states.pop().unwrap_or_default();
+                // A do-while's body always runs at least once - the
+                // converged result replaces `locals` directly, the same
+                // "no zero-iterations merge" choice this arm already made.
+                *locals = body_locals;
                 self.check_expr(cond, locals, label);
                 // Same as `While` - reaching code after a do-while always
                 // means `cond` just evaluated false. Applied *before*
@@ -434,19 +462,27 @@ impl<'a> Checker<'a> {
                 // semantics (the others are only there for a side effect).
                 match cond.last() {
                     Some(c) => {
-                        let mut body_locals = locals.clone();
-                        self.apply_narrowing(c, &mut body_locals, true);
-                        self.loop_break_states.push(Vec::new());
+                        let entry = locals.clone();
                         self.loop_depth += 1;
-                        self.check_stmt(body, &mut body_locals, declared_return, label);
+                        let (body_locals, break_states) = self.converge_loop_body(
+                            &entry,
+                            declared_return,
+                            label,
+                            |this, pass_locals, declared_return, label| {
+                                this.apply_narrowing(c, pass_locals, true);
+                                this.check_stmt(body, pass_locals, declared_return, label);
+                                // `step` runs after each body iteration, so
+                                // it should see whatever the body just did,
+                                // not the pre-loop state - and it runs on
+                                // every convergence pass too, since a
+                                // variable `step` mutates could itself need
+                                // more than one pass to converge.
+                                for e in step {
+                                    this.check_expr(e, pass_locals, label);
+                                }
+                            },
+                        );
                         self.loop_depth -= 1;
-                        let break_states = self.loop_break_states.pop().unwrap_or_default();
-                        // `step` runs after each body iteration, so it
-                        // should see whatever the body just did, not the
-                        // pre-loop state.
-                        for e in step {
-                            self.check_expr(e, &mut body_locals, label);
-                        }
                         // Same "may run zero times" merge `While` uses,
                         // for the same reason - unlike before this fix,
                         // this is no longer treated as if the body always
@@ -474,14 +510,21 @@ impl<'a> Checker<'a> {
                         // in additively on top of the direct body-check,
                         // rather than trying to model "unreachable if no
                         // break exists" precisely.
-                        self.loop_break_states.push(Vec::new());
+                        let entry = locals.clone();
                         self.loop_depth += 1;
-                        self.check_stmt(body, locals, declared_return, label);
+                        let (body_locals, break_states) = self.converge_loop_body(
+                            &entry,
+                            declared_return,
+                            label,
+                            |this, pass_locals, declared_return, label| {
+                                this.check_stmt(body, pass_locals, declared_return, label);
+                                for e in step {
+                                    this.check_expr(e, pass_locals, label);
+                                }
+                            },
+                        );
                         self.loop_depth -= 1;
-                        let break_states = self.loop_break_states.pop().unwrap_or_default();
-                        for e in step {
-                            self.check_expr(e, locals, label);
-                        }
+                        *locals = body_locals;
                         for state in break_states {
                             *locals = merge_scopes(locals, &state);
                         }
@@ -497,9 +540,11 @@ impl<'a> Checker<'a> {
             } => {
                 let subject_ty = self.check_expr(subject, locals, label);
                 // The loop variable(s) are a definition site, not a read -
-                // bind them (to the subject's known element type, when
-                // it's a homogeneous array) before checking anything that
-                // could reference them.
+                // bound (to the subject's known element type, when it's a
+                // homogeneous array) before checking anything that could
+                // reference them, at the start of every convergence pass
+                // below (see that closure's own comment for why every
+                // pass, not just once).
                 //
                 // Phase 12 (unplanned follow-on): a `Type::ArrayShape`
                 // subject used to fall straight to the `Mixed` catch-all,
@@ -527,23 +572,6 @@ impl<'a> Checker<'a> {
                 // real, confirmed regression (one of the most common
                 // constructs in real PHP).
                 let element_ty = Self::array_element_type(&subject_ty).unwrap_or(Type::Mixed);
-                if let Some(k) = key {
-                    self.bind_simple_target(k, Type::Mixed, locals);
-                    self.check_expr(k, locals, label);
-                }
-                // A foreach value can itself be a destructuring target
-                // (`foreach ($pairs as [$num, $letter])`, a real, common
-                // way to iterate a list of tuples) - route it through the
-                // same fully-recursive helpers a plain destructuring
-                // assignment uses, not the bare-variable-only
-                // bind_simple_target (which silently bound nothing at all
-                // for anything else). check_assignment_target already
-                // covers "check as a read where appropriate" for whatever
-                // isn't a pure definition site (an Index's key, a
-                // PropertyAccess's base, ...), so there's no separate
-                // check_expr call needed on top of it.
-                self.check_assignment_target(value, locals, label);
-                self.bind_assignment_target(value, element_ty, locals);
                 // Phase 29: `Foreach` still checks its body once directly
                 // against the real `locals` (deliberately *not* also
                 // adopting `While`/`For`'s own separate "may run zero
@@ -565,11 +593,59 @@ impl<'a> Checker<'a> {
                 // but nothing captured it for the loop's own exit state.
                 // `loop_break_states` closes exactly that gap, without
                 // touching the single-representative-pass model otherwise.
-                self.loop_break_states.push(Vec::new());
+                //
+                // Phase 55: the body itself now converges to a fixed point
+                // across up to 3 passes (see `converge_loop_body`'s own doc
+                // comment) - a variable reassigned inside the body is no
+                // longer stuck at its pre-loop type for the whole check.
+                // The *entry* state fed to every pass, and the final
+                // result, are both still `locals` directly - never merged
+                // with a separate pre-loop snapshot, preserving the
+                // deliberate zero-iterations trade-off described above
+                // exactly. Only the within/across-iteration staleness this
+                // phase targets is fixed.
+                //
+                // The key/value binding itself is re-applied at the start
+                // of *every* pass, not just once before the first - real
+                // PHP rebinds a foreach's loop variable(s) fresh from the
+                // subject on every actual iteration, so a pass must never
+                // start from what the *previous* pass's body left the
+                // loop variable mutated to. Confirmed necessary by a real
+                // corpus false positive this exact ordering fixed:
+                // `QNumericRangeScope::parse`'s `foreach ($range as $i =>
+                // &$val) { ...; $val = floatval(...); }` - a by-reference
+                // loop variable reassigned inside the body would otherwise
+                // wrongly union its post-body `float` into the *next*
+                // pass's entry as `string|float`, even though each real
+                // iteration's `&$val` aliases a *different* array slot
+                // that pass's body never touched.
+                let entry = locals.clone();
                 self.loop_depth += 1;
-                self.check_stmt(body, locals, declared_return, label);
+                let (body_locals, break_states) = self.converge_loop_body(
+                    &entry,
+                    declared_return,
+                    label,
+                    |this, pass_locals, declared_return, label| {
+                        if let Some(k) = key {
+                            this.bind_simple_target(k, Type::Mixed, pass_locals);
+                            this.check_expr(k, pass_locals, label);
+                        }
+                        // A foreach value can itself be a destructuring
+                        // target (`foreach ($pairs as [$num, $letter])`) -
+                        // route it through the same fully-recursive
+                        // helpers a plain destructuring assignment uses,
+                        // not the bare-variable-only `bind_simple_target`.
+                        // `check_assignment_target` already covers "check
+                        // as a read where appropriate" for whatever isn't
+                        // a pure definition site, so no separate
+                        // `check_expr` call is needed on top of it.
+                        this.check_assignment_target(value, pass_locals, label);
+                        this.bind_assignment_target(value, element_ty.clone(), pass_locals);
+                        this.check_stmt(body, pass_locals, declared_return, label);
+                    },
+                );
                 self.loop_depth -= 1;
-                let break_states = self.loop_break_states.pop().unwrap_or_default();
+                *locals = body_locals;
                 for state in break_states {
                     *locals = merge_scopes(locals, &state);
                 }
