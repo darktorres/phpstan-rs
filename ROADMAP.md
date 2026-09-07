@@ -367,16 +367,62 @@ confirmed_missing`, the pre-existing diagnostic-deciding logic, already
 had correct `Union`/`Intersection` semantics - it just never had a real
 type to work with before).
 
+After fix (7) shipped, a deliberate sweep for the identical anti-pattern
+elsewhere in the checker (every `let Type::Object(...) = ...` match with
+no `Union`/`Intersection` case) found and fixed five more real instances
+of the same class of bug, each with its own regression test: (8)
+`ExprKind::PropertyAccess`'s own visibility/`@internal`/`@deprecated`
+checks (`checker/expr.rs`) had the identical gap *right next to* the
+type-resolution one fix (7) already covered, silently skipping all three
+for a `Union`/`Intersection` receiver - fixed with a new `find_property_
+owner`, deliberately searching every member for the one that actually
+declares the property (not just the first found, the shortcut `MethodCall`'s
+own pre-existing `recv_class` extraction settles for - a bare-visibility
+check on the *wrong* intersection member would silently pass); (9)
+`checker::assignment::check_property_assignment` had the same gap on the
+*write* side, skipping readonly/visibility/`@internal`/`@deprecated`
+*and* the assigned value's own type check entirely for a `Union`/
+`Intersection` target - fixed with `find_property_receiver`, `find_
+property_owner`'s richer sibling that also carries the matching member's
+own type-args for template substitution; (10) `checker::calls::check_no_
+discard_statement`'s own `#[\NoDiscard]` method-call check had the
+identical gap - fixed with a new `find_method_owner`; (11) the bare,
+unconditional `@phpstan-assert` lookup for an instance `MethodCall`
+(`checker/stmt.rs`) had it too, silently skipping a real narrowing
+opportunity for a `Union`/`Intersection` receiver - fixed by reusing the
+same `find_method_owner`; (12) both `StmtKind::Throw` and `ExprKind::
+Throw`'s own "must be Throwable" check required the thrown value's type
+to be literally `Type::Object` too - fixed with a new, shared `thrown_
+value_not_throwable` (a `Union` fails if *any* member isn't Throwable, an
+`Intersection` only if *every* member isn't, mirroring `member_confirmed_
+missing`'s own identical asymmetry). Fixing (12) surfaced a *second*,
+independent, genuinely pre-existing bug via a real corpus multi-catch
+`catch (A|B $e) { throw $e; }` (real PHP binds a union type there) that
+the Union fix newly made reachable: `is_subclass_of` silently treats a
+class name the registry has no entry for as "not a subclass of
+Throwable," indistinguishable from a real, known, non-Throwable one -
+`thrown_value_not_throwable` now checks `class_name_exists` first,
+mirroring `StmtKind::Try`'s own multi-catch handling, which already
+guards this exact case (confirmed directly: the class in question,
+`RectorPrefix202608\Symfony\...\UnrecoverableExceptionInterface`, is a
+PHP-Scoper-prefixed name this project's vendor scan never actually
+indexes a declaration for, even though the real, unprefixed interface
+genuinely does extend `Throwable`). This one guard alone removed eleven
+more pre-existing false positives across the full vendor corpus, none of
+them Union/Intersection-shaped at all - a real, independent bug this
+session's own Union/Intersection sweep happened to surface, not
+something the sweep was looking for.
+
 Confirmed against the real Piwigo corpus (both the app-only scope and
 the full vendor-included one) after every fix above: zero remaining
 false positives traced to this family's own new checks - the only
 surviving diff lines are `widen_coalesce_result`'s own genuine, expected
 precision ripples (reviewed individually), real, correct findings newly
-unlocked by fix (7) above, and real, correct findings unrelated to any
-of this session's own changes (including in vendor/example code, where a
-docblock-declared literal param type like `@param false $x` makes
-`if ($x)` genuinely always-false, confirmed against `vendor/jetbrains/
-phpstorm-stubs`).
+unlocked by fixes (7)-(12) above, and real, correct findings unrelated to
+any of this session's own changes (including in vendor/example code,
+where a docblock-declared literal param type like `@param false $x`
+makes `if ($x)` genuinely always-false, confirmed against `vendor/
+jetbrains/phpstorm-stubs`).
 
 ## Performance & tooling
 
