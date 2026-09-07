@@ -413,6 +413,28 @@ them Union/Intersection-shaped at all - a real, independent bug this
 session's own Union/Intersection sweep happened to surface, not
 something the sweep was looking for.
 
+Checking whether that first sweep (grep for `let Type::Object(...) = ...
+else`) had actually been exhaustive found two more real instances of the
+identical anti-pattern, missed because they're plain `match` arms instead
+of `let-else` - (13) `AssertTarget::ThisProp`'s own "not already
+narrowed" fallback (`assert_target_key_and_current`, `checker/
+narrowing.rs`) matched the receiver's own type against `Type::Object`
+directly, silently discarding the property's real declared type for a
+`Union`/`Intersection` receiver - reachable even through the already-
+correct `ThisSelf`/branch-conditional call site, since this fallback
+re-infers the receiver's own type independently; fixed by reusing
+`property_access_type`. (14) `ExprKind::FirstClassCallable`'s own
+`MethodCall` arm (resolving a first-class callable used as, e.g.,
+`array_map`'s own callback) had the identical gap - fixed with a new
+`find_method_receiver_class`, `find_method_owner`'s sibling that returns
+the concrete receiver class actually queried (not the declaring owner) -
+late static binding needs the real matched member for `self`/`static`
+pseudo-return resolution, the same distinction the pre-existing single-
+`Object` code already relied on. Given a second miss on the very first
+attempt at "exhaustive," this project's own confidence that *this*
+sweep is now complete is deliberately not claimed either - only that
+every instance found by every search attempted so far is fixed.
+
 Confirmed against the real Piwigo corpus (both the app-only scope and
 the full vendor-included one) after every fix above: zero remaining
 false positives traced to this family's own new checks - the only
@@ -422,7 +444,9 @@ unlocked by fixes (7)-(12) above, and real, correct findings unrelated to
 any of this session's own changes (including in vendor/example code,
 where a docblock-declared literal param type like `@param false $x`
 makes `if ($x)` genuinely always-false, confirmed against `vendor/
-jetbrains/phpstorm-stubs`).
+jetbrains/phpstorm-stubs`). Fixes (13)-(14) had no corpus-verifiable
+effect either way (confirmed via a full before/after diff) - both are
+confirmed correct only by their own dedicated regression tests.
 
 ## Performance & tooling
 
