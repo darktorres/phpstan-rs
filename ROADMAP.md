@@ -233,36 +233,94 @@ after an unreachable point for every other rule, and this project's own
 corpus verification confirmed why: stopping early silently dropped real,
 unrelated diagnostics that happened to sit in a since-dead branch).
 
-Phase 15's own constant-boolean-condition family (`if.alwaysTrue`/`if.
-alwaysFalse`, `while.alwaysTrue`/`while.alwaysFalse`, `doWhile.alwaysTrue`/
-`doWhile.alwaysFalse`, level 4), reinstated deliberately narrower than the
-original reverted design: `literal_truthiness` (`checker/control_flow.rs`)
-only ever trusts a *syntactic* literal condition (`true`/`false`, an int/
-float/string/null literal, or a `!`/parenthesized wrapping of one) -
-never the condition's own *inferred* type, sidestepping both real
-narrowing-imprecision sources that got the type-inference-trusting
-version reverted (loop staleness, since fixed by Phase 55's own
-convergence work; and `widen_coalesce_result`'s own `?? false` collapse,
-still open, part of Phase 55's own separate, larger comparison-outcome/
-range-API item) entirely, since a bare literal's own truthiness never
-depends on narrowing precision at all. Exclusions grounded directly in a
-fresh read of `vendor/phpstan-src`'s own rule sources, not recalled:
-`if.always*` has none; `while.alwaysTrue`/`doWhile.alwaysTrue` skip when
-the loop is breakless (`stmt_contains_break` - this project's own
-already-existing, deliberately conservative "any break anywhere" check,
-reused as-is rather than re-deriving real PHPStan's own more precise
-per-level `continue N` analysis, a narrow, disclosed simplification - see
-Pending) or the body yields (a legitimate infinite generator); `while.
-alwaysTrue` additionally skips when the enclosing function is declared
-`: never`; `doWhile.alwaysFalse` skips on the same breakless check (a
-real, common "structured goto" idiom: `do { ...; if ($x) break; ... }
-while (false);`). Confirmed against the real Piwigo corpus: 3 new,
-individually-verified-correct `while.alwaysTrue` findings, all the exact
-same real idiom (`NotificationController::findAvailableFeedId` and two
-siblings - a breakless `while (true) { ...; if (cond) { return ...; } }`
-retry-until-success loop, matching real PHPStan's own documented behavior
-for this shape exactly, since a `return` doesn't disqualify the
-diagnostic, only `break`/`continue N>1` do).
+Phase 15's own constant-boolean-condition family, reinstated in full with
+real *inferred*-type trust (`Checker::inferred_constant_condition`,
+`checker/control_flow.rs`) - not just the bare-syntactic-literal slice
+this phase first shipped with. Rebuilt deliberately end-to-end after the
+user explicitly rejected a narrower follow-up plan ("why are you keeping
+things out of scope? i dont mind churn, i want MOST proper"), which led
+to re-investigating - not assuming - the original revert's own root
+causes: loop staleness (already fixed, Phase 55's convergence work) and
+`widen_coalesce_result`'s own `?? false` collapse, confirmed this session
+to be a small, self-contained, independently-fixable bug (`checker/
+expr.rs`'s general-case fallback discarded the left side's own type
+entirely instead of unioning it in - `_ => r_ty` fixed to `_ => union_
+types(l_ty, r_ty)`), not part of the large, genuinely-separate comparison-
+outcome/range-API item the ROADMAP's own prose used to conflate it with.
+
+Full family now built: `if`/`elseif` (`if.always*`/`elseif.always*`,
+`checker/stmt.rs`'s new `Checker::check_if`, extracted from the old
+inline `StmtKind::If` body) - `elseif` gets its own real identifier and
+real PHPStan's own "last condition, no trailing else" exemption
+(`reportAlwaysTrueInLastCondition: false`, confirmed in `vendor/
+phpstan-src/conf/config.neon`; `elseif` already desugars to a nested
+`StmtKind::If` in `parser/stmt.rs::parse_if`, confirmed directly, not
+assumed); `while`/`do-while` (unchanged identifiers/exclusions from the
+original narrower version, now inferred-type-trusting); the ternary
+operator (`ternary.always*`); `&&`/`||` (`booleanAnd`/`booleanOr.
+leftAlways*`/`rightAlways*`/`always*`, `Checker::check_boolean_and_or`) -
+three diagnostics per node (left unconditional, right/whole gated by
+`is_first_level` - real PHPStan's own `!isInFirstLevelStatement()`, which
+covers *both* a bare `&&`/`||` used directly as an if/while/ternary
+condition, via the new `Checker::in_condition_position` field, *and* one
+used as its own bare statement, via the pre-existing `in_bare_statement_
+position`, confirmed directly against `ExpressionHandler::processStmt`'s
+own `ExpressionContext::createTopLevel()`); `xor` (`logicalXor.
+leftAlways*`/`rightAlways*`, `Checker::check_logical_xor` - left/right
+only, no whole-result, no first-level gating, confirmed `LogicalXor
+ConstantConditionRule.php` has neither); and a standalone `!$expr`
+check anywhere it appears (`booleanNot.always*`, inverted relative to the
+inner value, with its own copy of the last-condition exemption via the
+new `Checker::in_exempt_last_condition` field). `should_skip_constant_
+condition` (free function) mirrors real PHPStan's own `ConstantCondition
+RuleHelper::shouldSkip` + `FunctionCallConstantConditionHelper::
+isTypeCheckCandidate` combined, excluding every shape that has its own
+dedicated rule (the six above) plus every equality/identity/ordering
+comparison (genuinely nothing to catch - `infer_binary`'s own comparison
+arm unconditionally returns bare `Type::Bool`, confirmed directly, no
+comparison-outcome type inference exists yet - see Pending) and any bare
+function/method/static call (deferred to real PHPStan's not-yet-built
+Collector-based `FunctionCallConstantConditionRule`, Pending's own Phase
+82). `infer_binary`'s `BinOp::And`/`Or`/`LogicalXor` arms gained real
+constant folding (mirroring `BooleanAndHandler`/`BooleanOrHandler`/
+`BinaryOpHandler::resolveType` exactly, confirmed against `vendor/
+phpstan-src`) - without it, `check_boolean_and_or`'s own whole-result
+check had nothing but a permanent bare `Type::Bool` to ever match
+against.
+
+Four real, independently-confirmed bugs found and fixed while building
+and corpus-verifying this (each with its own regression test in
+`checker/tests/control_flow.rs`, not just disclosed): (1) `converge_loop_
+body`'s own returned `body_locals` only ever reflected a loop body's
+fallthrough exit, silently dropping the same pass's own `continue`-
+reached states - a variable only ever assigned on a non-`continue` path
+looked unconditionally assigned afterward instead of "maybe, maybe not"
+(`Piwigo\Db\BatchWriter::updateRow`); (2) `While`/`For`'s own condition
+check ran exactly once against the pre-loop entry, entirely bypassing
+Phase 55's fixed-point convergence - moved inside `converge_loop_body`'s
+own closure so it runs against each pass's converging state, exactly
+matching real PHPStan's own `WhileHandler::processStmt` (`CoreUpdate
+Service::upgradeTo`, `QMultiToken::parseExpression`); (3) that same move
+broke a variable *the condition itself* assigns (`while (($x = f()) !==
+null)`) surviving the "loop may run zero times" merge afterward, fixed
+with a quiet, diagnostics-discarded priming evaluation against the real
+pre-loop `locals` first, mirroring real PHPStan's own separate quiet
+`$condResult`/`$condScope` pass (`Symfony\Component\DependencyInjection\
+Compiler\AbstractRecursivePass::getConstructor`); (4) `check_boolean_and_
+or`'s left-side check was evaluated against the caller's already-left-
+narrowed scope, making a bare-variable left operand look constantly true
+by pure circularity (`Piwigo\Controller\Admin\ConfigurationSubController
+::processSizes`) - fixed by narrowing internally, only for the right/
+whole checks, never the left one.
+
+Confirmed against the real Piwigo corpus (both the app-only scope and
+the full vendor-included one) after every fix above: zero remaining
+false positives traced to this family's own new checks - the only
+surviving diff lines are `widen_coalesce_result`'s own genuine, expected
+precision ripples (reviewed individually) and real, correct findings
+(including in vendor/example code, where a docblock-declared literal
+param type like `@param false $x` makes `if ($x)` genuinely always-false,
+confirmed against `vendor/jetbrains/phpstorm-stubs`).
 
 ## Performance & tooling
 
@@ -465,33 +523,42 @@ known. Numbered by the original phase for cross-reference; the number
 is not a priority order.
 
 **15 - Unreachable-code / constant-condition rule catalog (PARTIAL).**
-`UnreachableStatementRule` (`deadCode.unreachable`) and a syntactic-
-literal-only slice of the constant-boolean-condition family (`if.always*`/
-`while.always*`/`doWhile.always*`, see Done) are both done. Real PHPStan's
-own family has more members than this covers, each deliberately deferred
-rather than attempted with the same corpus-risking type-inference trust
-that got the original version reverted: `elseif` (`ElseIfConstantCondition
-Rule` - has its own extra nuance, a trailing `elseif (true)` with no
-`else` isn't flagged by default, an "implicit else" idiom); the ternary
-operator; boolean and/or/xor/not with a partially-literal operand; a
-number comparison between two literals; `assert(false)`/`assert(0)` as a
-sub-expression (`FunctionCallConstantConditionRule`) - none of these are
-bare-literal-*condition* shapes the way `if`/`while`/`do-while`'s own
-conditions are, each would need its own real AST matching. No match/
-switch dead-arm/exhaustiveness checking; no impossible-`instanceof`/
-redundant-`is_string()`-etc. detection (both would need trusting inferred
-types again, the same reverted-design risk). `while.alwaysTrue`/`doWhile.
-alwaysTrue`'s own breakless-detection reuses `stmt_contains_break`'s
-existing "any break anywhere" conservatism rather than real PHPStan's own
-more precise per-loop-level `continue N` analysis - a narrow, disclosed
-simplification (a `continue N > 1` that truly does escape the loop isn't
-recognized as disqualifying the diagnostic, unlike real PHPStan). A full,
-inferred-type-trusting version of the whole family remains blocked on
-Phase 55's own separate, larger comparison-outcome/range-API item
-(`widen_coalesce_result`'s `?? false` collapse). `continue N`'s own level
-argument is parsed but never consulted for *narrowing* purposes (Phase
-55's own `loop_continue_states` now consults it for convergence), and
-`goto`/label CFG edges are unmodeled - neither owned by any phase.
+`UnreachableStatementRule` (`deadCode.unreachable`) and the full,
+inferred-type-trusting constant-boolean-condition family (`if`/`elseif`/
+`while`/`do-while`/ternary/`&&`/`||`/`xor`/`!`, see Done) are both done.
+What real PHPStan's own family still has that this doesn't, each for a
+real, freshly-verified technical reason (not proportionality):
+`NumberComparisonOperatorsConstantConditionRule` (`</>/<=/>=` whose own
+inferred type happens to be a constant boolean) - confirmed directly that
+`infer_binary`'s own comparison arm unconditionally returns bare
+`Type::Bool`; genuinely nothing to catch until this project builds real
+comparison-outcome/range type inference (Phase 55's own separate, larger
+item - not the same thing `widen_coalesce_result`'s bug was, that's now
+fixed and unblocked). `FunctionCallConstantConditionRule`'s own cross-
+file aggregation (`is_string($x)` constant at every call site, reported
+once as "this check is dead everywhere") needs Collector-style whole-
+codebase aggregation - Pending's own Phase 82. `assert(false)`/
+`assert(0)` as a sub-expression is exactly this same call-shaped-
+condition case, not a separate gap. No match/switch dead-arm/
+exhaustiveness checking; no impossible-`instanceof`/redundant-
+`is_string()`-etc. detection on a *non-constant* narrowed type (this
+phase's own family only ever catches a condition whose inferred type is
+a `ConstantBooleanType`, never a broader "this instanceof check can never
+succeed given the value's declared type" analysis - a different, larger
+feature, not owned by any phase). `while.alwaysTrue`/`doWhile.alwaysTrue`'s
+own breakless-detection reuses `stmt_contains_break`'s existing "any
+break anywhere" conservatism rather than real PHPStan's own more precise
+per-loop-level `continue N` analysis - a narrow, disclosed simplification
+(a `continue N > 1` that truly does escape the loop isn't recognized as
+disqualifying the diagnostic, unlike real PHPStan). A `for`'s own non-
+last comma-separated condition expression(s) are checked once up front
+rather than on every iteration (real PHP re-evaluates all of them, only
+the last one's truthiness gates the loop) - a narrow, disclosed
+simplification, since every real corpus use seen is a side-effect-only
+scratch expression there. `continue N`'s own level argument is parsed
+but never consulted for *narrowing* purposes (Phase 55's own `loop_
+continue_states` now consults it for convergence), and `goto`/label CFG
+edges are unmodeled - neither owned by any phase.
 
 **17 - LSP hover/go-to-definition (PARTIAL).** Both stages plus five
 follow-ups are done (see Done): every name reference resolvable without
@@ -910,22 +977,28 @@ root cause is on hand if this is ever revisited, and so a future
 [[feedback_dont_discard_correct_checks_ship_opt_in]]'s own distinction
 before defaulting to another full revert.
 
-- **Constant-boolean-condition family** (Phase 15; `UnreachableStatementRule`
-  itself has since been reinstated, see Done/Pending). A real, demonstrated
-  soundness bug, not a corpus-representativeness call: this checker had no
-  fixed-point loop analysis, so a variable reassigned inside a loop body
-  kept its pre-loop type for the whole check, which both diagnostics
-  misinterpreted as "always terminates"/"always true or false" on
-  extremely common idioms (a loop-scoped flag variable, a deferred
-  reassignment). ~900 unverifiable false positives. `UnreachableStatementRule`'s
-  own share of that is fixed by Phase 55's fixed-point convergence
-  (`converge_loop_body` plus `loop_continue_states`, see Done) - reinstated
-  and corpus-clean. This *specific* reverted design - trusting the
-  condition's own full inferred type - stays reverted; a differently-
-  scoped, syntactic-literal-only version has since been built instead
-  (see Done/Pending) that sidesteps this exact root cause (and the
-  second, independent one - `widen_coalesce_result`'s `?? false`
-  collapse) by construction, rather than by waiting for both to be fixed.
+- **Constant-boolean-condition family** (Phase 15; superseded - fully
+  reinstated with real inferred-type trust, see Done). A real, demonstrated
+  soundness bug, not a corpus-representativeness call, caused the original
+  revert: this checker had no fixed-point loop analysis, so a variable
+  reassigned inside a loop body kept its pre-loop type for the whole
+  check, which both diagnostics misinterpreted as "always terminates"/
+  "always true or false" on extremely common idioms (a loop-scoped flag
+  variable, a deferred reassignment). ~900 unverifiable false positives.
+  Two real root causes, both since fixed: loop staleness (Phase 55's
+  fixed-point convergence, `converge_loop_body`/`loop_continue_states`)
+  and `widen_coalesce_result`'s own `?? false` collapse (confirmed a
+  small, self-contained, independently-fixable bug this session - not
+  the same thing as the large, genuinely-separate comparison-outcome/
+  range-API item this entry used to conflate it with). A narrower,
+  syntactic-literal-only version shipped as an intermediate step while
+  only the first cause was fixed; once both were, the *original* design -
+  trusting the condition's own full inferred type - was rebuilt in full
+  rather than staying narrowed, per explicit direction ("i dont mind
+  churn, i want MOST proper"). Building it surfaced and fixed four more
+  real bugs of the identical shape (a condition/its own dependencies
+  checked against a stale or wrongly-narrowed scope) - see Done for the
+  full list.
 - **`InvalidKeyInArrayDimFetchRule`** (Phase 50). Also a real soundness
   bug: a *used* (not merely declared) generic template parameter's own
   type leaks through as a bogus namespace-qualified class reference
