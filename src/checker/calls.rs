@@ -440,7 +440,7 @@ impl<'a> Checker<'a> {
                         p.span,
                         label,
                     );
-                    arrow_locals.insert(p.name.clone(), ty);
+                    arrow_locals.declare(p.name.clone(), ty, p.name_span);
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 if return_type.is_some() {
@@ -476,10 +476,11 @@ impl<'a> Checker<'a> {
                 {
                     return false;
                 }
-                let mut closure_locals: Locals = Locals::default();
+                let mut closure_locals: Locals = locals.fresh_scope();
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
-                    closure_locals.insert(u.name.clone(), ty);
+                    let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
+                    closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
                 }
                 if !*is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
@@ -497,7 +498,7 @@ impl<'a> Checker<'a> {
                         p.span,
                         &closure_label,
                     );
-                    closure_locals.insert(p.name.clone(), ty);
+                    closure_locals.declare(p.name.clone(), ty, p.name_span);
                 }
                 let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
                 self.check_type_class_names_exist(

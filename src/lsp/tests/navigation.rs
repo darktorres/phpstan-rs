@@ -556,6 +556,33 @@ fn definition_on_a_variable_read_after_a_one_sided_if_offers_the_original_too() 
 }
 
 #[test]
+fn definition_on_a_variable_read_after_a_guard_clause_excludes_the_terminated_branch() {
+    // The real payoff of routing through the checker's own flow-sensitive
+    // analysis instead of a hand-rolled approximation: the `else` branch
+    // here always `return`s, so real PHPStan-matching termination-pruning
+    // (`always_terminates`, `checker/stmt.rs`'s own `If` handling)
+    // excludes its own `$x = 2` from ever reaching the merge point at
+    // all - only `$x = 1` is a live candidate, a plain `Scalar`, not an
+    // over-cautious `Array` offering an alternative that could never
+    // actually be reached.
+    let dir = TempDir::new("var_guard_clause");
+    let src =
+        "<?php function f($cond) { if ($cond) { $x = 1; } else { $x = 2; return; } echo $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert!(
+        result.is_object(),
+        "expected a single Location object (the terminated else branch excluded), got {result:?}"
+    );
+    let expected = lsp_pos(src, "$x = 1");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
 fn definition_on_a_variable_read_after_a_straight_line_reassignment_stays_a_scalar() {
     // Regression guard: sequential, unconditional reassignment (no
     // branch/loop involved at all) must still resolve to exactly one
@@ -575,9 +602,9 @@ fn definition_on_a_variable_read_after_a_straight_line_reassignment_stays_a_scal
 }
 
 #[test]
-fn definition_on_a_variable_read_after_a_loop_offers_the_pre_loop_value_too() {
+fn definition_on_a_variable_read_after_a_while_loop_offers_the_pre_loop_value_too() {
     let dir = TempDir::new("var_loop");
-    let src = "<?php function f(array $items) { $x = 0; foreach ($items as $item) { $x = $item; } return $x; }";
+    let src = "<?php function f($cond) { $x = 0; while ($cond) { $x = 1; } return $x; }";
     let path = dir.write("a.php", src);
     let uri = path_to_uri(&path).to_string();
     let pos = lsp_pos(src, "$x; }");
@@ -585,9 +612,36 @@ fn definition_on_a_variable_read_after_a_loop_offers_the_pre_loop_value_too() {
     let messages = run(&dir, &[definition_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     // The loop might run zero times - `$x = 0` (before the loop) is a
-    // real alternative to the loop body's own `$x = $item`.
+    // real alternative to the loop body's own `$x = 1`.
     let locations = result.as_array().expect("expected an array of locations");
     assert_eq!(locations.len(), 2);
+}
+
+#[test]
+fn definition_on_a_variable_read_after_a_foreach_stays_a_scalar() {
+    // Real PHPStan-matching, corpus-verified checker behavior (Phase 29,
+    // `checker/stmt.rs`): unlike `while`/`for`, a `foreach`'s own body is
+    // deliberately *not* merged with the pre-loop state - a common real
+    // idiom relies on the loop variable's own post-loop type being
+    // trusted as if the loop body definitely ran at least once. This
+    // follow-up's own provenance tracking rides along the real checker,
+    // so it correctly inherits that same one-candidate answer rather
+    // than a hand-rolled heuristic's own (wrong, relative to the real
+    // checker) "every loop might run zero times" assumption.
+    let dir = TempDir::new("var_foreach_no_merge");
+    let src = "<?php function f(array $items) { $x = 0; foreach ($items as $item) { $x = $item; } return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert!(
+        result.is_object(),
+        "expected a single Location object, got {result:?}"
+    );
+    let expected = lsp_pos(src, "$x = $item");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
 }
 
 #[test]
@@ -661,7 +715,15 @@ fn definition_on_a_read_resolves_to_its_foreach_destructuring_target() {
 // Phase 17 follow-up: `global $x;` links back to a top-level declaration.
 
 #[test]
-fn definition_on_a_global_variable_links_back_to_its_top_level_declaration() {
+fn definition_on_a_global_variable_read_resolves_to_the_global_statement_itself() {
+    // The real `Checker` deliberately never links `global $x;` back to
+    // any specific top-level assignment (`checker/stmt.rs`'s own doc
+    // comment on `StmtKind::Global`: real PHP's own global scope isn't
+    // tracked at all, `Mixed` is the honest answer) - since this
+    // follow-up's own provenance tracking rides along the real checker
+    // rather than a separate, less-principled heuristic, a read resolves
+    // to the `global $x;` statement itself, not a guess at which
+    // top-level write "really" produced the value.
     let dir = TempDir::new("var_global");
     let src = "<?php $x = 1; function f() { global $x; return $x; }";
     let path = dir.write("a.php", src);
@@ -671,24 +733,8 @@ fn definition_on_a_global_variable_links_back_to_its_top_level_declaration() {
     let messages = run(&dir, &[definition_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(result["uri"], uri);
-    let expected = lsp_pos(src, "$x = 1");
+    let expected = lsp_pos(src, "global $x;");
     assert_eq!(result["range"]["start"]["character"], expected["character"]);
-}
-
-#[test]
-fn definition_on_a_global_variable_declared_later_in_the_file_still_resolves() {
-    // The order-independent pre-scan (`collect_top_level_vars`) is what
-    // makes this work - a single forward walk wouldn't have reached the
-    // top-level assignment yet by the time it reaches the function above it.
-    let dir = TempDir::new("var_global_forward_ref");
-    let src = "<?php function f() { global $x; return $x; } $x = 1;";
-    let path = dir.write("a.php", src);
-    let uri = path_to_uri(&path).to_string();
-    let pos = lsp_pos(src, "$x; }");
-
-    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
-    let result = response_result(&messages, 2);
-    assert_eq!(result["uri"], uri);
 }
 
 #[test]

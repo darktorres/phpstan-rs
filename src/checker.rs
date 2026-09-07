@@ -29,12 +29,223 @@ use crate::types::{self, Type};
 /// docs before making this change, not assumed. `rustc_hash::
 /// FxBuildHasher` (Finding C) as the hasher, since `imbl::HashMap` is
 /// generic over it the same way `std::collections::HashMap` is.
-pub(crate) type Locals = imbl::GenericHashMap<
+type LocalsMap = imbl::GenericHashMap<
     String,
     Type,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
+
+// Phase 17 follow-up: `imbl::HashSet` mirrors `imbl::HashMap`'s own O(1)-
+// clone design (Phase 20 Finding B's own doc comment above) - not load-
+// bearing here the way it is for the outer `provenance` map itself (a
+// per-variable span set is small and only ever mutated by inserting one
+// more `Span`, never iterated at scale), but consistent with the rest of
+// this module's own "persistent map/set throughout, not a plain
+// `std::collections` one partway through" convention.
+type ProvenanceSet =
+    imbl::GenericHashSet<Span, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
+type ProvenanceMap = imbl::GenericHashMap<
+    String,
+    ProvenanceSet,
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
+/// A checked scope's variable-name-to-inferred-type bindings, plus (Phase
+/// 17 follow-up) an opt-in, parallel declaration-span side-channel the
+/// LSP's own local-variable-navigation feature reads through `Checker::
+/// probe_span`/`probe_var_provenance` - real reaching-definitions
+/// precision (which real assignment(s) could have produced the value a
+/// given read sees), computed by riding along the checker's own already-
+/// correct, corpus-verified flow-sensitive traversal (branch merging via
+/// `merge_scopes`, loop fixed-point convergence via `converge_loop_body`,
+/// termination-pruning via `always_terminates`) rather than a second,
+/// independent approximation. `types`/`provenance` are two separate
+/// fields, not one field carrying `(Type, ProvenanceSet)` pairs, on
+/// purpose: `Type` is this checker's own inference domain, read and
+/// pattern-matched at hundreds of call sites throughout this module - a
+/// wrapper tuple there would mean touching every one of them just to
+/// unwrap it back out, for a concern (LSP navigation) that has nothing to
+/// do with type inference itself. Kept in exact lockstep with `types`
+/// instead via `Locals`'s own small, explicit API (`insert` leaves
+/// `provenance` for that key untouched - correct for type-narrowing,
+/// which refines an existing binding's type without creating a new one;
+/// `declare` is the one exception, used only at a genuine syntactic
+/// binding site - an assignment, a parameter, a `foreach`/`catch`
+/// binding, ...; `insert_with_provenance` copies an already-known
+/// provenance set across when a value moves between two `Locals` values
+/// unchanged, e.g. `merge_scopes`'s own union).
+///
+/// Phase 20 Finding B: backed by `imbl::HashMap`, a persistent,
+/// structurally-shared map (a HAMT), not `std::collections::HashMap` -
+/// cloned at ~22 call sites across `checker/stmt.rs`/`checker/expr.rs`
+/// (once per branch of every `if`/`while`/ternary/`match`/closure, in
+/// every function, in every file), profiling identified this as the
+/// single biggest allocation source in the whole checker: a plain
+/// `HashMap` clone rehashes every key and deep-clones every `Type`
+/// value's own nested `String`s/`Vec`s. `imbl::HashMap::clone` is O(1) -
+/// "really only a matter of copying a pointer and increasing a reference
+/// counter" - a value only gets deep-copied lazily, on the *next*
+/// mutation of whichever clone diverges from the other. `insert`/
+/// `remove`/`entry`/`get`/`contains_key`/`iter`/`Default`/`IntoIterator`/
+/// `FromIterator`/`PartialEq` all mirror `std::collections::HashMap`'s
+/// own signatures closely enough that every existing call site needed
+/// little to no change - confirmed directly against `imbl`/`im`'s own
+/// docs before making this change, not assumed. `rustc_hash::
+/// FxBuildHasher` (Finding C) as the hasher, since `imbl::HashMap` is
+/// generic over it the same way `std::collections::HashMap` is.
+///
+/// This wrapper struct preserves that exact clone/allocation profile:
+/// `provenance` is itself an `imbl::HashMap` (same O(1)-clone property),
+/// so wrapping `types` alongside it doesn't reintroduce the deep-clone
+/// cost Finding B eliminated - cloning a `Locals` is still, structurally,
+/// two pointer bumps.
+#[derive(Clone, Default)]
+pub(crate) struct Locals {
+    types: LocalsMap,
+    provenance: ProvenanceMap,
+    // Whether `declare`/`insert_with_provenance` actually do anything -
+    // `false` (via `Default`) for every ordinary `check-project` run,
+    // `true` only for the one throwaway, per-request `Checker` `lsp.rs`'s
+    // own variable-navigation probe builds (mirroring `Checker::probe_
+    // span`'s own "only ever `Some` during that one request" contract).
+    // Carried explicitly on `Locals` itself (not read from `Checker` at
+    // each call site) because `Locals` values are constructed in more
+    // places than `Checker` methods alone reach - most importantly, a
+    // closure/arrow-fn literal's own fresh scope (`Locals::default()` at
+    // several `checker/calls.rs`/`checker/expr.rs` call sites) needs the
+    // *enclosing* scope's own `track` value threaded through explicitly
+    // (`Locals::fresh_scope`, below) rather than silently defaulting back
+    // to `false` and losing provenance the instant a probed variable read
+    // sits inside a closure body.
+    track: bool,
+}
+
+impl Locals {
+    pub(crate) fn get(&self, key: &str) -> Option<&Type> {
+        self.types.get(key)
+    }
+
+    pub(crate) fn contains_key(&self, key: &str) -> bool {
+        self.types.contains_key(key)
+    }
+
+    /// Plain, provenance-preserving update - leaves whatever `provenance`
+    /// already has for `key` completely untouched. Correct for the large
+    /// majority of this module's own `locals.insert(...)` call sites:
+    /// type-narrowing (an `instanceof`/null/array-shape/... check refines
+    /// an *existing* binding's type without it being a new declaration)
+    /// and a call's own by-reference type-widening effect (`sort($arr)`,
+    /// `preg_match($p, $s, $matches)`, ...) both change what's *known*
+    /// about a variable without changing *where it came from* - `$arr`'s
+    /// own real declaration is still wherever it was first assigned, not
+    /// this call site.
+    pub(crate) fn insert(&mut self, key: String, ty: Type) -> Option<Type> {
+        self.types.insert(key, ty)
+    }
+
+    /// The one real "this is a new declaration" primitive - used only at
+    /// a genuine syntactic binding site (an assignment's left-hand side,
+    /// a parameter, a `foreach`/`catch` binding, `static $x`, a closure's
+    /// own `use (...)` capture, `$x++`/`$x--`). Replaces `key`'s own
+    /// provenance with a fresh singleton `{span}`, discarding whatever
+    /// was tracked before - a real rebind, not a refinement, so nothing
+    /// from before it remains a live candidate. A no-op on `provenance`
+    /// itself when `track` is off, at the cost of one `bool` check.
+    pub(crate) fn declare(&mut self, key: String, ty: Type, span: Span) -> Option<Type> {
+        if self.track {
+            let mut set = ProvenanceSet::default();
+            set.insert(span);
+            self.provenance.insert(key.clone(), set);
+        }
+        self.types.insert(key, ty)
+    }
+
+    /// The provenance-*copying* primitive - used where a value moves
+    /// between two different `Locals` values essentially unchanged (a
+    /// branch merge, a closure's `use (...)` capture copied in from the
+    /// enclosing scope, a `&&`/`||` short-circuit's own new-definition
+    /// propagation): `provenance` carries over whatever was already
+    /// tracked for it, rather than either fabricating a fresh span (not a
+    /// new declaration) or silently discarding it (it has a real,
+    /// already-known origin).
+    pub(crate) fn insert_with_provenance(
+        &mut self,
+        key: String,
+        ty: Type,
+        provenance: ProvenanceSet,
+    ) -> Option<Type> {
+        if self.track && !provenance.is_empty() {
+            self.provenance.insert(key.clone(), provenance);
+        }
+        self.types.insert(key, ty)
+    }
+
+    pub(crate) fn get_provenance(&self, key: &str) -> Option<&ProvenanceSet> {
+        self.provenance.get(key)
+    }
+
+    pub(crate) fn remove(&mut self, key: &str) -> Option<Type> {
+        self.provenance.remove(key);
+        self.types.remove(key)
+    }
+
+    pub(crate) fn entry(
+        &mut self,
+        key: String,
+    ) -> imbl::hashmap::Entry<
+        '_,
+        String,
+        Type,
+        rustc_hash::FxBuildHasher,
+        imbl::shared_ptr::DefaultSharedPtr,
+    > {
+        self.types.entry(key)
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Type)> {
+        self.types.iter()
+    }
+
+    /// A fresh, empty scope that still carries `self`'s own `track` flag
+    /// forward - see `track`'s own doc comment for why a closure/arrow-fn
+    /// literal's own scope needs this instead of a plain `Locals::
+    /// default()`.
+    pub(crate) fn fresh_scope(&self) -> Locals {
+        Locals {
+            types: LocalsMap::default(),
+            provenance: ProvenanceMap::default(),
+            track: self.track,
+        }
+    }
+
+    /// Turns declaration-span tracking on for this scope and everything
+    /// cloned from it - called exactly once, at `check_function`'s own
+    /// entry point, gated on `Checker::probe_span` being active (see
+    /// `track`'s own doc comment).
+    pub(crate) fn set_track(&mut self, track: bool) {
+        self.track = track;
+    }
+}
+
+impl PartialEq for Locals {
+    /// Deliberately compares `types` only, never `provenance` - `Checker::
+    /// converge_loop_body`'s own fixed-point convergence check (`next_
+    /// entry == pass_entry`) must keep converging purely on type
+    /// stability, exactly as it already did before this field existed.
+    /// `provenance` naturally reaches its own steady state alongside
+    /// `types` in the overwhelming majority of real code either way; on
+    /// the rare case it doesn't, whatever provenance resulted from the
+    /// pass that actually triggered convergence is used - a reasonable,
+    /// bounded approximation, never a hang (still capped at `MAX_PASSES`
+    /// regardless), and never a behavior change for `track: false`
+    /// (`provenance` stays empty on both sides throughout, so this
+    /// distinction is unobservable there).
+    fn eq(&self, other: &Self) -> bool {
+        self.types == other.types
+    }
+}
 
 /// A generic `@template` name -> concrete `Type` substitution map (class-
 /// hierarchy template binding, function-call argument-to-template
@@ -459,6 +670,19 @@ pub struct Checker<'a> {
     // being computed anyway.
     pub(crate) probe_span: Option<Span>,
     pub(crate) probe_hit: Option<Type>,
+    // Phase 17 follow-up: the LSP's own one-off "where could this local
+    // variable read have come from" probe - the real, flow-sensitive
+    // counterpart of `lsp::navigation`'s own hand-rolled arm-merging
+    // heuristic it replaces. Checked in `check_expr`'s own `ExprKind::
+    // Variable` arm the same way `probe_hit` already is in `MethodCall`/
+    // `PropertyAccess`: when `probe_span` matches this read's own span,
+    // `locals`'s own tracked provenance for that name (see `Locals::
+    // declare`'s own doc comment) is stashed here. `None` (every existing
+    // call site, `check-project` included) is a complete no-op - see
+    // `Locals::track`'s own doc comment for why declaration tracking
+    // itself is also gated off whenever no probe is active, not just this
+    // one read.
+    pub(crate) probe_var_provenance: Option<HashSet<Span>>,
 }
 
 mod assignment;
@@ -535,6 +759,7 @@ impl<'a> Checker<'a> {
             rebind_escape_all: false,
             probe_span: None,
             probe_hit: None,
+            probe_var_provenance: None,
         }
     }
 
@@ -1173,6 +1398,12 @@ impl<'a> Checker<'a> {
         let mut resolved_params: Vec<(String, Type, Span)> = Vec::with_capacity(f.params.len());
 
         let mut locals: Locals = Locals::default();
+        // Phase 17 follow-up: turns declaration-span tracking on for this
+        // whole function-body check exactly when the LSP's own probe is
+        // active - see `Locals::track`'s own doc comment. Every clone of
+        // `locals` from here on (every branch/loop this function's body
+        // contains) carries this forward automatically.
+        locals.set_track(self.probe_span.is_some());
         match sig {
             // The registry's FunctionSig already has PHPDoc types merged in
             // (Phase 2) - using it here, instead of re-deriving from the
@@ -1219,7 +1450,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    locals.insert(param.name.clone(), ty);
+                    locals.declare(param.name.clone(), ty, ast_param.name_span);
                 }
             }
             // Meant as a "shouldn't happen, but degrade rather than
@@ -1328,7 +1559,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    locals.insert(p.name.clone(), ty);
+                    locals.declare(p.name.clone(), ty, p.name_span);
                 }
             }
         }

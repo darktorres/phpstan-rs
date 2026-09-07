@@ -984,6 +984,14 @@ impl<'a> Checker<'a> {
                         "variable.undefined",
                     );
                 }
+                // Phase 17 follow-up: see `Checker::probe_var_provenance`'s
+                // own doc comment - the exact same "stash it when the span
+                // matches" pattern `probe_hit` already uses.
+                if self.probe_span == Some(e.span) {
+                    self.probe_var_provenance = locals
+                        .get_provenance(name)
+                        .map(|p| p.iter().copied().collect());
+                }
                 locals
                     .get(name)
                     .cloned()
@@ -1011,7 +1019,9 @@ impl<'a> Checker<'a> {
                         other => other.clone(),
                     };
                     purge_stale_narrowing_for(locals, name);
-                    locals.insert(name.clone(), updated);
+                    // Phase 17 follow-up: `$x++`/`$x--` is real, visible
+                    // rebinding syntax, the same category as `$x += 1`.
+                    locals.declare(name.clone(), updated, inner.span);
                 }
                 self.infer_expr(inner, locals)
             }
@@ -1205,7 +1215,9 @@ impl<'a> Checker<'a> {
                 if let ExprKind::Variable(name) = &lhs.kind {
                     let ty = self.infer_binary(op, lhs, rhs, locals);
                     purge_stale_narrowing_for(locals, name);
-                    locals.insert(name.clone(), ty);
+                    // Phase 17 follow-up: `$x += 1`/`$x ??= ...` is a
+                    // real rebind of `$x`.
+                    locals.declare(name.clone(), ty, lhs.span);
                 }
                 Type::Mixed
             }
@@ -2073,10 +2085,15 @@ impl<'a> Checker<'a> {
                 // is the one implicit exception: a non-static closure
                 // declared inside a method still auto-binds it, the same
                 // as real PHP.
-                let mut closure_locals: Locals = Locals::default();
+                let mut closure_locals: Locals = locals.fresh_scope();
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
-                    closure_locals.insert(u.name.clone(), ty);
+                    // Phase 17 follow-up: a captured variable's own real
+                    // declaration is wherever the *outer* scope already
+                    // says it is - copied across, not fabricated fresh at
+                    // this `use (...)` clause.
+                    let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
+                    closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
                 }
                 if !is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
@@ -2101,7 +2118,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    closure_locals.insert(p.name.clone(), ty);
+                    closure_locals.declare(p.name.clone(), ty, p.name_span);
                 }
                 let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
                 self.check_type_class_names_exist(
@@ -2188,7 +2205,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    arrow_locals.insert(p.name.clone(), ty);
+                    arrow_locals.declare(p.name.clone(), ty, p.name_span);
                 }
                 // Phase 70: an arrow function's own body is a single
                 // expression, not a `Vec<Stmt>` `body_contains_yield`
@@ -3856,9 +3873,16 @@ impl<'a> Checker<'a> {
 /// merge already lands B's new plain-variable defs in the outer node's
 /// real `locals` before the outer node clones it for `C`.
 fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
-    for (key, ty) in narrowed {
+    for (key, ty) in narrowed.iter() {
         if is_real_variable_key(key) && !locals.contains_key(key) {
-            locals.insert(key.clone(), ty.clone());
+            // Phase 17 follow-up: `key`'s own real declaration (a
+            // by-ref out-param, or a plain assignment) already recorded
+            // its true provenance inside `narrowed` when it happened -
+            // carried across unchanged here, not fabricated fresh at
+            // this merge point (which isn't itself where the variable
+            // was declared).
+            let provenance = narrowed.get_provenance(key).cloned().unwrap_or_default();
+            locals.insert_with_provenance(key.clone(), ty.clone(), provenance);
         }
     }
 }

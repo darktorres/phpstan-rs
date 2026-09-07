@@ -136,8 +136,15 @@ impl<'a> Checker<'a> {
             locals.insert(key, ty.clone());
         }
         match &lhs.kind {
+            // Phase 17 follow-up: the one real "this variable is now
+            // bound to a fresh value" site in this whole function - a
+            // plain assignment (`$x = ...`) or, recursing, each leaf of a
+            // list-destructuring target (`[$a, $b] = ...`) - `lhs.span`
+            // is already exactly the right span either way, since this
+            // recursion re-enters with `item.value` (each destructuring
+            // leaf's own real `Expr`, own real span) for the latter case.
             ExprKind::Variable(name) => {
-                locals.insert(name.clone(), ty);
+                locals.declare(name.clone(), ty, lhs.span);
             }
             ExprKind::ArrayLiteral(items) => match &ty {
                 // A known array shape (from a `@return array{0: int, 1:
@@ -281,7 +288,10 @@ impl<'a> Checker<'a> {
     pub(crate) fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut Locals) {
         if let ExprKind::Variable(name) = &target.kind {
             purge_stale_narrowing_for(locals, name);
-            locals.insert(name.clone(), ty);
+            // Phase 17 follow-up: real rebind - `target` is a `foreach`
+            // key's own bare `$var` expression (its only caller), a real
+            // declaration site.
+            locals.declare(name.clone(), ty, target.span);
         }
     }
 

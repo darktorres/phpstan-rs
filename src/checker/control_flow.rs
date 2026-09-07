@@ -245,11 +245,34 @@ impl<'a> Checker<'a> {
 /// variable present in both branches gets the union of its two types; one
 /// present in only one branch was introduced there and can't be assumed to
 /// exist afterward, so it's dropped rather than carried forward unsoundly.
+///
+/// Phase 17 follow-up: `provenance` is merged the same way `types` is -
+/// the *union* of both sides' known declaration spans for a name present
+/// in both, since either branch could be the one that actually ran. This
+/// is the one function every multi-way join in this checker already
+/// routes through (`Switch`'s own `exit_states` fold, `Try`'s own `end_
+/// states` fold, `converge_loop_body`'s own fixed-point loop) - fixing
+/// provenance-merging here once is what makes every one of those inherit
+/// real reaching-definitions precision, including this project's own
+/// already-correct termination-pruning (`always_terminates`) and break/
+/// continue handling (`loop_break_states`/`loop_continue_states`), with
+/// no further change needed at any of those call sites.
 pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
-    let mut merged = Locals::default();
-    for (name, then_ty) in then_locals {
+    let mut merged = then_locals.fresh_scope();
+    for (name, then_ty) in then_locals.iter() {
         if let Some(else_ty) = else_locals.get(name) {
-            merged.insert(name.clone(), union_types(then_ty.clone(), else_ty.clone()));
+            let mut provenance = then_locals
+                .get_provenance(name)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(else_provenance) = else_locals.get_provenance(name) {
+                provenance.extend(else_provenance.iter().copied());
+            }
+            merged.insert_with_provenance(
+                name.clone(),
+                union_types(then_ty.clone(), else_ty.clone()),
+                provenance,
+            );
         }
     }
     merged

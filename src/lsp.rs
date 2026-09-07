@@ -422,7 +422,9 @@ impl Server {
             // computed here (that would need its own probe, a further,
             // undisclosed-as-needed follow-up) - no hover text, but a
             // real, resolved position (`definition` still answers it).
-            navigation::Resolved::Variable(_) => None,
+            navigation::Resolved::VariableSelf(_) | navigation::Resolved::VariableRead { .. } => {
+                None
+            }
         }
     }
 
@@ -482,6 +484,33 @@ impl Server {
         checker.probe_hit
     }
 
+    /// Phase 17 follow-up: the local-variable-read counterpart of
+    /// `probe_receiver_type` above - same throwaway-`Checker`-per-request
+    /// mechanism, reading back `probe_var_provenance` instead of `probe_
+    /// hit`. See `Checker::probe_var_provenance`'s own doc comment
+    /// (`checker.rs`) for the full reaching-definitions design this reads
+    /// the result of. `None` when nothing was tracked for this read at
+    /// all (`Locals::track` was off - can't happen here, since this
+    /// method itself is what turns it on via `probe_span` - or the name
+    /// genuinely has no known declaration in scope, a real, if unusual,
+    /// possibility this project's own `variable.undefined` diagnostic
+    /// would already have flagged).
+    fn probe_variable_provenance(
+        &self,
+        span: Span,
+        function: &FunctionDecl,
+        is_static: bool,
+        class: Option<&str>,
+    ) -> Vec<Span> {
+        let mut checker = Checker::new(self.project.registry());
+        checker.probe_span = Some(span);
+        checker.check_function(function, class, is_static);
+        checker
+            .probe_var_provenance
+            .map(|set| set.into_iter().collect())
+            .unwrap_or_default()
+    }
+
     /// Phase 17 Stage A: the `navigation::Resolved` symbol's own
     /// declaration site, via `Project::decl_locations` - `None` when
     /// nothing resolved, or (a real, if rare, possibility) a symbol
@@ -492,22 +521,41 @@ impl Server {
         let path = uri_to_path(uri)?;
         let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
         // A local variable's own declaration site(s) are same-file and
-        // already real `Span`s - no registry/`decl_locations` lookup
-        // needed at all, unlike every other variant below. Usually one
-        // location; more than one exactly when the read is only reachable
-        // through mutually exclusive branches that assign it differently
-        // (see `navigation::Resolved::Variable`'s own doc comment) - the
-        // same `Array`-vs-`Scalar` choice the `Instance` arm below makes
-        // for a `Union`/`Intersection` receiver.
-        if let navigation::Resolved::Variable(spans) = &resolved {
-            let locs: Vec<Location> = spans.iter().map(|s| self.location(&path, *s)).collect();
-            return match locs.len() {
-                0 => None,
-                1 => Some(GotoDefinitionResponse::Scalar(
-                    locs.into_iter().next().unwrap(),
-                )),
-                _ => Some(GotoDefinitionResponse::Array(locs)),
-            };
+        // never need a `decl_locations` lookup at all, unlike every other
+        // variant below.
+        match &resolved {
+            // The click's own position already is the answer - no probe
+            // needed.
+            navigation::Resolved::VariableSelf(span) => {
+                return Some(GotoDefinitionResponse::Scalar(self.location(&path, *span)));
+            }
+            // Phase 17 follow-up: a real reaching-definitions probe -
+            // usually one location; more than one exactly when the read
+            // is only reachable through mutually exclusive branches that
+            // assign it differently (see `Resolved::VariableRead`'s own
+            // doc comment) - the same `Array`-vs-`Scalar` choice the
+            // `Instance` arm below makes for a `Union`/`Intersection`
+            // receiver.
+            navigation::Resolved::VariableRead {
+                span,
+                function,
+                is_static,
+                class,
+            } => {
+                let locs: Vec<Location> = self
+                    .probe_variable_provenance(*span, function, *is_static, class.as_deref())
+                    .into_iter()
+                    .map(|s| self.location(&path, s))
+                    .collect();
+                return match locs.len() {
+                    0 => None,
+                    1 => Some(GotoDefinitionResponse::Scalar(
+                        locs.into_iter().next().unwrap(),
+                    )),
+                    _ => Some(GotoDefinitionResponse::Array(locs)),
+                };
+            }
+            _ => {}
         }
         let locations = self.project.decl_locations();
         match &resolved {
@@ -567,7 +615,9 @@ impl Server {
                     _ => Some(GotoDefinitionResponse::Array(locs)),
                 }
             }
-            navigation::Resolved::Variable(_) => unreachable!("handled above"),
+            navigation::Resolved::VariableSelf(_) | navigation::Resolved::VariableRead { .. } => {
+                unreachable!("handled in the early match above")
+            }
         }
     }
 

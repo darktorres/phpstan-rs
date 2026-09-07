@@ -5,7 +5,7 @@
 /// against - string literals with em-dashes/curly quotes/accented
 /// characters), and a byte-offset column would silently overshoot the true
 /// character position on every such line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Position {
     pub line: u32,
     pub col: u32,
@@ -13,7 +13,11 @@ pub struct Position {
 
 /// A source range - real LSP `range`s and most compiler-style diagnostics
 /// want both a start and an end, not just a single anchor point.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// `Hash` (Phase 17 follow-up): `Locals`'s own declaration-provenance
+/// tracking uses a `Span` as a `HashSet` element, one entry per candidate
+/// declaration site for a variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub start: Position,
     pub end: Position,

@@ -939,7 +939,11 @@ impl<'a> Checker<'a> {
                             ),
                         };
                         purge_stale_narrowing_for(&mut catch_locals, var);
-                        catch_locals.insert(var.clone(), ty);
+                        // Phase 17 follow-up: real declaration - `var_span`
+                        // is always `Some` exactly when `var` is (the
+                        // parser sets both together), `c.span` is a
+                        // defensive fallback only.
+                        catch_locals.declare(var.clone(), ty, c.var_span.unwrap_or(c.span));
                     }
                     self.check_block(&c.body, &mut catch_locals, declared_return, label);
                     let catch_terminates = c
@@ -1043,7 +1047,20 @@ impl<'a> Checker<'a> {
                         );
                         continue;
                     }
-                    locals.entry(name.clone()).or_insert(Type::Mixed);
+                    // Phase 17 follow-up: real, lexically-visible binding
+                    // syntax - a `global $x;` declares `$x` here, even
+                    // though this checker deliberately doesn't try to
+                    // link it back to any specific top-level assignment
+                    // (see this arm's own doc comment above) - `stmt.span`
+                    // is as precise an answer as the type side already
+                    // gives (`Mixed`, not a real inferred type either).
+                    // `or_insert`'s own "only if not already bound"
+                    // semantics carry over: `.declare` unconditionally
+                    // overwrites, so it's only called when there's
+                    // nothing here yet to overwrite.
+                    if !locals.contains_key(name) {
+                        locals.declare(name.clone(), Type::Mixed, stmt.span);
+                    }
                 }
             }
             StmtKind::StaticVar(vars) => {
@@ -1066,7 +1083,10 @@ impl<'a> Checker<'a> {
                         .map(|e| self.check_expr(e, locals, label))
                         .unwrap_or(Type::Mixed);
                     purge_stale_narrowing_for(locals, name);
-                    locals.insert(name.clone(), ty);
+                    // Phase 17 follow-up: real declaration - no per-name
+                    // span exists on `StaticVar` (only the whole
+                    // statement's), same as `Global` just above.
+                    locals.declare(name.clone(), ty, stmt.span);
                     self.static_var_names.insert(name.clone());
                 }
             }
