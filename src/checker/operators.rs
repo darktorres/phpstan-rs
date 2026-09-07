@@ -79,10 +79,20 @@ impl<'a> Checker<'a> {
     /// Phase 81: whether `ty` is (or, inside a `Union`, could be) a real
     /// instance of `class` - `is_subclass_of`'s own reflexive "a class is
     /// always its own subclass" covers the exact-name case too.
+    ///
+    /// Real gap found and fixed this session (part of a broader sweep for
+    /// this project's own `Union`/`Intersection` anti-pattern): `Type::
+    /// Intersection` wasn't handled here at all - unlike `Union` ("could
+    /// be this member"), an `Intersection` value genuinely *is* every
+    /// member simultaneously, so it's just as true an instance of `class`
+    /// the moment any one member confirms it (the same "any" shape, for a
+    /// different reason).
     fn type_is_instance_of(&self, ty: &Type, class: &str) -> bool {
         match ty {
             Type::Object(name, _) => self.registry.is_subclass_of(name, class),
-            Type::Union(members) => members.iter().any(|m| self.type_is_instance_of(m, class)),
+            Type::Union(members) | Type::Intersection(members) => {
+                members.iter().any(|m| self.type_is_instance_of(m, class))
+            }
             _ => false,
         }
     }
@@ -108,7 +118,9 @@ impl<'a> Checker<'a> {
                 is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
             }
             Type::Object(name, _) => self.registry.is_subclass_of(name, class),
-            Type::Union(members) => members
+            // Same real gap and fix as `type_is_instance_of` just above -
+            // `Type::Intersection` needs the identical "any member" check.
+            Type::Union(members) | Type::Intersection(members) => members
                 .iter()
                 .any(|m| self.is_valid_overload_operand(m, class)),
             _ => false,
@@ -515,7 +527,18 @@ fn is_object_or_null(ty: &Type) -> bool {
     match ty {
         Type::Null => true,
         Type::Object(name, _) => name != "resource",
+        // A `Union` is *definitely* object-or-null only when every
+        // member is (any other member could be the runtime value
+        // instead); an `Intersection` value genuinely is every member at
+        // once, so *any single* member proving it is object-shaped is
+        // enough - the opposite quantifier from `Union`, not the same
+        // "any member" shape `type_is_instance_of`/
+        // `is_valid_overload_operand` just above needed. Real gap found
+        // and fixed this session (part of a broader sweep for this
+        // project's own `Union`/`Intersection` anti-pattern):
+        // `Intersection` wasn't handled here at all.
         Type::Union(members) => members.iter().all(is_object_or_null),
+        Type::Intersection(members) => members.iter().any(is_object_or_null),
         _ => false,
     }
 }
@@ -529,6 +552,14 @@ fn is_array_or_null(ty: &Type) -> bool {
         Type::Null => true,
         Type::Array(..) | Type::ArrayShape(_) => true,
         Type::Union(members) => members.iter().all(is_array_or_null),
+        // Real gap found and fixed this session: a real, common shape
+        // (`list<T>`/`non-empty-array<T>`, both `Intersection([Array(_),
+        // Accessory(_)])` - Phase 14) fell to the `_ => false` catch-all
+        // below entirely, meaning `$list < 5`-style comparisons against a
+        // `list<T>`-typed value were never flagged - the identical
+        // "any member proves it" reasoning `is_object_or_null` just above
+        // now uses.
+        Type::Intersection(members) => members.iter().any(is_array_or_null),
         _ => false,
     }
 }

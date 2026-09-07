@@ -816,6 +816,84 @@ fn instanceof_against_an_unrelated_interface_also_narrows_to_the_new_interface()
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real bug found and fixed this session, and the highest-impact instance
+// of this project's own Union/Intersection anti-pattern found so far:
+// the `MethodCall` case just above only ever exercises `check_expr`'s
+// own separate MethodCall arm (diagnostics/narrowing purposes) - a
+// *different*, parallel implementation in `infer_expr` (the core type-
+// *inference* path, used whenever a method call's own return type needs
+// computing without also running full diagnostics) had the identical
+// `Object`/`EnumCase`-only match with no `Union`/`Intersection` case,
+// silently collapsing the whole call's return type to `Type::Mixed`.
+#[test]
+fn a_method_call_on_an_intersection_receiver_infers_its_real_return_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            interface View {}
+            class HasValue { public function value(): int { return 1; } }
+            function f(View $view): void {
+                if ($view instanceof HasValue) {
+                    assertType('int', $view->value());
+                    $x = $view->value() + 1;
+                    assertType('int', $x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Real bug found and fixed this session, discovered via a real corpus
+// false positive `method_call_return_type`'s own Intersection fix
+// (immediately above) newly made reachable: `narrow_instanceof_true`
+// always builds `Intersection([original_type, target_type])` - the
+// broader, pre-existing type first, the just-`instanceof`-checked,
+// narrower type last. Searching members in that same (forward) order
+// meant a same-named method declared on *both* the broader original
+// type and the narrower target resolved to the broader type's own
+// (possibly less precise) signature first - real corpus shape:
+// `Rector\Php54\...\RemoveZeroBreakContinueRector`'s own `$staticType
+// instanceof ConstantIntegerType`, where a shared `PHPStan\Type\Type`-
+// family method the narrower type itself overrides more precisely was
+// found on the broader interface first, producing a bogus argument-type
+// mismatch. Fixed by searching `Intersection` members in reverse - the
+// narrower, just-checked type is always last, so it's now checked first.
+#[test]
+fn a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own_override() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            interface View { public function value(): int|string; }
+            class HasValue { public function value(): int { return 1; } }
+            function f(View $view): void {
+                if ($view instanceof HasValue) {
+                    assertType('int', $view->value());
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Same refinement as the property-read test below: a `Union`-typed
+// method call unions every resolving member's own return type together,
+// rather than just using whichever member happened to come first.
+#[test]
+fn a_method_call_on_a_union_of_two_classes_unions_their_return_types() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class ReturnsInt { public function get(): int { return 1; } }
+            class ReturnsString { public function get(): string { return "x"; } }
+            function f(ReturnsInt|ReturnsString $v): void {
+                assertType('int|string', $v->get());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Real bug found and fixed this session: `check_expr`'s/`infer_expr`'s
 // own `PropertyAccess` arms matched `Object`/`EnumCase`/`ObjectShape`
 // directly with no `Union`/`Intersection` arm at all, so a *property*
@@ -842,6 +920,27 @@ fn instanceof_against_an_unrelated_class_also_resolves_a_property_on_the_interse
                 if ($view instanceof ClassMethod) {
                     assertType('array', $view->stmts);
                 }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Real refinement made this session: a `Union`-typed property access
+// used the same "first member found wins" shortcut correct for an
+// `Intersection`, but wrong for a `Union` - the value is only ever *one*
+// of `A`/`B` at a time, so two members declaring the property with
+// different types genuinely means the read's own type is the union of
+// both, not just whichever member happened to come first.
+#[test]
+fn a_property_read_through_a_union_of_two_classes_unions_their_declared_types() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class HasIntFlag { public int $flag = 1; }
+            class HasStringFlag { public string $flag = "x"; }
+            function f(HasIntFlag|HasStringFlag $v): void {
+                assertType('int|string', $v->flag);
             }
         "#,
     );

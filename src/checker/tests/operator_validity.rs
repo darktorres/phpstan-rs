@@ -351,6 +351,26 @@ fn comparing_an_int_to_a_possibly_null_object_is_flagged() {
     assert_eq!(d[0].identifier, "greater.invalid");
 }
 
+// Real gap found and fixed this session: `is_array_or_null` matched
+// `Type::Array`/`Type::ArrayShape` directly with no `Type::Intersection`
+// case, so a `list<T>`/`non-empty-array<T>`-typed value (both represented
+// as `Intersection([Array(_), Accessory(_)])`, Phase 14) fell to the
+// permissive `_ => false` catch-all - meaning comparing a real `list<T>`
+// against a number was never flagged, unlike a plain `array`.
+#[test]
+fn comparing_an_int_to_a_possibly_null_list_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int>|null $xs */
+            function test(int $i, ?array $xs): void {
+                $i < $xs;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "smaller.invalid");
+}
+
 #[test]
 fn comparing_two_ints_is_never_flagged() {
     let d = diagnostics_for(

@@ -42,7 +42,18 @@ impl<'a> Checker<'a> {
                 Some(Type::Int)
             }
             Type::Object(..) => None,
-            Type::Union(members) => union_coercion(members, |m| self.type_to_integer(m)),
+            // Real gap found and fixed this session (part of a broader
+            // sweep for this project's own `Union`/`Intersection` anti-
+            // pattern): `Type::Intersection` fell to the permissive `_ =>
+            // Some(Type::Int)` catch-all below, meaning `(int) $x` on an
+            // intersection of two genuinely non-castable objects (e.g.
+            // `Countable&ArrayAccess`) was never flagged - `union_coercion`
+            // already tries each member and unions whichever are legal,
+            // the identical reasoning applies here (if any member offers
+            // a legal cast path, the real value trivially supports it).
+            Type::Union(members) | Type::Intersection(members) => {
+                union_coercion(members, |m| self.type_to_integer(m))
+            }
             _ => Some(Type::Int),
         }
     }
@@ -60,7 +71,10 @@ impl<'a> Checker<'a> {
                 Some(Type::Float)
             }
             Type::Object(..) => None,
-            Type::Union(members) => union_coercion(members, |m| self.type_to_float(m)),
+            // Same real gap and fix as `type_to_integer` just above.
+            Type::Union(members) | Type::Intersection(members) => {
+                union_coercion(members, |m| self.type_to_float(m))
+            }
             _ => Some(Type::Float),
         }
     }
@@ -105,6 +119,11 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Union(members) => union_coercion(members, |m| self.type_to_string(m)),
+            // Same real gap and fix as `type_to_integer`/`type_to_float`
+            // above, for a non-array-shaped intersection specifically -
+            // the array-shaped case is already handled by its own arm
+            // above, matched first.
+            Type::Intersection(members) => union_coercion(members, |m| self.type_to_string(m)),
             _ => Some(Type::String),
         }
     }

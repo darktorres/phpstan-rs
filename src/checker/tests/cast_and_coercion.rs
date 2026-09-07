@@ -66,6 +66,31 @@ fn casting_a_plain_object_with_no_tostring_to_int_is_flagged() {
     assert_eq!(d[0].identifier, "cast.int");
 }
 
+// Real gap found and fixed this session: `type_to_integer` matched
+// `Type::Object` directly, with a bare `Type::Union` case but no
+// `Type::Intersection` one - falling to the permissive `_ =>
+// Some(Type::Int)` catch-all meant `(int) $x` on an intersection of two
+// non-castable objects (a real, common shape: `narrow_instanceof_true`'s
+// own deliberate design intersects an unrelated-looking `instanceof`
+// target with the original type) was never flagged.
+#[test]
+fn casting_an_intersection_of_two_non_castable_objects_to_int_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface View {}
+            class Foo {}
+            function test(View $view): int {
+                if ($view instanceof Foo) {
+                    return (int) $view;
+                }
+                return 0;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "cast.int");
+}
+
 #[test]
 fn casting_an_array_to_int_or_float_is_not_flagged() {
     // Real PHP allows this (0 or 1, depending on emptiness) - only
