@@ -27,13 +27,13 @@ methodology behind every corpus number cited above.
 - Piwigo frozen-corpus diagnostic count (`phpstan-rs.toml`-scoped,
   `/home/torres/piwigo17-frozen`) - the primary false-positive-hunt
   metric - has fallen from 2312 (start of the Piwigo-corpus hunts) to
-  **94** (current). A confirmed real corpus, not PHPStan-clean by luck:
+  **90** (current). A confirmed real corpus, not PHPStan-clean by luck:
   a real checkout of the same Piwigo revision is independently verified
   clean under actual PHPStan at level 10.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
-  32,427 diagnostics. Re-run before citing - it drifts as vendored
+  32,498 diagnostics. Re-run before citing - it drifts as vendored
   dependencies change and isn't re-measured every round.
-- Test suite: 2011+ unit tests, all passing.
+- Test suite: 2023+ unit tests, all passing.
 
 ---
 
@@ -128,7 +128,22 @@ body-mutated `$val` forward wrongly widened it, when real PHP rebinds
 touched. Also fixed as a direct prerequisite, found via this same
 verification: a fully-qualified `\assert(\is_string($x))` wasn't
 recognized as a narrowing statement at all (only bare `assert(...)` was)
-- confirmed by amphp/http-client's `FollowRedirects::removeDotSegments`.
+- confirmed by amphp/http-client's `FollowRedirects::removeDotSegments`;
+`always_terminates`'s own `Block` arm (and `check_function`'s identical,
+separate copy for a function's top-level body) only ever looked at a
+block's *last* statement to decide whether it always terminates, so a
+block ending in dead code after a real terminator wasn't recognized as
+terminating at all - now `.any()` over every statement, not just
+`.last()`. A `continue`-reached state (`loop_continue_states`, the
+`continue` counterpart of the pre-existing `loop_break_states`) now
+feeds into the *next* convergence pass alongside the body's own ordinary
+fall-through exit - without it, a variable reassigned *only* on a path
+ending in `continue` (a real, common shape: `if ($x === null) { ...; $x
+= compute(); continue; }`) never looked reassignable at all, silently
+"converging" after a single pass against the stale entry - reintroducing
+the exact false-positive class Phase 15 was reverted over in the first
+place (real corpus finds: sebastian/diff's `Parser::parse`, Piwigo's own
+`tools/openapi-generate-input-dto.php`).
 
 ## Rule catalog (checker)
 
@@ -207,6 +222,12 @@ table, `date()`/`idate()`/`pathinfo()`/`parse_url()`/`sscanf()`/`stat()`
 family, `get_called_class`/`get_parent_class`/`gettype`/`get_debug_type`)
 - see Pending for what's still bespoke-per-function and unbuilt.
 `DateInterval::__construct()`'s own duration-string grammar validation.
+`UnreachableStatementRule` (`deadCode.unreachable`, level 4) - reported
+once per maximal unreachable run, at its first statement, without
+skipping analysis of the rest (real PHPStan still fully analyzes code
+after an unreachable point for every other rule, and this project's own
+corpus verification confirmed why: stopping early silently dropped real,
+unrelated diagnostics that happened to sit in a since-dead branch).
 
 ## Performance & tooling
 
@@ -232,16 +253,28 @@ Each entry: what's missing, and the root cause blocking it where one's
 known. Numbered by the original phase for cross-reference; the number
 is not a priority order.
 
-**15 - Unreachable-code / constant-condition rule catalog (PLANNED).**
-`always_terminates()` already exists for narrowing merges but nothing
-surfaces a diagnostic from it (`UnreachableStatementRule`); no
-constant-boolean-condition detection (`if (true)`, `while(true)`-no-
-break, etc., ~13 real PHPStan rules); no match/switch dead-arm/
-exhaustiveness checking; no impossible-`instanceof`/redundant-
-`is_string()`-etc. detection. Both of the first two were built and
-corpus-verified, then reverted - see **Reverted**, blocked on Phase 55.
-`continue N`'s own level argument is parsed but never consulted, and
-`goto`/label CFG edges are unmodeled - neither owned by any phase.
+**15 - Unreachable-code / constant-condition rule catalog (PARTIAL).**
+`UnreachableStatementRule` (`deadCode.unreachable`) is done (see Done) -
+Phase 55's fixed-point convergence removed its blocker. The constant-
+boolean-condition family (`if (true)`, `while(true)`-no-break, etc., ~13
+real PHPStan rules) stays reverted (see **Reverted**) for a more precise
+reason than originally recorded: its own original design trusts *any*
+condition whose inferred type happens to be exactly `Type::True`/
+`Type::False`, which is fragile against imprecision anywhere in the type
+system, not just loop staleness - `widen_coalesce_result`'s own `$x =
+$expr ?? false;` collapsing to the bare literal `false` whenever
+`$expr`'s type isn't confidently known is a second, independent,
+still-open source of exactly that (see Phase 55's own comparison-outcome/
+range-API item, not fixed by this batch's loop-convergence work). Real
+fix needs either resolving that gap too, or narrowing the check's own
+scope to syntactically-literal conditions (`if (true)`) rather than any
+inferred-True/False expression - a real design decision, not a quick
+follow-on. No match/switch dead-arm/exhaustiveness checking; no
+impossible-`instanceof`/redundant-`is_string()`-etc. detection.
+`continue N`'s own level argument is parsed but never consulted for
+*narrowing* purposes (Phase 55's own `loop_continue_states` now consults
+it for convergence), and `goto`/label CFG edges are unmodeled - neither
+owned by any phase.
 
 **17 - LSP hover/go-to-definition (PLANNED).** Needs a position-keyed
 lookup index; today's `Registry`/`Project` lookups are all name-keyed.
@@ -630,15 +663,19 @@ root cause is on hand if this is ever revisited, and so a future
 [[feedback_dont_discard_correct_checks_ship_opt_in]]'s own distinction
 before defaulting to another full revert.
 
-- **`UnreachableStatementRule` + constant-boolean-condition family**
-  (Phase 15). A real, demonstrated soundness bug, not a corpus-
-  representativeness call: this checker has no fixed-point loop
-  analysis, so a variable reassigned inside a loop body keeps its
-  pre-loop type for the whole check, which both diagnostics
+- **Constant-boolean-condition family** (Phase 15; `UnreachableStatementRule`
+  itself has since been reinstated, see Done/Pending). A real, demonstrated
+  soundness bug, not a corpus-representativeness call: this checker had no
+  fixed-point loop analysis, so a variable reassigned inside a loop body
+  kept its pre-loop type for the whole check, which both diagnostics
   misinterpreted as "always terminates"/"always true or false" on
   extremely common idioms (a loop-scoped flag variable, a deferred
-  reassignment). ~900 unverifiable false positives. Real fix belongs to
-  Phase 55's own tracked narrowing-engine generalization.
+  reassignment). ~900 unverifiable false positives. `UnreachableStatementRule`'s
+  own share of that is fixed by Phase 55's fixed-point convergence
+  (`converge_loop_body` plus `loop_continue_states`, see Done) - reinstated
+  and corpus-clean. The constant-condition family's own remaining blocker
+  is more precise than "loop staleness" alone; see Phase 15's own Pending
+  entry for why it stays reverted.
 - **`InvalidKeyInArrayDimFetchRule`** (Phase 50). Also a real soundness
   bug: a *used* (not merely declared) generic template parameter's own
   type leaks through as a bogus namespace-qualified class reference
