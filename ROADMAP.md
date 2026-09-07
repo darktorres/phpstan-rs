@@ -33,7 +33,7 @@ methodology behind every corpus number cited above.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   32,498 diagnostics. Re-run before citing - it drifts as vendored
   dependencies change and isn't re-measured every round.
-- Test suite: 2072+ unit tests, all passing.
+- Test suite: 2078+ unit tests, all passing.
 
 ---
 
@@ -391,6 +391,35 @@ plan disclosed as out of scope):
     full (`vendor/`-included) corpus is byte-identical - `Locals::track`
     defaults to `false` everywhere except the one throwaway, per-request
     `Checker` an LSP variable-navigation probe builds.
+- Two more follow-ups closed the last real gaps this design still had:
+  - **Top-level script-scope support**: `lsp::navigation::Resolved::
+    Instance`/`VariableRead` gained a `ProbeScope` (`Function(Box<
+    FunctionDecl>)` or `TopLevel(Vec<Stmt>)`, replacing the plain
+    `function: Box<FunctionDecl>` field both used to carry) - a receiver/
+    read at top-level script scope (no enclosing named function at all)
+    now re-checks the whole file's own top-level statements via `Checker::
+    check_program` instead of `check_function`, the real entry point
+    `check-project` itself already uses there. `check_program`'s own
+    `top_locals` needed the identical one-line `set_track` wiring `check_
+    function` already had.
+  - **Auto-vivification**: a by-ref call argument, an array index-write
+    (`$x['key'] = 1;`), or `preg_match`'s own `$matches` out-parameter is
+    real PHP's own well-known "this variable is silently created here if
+    it didn't already exist" behavior (already documented and relied on
+    elsewhere in this checker, e.g. `bind_assignment_target`'s own
+    existing comment on array auto-vivification) - when the target name
+    is genuinely undefined beforehand, these three call-effected sites
+    now `declare` (real, useful provenance: the call/write site itself,
+    since there's nothing truer to point to) instead of leaving
+    provenance untouched (which would mean *no* provenance, since there
+    was never anything there to leave). When the name *already* has a
+    real declaration, they still leave it alone exactly as before - a
+    real corpus example construct (`f($items)` widening an already-`$items
+    = []`-declared array by reference) keeps resolving to its own actual
+    declaration, not the incidental call site, confirmed by a dedicated
+    regression test.
+  - Same verification bar as the first round: full checker test suite and
+    a before/after `check-project` diff on both corpora, byte-identical.
 
 ---
 
@@ -423,35 +452,38 @@ impossible-`instanceof`/redundant-`is_string()`-etc. detection.
 it for convergence), and `goto`/label CFG edges are unmodeled - neither
 owned by any phase.
 
-**17 - LSP hover/go-to-definition (PARTIAL).** Both stages plus three
+**17 - LSP hover/go-to-definition (PARTIAL).** Both stages plus five
 follow-ups are done (see Done): every name reference resolvable without
 receiver-type inference; an instance receiver's own type (`$x->method()`/
-`$x->prop`, including inside a closure/arrow-fn body); a `Union`/
-`Intersection` receiver resolving to every declaring class; and local-
-variable-declaration navigation, now backed by real, checker-driven
+`$x->prop`, including inside a closure/arrow-fn body, and now at
+top-level script scope too via `ProbeScope::TopLevel`/`check_program`); a
+`Union`/`Intersection` receiver resolving to every declaring class; and
+local-variable-declaration navigation, backed by real, checker-driven
 reaching-definitions (not a hand-rolled approximation of it) - an
 ambiguous read across mutually exclusive `if`/`switch`/`try` arms or a
 `while`/`for` loop offers every real candidate as a `GotoDefinitionResponse
 ::Array`; a guard clause correctly excludes a branch that always
 `return`s/`throw`s from ever becoming a candidate; `break`/`continue` are
-handled precisely (`loop_break_states`/`loop_continue_states`); a
-`foreach` correctly does *not* offer its own pre-loop value as an
-alternative (matching Phase 29's own corpus-verified checker design);
-list-destructuring targets are tracked; `global $x;` resolves to the
-`global` statement itself (a deliberate, principled boundary - see Done -
-not a gap). What's left is genuinely narrow: a top-level script-scope
-read isn't supported (no enclosing named function/method to build a
-probe from - the same boundary `Instance` already has). Only *lexically
-visible* binding syntax updates provenance (an assignment, a parameter, a
-`foreach`/`catch`/`static`/`global` binding, `$x++`/`$x--`/`$x += 1`) -
-deliberately, not a call's own *effect* on a variable's type (a by-ref
-call argument, `preg_match`'s own `$matches` out-parameter, `$arr['k'] =
-v`'s own array-shape mutation): a read after one of those still resolves
-to wherever the variable was *really* declared, not the incidental call
-site, by design, not oversight (see `Locals::insert`'s own doc comment in
-`checker.rs`). A `Closure`'s own `use (&$x)`/`use ($x)` capture resolves
-only when the outer scope already has tracked provenance for that name at
-the closure literal's own point in the file.
+handled precisely; a `foreach` correctly does *not* offer its own
+pre-loop value as an alternative (matching Phase 29's own corpus-verified
+checker design); list-destructuring targets are tracked; `global $x;`
+resolves to the `global` statement itself (a deliberate, principled
+boundary, not a gap); and a genuinely first-appearance by-ref call
+argument/`preg_match` `$matches`/array auto-vivification write resolves
+to that real site, while one that widens an already-declared variable
+still resolves to its own true declaration. What's left is genuinely
+narrow, both disclosed and deliberate rather than unattempted: a
+`Closure`'s own `use (&$x)`/`use ($x)` capture resolves only when the
+outer scope already has tracked provenance for that name at the closure
+literal's own point in the file (garbage in, garbage out - nothing to
+copy across when there's nothing there). Only *lexically visible* binding
+syntax and the three now-handled auto-vivification shapes update
+provenance - an ordinary call's own incidental effect on an *already-
+declared* variable's type (`sort($arr)`, `array_push($arr, ...)`, a
+by-ref widen of a pre-existing variable) never does, on purpose: a read
+afterward should resolve to wherever the variable was *really* declared,
+not every call that happened to touch it since (see `Locals::insert`'s
+own doc comment in `checker.rs`).
 
 **18 - Extension/plugin API (PLANNED).** Deliberately last - premature
 before the rule/type-extension catalog is rich enough for a third party
