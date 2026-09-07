@@ -109,6 +109,27 @@ merges into the post-loop scope; a `finally` block's own unconditional
 exit point correctly overwrites the try/catch side's, matching a
 well-known PHP gotcha.
 
+Phase 55: fixed-point loop-body convergence (`Checker::
+converge_loop_body`, mirroring real PHPStan's own bounded
+`LOOP_SCOPE_ITERATIONS`). `While`/`DoWhile`/`For`/`Foreach` bodies are
+checked against a candidate entry state, then re-checked with that entry
+unioned against the previous pass's exit whenever the two differ,
+capped at 3 total passes; every pass but the one finally kept has its
+diagnostics discarded. Fixes a variable reassigned inside a loop body
+being stuck at its pre-loop type for the whole check - the real root
+cause behind Phase 15's reverted `UnreachableStatementRule`/constant-
+condition family (see Reverted). `Foreach`'s key/value binding is
+re-applied fresh at the start of every pass rather than carried over -
+required for a by-reference loop variable (`foreach (... as &$v)`)
+specifically, confirmed by a real corpus false positive
+(`QNumericRangeScope::parse`) where carrying a previous pass's
+body-mutated `$val` forward wrongly widened it, when real PHP rebinds
+`&$val` to a *different* array slot each iteration that pass never
+touched. Also fixed as a direct prerequisite, found via this same
+verification: a fully-qualified `\assert(\is_string($x))` wasn't
+recognized as a narrowing statement at all (only bare `assert(...)` was)
+- confirmed by amphp/http-client's `FollowRedirects::removeDotSegments`.
+
 ## Rule catalog (checker)
 
 Symbol existence (classes/functions/use-imports/typehints, catch
@@ -377,22 +398,31 @@ as one variant). Size: XL, genuine algorithmic rewrite. Blocks Phase
 50's reverted `InvalidKeyInArrayDimFetchRule` reattempt.
 
 **55 - Narrowing-engine generalization, remaining (PARTIAL).** `count()`
-truthiness, `array_is_list`, `str_contains`-family, and a real
-`instanceof`-intersection bug are fixed (see Done). Still missing: a
-comparison-outcome/range API for `<`/`>`/`<=`/`>=` generally (only the
-`count()` special case exists - cross-check against Phase 51's own
-`IntegerRangeType` work before building, so the two don't each reinvent
-range arithmetic); a loose `==`/`!=` truth table between differing
-scalar kinds; a subtracted/negated-type (`T&~U`) representation (so
-`!$x instanceof Foo` on a non-union type is dropped instead of
-recorded); a bare `assert(...)` used as a sub-expression rather than a
-top-level statement. `is_a()`/`class_exists()`-family narrowing were
-evaluated and declined (near-zero corpus incidence, or - for
-`class_exists()` specifically - an unobservable no-op given how this
-project already represents a bare `class-string`). This is the
-prerequisite for Phase 15's own reverted diagnostics; real-world value
-is high once tackled (redundant/impossible checks left over from
-refactors are a common, high-signal finding class).
+truthiness, `array_is_list`, `str_contains`-family, a real
+`instanceof`-intersection bug, and - this batch - fixed-point loop-body
+convergence are fixed (see Done). Still missing: a comparison-outcome/
+range API for `<`/`>`/`<=`/`>=` generally (only the `count()` special case
+exists - cross-check against Phase 51's own `IntegerRangeType` work
+before building, so the two don't each reinvent range arithmetic); a
+loose `==`/`!=` truth table between differing scalar kinds; a
+subtracted/negated-type (`T&~U`) representation (so `!$x instanceof Foo`
+on a non-union type is dropped instead of recorded - confirmed still
+live by this batch's own full-corpus verification, e.g. Latte's
+`CachingIterator::__construct`'s `do { $iterator =
+$iterator->getIterator(); } while (!$iterator instanceof \Iterator);`,
+where the missing negation means the loop's own exit-narrowing can't
+strip `Iterator` back out of the converged type); a bare `assert(...)`
+used as a sub-expression rather than a top-level statement; arithmetic on
+an `IntRange` operand doesn't preserve the range (`IntRange(0,max) + 1`
+widens to plain `Int` instead of staying a range) - newly found by this
+batch's full-corpus convergence verification (php-standard-library's
+`TemplateParser::parse`/`decode()`, both `strpos()`-offset-plus-length
+idioms), not fixed here to keep this batch scoped to loop convergence
+itself. `is_a()`/`class_exists()`-family narrowing were evaluated and
+declined (near-zero corpus incidence, or - for `class_exists()`
+specifically - an unobservable no-op given how this project already
+represents a bare `class-string`). Was the prerequisite for Phase 15's
+own reverted diagnostics - now unblocked, see Done.
 
 **56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
 a lenient regex tokenizer that silently drops what it doesn't recognize,
