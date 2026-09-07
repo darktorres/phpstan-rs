@@ -311,16 +311,72 @@ or`'s left-side check was evaluated against the caller's already-left-
 narrowed scope, making a bare-variable left operand look constantly true
 by pure circularity (`Piwigo\Controller\Admin\ConfigurationSubController
 ::processSizes`) - fixed by narrowing internally, only for the right/
-whole checks, never the left one.
+whole checks, never the left one; (5) `is_first_level` only ever
+consulted `in_condition_position` (an if/while/ternary's own direct
+condition), missing real PHPStan's *other* `isInFirstLevelStatement()`
+case - a bare `&&`/`||` used directly as its own statement
+(`ExpressionContext::createTopLevel()`, confirmed against `ExpressionHandler
+::processStmt`) - fixed by also consulting the pre-existing `in_bare_
+statement_position` flag (`Piwigo\Url\UrlService::makeSectionInUrl`'s
+`isset($x) or trigger_error(...);`, whose own stub return type is exactly
+`true`).
+
+Two further real bugs found and fixed while individually reviewing every
+line of the initial corpus diff (not just disclosing them as residual
+imprecision): (6) `infer_binary`'s `Add`/`Sub` arms collapsed straight to
+bare `Int` for any `int<min,max>`-typed operand, discarding the range
+entirely - `strpos()`'s own `$offset` parameter (typed `int<0, max>`)
+lost its refinement the moment it was reassigned via `$offset = $pos +
+1;` inside a loop, a false positive only visible once fix (2) above made
+`strpos()`'s own later, real re-check of `$offset` reachable at all
+(`Tools\p58\assign.php`). Fixed with real, narrow `int<min,max>`
+arithmetic (confirmed directly against `vendor/phpstan-src`'s own
+`InitializerExprTypeResolver::integerRangeMath`) - deliberately not the
+full range-arithmetic surface (`Mul`/`Div`'s own negative/positive-
+interval splitting isn't replicated, and `Sub` only handles a constant
+right operand), see Pending. (7) A much larger, previously-unsuspected
+gap: `check_expr`'s and `infer_expr`'s own `PropertyAccess` arms matched
+`Object`/`EnumCase`/`ObjectShape` directly with no `Union`/`Intersection`
+arm at all, silently collapsing to `Type::Mixed` whenever a property's
+own receiver type was a `Union`/`Intersection` - a real, common shape
+this project's *own* `narrow_instanceof_true` deliberately produces for
+an "unrelated sibling" `instanceof` check (see that function's own doc
+comment), and just as common as an ordinary `A|B`-typed parameter.
+Factored the existing `Object`/`EnumCase`/`ObjectShape` logic (previously
+duplicated near-verbatim between the two arms) into one shared
+`property_access_type` method that also recurses through `Union`/
+`Intersection` members - the identical "try each member, keep the first
+real match" idea `MethodCall`'s own receiver-class extraction already
+uses a few lines above it. Real corpus false positive this fixes:
+`PhpParser\Node\Stmt\ClassMethod::$stmts` (a real, docblock-typed
+`Node\Stmt[]|null` property) resolving to bare `Mixed` the moment its
+receiver was narrowed via `instanceof` from the `PhpParser\Node`
+interface - confirmed via direct debugging (not guessed) that PhpParser's
+own AST routes every concrete node type through an interface this way,
+not a common base *class*, so `narrow_instanceof_true`'s non-hierarchy-
+aware `is_subtype` check (deliberate - see its own doc comment) can never
+recognize the relationship and always falls to building a real
+`Intersection`. This fix has real reach beyond the one corpus line that
+surfaced it: any property access on a `narrow_instanceof_true`-produced
+intersection, or on an ordinarily union-typed value, was silently
+returning `Mixed` project-wide - confirmed via the full vendor-included
+corpus diff, which picked up a batch of genuine, previously-silently-
+discarded `property.notFound`/`method.notFound` findings once their own
+receiver's real type was finally computed instead of `Mixed` (`member_
+confirmed_missing`, the pre-existing diagnostic-deciding logic, already
+had correct `Union`/`Intersection` semantics - it just never had a real
+type to work with before).
 
 Confirmed against the real Piwigo corpus (both the app-only scope and
 the full vendor-included one) after every fix above: zero remaining
 false positives traced to this family's own new checks - the only
 surviving diff lines are `widen_coalesce_result`'s own genuine, expected
-precision ripples (reviewed individually) and real, correct findings
-(including in vendor/example code, where a docblock-declared literal
-param type like `@param false $x` makes `if ($x)` genuinely always-false,
-confirmed against `vendor/jetbrains/phpstorm-stubs`).
+precision ripples (reviewed individually), real, correct findings newly
+unlocked by fix (7) above, and real, correct findings unrelated to any
+of this session's own changes (including in vendor/example code, where a
+docblock-declared literal param type like `@param false $x` makes
+`if ($x)` genuinely always-false, confirmed against `vendor/jetbrains/
+phpstorm-stubs`).
 
 ## Performance & tooling
 
@@ -532,9 +588,12 @@ real, freshly-verified technical reason (not proportionality):
 inferred type happens to be a constant boolean) - confirmed directly that
 `infer_binary`'s own comparison arm unconditionally returns bare
 `Type::Bool`; genuinely nothing to catch until this project builds real
-comparison-outcome/range type inference (Phase 55's own separate, larger
-item - not the same thing `widen_coalesce_result`'s bug was, that's now
-fixed and unblocked). `FunctionCallConstantConditionRule`'s own cross-
+comparison-outcome type inference (real PHPStan's own `Type::isSmallerThan`/
+`isSmallerThanOrEqual` equivalent) - a different half of "the range API"
+than the one `Add`/`Sub` now have (see Done): those two arms gained real,
+narrow `int<min,max>` *arithmetic* this session, but nothing yet computes
+a *comparison*'s own boolean result from two ranges, which is what this
+rule actually needs. Still Phase 55's own separate, larger item. `FunctionCallConstantConditionRule`'s own cross-
 file aggregation (`is_string($x)` constant at every call site, reported
 once as "this check is dead everywhere") needs Collector-style whole-
 codebase aggregation - Pending's own Phase 82. `assert(false)`/
@@ -558,7 +617,18 @@ simplification, since every real corpus use seen is a side-effect-only
 scratch expression there. `continue N`'s own level argument is parsed
 but never consulted for *narrowing* purposes (Phase 55's own `loop_
 continue_states` now consults it for convergence), and `goto`/label CFG
-edges are unmodeled - neither owned by any phase.
+edges are unmodeled - neither owned by any phase. `infer_binary`'s new
+`int<min,max>` arithmetic (`Add`/`Sub`, see Done) is deliberately
+narrower than real PHPStan's own full range-arithmetic surface: `Mul`/
+`Div`/`Mod`/`Pow` still collapse straight to bare `Int`/`Float` (real
+PHPStan's own `integerRangeMath` splits these by negative/positive
+sub-intervals, meaningfully more involved to transcribe correctly, no
+corpus evidence needs it), and `Sub` only preserves the range for a
+*constant* right operand, not the full range-minus-range case (real
+PHPStan's own `Minus` arm has extra branches specifically for when the
+subtracted side is itself an unbounded range, which can flip which end
+stays bounded - a subtle asymmetry this project has no way to cross-
+check against a real PHPStan run without building it).
 
 **17 - LSP hover/go-to-definition (PARTIAL).** Both stages plus five
 follow-ups are done (see Done): every name reference resolvable without
