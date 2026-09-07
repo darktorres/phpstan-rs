@@ -435,18 +435,87 @@ attempt at "exhaustive," this project's own confidence that *this*
 sweep is now complete is deliberately not claimed either - only that
 every instance found by every search attempted so far is fixed.
 
+A third, broader search (every `Type::Object(...) =>` match across
+`src/checker/*.rs`, not just the two narrower `let-else` patterns before
+it) found the single highest-impact instance yet: (15) `infer_expr`'s own
+`ExprKind::MethodCall` arm - a *separate*, parallel implementation from
+`check_expr`'s own `MethodCall` handling (which already extracted a
+representative class from `Union`/`Intersection` for its own diagnostic
+purposes) - had the identical `Object`/`EnumCase`-only match, silently
+collapsing *any* method call's own return type to `Type::Mixed` for a
+`Union`/`Intersection` receiver. Since `infer_expr` is the core type-
+*inference* path (exercised whenever a method call's result type needs
+computing without also running full diagnostics), this was reachable far
+more often than any other fix in this family. Extracted into a new
+`method_call_return_type`, which - like `property_access_type` - also
+picked up a real refinement while being rewritten: `Intersection` keeps
+"first member whose declaration resolves wins" (the value genuinely is
+every member simultaneously), while `Union` now unions every resolving
+member's own return type together instead of just using whichever came
+first (`A|B` where `A::get(): int` and `B::get(): string` is really
+`int|string`) - the same, more-correct distinction now also applied
+retroactively to `property_access_type` itself.
+
+Reviewing *that* refinement's own corpus diff surfaced a fourth, more
+subtle bug in the "first member wins" `Intersection` logic itself (16):
+`narrow_instanceof_true` always builds `Intersection([original_type,
+target_type])` - the broader, pre-existing type first, the just-
+`instanceof`-checked, narrower type last. Every `find_map`-based
+Intersection lookup this session (`find_property_owner`, `find_property_
+receiver`, `find_method_owner`, `find_method_receiver_class`,
+`property_access_type`, `method_call_return_type`) searched members in
+that same forward order - so a method/property name declared on *both*
+the broader original type and the narrower target resolved to the
+broader type's own (possibly less-specific, covariant-overridden)
+declaration first. Real corpus false positive this produced: `Rector\
+Php54\...\RemoveZeroBreakContinueRector`'s own `$staticType instanceof
+ConstantIntegerType`, where a shared `PHPStan\Type\Type`-family method
+the narrower `ConstantIntegerType` itself overrides more precisely was
+found on the broader interface first, producing a bogus argument-type
+mismatch - confirmed directly via `assertType()` debug tracing, not
+guessed. Fixed by searching every one of those six helpers' own
+`Intersection` arm in reverse - provably never wrong (a class's own
+`lookup_*_with_owner` already walks its full ancestor chain, so checking
+the narrower type first can only ever find an equally or more specific
+answer, falling through to the broader type exactly as before when the
+narrower one genuinely doesn't have it).
+
+The same broader search also found two much narrower, lower-severity
+instances - real, but false-negative-only (a missed diagnostic, never a
+wrong one) and low real-world likelihood: (17) `operators.rs`'s
+`type_is_instance_of`/`is_valid_overload_operand` (GMP/BcMath operator-
+overload legality) and `is_object_or_null`/`is_array_or_null` (nullsafe/
+comparison validity) each handled `Union` but not `Intersection` - fixed
+with the correct, sometimes-opposite quantifier per function (`any`
+member proves an instanceof/overload-legal fact true, matching `Union`'s
+own "any" shape for a different reason; `any` member being array-shaped
+proves `is_array_or_null`, unlike `Union`'s own "all" requirement for
+definiteness) - `is_array_or_null`'s own gap meant a real, common shape
+(`list<T>`/`non-empty-array<T>`, both `Intersection([Array(_),
+Accessory(_))])`, Phase 14) was never recognized as array-shaped for
+comparison-validity purposes at all. (18) `coercion.rs`'s `type_to_
+integer`/`type_to_float`/`type_to_string` handled `Union` (via the
+existing `union_coercion` helper) but not `Intersection`, falling to the
+permissive "always legal" default - fixed by reusing `union_coercion` for
+`Intersection` too (the identical "if any member offers a legal cast
+path, don't flag" reasoning already applied to `Union`).
+
 Confirmed against the real Piwigo corpus (both the app-only scope and
 the full vendor-included one) after every fix above: zero remaining
 false positives traced to this family's own new checks - the only
 surviving diff lines are `widen_coalesce_result`'s own genuine, expected
 precision ripples (reviewed individually), real, correct findings newly
-unlocked by fixes (7)-(12) above, and real, correct findings unrelated to
+unlocked by fixes (7)-(18) above, and real, correct findings unrelated to
 any of this session's own changes (including in vendor/example code,
 where a docblock-declared literal param type like `@param false $x`
 makes `if ($x)` genuinely always-false, confirmed against `vendor/
-jetbrains/phpstorm-stubs`). Fixes (13)-(14) had no corpus-verifiable
-effect either way (confirmed via a full before/after diff) - both are
-confirmed correct only by their own dedicated regression tests.
+jetbrains/phpstorm-stubs`). Fix (16)'s own reverse-order correction alone
+removed a further net nine false positives across the full vendor
+corpus once applied on top of (15) - most of (15)'s own newly-surfaced
+findings turned out to be this same ordering bug, not genuine new
+precision. Fixes (13)/(14)/(17)/(18) had no corpus-verifiable effect
+either way (confirmed via a full before/after diff) - all are confirmed
+correct only by their own dedicated regression tests.
 
 ## Performance & tooling
 
