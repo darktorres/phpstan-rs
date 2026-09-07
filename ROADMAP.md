@@ -33,7 +33,7 @@ methodology behind every corpus number cited above.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   32,498 diagnostics. Re-run before citing - it drifts as vendored
   dependencies change and isn't re-measured every round.
-- Test suite: 2062+ unit tests, all passing.
+- Test suite: 2071+ unit tests, all passing.
 
 ---
 
@@ -304,23 +304,56 @@ plan disclosed as out of scope):
   `Scalar` for the overwhelming majority-case single match, so every
   existing single-owner test kept its original assertions unchanged.
 - **Local-variable-declaration navigation** (a read resolving to its own
-  declaration): new `Resolved::Variable(Span)`, same-file only (no
-  registry lookup needed). `lsp::navigation::Walker` now tracks
-  `var_decls: Vec<(String, Span)>` - every parameter/assignment/`foreach`
-  key-value/`catch (...) $e`/`static $x` binding seen so far in the
-  current scope, in document order - and a read resolves to the *nearest
-  preceding* entry for that name: a deliberate, disclosed textual-order
-  heuristic, not real control-flow analysis (see Pending for where this
-  approximation can point somewhere less useful than the "real" answer).
-  Two small additive AST spans made this possible without a text-split
-  hack: `Param.name_span` and `CatchClause.var_span`, populated by the
-  parser at the same point each is already consumed. Scope reset mirrors
-  real PHP semantics: a named function/`Closure` gets a fresh scope
-  (`Closure` seeded only from its own params plus whatever its `use
-  (...)` clause explicitly names, copied from the *outer* scope at that
-  point); an `ArrowFn` does not get a fresh scope (it implicitly captures
-  the whole enclosing scope by value) - its own params are pushed and
-  popped around just its one body expression instead.
+  declaration): new `Resolved::Variable(Vec<Span>)`, same-file only (no
+  registry lookup needed). `lsp::navigation::Walker` tracks
+  `var_decls: Vec<(String, Span, bool)>` - every parameter/assignment/
+  `foreach` key-value/`catch (...) $e`/`static $x` binding seen so far in
+  the current scope, in document order, each tagged `conditional` (pushed
+  while `conditional_depth > 0`). Two small additive AST spans made this
+  possible without a text-split hack: `Param.name_span` and
+  `CatchClause.var_span`, populated by the parser at the same point each
+  is already consumed. Scope reset mirrors real PHP semantics: a named
+  function/`Closure` gets a fresh scope (`Closure` seeded only from its
+  own params plus whatever its `use (...)` clause explicitly names,
+  copied from the *outer* scope at that point); an `ArrowFn` does not get
+  a fresh scope (it implicitly captures the whole enclosing scope by
+  value) - its own params are pushed and popped around just its one body
+  expression instead.
+- **Branch-aware variable resolution** (follow-up to the follow-up above,
+  same commit): a read no longer silently picks the textually-last
+  candidate when that's a real guess. `If`/`Switch`/`Try`'s own
+  then/else/case/catch bodies are each walked as an isolated arm from the
+  same starting point (`var_decls` truncated back between arms so one
+  arm's declarations can't leak into a sibling's), then merged back
+  together - a name reassigned differently by two arms keeps *both*
+  candidates; a name only one arm touches adds just that one, alongside
+  whatever was declared before the branch (never removed, since arms only
+  truncate *forward* from a saved length). A loop body (`while`/`do`/
+  `for`/`foreach`) is simpler - no sibling arm to merge against, just a
+  single conditional region wrapping it, so a post-loop read still sees
+  the pre-loop value as a live alternative to whatever the body itself
+  assigned. `lookup_in` (shared by ordinary lookups and a `Closure`'s own
+  captured-variable seeding) scans backward and stops at the first
+  *unconditional* declaration found - collecting every *conditional* one
+  along the way as a genuine alternative, not real control-flow analysis,
+  but no longer a silent single guess either: an ambiguous read now
+  returns every real candidate, and `lsp.rs`'s `definition` offers them
+  as a `GotoDefinitionResponse::Array` (a picker) exactly the way a
+  `Union`/`Intersection` receiver's own multiple owners already do,
+  falling back to a plain `Scalar` for the overwhelming single-candidate
+  case so no existing test's assertions needed to change.
+- **List-destructuring targets** (`[$a, $b] = ...`, `foreach ($rows as
+  [$a, $b])`) are now tracked as declarations too - `bind_var` recurses
+  into an `ArrayLiteral`'s own items (a key expression, if any, walked as
+  an ordinary read; each value recursively bound), shared by both the
+  `Assign`/`CompoundAssign` and `foreach`-binding call sites.
+- **`global $x;`** now links back to a top-level (script-scope)
+  declaration, via a new, order-independent pre-scan
+  (`collect_top_level_vars`, run once up front rather than folded into
+  the position-aware walk) - needed specifically because the top-level
+  assignment a `global` statement refers to very often appears *later* in
+  the file than the function using it, which a single forward walk
+  wouldn't have reached yet.
 
 ---
 
@@ -353,26 +386,26 @@ impossible-`instanceof`/redundant-`is_string()`-etc. detection.
 it for convergence), and `goto`/label CFG edges are unmodeled - neither
 owned by any phase.
 
-**17 - LSP hover/go-to-definition (PARTIAL).** Both stages, plus the
-follow-up closing all three originally-disclosed gaps, are done (see
-Done): every name reference resolvable without receiver-type inference;
-an instance receiver's own type (`$x->method()`/`$x->prop`, including
-inside a closure/arrow-fn body); a `Union`/`Intersection` receiver
-resolving to every declaring class, not just the first; and local-
-variable-declaration navigation (a read resolving to its own parameter/
-assignment/`foreach`/`catch` binding). What's left is narrower than any
-of those: local-variable-declaration navigation is a plain nearest-
-preceding-in-document-order heuristic, not real control-flow analysis -
-it can point to a *textually* earlier assignment that a real CFG would
-know is unreachable on the path actually taken (an `if`/`else` each
-assigning the same name, then a read after the `if` - the heuristic
-picks whichever branch's assignment is later in the file, not
-necessarily the one that ran). List-destructuring targets (`[$a, $b] =
-...`, `foreach ($rows as [$a, $b])`) aren't tracked as declarations at
-all - only a plain `$var` binding is. `global $x;` isn't linked back to
-a top-level declaration. A `Closure`'s own `use (&$x)`/`use ($x)` capture
-resolves only when the outer scope already has a tracked declaration for
-that name at the closure's own point in the file.
+**17 - LSP hover/go-to-definition (PARTIAL).** Both stages plus two
+follow-ups are done (see Done): every name reference resolvable without
+receiver-type inference; an instance receiver's own type (`$x->method()`/
+`$x->prop`, including inside a closure/arrow-fn body); a `Union`/
+`Intersection` receiver resolving to every declaring class; local-
+variable-declaration navigation, branch-aware (an ambiguous read across
+mutually exclusive `if`/`switch`/`try` arms or a loop body offers every
+real candidate as a `GotoDefinitionResponse::Array`, not a silent guess);
+list-destructuring targets; and `global $x;` linking to a top-level
+declaration. What's left is real but narrow: this is arm-merging over the
+AST's own document order, not a true control-flow graph, so it can offer
+an alternative a real CFG would know is unreachable (a branch that always
+`return`s/`throw`s before falling through still contributes its own
+declarations as "alternatives" to code after the whole construct, even
+though that code could only actually be reached via the *other* arm) -
+overly cautious, never wrong-file. `break`/`continue`'s own early-exit
+effect on which loop-body statements really ran isn't modeled either. A
+`Closure`'s own `use (&$x)`/`use ($x)` capture resolves only when the
+outer scope already has a tracked declaration for that name at the
+closure's own point in the file.
 
 **18 - Extension/plugin API (PLANNED).** Deliberately last - premature
 before the rule/type-extension catalog is rich enough for a third party
