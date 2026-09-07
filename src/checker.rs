@@ -460,7 +460,12 @@ pub(crate) use control_flow::{
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
+pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::has_explicit_mixed_nested_somewhere;
+pub(crate) use oop::{
+    ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
+    ATTRIBUTE_TARGET_PROPERTY,
+};
 pub(crate) use throws::body_contains_explicit_throw;
 // Only ever called by `union_types` itself in real code (`checker/expr.rs`) -
 // this crate-level re-export exists solely so this module's own test
@@ -693,6 +698,12 @@ impl<'a> Checker<'a> {
                     self.check_attributes(&c.attrs, &fqn);
                     for p in &c.properties {
                         self.check_attributes(&p.attrs, &fqn);
+                        self.check_attribute_targets(
+                            &p.attrs,
+                            ATTRIBUTE_TARGET_PROPERTY,
+                            "property",
+                            &fqn,
+                        );
                     }
                     for cc in &c.consts {
                         self.check_attributes(&cc.attrs, &fqn);
@@ -1412,8 +1423,29 @@ impl<'a> Checker<'a> {
         // here covers all of them at once, rather than duplicating the
         // same two loops at every one of those call sites.
         self.check_attributes(&f.attrs, &label);
+        // Phase 37 follow-up: target-validity, mirroring real PHPStan's
+        // own split between `MethodAttributesRule`/`FunctionAttributesRule`
+        // (one or the other, never both, for this same choke point).
+        if class_name.is_some() {
+            self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_METHOD, "method", &label);
+        } else {
+            self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_FUNCTION, "function", &label);
+        }
         for p in &f.params {
             self.check_attributes(&p.attrs, &label);
+            // `ParamAttributesRule`: a promoted param's own attributes
+            // may target either a parameter or the property it also
+            // declares - real PHP itself doesn't distinguish which one
+            // an attribute "means" here, so either target is accepted.
+            let (target, target_name) = if p.promoted_visibility.is_some() {
+                (
+                    ATTRIBUTE_TARGET_PARAMETER | ATTRIBUTE_TARGET_PROPERTY,
+                    "parameter or property",
+                )
+            } else {
+                (ATTRIBUTE_TARGET_PARAMETER, "parameter")
+            };
+            self.check_attribute_targets(&p.attrs, target, target_name, &label);
         }
 
         // Phase 10.5's bound-enforcement: checked once here, against the

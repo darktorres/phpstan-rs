@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, PropertyDecl, TraitAlias, Visibility,
+    Attribute, BinOp, ClassDecl, ClassKind, EnumDecl, Expr, ExprKind, Literal, PropertyDecl,
+    TraitAlias, Visibility,
 };
 use crate::docblock::{self, DocBlock};
 use crate::registry::function_sig::{
@@ -166,6 +167,15 @@ pub struct ClassInfo {
     // (see `FunctionSig::deprecated`'s doc comment for why that question
     // is left unclaimed) - this is purely "is the class itself tagged."
     pub deprecated: Option<String>,
+    // Phase 37 follow-up: this class's own `#[\Attribute(flags)]` meta-
+    // attribute flags (an `int-mask-of<Attribute::TARGET_*>`), if this
+    // class is declared usable as an attribute class at all - `None`
+    // means it isn't (real PHP's `ReflectionClass::isAttribute()` would
+    // be `false`), which is a distinct question from what a *bare*
+    // `#[\Attribute]` with no arguments means (`Attribute::TARGET_ALL`,
+    // matching `Attribute::__construct`'s own default parameter value -
+    // see `compute_attribute_targets`'s own doc comment).
+    pub attribute_targets: Option<u32>,
     // Phase 79: for a backed enum only, each case's own literal backing
     // value (`StringLiteral`/`IntLiteral`), keyed by case name - lets
     // `::from()`/`::tryFrom()` narrow a literal-argument call to the
@@ -478,6 +488,7 @@ impl ClassInfo {
         let is_api_do_not_implement = class_doc.as_ref().is_some_and(|d| d.api_do_not_implement);
         let is_internal = class_doc.as_ref().is_some_and(|d| d.internal);
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
+        let attribute_targets = compute_attribute_targets(&c.attrs);
 
         ClassInfo {
             kind: c.kind,
@@ -503,6 +514,7 @@ impl ClassInfo {
             is_api_do_not_implement,
             is_internal,
             deprecated,
+            attribute_targets,
             enum_case_values: HashMap::new(),
             type_aliases,
         }
@@ -831,6 +843,7 @@ impl ClassInfo {
             is_api_do_not_implement: false,
             is_internal: class_doc.as_ref().is_some_and(|d| d.internal),
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
+            attribute_targets: compute_attribute_targets(&e.attrs),
             enum_case_values,
             type_aliases: HashMap::new(),
         }
@@ -875,6 +888,7 @@ impl ClassInfo {
             self.is_api_do_not_implement || other.is_api_do_not_implement;
         self.is_internal = self.is_internal || other.is_internal;
         self.deprecated = self.deprecated.or(other.deprecated);
+        self.attribute_targets = self.attribute_targets.or(other.attribute_targets);
         if self.extends.is_empty() {
             self.extends = other.extends;
         }
@@ -895,6 +909,77 @@ impl ClassInfo {
         }
         self
     }
+}
+
+/// PHP's own `Attribute::TARGET_*`/`IS_REPEATABLE` class constant values -
+/// confirmed directly via `php -r 'var_dump((new ReflectionClass(Attribute::class))->getConstants());'`,
+/// not guessed from the manual.
+fn attribute_target_constant_value(name: &str) -> Option<u32> {
+    match name {
+        "TARGET_CLASS" => Some(1),
+        "TARGET_FUNCTION" => Some(2),
+        "TARGET_METHOD" => Some(4),
+        "TARGET_PROPERTY" => Some(8),
+        "TARGET_CLASS_CONSTANT" => Some(16),
+        "TARGET_PARAMETER" => Some(32),
+        "TARGET_CONSTANT" => Some(64),
+        "TARGET_ALL" => Some(127),
+        "IS_REPEATABLE" => Some(128),
+        _ => None,
+    }
+}
+
+/// Evaluates a `#[\Attribute(...)]` meta-attribute's own `flags` argument -
+/// a bitwise-OR chain of `Attribute::TARGET_*`/`IS_REPEATABLE` class-
+/// constant references (the name before `::` is never itself checked -
+/// the same lenient, no-namespace-resolution convention `is_override_
+/// attribute_name`/`is_no_discard_attribute_name` already use for a
+/// marker attribute's own bare name) or a plain int literal. Anything
+/// else (a computed expression, a variable, a named constant this
+/// project doesn't recognize) falls back to `Attribute::TARGET_ALL` -
+/// "don't know, don't guess wrong," so an unusual-but-legal flags
+/// expression can never manufacture a false `attribute.target` finding.
+fn eval_attribute_flags_expr(e: &Expr) -> u32 {
+    match &e.kind {
+        ExprKind::StaticAccess(_, member) => {
+            attribute_target_constant_value(member).unwrap_or(ATTRIBUTE_TARGET_ALL)
+        }
+        ExprKind::Literal(Literal::Int(n)) => u32::try_from(*n).unwrap_or(ATTRIBUTE_TARGET_ALL),
+        ExprKind::Binary(BinOp::BitOr, l, r) => {
+            eval_attribute_flags_expr(l) | eval_attribute_flags_expr(r)
+        }
+        _ => ATTRIBUTE_TARGET_ALL,
+    }
+}
+
+const ATTRIBUTE_TARGET_ALL: u32 = 127;
+
+/// This class's own attribute-class flags, from a `#[\Attribute(...)]`
+/// meta-attribute directly preceding its declaration - `None` when no
+/// such meta-attribute is present at all (real PHP's own
+/// `ReflectionClass::isAttribute()` would be `false` - this class was
+/// simply never declared usable as an attribute). A bare `#[\Attribute]`
+/// with no arguments at all defaults to `Attribute::TARGET_ALL`,
+/// matching real PHP's own `Attribute::__construct(int $flags =
+/// self::TARGET_ALL)` default parameter value.
+fn compute_attribute_targets(attrs: &[Attribute]) -> Option<u32> {
+    let meta = attrs.iter().find(|a| {
+        a.name
+            .trim_start_matches('\\')
+            .rsplit('\\')
+            .next()
+            .unwrap_or(&a.name)
+            .eq_ignore_ascii_case("Attribute")
+    })?;
+    let flags_arg = meta
+        .args
+        .iter()
+        .find(|a| a.name.as_deref() == Some("flags"))
+        .or_else(|| meta.args.first());
+    Some(match flags_arg {
+        Some(arg) => eval_attribute_flags_expr(&arg.value),
+        None => ATTRIBUTE_TARGET_ALL,
+    })
 }
 
 /// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can

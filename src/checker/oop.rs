@@ -1,11 +1,20 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder, Locals};
+use crate::checker::{Checker, DiagnosticBuilder, Locals, class_type_word};
 use crate::docblock;
 use crate::registry::{self, FunctionSig, PropertySig};
 use crate::token::Span;
 use crate::types::Type;
+
+/// PHP's own `Attribute::TARGET_*` values (confirmed directly via
+/// `php -r`, see `registry::class_info::attribute_target_constant_value`'s
+/// identical table) - only the ones this project's own call sites for
+/// `check_attribute_targets` need so far.
+pub(crate) const ATTRIBUTE_TARGET_FUNCTION: u32 = 2;
+pub(crate) const ATTRIBUTE_TARGET_METHOD: u32 = 4;
+pub(crate) const ATTRIBUTE_TARGET_PROPERTY: u32 = 8;
+pub(crate) const ATTRIBUTE_TARGET_PARAMETER: u32 = 32;
 
 /// The full set of PHP magic-method names (`nikic/php-parser`'s own
 /// `ClassMethod::isMagic()` list) - used only by `check_enum_sanity`
@@ -43,19 +52,14 @@ impl<'a> Checker<'a> {
     /// appear on (class/enum, method/function, property, const, enum
     /// case, param, closure/arrow-fn - see each call site).
     ///
-    /// Deliberately narrower than real PHPStan's own check: whether the
-    /// resolved class is actually usable as an attribute at all (declares
-    /// its own `#[Attribute(...)]`, i.e. `attribute.notAttribute`),
-    /// whether its declared `Attribute::TARGET_*` flags match where this
-    /// one is actually used (`attribute.target`), and constructor-
+    /// Deliberately narrower than real PHPStan's own check: constructor-
     /// argument validation (`attribute.noConstructor`/parameter-count/
     /// type checks - genuinely needs Phase 49's call-argument-binding
     /// generalization, named explicitly in this phase's own audit notes)
-    /// are all left for a later pass - this project's own registry
-    /// doesn't yet track which classes are attribute classes or what
-    /// targets they declare, and guessing wrong here (silently assuming
-    /// every class qualifies) would be strictly worse than not checking
-    /// at all.
+    /// is left for a later pass. Whether the resolved class is actually
+    /// usable as an attribute at all, and whether its declared
+    /// `Attribute::TARGET_*` flags match where this one is actually used,
+    /// are now checked too - see `check_attribute_targets` just below.
     pub(crate) fn check_attributes(&mut self, attrs: &[Attribute], label: &str) {
         for attr in attrs {
             let fqn = self.name_ctx.resolve(&attr.name);
@@ -66,6 +70,56 @@ impl<'a> Checker<'a> {
                     attr.span,
                     0,
                     "attribute.notFound",
+                );
+            }
+        }
+    }
+
+    /// Phase 37 follow-up: the `attribute.notAttribute`/`attribute.target`
+    /// halves of real PHPStan's own `AttributesCheck` - mirrors
+    /// `registry::class_info::compute_attribute_targets`'s own doc
+    /// comment for how a class's own allowed targets are computed.
+    /// Deliberately called only from the two highest-value declaration
+    /// kinds so far (property, method/function - see each call site);
+    /// class-level, param-level (including the promoted-property
+    /// `parameter or property` dual-target shape), enum-case, class-
+    /// constant, and closure/arrow-fn attributes still only get the
+    /// plain existence check above (see ROADMAP.md's own Phase 37 entry).
+    /// A name the registry has no entry for at all is skipped here (the
+    /// existence check above already reports it, and reporting *both*
+    /// would be confusing double-counting for the identical typo).
+    pub(crate) fn check_attribute_targets(
+        &mut self,
+        attrs: &[Attribute],
+        required_target: u32,
+        target_name: &str,
+        label: &str,
+    ) {
+        for attr in attrs {
+            let fqn = self.name_ctx.resolve(&attr.name);
+            let Some(info) = self.registry.classes.get(&fqn) else {
+                continue;
+            };
+            let Some(flags) = info.attribute_targets else {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "{} {fqn} is not an Attribute class.",
+                        class_type_word(info.kind)
+                    ),
+                    attr.span,
+                    0,
+                    "attribute.notAttribute",
+                );
+                continue;
+            };
+            if flags & required_target == 0 {
+                self.report(
+                    label.to_string(),
+                    format!("Attribute class {fqn} does not have the {target_name} target."),
+                    attr.span,
+                    0,
+                    "attribute.target",
                 );
             }
         }

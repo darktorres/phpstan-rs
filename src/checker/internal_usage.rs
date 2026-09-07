@@ -29,7 +29,7 @@ use crate::token::Span;
 /// `Class`/`Interface`/`Trait`/`Enum` - matches real PHPStan's own
 /// `ClassReflection::getClassTypeDescription()`, used both in message
 /// text (lowercased) and as an identifier suffix (as-is).
-fn class_type_word(kind: ClassKind) -> &'static str {
+pub(crate) fn class_type_word(kind: ClassKind) -> &'static str {
     match kind {
         ClassKind::Class => "Class",
         ClassKind::Interface => "Interface",

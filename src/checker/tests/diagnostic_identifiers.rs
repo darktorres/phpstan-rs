@@ -284,6 +284,181 @@ fn an_attribute_naming_a_real_builtin_attribute_class_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 37 follow-up: `attribute.notAttribute`/`attribute.target` - the
+// vendored real `#[\Override]` stub declaration (`Attribute::
+// TARGET_METHOD|TARGET_PROPERTY|TARGET_CLASS_CONSTANT`, confirmed
+// directly against `vendor/phpstorm-stubs/Core/Core_c.php`) is real,
+// already-registered data these tests exercise directly rather than
+// needing a synthetic attribute class.
+
+#[test]
+fn using_override_on_a_plain_function_is_flagged_wrong_target() {
+    // `Override`'s own real flags don't include `TARGET_FUNCTION`.
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[Override]
+            function f(): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"
+            && x.message == "Attribute class Override does not have the function target."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn using_override_on_an_ordinary_method_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                #[Override]
+                function f(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.target"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn using_override_on_an_ordinary_property_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                #[Override]
+                public int $x = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.target"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_on_a_property_naming_a_class_with_no_attribute_meta_is_flagged_not_an_attribute() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class MyAttr {}
+
+            class C {
+                #[MyAttr]
+                public int $x = 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.notAttribute"
+            && x.message == "Class MyAttr is not an Attribute class."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_user_defined_attribute_class_targeting_only_properties_used_on_a_method_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_PROPERTY)]
+            class PropOnly {}
+
+            class C {
+                #[PropOnly]
+                function f(): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"
+            && x.message == "Attribute class PropOnly does not have the method target."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_user_defined_attribute_class_targeting_only_properties_used_on_a_property_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_PROPERTY)]
+            class PropOnly {}
+
+            class C {
+                #[PropOnly]
+                public int $x = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "attribute.target" || x.identifier == "attribute.notAttribute"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_bare_attribute_meta_with_no_flags_argument_defaults_to_target_all() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class AnyTarget {}
+
+            class C {
+                #[AnyTarget]
+                function f(): void {}
+
+                #[AnyTarget]
+                public int $x = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "attribute.target" || x.identifier == "attribute.notAttribute"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_constructor_property_accepts_either_the_parameter_or_property_target() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_PROPERTY)]
+            class PropOnly {}
+
+            class C {
+                function __construct(#[PropOnly] public int $x) {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "attribute.target" || x.identifier == "attribute.notAttribute"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_promoted_parameter_rejects_a_property_only_attribute() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_PROPERTY)]
+            class PropOnly {}
+
+            class C {
+                function f(#[PropOnly] int $x) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"
+            && x.message == "Attribute class PropOnly does not have the parameter target."),
+        "got: {d:?}"
+    );
+}
+
 // Phase 37: PHP 8.5's `#[\NoDiscard]` marker -
 // `Checker::check_no_discard_statement`, mirroring real PHPStan's own
 // `CallToFunctionStatementWithNoDiscardRule`/
