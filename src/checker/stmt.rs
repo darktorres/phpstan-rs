@@ -1,8 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
     Checker, Locals, body_contains_yield, collect_exit_point_statements, exit_point_description,
-    is_truthy_literal, literal_truthiness, merge_scopes, purge_stale_narrowing_for,
-    stmt_contains_break,
+    is_truthy_literal, merge_scopes, purge_stale_narrowing_for, stmt_contains_break,
 };
 use crate::docblock;
 use crate::types::Type;
@@ -304,114 +303,76 @@ impl<'a> Checker<'a> {
                 then_branch,
                 else_branch,
             } => {
-                self.check_expr(cond, locals, label);
-                // Phase 15 item (2), `IfConstantConditionRule`: the
-                // original design (trusting the condition's own *full
-                // inferred* type being exactly `Type::True`/`Type::False`)
-                // was investigated, corpus-verified, then reverted - real
-                // corpus testing found this project's own narrowing has
-                // two separate, pervasive gaps that each independently
-                // make a plain variable's type wrongly collapse to a
-                // literal `True`/`False` long after it should have
-                // widened back to `bool`: a `foreach`-scoped "first
-                // iteration" flag never getting fixed-point-merged across
-                // loop iterations (fixed by Phase 55's own convergence
-                // work, see Done), and `$x = $expr ?? false;` collapsing
-                // to the bare literal `false` whenever `$expr`'s own type
-                // isn't confidently known (still open - Phase 55's own
-                // tracked comparison-outcome/range-API item). Reinstated
-                // here deliberately narrower than the reverted version:
-                // `literal_truthiness` only ever trusts a *syntactic*
-                // literal (`if (true)`, `if (0)`, `if (!false)`, ...),
-                // never the condition's own inferred type - sidesteps
-                // both gaps above entirely, since a bare literal's own
-                // truthiness never depends on narrowing precision at all.
-                if let Some(value) = literal_truthiness(cond) {
-                    self.report(
-                        label.to_string(),
-                        format!(
-                            "If condition is always {}.",
-                            if value { "true" } else { "false" }
-                        ),
-                        cond.span,
-                        4,
-                        if value {
-                            "if.alwaysTrue"
-                        } else {
-                            "if.alwaysFalse"
-                        },
-                    );
-                }
-
-                let mut then_locals = locals.clone();
-                self.apply_narrowing(cond, &mut then_locals, true);
-                self.check_stmt(then_branch, &mut then_locals, declared_return, label);
-
-                let mut else_locals = locals.clone();
-                self.apply_narrowing(cond, &mut else_locals, false);
-                if let Some(e) = else_branch {
-                    self.check_stmt(e, &mut else_locals, declared_return, label);
-                }
-
-                // The classic guard clause - `if ($x === null) { return; }`
-                // - depends on this: a branch that unconditionally
-                // returns/throws/breaks/continues never reaches the merge
-                // point, so only the surviving branch's (narrowed) scope
-                // should propagate past the if. Without this, the
-                // terminated branch's narrowing (here, "$x is null")
-                // would incorrectly leak into the code after the guard.
-                let then_terminates = self.always_terminates(then_branch, &then_locals);
-                let else_terminates = else_branch
-                    .as_deref()
-                    .is_some_and(|e| self.always_terminates(e, &else_locals));
-
-                *locals = match (then_terminates, else_terminates) {
-                    (true, false) => else_locals,
-                    (false, true) => then_locals,
-                    _ => merge_scopes(&then_locals, &else_locals),
-                };
+                self.check_if(
+                    cond,
+                    then_branch,
+                    else_branch,
+                    locals,
+                    declared_return,
+                    label,
+                    false,
+                );
             }
             StmtKind::While { cond, body } => {
+                // Phase 15 continuation: real bug found and fixed this
+                // session - the condition's own constant-condition check
+                // (and, transitively, any standalone check reached while
+                // checking it, like `BooleanNot`/`BooleanAnd`/`BooleanOr`)
+                // used to run exactly once, against the pre-loop entry
+                // `locals`, *before* `converge_loop_body` ever ran -
+                // completely bypassing Phase 55's own fixed-point
+                // convergence. Real corpus false positive this produced:
+                // `$end = false; while (!$end) { ...; $end = true; ... }`
+                // (`Piwigo\Admin\Extensions\CoreUpdateService::upgradeTo`)
+                // - `$end`'s pre-loop type is exactly `false`, so `!$end`
+                // looked unconditionally `true` even though the loop body
+                // can reassign it. Confirmed directly against real
+                // PHPStan's own `WhileHandler::processStmt`: it re-
+                // evaluates the condition at the top of *every*
+                // convergence pass (discarding all but the last with a
+                // no-op node callback), and only the FINAL, fully-
+                // converged pass's walk of the condition ever reaches the
+                // real rule-invoking callback. Moving the condition check
+                // inside `converge_loop_body`'s own closure reproduces
+                // that exactly for free: every pass but the kept one
+                // already has its diagnostics discarded via
+                // `converge_loop_body`'s own `diagnostics.truncate`.
+                let skip_always_true = stmt_contains_break(body)
+                    || body_contains_yield(std::slice::from_ref(body.as_ref()))
+                    || declared_return == Some(&Type::Never);
+                // Real bug found and fixed this session, on top of the
+                // one above: moving the diagnostic-bearing condition
+                // check into the convergence closure means it now only
+                // ever runs against per-pass *copies* of the entry
+                // (`pass_locals`), never mutating the real `locals`
+                // directly the way a single up-front call used to. A
+                // real PHP `while`'s own condition always runs at least
+                // once, unconditionally, regardless of how many times the
+                // body itself iterates - so a variable *the condition
+                // itself* assigns (`while (($x = f()) !== null) {...}`,
+                // a real, common idiom) must be treated as unconditionally
+                // defined afterward, unlike anything only the *body*
+                // conditionally defines. Without this, `merge_scopes`
+                // dropped it entirely (present in the loop's own exit
+                // state but never in the real pre-loop `locals` it gets
+                // merged against). Confirmed directly against real
+                // PHPStan's own `WhileHandler::processStmt`: it also does
+                // a quiet, non-diagnostic evaluation of the condition
+                // against the real pre-loop scope first (its own
+                // `$condResult`/`$condScope`, built with a `NoopNodeCallback`),
+                // strictly separate from the later diagnostic-bearing
+                // walk against the converged state - replicated here by
+                // running `check_expr` once for real (to bind any
+                // assignment side effect into `locals`) and discarding
+                // whatever it reported, since the real diagnostics come
+                // from the convergence-aware walk below. Real corpus
+                // false positive this fixes: `Symfony\Component\
+                // DependencyInjection\Compiler\AbstractRecursivePass::
+                // getConstructor`'s `while ((null === $class = $definition
+                // ->getClass()) && $definition instanceof ChildDefinition)`.
+                let diagnostics_before = self.diagnostics.len();
                 self.check_expr(cond, locals, label);
-                // Phase 15 item (2), `WhileLoopAlwaysFalseConditionRule`/
-                // `WhileLoopAlwaysTrueConditionRule`: same syntactic-
-                // literal-only reinstatement as `StmtKind::If`'s own
-                // identical check just above - see that arm's doc
-                // comment. `alwaysFalse` has no exclusions, matching real
-                // PHPStan's own rule exactly. `alwaysTrue` is gated the
-                // same way real PHPStan's own `WhileLoopAlwaysTrueCondition
-                // Rule` is (confirmed directly against `vendor/phpstan-src`):
-                // skipped when the loop is breakless (`stmt_contains_break`
-                // - this project's own already-existing, deliberately
-                // conservative "any break anywhere" check, reused rather
-                // than re-deriving real PHPStan's own more precise
-                // per-level break/`continue N` analysis - a narrow,
-                // disclosed simplification, see ROADMAP), when the body
-                // yields (a legitimate infinite generator, not dead code),
-                // or when the enclosing function is declared `: never`
-                // (already documents "this never returns" on its own,
-                // redundant to also flag the loop).
-                if literal_truthiness(cond) == Some(false) {
-                    self.report(
-                        label.to_string(),
-                        "While loop condition is always false.".to_string(),
-                        cond.span,
-                        4,
-                        "while.alwaysFalse",
-                    );
-                } else if literal_truthiness(cond) == Some(true)
-                    && !stmt_contains_break(body)
-                    && !body_contains_yield(std::slice::from_ref(body.as_ref()))
-                    && declared_return != Some(&Type::Never)
-                {
-                    self.report(
-                        label.to_string(),
-                        "While loop condition is always true.".to_string(),
-                        cond.span,
-                        4,
-                        "while.alwaysTrue",
-                    );
-                }
+                self.diagnostics.truncate(diagnostics_before);
                 let entry = locals.clone();
                 self.loop_depth += 1;
                 let (body_locals, break_states) = self.converge_loop_body(
@@ -419,6 +380,50 @@ impl<'a> Checker<'a> {
                     declared_return,
                     label,
                     |this, pass_locals, declared_return, label| {
+                        this.in_condition_position = true;
+                        this.check_expr(cond, pass_locals, label);
+                        // Phase 15, `WhileLoopAlwaysFalseConditionRule`/
+                        // `WhileLoopAlwaysTrueConditionRule`: real
+                        // inferred-type trust (`inferred_constant_
+                        // condition`), matching real PHPStan's own design
+                        // now that both reasons the original version was
+                        // reverted are fixed - see `check_if`'s own doc
+                        // comment. `alwaysFalse` has no exclusions,
+                        // matching real PHPStan's own rule exactly.
+                        // `alwaysTrue` is gated the same way real
+                        // PHPStan's own `WhileLoopAlwaysTrueConditionRule`
+                        // is (confirmed directly against `vendor/
+                        // phpstan-src`): skipped when the loop is
+                        // breakless (`stmt_contains_break` - this
+                        // project's own already-existing, deliberately
+                        // conservative "any break anywhere" check, reused
+                        // rather than re-deriving real PHPStan's own more
+                        // precise per-level break/`continue N` analysis -
+                        // a narrow, disclosed simplification, see
+                        // ROADMAP), when the body yields (a legitimate
+                        // infinite generator, not dead code), or when the
+                        // enclosing function is declared `: never`
+                        // (already documents "this never returns" on its
+                        // own, redundant to also flag the loop).
+                        if this.inferred_constant_condition(cond, pass_locals) == Some(false) {
+                            this.report(
+                                label.to_string(),
+                                "While loop condition is always false.".to_string(),
+                                cond.span,
+                                4,
+                                "while.alwaysFalse",
+                            );
+                        } else if this.inferred_constant_condition(cond, pass_locals) == Some(true)
+                            && !skip_always_true
+                        {
+                            this.report(
+                                label.to_string(),
+                                "While loop condition is always true.".to_string(),
+                                cond.span,
+                                4,
+                                "while.alwaysTrue",
+                            );
+                        }
                         this.apply_narrowing(cond, pass_locals, true);
                         this.check_stmt(body, pass_locals, declared_return, label);
                     },
@@ -500,20 +505,20 @@ impl<'a> Checker<'a> {
                 // converged result replaces `locals` directly, the same
                 // "no zero-iterations merge" choice this arm already made.
                 *locals = body_locals;
+                self.in_condition_position = true;
                 self.check_expr(cond, locals, label);
-                // Phase 15 item (2), `DoWhileLoopConstantConditionRule`:
-                // same syntactic-literal-only reinstatement as `If`/
-                // `While` above. Both directions are gated on
-                // breakless-ness here (confirmed directly against real
-                // PHPStan's own rule): `alwaysFalse` skips when the body
-                // has a `break` (`do { ...; if ($x) break; ... } while
-                // (false);` is a real, common "structured goto" idiom,
-                // not dead code); `alwaysTrue` skips on the same
-                // `stmt_contains_break` check plus a yield check (no
-                // `declared_return: never` exclusion here - confirmed
-                // real PHPStan's own rule doesn't have one, unlike
-                // `While`'s).
-                if literal_truthiness(cond) == Some(false) {
+                // Phase 15, `DoWhileLoopConstantConditionRule`: real
+                // inferred-type trust, same as `If`/`While` above. Both
+                // directions are gated on breakless-ness here (confirmed
+                // directly against real PHPStan's own rule): `alwaysFalse`
+                // skips when the body has a `break` (`do { ...; if ($x)
+                // break; ... } while (false);` is a real, common
+                // "structured goto" idiom, not dead code); `alwaysTrue`
+                // skips on the same `stmt_contains_break` check plus a
+                // yield check (no `declared_return: never` exclusion here
+                // - confirmed real PHPStan's own rule doesn't have one,
+                // unlike `While`'s).
+                if self.inferred_constant_condition(cond, locals) == Some(false) {
                     if !stmt_contains_break(body) {
                         self.report(
                             label.to_string(),
@@ -523,7 +528,7 @@ impl<'a> Checker<'a> {
                             "doWhile.alwaysFalse",
                         );
                     }
-                } else if literal_truthiness(cond) == Some(true)
+                } else if self.inferred_constant_condition(cond, locals) == Some(true)
                     && !stmt_contains_break(body)
                     && !body_contains_yield(std::slice::from_ref(body.as_ref()))
                 {
@@ -552,15 +557,47 @@ impl<'a> Checker<'a> {
                 step,
                 body,
             } => {
-                for e in init.iter().chain(cond.iter()) {
+                for e in init.iter() {
                     self.check_expr(e, locals, label);
                 }
                 // A real `for`'s condition slot can hold several
                 // comma-separated expressions - only the *last* one's
                 // truthiness actually gates the loop, matching PHP's own
                 // semantics (the others are only there for a side effect).
+                // The *last* one's own check moved into the convergence
+                // closure below (Phase 15 continuation - the same real
+                // bug this session's own `While` fix addresses: checking
+                // it once here, against the pre-loop entry, would bypass
+                // Phase 55's fixed-point convergence entirely, the exact
+                // false positive real corpus code hit - `QMultiToken::
+                // parseExpression`'s `for ($stop = false; !$stop && ...;
+                // $qi++)`, where `$stop` is reassigned inside the body).
+                // The non-last expressions genuinely are only ever
+                // side-effecting scratch expressions in every real corpus
+                // use seen so far, so they stay checked once up front,
+                // unlike real PHP's own per-iteration re-evaluation of
+                // them - a narrow, disclosed simplification (ROADMAP).
+                if cond.len() > 1 {
+                    for e in &cond[..cond.len() - 1] {
+                        self.check_expr(e, locals, label);
+                    }
+                }
                 match cond.last() {
                     Some(c) => {
+                        // Same real bug and fix as `While`'s own arm
+                        // above: a variable *the last condition
+                        // expression itself* assigns (`for (;; ($x =
+                        // f()) !== null; )`, unusual but real) must be
+                        // unconditionally defined afterward, since a
+                        // `for`'s condition always runs at least once
+                        // regardless of body iterations - a quiet,
+                        // diagnostics-discarded evaluation against the
+                        // real pre-loop `locals` binds that side effect
+                        // before the convergence-aware, diagnostic-
+                        // bearing walk runs against per-pass copies.
+                        let diagnostics_before = self.diagnostics.len();
+                        self.check_expr(c, locals, label);
+                        self.diagnostics.truncate(diagnostics_before);
                         let entry = locals.clone();
                         self.loop_depth += 1;
                         let (body_locals, break_states) = self.converge_loop_body(
@@ -568,6 +605,7 @@ impl<'a> Checker<'a> {
                             declared_return,
                             label,
                             |this, pass_locals, declared_return, label| {
+                                this.check_expr(c, pass_locals, label);
                                 this.apply_narrowing(c, pass_locals, true);
                                 this.check_stmt(body, pass_locals, declared_return, label);
                                 // `step` runs after each body iteration, so
@@ -1291,6 +1329,128 @@ impl<'a> Checker<'a> {
             purge_stale_narrowing_for(locals, &name);
             locals.insert(name, ty);
         }
+    }
+
+    /// `StmtKind::If`'s own real body, extracted so a nested `elseif`
+    /// (which the parser already desugars into a nested `If` inside
+    /// `else_branch` - confirmed directly in `parser/stmt.rs::parse_if`:
+    /// `self.tokens[self.pos] = Token::Keyword(Keyword::If); Some(Box::new
+    /// (self.parse_if()?))`) can recurse into `check_if` itself
+    /// (`is_elseif: true`) instead of the generic `check_stmt` dispatch,
+    /// carrying its own chain-position context along - `check_stmt` never
+    /// gains an `is_elseif` parameter, so its ~dozens of other call sites
+    /// need no change at all.
+    ///
+    /// Phase 15 continuation, `IfConstantConditionRule`/
+    /// `ElseIfConstantConditionRule`: the original type-inference-trusting
+    /// design is reinstated (`inferred_constant_condition`, see its own
+    /// doc comment) now that both real reasons it was reverted are fixed
+    /// (Phase 55's convergence work; `widen_coalesce_result`'s own
+    /// general-case bug, fixed this session). A genuine `elseif` gets its
+    /// own real identifier/message (not `if.*`) and real PHPStan's own
+    /// "last condition, no trailing else" exemption for `alwaysTrue`
+    /// only, confirmed against `vendor/phpstan-src`'s own
+    /// `reportAlwaysTrueInLastCondition: false` default - a trailing
+    /// `elseif (true)` with nothing after it is a real, common "acts as
+    /// an implicit else" idiom; `alwaysFalse` is never exempted this way,
+    /// dead code is dead code regardless of position. A bare, non-elseif
+    /// `If` has no such chain-position concept at all and is never
+    /// exempted.
+    #[allow(clippy::too_many_arguments)]
+    fn check_if(
+        &mut self,
+        cond: &Expr,
+        then_branch: &Stmt,
+        else_branch: &Option<Box<Stmt>>,
+        locals: &mut Locals,
+        declared_return: Option<&Type>,
+        label: &str,
+        is_elseif: bool,
+    ) {
+        let is_last_without_else = else_branch.is_none();
+        self.in_condition_position = true;
+        self.in_exempt_last_condition = is_elseif && is_last_without_else;
+        self.check_expr(cond, locals, label);
+        if let Some(value) = self.inferred_constant_condition(cond, locals) {
+            if is_elseif {
+                if !(value && is_last_without_else) {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "Elseif condition is always {}.",
+                            if value { "true" } else { "false" }
+                        ),
+                        cond.span,
+                        4,
+                        if value {
+                            "elseif.alwaysTrue"
+                        } else {
+                            "elseif.alwaysFalse"
+                        },
+                    );
+                }
+            } else {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "If condition is always {}.",
+                        if value { "true" } else { "false" }
+                    ),
+                    cond.span,
+                    4,
+                    if value {
+                        "if.alwaysTrue"
+                    } else {
+                        "if.alwaysFalse"
+                    },
+                );
+            }
+        }
+
+        let mut then_locals = locals.clone();
+        self.apply_narrowing(cond, &mut then_locals, true);
+        self.check_stmt(then_branch, &mut then_locals, declared_return, label);
+
+        let mut else_locals = locals.clone();
+        self.apply_narrowing(cond, &mut else_locals, false);
+        if let Some(e) = else_branch {
+            if let StmtKind::If {
+                cond: nested_cond,
+                then_branch: nested_then,
+                else_branch: nested_else,
+            } = &e.kind
+            {
+                self.check_if(
+                    nested_cond,
+                    nested_then,
+                    nested_else,
+                    &mut else_locals,
+                    declared_return,
+                    label,
+                    true,
+                );
+            } else {
+                self.check_stmt(e, &mut else_locals, declared_return, label);
+            }
+        }
+
+        // The classic guard clause - `if ($x === null) { return; }` -
+        // depends on this: a branch that unconditionally
+        // returns/throws/breaks/continues never reaches the merge point,
+        // so only the surviving branch's (narrowed) scope should
+        // propagate past the if. Without this, the terminated branch's
+        // narrowing (here, "$x is null") would incorrectly leak into the
+        // code after the guard.
+        let then_terminates = self.always_terminates(then_branch, &then_locals);
+        let else_terminates = else_branch
+            .as_deref()
+            .is_some_and(|e| self.always_terminates(e, &else_locals));
+
+        *locals = match (then_terminates, else_terminates) {
+            (true, false) => else_locals,
+            (false, true) => then_locals,
+            _ => merge_scopes(&then_locals, &else_locals),
+        };
     }
 
     /// Recognizes an inline `/** @var Type $name */` (or bare `/** @var

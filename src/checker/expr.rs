@@ -246,6 +246,11 @@ impl<'a> Checker<'a> {
         // for, never for anything this match's own arms go on to
         // recursively check via a nested `check_expr` call.
         let is_bare_statement = std::mem::take(&mut self.in_bare_statement_position);
+        // Phase 15 continuation: see `Checker::in_condition_position`'s
+        // own doc comment - same "take, not just read" reasoning as
+        // `is_bare_statement` just above.
+        let is_condition_position = std::mem::take(&mut self.in_condition_position);
+        let is_exempt_last_condition = std::mem::take(&mut self.in_exempt_last_condition);
         match &e.kind {
             ExprKind::Call(callee, args) => {
                 // `unset($x)` genuinely removes `$x` from scope in real
@@ -934,23 +939,61 @@ impl<'a> Checker<'a> {
             // started exercising exactly this idiom on real code.
             ExprKind::Binary(BinOp::And, l, r) => {
                 self.check_expr(l, locals, label);
-                // Phase 15 item (2), `BooleanAndConstantConditionRule`:
-                // investigated and declined alongside `StmtKind::If`'s own
-                // identical check - see that arm's doc comment
-                // (`checker/stmt.rs`) and ROADMAP.md.
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
                 self.check_expr(r, &mut narrowed, label);
+                // Phase 15, `BooleanAndConstantConditionRule`: real
+                // inferred-type trust - see `check_boolean_and_or`'s own
+                // doc comment (`checker/control_flow.rs`). Passes the
+                // *original*, pre-narrowing `locals` (not `narrowed`) -
+                // `check_boolean_and_or` narrows its own right-side/
+                // whole-result checks internally now; an earlier version
+                // passed the already-narrowed scope for every one of its
+                // three checks, including the left one, which was a real,
+                // now-fixed bug (see that function's own doc comment).
+                // `is_first_level` is `is_condition_position ||
+                // is_bare_statement` - confirmed directly against real
+                // PHPStan's own `isInFirstLevelStatement()`: a bare `$a &&
+                // $b;` used as its own statement (its result discarded)
+                // is checked with `ExpressionContext::createTopLevel()`
+                // the exact same way an `if`/`while`'s own direct
+                // condition is, not just the condition sites this
+                // project's own `in_condition_position` already covers.
+                // Real corpus false positive this fixes: `Piwigo\Url\
+                // UrlService::makeSectionInUrl`'s `isset($x) or
+                // trigger_error(...);` (`trigger_error()`'s own stub
+                // return type is exactly `true`, so the bare `or`'s own
+                // whole-result looked constantly true).
+                self.check_boolean_and_or(
+                    &BinOp::And,
+                    l,
+                    r,
+                    e,
+                    locals,
+                    label,
+                    is_condition_position || is_bare_statement,
+                );
                 merge_new_variable_definitions(locals, &narrowed);
                 self.infer_binary(&BinOp::And, l, r, locals)
             }
             ExprKind::Binary(BinOp::Or, l, r) => {
                 self.check_expr(l, locals, label);
-                // Phase 15 item (2), `BooleanOrConstantConditionRule`:
-                // investigated and declined - same as `&&` above.
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
                 self.check_expr(r, &mut narrowed, label);
+                // Phase 15, `BooleanOrConstantConditionRule`: same
+                // reasoning as `&&` above - passes the original,
+                // pre-narrowing `locals`, and the same `is_bare_statement`
+                // inclusion in `is_first_level`.
+                self.check_boolean_and_or(
+                    &BinOp::Or,
+                    l,
+                    r,
+                    e,
+                    locals,
+                    label,
+                    is_condition_position || is_bare_statement,
+                );
                 merge_new_variable_definitions(locals, &narrowed);
                 self.infer_binary(&BinOp::Or, l, r, locals)
             }
@@ -985,10 +1028,19 @@ impl<'a> Checker<'a> {
                 let r_ty = self.check_expr(r, locals, label);
                 self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span, label);
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span, label);
-                // Phase 15 item (2), `LogicalXorConstantConditionRule`:
-                // investigated and declined alongside `StmtKind::If`'s own
-                // identical check - see that arm's doc comment
-                // (`checker/stmt.rs`) and ROADMAP.md.
+                // Phase 15, `LogicalXorConstantConditionRule`: real
+                // inferred-type trust - see `check_logical_xor`'s own doc
+                // comment (`checker/control_flow.rs`). `BinOp::And`/`Or`
+                // are deliberately *not* handled here at all: they each
+                // have their own, separate, earlier-matching `ExprKind::
+                // Binary` arm above (short-circuit-narrowing-aware,
+                // matching real PHPStan's own `getRightScope()`), which
+                // this generic arm - the same one every *other* binary
+                // operator falls through to - never actually reaches for
+                // them.
+                if *op == BinOp::LogicalXor {
+                    self.check_logical_xor(l, r, locals, label);
+                }
                 self.infer_binary(op, l, r, locals)
             }
             ExprKind::Variable(name) => {
@@ -1044,10 +1096,40 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 self.check_expr(inner, locals, label);
-                // Phase 15 item (2), `BooleanNotConstantConditionRule`:
-                // investigated and declined alongside `StmtKind::If`'s own
-                // identical check - see that arm's doc comment
-                // (`checker/stmt.rs`) and ROADMAP.md.
+                // Phase 15, `BooleanNotConstantConditionRule`: real
+                // inferred-type trust, fires *anywhere* `!expr` appears
+                // (not just as a condition - `should_skip_constant_
+                // condition` excludes `!` from `if`/`while`/`ternary`'s
+                // own generic check specifically so this standalone rule
+                // is the one and only place it's caught, matching real
+                // PHPStan's own separation exactly). Note the inversion:
+                // negating an always-*true* inner expression makes the
+                // whole `!expr` always *false*, and vice versa - confirmed
+                // directly against `BooleanNotConstantConditionRule.php`,
+                // not assumed. `is_exempt_last_condition` (only ever `true`
+                // when this `!expr` is itself a genuine last-elseif-
+                // without-else's own condition, set by `check_if`) mirrors
+                // real PHPStan's own `isLast` exemption for this rule too -
+                // confirmed it has one, unlike `Ternary`'s.
+                if let Some(inner_value) = self.inferred_constant_condition(inner, locals) {
+                    let result_value = !inner_value;
+                    if !(result_value && is_exempt_last_condition) {
+                        self.report(
+                            label.to_string(),
+                            format!(
+                                "Negated boolean expression is always {}.",
+                                if result_value { "true" } else { "false" }
+                            ),
+                            inner.span,
+                            4,
+                            if result_value {
+                                "booleanNot.alwaysTrue"
+                            } else {
+                                "booleanNot.alwaysFalse"
+                            },
+                        );
+                    }
+                }
                 Type::Bool
             }
             // Real PHP's unary minus/plus convert a numeric string
@@ -1239,11 +1321,32 @@ impl<'a> Checker<'a> {
                 Type::Mixed
             }
             ExprKind::Ternary(cond, then_, else_) => {
+                self.in_condition_position = true;
                 self.check_expr(cond, locals, label);
-                // Phase 15 item (2), `TernaryOperatorConstantConditionRule`:
-                // investigated and declined alongside `StmtKind::If`'s own
-                // identical check - see that arm's doc comment
-                // (`checker/stmt.rs`) and ROADMAP.md.
+                // Phase 15, `TernaryOperatorConstantConditionRule`: real
+                // inferred-type trust, same design as `If`/`While`/
+                // `DoWhile` (`checker/stmt.rs`'s own `check_if`) - no
+                // exclusions beyond `inferred_constant_condition`'s own
+                // shared ones, confirmed directly against `vendor/
+                // phpstan-src`: this one real rule has none of `BooleanAnd`
+                // /`BooleanOr`'s own `isLast`/first-level-statement
+                // complexity.
+                if let Some(value) = self.inferred_constant_condition(cond, locals) {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "Ternary operator condition is always {}.",
+                            if value { "true" } else { "false" }
+                        ),
+                        cond.span,
+                        4,
+                        if value {
+                            "ternary.alwaysTrue"
+                        } else {
+                            "ternary.alwaysFalse"
+                        },
+                    );
+                }
                 // Same clone-and-narrow shape as `StmtKind::If` - a
                 // ternary is just as branch-based, and without this,
                 // `$x === null ? "default" : $x` never benefits from the
@@ -3721,7 +3824,21 @@ impl<'a> Checker<'a> {
             || matches!(&l_ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(_, _))));
         match &r_ty {
             Type::ArrayShape(_) if l_is_array => l_ty,
-            _ => r_ty,
+            // Phase 15 continuation: the general case was discarding
+            // `l_ty` entirely, keeping only `r_ty` - wrong for `??`'s own
+            // semantics regardless of precision: the result is `$expr`
+            // itself when it's not null (already computed above, with
+            // `Null` excluded) *or* `$default` when it is - a real union
+            // of both outcomes, not "the default's type, unconditionally"
+            // (which happened to look like a narrow-imprecision problem -
+            // `$x = $expr ?? false;` collapsing to the bare literal
+            // `false` whenever `$expr`'s own type isn't confidently known
+            // - but was actually just this fallback throwing `l_ty` away
+            // outright, confirmed by reading the surrounding early-return
+            // cases above, which *do* union `Null` back into `l_ty` for
+            // the `?? null` case specifically; this arm never had the
+            // equivalent treatment for every other right-hand type).
+            _ => union_types(l_ty, r_ty),
         }
     }
 
@@ -3748,6 +3865,61 @@ impl<'a> Checker<'a> {
                     Type::String
                 }
             }
+            // Phase 15 continuation: real constant folding, confirmed
+            // directly against `vendor/phpstan-src`'s own
+            // `BooleanAndHandler`/`BooleanOrHandler::resolveType` -
+            // without this, `check_boolean_and_or`'s own "whole result"
+            // diagnostic (`booleanAnd.always*`/`booleanOr.always*`) could
+            // never fire at all, since it has nothing but a permanent
+            // bare `Type::Bool` to ever match against. Mirrors real
+            // PHPStan's exact short-circuit algorithm: a definitely-false
+            // left side makes `&&`'s result definitely false without
+            // even considering the right side; otherwise the right side
+            // is inferred against `l`'s own truthy-narrowed scope (the
+            // same `apply_narrowing` every call site already narrows
+            // into before checking the right operand) since that's the
+            // only scope the right side is ever actually reached in.
+            BinOp::And => {
+                let l_ty = self.infer_expr(l, locals);
+                if matches!(l_ty, Type::False) {
+                    return Type::False;
+                }
+                let mut narrowed = locals.clone();
+                self.apply_narrowing(l, &mut narrowed, true);
+                let r_ty = self.infer_expr(r, &narrowed);
+                if matches!(r_ty, Type::False) {
+                    Type::False
+                } else if matches!(l_ty, Type::True) && matches!(r_ty, Type::True) {
+                    Type::True
+                } else {
+                    Type::Bool
+                }
+            }
+            BinOp::Or => {
+                let l_ty = self.infer_expr(l, locals);
+                if matches!(l_ty, Type::True) {
+                    return Type::True;
+                }
+                let mut narrowed = locals.clone();
+                self.apply_narrowing(l, &mut narrowed, false);
+                let r_ty = self.infer_expr(r, &narrowed);
+                if matches!(r_ty, Type::True) {
+                    Type::True
+                } else if matches!(l_ty, Type::False) && matches!(r_ty, Type::False) {
+                    Type::False
+                } else {
+                    Type::Bool
+                }
+            }
+            // `xor` doesn't short-circuit, so both sides are always
+            // inferred against the same, un-narrowed scope - confirmed
+            // against `BinaryOpHandler::resolveType`'s own
+            // `BinaryOp\LogicalXor` arm.
+            BinOp::LogicalXor => match (self.infer_expr(l, locals), self.infer_expr(r, locals)) {
+                (Type::True, Type::True) | (Type::False, Type::False) => Type::False,
+                (Type::True, Type::False) | (Type::False, Type::True) => Type::True,
+                _ => Type::Bool,
+            },
             BinOp::Eq
             | BinOp::Identical
             | BinOp::NotEq
@@ -3755,10 +3927,7 @@ impl<'a> Checker<'a> {
             | BinOp::Lt
             | BinOp::Gt
             | BinOp::LtEq
-            | BinOp::GtEq
-            | BinOp::And
-            | BinOp::Or
-            | BinOp::LogicalXor => Type::Bool,
+            | BinOp::GtEq => Type::Bool,
             // The spaceship operator returns -1/0/1 (an int), not a bool -
             // its single most common real use is returning a value
             // directly from a comparator (`usort`/`uasort`/...).

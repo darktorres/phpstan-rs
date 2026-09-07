@@ -531,6 +531,36 @@ pub struct Checker<'a> {
     // this one, which needs to answer it from every *other*, much more
     // varied call site instead.
     pub(crate) in_bare_statement_position: bool,
+    // Phase 15 continuation: mirrors `in_bare_statement_position`'s own
+    // exact `std::mem::take`-at-top-of-`check_expr` idiom - set to `true`
+    // immediately before `check_expr` is called for the direct `cond` of
+    // an `if`/`elseif`/`while`/`do-while`/ternary (never `for` - real
+    // PHPStan has no dedicated for-condition rule at all), cleared the
+    // instant `check_expr` reads it. Real PHPStan's own `Scope::
+    // isInFirstLevelStatement` equivalent: `BooleanAndConstantConditionRule`/
+    // `BooleanOrConstantConditionRule`'s own right-side/whole-expression-
+    // result diagnostics are skipped exactly when the `&&`/`||` itself
+    // *is* one of those direct conditions - already covered by the
+    // if/while/ternary's own check there - but never for a `&&`/`||`
+    // reached any other way (an ordinary sub-expression, a nested one
+    // several levels deep, ...), which still gets the full three-way
+    // check.
+    pub(crate) in_condition_position: bool,
+    // Phase 15 continuation: same `std::mem::take` idiom, set (alongside
+    // `in_condition_position`) only when the direct condition about to be
+    // checked is a genuine `elseif` with no trailing `else` and nothing
+    // after it in the chain - real PHPStan's own "acts as an implicit
+    // else" exemption (`reportAlwaysTrueInLastCondition: false`'s
+    // default, confirmed in `vendor/phpstan-src/conf/config.neon`).
+    // `check_if` already applies this directly to its own `elseif.
+    // alwaysTrue`, but `BooleanNotConstantConditionRule` has the *same*
+    // exemption for a standalone `!$expr` condition (`elseif (!false)
+    // {}` with nothing after it) - `should_skip_constant_condition`
+    // deliberately excludes `!` from `check_if`'s own top-level check
+    // (deferring to this dedicated one), so without this flag that
+    // deferral would silently lose the exemption `check_if` alone can't
+    // apply to a shape it never evaluates itself.
+    pub(crate) in_exempt_last_condition: bool,
     // Finding 1: the `$this` type inside a Pest `it`/`test`/`describe`/
     // `beforeEach`/`afterEach`/`beforeAll`/`afterAll` closure - set via
     // `set_pest_this_type` (by `Project::check_file`, from its own
@@ -702,7 +732,7 @@ pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{
     body_contains_yield, collect_exit_point_statements, exit_point_description,
-    expr_contains_yield, is_truthy_literal, literal_truthiness, merge_scopes, stmt_contains_break,
+    expr_contains_yield, is_truthy_literal, merge_scopes, stmt_contains_break,
     type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
@@ -737,6 +767,8 @@ impl<'a> Checker<'a> {
             saw_dynamic_var_construct: false,
             current_function_is_generator: false,
             in_bare_statement_position: false,
+            in_condition_position: false,
+            in_exempt_last_condition: false,
             pest_this_type: Type::Mixed,
             pest_hook_properties: HashSet::new(),
             loop_break_states: Vec::new(),
