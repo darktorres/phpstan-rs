@@ -503,17 +503,48 @@ must resolve to a real, known class (`attribute.notFound`); and a
 `CallToStaticMethodStatementWithNoDiscardRule`'s own shape
 (`checker/calls.rs`).
 
-**Still open**: target-validity checking - real PHPStan's own
-per-declaration-kind rules (`ClassAttributesRule`,
-`ClassConstantAttributesRule`, `NonClassAttributeClassRule`,
-`TraitAttributeClassRule`, `TraitAttributesRule`, `PropertyAttributesRule`,
-`PropertyHookAttributesRule`, `EnumCaseAttributesRule`,
-`MethodAttributesRule`, `ParamAttributesRule`, `FunctionAttributesRule`,
-`ClosureAttributesRule`, `ArrowFunctionAttributesRule`,
-`ConstantAttributesRule`) each verify an attribute is only used on a
-declaration kind its own `#[\Attribute(Attribute::TARGET_*)]` flags
-actually allow - this project checks existence only, never target
-legality. Prerequisite for the `#[Override]`/`#[ReturnTypeWillChange]`
+**Update**: target-validity checking is now partly done -
+`attribute.notAttribute` (the resolved class was never itself declared
+usable as an attribute at all) and `attribute.target` (it is, but not
+for this declaration kind) now run for `PropertyAttributesRule`/
+`MethodAttributesRule`/`FunctionAttributesRule`/`ParamAttributesRule`
+(including the promoted-property dual `parameter or property` target
+shape real PHPStan's own version has). New `Registry::ClassInfo::
+attribute_targets: Option<u32>` (an `int-mask-of<Attribute::TARGET_*>`,
+`None` when the class carries no `#[\Attribute(...)]` meta-attribute of
+its own at all) computed once at registry-build time from a small,
+lenient constant-expression evaluator (`eval_attribute_flags_expr`,
+`registry::class_info.rs`) - a bitwise-OR chain of `Attribute::
+TARGET_*`/`IS_REPEATABLE` class-constant references, falling back to
+`Attribute::TARGET_ALL` for anything it doesn't recognize (a computed
+expression, a variable, ...) rather than ever guessing a false
+violation. No new hardcoded data was needed for the real, commonly-used
+marker attributes (`#[\Override]`, `#[\NoDiscard]`) - this project
+already parses the real vendored `phpstorm-stubs`/`phpstan-src` PHP
+source at registry-build time (`php_stubs::generated_stub_classes`),
+and those sources' own real `#[Attribute(Attribute::TARGET_METHOD|
+TARGET_PROPERTY|TARGET_CLASS_CONSTANT)]` (`Override`) declarations flow
+straight through the same `ClassInfo::from_decl` path every other class
+does. Verified byte-for-byte against real `vendor/bin/phpstan` using
+`Override`'s own real target flags (e.g. `#[Override] function f(): void
+{}` at the top level correctly reports `attribute.target`: "Attribute
+class Override does not have the function target."). Corpus-verified:
+byte-identical to baseline in both Piwigo-only and full-corpus scope -
+no violation of either kind exists anywhere in this corpus, a genuine
+"no violations found" result, not a dormant check (the unit tests
+exercise both real detection and real non-detection directly).
+
+Still open: real PHPStan's own per-declaration-kind rules this update
+doesn't cover yet (`ClassAttributesRule`, `ClassConstantAttributesRule`,
+`NonClassAttributeClassRule`, `TraitAttributeClassRule`,
+`TraitAttributesRule`, `PropertyHookAttributesRule`,
+`EnumCaseAttributesRule`, `ClosureAttributesRule`,
+`ArrowFunctionAttributesRule`, `ConstantAttributesRule`) - class-level,
+enum-case, class-constant, and closure/arrow-fn attributes still only
+get the plain existence check. Constructor-argument validation
+(`attribute.noConstructor`/parameter-count/type checks) remains
+unclaimed too, genuinely needing Phase 49's call-argument-binding
+generalization. Prerequisite for the `#[Override]`/`#[ReturnTypeWillChange]`
 half of Phase 64's override-compatibility rewrite either way.
 
 **Phase 38 - Target-PHP-version configuration (DONE).** This entry's
