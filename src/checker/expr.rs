@@ -833,19 +833,33 @@ impl<'a> Checker<'a> {
                     }
                     _ => None,
                 };
-                // Substituted through the receiver's own carried type
-                // arguments (Phase 10), walking up to whichever ancestor
-                // actually declares the method if it's inherited (Phase
-                // 10.5) - a method declared `add(T $item)` on
-                // `Collection<User>`, or inherited from `Collection` by a
-                // concrete `IntCollection extends Collection<int>`, gets
-                // checked against `User`/`int`, not an unbound `T`/`Mixed`.
-                let sig = recv_class.as_ref().and_then(|(class, type_args)| {
-                    self.registry
-                        .lookup_method_with_owner(class, method)
-                        .map(|(owner, sig)| {
-                            self.substitute_class_templates(sig, class, type_args, &owner)
-                        })
+                // Real bug found and fixed this session: `sig` (and every
+                // class-name-dependent decision below it - argument-type
+                // checking, visibility/`@internal`/`@deprecated`, the
+                // Doctrine special case, and the final return-type
+                // resolution) used to derive `class`/`owner` from
+                // `recv_class` above, which is picked purely to answer
+                // "is there any concrete class at all" (forward order,
+                // regardless of whether it actually has the method) - the
+                // same anti-pattern this session's own `find_method_
+                // receiver_class`/`find_property_receiver` already fix
+                // elsewhere. `find_method_receiver` searches every member
+                // (`Intersection` in reverse, preferring the narrower,
+                // just-`instanceof`-checked type - see `method_call_
+                // return_type`'s own doc comment for the real corpus bug
+                // this ordering fixes) for one that genuinely resolves
+                // the method, carrying its own type-args and declaring
+                // owner through in one pass. Substituted through the
+                // receiver's own carried type arguments (Phase 10),
+                // walking up to whichever ancestor actually declares the
+                // method if it's inherited (Phase 10.5) - a method
+                // declared `add(T $item)` on `Collection<User>`, or
+                // inherited from `Collection` by a concrete
+                // `IntCollection extends Collection<int>`, gets checked
+                // against `User`/`int`, not an unbound `T`/`Mixed`.
+                let receiver = self.find_method_receiver(&recv_ty, method);
+                let sig = receiver.as_ref().map(|(class, type_args, owner, sig)| {
+                    self.substitute_class_templates(sig, class, type_args, owner)
                 });
                 let resolved = sig
                     .as_ref()
@@ -886,36 +900,26 @@ impl<'a> Checker<'a> {
                             0,
                             "method.notFound",
                         );
-                    } else if let Some(sig) = &sig {
-                        // Phase 57: visibility - a fresh, small lookup
-                        // rather than threading `owner` out of `sig`'s
-                        // own computation above (which discards it once
-                        // `substitute_class_templates` has consumed it),
-                        // matching this project's own established
-                        // "cheap, pure lookup called twice for clarity"
-                        // precedent elsewhere (e.g. `ExprKind::
-                        // PropertyAccess`'s identical shape just above).
-                        if let Some((owner, _)) =
-                            self.registry.lookup_method_with_owner(class, method)
-                        {
-                            self.check_member_visibility(MemberVisibilityCheck {
-                                kind: "method",
-                                owner: &owner,
-                                member_name: method,
-                                visibility: &sig.visibility,
-                                describe: &format!("method {owner}::{method}()"),
-                                span: e.span,
-                                label,
-                            });
-                            // Phase 67: `@internal`.
-                            self.check_internal_method_call(
-                                &owner, method, sig, false, e.span, label,
-                            );
-                            // Phase 39: `@deprecated`.
-                            self.check_deprecated_method_call(
-                                &owner, method, sig, false, e.span, label,
-                            );
-                        }
+                    } else if let Some((class, _, owner, _)) = &receiver
+                        && let Some(sig) = &sig
+                    {
+                        // Phase 57: visibility. `owner`/`sig` both come
+                        // from the same `find_method_receiver` lookup
+                        // now, guaranteed consistent with each other -
+                        // no separate re-lookup needed.
+                        self.check_member_visibility(MemberVisibilityCheck {
+                            kind: "method",
+                            owner,
+                            member_name: method,
+                            visibility: &sig.visibility,
+                            describe: &format!("method {owner}::{method}()"),
+                            span: e.span,
+                            label,
+                        });
+                        // Phase 67: `@internal`.
+                        self.check_internal_method_call(owner, method, sig, false, e.span, label);
+                        // Phase 39: `@deprecated`.
+                        self.check_deprecated_method_call(owner, method, sig, false, e.span, label);
                         // Finding 29 / Phase 49: see the identical
                         // comment on the plain-function Call arm above -
                         // `check_args` is spread-aware now, so it's
@@ -933,11 +937,11 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                let result = match &recv_class {
-                    Some((class, _)) if is_doctrine_query_get_result(self, class, method) => {
+                let result = match &receiver {
+                    Some((class, _, _, _)) if is_doctrine_query_get_result(self, class, method) => {
                         doctrine_query_result_list_type()
                     }
-                    Some((class, _)) => sig
+                    Some((class, _, _, _)) => sig
                         .as_ref()
                         .map(|s| {
                             let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
@@ -2730,6 +2734,45 @@ impl<'a> Checker<'a> {
                 .iter()
                 .rev()
                 .find_map(|m| self.find_property_receiver(m, prop)),
+            _ => None,
+        }
+    }
+
+    /// `find_property_receiver`'s own method counterpart, used by
+    /// `check_expr`'s own `MethodCall` arm - real bug found and fixed
+    /// this session: that arm's own `recv_class` extraction (a plain
+    /// "first Object/EnumCase member, regardless of whether it actually
+    /// declares the method" pick, kept as-is purely to gate whether the
+    /// existence-check block below even runs at all) was *also* being
+    /// used to resolve the method's own real signature, owner, argument-
+    /// type checking, visibility/`@internal`/`@deprecated`, the Doctrine
+    /// query special case, and the final return type - all of which need
+    /// a member that actually declares the method, in the correct
+    /// (`Intersection` reversed) order, exactly like `find_method_owner`/
+    /// `method_call_return_type` already get right. Returns an owned
+    /// `FunctionSig` (unlike `find_method_owner`'s borrowed one) so the
+    /// caller can freely call further `&mut self` methods afterward.
+    pub(crate) fn find_method_receiver(
+        &self,
+        base_ty: &Type,
+        method: &str,
+    ) -> Option<(String, Vec<Type>, String, FunctionSig)> {
+        match base_ty {
+            Type::Object(class, type_args) => self
+                .registry
+                .lookup_method_with_owner(class, method)
+                .map(|(owner, sig)| (class.clone(), type_args.clone(), owner, sig.clone())),
+            Type::EnumCase(fqn, _) => self
+                .registry
+                .lookup_method_with_owner(fqn, method)
+                .map(|(owner, sig)| (fqn.clone(), Vec::new(), owner, sig.clone())),
+            Type::Union(members) => members
+                .iter()
+                .find_map(|m| self.find_method_receiver(m, method)),
+            Type::Intersection(members) => members
+                .iter()
+                .rev()
+                .find_map(|m| self.find_method_receiver(m, method)),
             _ => None,
         }
     }

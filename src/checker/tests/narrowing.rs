@@ -876,6 +876,44 @@ fn a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real bug found and fixed this session, in `check_expr`'s own separate
+// `MethodCall` arm this time (not `infer_expr`'s, fixed just above) -
+// its own `recv_class` extraction was *also* used to resolve the
+// method's real signature/owner for argument-type checking and
+// visibility/`@internal`/`@deprecated`, using a plain "first Object/
+// EnumCase member, regardless of whether it actually declares the
+// method" pick (kept, correctly, for the separate existence-check gate,
+// but wrongly reused here too). `assertType` alone can't observe this -
+// it reads `infer_expr`'s own result, not `check_expr`'s - so this test
+// instead checks a `check_expr`-only side effect: a same-named method
+// declared on *both* intersection members with *different* visibility.
+// `HasValue::value()` (the narrower, correctly-preferred member) is
+// private; `View::value()` (the broader, previously wrongly-preferred
+// member) is public - the bug silently allowed the call by resolving
+// against `View`'s own public declaration instead.
+#[test]
+fn a_method_call_through_an_intersection_checks_visibility_against_the_narrower_types_own_override()
+{
+    let d = diagnostics_for(
+        r#"<?php
+            interface View { public function value(): int; }
+            class HasValue {
+                private function value(): int { return 1; }
+                public function useIt(): int { return $this->value(); }
+            }
+            function f(View $view): void {
+                if ($view instanceof HasValue) {
+                    $view->value();
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.private"),
+        "got: {d:?}"
+    );
+}
+
 // Same refinement as the property-read test below: a `Union`-typed
 // method call unions every resolving member's own return type together,
 // rather than just using whichever member happened to come first.
