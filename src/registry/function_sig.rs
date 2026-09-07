@@ -1108,3 +1108,18 @@ fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
         .map(|name| by_name.remove(&name).expect("just inserted for this name"))
         .collect()
 }
+
+/// Renders `sig` as a real PHP-looking signature (`strlen(string $string):
+/// int<0, max>`) - shared between the `demo` subcommand's own output and
+/// the LSP's hover text (Phase 17), so the two never drift apart.
+pub fn format_signature(name: &str, sig: &FunctionSig) -> String {
+    let params: Vec<String> = sig
+        .params
+        .iter()
+        .map(|p| {
+            let dots = if p.variadic { "..." } else { "" };
+            format!("{} {dots}${}", p.ty, p.name)
+        })
+        .collect();
+    format!("{name}({}): {}", params.join(", "), sig.return_type)
+}

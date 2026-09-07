@@ -12,7 +12,7 @@ use phpstan_rs::{
     baseline, checker, composer, config, ignore_errors, lexer, lsp, output, parser, php_stubs,
     php_version, project, registry,
 };
-use registry::{FunctionSig, Registry};
+use registry::{Registry, format_signature};
 
 const SAMPLE: &str = r#"<?php
 
@@ -794,18 +794,6 @@ fn run_demo(file: Option<&Path>) {
             }
         }
     }
-}
-
-fn format_signature(name: &str, sig: &FunctionSig) -> String {
-    let params: Vec<String> = sig
-        .params
-        .iter()
-        .map(|p| {
-            let dots = if p.variadic { "..." } else { "" };
-            format!("{} {dots}${}", p.ty, p.name)
-        })
-        .collect();
-    format!("{name}({}): {}", params.join(", "), sig.return_type)
 }
 
 #[cfg(test)]
