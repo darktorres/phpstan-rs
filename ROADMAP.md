@@ -1007,7 +1007,8 @@ plan disclosed as out of scope):
 
 Each entry: what's missing, and the root cause blocking it where one's
 known. Numbered by the original phase for cross-reference; the number
-is not a priority order.
+is not a priority order. See `PHASE_DEPENDENCIES.md` for a graph of
+which of these phases actually block each other (most don't).
 
 **15 - Unreachable-code / constant-condition rule catalog (PARTIAL).**
 `UnreachableStatementRule` (`deadCode.unreachable`) and the full,
