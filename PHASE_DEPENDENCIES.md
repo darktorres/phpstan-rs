@@ -15,7 +15,7 @@ re-derived automatically.
 ```mermaid
 graph LR
     P57["57: readonly/private(set)\nPropertySig metadata — DONE"]
-    P43["43: Property-hook\nchecker validation — PLANNED"]
+    P43["43: Property-hook\nchecker validation — PARTIAL, done"]
     P48["48: Symbol-existence pipeline\n(remaining) — PARTIAL"]
     P49["49: Call-argument binding\n(remaining) — PARTIAL"]
     P37["37: Attribute target-validity\n(remaining) — PARTIAL"]
@@ -35,7 +35,7 @@ graph LR
     P36["36: PHPDoc tag ecosystem\nexpansion (remaining) — PARTIAL"]
 
     P57 -->|done; unblocks| P43
-    P43 -->|blocks| P48
+    P43 -->|done; unblocks| P48
     P49 -->|needed by| P37
     P54 -->|needed by| P50
     P80 -->|prerequisite for| P54
@@ -58,8 +58,8 @@ architectural nice-to-have, explicitly "not a hard blocker").
 
 | From (satisfies) | To (blocked/helped) | Relationship | Status of the edge today |
 |---|---|---|---|
-| **57** readonly/private(set) `PropertySig` metadata | **43** Property-hook checker validation | prerequisite | 57 is done → edge satisfied, 43 unblocked but not started |
-| **43** Property-hook checker validation | **48**'s `ExistingClassesInPropertyHookTypehintsRule` | blocks | 43 still PLANNED → 48 sub-item still blocked |
+| **57** readonly/private(set) `PropertySig` metadata | **43** Property-hook checker validation | prerequisite | 57 done → edge satisfied; 43 built the same session (picked as the first "unblocking" phase) |
+| **43** Property-hook checker validation | **48**'s `ExistingClassesInPropertyHookTypehintsRule` | blocks | 43 done → edge satisfied for the existence-checking half (a `set` hook's own parameter type); 48's own entry now names the narrower remaining sub-checks (template-referenced-in-parameter, unresolvable native type, native union pre-8.0) directly, not as blocked on 43 |
 | **49** Call-argument binding (remaining) | **37**'s attribute constructor-argument validation | needs | 49 PARTIAL, the needed generalization not yet done → still blocked |
 | **54** Generic template richness | **50**'s reverted `InvalidKeyInArrayDimFetchRule` reattempt | blocks | 54 PARTIAL (the relevant rewrite not done) → still blocked |
 | **80** Object-shape/key-of/conditional-type syntax | **54**'s `TemplateKeyOfType`/`TemplateObjectShapeType` bound kinds | prerequisite | 80 PARTIAL; the specific deferred-resolution piece 54 needs isn't done yet |
@@ -72,9 +72,10 @@ architectural nice-to-have, explicitly "not a hard blocker").
 | **55** Narrowing-engine generalization (comparison-outcome/range API) | **51** IntegerRangeType work | coordinate, don't duplicate | both still open; explicitly flagged so whichever is built first doesn't reinvent range arithmetic |
 | **56** Grammar-level PHPDoc parser rewrite | **36** PHPDoc tag ecosystem (every sub-item) | soft/architectural | 56 PLANNED; not a hard blocker, sub-items of 36 proceed independently today |
 
-Two edges above are already satisfied (57→43, 55→15's original family) -
-kept in the graph because they explain *why* 43 and 15 are buildable/built
-now, not because they're still live blockers.
+Three edges above are already satisfied (57→43, 43→48, 55→15's original
+family) - kept in the graph because they explain *why* 43, 48's existence-
+check half, and 15 are buildable/built now, not because they're still
+live blockers.
 
 ## Genuinely independent (no dependency edge either direction)
 

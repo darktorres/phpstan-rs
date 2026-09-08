@@ -809,6 +809,123 @@ both operands provably non-negative), plus several message-precision
 refinements on already-firing diagnostics, zero new false positives,
 Piwigo's own app-only scope completely unchanged.
 
+Phase 43: PHP 8.4 property-hook checker validation, ported directly from
+`vendor/phpstan-src/src/Rules/Properties/*.php` and `Generics/
+PropertyVarianceRule.php` - real, function-like checking for hook bodies
+that were previously only parsed, never analyzed at all. Picked as the
+first of the roadmap's own "phases that unblock others" (see
+`PHASE_DEPENDENCIES.md`, built the same session): its own prerequisite
+(Phase 57's `readonly`/`private(set)` metadata on `PropertySig`) had
+already shipped, and closing it unblocks Phase 48's `ExistingClassesIn
+PropertyHookTypehintsRule`.
+
+The "virtual property" algorithm (does a hooked property have real
+backing storage at all) has no vendored source to transcribe - it's
+computed by the Zend engine/BetterReflection, neither present in this
+project's vendored copies. Verified empirically instead, the same "confirm
+against real, live `php`, not recalled knowledge" methodology this whole
+document uses elsewhere: real PHP 8.5's own `ReflectionProperty::
+isVirtual()` run against ~15 constructed shapes. The confirmed rule - a
+hooked property is virtual iff no hook body contains, anywhere in its own
+function scope (recursing through ordinary statements/expressions,
+including an unreachable branch like `if (false) {...}` - not
+reachability-based, purely syntactic), a `$this->propName` property-fetch
+for that exact property (a read, a bare unused statement, `isset()`, or
+`unset()` all count identically; a *nested* closure/arrow-fn/anonymous-
+class body does not, since it's a separate function scope; neither does a
+dynamic `$this->$name` access or an indirect copy like `$self = $this;
+$self->propName`) - is computed by a new `hooks_reference_backing_storage`/
+`hook_body_references_property` pair (`registry/class_info.rs`), a plain
+generic tree walk reusing the existing `expr_children`/`stmt_children`
+helpers (`ast_walk.rs`) exactly as they already stand - their own,
+pre-existing "stop at a nested closure/arrow-fn/anonymous-class boundary"
+behavior turned out to already match real PHP's own scope boundary here,
+confirmed by the same empirical probe rather than assumed. New `PropertySig::
+is_virtual: bool` field, gating `propertyGetHook.noRead`/`propertySetHook.
+noAssign` (`checker/oop.rs::check_property_hooks`) the same way real
+PHPStan's own `GetNonVirtualPropertyHookReadRule`/`SetNonVirtualProperty
+HookAssignRule` do - a disclosed simplification of the *assign* half:
+real PHPStan runs actual dataflow there (does every execution path end
+with the property initialized), which this project has no primitive for;
+a syntactic "does the body reference it at all" is coarser but zero-false-
+positive on the common case.
+
+`SetPropertyHookParameterRule`'s native-type-contravariance half
+(`propertySetHook.nativeParameterType`) is ported; its docblock-merged
+sibling (`propertySetHook.parameterType`) deliberately isn't, mirroring
+this project's own established default for override compatibility
+generally - real PHPStan's own `checkPhpDocMethodSignatures` flag defaults
+off, confirmed neither Piwigo's own `phpstan.neon` nor this project's
+corpus config enables it (`FunctionSig::return_type_native`'s own doc
+comment already documents the identical reasoning for method overrides).
+
+Each hook body is now checked as a real function-like scope - modeled
+directly on the existing `ExprKind::Closure`/`ExprKind::ArrowFn` handling
+in `checker/expr.rs` (fresh `locals`, explicit `$this` binding,
+generator-flag/goto-targets save-restore), deliberately *not* on
+`check_function`'s registry-`FunctionSig`-lookup path: that path runs a
+lot of method-specific machinery (attribute-target validation for
+*methods*, `#[Override]`/`#[NoDiscard]`, first-class-callable
+eligibility) that would be actively wrong for a hook, which - unlike a
+real method - is never itself callable as `$obj->get()`. This closes the
+actual core gap ROADMAP's own prior entry named ("no function-like
+registry entry exists to check hook bodies against"): an undefined
+variable inside a hook body, a wrong return type, a missing return, or a
+generator-return-type mismatch are all caught now, the same way they
+would be inside any ordinary method body - confirmed live via `php -l`
+that real PHP itself applies the identical Generator-return-type
+compile check to a hook body that contains `yield`, validating that
+reusing `check_generator_return_type` here (declared return = the
+property's own type) is the right call, not an assumption.
+
+One real, live bug found and fixed while building this, caught by a
+constructed mini-repro rather than assumed safe: `check_get_hook`/
+`check_set_hook` initially never saved/set/restored `Checker::
+current_class` the way `check_function` already does - an entirely
+legal same-class private property access from inside a hook body
+(`$this->celsius` read from within `$this->fahrenheit`'s own `get`/`set`
+hooks, both declared on the same class) was wrongly flagged
+`property.private`, since the visibility check reads `current_class` to
+allow it. Has its own dedicated regression test, explicitly reverted and
+confirmed to fail without the fix.
+
+`PropertyVarianceRule` reuses the existing `walk_variance` primitive
+directly (`checker/generics.rs`) rather than going through `check_variance`'s
+own param/return-specific loop - a property has one type, not a pair -
+with real PHPStan's own `hasRestrictedWriteAccess` mapped onto this
+project's existing `Position` enum: `Position::Out` (covariant-safe) for
+`readonly`, private-set (`write_visibility == Private`, only reachable
+for a property whose *read* visibility isn't itself private - already
+filtered, so this can only mean a genuine asymmetric `private(set)`), or
+a get-only hooked property (hooks present, none of them `set`);
+`Position::Inv` otherwise. One real, disclosed wording imprecision: this
+reuses `walk_variance`'s own hardcoded, method-parameter-flavored
+violation strings verbatim ("cannot be used in an input (parameter)
+position") rather than real PHPStan's property-specific phrasing - fires
+on exactly the right condition, same identifier/level, just a text
+nuance judged not worth splitting the shared strings by call site for how
+rarely a property is both generic-template-typed and hits this specific
+violation. `check_variance`'s own doc comment used to say properties
+weren't checked "because this project doesn't track `readonly` at all
+yet" - stale since Phase 57 shipped `PropertySig::is_readonly`/
+`write_visibility`; corrected as part of building this, rather than left
+contradicted by the current code (the same kind of stale-prior-write-up
+gap this whole document's Phase 15 re-examination found repeatedly).
+
+Confirmed via a full corpus diff: Piwigo's own app-only scope is byte-
+identical (zero PHP 8.4 property hooks or generic-template properties
+anywhere in Piwigo's own code); the full vendor-included corpus gained
+exactly 5 new diagnostics, all `generics.variance`, all individually
+confirmed genuine by reading the real source (plain, read-write public
+properties on a `@template-covariant`-declared class - Doctrine ORM's
+`ClassMetadata::$reflClass`, `Doctrine\Persistence\ObjectManagerDecorator`,
+Symfony Config's `NodeDefinition`, and phpstorm-stubs' `Ds\Pair::$key`/
+`$value` - each a real, correct finding real PHPStan's own identical rule
+would also produce against the same source) - zero property-hook-specific
+findings anywhere in the ~20,300-file corpus, confirming zero real-world
+PHP 8.4 property hook usage there at all, and zero false positives from
+either family.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -1164,12 +1281,18 @@ inconsistently this corpus tags `@throws`), `TooWideFunctionThrowTypeRule`/
 `MethodThrowTypeRule`, and the ~16-item per-callee dynamic-throw-type
 extension cluster (`Type/Php/*ThrowTypeExtension`).
 
-**43 - Property-hook checker validation (PLANNED).** Hook bodies are
-parsed but never type-checked - no function-like registry entry exists
-for one to check against. Needs "virtual property" detection (no hook
-body ever references the property's own backing storage) and, as a
-prerequisite, `readonly`/`private(set)` metadata on `PropertySig`
-(tracked at Phase 57, done) before `PropertyVarianceRule` can run.
+**43 - Property-hook checker validation (PARTIAL).** Virtual-property
+detection, `propertyGetHook.noRead`/`propertySetHook.noAssign`,
+`propertySetHook.nativeParameterType` contravariance, existence-checking
+for a `set` hook's own parameter type, real function-like body checking,
+and `PropertyVarianceRule` are all done (see Done). Only plain property
+declarations are covered - a promoted constructor property's own inline
+hooks (`Param::hooks`) aren't, since nothing in the registry resolves
+`set_ty`/`is_virtual` for that shape either (`property_hook_set_type`
+takes a `&PropertyDecl`, structurally unable to accept a `&Param`) - a
+real, disclosed residual, not corpus-evidenced (property hooks on a
+promoted property is a rare combination even within an already-rare PHP
+8.4 feature).
 
 **45 - Declared-vs-actual-narrowest-type inference (PLANNED).** No
 mechanism compares a declared type against the narrowest type a body
@@ -1188,8 +1311,17 @@ answers on real PCRE patterns.
 The existence-check MVP, typed-class-constant validation, and the
 multi-namespace-per-file positional-tracking fix are all done (see
 Done). Still open: `ExistingNamesInGroupUseRule`'s case-sensitivity/
-forbidden-name folding, `ExistingClassesInPropertyHookTypehintsRule`
-(blocked on Phase 43), and `ClassNameCheck`/`ClassCaseSensitivityCheck`/
+forbidden-name folding; `ExistingClassesInPropertyHookTypehintsRule`'s
+existence-checking half is done for a `set` hook's own parameter type
+(Phase 43, no longer blocked - `checker::oop::check_set_hook` reuses the
+same `check_type_class_names_exist` every other param/return position
+already goes through), but its other sub-checks (a template type not
+referenced in a parameter, an unresolvable native type, a native union
+type pre-PHP-8.0) aren't ported - real PHPStan's own get hook return-type
+half doesn't apply here either, since this project's AST has no explicit
+declared return type for a `get` hook to check (implicitly the
+property's own type, never separately written down); and
+`ClassNameCheck`/`ClassCaseSensitivityCheck`/
 `ClassForbiddenNameCheck` - the last needs "name as literally written in
 source" tracked through resolution, which today's checker discards at
 the point of resolving to a class's own FQN; real PHPStan's own default
