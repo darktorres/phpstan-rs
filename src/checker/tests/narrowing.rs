@@ -1205,6 +1205,34 @@ fn instanceof_false_branch_against_an_unrelated_class_leaves_the_type_untouched(
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive: `Symfony\Component\Messenger\MessageBus::
+// dispatch()`'s own `while ($x instanceof IteratorAggregate) { $x = $x->
+// getIterator(); }` - PHP's own `Traversable` is a marker interface
+// userland code can never implement directly, only through one of its
+// exactly two direct subinterfaces (`Iterator`, `IteratorAggregate`), so
+// excluding one after the loop structurally proves the other. Before this
+// fix, `narrow_type_excluding` had no special case for this relationship
+// at all, leaving the loop-exit type bare `Traversable` (which declares
+// no methods of its own) and wrongly flagging every one of `rewind()`/
+// `valid()`/`current()` as undefined.
+#[test]
+fn a_while_loop_excluding_iterator_aggregate_narrows_traversable_to_iterator() {
+    let d = diagnostics_for(
+        r#"<?php
+            function handle(Traversable $x): void {
+                while ($x instanceof IteratorAggregate) {
+                    $x = $x->getIterator();
+                }
+                $x->rewind();
+                if ($x->valid()) {
+                    $x->current();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn in_array_strict_narrows_the_true_branch_to_the_haystacks_literal_union() {
     // Phase 33 Finding 2: CatPermSubmitRequest::fromArray's real

@@ -1508,6 +1508,32 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         Type::Array(..) | Type::Intersection(_) if matches!(excluded, Type::ArrayShape(fields) if fields.is_empty()) => {
             upgrade_array_to_non_empty(original)
         }
+        // Real PHP's own `Traversable` is a marker interface userland
+        // code can never implement directly (`class Foo implements
+        // Traversable {}` is a real fatal error, confirmed via `php -r`)
+        // - only through one of its exactly two direct subinterfaces,
+        // `Iterator` and `IteratorAggregate`. Excluding one therefore
+        // structurally *proves* the other, unlike the general "we can't
+        // disprove anything more precise than the type itself" fallback
+        // below - real PHPStan special-cases this identical relationship.
+        // Real corpus false positive this fixes: `Symfony\Component\
+        // Messenger\MessageBus::dispatch()`'s own `while ($x instanceof
+        // IteratorAggregate) { $x = $x->getIterator(); }` loop-exit type
+        // staying bare `Traversable` (missing `rewind()`/`valid()`/
+        // `current()`) instead of narrowing to the only other
+        // structurally possible answer, `Iterator`.
+        Type::Object(name, _)
+            if name == "Traversable"
+                && matches!(excluded, Type::Object(excl, _) if excl == "IteratorAggregate") =>
+        {
+            Type::Object("Iterator".to_string(), Vec::new())
+        }
+        Type::Object(name, _)
+            if name == "Traversable"
+                && matches!(excluded, Type::Object(excl, _) if excl == "Iterator") =>
+        {
+            Type::Object("IteratorAggregate".to_string(), Vec::new())
+        }
         other if other == excluded => Type::Never,
         other => other.clone(),
     }
