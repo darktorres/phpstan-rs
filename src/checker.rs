@@ -514,6 +514,15 @@ pub struct Checker<'a> {
     // StmtKind::Return(None) arm, which has no direct access to the
     // enclosing function's body to answer this itself.
     pub(crate) current_function_is_generator: bool,
+    // Set for the duration of one function/method/closure body to every
+    // label name `goto`-targeted anywhere in it (`collect_goto_targets`'s
+    // own doc comment has the full real corpus false positive this
+    // exists for) - consulted by `check_block`'s own `deadCode.
+    // unreachable` check, which has no direct access to the enclosing
+    // function's body to answer "could a `goto` reach this labeled
+    // statement" itself, the same shape `current_function_is_generator`
+    // already has for its own equally function-scoped question.
+    pub(crate) current_function_goto_targets: std::collections::HashSet<String>,
     // Phase 71: set to `true` immediately before `check_expr` is called
     // for a `StmtKind::Expression`'s own top-level expression (a bare
     // `foo();`, its return value going nowhere by construction), cleared
@@ -731,9 +740,9 @@ pub(crate) use assignment::{
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{
-    body_contains_yield, collect_exit_point_statements, exit_point_description,
-    expr_contains_yield, is_truthy_literal, merge_scopes, stmt_contains_break,
-    stmt_contains_escaping_exit, type_allows_generator_return,
+    body_contains_yield, collect_exit_point_statements, collect_goto_targets,
+    exit_point_description, expr_contains_yield, is_truthy_literal, merge_scopes,
+    stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
@@ -766,6 +775,7 @@ impl<'a> Checker<'a> {
             current_method: None,
             saw_dynamic_var_construct: false,
             current_function_is_generator: false,
+            current_function_goto_targets: std::collections::HashSet::new(),
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,
@@ -1801,6 +1811,10 @@ impl<'a> Checker<'a> {
         self.saw_dynamic_var_construct = false;
         let previous_generator_flag = self.current_function_is_generator;
         self.current_function_is_generator = body_contains_yield(&f.body);
+        let previous_goto_targets = std::mem::replace(
+            &mut self.current_function_goto_targets,
+            collect_goto_targets(&f.body),
+        );
         self.check_generator_return_type(native_return.as_ref(), f.span, &label);
 
         // `check_block`, not a bare loop over `check_stmt`: a function's
@@ -1879,6 +1893,7 @@ impl<'a> Checker<'a> {
         }
         self.saw_dynamic_var_construct = previous_dynamic_flag;
         self.current_function_is_generator = previous_generator_flag;
+        self.current_function_goto_targets = previous_goto_targets;
 
         self.current_class = previous_class;
         self.current_method = previous_method;

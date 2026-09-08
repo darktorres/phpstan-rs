@@ -2152,6 +2152,52 @@ fn only_the_first_statement_after_a_terminator_is_flagged_not_every_one_after() 
     assert_eq!(matches.len(), 1, "got: {d:?}");
 }
 
+// Real corpus false positive: `Amp\Http\Client\Connection\Internal\
+// Http1Parser::parse()`'s own `return $response; body_identity: { ... }`,
+// where `goto body_identity;` (elsewhere in the same function - a real,
+// hand-written HTTP/1.1 parsing state machine) makes the labeled block
+// a genuine jump target, not dead code, whatever the `return` right
+// before it does.
+#[test]
+fn a_labeled_statement_reachable_via_an_earlier_goto_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $cond): int {
+                if ($cond) {
+                    goto skip;
+                }
+                return 1;
+                skip:
+                return 2;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "deadCode.unreachable"),
+        "got: {d:?}"
+    );
+}
+
+// A label nobody `goto`s at all is exactly as dead as any other
+// statement after an unconditional terminator - this fix must not
+// suppress the diagnostic unconditionally for every label.
+#[test]
+fn an_untargeted_label_after_a_return_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): int {
+                return 1;
+                never_reached:
+                echo "dead";
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "deadCode.unreachable"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_statement_after_an_unconditional_throw_is_flagged_as_unreachable() {
     let d = diagnostics_for(

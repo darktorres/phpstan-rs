@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::checker::{
-    Checker, DiagnosticBuilder, Locals, body_contains_yield, literal_string_value,
-    narrow_type_excluding, purge_stale_narrowing_for, union_types, unwrap_grouping,
+    Checker, DiagnosticBuilder, Locals, body_contains_yield, collect_goto_targets,
+    literal_string_value, narrow_type_excluding, purge_stale_narrowing_for, union_types,
+    unwrap_grouping,
 };
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
@@ -521,6 +522,10 @@ impl<'a> Checker<'a> {
                 );
                 let previous_generator_flag = self.current_function_is_generator;
                 self.current_function_is_generator = body_contains_yield(body);
+                let previous_goto_targets = std::mem::replace(
+                    &mut self.current_function_goto_targets,
+                    collect_goto_targets(body),
+                );
                 self.check_generator_return_type(
                     declared_return.as_ref(),
                     closure_expr.span,
@@ -533,6 +538,7 @@ impl<'a> Checker<'a> {
                     &closure_label,
                 );
                 self.current_function_is_generator = previous_generator_flag;
+                self.current_function_goto_targets = previous_goto_targets;
                 self.check_unused_closure_uses(uses, body, &closure_label, closure_expr.span);
                 for u in uses {
                     if !u.by_ref {

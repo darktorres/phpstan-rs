@@ -40,6 +40,13 @@ impl<'a> Checker<'a> {
             if !reported_unreachable
                 && self.always_terminates(stmt, locals)
                 && let Some(next) = stmts.get(i + 1)
+                // A labeled statement `goto`-targeted somewhere else in
+                // this same function is a real jump target, not dead
+                // code, whatever the statement immediately before it
+                // does - see `collect_goto_targets`'s own doc comment
+                // for the real corpus false positive this guards
+                // against.
+                && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.contains(name))
             {
                 self.report(
                     label.to_string(),

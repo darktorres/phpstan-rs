@@ -1,10 +1,10 @@
 use crate::ast::*;
 use crate::checker::{
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, TemplateBindings,
-    body_contains_yield, expr_contains_yield, is_language_construct, is_real_variable_key,
-    is_superglobal, literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding,
-    narrowing_key, purge_stale_narrowing_for, resolve_call_args, superglobal_default_type,
-    to_bitwise_not,
+    body_contains_yield, collect_goto_targets, expr_contains_yield, is_language_construct,
+    is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
+    narrow_type_excluding, narrowing_key, purge_stale_narrowing_for, resolve_call_args,
+    superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -2253,6 +2253,10 @@ impl<'a> Checker<'a> {
                 // check_block never routes through check_function at all.
                 let previous_generator_flag = self.current_function_is_generator;
                 self.current_function_is_generator = body_contains_yield(body);
+                let previous_goto_targets = std::mem::replace(
+                    &mut self.current_function_goto_targets,
+                    collect_goto_targets(body),
+                );
                 self.check_generator_return_type(declared_return.as_ref(), e.span, &closure_label);
                 self.check_block(
                     body,
@@ -2261,6 +2265,7 @@ impl<'a> Checker<'a> {
                     &closure_label,
                 );
                 self.current_function_is_generator = previous_generator_flag;
+                self.current_function_goto_targets = previous_goto_targets;
                 // Phase 59: a `use(...)` capture never referenced anywhere
                 // in the closure's own body it was just checked against
                 // above. `ClosureUse` carries no span of its own (see its
