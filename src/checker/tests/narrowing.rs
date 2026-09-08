@@ -2723,6 +2723,28 @@ fn isset_guard_narrows_a_property_access_too() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive: Monolog's own `MongoDBHandler::write()`'s
+// `isset($this->manager, $this->namespace)` - real PHP's `isset()` is
+// genuinely variadic (`isset($a, $b)` means `isset($a) && isset($b)`,
+// every argument must be set), but the narrowing dispatch above only
+// ever matched a *single*-argument call (`[single_arg]`'s own slice
+// pattern), silently narrowing none of a multi-argument isset()'s
+// arguments at all - not just the ones past the first.
+#[test]
+fn a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(?string $a, ?string $b): int {
+                if (isset($a, $b)) {
+                    return strlen($a) + strlen($b);
+                }
+                return 0;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // A round of Piwigo-corpus bucketing found a static property
 // (`self::$prop !== null`) had no narrowing key at all - only an
 // instance property's `->` chain was handled. Real Piwigo test code

@@ -295,6 +295,33 @@ impl<'a> Checker<'a> {
                     };
                     locals.insert(key, narrowed);
                 } else if let ExprKind::Name(name) = &callee.kind
+                    && name.trim_start_matches('\\') == "isset"
+                    && branch_true
+                    && args.len() > 1
+                {
+                    // Real PHP's `isset()` is genuinely variadic
+                    // (`isset($a, $b, ...)`, equivalent to `isset($a) &&
+                    // isset($b) && ...` - *every* argument must be set) -
+                    // the single-arg dispatch above's own `[single_arg]`
+                    // slice pattern never matches here at all, silently
+                    // narrowing *none* of them, not just the ones past
+                    // the first. Only the true branch is narrowable, the
+                    // same asymmetry the single-arg case above already
+                    // has (a multi-arg `isset()` being false doesn't say
+                    // *which* argument was unset). Real corpus false
+                    // positive: Monolog's own `MongoDBHandler::write()`'s
+                    // `isset($this->manager, $this->namespace)` leaving
+                    // `$this->namespace` (a real `string|null` property)
+                    // un-narrowed inside the guard, wrongly flagging the
+                    // subsequent `$this->manager->executeBulkWrite(
+                    // $this->namespace, ...)` call.
+                    for arg in args {
+                        if let Some(key) = narrowing_key(&arg.value) {
+                            let current = self.current_narrowed_type(&arg.value, &key, locals);
+                            locals.insert(key, narrow_type_excluding(&current, &Type::Null));
+                        }
+                    }
+                } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "array_key_exists"
                     && let [key_arg, arr_arg] = args.as_slice()
                     && let ExprKind::Literal(Literal::String(lit_key)) = &key_arg.value.kind
