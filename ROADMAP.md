@@ -527,20 +527,95 @@ unlocked by fixes (7)-(19) above, and real, correct findings unrelated to
 any of this session's own changes (including in vendor/example code,
 where a docblock-declared literal param type like `@param false $x`
 makes `if ($x)` genuinely always-false, confirmed against `vendor/
-jetbrains/phpstorm-stubs`). Fix (19)'s own full-corpus diff is
-considerably larger than any single prior fix in this family (`check_expr`'s
-own `MethodCall` arm is exercised far more broadly than `infer_expr`
-alone) and was spot-checked rather than reviewed line-by-line - every
-sampled line followed the same already-verified pattern (a more precise
-resolved type/signature surfacing a real, previously-masked mismatch),
-but this is a real, disclosed gap in verification depth, not a claim of
-exhaustive review. Fix (16)'s own reverse-order correction alone
+jetbrains/phpstorm-stubs`). Fix (16)'s own reverse-order correction alone
 removed a further net nine false positives across the full vendor
 corpus once applied on top of (15) - most of (15)'s own newly-surfaced
 findings turned out to be this same ordering bug, not genuine new
 precision. Fixes (13)/(14)/(17)/(18) had no corpus-verifiable effect
 either way (confirmed via a full before/after diff) - all are confirmed
 correct only by their own dedicated regression tests.
+
+Fix (19)'s own full-corpus diff was later reviewed exhaustively, line by
+line (it had initially only been spot-checked - see above). Of its ~57
+changed lines, the overwhelming majority (every `argument.type`/
+`return.type` finding whose "got" type was the broad five-member union
+`int|float|string|bool|null`, plus several differently-shaped ones
+sampled individually - Doctrine ORM's own cache layer, PHPUnit, Rector's
+bundled Symfony console/messenger copies, Symfony Config/Console/
+Messenger/Mailer/Serializer, thecodingmachine/safe) traced to one single,
+deeper, pre-existing root bug this review uncovered while chasing the
+`int|float|string|bool|null` cluster to its source: `Registry::
+flatten_phpdoc_inheritance_one_pass` (Phase 87) backfilled an ancestor's
+own docblock-only return/param type onto a child override **verbatim**,
+never reconciling it against the child's *own* real native type hint the
+way an *own* (non-inherited) docblock already does via `FunctionSig::
+resolve_type`/`reconcile_with_native`. Concretely: `PHPStan\Type\
+Constant\ConstantStringType::getValue(): string` (a concrete override)
+sits under `ConstantScalarType::getValue()`'s own `@return int|float|
+string|bool|null` doc tag - the ancestor's far broader union was cloned
+onto the child wholesale, discarding its own, already-correct, narrower
+native `string` for something far less precise (real PHPStan's own
+`TypehintHelper::decideType` never does this: an inherited doc type only
+wins when the native hint is itself a supertype of it). Fixed (20) by
+running the exact same `reconcile_with_native` an own docblock already
+goes through on the inherited one too, in both `flatten_phpdoc_
+inheritance_one_pass`'s param and return backfills (`registry.rs`) -
+this alone accounted for the entire `int|float|string|bool|null` cluster
+(confirmed via a mini repro isolating the exact shape, and via the real
+corpus diff, both before/after). This is a real, independent, more
+severe bug than any single fix in the (6)-(19) family: unlike a wrong-
+member Intersection/Union arm (which only ever *loses* precision to
+`Mixed`), this one *actively supplied a wrong, misleadingly-specific*
+type wherever it fired, both losing real diagnostics on the affected
+override's own parameters (a native `string $v` silently accepting real
+`int`/`float`/`bool`/`null` call-site arguments, confirmed live) and
+fabricating false ones on its return type.
+
+Reviewing fix (20) itself immediately surfaced a second, narrower gap
+(21) in `reconcile_with_native`'s own `member_possible_given_native`
+helper: its deliberate `Type::Object => true`/`Type::Callable => true`
+leniency (justified for reconciling an *own* docblock, where this
+project has no class hierarchy yet to disprove a claimed subclass) was
+never scoped away from a native `void` return hint, which admits no
+value at all, not even a class or callable. Real corpus false positive:
+`PhpParser\NodeVisitor::enterNode()`'s own `@return null|int|Node|
+Node[]` doc backfilling straight through a native `void` override two
+ancestors down, wrongly demanding a real `Node` return from a function
+whose own signature is `void` (22 real corpus false positives this
+one fix alone removed, including the entire `PhpBench\...::configure():
+OptionsResolver` family). Fixing this the obvious way (native `void`
+excludes every doc member outright) broke a real, correct case in turn:
+`Type::Never` needed its own carve-out, since an explicit `@return
+never` genuinely means "always diverges" and is honestly compatible with
+*any* native return hint including `void` (real PHPStan's own
+`TypehintHelper::decideType` special-cases exactly this, checked before
+its general rule) - confirmed via `Nette\Utils\ObjectHelpers::
+strictStaticCall(): void`'s own `@return never`, whose loss wrongly
+flagged every `__callStatic` ending with a call to it as "should never
+return, but a return statement was reached." Both (20) and (21) have
+their own dedicated regression tests, each explicitly reverted and
+confirmed to fail without their fix.
+
+With (20) and (21) applied, the review of fix (19)'s remaining, non-
+`int|float|string|bool|null` lines completed: every sampled line (an
+interface member missing on a `Region::get(): CacheEntry|null` result
+where only the concrete `EntityCacheEntry` declares it; an `arguments.
+count` mismatch calling a 2-arg concrete override through its 1-arg
+interface type; a `NodeInterface`-vs-`BaseNode` argument narrowing) is a
+genuine, correct finding fix (19) correctly unmasked, not a new bug of
+its own. One real, disclosed, pre-existing limitation surfaced this way
+rather than fixed: `Symfony\Component\Messenger\MessageBus::dispatch()`'s
+`while ($x instanceof IteratorAggregate) { $x = $x->getIterator(); }`
+loop-exit type of `$x` stays bare `Traversable` (missing `rewind()`/
+`valid()`/`current()`) instead of narrowing to `Iterator` - real PHP's
+`Traversable` has *exactly* two direct subinterfaces (`Iterator`,
+`IteratorAggregate`), so excluding one structurally proves the other,
+but this project has no negated-`instanceof`/loop-exit narrowing
+mechanism at all (confirmed: no `narrow_instanceof_false` exists
+anywhere in `checker/narrowing.rs`) to exploit that. Real PHPStan special-
+cases this exact relationship. Out of scope for this review (a new,
+general negated-narrowing feature, not a follow-up fix to (19)/(20)/(21))
+- left as a disclosed, known gap.
 
 ## Performance & tooling
 
