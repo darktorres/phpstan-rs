@@ -8,6 +8,7 @@ mod class_info;
 mod function_sig;
 mod name_context;
 
+pub(crate) use class_info::hook_body_references_property;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
 pub use function_sig::format_signature;
 pub(crate) use function_sig::resolve_type;

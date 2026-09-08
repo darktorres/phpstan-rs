@@ -978,6 +978,8 @@ impl<'a> Checker<'a> {
                     self.check_class_references_exist(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
                     self.check_property_overrides(&fqn, c);
+                    self.check_property_hooks(&fqn, c);
+                    self.check_property_variances(&fqn, c);
                     self.check_trait_conflicts(&fqn, c.span);
                     self.check_uninitialized_properties(&fqn, c);
                     self.check_duplicate_class_members(&fqn, c);

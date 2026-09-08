@@ -278,13 +278,15 @@ impl<'a> Checker<'a> {
     /// invariant slot at all, so neither direction is sound there
     /// either. See `walk_variance`/`Position::compose` below.
     ///
-    /// Still deliberately conservative in one way, matching this
-    /// project's general preference for fewer false positives over
-    /// catching everything: only checks method params/return types, not
-    /// properties (this project doesn't track `readonly` at all yet, and
-    /// a *readonly* property typed `T` is actually a legitimate output-
-    /// only position - without that information, checking properties
-    /// here would misflag every real one).
+    /// Checks method params/return types only - a property's own single
+    /// type needs different position logic entirely (`Position::Out` when
+    /// write access is restricted, `Position::Inv` otherwise, not a
+    /// param/return split), see `check_property_variances` below (Phase
+    /// 43). This doc comment used to say properties weren't checked
+    /// because "this project doesn't track `readonly` at all yet" - stale
+    /// since Phase 57 added `PropertySig::is_readonly`/`write_visibility`;
+    /// corrected as part of building that check rather than left
+    /// contradicted by the current code.
     pub(crate) fn check_variance(
         &mut self,
         sig: &FunctionSig,
@@ -317,6 +319,70 @@ impl<'a> Checker<'a> {
         violations.dedup();
         for message in violations {
             self.report(label.to_string(), message, span, 6, "generics.variance");
+        }
+    }
+
+    /// Phase 43: `PropertyVarianceRule`, ported directly from
+    /// `vendor/phpstan-src/src/Rules/Generics/PropertyVarianceRule.php` -
+    /// a property has one type, not a param/return pair, so this is a new
+    /// sibling of `check_variance` above rather than a caller of it,
+    /// reusing `walk_variance` directly with property-specific position
+    /// logic: `Position::Out` (real PHPStan's "covariant" - the property
+    /// can only ever be read back out, not written into, so a covariant
+    /// template there is sound) when write access is restricted -
+    /// `readonly`, private-set (`write_visibility == Private`, only
+    /// reachable here for a property whose *read* visibility isn't
+    /// itself private - already filtered below, same as real PHPStan's
+    /// own `isPrivate()` early return - so this can only mean a genuine
+    /// asymmetric `private(set)`, not a plain fully-private property), or
+    /// a property with hooks where none of them is `set` (get-only, so
+    /// nothing can ever write through it either) - `Position::Inv`
+    /// otherwise. `readonly`-by-PHPDoc isn't checked (this project has no
+    /// such tracking at all - see ROADMAP.md's Phase 36 entry, a
+    /// pre-existing, disclosed scope boundary this doesn't newly narrow).
+    ///
+    /// One real, disclosed wording imprecision: `walk_variance`'s own
+    /// violation messages are worded for the method-parameter case
+    /// ("cannot be used in an input (parameter) position") since they're
+    /// shared verbatim with `check_variance` above - a property violation
+    /// reuses the identical wording rather than real PHPStan's own
+    /// property-specific phrasing ("...but occurs in ... position in
+    /// property Foo::$bar"). Still fires on exactly the right condition,
+    /// same identifier/level - a text nuance, not a correctness gap;
+    /// splitting `walk_variance`'s hardcoded strings by call site wasn't
+    /// judged worth it for how rarely a property is both generic-
+    /// template-typed and hits this specific violation.
+    pub(crate) fn check_property_variances(&mut self, fqn: &str, c: &ClassDecl) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        if info.covariant_templates.is_empty() && info.contravariant_templates.is_empty() {
+            return;
+        }
+        for p in &c.properties {
+            let Some(prop_sig) = info.properties.get(&p.name) else {
+                continue;
+            };
+            if prop_sig.visibility == Visibility::Private {
+                continue;
+            }
+            let has_restricted_write_access = prop_sig.is_readonly
+                || prop_sig.write_visibility == Visibility::Private
+                || p.hooks
+                    .as_ref()
+                    .is_some_and(|h| h.set.is_none() && h.get.is_some());
+            let pos = if has_restricted_write_access {
+                Position::Out
+            } else {
+                Position::Inv
+            };
+            let mut violations: Vec<String> = Vec::new();
+            self.walk_variance(&prop_sig.ty.clone(), pos, fqn, &mut violations);
+            violations.sort();
+            violations.dedup();
+            for message in violations {
+                self.report(fqn.to_string(), message, p.span, 6, "generics.variance");
+            }
         }
     }
 

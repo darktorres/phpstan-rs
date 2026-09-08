@@ -29,6 +29,7 @@ mod operator_overloading;
 mod operator_validity;
 mod phpstan_assert_tags;
 mod preg_and_regex;
+mod property_hooks;
 mod string_functions;
 mod symbol_existence;
 mod throws;

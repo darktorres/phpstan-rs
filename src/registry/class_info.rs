@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
     Attribute, BinOp, ClassDecl, ClassKind, EnumDecl, Expr, ExprKind, Literal, PropertyDecl,
-    TraitAlias, Visibility,
+    PropertyHookBody, PropertyHooks, Stmt, StmtKind, TraitAlias, Visibility,
 };
+use crate::ast_walk::{expr_children, stmt_children};
 use crate::docblock::{self, DocBlock};
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
@@ -41,6 +42,27 @@ pub struct PropertySig {
     // the hook uses an implicit `set { ... }` with no parameter list at
     // all - a write then still checks against `ty` as before.
     pub set_ty: Option<Type>,
+    // Phase 43: PHP 8.4's own "virtual property" concept - a hooked
+    // property with no backing storage allocated for it at all. Real PHP
+    // computes this itself (via the Zend engine/BetterReflection, neither
+    // vendored here) as a purely *syntactic* compile-time scan: a hooked
+    // property is virtual iff no hook body contains, anywhere in its own
+    // function scope (including an unreachable branch like `if (false)
+    // {...}` - not reachability-based), a `$this->propName` property-fetch
+    // for that exact property (read, bare unused statement, `isset()`, or
+    // `unset()` all count identically; a *nested* closure/arrow-fn/
+    // anonymous-class body does NOT count - it's a separate function
+    // scope; neither does a dynamic `$this->$name` access or an indirect
+    // copy like `$self = $this; $self->propName`). Verified empirically
+    // against real PHP 8.5's own `ReflectionProperty::isVirtual()` across
+    // ~15 shapes (no vendored source exists for this specific algorithm -
+    // see ROADMAP.md's Phase 43 entry), not recalled. Always `false` for
+    // a property with no hooks at all, matching `isVirtual()` on an
+    // ordinary property. Gates `propertyGetHook.noRead`/
+    // `propertySetHook.noAssign` (`checker/oop.rs::check_property_hooks`)
+    // exactly the way real PHPStan's own `GetNonVirtualPropertyHookReadRule`/
+    // `SetNonVirtualPropertyHookAssignRule` do.
+    pub is_virtual: bool,
     // Phase 67: `@internal` on this property's own docblock - see
     // `docblock::DocBlock::internal`'s own doc comment. Only ever set for
     // a real, plainly-declared property with its own doc comment
@@ -277,6 +299,10 @@ impl ClassInfo {
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let set_ty = property_hook_set_type(p, &template_params, ctx);
+                let is_virtual = p
+                    .hooks
+                    .as_ref()
+                    .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 (
                     p.name.clone(),
                     PropertySig {
@@ -284,6 +310,7 @@ impl ClassInfo {
                         is_static: p.is_static,
                         is_readonly: p.is_readonly,
                         set_ty,
+                        is_virtual,
                         visibility: p.visibility.clone(),
                         write_visibility: p
                             .write_visibility
@@ -337,6 +364,7 @@ impl ClassInfo {
                         is_static: false,
                         is_readonly: p.promoted_readonly,
                         set_ty: None,
+                        is_virtual: false,
                         visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
                         write_visibility: p
                             .promoted_visibility
@@ -369,6 +397,7 @@ impl ClassInfo {
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,
                         set_ty: None,
+                        is_virtual: false,
                         visibility: Visibility::Public,
                         write_visibility: Visibility::Public,
                         is_internal: false,
@@ -735,6 +764,7 @@ impl ClassInfo {
                 is_static: false,
                 is_readonly: false,
                 set_ty: None,
+                is_virtual: false,
                 visibility: Visibility::Public,
                 write_visibility: Visibility::Public,
                 is_internal: false,
@@ -772,6 +802,7 @@ impl ClassInfo {
                     is_static: false,
                     is_readonly: false,
                     set_ty: None,
+                    is_virtual: false,
                     visibility: Visibility::Public,
                     write_visibility: Visibility::Public,
                     is_internal: false,
@@ -1005,4 +1036,106 @@ fn property_hook_set_type(
     let ty = resolve_type(None, param.type_hint.as_deref());
     let ty = mark_template_params(ty, template_params);
     Some(resolve_names_in_type(ty, ctx))
+}
+
+/// Phase 43: whether either hook of `hooks` references `$this->prop_name`
+/// anywhere in its own body - see `PropertySig::is_virtual`'s own doc
+/// comment for the full, empirically-verified rule this mirrors. `get`
+/// and `set` are checked independently and OR'd together: real PHP makes
+/// the whole property non-virtual the moment *either* hook references the
+/// backing storage, even if the other one never does (confirmed
+/// empirically: a `get` that reads it with a `set` that never writes it
+/// is still non-virtual, and vice versa).
+fn hooks_reference_backing_storage(hooks: &PropertyHooks, prop_name: &str) -> bool {
+    hooks
+        .get
+        .as_ref()
+        .is_some_and(|body| hook_body_references_property(body, prop_name))
+        || hooks
+            .set
+            .as_ref()
+            .is_some_and(|(_, body)| hook_body_references_property(body, prop_name))
+}
+
+/// `pub(crate)`: also reused by `checker::oop::check_property_hooks` to
+/// test each hook individually (`propertyGetHook.noRead`/
+/// `propertySetHook.noAssign`), not just the OR'd-together whole-property
+/// question `hooks_reference_backing_storage` above answers.
+pub(crate) fn hook_body_references_property(body: &PropertyHookBody, prop_name: &str) -> bool {
+    match body {
+        PropertyHookBody::Arrow(e) => expr_references_property(e, prop_name),
+        PropertyHookBody::Block(stmts) => {
+            stmts.iter().any(|s| stmt_references_property(s, prop_name))
+        }
+    }
+}
+
+/// Deliberately checks *every* occurrence of `$this->prop_name` - a read,
+/// a bare unused statement, an `isset()`/`unset()` argument, or a write
+/// target - uniformly, since real PHP's own virtual-property algorithm
+/// doesn't distinguish between them either (confirmed empirically: a bare
+/// `$this->x;` statement with no use at all still makes the property
+/// non-virtual). `expr_children`/`stmt_children` already stop at a nested
+/// closure/arrow-fn/anonymous-class boundary (see their own module doc
+/// comment in `ast_walk.rs`) - exactly the scope boundary real PHP's own
+/// algorithm respects too, confirmed by the same empirical probe (a
+/// `$this->propName` read inside a nested closure/arrow-fn does NOT count).
+fn stmt_references_property(stmt: &Stmt, prop_name: &str) -> bool {
+    stmt_expr_fields(stmt)
+        .into_iter()
+        .any(|e| expr_references_property(e, prop_name))
+        || stmt_children(stmt)
+            .into_iter()
+            .any(|s| stmt_references_property(s, prop_name))
+}
+
+fn expr_references_property(e: &Expr, prop_name: &str) -> bool {
+    if let ExprKind::PropertyAccess(base, name, _) = &e.kind
+        && name == prop_name
+        && matches!(&base.kind, ExprKind::Variable(v) if v == "this")
+    {
+        return true;
+    }
+
+    expr_children(e)
+        .into_iter()
+        .any(|c| expr_references_property(c, prop_name))
+}
+
+/// This statement's own direct `Expr` fields (not nested statements -
+/// `stmt_children` already covers those) - mirrors `checker::unused::
+/// walk_stmt_for_members`'s identical enumeration, kept as its own copy
+/// here since that one is coupled to a different walk's own accumulator/
+/// context parameters.
+fn stmt_expr_fields(stmt: &Stmt) -> Vec<&Expr> {
+    match &stmt.kind {
+        StmtKind::Expression(e) | StmtKind::Throw(e) => vec![e],
+        StmtKind::Return(Some(e)) => vec![e],
+        StmtKind::Echo(exprs) => exprs.iter().collect(),
+        StmtKind::If { cond, .. }
+        | StmtKind::While { cond, .. }
+        | StmtKind::DoWhile { cond, .. } => vec![cond],
+        StmtKind::For {
+            init, cond, step, ..
+        } => init.iter().chain(cond).chain(step).collect(),
+        StmtKind::Foreach {
+            subject,
+            key,
+            value,
+            ..
+        } => {
+            let mut v = vec![subject];
+            v.extend(key.iter());
+            v.push(value);
+            v
+        }
+        StmtKind::GlobalConst(consts) => consts.iter().map(|c| &c.value).collect(),
+        StmtKind::StaticVar(vars) => vars.iter().filter_map(|(_, d)| d.as_ref()).collect(),
+        StmtKind::Switch { subject, cases } => {
+            let mut v = vec![subject];
+            v.extend(cases.iter().filter_map(|c| c.test.as_ref()));
+            v
+        }
+        _ => vec![],
+    }
 }
