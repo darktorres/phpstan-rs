@@ -348,7 +348,7 @@ pub(crate) fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) ->
 /// (`finfo_file`'s bare `resource` against a modern `finfo` native) still
 /// resolves to the real, useful native type instead of losing all
 /// precision.
-fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
+pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
     let members: Vec<Type> = match doc_ty {
         Type::Union(members) => members,
         other => vec![other],
@@ -432,7 +432,43 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 /// simply stale" can't be told apart without the hierarchy this function
 /// doesn't have, and silently guessing wrong here is worse than not
 /// generalizing past what's actually provable.
+// A native `void` return hint admits no value at all - not even a named
+// class or callable, both otherwise deliberately trusted (see the
+// `Object`/`Callable` arms below) since this function usually can't
+// structurally disprove them for a real, non-`void` native hint. `void`
+// needs no such leniency: it's never legitimately narrowed by *any* doc
+// type, so this is checked before the general `Object`/`Callable`
+// permissiveness below ever gets a chance to wrongly keep a doc member
+// real PHPStan would always discard in favor of the native `void`
+// (`TypehintHelper::decideType`'s own `$type->isSuperTypeOf($phpDocType)`
+// is unconditionally `no()` for `VoidType`). Real corpus false positive
+// this fixes: `PhpParser\NodeVisitor::enterNode()`'s own `@return
+// null|int|Node|Node[]` doc backfilling straight through a native `void`
+// override two ancestors down (`NodeVisitorAbstract::enterNode()`'s own
+// untyped, undocumented passthrough in between) - the `Node` member
+// survived via the `Object => true` rule below with nothing to stop it,
+// wrongly demanding a real `Node` return from a function whose own,
+// authoritative native signature is `void`.
+//
+// `Type::Never` is exempted from this exclusion - real PHPStan special-
+// cases it identically (`TypehintHelper::decideType`'s own `if
+// ($phpDocType instanceof NeverType && $phpDocType->isExplicit()) {
+// return $phpDocType; }`, checked *before* its general `isSuperTypeOf`
+// rule): an explicit `@return never` genuinely means the function always
+// diverges (throws/exits/loops forever), which is honestly compatible
+// with *any* native return hint, `void` included - a real corpus
+// regression caught verifying the `void` exclusion above:
+// `Nette\Utils\ObjectHelpers::strictStaticCall(): void` (own `@return
+// never`) collapsing to plain `void` lost the one piece of information
+// (`Never`) this project's own control-flow-termination analysis needs
+// to recognize the call as always-diverging, wrongly flagging every
+// `__callStatic` that ends with `ObjectHelpers::strictStaticCall(...);`
+// and no further `return` as "should never return, but a return
+// statement was reached."
 fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
+    if *native_ty == Type::Void && *m != Type::Void && *m != Type::Never {
+        return false;
+    }
     match m {
         Type::Object(name, _) if name == "resource" => types::is_subtype(m, native_ty),
         Type::Object(_, _) => true,

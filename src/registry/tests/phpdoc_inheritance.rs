@@ -325,3 +325,73 @@ fn an_ancestors_object_type_naming_a_different_class_than_the_native_hint_is_nev
         Type::Object("SpecificFactory11".to_string(), Vec::new())
     );
 }
+
+// Real corpus false positive found reviewing fix 19's own full-corpus
+// diff (`PHPStan\Type\Constant\ConstantStringType::getValue()`, a
+// concrete `: string` override of `ConstantScalarType::getValue()`'s own
+// `@return int|float|string|bool|null` doc tag): neither `safe_to_
+// backfill_mixed` nor `safe_to_backfill_object_type` catches an
+// ancestor's *non*-`Mixed`, *non*-`Object` doc type that's simply
+// incompatible with the child's own concrete native return type - the
+// ancestor's broad `int|float|string|bool|null` was blindly cloned
+// wholesale onto the child, discarding its own, already-correct,
+// narrower native `string` for something far less precise. Fixed by
+// reconciling the inherited doc type against the child's own native type
+// via the exact same `reconcile_with_native` an own (non-inherited)
+// docblock already goes through (`FunctionSig::resolve_type`'s own doc
+// comment) - filtering the inherited union down to whichever member(s)
+// the native type can actually be, matching real PHPStan's own
+// `TypehintHelper::decideType` (`$type->isSuperTypeOf($phpDocType)`).
+#[test]
+fn an_ancestors_doc_return_type_incompatible_with_the_native_return_type_is_reconciled_not_cloned_verbatim()
+ {
+    let r = build_registry(
+        r#"<?php
+            interface ConstantScalarType12 {
+                /** @return int|float|string|bool|null */
+                public function getValue();
+            }
+            class ConstantStringType12 implements ConstantScalarType12 {
+                public function getValue(): string { return "x"; }
+            }
+            "#,
+    );
+    let sig = &r.classes["ConstantStringType12"].methods["getValue"];
+    assert_eq!(
+        sig.return_type,
+        Type::String,
+        "the child's own concrete native return type must win over an \
+         ancestor's incompatible, broader doc type, got {:?}",
+        sig.return_type
+    );
+}
+
+// Same bug, parameter side: `ScalarC12::setValue()`'s own `@param
+// int|float|string|bool|null $v` blindly overwrote `StrC12::setValue()`'s
+// already-correct, narrower native `string $v` - silently making every
+// call passing a real `int`/`float`/`bool`/`null` argument (only ever
+// legal for the *interface's* own doc-implied signature, not this
+// concrete override's real, narrower one) look valid.
+#[test]
+fn an_ancestors_doc_param_type_incompatible_with_the_native_param_type_is_reconciled_not_cloned_verbatim()
+ {
+    let r = build_registry(
+        r#"<?php
+            interface ScalarC12 {
+                /** @param int|float|string|bool|null $v */
+                public function setValue($v): void;
+            }
+            class StrC12 implements ScalarC12 {
+                public function setValue(string $v): void {}
+            }
+            "#,
+    );
+    let sig = &r.classes["StrC12"].methods["setValue"];
+    assert_eq!(
+        sig.params[0].ty,
+        Type::String,
+        "the child's own concrete native param type must win over an \
+         ancestor's incompatible, broader doc type, got {:?}",
+        sig.params[0].ty
+    );
+}

@@ -574,7 +574,10 @@ impl Registry {
                             {
                                 param_fills.push((
                                     i,
-                                    ancestor_param.ty.clone(),
+                                    function_sig::reconcile_with_native(
+                                        ancestor_param.ty.clone(),
+                                        p.ty_native.clone(),
+                                    ),
                                     ancestor_param.explicit_mixed_hint,
                                 ));
                             }
@@ -598,7 +601,10 @@ impl Registry {
                             {
                                 param_fills.push((
                                     i,
-                                    ancestor_param.ty.clone(),
+                                    function_sig::reconcile_with_native(
+                                        ancestor_param.ty.clone(),
+                                        p.ty_native.clone(),
+                                    ),
                                     ancestor_param.explicit_mixed_hint,
                                 ));
                             }
@@ -626,7 +632,10 @@ impl Registry {
                     ))
                 .then(|| {
                     (
-                        ancestor_sig.return_type.clone(),
+                        function_sig::reconcile_with_native(
+                            ancestor_sig.return_type.clone(),
+                            sig.return_type_native.clone(),
+                        ),
                         ancestor_sig.return_explicit_mixed_hint,
                     )
                 });

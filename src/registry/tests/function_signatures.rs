@@ -324,6 +324,56 @@ fn a_false_member_the_native_hint_still_allows_is_kept() {
     );
 }
 
+// Real corpus false positive found reviewing the phpdoc-inheritance
+// reconciliation fix above (`member_possible_given_native`'s general
+// `Object => true`/`Callable => true` leniency - deliberately permissive
+// since this function usually can't disprove a class-hierarchy claim -
+// wrongly extended to a native `void` return, which admits nothing at
+// all, not even a class or callable). Real shape: `PhpParser\
+// NodeVisitor::enterNode()`'s own `@return null|int|Node|Node[]` doc
+// backfilling straight through an unrelated concrete override's native
+// `void` two ancestors down - the `Node` member survived reconciliation
+// purely because it's a named class, wrongly demanding a real `Node`
+// return from a function whose own, authoritative native signature is
+// `void`.
+#[test]
+fn a_stale_object_member_is_dropped_when_the_native_hint_is_void() {
+    let r = build_registry(
+        r#"<?php
+            class Foo14 {}
+            /** @return Foo14 */
+            function make14(): void {}
+        "#,
+    );
+    assert_eq!(r.functions["make14"].return_type, Type::Void);
+}
+
+// Real corpus regression caught verifying the fix just above: `Type::
+// Never` must be exempted from the new native-`void` exclusion - an
+// explicit `@return never` genuinely means the function always diverges
+// (throws/exits/loops forever), honestly compatible with *any* native
+// return hint including `void` (real PHPStan's own `TypehintHelper::
+// decideType` special-cases exactly this, checked before its general
+// `isSuperTypeOf` rule). Real shape: `Nette\Utils\ObjectHelpers::
+// strictStaticCall(): void` (own `@return never`) - collapsing this to
+// plain `void` would lose the one piece of information this project's
+// control-flow-termination analysis needs to recognize the call as
+// always-diverging, wrongly flagging every `__callStatic` ending with
+// `ObjectHelpers::strictStaticCall(...);` and no further `return` as
+// "should never return, but a return statement was reached."
+#[test]
+fn an_explicit_never_doc_survives_reconciliation_against_a_native_void_hint() {
+    let r = build_registry(
+        r#"<?php
+            /** @return never */
+            function alwaysThrows15(): void {
+                throw new \RuntimeException();
+            }
+        "#,
+    );
+    assert_eq!(r.functions["alwaysThrows15"].return_type, Type::Never);
+}
+
 // Phase 60 corpus find: a PHPStan/Psalm callable-shape doc member
 // (`Closure(Tv): bool`) degrades to plain `Type::Callable` at parse
 // time (no per-parameter/return signature is tracked) - `is_subtype
