@@ -1003,6 +1003,105 @@ passes an `options` array to `filter_var()` at all, matching this phase's
 own long-standing "not corpus-evidenced" note; built anyway per the
 user's own standing directive that corpus silence isn't a reason not to.
 
+Phase 80 follow-up: `value-of<T>` naming a real, registered enum, the
+fourth phase picked from `PHASE_DEPENDENCIES.md`'s own "phases that
+unblock others" this session. Real PHPStan represents `value-of<T>`/
+`key-of<T>` as `LateResolvableType`s that resolve themselves lazily,
+wherever a type is actually consulted anywhere in the program - this
+project has no general lazy-type mechanism, and building one would touch
+every one of the ~19 files with an exhaustive `match` over `Type` for a
+rarely-used feature, so a lower-risk design was chosen instead: resolve
+**once**, in a new one-time `Registry::resolve_deferred_value_of` pass
+that runs after every class/enum is indexed, the same architectural shape
+`flatten_phpdoc_inheritance` already uses for the closely analogous
+problem. Reading `KeyOfType::getResult()` directly confirmed a real scope
+narrowing before any code was written: `key-of<T>` naming a bare class/
+enum reference has no special case in real PHPStan at all (it just tries
+`getIterableKeyType()`, `Mixed` for an ordinary class) - only
+`value-of<T>` special-cases an enum, so that's the only real slice worth
+building. A second simplification found by reading `registry/class_info.rs`
+directly: a backed enum's own `properties["value"]` (already built for
+its real `->value` property) is already the exact union-of-case-value
+type `value-of<EnumName>` needs - reused directly, not recomputed.
+
+`types::parse_type_keyword_or_class`'s `"value-of"` arm now produces a
+sentinel (`Type::Object("$$valueof", [Type::Object(name, [])])`) for a
+bare class/enum reference instead of falling to `Mixed` - the same
+"encode a special case via an existing variant, guarded by an impossible
+name" idiom `"resource"`/`"object"` already use (`$` can never appear in
+a real PHP identifier). `resolve_deferred_value_of` resolves it once
+every class/enum is indexed: not found, or not an enum, stays `Mixed`
+(can't verify, don't guess); an unbacked enum (no real `->value`
+property) is `Never`, matching `ValueOfType::getResult()`'s own
+`count($valueTypes) === 0 -> NeverType` exactly; a backed enum reuses its
+already-built `properties["value"]` type directly.
+
+Two real, live bugs found via this session's own corpus diff, neither
+caught by the unit test suite alone (both fixed, each with its own
+dedicated regression test, explicitly reverted and confirmed to fail
+without its fix):
+
+(1) `registry/name_context.rs::resolve_names_in_type`'s generic `Object`
+arm namespace-qualifies every name it doesn't special-case - inside a
+real `namespace` block, the sentinel's own name (not yet its inner
+argument) got mangled into `App\$$valueof` before the resolution pass
+ever got a chance to recognize it, producing a bogus `class.notFound`
+instead of the real resolved type. A namespace-less test fixture never
+exercises this at all (`ctx.resolve` on a bare name with an empty
+namespace is a no-op) - caught only once a namespaced regression test was
+deliberately added. Fixed with a fourth exact-name guard alongside
+`"object"`/`"Traversable"`/`"resource"`'s existing ones, which - unlike
+those three - still recurses into (and resolves) the sentinel's own inner
+argument, the real class/enum name it wraps.
+
+(2) A real, live false positive in the full vendor corpus
+(`shipmonk/dead-code-detector`'s own `CollectedUsage::deserialize()`,
+`/** @var array{..., t: value-of<MemberType>, ...} $result */`) leaked
+the raw, unresolved `$$valueof<...>` sentinel straight into a real
+diagnostic message. `resolve_deferred_value_of` only runs once, at
+registry-build time - an inline `@var` annotation (and an anonymous
+class's own param/return docblock fallback) parses its own raw text
+independently of that pipeline, at check time, when every class/enum is
+already fully indexed anyway. New `Registry::resolve_deferred_value_of_now`
+(the `&self`, immediate-resolution twin of the `&mut self` one-time pass)
+wired into `Checker::resolve_type_hint` (used by the inline-`@var` path)
+and `checker.rs`'s anonymous-class param/return fallback.
+
+Fixing (2) surfaced a third, more subtle bug while writing its own
+regression test: `php-standard-library`'s own `BackedEnumValueType::coerce():
+string|int`, `/** @return value-of<T> */` for an unresolvable `@template
+T`, started returning bare `Mixed` instead of the correct native
+`string|int` fallback - a real regression, not just a missing
+improvement, traced to `function_sig::member_possible_given_native`'s own
+deliberate `Type::Object(_, _) => true` leniency (built for a genuine, if
+unverifiable, class reference) blanket-trusting the still-unresolved
+sentinel too early in the pipeline, which made `reconcile_with_native`
+keep it instead of correctly falling back to the native type when nothing
+else survived - a real, live regression this feature would otherwise have
+introduced into existing, previously-correct behavior. Fixed with a
+native-fallback-aware resolution path (`resolve_deferred_value_of_with_native_fallback`
+and its `resolve_deferred_value_of_now_with_native_fallback` check-time
+twin): once a sentinel resolves to bare `Mixed`, falls back to the
+position's own already-tracked native-only type (`ParamSig::ty_native`/
+`FunctionSig::return_type_native`) instead, restoring the exact behavior
+`value-of<T>` support would otherwise have silently regressed. A
+disclosed, narrower gap remains for `PropertySig`/`ConstSig`/
+`ClassInfo::template_bounds`, none of which persist a native-type
+counterpart at all (Phase 64's own pre-existing, disclosed limitation) -
+an unresolvable `value-of<T>` there stays plain `Mixed` rather than
+falling back to a native hint, with no current corpus evidence it matters.
+
+Confirmed via a full corpus diff on both scopes, after all three fixes:
+Piwigo's own app-only scope byte-identical; the full vendor-included
+corpus also byte-identical against its own pre-this-phase baseline (the
+two real false positives fixes (1)/(2)/(3) found were all introduced and
+removed within this same phase, confirmed via the corpus diff at each
+intermediate step before finally landing net-zero against the true
+starting point) - no known real corpus usage of `value-of<EnumName>`
+exists in either corpus at all, matching the user's own standing
+directive that corpus silence isn't a reason not to build a real,
+disclosed feature.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -1644,15 +1743,20 @@ scheduled. Size: L remaining, low value.
 
 **80 - Object-shape/key-of/conditional-type syntax, remaining
 (PARTIAL).** `object{...}` shapes, `value-of<T>`/`key-of<T>` (the
-registry-free cases), and conditional-return-type syntax are all done
-(see Done). Still open: `OffsetAccessType` (a literal-key array access's
-own type extracted from a docblock type-string context); a genuine
-deferred-resolution mechanism that would let `value-of`/`key-of`
-resolve a class/enum reference (needs registry access unavailable at
-parse time) and let a conditional return type pick a specific call
-site's real branch instead of always widening to the union of both.
-Also a prerequisite for Phase 54's `TemplateKeyOfType`/
-`TemplateObjectShapeType` bound kinds. Size: M remaining (down from XL).
+registry-free cases), conditional-return-type syntax, and (see Done)
+`value-of<T>` naming a real, registered enum (a deferred-resolution
+mechanism, `Registry::resolve_deferred_value_of`) are all done. Still
+open: `OffsetAccessType` (a literal-key array access's own type extracted
+from a docblock type-string context); `key-of<T>` naming a class/enum
+reference (confirmed real PHPStan has no special case there either -
+`KeyOfType::getResult()` just falls to `getIterableKeyType()`, `Mixed`
+for an ordinary class - so this is a deliberate non-gap, not deferred
+work); letting a conditional return type pick a specific call site's real
+branch instead of always widening to the union of both. Phase 54's own
+`TemplateKeyOfType`/`TemplateObjectShapeType` bound kinds can now build on
+an already-resolved `ClassInfo.template_bounds` (the specific piece Phase
+54 needed from here), though Phase 54 itself remains untouched. Size: M
+remaining (down further after the `value-of`/enum slice above).
 
 **82 - Collector / cross-file aggregation architecture (PLANNED, do not
 schedule standalone).** No two-phase Collector-then-aggregate pass
