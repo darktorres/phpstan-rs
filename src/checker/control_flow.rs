@@ -669,6 +669,41 @@ pub(crate) fn stmt_contains_break(stmt: &Stmt) -> bool {
         || stmt_children(stmt).into_iter().any(stmt_contains_break)
 }
 
+/// A second, real gap in `while`/`do-while`'s own "always true" breakless
+/// detection, found re-examining Phase 15's own disclosed Pending entry
+/// ("breakless-detection reuses `stmt_contains_break`'s own 'any break
+/// anywhere' conservatism... a narrow, disclosed simplification") against
+/// real PHPStan's own actual source rather than trusting the prior
+/// write-up: `WhileLoopAlwaysTrueConditionRule`'s real suppression logic
+/// (`BreaklessWhileLoopNode::getExitPoints()`, confirmed directly against
+/// `vendor/phpstan-src`) treats *any* loop exit point that isn't a
+/// `break` or a bare/level-1 `continue` as disqualifying - not just a
+/// `continue` whose own level escapes past this loop (the only half the
+/// prior write-up named), but a `return`/`throw` reachable inside the
+/// loop body at all. Neither was checked here before this fix, and both
+/// have real, live corpus false positives: `PhpBench\Path\Path::
+/// getLongestCommonBasePath()`'s own `while (true) { ...; continue 2; }`
+/// (no literal `break` anywhere, vendored identically in `symfony/
+/// filesystem`, Rector's and easy-coding-standard's own bundled copies -
+/// four duplicate false positives from one real gap) and `Amp\Http\
+/// Server\Driver\Http1Driver::handleClient()`'s own `while (true) { ...;
+/// return; ... }`. Same maximally-conservative "anywhere in the subtree,
+/// not reachability-checked" traversal `stmt_contains_break` already
+/// uses (and for the identical reason: over-suppressing only ever misses
+/// a diagnostic, never fabricates one) - a `continue`/`return`/`throw`
+/// buried inside a nested `if`/`switch` still disqualifies, matching
+/// `getExitPoints()`'s own set of *possible* exits regardless of how
+/// deep the conditional nesting is.
+pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
+    matches!(
+        stmt.kind,
+        StmtKind::Continue(Some(n)) if n > 1
+    ) || matches!(stmt.kind, StmtKind::Return(_) | StmtKind::Throw(_))
+        || stmt_children(stmt)
+            .into_iter()
+            .any(stmt_contains_escaping_exit)
+}
+
 /// Phase 15 continuation: real PHPStan's own `ConstantConditionRuleHelper
 /// ::shouldSkip` + `FunctionCallConstantConditionHelper::isTypeCheckCandidate`
 /// combined, confirmed directly against `vendor/phpstan-src` - every one

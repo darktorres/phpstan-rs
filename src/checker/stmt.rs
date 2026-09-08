@@ -2,6 +2,7 @@ use crate::ast::*;
 use crate::checker::{
     Checker, Locals, body_contains_yield, collect_exit_point_statements, exit_point_description,
     is_truthy_literal, merge_scopes, purge_stale_narrowing_for, stmt_contains_break,
+    stmt_contains_escaping_exit,
 };
 use crate::docblock;
 use crate::types::Type;
@@ -343,6 +344,7 @@ impl<'a> Checker<'a> {
                 // already has its diagnostics discarded via
                 // `converge_loop_body`'s own `diagnostics.truncate`.
                 let skip_always_true = stmt_contains_break(body)
+                    || stmt_contains_escaping_exit(body)
                     || body_contains_yield(std::slice::from_ref(body.as_ref()))
                     || declared_return == Some(&Type::Never);
                 // Real bug found and fixed this session, on top of the
@@ -535,6 +537,7 @@ impl<'a> Checker<'a> {
                     }
                 } else if self.inferred_constant_condition(cond, locals) == Some(true)
                     && !stmt_contains_break(body)
+                    && !stmt_contains_escaping_exit(body)
                     && !body_contains_yield(std::slice::from_ref(body.as_ref()))
                 {
                     self.report(

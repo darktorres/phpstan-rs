@@ -2331,6 +2331,103 @@ fn a_while_true_in_a_never_returning_function_is_not_flagged() {
     );
 }
 
+// Re-examining Phase 15's own disclosed Pending entry ("breakless-
+// detection reuses stmt_contains_break's own 'any break anywhere'
+// conservatism... a narrow, disclosed simplification") against real
+// PHPStan's own actual source (`WhileLoopAlwaysTrueConditionRule`'s
+// `BreaklessWhileLoopNode::getExitPoints()`) found this understated the
+// real gap: a `continue` whose own level escapes past this loop also
+// disqualifies, not just a literal `break` - confirmed via a real, live
+// corpus false positive, `PhpBench\Path\Path::getLongestCommonBasePath()`'s
+// own `while (true) { ...; continue 2; }` (vendored identically four
+// times across the corpus).
+#[test]
+fn a_while_true_with_an_escaping_continue_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $items): void {
+                foreach ($items as $item) {
+                    while (true) {
+                        if ($item) {
+                            continue 2;
+                        }
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "while.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+// A bare `continue;` (or `continue 1;`) only restarts *this* loop's own
+// next iteration - real PHPStan's own rule doesn't treat that as
+// disqualifying either (only `num > 1` does), so this must still flag.
+#[test]
+fn a_while_true_with_a_same_level_continue_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                while (true) {
+                    if (rand(0, 1)) {
+                        continue;
+                    }
+                    echo 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "while.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+// Same real gap, the other disqualifying shape real PHPStan's own
+// `getExitPoints()` also covers: any `return`/`throw` reachable inside
+// the loop body is a real exit point too, not just `break`/`continue`.
+// Real, live corpus false positive: `Amp\Http\Server\Driver\Http1Driver::
+// handleClient()`'s own `while (true) { ...; return; ... }`.
+#[test]
+fn a_while_true_with_a_return_inside_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                while (true) {
+                    if (rand(0, 1)) {
+                        return;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "while.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_do_while_true_with_a_return_inside_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                do {
+                    if (rand(0, 1)) {
+                        return;
+                    }
+                } while (true);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "doWhile.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
 // Phase 15 continuation: real bug found and fixed this session - a
 // `while` condition's own constant-condition check (and any standalone
 // check reached while checking it, like `BooleanNot`) used to run
