@@ -667,6 +667,37 @@ with zero other ripples. This closes the fix (19) diff review started
 above: every line in it is now individually accounted for as either a
 genuine finding or a fixed, tested bug.
 
+Asked to re-examine this family's own remaining Pending entry (below) to
+see whether any of its "blocked on a bigger feature" justifications
+still held up rather than trusting the prior write-up, one turned out to
+be understated rather than accurate: (24) `while.alwaysTrue`/`doWhile.
+alwaysTrue`'s own breakless-detection was described as reusing `stmt_
+contains_break`'s "any break anywhere" conservatism instead of real
+PHPStan's more precise per-loop-level `continue N` analysis - true, but
+not the whole gap. Reading `WhileLoopAlwaysTrueConditionRule`'s real
+source directly (`BreaklessWhileLoopNode::getExitPoints()`) showed its
+actual suppression logic treats *any* exit point that isn't a `break` or
+a bare/level-1 `continue` as disqualifying - a `return`/`throw`
+reachable inside the loop body disqualifies it too, which this project
+checked for nowhere at all (`DoWhileLoopConstantConditionRule`'s
+identical logic confirms `alwaysFalse` is correctly *un*touched by this -
+only `break` suppresses that case). This made the diagnostic
+substantially more broken than the "narrow, disclosed simplification"
+framing suggested: every one of the 53 `while.alwaysTrue`/`doWhile.
+alwaysTrue` findings in the full corpus turned out to have a genuine
+internal return/throw/escaping-continue - the common, idiomatic "`while
+(true)` as a retry-until-done loop" shape - meaning the diagnostic was
+misfiring on essentially every real-world use of the pattern, only ever
+correctly catching a loop with no internal exit at all. Fixed with a new
+`stmt_contains_escaping_exit` (`control_flow.rs`), the same maximally-
+conservative "anywhere in the subtree" traversal `stmt_contains_break`
+already uses, wired into both `While`'s `skip_always_true` and
+`DoWhile`'s `alwaysTrue` arm only. Verified via five dedicated
+regression tests (escaping `continue`, same-level `continue` still
+flagging, `return` inside for both loop kinds), each explicitly reverted
+and confirmed to fail without the fix, and via a full corpus diff
+removing exactly these 53 false positives with zero other ripples.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -893,12 +924,7 @@ exhaustiveness checking; no impossible-`instanceof`/redundant-
 phase's own family only ever catches a condition whose inferred type is
 a `ConstantBooleanType`, never a broader "this instanceof check can never
 succeed given the value's declared type" analysis - a different, larger
-feature, not owned by any phase). `while.alwaysTrue`/`doWhile.alwaysTrue`'s
-own breakless-detection reuses `stmt_contains_break`'s existing "any
-break anywhere" conservatism rather than real PHPStan's own more precise
-per-loop-level `continue N` analysis - a narrow, disclosed simplification
-(a `continue N > 1` that truly does escape the loop isn't recognized as
-disqualifying the diagnostic, unlike real PHPStan). A `for`'s own non-
+feature, not owned by any phase). A `for`'s own non-
 last comma-separated condition expression(s) are checked once up front
 rather than on every iteration (real PHP re-evaluates all of them, only
 the last one's truthiness gates the loop) - a narrow, disclosed
