@@ -299,19 +299,119 @@ fn filter_var_with_require_array_flag_falls_back_to_the_generic_stub() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 76 follow-up: an `['options' => [...]]` array's own `default`/
+// `min_range`/`max_range` sub-keys are now recognized (this phase's own
+// prior write-up called this "needs Phase 51's IntegerRangeType
+// completion" - re-checked rather than trusted, and turned out to be
+// unrelated: `normalize_int_range`/`int_range_bounds` already existed,
+// built this session for Phase 15's own range-arithmetic work).
+
 #[test]
-fn filter_var_with_an_options_array_falls_back_to_the_generic_stub() {
+fn filter_var_with_a_min_and_max_range_option_narrows_to_a_real_int_range() {
     // Real corpus find: filter_var($v, FILTER_VALIDATE_INT, ['options'
     // => ['min_range' => 1]]) narrows the successful result to a real
-    // range this project doesn't attempt to compute - guessing plain
-    // int|false here wrongly widened past a declared positive-int sink.
+    // range - guessing plain int|false here wrongly widened past a
+    // declared positive-int sink.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
             function f(string $x): void {
                 assertType(
-                    'mixed',
+                    'int<1, 10>|false',
+                    filter_var($x, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 10]])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_with_only_a_min_range_option_leaves_the_upper_bound_open() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'int<1, max>|false',
                     filter_var($x, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_with_a_default_option_uses_it_as_the_failure_fallback_instead_of_false() {
+    // `int|42` simplifies to plain `int` (42 is already a member of it) -
+    // this project's own `union_types` already collapses that generally,
+    // not a precision loss specific to this check. A string default
+    // (`filter_var_with_a_non_int_default_option_below`) demonstrates the
+    // fallback actually being used, unsimplified.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'int',
+                    filter_var($x, FILTER_VALIDATE_INT, ['options' => ['default' => 42]])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_with_a_non_int_default_option_widens_the_result_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'int|null',
+                    filter_var($x, FILTER_VALIDATE_INT, ['options' => ['default' => null]])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_min_range_option_is_ignored_for_a_non_int_filter() {
+    // `FILTER_VALIDATE_FLOAT`'s own `min_range`/`max_range` aren't
+    // modeled (real PHPStan itself doesn't support FloatRangeType
+    // either, confirmed directly against `FilterFunctionReturnTypeHelper
+    // ::getFilterTypeOptions()`'s own commented-out entry) - the base
+    // type is used unchanged rather than misapplying an int range to it.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'float|false',
+                    filter_var($x, FILTER_VALIDATE_FLOAT, ['options' => ['min_range' => 1]])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn filter_var_with_an_unparseable_options_array_falls_back_to_the_generic_stub() {
+    // A non-constant `options` value (`$dynamic` here) can't be
+    // inspected at all - falls through unchanged, matching real
+    // PHPStan's own "too complicated" leniency rather than guessing.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x, array $dynamic): void {
+                assertType(
+                    'mixed',
+                    filter_var($x, FILTER_VALIDATE_INT, ['options' => $dynamic])
                 );
             }
         "#,
