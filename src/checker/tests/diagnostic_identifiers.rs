@@ -284,6 +284,218 @@ fn an_attribute_naming_a_real_builtin_attribute_class_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 37 follow-up (this session): constructor-argument validation -
+// `resolve_call_args`/`check_args` reused directly for an attribute's own
+// constructor call, the same machinery `ExprKind::New` already uses.
+
+#[test]
+fn an_attribute_with_no_constructor_given_arguments_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {}
+
+            #[MyAttr(1, 2)]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.noConstructor"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_class_inheriting_its_constructor_from_an_ancestor_is_not_flagged() {
+    // Regression test for a real corpus false positive (PHPBench's own
+    // `#[BeforeMethods]`, `class BeforeMethods extends
+    // AbstractMethodsAttribute {}`) - the constructor lookup must walk
+    // the ancestor chain (`Registry::lookup_method`), not just this
+    // class's own declared methods.
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class BaseAttr {
+                public function __construct(public string $name) {}
+            }
+
+            #[Attribute]
+            class MyAttr extends BaseAttr {}
+
+            #[MyAttr('reset')]
+            class Foo {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_attribute_with_no_constructor_given_no_arguments_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {}
+
+            #[MyAttr]
+            class Foo {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_attribute_missing_a_required_constructor_argument_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {
+                public function __construct(public int $a, public string $b) {}
+            }
+
+            #[MyAttr(1)]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_with_too_many_constructor_arguments_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {
+                public function __construct(public int $a) {}
+            }
+
+            #[MyAttr(1, 2)]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_constructor_argument_of_the_wrong_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {
+                public function __construct(public int $a) {}
+            }
+
+            #[MyAttr("not an int")]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_constructor_called_with_the_correct_arguments_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {
+                public function __construct(public int $a, public string $b) {}
+            }
+
+            #[MyAttr(1, "x")]
+            class Foo {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_attribute_constructor_called_with_named_arguments_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {
+                public function __construct(public int $a, public string $b = "default") {}
+            }
+
+            #[MyAttr(a: 1)]
+            class Foo {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_abstract_attribute_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            abstract class MyAttr {}
+
+            #[MyAttr]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.abstract"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_class_with_a_non_public_constructor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[Attribute]
+            class MyAttr {
+                private function __construct() {}
+            }
+
+            #[MyAttr]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "attribute.constructorNotPublic"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_argument_referencing_an_undefined_class_constant_is_checked() {
+    // Confirms attribute argument expressions are now actually visited by
+    // `check_expr` (previously never checked at all - only the attribute
+    // name itself was) - a real class's own genuinely undefined constant
+    // (attribute arguments are constant expressions in real PHP, so a
+    // plain `SomeClass::CONST` is exactly the shape that appears there)
+    // should be caught the same way it would anywhere else.
+    let d = diagnostics_for(
+        r#"<?php
+            class Real {}
+
+            #[Attribute]
+            class MyAttr {
+                public function __construct(public $a) {}
+            }
+
+            #[MyAttr(Real::UNDEFINED_CONST)]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "classConstant.notFound"),
+        "got: {d:?}"
+    );
+}
+
 // Phase 37 follow-up: `attribute.notAttribute`/`attribute.target` - the
 // vendored real `#[\Override]` stub declaration (`Attribute::
 // TARGET_METHOD|TARGET_PROPERTY|TARGET_CLASS_CONSTANT`, confirmed
