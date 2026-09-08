@@ -722,6 +722,93 @@ flags), the fix explicitly reverted and confirmed to fail without it,
 and via a full corpus diff removing exactly this one false positive with
 zero other ripples.
 
+Asked directly to close the family's remaining "narrow, disclosed
+simplification, no corpus evidence needs it" items anyway - "do all
+those narrow [items], our corpus not having them is not a reason not to
+do them" - three more landed together (26)-(28), none corpus-motivated,
+all verified the same way regardless.
+
+(26): a `for` loop's non-last comma-separated condition expressions
+(`for ($stop = false; !$stop, $i < $n; $i++)` - only the *last*
+expression's truthiness gates the loop, but real PHP re-evaluates
+*every* one of them on each pass) were checked exactly once, up front
+against the pre-loop entry, instead of every pass - the same Phase 15
+continuation bug the *last* condition's own fix already addressed,
+just left unfixed for the others at the time. Moved into the same
+per-pass convergence closure. Verified via a constructed regression
+test (mirroring the existing `QMultiToken`-style one immediately above
+it in `control_flow.rs`, moved into a non-last slot instead), explicitly
+reverted (confirmed to reproduce a real `booleanNot.alwaysTrue` false
+positive) and restored.
+
+(27): real PHP's own well-known `continue`-inside-`switch` gotcha (a
+`switch` counts as one level for `break`/`continue` purposes, so a bare
+`continue;`/`continue 1;` written directly in a case is exactly
+`break`-equivalent) was recognized nowhere at all. Turned out to be two
+distinct, real bugs sharing this one root cause, both found by
+constructing and directly verifying real test cases rather than trusting
+the fix in isolation: `always_terminates`'s own `Switch` arm treated
+*any* `Continue` the same as `Return`/`Throw`, wrongly marking code
+after a switch as dead once every case ends in either `return` or a
+break-equivalent `continue`; separately, `reaches_after_switch`'s own
+first, unconditional arm only special-cased a literal `Break` this way,
+leaving a *non-last* case (or one whose break-equivalent `continue` is
+reached through a nested `if`, not directly) still gated behind
+`is_last`. New shared `is_switch_break_equivalent` (`control_flow.rs`),
+recursing through `Block`/`If` the same way `always_terminates`'s own
+recursion already does - a case ending in `if ($c) { continue; } else {
+continue; }` is break-equivalent on every branch too, found only after
+constructing a test for exactly that shape and watching it still fail.
+A genuinely *mixed* branch (one side break-equivalent, the other
+diverging a different way entirely) remains a disclosed residual -
+`is_switch_break_equivalent`'s own doc comment has the full reasoning
+for why threading that distinction through `always_terminates`'s much
+more broadly-used recursion isn't attempted here. Three dedicated
+regression tests (a non-last case, the last/only case, and the nested-if
+shape), each explicitly reverted and confirmed to fail without its
+piece of the fix.
+
+(28): `infer_binary`'s `int<min,max>` arithmetic, previously `Add`/`Sub`
+(the latter only for a constant right operand) only, gained the rest of
+real PHPStan's own range-arithmetic surface, each transcribed directly
+from `vendor/phpstan-src`'s own `InitializerExprTypeResolver`: `Mul`
+(`mul_int_range` - the real source's own four-corner-product formula,
+substituting signed infinity for an unbounded end, with a `0`-corner
+special case to avoid computing `0 * INF`); `Div` (`div_int_range` -
+real division isn't guaranteed to itself produce an int, so the result
+is always a refined-int-range-or-`Float` union, never a pure int range;
+the recursive sign-splitting when either operand's own range spans zero
+is transcribed as real recursion, each half already returning a
+complete, tail-processed `Type` unioned directly); `Mod` (`mod_int_range` -
+a literal-pair exact fold first, matching real PHPStan's own two-step
+structure, since the general magnitude-based range fallback alone would
+answer `7 % 3` with the far coarser `int<0, 2>` instead of the exact `1`);
+`Pow` (`pow_int_range` - a literal base's own degenerate `min == max`
+bounds happen to make the same single formula real PHPStan splits across
+two separate call sites work correctly for both a literal and a genuine
+range base). `Sub` gained the full range-minus-range case
+(`sub_int_range_full`, real PHPStan's own `Minus` arm - including its
+own sequential `min`/`max` mutation, preserved exactly rather than
+"cleaned up," since correctness depends on matching the real source's
+execution order, not just its inputs and outputs in isolation).
+`normalize_int_range` gained real PHPStan's own `IntegerRangeType::
+fromInterval`'s "`min > max` collapses to `Never`" guard, needed once
+`Div`'s own rounding step (ceiling the min, flooring the max
+independently) can produce exactly that shape for a division with no
+exact int result at all (`10 / 4` is always exactly `2.5`, never any
+int - its own int "half" collapses away, correctly leaving bare
+`float`). Every function has its own dedicated regression tests
+(literal-pair folding, bounded-range computation, and each function's
+own particular edge - the zero-corner special case, the inverted-range-
+collapses-to-float case, the second-block-overwrites-`min` sub-case),
+each explicitly reverted and confirmed to fail without it. Confirmed via
+a full corpus diff: one further real false positive removed (`Nette\
+Utils\Paginator::getOffset()`'s own `@return int<0, max>` now correctly
+resolves through a real `getPageIndex() * itemsPerPage` multiplication,
+both operands provably non-negative), plus several message-precision
+refinements on already-firing diagnostics, zero new false positives,
+Piwigo's own app-only scope completely unchanged.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -948,33 +1035,32 @@ exhaustiveness checking; no impossible-`instanceof`/redundant-
 phase's own family only ever catches a condition whose inferred type is
 a `ConstantBooleanType`, never a broader "this instanceof check can never
 succeed given the value's declared type" analysis - a different, larger
-feature, not owned by any phase). A `for`'s own non-
-last comma-separated condition expression(s) are checked once up front
-rather than on every iteration (real PHP re-evaluates all of them, only
-the last one's truthiness gates the loop) - a narrow, disclosed
-simplification, since every real corpus use seen is a side-effect-only
-scratch expression there (re-checked directly: no real corpus `for`
-condition slot with more than one top-level comma-separated expression
-was found at all, vendor included). `continue N`'s own level argument is
-parsed but never consulted for *narrowing* purposes (Phase 55's own
-`loop_continue_states` now consults it for convergence) - not owned by
-any phase; full `goto`/label control-flow edges (e.g., narrowing a value
-correctly across an arbitrary jump) remain unmodeled and out of scope,
-but the one concrete false positive this produced (`deadCode.
-unreachable` flagging a labeled statement a real `goto` elsewhere in the
-same function jumps straight to) is fixed - see Done, fix (25).
-`infer_binary`'s new
-`int<min,max>` arithmetic (`Add`/`Sub`, see Done) is deliberately
-narrower than real PHPStan's own full range-arithmetic surface: `Mul`/
-`Div`/`Mod`/`Pow` still collapse straight to bare `Int`/`Float` (real
-PHPStan's own `integerRangeMath` splits these by negative/positive
-sub-intervals, meaningfully more involved to transcribe correctly, no
-corpus evidence needs it), and `Sub` only preserves the range for a
-*constant* right operand, not the full range-minus-range case (real
-PHPStan's own `Minus` arm has extra branches specifically for when the
-subtracted side is itself an unbounded range, which can flip which end
-stays bounded - a subtle asymmetry this project has no way to cross-
-check against a real PHPStan run without building it).
+feature, not owned by any phase). Full `goto`/label control-flow edges
+(e.g., narrowing a value correctly across an arbitrary jump) remain
+unmodeled and out of scope, but the one concrete false positive this
+produced (`deadCode.unreachable` flagging a labeled statement a real
+`goto` elsewhere in the same function jumps straight to) is fixed - see
+Done, fix (25). `exits_function_or_loop`'s own recursion through a
+`Try`/nested `Switch` inside a switch case is unmodeled the same way
+`always_terminates`'s own doesn't recurse into those either - a real,
+disclosed residual, narrower than the shapes already fixed (see Done,
+fixes (26)-(28)). A genuinely *mixed* case-ending branch (one side
+break-equivalent, the other diverging a different way entirely - a
+`: never`-returning call, `return`, `throw`) is a real, disclosed
+residual gap too: `exits_function_or_loop`'s own recursion correctly
+judges that shape, but `always_terminates`'s own separate, much more
+broadly-used recursion has no way to thread "this specific `Continue` is
+switch-scoped" through an arbitrary nesting depth without risking wrongly
+loosening its own unrelated, function-level "does this exit for real"
+question elsewhere (guard-clause detection, `deadCode.unreachable`'s own
+non-switch callers) - not attempted, narrower and more corner-case than
+what's fixed. `for`'s own non-last comma-separated condition
+expressions, `continue N`'s own level argument for switch-narrowing
+purposes, and `infer_binary`'s full `Mul`/`Div`/`Mod`/`Pow`/`Sub` range-
+arithmetic surface (all three previously disclosed here as "narrow, no
+corpus evidence needs it") are now Done - see fixes (26)-(28): closed on
+request ("do all those narrow [items], our corpus not having them is not
+a reason not to do them"), not because corpus evidence later emerged.
 
 **17 - LSP hover/go-to-definition (PARTIAL).** Both stages plus five
 follow-ups are done (see Done): every name reference resolvable without
