@@ -603,19 +603,30 @@ where only the concrete `EntityCacheEntry` declares it; an `arguments.
 count` mismatch calling a 2-arg concrete override through its 1-arg
 interface type; a `NodeInterface`-vs-`BaseNode` argument narrowing) is a
 genuine, correct finding fix (19) correctly unmasked, not a new bug of
-its own. One real, disclosed, pre-existing limitation surfaced this way
-rather than fixed: `Symfony\Component\Messenger\MessageBus::dispatch()`'s
+its own. One real, pre-existing limitation surfaced this way, initially
+disclosed as out of scope for this review and fixed immediately after on
+request (22): `Symfony\Component\Messenger\MessageBus::dispatch()`'s
 `while ($x instanceof IteratorAggregate) { $x = $x->getIterator(); }`
-loop-exit type of `$x` stays bare `Traversable` (missing `rewind()`/
-`valid()`/`current()`) instead of narrowing to `Iterator` - real PHP's
-`Traversable` has *exactly* two direct subinterfaces (`Iterator`,
-`IteratorAggregate`), so excluding one structurally proves the other,
-but this project has no negated-`instanceof`/loop-exit narrowing
-mechanism at all (confirmed: no `narrow_instanceof_false` exists
-anywhere in `checker/narrowing.rs`) to exploit that. Real PHPStan special-
-cases this exact relationship. Out of scope for this review (a new,
-general negated-narrowing feature, not a follow-up fix to (19)/(20)/(21))
-- left as a disclosed, known gap.
+loop-exit type of `$x` stayed bare `Traversable` (missing `rewind()`/
+`valid()`/`current()`) instead of narrowing to `Iterator`. Real PHP's
+`Traversable` is a marker interface userland code can never implement
+directly - only through one of its exactly two direct subinterfaces,
+`Iterator` and `IteratorAggregate` - so excluding one structurally
+proves the other; real PHPStan special-cases this exact relationship.
+This project's existing negated-`instanceof` narrowing (`narrow_type_
+excluding`, already reached via `ExprKind::Instanceof`'s false branch
+and via `While`'s own loop-exit `apply_narrowing` call - there was no
+missing dispatch mechanism after all, just a missing case in the
+function both already fed into) turned out to be exactly the right,
+narrow place to add this: a new arm matching `Type::Object("Traversable",
+_)` excluding `Object("IteratorAggregate", _)`/`Object("Iterator", _)`
+by exact name (deliberately *not* subclass-aware - the structural
+guarantee only holds for these two specific interfaces, not an arbitrary
+subtype of either), resolving to the other by name. Verified via a
+dedicated regression test reproducing the real corpus shape, explicitly
+reverted and confirmed to fail without the fix, and via a full corpus
+diff removing exactly these 3 false positives corpus-wide with zero
+other ripples.
 
 ## Performance & tooling
 
