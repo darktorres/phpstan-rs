@@ -597,15 +597,38 @@ their own dedicated regression tests, each explicitly reverted and
 confirmed to fail without their fix.
 
 With (20) and (21) applied, the review of fix (19)'s remaining, non-
-`int|float|string|bool|null` lines completed: every sampled line (an
-interface member missing on a `Region::get(): CacheEntry|null` result
-where only the concrete `EntityCacheEntry` declares it; an `arguments.
-count` mismatch calling a 2-arg concrete override through its 1-arg
-interface type; a `NodeInterface`-vs-`BaseNode` argument narrowing) is a
-genuine, correct finding fix (19) correctly unmasked, not a new bug of
-its own. One real, pre-existing limitation surfaced this way, initially
-disclosed as out of scope for this review and fixed immediately after on
-request (22): `Symfony\Component\Messenger\MessageBus::dispatch()`'s
+`int|float|string|bool|null` lines completed - first as a pattern-sample
+across categories (disclosed as such when asked "did you leave anything
+deferred or partial?"), then, on request, individually: every single one
+of the ~20 remaining distinct call sites (Doctrine ORM's cache layer -
+an interface member missing on a `Region::get(): CacheEntry|null` result
+where only the concrete `EntityCacheEntry` declares it, and a `Persistence
+\Mapping\ClassMetadataFactory::getMetadataFor()`/`CollectionCacheEntry::
+$identifiers`'s own broader-than-used docblock shape; PHPUnit's
+`addToAssertionCount(non-negative-int)`/`Util\Filter`'s sealed array-
+shape mismatch; Rector's bundled Symfony console copies and the real
+`symfony/console` alongside them - an `arguments.count` mismatch calling
+a 2-arg concrete override through its 1-arg interface type,
+`ConsoleSectionOutput::clear()`'s `int|null` against a `float`-tainted
+`$lineCount`, `OutputInterface::warning()` genuinely undeclared on the
+interface; Symfony Config's `ArrayShapeGenerator`'s own `NodeInterface`-
+vs-`BaseNode` argument narrowing and `FileLoader::doImport()`'s
+`?string`-into-`string`/interface-segregation gap; Console's
+`Interaction::interact()` against `Closure::getClosureThis(): ?object`;
+DependencyInjection's `ValidateEnvPlaceholdersPass::process()` against a
+`string[][]` docblock less precise than its own declared use; Mailer's
+`SentMessage::__construct()` against `Headers::get(): ?HeaderInterface`;
+PropertyInfo's `PhpDocTypeHelper::getType()` against `AggregatedType::
+get(): ?Type`; Serializer's `TraceableSerializer`'s own two-argument
+calls through the one-argument `EncoderInterface`/`DecoderInterface`;
+thecodingmachine/safe's `DateTimeImmutable::createFromInterface()`
+against its own three-way `instanceof` fallthrough) is confirmed, each
+by reading its real source directly, to be a genuine, correct finding
+fix (19) correctly unmasked, not a new bug of its own.
+
+Two real, pre-existing bugs did surface this way, both fixed immediately
+on request rather than left disclosed. (22): `Symfony\Component\
+Messenger\MessageBus::dispatch()`'s
 `while ($x instanceof IteratorAggregate) { $x = $x->getIterator(); }`
 loop-exit type of `$x` stayed bare `Traversable` (missing `rewind()`/
 `valid()`/`current()`) instead of narrowing to `Iterator`. Real PHP's
@@ -622,11 +645,27 @@ narrow place to add this: a new arm matching `Type::Object("Traversable",
 _)` excluding `Object("IteratorAggregate", _)`/`Object("Iterator", _)`
 by exact name (deliberately *not* subclass-aware - the structural
 guarantee only holds for these two specific interfaces, not an arbitrary
-subtype of either), resolving to the other by name. Verified via a
-dedicated regression test reproducing the real corpus shape, explicitly
-reverted and confirmed to fail without the fix, and via a full corpus
-diff removing exactly these 3 false positives corpus-wide with zero
-other ripples.
+subtype of either), resolving to the other by name.
+
+(23): Monolog's own `MongoDBHandler::write()`'s `isset($this->manager,
+$this->namespace)` left `$this->namespace` (a real `string|null`
+property) un-narrowed inside the guard - real PHP's `isset()` is
+genuinely variadic (`isset($a, $b)` means `isset($a) && isset($b)`,
+every argument must be set), but the narrowing dispatch's own single-
+argument `[single_arg]` slice pattern never matched a multi-argument
+call at all, silently narrowing *none* of its arguments, not just the
+ones past the first. Fixed with a new, dedicated arm for `isset` with
+more than one argument, narrowing each independently the same way the
+existing single-argument case already does (only the true branch, same
+asymmetry).
+
+Both (22) and (23) have their own dedicated regression test reproducing
+the real corpus shape, each explicitly reverted and confirmed to fail
+without its fix, and each confirmed via a full corpus diff removing
+exactly its own targeted false positive(s) - 3 for (22), 1 for (23) -
+with zero other ripples. This closes the fix (19) diff review started
+above: every line in it is now individually accounted for as either a
+genuine finding or a fixed, tested bug.
 
 ## Performance & tooling
 
