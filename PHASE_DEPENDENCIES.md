@@ -23,7 +23,6 @@ graph LR
     P50["50: Array key-type/offset\nengine (remaining) — PARTIAL"]
     P80["80: Object-shape/key-of/\nconditional-type syntax — PARTIAL"]
     P51["51: Type coercion\nsurface (remaining) — PARTIAL"]
-    P76["76: filter_var/filter_input\n(remaining) — PARTIAL"]
     P73["73/74: Array/string stdlib\ncoverage (remaining) — PARTIAL"]
     P62["62: Uninitialized-property\ndataflow (remaining) — PARTIAL"]
     P60["60: isset/empty/nullsafe\nreversal (remaining) — PARTIAL"]
@@ -39,7 +38,6 @@ graph LR
     P49 -->|done; unblocked| P37
     P54 -->|needed by| P50
     P80 -->|prerequisite for| P54
-    P51 -->|needed by| P76
     P50 -->|needed by| P73
     P62 -->|gates| P60
     P82 -->|needed by| P41
@@ -63,7 +61,6 @@ architectural nice-to-have, explicitly "not a hard blocker").
 | **49** Call-argument binding (remaining) | **37**'s attribute constructor-argument validation | needs | edge satisfied → `resolve_call_args`/`check_args` were already fully generic (no expr-node coupling), so 37's own "needs Phase 49's generalization" framing was stale; built directly, no new Phase 49 work needed |
 | **54** Generic template richness | **50**'s reverted `InvalidKeyInArrayDimFetchRule` reattempt | blocks | 54 PARTIAL (the relevant rewrite not done) → still blocked |
 | **80** Object-shape/key-of/conditional-type syntax | **54**'s `TemplateKeyOfType`/`TemplateObjectShapeType` bound kinds | prerequisite | 80 PARTIAL; the specific deferred-resolution piece 54 needs isn't done yet |
-| **51** Type coercion surface (remaining) | **76**'s `options` array `default`/`min_range`/`max_range` | needs | 51's `IntegerRangeType` completion not finished → still blocked |
 | **50** Array key-type/offset engine (remaining) | **73/74**'s `array_key_exists` narrowing | needs | 50's `HasOffsetType`/`HasOffsetValueType` accessory facts not built → still blocked |
 | **62** Uninitialized-property dataflow (remaining) | **60**'s offset/property-chain `isset($x['key'])` half | gates | 62's real dataflow not built → still blocked |
 | **82** Collector / cross-file aggregation | **41**'s transitive purity across the call graph | needs | 82 explicitly PLANNED, "don't schedule standalone" → still blocked |
@@ -77,12 +74,27 @@ original family) - kept in the graph because they explain *why* 43, 48's
 existence-check half, 37's constructor-argument validation, and 15 are
 buildable/built now, not because they're still live blockers.
 
+**Investigated and removed: 51→76.** 76's own prior entry said its
+`options` array `default`/`min_range`/`max_range` gap "needs Phase 51's
+`IntegerRangeType` completion" - checked directly (at the user's own
+request, before building) rather than assumed. The real prerequisite
+(`normalize_int_range`/`int_range_bounds`, "build an int range from two
+bounds") already existed, built by an unrelated phase (15, this same
+session) - Phase 51's own actually-remaining item (range-preserving
+`**`/shift arithmetic) has nothing to do with it. 76's own gap is now
+built; 51's own item is still open, on its own, with no bearing on 76 at
+all. A real example of why this file says "verify before trusting" a
+prior write-up rather than mechanically propagating it forward.
+
 ## Genuinely independent (no dependency edge either direction)
 
 Everything else in Pending/partial: **18, 19, 36's other sub-items, 39, 40,
 42, 45, 46** (needs a `pcre2` binding - an external crate, not a phase),
 **52, 53, 61, 63, 64** (blocked on an internal `PropertySig::ty_native`
 split, not another phase), **67, 68, 69, 70, 71, 73/74's other sub-items,
-75, 77, 78, 83, 84**. These can be picked up in any order with respect to
-each other - their Pending entries name *reasons* (low corpus incidence,
-size, deliberate scope trims) but never another phase number as a blocker.
+75, 76** (its remaining scope - `filter_input()`, `FILTER_REQUIRE_ARRAY`/
+`FILTER_FORCE_ARRAY`, PHP 8.4's `FILTER_THROW_ON_FAILURE` - needs no
+other phase, confirmed above), **77, 78, 83, 84**. These can be picked up
+in any order with respect to each other - their Pending entries name
+*reasons* (low corpus incidence, size, deliberate scope trims) but never
+another phase number as a blocker.

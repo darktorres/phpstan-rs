@@ -970,6 +970,39 @@ runtime error either way), not a new false-positive class - individually
 correct, and far too narrow (2 vendor-only occurrences, functionally
 inert attribute metadata) to be worth chasing further.
 
+Phase 76 follow-up: `filter_var()`'s own literal `['options' => [...]]`
+array narrowing, the third phase picked from `PHASE_DEPENDENCIES.md`'s
+own "phases that unblock others" this session, and the first one where
+the investigation itself (not just the fix) was the point - the user
+asked to check what this actually needed before committing to it, since
+the 51→76 edge looked speculative. Confirmed: `FilterFunctionReturnTypeHelper::
+applyRangeOptions` (`vendor/phpstan-src`) only needs a plain "build an
+int range from two literal/range bounds" primitive - exactly
+`normalize_int_range`/`int_range_bounds` (`checker/expr.rs`), already
+built this same session for Phase 15's own range-arithmetic work, and
+entirely unrelated to Phase 51's own actually-remaining item (range-
+preserving `**`/shift arithmetic). The 51→76 edge in `PHASE_DEPENDENCIES.md`
+was speculative, not a real blocker - `PHASE_DEPENDENCIES.md` updated to
+reflect this rather than left stale.
+
+New `filter_var_options_fields`/`filter_var_option` (`checker/expr/
+builtin_calls.rs`) extract a real, literal `['options' => [...]]` sub-
+array's own `default`/`min_range`/`max_range` sub-keys - a non-constant
+`options` value (e.g. `['options' => $dynamic]`) is left completely
+unrecognized, matching real PHPStan's own `getOptions()` "not a constant
+array" leniency rather than guessing. `min_range`/`max_range` only apply
+to `FILTER_VALIDATE_INT` (real PHPStan's own `getFilterTypeOptions()` has
+`FILTER_VALIDATE_FLOAT`'s own entry commented out - "PHPStan does not yet
+support FloatRangeType" - and this project doesn't either); every other
+`FILTER_VALIDATE_*` constant still gets its own base type from
+`filter_validate_type_for_constant`, just unioned with an explicit
+`default` option when present instead of the implicit `false`/`null`
+fallback. Confirmed via a full corpus diff on both scopes: byte-identical
+- no real corpus code (Piwigo's own or the full vendor tree) currently
+passes an `options` array to `filter_var()` at all, matching this phase's
+own long-standing "not corpus-evidenced" note; built anyway per the
+user's own standing directive that corpus silence isn't a reason not to.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -1585,11 +1618,11 @@ undermines the feature's main real-world use (SQL-injection-safety
 checking). Size: M.
 
 **76 - `filter_var`/`filter_input`, remaining (PARTIAL).** The literal-
-`FILTER_VALIDATE_*`-constant-with-plain-flags case is done (see Done).
-`filter_input()` itself (zero corpus incidence), `FILTER_REQUIRE_ARRAY`/
-`FILTER_FORCE_ARRAY`'s per-element return type, an `options` array's
-`default`/`min_range`/`max_range` (needs Phase 51's `IntegerRangeType`
-completion), and PHP 8.4's `FILTER_THROW_ON_FAILURE` remain unbuilt.
+`FILTER_VALIDATE_*`-constant-with-plain-flags case and a literal
+`['options' => [...]]` array's own `default`/`min_range`/`max_range`
+sub-keys (see Done) are done. `filter_input()` itself (zero corpus
+incidence), `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY`'s per-element
+return type, and PHP 8.4's `FILTER_THROW_ON_FAILURE` remain unbuilt.
 `FILTER_SANITIZE_*` needs no work - every one already maps to plain
 `string`, matching the generic stub.
 
