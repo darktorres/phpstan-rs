@@ -698,6 +698,30 @@ flagging, `return` inside for both loop kinds), each explicitly reverted
 and confirmed to fail without the fix, and via a full corpus diff
 removing exactly these 53 false positives with zero other ripples.
 
+Continuing the same re-examination into this family's `goto`/label
+disclosure (below) found one more concrete, live false positive rather
+than only a theoretical gap (25): real, non-trivial `goto` usage exists
+in the corpus (hand-written state-machine parsers - `Amp\Http\Client\
+Connection\Internal\Http1Parser::parse()`'s own HTTP/1.1 response
+parser, 14 `goto`s across its states), and `deadCode.unreachable`'s own
+`check_block` loop had no way to know a labeled statement immediately
+following an always-terminating one (`return $response; body_identity:
+{ ... }`) is a real jump target (`goto body_identity;`, elsewhere in the
+same function), not dead code. Fixed with a new `collect_goto_targets`
+(`control_flow.rs`) - the same maximally-conservative "anywhere in the
+subtree, not scope-aware" traversal `stmt_contains_break` already uses,
+since recovering *which* `goto` can legally reach *which* label would
+mean building the full goto/label CFG this project still doesn't have
+(genuinely out of scope, per the disclosure above) - computed once per
+function/closure/method body into a new `Checker::current_function_goto_
+targets` field (the same save/set/restore shape `current_function_is_
+generator` already has at every one of its three entry points) and
+consulted by `check_block`'s own report site. Verified via two dedicated
+regression tests (a targeted label survives, an untargeted one still
+flags), the fix explicitly reverted and confirmed to fail without it,
+and via a full corpus diff removing exactly this one false positive with
+zero other ripples.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -929,10 +953,17 @@ last comma-separated condition expression(s) are checked once up front
 rather than on every iteration (real PHP re-evaluates all of them, only
 the last one's truthiness gates the loop) - a narrow, disclosed
 simplification, since every real corpus use seen is a side-effect-only
-scratch expression there. `continue N`'s own level argument is parsed
-but never consulted for *narrowing* purposes (Phase 55's own `loop_
-continue_states` now consults it for convergence), and `goto`/label CFG
-edges are unmodeled - neither owned by any phase. `infer_binary`'s new
+scratch expression there (re-checked directly: no real corpus `for`
+condition slot with more than one top-level comma-separated expression
+was found at all, vendor included). `continue N`'s own level argument is
+parsed but never consulted for *narrowing* purposes (Phase 55's own
+`loop_continue_states` now consults it for convergence) - not owned by
+any phase; full `goto`/label control-flow edges (e.g., narrowing a value
+correctly across an arbitrary jump) remain unmodeled and out of scope,
+but the one concrete false positive this produced (`deadCode.
+unreachable` flagging a labeled statement a real `goto` elsewhere in the
+same function jumps straight to) is fixed - see Done, fix (25).
+`infer_binary`'s new
 `int<min,max>` arithmetic (`Add`/`Sub`, see Done) is deliberately
 narrower than real PHPStan's own full range-arithmetic surface: `Mul`/
 `Div`/`Mod`/`Pow` still collapse straight to bare `Int`/`Float` (real
