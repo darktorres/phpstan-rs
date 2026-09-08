@@ -1,8 +1,8 @@
 use crate::ast::*;
 use crate::checker::{
     Checker, Locals, body_contains_yield, collect_exit_point_statements, exit_point_description,
-    is_truthy_literal, merge_scopes, purge_stale_narrowing_for, stmt_contains_break,
-    stmt_contains_escaping_exit,
+    is_switch_break_equivalent, is_truthy_literal, merge_scopes, purge_stale_narrowing_for,
+    stmt_contains_break, stmt_contains_escaping_exit,
 };
 use crate::docblock;
 use crate::types::Type;
@@ -576,42 +576,39 @@ impl<'a> Checker<'a> {
                     self.check_expr(e, locals, label);
                 }
                 // A real `for`'s condition slot can hold several
-                // comma-separated expressions - only the *last* one's
-                // truthiness actually gates the loop, matching PHP's own
-                // semantics (the others are only there for a side effect).
-                // The *last* one's own check moved into the convergence
-                // closure below (Phase 15 continuation - the same real
-                // bug this session's own `While` fix addresses: checking
-                // it once here, against the pre-loop entry, would bypass
-                // Phase 55's fixed-point convergence entirely, the exact
-                // false positive real corpus code hit - `QMultiToken::
-                // parseExpression`'s `for ($stop = false; !$stop && ...;
-                // $qi++)`, where `$stop` is reassigned inside the body).
-                // The non-last expressions genuinely are only ever
-                // side-effecting scratch expressions in every real corpus
-                // use seen so far, so they stay checked once up front,
-                // unlike real PHP's own per-iteration re-evaluation of
-                // them - a narrow, disclosed simplification (ROADMAP).
-                if cond.len() > 1 {
-                    for e in &cond[..cond.len() - 1] {
-                        self.check_expr(e, locals, label);
-                    }
-                }
+                // comma-separated expressions, *all* of which real PHP
+                // re-evaluates on every single pass through the condition
+                // (only the *last* one's truthiness actually gates the
+                // loop - the others are there purely for a side effect,
+                // but that side effect happens every iteration, not just
+                // once). Both halves - the non-last expressions here, and
+                // the last one's own check moved into the convergence
+                // closure below - need the identical Phase 15 continuation
+                // fix (the same real bug this session's own `While` fix
+                // addresses: checking any of them once, up front, against
+                // the pre-loop entry, would bypass Phase 55's fixed-point
+                // convergence entirely, the exact false positive real
+                // corpus code hit - `QMultiToken::parseExpression`'s
+                // `for ($stop = false; !$stop && ...; $qi++)`, where
+                // `$stop` is reassigned inside the body).
                 match cond.last() {
                     Some(c) => {
                         // Same real bug and fix as `While`'s own arm
-                        // above: a variable *the last condition
-                        // expression itself* assigns (`for (;; ($x =
-                        // f()) !== null; )`, unusual but real) must be
-                        // unconditionally defined afterward, since a
-                        // `for`'s condition always runs at least once
-                        // regardless of body iterations - a quiet,
-                        // diagnostics-discarded evaluation against the
-                        // real pre-loop `locals` binds that side effect
-                        // before the convergence-aware, diagnostic-
-                        // bearing walk runs against per-pass copies.
+                        // above: a variable *any* condition expression
+                        // itself assigns (`for (;; ($x = f()) !== null; )`,
+                        // unusual but real) must be unconditionally
+                        // defined afterward, since a `for`'s condition
+                        // always runs at least once regardless of body
+                        // iterations - a quiet, diagnostics-discarded
+                        // evaluation against the real pre-loop `locals`
+                        // binds every condition expression's own side
+                        // effect (not just the last one's) before the
+                        // convergence-aware, diagnostic-bearing walk runs
+                        // against per-pass copies.
                         let diagnostics_before = self.diagnostics.len();
-                        self.check_expr(c, locals, label);
+                        for e in cond.iter() {
+                            self.check_expr(e, locals, label);
+                        }
                         self.diagnostics.truncate(diagnostics_before);
                         let entry = locals.clone();
                         self.loop_depth += 1;
@@ -620,6 +617,9 @@ impl<'a> Checker<'a> {
                             declared_return,
                             label,
                             |this, pass_locals, declared_return, label| {
+                                for e in &cond[..cond.len() - 1] {
+                                    this.check_expr(e, pass_locals, label);
+                                }
                                 this.check_expr(c, pass_locals, label);
                                 this.apply_narrowing(c, pass_locals, true);
                                 this.check_stmt(body, pass_locals, declared_return, label);
@@ -893,7 +893,7 @@ impl<'a> Checker<'a> {
                     }
                     let is_last = i + 1 == case_count;
                     let reaches_after_switch = match last_stmt {
-                        Some(s) if matches!(s.kind, StmtKind::Break(_)) => true,
+                        Some(s) if is_switch_break_equivalent(s) => true,
                         Some(s) => is_last && !self.exits_function_or_loop(s, &case_locals),
                         None => is_last,
                     };

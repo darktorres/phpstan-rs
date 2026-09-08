@@ -98,12 +98,342 @@ fn int_range_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
 /// representable type - `Type::Int` when both ends are unbounded (an
 /// `IntRange(None, None)` is never constructed elsewhere in this
 /// project), `Type::IntLiteral` when both ends coincide, `Type::IntRange`
-/// otherwise.
+/// otherwise. An inverted range (`min > max`) is genuinely empty - no
+/// real value satisfies it - matching real PHPStan's own `IntegerRangeType
+/// ::fromInterval`'s identical `if ($min > $max) { return new NeverType(); }`
+/// guard exactly; `div_int_range`'s own rounding step (`ceil`ing the min
+/// and `floor`ing the max independently, real PHPStan's own doc comment
+/// there) is the one caller that can genuinely produce this shape - a
+/// `Div` result with no possible integer value at all, only the `Float`
+/// alternative `union_types` there still unions in (`10 / 4` is always
+/// exactly `2.5`, never any int, so its own int "half" collapses to
+/// `Never`, absorbed away by the union, correctly leaving bare `float`).
 fn normalize_int_range(min: Option<i64>, max: Option<i64>) -> Type {
     match (min, max) {
         (None, None) => Type::Int,
+        (Some(a), Some(b)) if a > b => Type::Never,
         (Some(a), Some(b)) if a == b => Type::IntLiteral(a),
         (min, max) => Type::IntRange(min, max),
+    }
+}
+
+/// An unbounded end, mapped to signed infinity - `mul_int_range`'s own
+/// corner-product formula needs this so a single formula covers every
+/// combination of bounded/unbounded ends uniformly, matching real
+/// PHPStan's own use of `-INF`/`INF` there directly (`?? -INF`/`?? INF`).
+fn bound_or_inf(v: Option<i64>, inf: f64) -> f64 {
+    v.map(|n| n as f64).unwrap_or(inf)
+}
+
+/// The inverse of `bound_or_inf`: a finite corner product collapses back
+/// to a real `i64` bound; a non-finite one (either side was genuinely
+/// unbounded, or the product's own magnitude doesn't fit any real `int`
+/// PHP could ever produce) collapses to `None` - matching real PHPStan's
+/// own `is_finite($min) ? ... : null` check, extended with an explicit
+/// `i64`-range guard this project needs and PHP's own arbitrary-precision
+/// `float` arithmetic doesn't (a product that's finite as `f64` can still
+/// overflow `i64`).
+fn finite_bound(v: f64) -> Option<i64> {
+    if v.is_finite() && v >= i64::MIN as f64 && v <= i64::MAX as f64 {
+        Some(v as i64)
+    } else {
+        None
+    }
+}
+
+/// Real PHPStan's own `InitializerExprTypeResolver::integerRangeMath`'s
+/// `Mul` arm, transcribed directly - the four "corner product" formula
+/// (every combination of each side's own min/max, substituting signed
+/// infinity for an unbounded end) needs no sign-based case-splitting at
+/// all, unlike `Div`'s own arm, since a product's extremes are always
+/// among these four corners regardless of which operand is negative.
+/// `0 * (anything, including an unbounded end)` is special-cased to `0`
+/// first, matching the real source exactly - naively substituting
+/// infinity there would compute `0 * INF = NaN` instead.
+fn mul_int_range(
+    l_min: Option<i64>,
+    l_max: Option<i64>,
+    r_min: Option<i64>,
+    r_max: Option<i64>,
+) -> Type {
+    let corner = |a: Option<i64>, b: Option<i64>, a_inf: f64, b_inf: f64| -> f64 {
+        if a == Some(0) || b == Some(0) {
+            0.0
+        } else {
+            bound_or_inf(a, a_inf) * bound_or_inf(b, b_inf)
+        }
+    };
+    let min1 = corner(l_min, r_min, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let min2 = corner(l_min, r_max, f64::NEG_INFINITY, f64::INFINITY);
+    let max1 = corner(l_max, r_min, f64::INFINITY, f64::NEG_INFINITY);
+    let max2 = corner(l_max, r_max, f64::INFINITY, f64::INFINITY);
+    let min = min1.min(min2).min(max1).min(max2);
+    let max = min1.max(min2).max(max1).max(max2);
+    normalize_int_range(finite_bound(min), finite_bound(max))
+}
+
+/// Real PHPStan's own `integerRangeMath`'s `Minus` arm's own range-minus-
+/// range case (the constant-right-operand shortcut is already handled
+/// separately, at this project's own `Sub` arm's call site, before this
+/// is ever reached) - transcribed directly, including its own sequential
+/// mutation of `min`/`max` (the second block can still overwrite `min`
+/// again, in exactly one sub-case) rather than "cleaned up" into
+/// independent expressions, since correctness here depends on matching
+/// the real source's own execution order exactly, not just its inputs
+/// and outputs in isolation.
+fn sub_int_range_full(
+    l_min: Option<i64>,
+    l_max: Option<i64>,
+    r_min: Option<i64>,
+    r_max: Option<i64>,
+) -> Type {
+    let (min, max) = if l_min == l_max && l_min.is_some() && (r_min.is_none() || r_max.is_none()) {
+        (None, l_min)
+    } else {
+        let mut min = match (l_min, r_min) {
+            (_, None) => None,
+            (Some(lm), Some(_)) => Some(lm - r_max.or(r_min).unwrap()),
+            (None, Some(_)) => None,
+        };
+        let max;
+        match (r_max, l_max) {
+            // real PHPStan's own first branch (`$operand->getMax() ===
+            // null`): both ends collapse to null, overwriting whatever
+            // `min` above already computed.
+            (None, _) => {
+                min = None;
+                max = None;
+            }
+            (Some(rmax), Some(lmax)) => {
+                if let Some(lm) = l_min
+                    && r_min.is_none()
+                {
+                    min = Some(lm - rmax);
+                    max = None;
+                } else if let Some(rmin) = r_min {
+                    max = Some(lmax - rmin);
+                } else {
+                    max = None;
+                }
+            }
+            // real PHPStan's own final `else` (`$rangeMax === null`):
+            // only `max` collapses to null - `min`, computed above,
+            // deliberately stays untouched here.
+            (Some(_), None) => {
+                max = None;
+            }
+        }
+        if let (Some(mn), Some(mx)) = (min, max)
+            && mn > mx
+        {
+            (Some(mx), Some(mn))
+        } else {
+            (min, max)
+        }
+    };
+    normalize_int_range(min, max)
+}
+
+/// `base ** exp` for two plain `i64`s, `None` whenever real PHP itself
+/// would silently promote the result to `float` instead of a real `int` -
+/// a negative exponent (a fractional result) or an overflowing one (PHP's
+/// own general int-overflow-to-float behavior, which `pow()`/`**` share
+/// with `+`/`-`/`*`) - mirroring real PHPStan's own `is_float($min)`/
+/// `is_float($max)` checks in `pow_int_range`'s own two call sites below.
+fn checked_i64_pow(base: i64, exp: i64) -> Option<i64> {
+    let exp_u32 = u32::try_from(exp).ok()?;
+    base.checked_pow(exp_u32)
+}
+
+/// Real PHPStan's own `ExponentiateHelper`/`IntegerRangeType::exponentiate`,
+/// transcribed for the pure-integer case this project's own `IntRange`
+/// represents - `infer_binary`'s own `Pow` arm already routes a `Float`-
+/// involving operand to bare `Type::Float` before ever reaching this, the
+/// same gate every one of real PHPStan's own non-numeric-exponent cases
+/// (`string`/`bool`/`null`) this project's type system doesn't route
+/// through this path at all. A literal base's own `(min, max)` bounds
+/// coincide (`int_range_bounds`'s own doc comment), so this single
+/// formula - real PHPStan's own two separate call sites, one for a
+/// `ConstantScalarType` base and one for an `IntegerRangeType` base,
+/// happen to collapse into exactly the same shape here - correctly
+/// covers both a literal and a genuine range base with no separate case.
+fn pow_int_range(
+    l_min: Option<i64>,
+    l_max: Option<i64>,
+    r_min: Option<i64>,
+    r_max: Option<i64>,
+) -> Type {
+    let min = l_min.zip(r_min).and_then(|(b, e)| checked_i64_pow(b, e));
+    let max = l_max.zip(r_max).and_then(|(b, e)| checked_i64_pow(b, e));
+    if min.is_some() || max.is_some() {
+        normalize_int_range(min, max)
+    } else {
+        Type::Union(vec![Type::Int, Type::Float])
+    }
+}
+
+/// Real PHPStan's own `InitializerExprTypeResolver::getModType`,
+/// transcribed - unlike `Mul`/`Sub`/`Pow`, whose own corner/point
+/// formulas already reduce to the exact answer for two literal operands
+/// as a natural degenerate case, `%`'s own real magnitude-based range
+/// fallback (below) reasons only about the *divisor*'s own bound (real
+/// PHPStan's own `IntegerRangeType`-branch: `[0, |r|-1]` when the
+/// dividend is provably non-negative, `[-(|r|-1), |r|-1]` otherwise) -
+/// `7 % 3` would fall to the far coarser `int<0, 2>` there instead of
+/// the exact literal `1` without a dedicated literal-pair fold first,
+/// exactly matching real PHPStan's own two-step structure (its own
+/// `getModType` does the identical cross-product fold before ever
+/// reaching this same fallback).
+fn mod_int_range(
+    l_min: Option<i64>,
+    l_max: Option<i64>,
+    r_min: Option<i64>,
+    r_max: Option<i64>,
+) -> Type {
+    if l_min == l_max
+        && r_min == r_max
+        && let (Some(l), Some(r)) = (l_min, r_min)
+        && r != 0
+    {
+        return Type::IntLiteral(l % r);
+    }
+    // Real PHPStan's own explicit special case: modulo by exactly 1 is
+    // always 0, regardless of the dividend.
+    if r_min == Some(1) && r_max == Some(1) {
+        return Type::IntLiteral(0);
+    }
+    let range_max = r_max.map(|m| m - 1);
+    let left_is_non_negative = l_min.is_some_and(|v| v >= 0);
+    let range_min = if left_is_non_negative {
+        Some(0)
+    } else {
+        range_max.map(|m| -m)
+    };
+    normalize_int_range(range_min, range_max)
+}
+
+/// An unbounded end (or a `0` swapped to the nearest representable
+/// non-zero int, matching `div_int_range`'s own zero-avoidance) mapped
+/// to signed infinity - shares `mul_int_range`'s own `bound_or_inf`.
+fn div_sign(v: f64) -> f64 {
+    if v < 0.0 {
+        -1.0
+    } else if v > 0.0 {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+/// Real PHPStan's own `integerRangeMath`'s `Div` arm, transcribed
+/// directly (`InitializerExprTypeResolver::integerRangeMath`,
+/// `Expr\BinaryOp\Div` branch, plus the shared tail every arm in that
+/// function runs through afterward). Real division between two ints
+/// isn't guaranteed to itself produce an int (`7 / 2` is `3.5`), so the
+/// result is always a union of a refined int-range possibility and a
+/// bare `Float` possibility, never a pure int range alone - matching
+/// this project's own pre-existing `Div` fallback shape (`Union([Int,
+/// Float])`) exactly, just with the int half narrowed to a real range
+/// instead of bare `Int` whenever possible.
+///
+/// The recursive sign-splitting (when the divisor, or the dividend,
+/// spans both a negative and a positive sub-range, its own extremes
+/// aren't simply "the four corners" `Mul`'s own formula relies on - each
+/// half needs computing independently and unioning) is transcribed as
+/// real recursion, mirroring the source's own two `$this->
+/// integerRangeMath(...)` self-calls per split exactly, each one
+/// already returning a complete, tail-processed `Type` that's unioned
+/// directly rather than combined as raw bounds.
+fn div_int_range(
+    l_min: Option<i64>,
+    l_max: Option<i64>,
+    r_min: Option<i64>,
+    r_max: Option<i64>,
+) -> Type {
+    // "Avoid division by zero when looking for the min and the max by
+    // using the closest int" - the real source's own comment, verbatim.
+    // Only these two local values are adjusted; the "invert on negative
+    // constant" check below deliberately still consults the real,
+    // un-adjusted `r_min`/`r_max`.
+    let operand_min = if r_min == Some(0) { Some(1) } else { r_min };
+    let operand_max = if r_max == Some(0) { Some(-1) } else { r_max };
+
+    if operand_min.is_none_or(|v| v < 0) && operand_max.is_none_or(|v| v > 0) {
+        let negative = div_int_range(l_min, l_max, operand_min, Some(0));
+        let positive = div_int_range(l_min, l_max, Some(0), operand_max);
+        return union_types(negative, positive);
+    }
+    if l_min.is_none_or(|v| v < 0) && l_max.is_none_or(|v| v > 0) {
+        let negative = div_int_range(l_min, Some(0), r_min, r_max);
+        let positive = div_int_range(Some(0), l_max, r_min, r_max);
+        return union_types(negative, positive);
+    }
+
+    let range_min_sign = div_sign(bound_or_inf(l_min, f64::NEG_INFINITY));
+    let range_max_sign = div_sign(bound_or_inf(l_max, f64::INFINITY));
+
+    let min1 = operand_min
+        .map(|o| bound_or_inf(l_min, f64::NEG_INFINITY) / o as f64)
+        .unwrap_or(range_min_sign * -0.1);
+    let min2 = operand_max
+        .map(|o| bound_or_inf(l_min, f64::NEG_INFINITY) / o as f64)
+        .unwrap_or(range_min_sign * 0.1);
+    let max1 = operand_min
+        .map(|o| bound_or_inf(l_max, f64::INFINITY) / o as f64)
+        .unwrap_or(range_max_sign * -0.1);
+    let max2 = operand_max
+        .map(|o| bound_or_inf(l_max, f64::INFINITY) / o as f64)
+        .unwrap_or(range_max_sign * 0.1);
+
+    let fmin = min1.min(min2).min(max1).min(max2);
+    let fmax = min1.max(min2).max(max1).max(max2);
+    let mut min = if fmin == f64::NEG_INFINITY {
+        None
+    } else {
+        Some(fmin)
+    };
+    let mut max = if fmax == f64::INFINITY {
+        None
+    } else {
+        Some(fmax)
+    };
+
+    if let (Some(mn), Some(mx)) = (min, max)
+        && mn > mx
+    {
+        std::mem::swap(&mut min, &mut max);
+    }
+    let mut min_i = min.map(|v| v.ceil() as i64);
+    let mut max_i = max.map(|v| v.floor() as i64);
+
+    // "invert maximas on division with negative constants" - real
+    // PHPStan's own tail-adjustment, using the *original*,
+    // pre-zero-avoidance `l_min`/`l_max`/`r_min`/`r_max` (a literal
+    // degenerates to `min == max`, matching its own `ConstantIntegerType`
+    // check).
+    let range_is_negative_const = l_min == l_max && l_min.is_some_and(|v| v < 0);
+    let operand_is_negative_const = r_min == r_max && r_min.is_some_and(|v| v < 0);
+    if (range_is_negative_const || operand_is_negative_const)
+        && (min_i.is_none() || max_i.is_none())
+    {
+        std::mem::swap(&mut min_i, &mut max_i);
+    }
+
+    if min_i.is_none() && max_i.is_none() {
+        return Type::Union(vec![Type::Int, Type::Float]);
+    }
+    match normalize_int_range(min_i, max_i) {
+        // The rounding step (`ceil`ing the min, `floor`ing the max
+        // independently) can invert an otherwise-valid range into one
+        // with no real int members at all - `normalize_int_range`'s own
+        // doc comment has the exact real corpus shape (`10 / 4`, always
+        // `2.5`, never any int). `union_types` has no general `Never`-
+        // absorption rule of its own (nothing elsewhere in this project
+        // ever produces a `Never` member to union away), so this handles
+        // it explicitly rather than teach that absorption to every other
+        // `union_types` caller for the sake of this one.
+        Type::Never => Type::Float,
+        int_half => union_types(int_half, Type::Float),
     }
 }
 
@@ -4360,19 +4690,12 @@ impl<'a> Checker<'a> {
                 if lt == Type::Float || rt == Type::Float {
                     return Type::Float;
                 }
-                // Same real, narrow range-arithmetic as `Add` above, but
-                // only for a *constant* right operand (`$x - 1`) - a
-                // fixed value shifts both bounds by the same amount with
-                // no swap ever needed, unlike real PHPStan's own full
-                // range-minus-range case (`integerRangeMath`'s own
-                // `BinaryOp\Minus` arm has extra branches specifically for
-                // when the *subtracted* side is itself an unbounded
-                // range, which can flip which end stays bounded) - not
-                // replicated here, no corpus evidence needs it, and
-                // transcribing it exactly risks a subtle sign/swap bug
-                // this project has no way to cross-check against a real
-                // PHPStan run. Falls through to plain `Int` for a
-                // non-constant right operand.
+                // A *constant* right operand (`$x - 1`) shifts both bounds
+                // by the same amount with no swap ever needed - kept as
+                // its own fast path (matching this project's pre-existing
+                // shape) rather than routed through `sub_int_range_full`
+                // below, which computes the identical answer for this
+                // case but far less directly.
                 if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
                     (int_range_bounds(&lt), int_range_bounds(&rt))
                     && c == rc
@@ -4381,9 +4704,38 @@ impl<'a> Checker<'a> {
                     let max = l_max.map(|m| m - c);
                     return normalize_int_range(min, max);
                 }
+                // The full range-minus-range case (`$x - $y`, both sides
+                // genuinely range-representable, right side not a single
+                // constant) - `sub_int_range_full`'s own doc comment has
+                // the transcription details.
+                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
+                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                {
+                    return sub_int_range_full(l_min, l_max, r_min, r_max);
+                }
                 Type::Int
             }
-            BinOp::Mul | BinOp::Pow => {
+            BinOp::Mul => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                    return ty;
+                }
+                if lt == Type::Float || rt == Type::Float {
+                    return Type::Float;
+                }
+                // Real, narrow range-arithmetic, the `Add`/`Sub` arms'
+                // own family - `mul_int_range`'s own doc comment has the
+                // transcription details. Falls through to plain `Int`
+                // whenever either side isn't range-representable at all.
+                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
+                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                {
+                    return mul_int_range(l_min, l_max, r_min, r_max);
+                }
+                Type::Int
+            }
+            BinOp::Pow => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
                 if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
@@ -4391,6 +4743,10 @@ impl<'a> Checker<'a> {
                 }
                 if lt == Type::Float || rt == Type::Float {
                     Type::Float
+                } else if let (Some((l_min, l_max)), Some((r_min, r_max))) =
+                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                {
+                    pow_int_range(l_min, l_max, r_min, r_max)
                 } else {
                     Type::Int
                 }
@@ -4405,11 +4761,29 @@ impl<'a> Checker<'a> {
             // at all, per `binary_operator_overload_result`'s own gate)
             // is genuinely involved, which yields the object type back
             // instead of a plain `int`.
-            BinOp::Mod | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
                 self.binary_operator_overload_result(op, &lt, &rt)
                     .unwrap_or(Type::Int)
+            }
+            BinOp::Mod => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                    return ty;
+                }
+                // Real, narrow range-arithmetic, the `Add`/`Sub`/`Mul`
+                // family - `mod_int_range`'s own doc comment has the
+                // transcription details. Falls through to plain `Int`
+                // whenever either side isn't range-representable at all.
+                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
+                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                {
+                    mod_int_range(l_min, l_max, r_min, r_max)
+                } else {
+                    Type::Int
+                }
             }
             // Phase 13 Finding C: verified against real PHPStan's own
             // dumpType() - `/` gives `int|float` unconditionally whenever
@@ -4427,6 +4801,10 @@ impl<'a> Checker<'a> {
                 }
                 if lt == Type::Float || rt == Type::Float {
                     Type::Float
+                } else if let (Some((l_min, l_max)), Some((r_min, r_max))) =
+                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                {
+                    div_int_range(l_min, l_max, r_min, r_max)
                 } else {
                     Type::Union(vec![Type::Int, Type::Float])
                 }

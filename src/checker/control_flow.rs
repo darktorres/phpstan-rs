@@ -4,6 +4,58 @@ use crate::checker::{Checker, Locals, union_types};
 use crate::registry::Registry;
 use crate::types::Type;
 
+/// Whether `stmt` merely exits a `switch` itself rather than the whole
+/// enclosing function/loop - real PHP's own well-known `continue`-
+/// inside-`switch` gotcha: a `switch` counts as one level for `break`/
+/// `continue` purposes, so a bare `continue;`/`continue 1;` written
+/// directly in a case is exactly `break`-equivalent (falls through to
+/// after the switch, doesn't restart any enclosing loop). Only a level
+/// that explicitly escapes past the switch (`continue 2;` or higher)
+/// counts as a real exit. Shared by `always_terminates`'s own `Switch`
+/// arm and `Checker::exits_function_or_loop` - both independently need
+/// the identical "is this case's own last statement break-equivalent"
+/// question, and getting it wrong the same way in only one of the two
+/// would have left the other producing a different, inconsistent answer
+/// for the exact same case. Real corpus false positive this fixes (found
+/// verifying the `exits_function_or_loop` fix alone wasn't enough - a
+/// switch statement ending in a break-equivalent `continue;` was *also*
+/// still being counted by `always_terminates` as if it were a real
+/// function-level exit, wrongly marking code after the switch dead).
+///
+/// Recurses through `Block`/`If` (a case whose own last statement is
+/// `if ($c) { continue; } else { continue; }` unconditionally exits the
+/// switch too, on every branch, the same as a bare `continue;` would) -
+/// the identical shape `always_terminates`'s own recursion already has,
+/// for the identical reason. A genuinely *mixed* branch - one side
+/// break-equivalent, the other diverging a different way entirely (a
+/// `: never`-returning call, `return`, `throw`) - is a real, disclosed
+/// residual gap: `exits_function_or_loop`'s own recursion correctly
+/// judges that shape (verified directly), but `always_terminates`'s own
+/// separate, much more broadly-used recursion has no way to thread "this
+/// specific `Continue` is switch-scoped" through an arbitrary nesting
+/// depth without risking wrongly loosening its own unrelated, function-
+/// level "does this exit for real" question elsewhere (guard-clause
+/// detection, `deadCode.unreachable`'s own non-switch callers) - not
+/// attempted here, narrower and more corner-case than the shapes above.
+pub(crate) fn is_switch_break_equivalent(stmt: &Stmt) -> bool {
+    match &stmt.kind {
+        StmtKind::Break(_) => true,
+        StmtKind::Continue(level) => level.is_none() || *level == Some(1),
+        StmtKind::Block(stmts) => stmts.last().is_some_and(is_switch_break_equivalent),
+        StmtKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            is_switch_break_equivalent(then_branch)
+                && else_branch
+                    .as_deref()
+                    .is_some_and(is_switch_break_equivalent)
+        }
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
     /// The classic guard clause (`if ($x === null) { return; }`, or the
     /// less obvious `if (! $x instanceof Foo) { $this->fatalError(...); }`)
@@ -70,8 +122,7 @@ impl<'a> Checker<'a> {
                     && cases.iter().enumerate().all(|(i, c)| {
                         if !c.body.is_empty() {
                             return c.body.last().is_some_and(|s| {
-                                !matches!(s.kind, StmtKind::Break(_))
-                                    && self.always_terminates(s, locals)
+                                !is_switch_break_equivalent(s) && self.always_terminates(s, locals)
                             });
                         }
                         cases[i + 1..]
@@ -79,7 +130,7 @@ impl<'a> Checker<'a> {
                             .find(|later| !later.body.is_empty())
                             .is_some_and(|later| {
                                 later.body.last().is_some_and(|s| {
-                                    !matches!(s.kind, StmtKind::Break(_))
+                                    !is_switch_break_equivalent(s)
                                         && self.always_terminates(s, locals)
                                 })
                             })
@@ -147,7 +198,24 @@ impl<'a> Checker<'a> {
     /// `return`/`throw`/`continue` never does.
     pub(crate) fn exits_function_or_loop(&self, stmt: &Stmt, locals: &Locals) -> bool {
         match &stmt.kind {
-            StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Continue(_) => true,
+            StmtKind::Return(_) | StmtKind::Throw(_) => true,
+            // Real PHP's own well-known `continue`-inside-`switch` gotcha:
+            // a `switch` counts as one level for `break`/`continue`
+            // purposes, so a bare `continue;`/`continue 1;` written
+            // directly in a case (this function's own recursion never
+            // descends into a nested loop's body at all - there's no
+            // `While`/`For`/`Foreach`/`DoWhile`/`Switch` arm below, so any
+            // `Continue` this function actually reaches is guaranteed to
+            // be switch-scoped, not further-loop-scoped) is exactly
+            // `break`-equivalent: it exits the switch, not any enclosing
+            // loop, so code after the switch *is* reached. Only a level
+            // that explicitly escapes past the switch (`continue 2;` or
+            // higher) still counts as exiting. Confirmed live, this
+            // session, per the user's own explicit "do all those narrow
+            // [items], our corpus not having them is not a reason not to
+            // do them" - re-verified directly against `php -r` semantics,
+            // not merely inferred.
+            StmtKind::Continue(level) => matches!(level, Some(n) if *n > 1),
             StmtKind::Break(_) => false,
             StmtKind::Expression(e) => self.infer_expr(e, locals) == Type::Never,
             StmtKind::Block(stmts) => stmts

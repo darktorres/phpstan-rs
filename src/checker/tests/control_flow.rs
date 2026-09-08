@@ -1317,6 +1317,99 @@ fn switch_cases_ending_in_break_still_propagate_their_definitions_past_the_switc
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Re-examining Phase 15's own disclosed "continue N's own level argument
+// is parsed but never consulted for narrowing purposes" per the user's
+// own explicit "do all those narrow [items], our corpus not having them
+// is not a reason not to do them": real PHP's own well-known
+// `continue`-inside-`switch` gotcha (a bare `continue;`/`continue 1;`
+// written directly in a case is exactly `break`-equivalent - it exits
+// the switch, not any enclosing loop) was not recognized anywhere. Two
+// distinct, real bugs shared this one root cause, both found and fixed
+// together: `always_terminates`'s own `Switch` arm treated *any*
+// `Continue` (regardless of level) the same as `Return`/`Throw`, so a
+// switch with every case ending in either `return` or a break-equivalent
+// `continue` was wrongly judged to always terminate the whole function,
+// flagging the code after it as unreachable dead code; separately,
+// `reaches_after_switch`'s own first, unconditional arm only special-
+// cased a literal `Break` this way, leaving a *non-last* case ending in
+// a break-equivalent `continue` gated behind `is_last` (which a non-last
+// case can never satisfy) even after `exits_function_or_loop` was
+// itself already fixed - `is_switch_break_equivalent` now covers both.
+// `exits_function_or_loop`'s own half of the same fix, isolated: the
+// *last* case (here the only one) ending in a bare `continue` - routed
+// through `reaches_after_switch`'s second, `is_last`-gated arm, not the
+// first, unconditional one the test above exercises.
+#[test]
+fn the_last_switch_case_ending_in_a_bare_continue_reaches_after_the_switch() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): string {
+                switch ($x) {
+                    default:
+                        $result = "value";
+                        continue;
+                }
+                return $result;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_non_last_switch_case_ending_in_a_bare_continue_reaches_after_the_switch() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): string {
+                switch ($x) {
+                    case 1:
+                        $onlyFromCase1 = "one";
+                        continue;
+                    default:
+                        return "other";
+                }
+                return $onlyFromCase1;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// `is_switch_break_equivalent`'s own further real find, verifying the
+// fix just above wasn't complete either: a case's own last statement can
+// be an `if` whose *every* branch is itself break-equivalent
+// (`if ($c) { continue; } else { continue; }`), unconditionally exiting
+// the switch on every path just like a bare `continue;` would - not
+// recognized at all until `is_switch_break_equivalent` itself recursed
+// through `Block`/`If` the same way `always_terminates` already does.
+#[test]
+fn a_switch_case_ending_in_an_if_whose_every_branch_continues_reaches_after_the_switch() {
+    // `default:` deliberately never reaches after the switch at all
+    // (ends in `return`) - the *only* way `return $onlyFromCase1;` is
+    // reachable is via `case 1`'s own nested-`continue` exit, isolating
+    // whether that exit is correctly recognized (a `default:` that also
+    // assigned `$onlyFromCase1` would pass either way, masking the bug).
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x, bool $c): string {
+                switch ($x) {
+                    case 1:
+                        $onlyFromCase1 = "a";
+                        if ($c) {
+                            continue;
+                        } else {
+                            continue;
+                        }
+                    default:
+                        return "other";
+                }
+                return $onlyFromCase1;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_function_ending_in_a_try_catch_that_both_return_is_not_flagged() {
     // Regression test for a real bug caught while implementing this
@@ -2533,6 +2626,38 @@ fn a_for_loop_condition_reassigned_inside_the_body_is_not_a_false_constant() {
     );
 }
 
+// Re-examining Phase 15's own disclosed simplification ("the non-last
+// [`for` condition] expressions genuinely are only ever side-effecting
+// scratch expressions in every real corpus use seen so far, so they
+// stay checked once up front... a narrow, disclosed simplification")
+// per the user's own explicit "do all those narrow [items], our corpus
+// not having them is not a reason not to do them": the *non-last*
+// condition slot needed the identical fixed-point-convergence fix the
+// test just above already has for the *last* slot - checking it once,
+// up front against the pre-loop entry, saw `$stop`'s own pre-loop
+// literal `false` and never the body's own later reassignment,
+// wrongly flagging the bare `!$stop` (itself its own standalone check,
+// fires anywhere, not just as a whole condition) as always `true`.
+#[test]
+fn a_for_loop_non_last_condition_reassigned_inside_the_body_is_not_a_false_constant() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $n): void {
+                for ($stop = false, $i = 0; !$stop, $i < $n; $i++) {
+                    if ($i === 5) {
+                        $stop = true;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("booleanNot.")),
+        "expected $stop's loop-carried reassignment to be visible to the \
+         for loop's own non-last condition expression, got: {d:?}"
+    );
+}
+
 // Real regression found and fixed this session, caused by the two fixes
 // directly above: moving the condition check into `converge_loop_body`'s
 // own closure means it only ever mutates per-pass *copies* of the entry,
@@ -2969,12 +3094,13 @@ fn a_negated_literal_true_as_a_last_elseif_without_else_is_exempt() {
 // `$offset` visible at all (`Tools\p58\assign.php`). `infer_binary`'s
 // `Add`/`Sub` arms gained real, narrow `int<min,max>` arithmetic -
 // confirmed directly against `vendor/phpstan-src`'s own
-// `InitializerExprTypeResolver::integerRangeMath` (deliberately not the
-// *full* range-arithmetic surface: `Mul`/`Div`'s own negative/positive-
-// interval splitting isn't replicated, and `Sub` only handles a constant
-// right operand, not the full range-minus-range case - no corpus
-// evidence needs either, and both are meaningfully more involved to
-// transcribe correctly).
+// `InitializerExprTypeResolver::integerRangeMath`. `Mul`/`Div`/`Mod`/
+// `Pow`'s own full range-arithmetic surface, and `Sub`'s own full
+// range-minus-range case, were extended to match later in the same
+// session (see the dedicated tests further below) - see each of
+// `mul_int_range`/`div_int_range`/`mod_int_range`/`pow_int_range`/
+// `sub_int_range_full`'s own doc comments (`checker/expr.rs`) for the
+// exact transcription each is based on.
 #[test]
 fn adding_a_literal_to_a_bounded_int_range_shifts_both_ends() {
     let d = diagnostics_for(
@@ -3048,11 +3174,17 @@ fn adding_two_int_ranges_with_a_shared_unbounded_end_stays_unbounded() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Re-examining Phase 15's own disclosed simplification ("`Sub` only
+// preserves the range for a *constant* right operand... real PHPStan's
+// own `Minus` arm has extra branches specifically for when the
+// subtracted side is itself an unbounded range") per the user's own
+// explicit "do all those narrow [items], our corpus not having them is
+// not a reason not to do them" - `sub_int_range_full` now transcribes
+// real PHPStan's own full range-minus-range formula directly, so a
+// genuinely ranged (not single-valued) right operand is handled too,
+// not just a constant one.
 #[test]
-fn subtracting_a_non_constant_int_range_falls_back_to_plain_int() {
-    // The narrower, undocumented-as-general `Sub` case: a genuinely
-    // ranged (not single-valued) right operand isn't handled, matching
-    // this fix's own disclosed scope.
+fn subtracting_a_non_constant_int_range_computes_the_real_range() {
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -3061,7 +3193,160 @@ fn subtracting_a_non_constant_int_range_falls_back_to_plain_int() {
              * @param int<0, 5> $y
              */
             function f(int $x, int $y): void {
-                assertType('int', $x - $y);
+                assertType('int<-5, 10>', $x - $y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Real PHPStan's own `Minus` arm's remaining asymmetric shape (the
+// second block of `sub_int_range_full` can still overwrite `min` again,
+// in exactly one sub-case, per its own doc comment): a lower-unbounded
+// right operand (`int<min, 8>`) against a fully-bounded left one
+// (`int<3, 20>`) - the first block's own `min` computation requires a
+// *known* right-side min, so `min` starts `None` there and is only
+// really computed in the second block, from `l_min - r_max`.
+#[test]
+fn subtracting_a_lower_unbounded_range_recomputes_min_in_the_second_block() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param int<3, 20> $x
+             * @param int<min, 8> $y
+             */
+            function f(int $x, int $y): void {
+                assertType('int<-5, max>', $x - $y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn multiplying_two_literals_folds_to_the_exact_product() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType('15', 5 * 3);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn multiplying_two_bounded_int_ranges_computes_the_real_range() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param int<1, 5> $x
+             * @param int<2, 4> $y
+             */
+            function f(int $x, int $y): void {
+                assertType('int<2, 20>', $x * $y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// `mul_int_range`'s own zero-corner special case - without it, an
+// unbounded end multiplied against a literal `0` would compute `0 * INF`
+// (`NaN` in plain floating point), not the real answer, `0`.
+#[test]
+fn multiplying_an_unbounded_range_by_zero_is_always_zero() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param int<0, max> $x */
+            function f(int $x): void {
+                assertType('0', $x * 0);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn raising_two_literals_to_a_power_folds_to_the_exact_result() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType('8', 2 ** 3);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn modulo_of_two_literals_folds_to_the_exact_remainder() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType('1', 7 % 3);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// `mod_int_range`'s own magnitude-based fallback (real PHPStan's own
+// `getModType`): the result's own bound is keyed off the *divisor*'s
+// magnitude, narrowed to non-negative only when the dividend is itself
+// provably non-negative.
+#[test]
+fn modulo_by_a_bounded_int_range_bounds_the_result_by_its_magnitude() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param int<1, 5> $x
+             * @param int<2, 4> $y
+             */
+            function f(int $x, int $y): void {
+                assertType('int<0, 3>', $x % $y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Real PHP division isn't guaranteed to itself produce an int (`10 / 4`
+// is always exactly `2.5`) - `div_int_range`'s own rounding step
+// (`ceil`ing the min, `floor`ing the max independently) can invert an
+// otherwise-valid range into an empty one, which must collapse the int
+// half away entirely rather than surface as a nonsensical `int<3, 2>`.
+#[test]
+fn dividing_two_literals_with_no_exact_int_result_is_bare_float() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType('float', 10 / 4);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn dividing_two_bounded_int_ranges_computes_a_refined_int_or_float_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param int<1, 5> $x
+             * @param int<2, 4> $y
+             */
+            function f(int $x, int $y): void {
+                assertType('int<1, 2>|float', $x / $y);
             }
         "#,
     );
