@@ -1540,6 +1540,19 @@ impl<'a> Checker<'a> {
                         });
                     let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
                     let ty = resolve_names_in_type(ty, &self.name_ctx);
+                    // Phase 80 follow-up: see `Checker::resolve_type_hint`'s
+                    // own doc comment - this anonymous-class param
+                    // docblock fallback parses raw text independently of
+                    // the registry's own pipeline too, so it needs the
+                    // identical `value-of<T>`-on-an-enum resolution -
+                    // `resolve_type` just above already went through the
+                    // same native-reconciliation `FunctionSig::from_decl`
+                    // does, so an unresolvable `value-of<T>` needs the
+                    // same native-type fallback here too.
+                    let native_ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    let ty = self
+                        .registry
+                        .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
                     // Phase 92: `doc_ty` being `None` means this exact
                     // declaration has nothing of its own to say about
                     // this position - but an anonymous class relying on
@@ -1628,6 +1641,14 @@ impl<'a> Checker<'a> {
                 .and_then(|d| d.return_type);
             let ty = resolve_type(doc_return.as_deref(), f.return_type.as_deref());
             let ty = resolve_names_in_type(ty, &self.name_ctx);
+            // Phase 80 follow-up: see `Checker::resolve_type_hint`'s own
+            // doc comment - the return-position sibling of the param
+            // loop's identical fix just above, including the same
+            // native-fallback need.
+            let native_ty = self.resolve_type_hint(f.return_type.as_deref());
+            let ty = self
+                .registry
+                .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
             // Phase 92: same ancestor-backfill as the param loop above,
             // for the return position - see its own doc comment.
             let ty = if doc_return.is_none() {

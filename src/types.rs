@@ -987,21 +987,31 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "resource" => Type::Object("resource".to_string(), Vec::new()),
         // Phase 80: `value-of<T>`/`key-of<T>` - real PHPStan's own
         // `ValueOfType`/`KeyOfType`, both `LateResolvableType`s evaluated
-        // against `T`'s own resolved type only once actually needed.
-        // This project has no lazy/deferred type-resolution mechanism at
-        // all (a real, separate prerequisite this phase's own roadmap
-        // entry names), so only the case answerable immediately, with no
-        // registry access, is handled here: `T` itself already parsing
-        // to a real `Array`/`ArrayShape` (no class/enum lookup needed at
-        // all - real PHPStan's own `key-of<T>` never special-cases an
-        // enum either, only `value-of<T>` does). `T` naming a class/enum
-        // by reference (needing a registry lookup this function has no
-        // access to) degrades to `Mixed` instead of guessing - before
-        // this arm existed, `value-of<T>`/`key-of<T>` fell through to the
-        // generic-user-class branch below and got mangled into a bogus,
-        // namespace-qualified "class name" (`class.notFound` on every
-        // real use) regardless of which case it was, so `Mixed` is
-        // already a strict improvement even for the unhandled case.
+        // against `T`'s own resolved type only once actually needed. This
+        // project has no general lazy/deferred type-resolution mechanism
+        // (adding one would touch every exhaustive `match` over `Type`
+        // across the codebase, for a rarely-used feature) - `T` itself
+        // already parsing to a real `Array`/`ArrayShape` needs no registry
+        // access at all and is resolved immediately below (real PHPStan's
+        // own `key-of<T>` never special-cases an enum either, only
+        // `value-of<T>` does, confirmed directly against `KeyOfType::
+        // getResult()`/`ValueOfType::getResult()`).
+        //
+        // Phase 80 follow-up: `T` naming a bare class/enum reference (no
+        // template args) is exactly real PHPStan's own `value-of<T>`-on-an-
+        // enum special case (`key-of<T>` on a class/enum has no real
+        // PHPStan special case at all - it just falls to `getIterableKeyType()`,
+        // `Mixed` for an ordinary class, so it's left unchanged below) -
+        // this one case genuinely needs registry access this parse-time
+        // function doesn't have, so it's encoded as a sentinel
+        // (`Type::Object("$$valueof", [Type::Object(name, [])])`) instead
+        // of guessed at here, resolved once real class/enum data exists by
+        // `Registry::resolve_deferred_value_of` (`registry.rs`) - the same
+        // "encode a special case via an existing variant, guarded by an
+        // impossible name" idiom `"resource"`/`"object"` above already
+        // use (`$` can never appear in a real PHP identifier, so this can
+        // never collide with a genuine class/enum/template-param/type-
+        // alias name anywhere else in the type tree).
         "value-of" => match generic_args {
             [single] => match parse_type_string(single) {
                 Type::Array(_, value) => *value,
@@ -1010,6 +1020,9 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                     1 => fields.into_iter().next().unwrap().1,
                     _ => Type::Union(fields.into_iter().map(|(_, ty, _)| ty).collect()),
                 },
+                Type::Object(name, args) if args.is_empty() => {
+                    Type::Object("$$valueof".to_string(), vec![Type::Object(name, args)])
+                }
                 _ => Type::Mixed,
             },
             _ => Type::Mixed,

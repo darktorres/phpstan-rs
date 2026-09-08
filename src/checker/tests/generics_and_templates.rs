@@ -601,6 +601,55 @@ fn a_bounded_template_argument_satisfying_the_bound_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 80 follow-up: a `@template T of value-of<Enum>` bound - exercises
+// `Registry::resolve_deferred_value_of` (`registry.rs`) resolving a
+// class-level `template_bounds` entry, the one walked location the rest
+// of this session's own `checker/tests/key_value_of.rs` tests don't cover
+// (those only exercise ordinary param/return/property positions).
+
+#[test]
+fn a_template_bound_by_value_of_an_enum_flags_a_non_matching_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'S';
+            }
+            /**
+             * @template T of value-of<Suit>
+             */
+            class Collection {}
+            /** @param Collection<'nope'> $c */
+            function f($c) {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("@template T requires")
+            && x.message.contains("'H'|'S'")
+            && x.message.contains("nope")),
+        "expected a bound-violation diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_template_bound_by_value_of_an_enum_accepts_a_matching_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit: string {
+                case Hearts = 'H';
+                case Spades = 'S';
+            }
+            /**
+             * @template T of value-of<Suit>
+             */
+            class Collection {}
+            /** @param Collection<'H'> $c */
+            function f($c) {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_bare_unspecified_generic_never_triggers_bound_checking() {
     // No `<...>` at all - nothing to check, same "don't know, don't

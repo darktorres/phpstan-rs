@@ -176,6 +176,7 @@ impl Registry {
         registry.index(program);
         registry.flatten_traits();
         registry.flatten_phpdoc_inheritance();
+        registry.resolve_deferred_value_of();
         registry
     }
 
@@ -354,6 +355,151 @@ impl Registry {
                 break;
             }
         }
+    }
+
+    /// Phase 80 follow-up: resolves `types::parse_type_keyword_or_class`'s
+    /// own `value-of<T>`-on-a-class/enum sentinel
+    /// (`Type::Object("$$valueof", [Type::Object(target_fqn, [])])`) now
+    /// that every class/enum is actually indexed - see that function's own
+    /// doc comment for why this can't happen at parse time. A single pass,
+    /// not a fixed-point loop like `flatten_phpdoc_inheritance` above: a
+    /// `value-of<value-of<X>>`-style chain isn't attempted (no realistic
+    /// case, disclosed rather than silently unhandled).
+    ///
+    /// Every class is taken out of `self.classes` before being mutated
+    /// (`HashMap::remove`, reinserted at the end of its own iteration),
+    /// not the collect-then-apply shape `flatten_phpdoc_inheritance_one_pass`
+    /// needs - that one's own shape exists to let a fixed-point loop read
+    /// an *ancestor's* still-unmodified signature while backfilling a
+    /// *descendant's*; this pass only ever needs to read some *other*
+    /// class/enum's own `properties["value"]` while rewriting the current
+    /// one's types, and temporarily removing the current entry sidesteps
+    /// borrowing `self.classes` both ways at once with no extra plumbing.
+    /// (A class whose own docblock names `value-of<self>` on itself, where
+    /// `self` is genuinely an enum, degrades to `Mixed` while it's
+    /// temporarily removed - the identical, already-accepted "can't
+    /// verify, don't guess" outcome every other unresolvable case here
+    /// already gets, not a new failure mode.) Top-level functions
+    /// (`self.functions`) need no such dance at all - mutating one
+    /// function's own signature while reading `self.classes` for a lookup
+    /// borrows two disjoint fields of `self`, which the borrow checker
+    /// already allows without help.
+    #[hotpath::measure]
+    pub(crate) fn resolve_deferred_value_of(&mut self) {
+        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        for class_name in class_names {
+            let Some(mut info) = self.classes.remove(&class_name) else {
+                continue;
+            };
+            for sig in info.methods.values_mut() {
+                for param in &mut sig.params {
+                    if type_contains_deferred_value_of(&param.ty) {
+                        let ty = std::mem::replace(&mut param.ty, Type::Mixed);
+                        param.ty = resolve_deferred_value_of_with_native_fallback(
+                            ty,
+                            &param.ty_native,
+                            &self.classes,
+                        );
+                    }
+                }
+                if type_contains_deferred_value_of(&sig.return_type) {
+                    let ty = std::mem::replace(&mut sig.return_type, Type::Mixed);
+                    sig.return_type = resolve_deferred_value_of_with_native_fallback(
+                        ty,
+                        &sig.return_type_native,
+                        &self.classes,
+                    );
+                }
+            }
+            for prop in info.properties.values_mut() {
+                if type_contains_deferred_value_of(&prop.ty) {
+                    let ty = std::mem::replace(&mut prop.ty, Type::Mixed);
+                    prop.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
+                }
+                if let Some(set_ty) = &prop.set_ty
+                    && type_contains_deferred_value_of(set_ty)
+                {
+                    let ty = prop.set_ty.take().unwrap();
+                    prop.set_ty = Some(resolve_deferred_value_of_in_type(ty, &self.classes));
+                }
+            }
+            for c in info.consts.values_mut() {
+                if type_contains_deferred_value_of(&c.ty) {
+                    let ty = std::mem::replace(&mut c.ty, Type::Mixed);
+                    c.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
+                }
+            }
+            for bound in info.template_bounds.values_mut() {
+                if type_contains_deferred_value_of(bound) {
+                    let ty = std::mem::replace(bound, Type::Mixed);
+                    *bound = resolve_deferred_value_of_in_type(ty, &self.classes);
+                }
+            }
+            self.classes.insert(class_name, info);
+        }
+        for sig in self.functions.values_mut() {
+            for param in &mut sig.params {
+                if type_contains_deferred_value_of(&param.ty) {
+                    let ty = std::mem::replace(&mut param.ty, Type::Mixed);
+                    param.ty = resolve_deferred_value_of_with_native_fallback(
+                        ty,
+                        &param.ty_native,
+                        &self.classes,
+                    );
+                }
+            }
+            if type_contains_deferred_value_of(&sig.return_type) {
+                let ty = std::mem::replace(&mut sig.return_type, Type::Mixed);
+                sig.return_type = resolve_deferred_value_of_with_native_fallback(
+                    ty,
+                    &sig.return_type_native,
+                    &self.classes,
+                );
+            }
+        }
+    }
+
+    /// The `&self` (read-only, immediate) twin of `resolve_deferred_value_of`
+    /// above, for a `Type` parsed directly from a raw docblock string
+    /// *during checking* rather than at registry-build time - by then
+    /// every class/enum genuinely is already fully indexed (unlike mid-
+    /// registry-construction, where `resolve_deferred_value_of` itself
+    /// needs its own one-time deferred pass), so this resolves the
+    /// `"$$valueof"` sentinel immediately, inline, with no pass needed.
+    /// Every checker-side call site that parses a docblock type string
+    /// independently of the registry's own `FunctionSig::from_decl`/
+    /// `ClassInfo::from_decl` pipeline (which `resolve_deferred_value_of`
+    /// already covers) needs this too - real corpus false positive found
+    /// via this phase's own corpus diff caught exactly one such site
+    /// (`Checker::resolve_type_hint`, reached through an inline `@var`
+    /// annotation) that would otherwise leak the raw, unresolved sentinel
+    /// straight into a real diagnostic message
+    /// (`shipmonk/dead-code-detector`'s own `CollectedUsage::deserialize()`,
+    /// `/** @var array{..., t: value-of<MemberType>, ...} $result */`).
+    pub(crate) fn resolve_deferred_value_of_now(&self, ty: Type) -> Type {
+        if !type_contains_deferred_value_of(&ty) {
+            return ty;
+        }
+        resolve_deferred_value_of_in_type(ty, &self.classes)
+    }
+
+    /// `resolve_deferred_value_of_now`'s own native-fallback-aware sibling.
+    /// See `resolve_deferred_value_of_with_native_fallback`'s doc comment
+    /// (the free function this wraps) for why an unresolvable
+    /// `value-of<T>` needs this rather than plain `resolve_deferred_value_of_now`
+    /// alone. Used by the anonymous-class param/return docblock fallback
+    /// in `checker.rs`, which (like the registry's own `FunctionSig::
+    /// from_decl`) reconciles its own raw-parsed doc type against a
+    /// native counterpart via `resolve_type` before this ever runs.
+    pub(crate) fn resolve_deferred_value_of_now_with_native_fallback(
+        &self,
+        ty: Type,
+        native: &Type,
+    ) -> Type {
+        if !type_contains_deferred_value_of(&ty) {
+            return ty;
+        }
+        resolve_deferred_value_of_with_native_fallback(ty, native, &self.classes)
     }
 
     /// Whether `ty` mentions a `Type::TemplateParam` anywhere in its tree -
@@ -1774,6 +1920,148 @@ impl Registry {
             }
             _ => types::is_subtype(sub, sup),
         }
+    }
+}
+
+/// Cheap, read-only pre-check for `Registry::resolve_deferred_value_of`:
+/// does `ty` contain the `"$$valueof"` sentinel anywhere in its tree at
+/// all - lets every call site skip the (much more expensive) rebuild-with-
+/// clone `resolve_deferred_value_of_in_type` below does for the
+/// overwhelming majority of types, which never contain it.
+fn type_contains_deferred_value_of(ty: &Type) -> bool {
+    match ty {
+        Type::Object(name, args) => {
+            name == "$$valueof" || args.iter().any(type_contains_deferred_value_of)
+        }
+        Type::Array(key, inner) => {
+            type_contains_deferred_value_of(key) || type_contains_deferred_value_of(inner)
+        }
+        Type::ClassString(inner) => type_contains_deferred_value_of(inner),
+        Type::Union(members) | Type::Intersection(members) => {
+            members.iter().any(type_contains_deferred_value_of)
+        }
+        Type::ArrayShape(fields) | Type::ObjectShape(fields) => fields
+            .iter()
+            .any(|(_, t, _)| type_contains_deferred_value_of(t)),
+        _ => false,
+    }
+}
+
+/// The actual substitution - mirrors `function_sig::substitute_type_aliases`'s
+/// own recursive-rebuild shape exactly, with one extra case (checked
+/// first) for the `"$$valueof"` sentinel itself. See `Registry::
+/// resolve_deferred_value_of`'s own doc comment for why this exists at
+/// all, and `types::parse_type_keyword_or_class`'s `"value-of"` arm for
+/// where the sentinel is produced.
+fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<String, ClassInfo>) -> Type {
+    match ty {
+        Type::Object(name, mut args) if name == "$$valueof" => {
+            let Some(Type::Object(target_fqn, _)) = args.pop() else {
+                return Type::Mixed;
+            };
+            resolve_value_of_target(&target_fqn, classes)
+        }
+        Type::Object(name, args) => Type::Object(
+            name,
+            args.into_iter()
+                .map(|a| resolve_deferred_value_of_in_type(a, classes))
+                .collect(),
+        ),
+        Type::Array(key, inner) => Type::Array(
+            Box::new(resolve_deferred_value_of_in_type(*key, classes)),
+            Box::new(resolve_deferred_value_of_in_type(*inner, classes)),
+        ),
+        Type::ClassString(inner) => {
+            Type::ClassString(Box::new(resolve_deferred_value_of_in_type(*inner, classes)))
+        }
+        Type::Union(members) => Type::Union(
+            members
+                .into_iter()
+                .map(|m| resolve_deferred_value_of_in_type(m, classes))
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .into_iter()
+                .map(|m| resolve_deferred_value_of_in_type(m, classes))
+                .collect(),
+        ),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, resolve_deferred_value_of_in_type(t, classes), opt))
+                .collect(),
+        ),
+        Type::ObjectShape(fields) => Type::ObjectShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, resolve_deferred_value_of_in_type(t, classes), opt))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+/// `value-of<target_fqn>`'s own real resolved value, once `target_fqn`'s
+/// class/enum data actually exists to consult - mirrors real PHPStan's own
+/// `ValueOfType::getResult()` exactly: not an enum at all (or not a
+/// registered class/enum) degrades to `Mixed` (can't verify, don't guess -
+/// the same leniency real PHPStan's own non-enum `getIterableValueType()`
+/// fallback amounts to for an ordinary class); an unbacked enum (no real
+/// `->value` property, since real PHP never gives one to a non-backed
+/// enum) is `Never`, matching `ValueOfType::getResult()`'s own
+/// `count($valueTypes) === 0 -> NeverType`; a backed enum's own already-
+/// built `properties["value"]` (`registry/class_info.rs`, built for the
+/// enum's real `->value` property) is already the exact union-of-case-
+/// literal-values type real PHPStan computes independently - reused
+/// directly, not recomputed.
+fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<String, ClassInfo>) -> Type {
+    let Some(info) = classes.get(target_fqn) else {
+        return Type::Mixed;
+    };
+    if info.kind != ClassKind::Enum {
+        return Type::Mixed;
+    }
+    match info.properties.get("value") {
+        Some(sig) => sig.ty.clone(),
+        None => Type::Never,
+    }
+}
+
+/// Resolves `ty` (a param/return type that may contain the `"$$valueof"`
+/// sentinel) and, if the result is bare `Type::Mixed`, falls back to
+/// `native` instead when that's itself something more useful - restores
+/// real PHPStan's own (and this project's pre-existing)
+/// `function_sig::reconcile_with_native` behavior for a `value-of<T>`
+/// that turns out unresolvable (`T` not a real, registered enum), which
+/// `member_possible_given_native`'s own deliberate, unconditional trust of
+/// the still-unresolved sentinel (see its own doc comment) would otherwise
+/// have already locked in as "kept" well before this pass ever runs. Real
+/// corpus false positive this fixes: `php-standard-library`'s own
+/// `BackedEnumValueType::coerce(): string|int`, `@return value-of<T>` for
+/// an unresolvable `@template T` - without this, the native `string|int`
+/// this project already trusted here before this whole feature existed
+/// was silently replaced by a bare, strictly worse `Mixed`.
+///
+/// Only `ParamSig::ty`/`FunctionSig::return_type` get this treatment -
+/// they're the only two places this registry persists a native-only
+/// counterpart type to fall back to at all (`ParamSig::ty_native`/
+/// `FunctionSig::return_type_native`, both built for an unrelated,
+/// earlier override-compatibility need). `PropertySig`/`ConstSig`/
+/// `ClassInfo::template_bounds` have no such counterpart stored (Phase
+/// 64's own disclosed, pre-existing gap - see its own ROADMAP entry) -
+/// an unresolvable `value-of<T>` there stays plain `Mixed`, a narrower,
+/// disclosed simplification with no current corpus evidence it matters.
+fn resolve_deferred_value_of_with_native_fallback(
+    ty: Type,
+    native: &Type,
+    classes: &FxHashMap<String, ClassInfo>,
+) -> Type {
+    let resolved = resolve_deferred_value_of_in_type(ty, classes);
+    if resolved == Type::Mixed && *native != Type::Mixed {
+        native.clone()
+    } else {
+        resolved
     }
 }
 

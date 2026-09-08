@@ -471,6 +471,16 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
     }
     match m {
         Type::Object(name, _) if name == "resource" => types::is_subtype(m, native_ty),
+        // `"$$valueof"` (`types::parse_type_keyword_or_class`'s own
+        // `value-of<T>`-on-an-enum sentinel) is deliberately trusted here
+        // exactly like a genuine (if unverifiable) class reference -
+        // `Registry::resolve_deferred_value_of`'s own later, whole-
+        // registry pass (see its own doc comment) restores the identical
+        // "fall back to native when the resolved doc type turns out to be
+        // Mixed" behavior this function would otherwise have given for
+        // free, once the sentinel's real value is actually known (a
+        // narrower value than the generic Object case can safely give
+        // here, this early in the pipeline).
         Type::Object(_, _) => true,
         // Phase 60 corpus find: a PHPStan/Psalm callable-shape doc member
         // (`Closure(int): string`) degrades to plain `Type::Callable` at

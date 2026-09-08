@@ -254,6 +254,7 @@ impl Project {
     pub fn finish_loading(&mut self) {
         self.registry.flatten_traits();
         self.registry.flatten_phpdoc_inheritance();
+        self.registry.resolve_deferred_value_of();
         self.rebuild_pest_config();
     }
 
@@ -313,6 +314,7 @@ impl Project {
         // over already-parsed ClassInfo, not a re-parse of anything.
         self.registry.flatten_traits();
         self.registry.flatten_phpdoc_inheritance();
+        self.registry.resolve_deferred_value_of();
         register_references(&mut self.dependents, path, &references);
 
         self.files.insert(

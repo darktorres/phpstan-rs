@@ -233,6 +233,23 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // type used in two different namespaces was treated as two
         // unrelated "classes" (`App\resource` vs. plain `resource`).
         Type::Object(name, args) if name == "resource" => Type::Object(name, args),
+        // Phase 80 follow-up: `"$$valueof"` (`types::parse_type_keyword_or_class`'s
+        // own `value-of<T>`-on-a-class/enum sentinel, `Type::Object("$$valueof",
+        // [Type::Object(name, [])])`) is a marker, not a class reference
+        // itself - resolved later by `Registry::resolve_deferred_value_of`
+        // once real class/enum data exists - but unlike `object`/
+        // `Traversable`/`resource` above, its own *argument* (the real
+        // class/enum name it wraps) still needs ordinary name resolution
+        // here, the same as any other `Object`'s type arguments - without
+        // this special case, the generic arm just below would instead try
+        // to resolve `"$$valueof"` itself as if it were a genuine (and
+        // nonsensical) class reference.
+        Type::Object(name, args) if name == "$$valueof" => Type::Object(
+            name,
+            args.into_iter()
+                .map(|a| resolve_names_in_type(a, ctx))
+                .collect(),
+        ),
         Type::Object(name, args) => Type::Object(
             ctx.resolve(&name),
             args.into_iter()

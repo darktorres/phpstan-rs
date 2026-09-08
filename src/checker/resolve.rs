@@ -41,19 +41,38 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Parses a raw native type-hint string (a closure/arrow-fn param or
-    /// return type - the one place in this checker that builds a `Type`
-    /// straight from source without going through the registry's own
-    /// `FunctionSig::from_decl`, which already resolves names as part of
-    /// its pipeline) and resolves any class name in it against this
-    /// file's `NameContext`, exactly like a real declaration would. Found
+    /// Parses a raw type-hint string (a closure/arrow-fn param/return, or
+    /// (Phase 80 follow-up) an inline `@var` annotation via `inline_var_
+    /// annotation` below - one of a few places in this checker that build
+    /// a `Type` straight from source without going through the registry's
+    /// own `FunctionSig::from_decl`, which already resolves names as part
+    /// of its pipeline; `checker.rs`'s anonymous-class param/return
+    /// docblock fallback is another, patched the same way at its own two
+    /// call sites) and resolves any class name in it against this file's
+    /// `NameContext`, exactly like a real declaration would. Found
     /// necessary the hard way: an unresolved bare name here compared as a
     /// real mismatch against the correctly-resolved FQN the closure body
     /// itself infers, on real code (a `static fn(array $row): ActionCount
     /// => new ActionCount(...)` where `ActionCount` is `use`-imported).
+    ///
+    /// Phase 80 follow-up: also resolves `types::parse_type_keyword_or_class`'s
+    /// `value-of<T>`-on-an-enum sentinel (`Registry::resolve_deferred_value_of_now`) -
+    /// unlike `Registry::resolve_deferred_value_of`'s own one-time,
+    /// registry-build-time pass, every class/enum is already fully
+    /// indexed by the time *this* function ever runs, so resolution
+    /// happens immediately, inline, with no separate pass needed. Real
+    /// corpus false positive this closes: an inline `@var` annotation is
+    /// checked through here, and without this, the raw, unresolved
+    /// sentinel leaked straight into a real diagnostic message
+    /// (`shipmonk/dead-code-detector`'s own `CollectedUsage::deserialize()`,
+    /// `/** @var array{..., t: value-of<MemberType>, ...} $result */`).
     pub(crate) fn resolve_type_hint(&self, hint: Option<&str>) -> Type {
         match hint {
-            Some(h) => registry::resolve_names_in_type(types::parse_type_string(h), &self.name_ctx),
+            Some(h) => {
+                let ty =
+                    registry::resolve_names_in_type(types::parse_type_string(h), &self.name_ctx);
+                self.registry.resolve_deferred_value_of_now(ty)
+            }
             None => Type::Mixed,
         }
     }
