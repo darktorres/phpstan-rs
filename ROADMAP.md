@@ -926,6 +926,50 @@ findings anywhere in the ~20,300-file corpus, confirming zero real-world
 PHP 8.4 property hook usage there at all, and zero false positives from
 either family.
 
+Phase 37 follow-up: attribute constructor-argument validation
+(`attribute.abstract`/`.noConstructor`/`.constructorNotPublic`, plus
+arity/named-argument/by-ref/type checking), the second phase picked from
+`PHASE_DEPENDENCIES.md`'s own "phases that unblock others" this session.
+Its own prior write-up called this "genuinely needs Phase 49's call-
+argument-binding generalization" - re-checked rather than trusted (the
+same standing practice this whole document's Phase 15 entry started):
+`resolve_call_args`/`check_args` (`checker/calls.rs`) already take a bare
+`args: &[Arg]` + `sig: &FunctionSig`, no expr-node coupling at all - the
+exact same pair `ExprKind::New`'s own constructor-call handling already
+uses, directly reusable for an attribute's own constructor call with zero
+further generalization needed. `Checker::check_attributes` (the single
+choke point every attribute-bearing declaration already routes through)
+now also visits each argument expression via `check_expr` against a
+fresh, empty `Locals::default()` - correct, not a shortcut, since a real
+PHP attribute argument is a constant-expression and can never reference a
+local variable at all - which newly catches things like an undefined
+class-constant reference inside an attribute argument, previously
+invisible to this checker entirely.
+
+One real, live bug found via this session's own corpus diff, not assumed
+safe: the constructor lookup initially used a bare `info.methods.get
+("__construct")` (this class's own declared methods only) instead of the
+ancestor-chain-aware `Registry::lookup_method` `ExprKind::New` already
+uses - PHPBench's own `#[BeforeMethods]` (`class BeforeMethods extends
+AbstractMethodsAttribute {}`, no `__construct` of its own, inheriting its
+parent's) was wrongly flagged `attribute.noConstructor` on every real,
+legal use in Piwigo's own test suite. Fixed, with its own dedicated
+regression test, explicitly reverted and confirmed to fail without the
+fix.
+
+Confirmed via a full corpus diff: Piwigo's own app-only scope is byte-
+identical once the ancestor-lookup fix above landed. The full vendor-
+included corpus gained exactly 2 new diagnostics, both `argument.type`,
+both the identical real (if very minor) finding: JetBrains' own
+`#[Deprecated(since: 8.3)]` convention in two phpstorm-stubs files passes
+a bare float literal where the attribute's own constructor docblock
+explicitly declares `@param string $since` - a real type mismatch by this
+project's own established docblock-is-the-checked-bar convention (the
+parameter has no *native* type at all, so real PHP itself raises no
+runtime error either way), not a new false-positive class - individually
+correct, and far too narrow (2 vendor-only occurrences, functionally
+inert attribute metadata) to be worth chasing further.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -1239,15 +1283,20 @@ not a quick win); an enumerated `@phpstan-*` typo-detection whitelist;
 `-closure-this`.
 
 **37 - Attribute target-validity, remaining kinds (PARTIAL).** Existence
-checking and target-validity for property/method/function/param are
-done (see Done). `ClassAttributesRule`/`ClassConstantAttributesRule`/
+checking, target-validity for property/method/function/param, and
+constructor-argument validation (`attribute.abstract`/`.noConstructor`/
+`.constructorNotPublic`/arity/type checks, see Done) are all done.
+`ClassAttributesRule`/`ClassConstantAttributesRule`/
 `TraitAttributeClassRule`/`TraitAttributesRule`/
 `PropertyHookAttributesRule`/`EnumCaseAttributesRule`/
 `ClosureAttributesRule`/`ArrowFunctionAttributesRule`/
 `ConstantAttributesRule` still only get existence-checking, not target
-validity. Constructor-argument validation
-(`attribute.noConstructor`/parameter-count/type checks) needs Phase 49's
-call-argument-binding generalization first.
+validity. `attribute.nonRepeatable` (needs a same-declaration-list
+accumulator, a different shape of check than `check_attributes`'s own
+per-attribute loop) and `attribute.deprecated` (would duplicate this
+project's own existing `@deprecated` family rather than add real
+coverage) aren't ported - a real, deliberate scope trim, not corpus-
+evidenced as needed.
 
 **39 - `@deprecated` usage warnings (PARTIAL).** Full access-shape
 coverage is done (see Done). Whether a class-level `@deprecated` tag
