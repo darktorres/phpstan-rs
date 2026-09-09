@@ -1931,22 +1931,20 @@ the narrowed access is still caught). `ArrayShape`'s own int-vs-string
 key precision and unsealed-shape (`array{...}`) tracking remain
 unbuilt, genuinely separate from what 73/74 needed.
 
-**51 - `Type` coercion surface, remaining (PARTIAL).** Cast legality,
-`IntegerRangeType`'s `abs()`/`~` arithmetic, `print`/`InvalidPartOfEncapsedStringRule`,
-and four more `IntegerRangeType`-consumer extensions are done (see
-Done). `**`'s own range arithmetic is also already done (`pow_int_range`,
-entry 28) - this entry's own prior "range-preserving `**`/shift
-arithmetic... remains unbuilt" framing was stale on the `**` half,
-checked directly against the code rather than assumed. Only
-range-preserving shift (`<<`/`>>`) remains genuinely unbuilt: confirmed
-directly against real PHPStan's own `getShiftLeftType`/`getShiftRightType`
+**51 - `Type` coercion surface (DONE).** Cast legality, `IntegerRangeType`'s
+`abs()`/`~` arithmetic, `print`/`InvalidPartOfEncapsedStringRule`, four
+more `IntegerRangeType`-consumer extensions, and `**`'s own range
+arithmetic (`pow_int_range`, entry 28) were already done. The one
+remaining item, range-preserving shift (`<<`/`>>`), is now done too
+(`shift_int_range`, `checker/expr.rs`) - confirmed directly against
+real PHPStan's own `getShiftLeftType`/`getShiftRightType`
 (`InitializerExprTypeResolver.php`) that a real, correct formula exists
 and is small - `IntRange(min, max) << N` → `IntRange(min << N, max << N)`
 (same for `>>`), but *only* when the shift amount is a single literal
 non-negative int, not itself a range (real PHPStan falls back to plain
 `int` otherwise, confirmed directly - no cross-product-of-ranges case
-exists for shifts the way `Mul`/`Pow` have). Not corpus-evidenced as a
-real gap either way.
+exists for shifts the way `Mul`/`Pow` have). Nothing left unbuilt in
+this phase's own scope.
 
 **52 - Invalid-operand-combination (`ErrorType`), remaining (PARTIAL).**
 The operand-validity matrix (binary/comparison/unary/inc-dec) is done
@@ -1993,31 +1991,28 @@ sentinel representation doesn't already produce.
 
 **55 - Narrowing-engine generalization, remaining (PARTIAL).** `count()`
 truthiness, `array_is_list`, `str_contains`-family, a real
-`instanceof`-intersection bug, and - this batch - fixed-point loop-body
-convergence are fixed (see Done). Still missing: a comparison-outcome/
-range API for `<`/`>`/`<=`/`>=` generally (only the `count()` special case
-exists). Scoped directly against real PHPStan's own mechanism
+`instanceof`-intersection bug, fixed-point loop-body convergence, and -
+this batch - the comparison-outcome/range API for `<`/`>`/`<=`/`>=`
+(`comparison_narrowed_bounds`, `checker/narrowing.rs`) are fixed (see
+Done). Scoped directly against real PHPStan's own mechanism
 (`IntegerRangeType::getSmallerType`/`getSmallerOrEqualType`/`getGreaterType`/
 `getGreaterOrEqualType`, `vendor/phpstan-src`) - real PHPStan's own
 version is genuinely bigger than "just build an `IntRange`": because
 `<`/`>` do PHP's full loose-comparison type-juggling, narrowing `$x < 5`
 also has to subtract `true`/`null`/`false` from `$x`'s own type in some
 cases (a positive-only range excludes `true`, since `5 < true` is
-`false`), not just adjust numeric bounds. A proportionate build for this
-project skips that cross-type juggling entirely - same "favor false
-negatives, don't model loose comparison" precedent this narrowing
-engine already holds for `===`/`!==`-only equality narrowing just below
-- and only narrows when both sides are already known-numeric
-(`Int`/`Float`/`IntRange`/`IntLiteral`), which reduces to a small,
-already-buildable extension: construct an `IntRange` bound from the
-comparison (mirroring `IntegerRangeType::createAllGreaterThanOrEqualTo`/
-`createAllSmallerThan`) and intersect via the existing `narrow_type_to`.
-This genuinely shares no code with Phase 51's own remaining shift-range
-item below beyond the `normalize_int_range`/`int_range_bounds`
-primitives both already build on today - the "cross-check before
-building" coordination note is effectively already satisfied by that
-shared foundation existing, not a live blocker on either side. A loose
-`==`/`!=` truth table between differing scalar kinds; a
+`false`), not just adjust numeric bounds. Built to a proportionate,
+deliberately narrower scope instead: skips that cross-type juggling
+entirely (same "favor false negatives, don't model loose comparison"
+precedent this narrowing engine already holds for `===`/`!==`-only
+equality narrowing just below), only narrows when both sides are
+already known-numeric (`Int`/`Float`/`IntRange`/`IntLiteral`), and only
+against a single literal bound, not a genuine range. Shared no code
+with Phase 51's own shift-range item beyond the `normalize_int_range`/
+`int_range_bounds` primitives both already built on - the "cross-check
+before building" coordination note turned out already satisfied by
+that shared foundation, never a live blocker either way. Still missing:
+a loose `==`/`!=` truth table between differing scalar kinds; a
 subtracted/negated-type (`T&~U`) representation (so `!$x instanceof Foo`
 on a non-union type is dropped instead of recorded - confirmed still
 live by this batch's own full-corpus verification, e.g. Latte's

@@ -22,16 +22,16 @@ graph LR
     P54["54: Generic template\nrichness — PARTIAL, variance-aware\nassignability done"]
     P50["50: Array key-type/offset\nengine (remaining) — PARTIAL,\nInvalidKeyInArrayDimFetchRule +\nHasOffsetValueType equiv. done"]
     P80["80: Object-shape/key-of/\nconditional-type syntax — PARTIAL,\nvalue-of/enum slice done"]
-    P51["51: Type coercion\nsurface (remaining) — PARTIAL,\n** range arithmetic done,\nonly shift left"]
+    P51["51: Type coercion\nsurface — DONE"]
     P73["73/74: Array/string stdlib\ncoverage — PARTIAL,\narray_key_exists narrowing done"]
     P62["62: Uninitialized-property\ndataflow — DONE (both halves)"]
     P60["60: isset/empty/nullsafe\nreversal — PARTIAL, offset/property-\nchain half done"]
     P82["82: Collector / cross-file\naggregation — RETIRED, built as a\nregistry fixed point instead"]
     P41["41: Purity / side-effect\nmodel — transitive slice DONE,\nrest PARTIAL"]
     P15["15: Unreachable-code / constant-\ncondition catalog — PARTIAL"]
-    P55["55: Narrowing-engine\ngeneralization (remaining) — PARTIAL"]
+    P55["55: Narrowing-engine\ngeneralization — PARTIAL,\ncomparison-range narrowing done"]
     P56["56: Grammar-level PHPDoc\nparser rewrite — PLANNED"]
-    P36["36: PHPDoc tag ecosystem\nexpansion (remaining) — PARTIAL"]
+    P36["36: PHPDoc tag ecosystem\nexpansion — PARTIAL, only\ninline @var error-reporting/\ntypo-whitelist/@readonly left"]
 
     P57 -->|done; unblocks| P43
     P43 -->|done; unblocks| P48
@@ -42,8 +42,8 @@ graph LR
     P62 -.->|satisfied differently;\nsee edge list| P60
     P82 -.->|satisfied differently;\nsee edge list| P41
     P55 -->|done; unblocked| P15
-    P55 -.->|re-scoped: shared\nfoundation already exists| P51
-    P56 -.->|re-scoped: no sub-item\nactually needs it| P36
+    P55 -.->|both sides built;\nnever collided| P51
+    P56 -.->|re-scoped: no sub-item\nactually needed it| P36
 ```
 
 Solid arrows are hard blockers stated directly in ROADMAP.md ("needs",
@@ -69,8 +69,8 @@ each has its own small bounded grammar).
 | **82** Collector / cross-file aggregation | **41**'s transitive purity across the call graph | needs | **edge satisfied, differently than planned**: 82 was never actually needed as a literal Collector architecture at all - real PHPStan's own `Collector`/`CollectedDataNode` machinery exists to reconcile results across its *parallel worker processes*, a problem this project's single-process, in-memory tool doesn't have. The real, correct equivalent (a registry-build-time fixed point, the same shape `flatten_phpdoc_inheritance`/`resolve_deferred_value_of` already use) was planned and built directly (`registry/purity.rs`; see Phase 41, Done) - Phase 82 itself is now RETIRED, its own entry rewritten to explain the finding rather than left as a literal architecture to build later |
 | **82** Collector / cross-file aggregation | **15**'s `FunctionCallConstantConditionRule` cross-file dedup | needs | **edge removed, and the piece built independently**: confirmed directly (while investigating 41's own transitive slice) that this piece never actually needed Collector-style architecture at all - it's real PHPStan's own existing if/while/elseif/ternary/&&/|| rules deferring their own reporting when their own condition is a call. Built directly (`should_skip_constant_condition`'s own four-shape exclusion removed; see Phase 15, Done) |
 | **55** Narrowing-engine generalization | **15** (original constant-boolean-condition family) | was the prerequisite | 55's fixed-point loop convergence shipped → **edge satisfied, 15 reinstated in full** (see Done) |
-| **55** Narrowing-engine generalization (comparison-outcome/range API) | **51** IntegerRangeType work | coordinate, don't duplicate | **re-scoped, not a live risk**: both still open, but checked directly against real PHPStan's own mechanisms (`IntegerRangeType::getSmallerType`-family for 55's item vs `getShiftLeftType`/`getShiftRightType` for 51's) - they're genuinely separate consumers (narrowing a variable from a comparison vs inferring a shift expression's own result type) that already share their only real common ground, `normalize_int_range`/`int_range_bounds`, built and in use today. Whichever is built first has nothing left to reinvent for the other |
-| **56** Grammar-level PHPDoc parser rewrite | **36** PHPDoc tag ecosystem (every sub-item) | soft/architectural | **re-scoped, edge weaker than stated**: checked directly against real `phpstan/phpdoc-parser`'s own per-tag grammars - every one of 36's specific remaining items (`@method`, `@phpstan-import-type`, `@phpstan-require-extends`/`-implements`/`-sealed`, `@phpstan-consistent-constructor`) has its own small, bounded, self-contained grammar, buildable directly as its own dedicated sub-parser (same shape `parse_assert_tag`/`parse_template_tag` already use) - none actually needs 56's architecture first. 56 stays PLANNED, motivated instead by the general type-expression grammar's own robustness, not by unblocking 36 |
+| **55** Narrowing-engine generalization (comparison-outcome/range API) | **51** IntegerRangeType work | coordinate, don't duplicate | **edge satisfied, both sides now built**: checked directly against real PHPStan's own mechanisms (`IntegerRangeType::getSmallerType`-family for 55's item vs `getShiftLeftType`/`getShiftRightType` for 51's) - genuinely separate consumers, confirmed to share only `normalize_int_range`/`int_range_bounds`, already built. Both items shipped (55's `comparison_narrowed_bounds`, 51's `shift_int_range`) with no reinvention on either side, exactly as predicted |
+| **56** Grammar-level PHPDoc parser rewrite | **36** PHPDoc tag ecosystem (every sub-item) | soft/architectural | **re-scoped, edge weaker than stated, then built anyway**: checked directly against real `phpstan/phpdoc-parser`'s own per-tag grammars - every one of 36's then-remaining items (`@method`, `@phpstan-import-type`, `@phpstan-require-extends`/`-implements`/`-sealed`, `@phpstan-consistent-constructor`) had its own small, bounded, self-contained grammar, buildable directly as its own dedicated sub-parser (same shape `parse_assert_tag`/`parse_template_tag` already use) - none needed 56's architecture first, and all four are now built (see Phase 36, Done). 56 stays PLANNED, motivated instead by the general type-expression grammar's own robustness, not by unblocking 36 |
 
 Six edges above are already satisfied (57→43, 43→48, 49→37, 54→50, 80→54,
 55→15's original family) - kept in the graph because they explain *why*
