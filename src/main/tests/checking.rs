@@ -62,6 +62,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         purity_dependencies: None,
         is_transitively_pure: false,
         is_stub: false,
+        is_magic: false,
     };
     assert_eq!(
         format_signature("f", &sig),

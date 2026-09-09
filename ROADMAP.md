@@ -1665,10 +1665,10 @@ tag spellings, `@property`-family validation (the `class.notFound`
 slice), `@phpstan-assert`/`-if-true`/`-if-false` (including the
 narrowing they drive at call sites, not just tag parsing), and
 `@phpstan-type`/cross-class `@phpstan-import-type`,
-`@phpstan-consistent-constructor`, and
-`@phpstan-require-extends`/`-implements`/`@phpstan-sealed` (see Done)
-are done. Still unbuilt: `@method`/`@mixin` synthesis into `ClassInfo`;
-`@readonly`
+`@phpstan-consistent-constructor`,
+`@phpstan-require-extends`/`-implements`/`@phpstan-sealed`, and
+`@method`/`@mixin` synthesis into `ClassInfo` (see Done) are done.
+Still unbuilt: `@readonly`
 (documentation-only convention); inline `@var`'s own error-reporting
 half (`VarTagChangedExpressionTypeRule`/`WrongVariableNameInVarTagRule`
 - looked much larger up close than originally scoped: 7+ distinct
@@ -1708,6 +1708,54 @@ hand-parse directly, not something needing the whole module rewritten
 first. Phase 56's own "every sub-item would ideally build on it"
 framing (see its own entry) was checked directly against this and
 found overstated - every item here was independently buildable.
+
+`@method` synthesis itself needed a real, mid-implementation fix: a
+class's own `@method` tag was found (real corpus shape: `pestphp/pest-
+plugin-arch`'s own `Blueprint`, which both tags and really `use`s a
+trait implementing the same method name under different parameter
+names) to be able to permanently shadow a real trait method, since
+`ClassInfo::from_decl` synthesizes `@method` entries before `Registry::
+flatten_traits` has flattened a same-named trait method in - both
+insertions are vacant-only, so whichever runs first wins by accident.
+Fixed by deferring `@method`'s own insertion to a new pass, `Registry::
+resolve_method_tags`, run right after `flatten_traits` reaches its own
+fixed point. A second, real corpus bug (Tracy's own `IBarPanel`,
+`@method ?string getAgentInfo()`) found `Registry::required_abstract_
+methods`'s own interface branch treating *every* name in an interface's
+`methods` map as something an implementor must define for real -
+including a purely magic `@method` tag, which only ever documents a
+`__call`-backed capability, never a requirement. Fixed with a new
+`FunctionSig::is_magic` field (also covering PHP's own built-in enum
+`cases()`/`from()`/`tryFrom()` synthesis, already the same shape),
+filtered out of that one scan.
+
+A third, more serious bug was found only by comparing this feature's
+own corpus-diff behavior through the real `check-project`/LSP path
+against its own (all-passing) checker-level test suite: `Registry::
+resolve_method_tags`/`resolve_deferred_type_imports`/`resolve_deferred_
+mixins` are only ever invoked from `Registry::index_and_flatten`, which
+every checker-level test helper goes through directly - but `project::
+Project::finish_loading`/`update_file` (what `check-project` and the
+LSP actually call) invoke the individual registry passes directly
+instead, and had never been updated to include any of these three,
+silently making `@method`/`@mixin`/cross-class `@phpstan-import-type`
+all completely non-functional through the real CLI/LSP despite every
+one of their own dedicated tests passing. Fixed by adding all three
+calls to both `Project` sites, in the same order `index_and_flatten`
+uses; a new project-level regression test (`project::tests::
+file_discovery_and_misc`) exercises this exact path directly, through
+`Project`/`check_all`, not the checker-level `Registry::build` shortcut
+every other test in this phase uses. Corpus-verified afterward against
+the full unscoped Piwigo + vendor corpus (previously silent, now a real
+~500-line diagnostic delta - the overwhelming majority a pre-existing
+false-positive `class.notFound`/`method.notFound` cleanup now finally
+taking effect; the remainder hand-triaged as genuine new findings, plus
+one already-disclosed pre-existing limitation - `build_type_aliases`'s
+own "one level of alias-to-alias only" - newly visible for the first
+time on a real three-level `@phpstan-type` chain, `studio-design/gesso`'s
+own `CoverageResult` -> `EndpointSummary` -> `ResponseRow`, now that
+`@phpstan-import-type` finally propagates it to files that import from
+it too).
 
 **37 - Attribute target-validity, remaining kinds (PARTIAL).** Existence
 checking, target-validity for property/method/function/param, and

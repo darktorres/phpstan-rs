@@ -219,6 +219,22 @@ pub struct FunctionSig {
     // `true` on their own returned signatures afterward instead, the
     // one place that actually knows).
     pub is_stub: bool,
+    // `true` for a signature with no real, textual declaration at all -
+    // a magic `@method` tag (`class_info::method_tag_sig`) or one of
+    // PHP's own built-in enum methods this project synthesizes directly
+    // (`cases()`/`from()`/`tryFrom()`). `false` for every real
+    // declaration, including one merged from two real overloads
+    // (`merge`'s own `&&` - a real declaration on *either* side of a
+    // merge makes the result real too). Found necessary via corpus
+    // verification, not assumed: `Registry::required_abstract_methods`'s
+    // own "an interface's own declared methods are all required" rule
+    // used to scan an interface's `methods` map indiscriminately,
+    // wrongly treating a purely magic `@method` tag on an interface
+    // (real corpus shape: Tracy's own `IBarPanel`, `@method ?string
+    // getAgentInfo()`) as something every implementor must also define a
+    // real, textual method for - `@method` only ever documents a
+    // magic-`__call`-backed capability, never a requirement.
+    pub is_magic: bool,
 }
 
 /// Which real, checkable thing a `@phpstan-assert`-family tag's own
@@ -1096,6 +1112,7 @@ impl FunctionSig {
             purity_dependencies: None,
             is_transitively_pure: false,
             is_stub: false,
+            is_magic: false,
         }
     }
 
@@ -1229,6 +1246,13 @@ impl FunctionSig {
             // shape and reintroduced the original `header()`/`exit()`
             // false-positive bug through a second path.
             is_stub: self.is_stub || other.is_stub,
+            // `&&`, not `||`: a real declaration on *either* side of a
+            // merge (this function's own doc comment - both sides are
+            // always real, textual declarations in practice) makes the
+            // merged result real too, the same "real declaration always
+            // wins" precedent `@method`/`@property` synthesis already
+            // hold elsewhere.
+            is_magic: self.is_magic && other.is_magic,
         }
     }
 }

@@ -242,6 +242,7 @@ fn merge_stubs_does_not_override_user_functions() {
             purity_dependencies: None,
             is_transitively_pure: false,
             is_stub: false,
+            is_magic: false,
         },
     )]);
     assert_eq!(r.functions["strlen"].return_type, Type::Int);

@@ -18,6 +18,7 @@ mod global_constants;
 mod helpers;
 mod internal_usage;
 mod key_value_of;
+mod method_and_mixin;
 mod misc_and_regressions;
 mod missing_typehint;
 mod narrowing;

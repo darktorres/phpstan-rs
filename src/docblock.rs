@@ -204,6 +204,20 @@ pub struct DocBlock {
     // against every *immediate* child only - `checker::oop::
     // check_sealed_hierarchy`.
     pub sealed: Vec<String>,
+    // `@method [static] ReturnType methodName(Type $param = default, ...)` -
+    // a virtual method with no real declaration at all (conventionally
+    // backed by `__call`/`__callStatic`). A class can declare many, one
+    // tag per virtual method. Kept parsed (not raw text like most other
+    // tags here) since the grammar is genuinely more than one type
+    // expression - `parse_method_tag`'s own doc comment has the details.
+    pub method_tags: Vec<MethodTag>,
+    // `@mixin Type` - every `Type`'s own *public* method/property becomes
+    // available on this class too, as if inherited (conventionally
+    // forwarded via `__call`/`__get`). Kept as raw text, resolved at
+    // `Registry::resolve_deferred_mixins` time (the mixin target may not
+    // be indexed yet at `ClassInfo::from_decl` time, the identical
+    // ordering problem `type_imports` already has).
+    pub mixins: Vec<String>,
 }
 
 /// One parsed `@phpstan-import-type` tag - see `DocBlock::type_imports`'s
@@ -219,6 +233,32 @@ pub struct TypeImportTag {
     // `as OtherName` - the name this class's own members reference it by,
     // when different from `alias`.
     pub as_name: Option<String>,
+}
+
+/// One parsed `@method` tag - see `DocBlock::method_tags`'s own doc
+/// comment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodTag {
+    pub is_static: bool,
+    // `None` when the tag omits a return type entirely (real, legal
+    // syntax - `@method getX()` - resolved to `Mixed` at `ClassInfo::
+    // from_decl` time, same as an omitted native return type anywhere
+    // else in this project).
+    pub return_type: Option<String>,
+    pub name: String,
+    pub params: Vec<MethodTagParam>,
+}
+
+/// One parameter of a parsed `@method` tag.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodTagParam {
+    // `None` when the parameter's own type is omitted (also real, legal
+    // syntax) - resolved to `Mixed`, same as `MethodTag::return_type`.
+    pub ty: Option<String>,
+    pub name: String,
+    pub by_ref: bool,
+    pub variadic: bool,
+    pub has_default: bool,
 }
 
 /// One parsed `@phpstan-assert`-family tag - see `DocBlock::assert_if_true`'s
@@ -558,6 +598,17 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     block.sealed.push(ty.to_string());
                 }
             }
+            "method" => {
+                if let Some(tag) = parse_method_tag(rest) {
+                    block.method_tags.push(tag);
+                }
+            }
+            "mixin" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    block.mixins.push(ty.to_string());
+                }
+            }
             // Phase 40: see `DocBlock::api`/`api_do_not_implement`'s own
             // doc comments. Neither tag takes an argument, so `rest` is
             // never consulted - unlike every other arm above.
@@ -673,6 +724,133 @@ fn take_type_token(s: &str) -> &str {
         }
     }
     s
+}
+
+/// Splits `s` on `,`, but only where it appears outside any `<>`/`{}`/
+/// `()`/`[]` nesting - `@method`'s own parameter list needs this (a real
+/// corpus shape: `array<string, mixed> $options = []`, whose own internal
+/// comma must not split the parameter list itself). Mirrors `take_type_
+/// token`'s exact bracket-depth/quote-tracking shape one call up - a
+/// deliberate duplication, not shared with `types::split_top_level`
+/// (nearly identical logic, comma instead of whitespace as the
+/// separator): this module's own doc comment already commits to zero
+/// dependency on `types` at all.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    let mut quote: Option<char> = None;
+    for (i, c) in s.char_indices() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '<' | '{' | '(' | '[' => depth += 1,
+            '>' | '}' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+/// `@method [static] ReturnType methodName(Type $param = default, ...)` -
+/// confirmed directly against real `phpstan/phpdoc-parser`'s own
+/// `parseMethodTagValue`/`parseMethodTagValueParameter`. The return-type-
+/// vs-method-name ambiguity (both are bare-identifier-shaped) resolves
+/// the same way real PHPStan's own parser does: try a type token first:
+/// if it already contains its own `(...)` (no whitespace before the
+/// parameter list at all), it was actually the *method name*, and there
+/// is no return type; otherwise it's the return type, and the very next
+/// token is the method name. A trailing free-text description (real,
+/// common style) is simply never consumed past the parameter list's own
+/// closing `)`, same as every other tag's own trailing-description text
+/// elsewhere in this file.
+fn parse_method_tag(rest: &str) -> Option<MethodTag> {
+    let rest = rest.trim_start();
+    let (is_static, rest) = match rest.strip_prefix("static") {
+        Some(r) if r.starts_with(char::is_whitespace) => (true, r.trim_start()),
+        _ => (false, rest),
+    };
+    let first = take_type_token(rest);
+    if first.is_empty() {
+        return None;
+    }
+    let (return_type, name_and_params) = if first.contains('(') {
+        (None, first)
+    } else {
+        let remainder = rest[first.len()..].trim_start();
+        let second = take_type_token(remainder);
+        if second.is_empty() {
+            return None;
+        }
+        (Some(first.to_string()), second)
+    };
+    let paren_idx = name_and_params.find('(')?;
+    let name = name_and_params[..paren_idx].to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let params_str = name_and_params[paren_idx + 1..].trim_end_matches(')');
+    let params = if params_str.trim().is_empty() {
+        Vec::new()
+    } else {
+        split_top_level_commas(params_str)
+            .into_iter()
+            .filter_map(parse_method_tag_param)
+            .collect()
+    };
+    Some(MethodTag {
+        is_static,
+        return_type,
+        name,
+        params,
+    })
+}
+
+/// One `@method` parameter - see `parse_method_tag`'s own doc comment.
+/// The type-omitted case (`p` starting directly with `$`/`&`/`...`)
+/// mirrors real PHPStan's own lookahead exactly (`parseMethodTagValueParameter`,
+/// confirmed directly): a parameter type is only ever parsed when the
+/// current token *isn't* already variable/reference/variadic-shaped.
+fn parse_method_tag_param(p: &str) -> Option<MethodTagParam> {
+    let p = p.trim();
+    if p.is_empty() {
+        return None;
+    }
+    let (ty, remainder) = if p.starts_with('$') || p.starts_with('&') || p.starts_with("...") {
+        (None, p)
+    } else {
+        let t = take_type_token(p);
+        (Some(t.to_string()), p[t.len()..].trim_start())
+    };
+    let by_ref = remainder.starts_with('&');
+    let remainder = remainder.trim_start_matches('&').trim_start();
+    let variadic = remainder.starts_with("...");
+    let remainder = remainder.trim_start_matches("...").trim_start();
+    let (name_part, has_default) = match remainder.split_once('=') {
+        Some((n, _)) => (n.trim(), true),
+        None => (remainder.trim(), false),
+    };
+    let name = name_part.strip_prefix('$')?.to_string();
+    if name.is_empty() {
+        return None;
+    }
+    Some(MethodTagParam {
+        ty,
+        name,
+        by_ref,
+        variadic,
+        has_default,
+    })
 }
 
 #[cfg(test)]

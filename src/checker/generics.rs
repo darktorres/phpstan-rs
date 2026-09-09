@@ -624,6 +624,7 @@ impl<'a> Checker<'a> {
             purity_dependencies: sig.purity_dependencies.clone(),
             is_transitively_pure: sig.is_transitively_pure,
             is_stub: sig.is_stub,
+            is_magic: sig.is_magic,
         }
     }
 }

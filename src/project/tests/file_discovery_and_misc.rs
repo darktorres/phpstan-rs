@@ -103,3 +103,66 @@ fn cross_file_use_import_and_method_calls_resolve_correctly() {
         "expected an undefined-method diagnostic, got: {bad_diagnostics:?}"
     );
 }
+
+#[test]
+fn deferred_registry_passes_all_run_through_the_real_project_path() {
+    // Real bug found via corpus verification, not exercised by any
+    // existing test: `Registry::resolve_method_tags`/`resolve_deferred_
+    // type_imports`/`resolve_deferred_mixins` are only ever called from
+    // `Registry::index_and_flatten` - which every *checker-level* test
+    // helper (`diagnostics_for`, `Registry::build`) goes through, but
+    // `Project::finish_loading`/`update_file` (what `check-project` and
+    // the LSP actually use) call the individual passes directly instead
+    // and had never been updated to include these three, silently making
+    // @method/@mixin/cross-class @phpstan-import-type all non-functional
+    // through the real CLI despite passing every checker-level test.
+    // One project, exercising all three at once, through `check_all` -
+    // exactly what `--check-project` itself calls.
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("source.php"),
+            "<?php /** @phpstan-type ValueType string */ class Types {} class Collection { public function count(): int { return 0; } }",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("consumer.php"),
+            concat!(
+                "<?php\n",
+                "/**\n",
+                " * @phpstan-import-type ValueType from Types as ImportedValueType\n",
+                " * @mixin Collection\n",
+                " * @method int getX()\n",
+                " */\n",
+                "class Consumer {\n",
+                "    function needsInt(int $x): void {}\n",
+                "    /** @return ImportedValueType */\n",
+                "    function readValue() { return 'x'; }\n",
+                "    function test(): void {\n",
+                "        $this->needsInt($this->readValue());\n",
+                "        $this->needsInt($this->count());\n",
+                "        $this->needsInt($this->getX());\n",
+                "    }\n",
+                "}\n",
+            ),
+        )
+        .unwrap();
+    project.finish_loading();
+
+    let all = project.check_all();
+    let consumer_diagnostics = &all[&PathBuf::from("consumer.php")];
+    // Only the @phpstan-import-type call is a real type mismatch (string
+    // isn't int) - @mixin's count() and @method's getX() both return int
+    // already, so those two calls should be silent.
+    assert_eq!(
+        consumer_diagnostics.len(),
+        1,
+        "got: {consumer_diagnostics:?}"
+    );
+    assert_eq!(consumer_diagnostics[0].identifier, "argument.type");
+    assert!(
+        consumer_diagnostics[0].message.contains("string given"),
+        "got: {consumer_diagnostics:?}"
+    );
+}

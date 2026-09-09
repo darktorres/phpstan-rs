@@ -253,8 +253,11 @@ impl Project {
     #[hotpath::measure]
     pub fn finish_loading(&mut self) {
         self.registry.flatten_traits();
+        self.registry.resolve_method_tags();
         self.registry.flatten_phpdoc_inheritance();
         self.registry.resolve_deferred_value_of();
+        self.registry.resolve_deferred_type_imports();
+        self.registry.resolve_deferred_mixins();
         self.registry.resolve_transitive_purity();
         self.rebuild_pest_config();
     }
@@ -314,8 +317,11 @@ impl Project {
         // re-run it. Still far cheaper than a full reload: a HashMap scan
         // over already-parsed ClassInfo, not a re-parse of anything.
         self.registry.flatten_traits();
+        self.registry.resolve_method_tags();
         self.registry.flatten_phpdoc_inheritance();
         self.registry.resolve_deferred_value_of();
+        self.registry.resolve_deferred_type_imports();
+        self.registry.resolve_deferred_mixins();
         self.registry.resolve_transitive_purity();
         register_references(&mut self.dependents, path, &references);
 

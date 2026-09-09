@@ -247,6 +247,12 @@ pub struct ClassInfo {
     // shape) - merged into `type_aliases` above once resolved, so this
     // field is empty again after that pass runs; never read afterward.
     pub type_imports: Vec<ResolvedTypeImport>,
+    // `@method` tags, already resolved into real `FunctionSig`s but not
+    // yet inserted into `methods` - see the long comment at this field's
+    // own construction site in `from_decl` for why insertion has to wait
+    // for `Registry::resolve_method_tags`, a later pass. Empty again
+    // after that pass runs; never read afterward.
+    pub method_tags: Vec<(String, FunctionSig)>,
     // `@phpstan-require-extends`/`@phpstan-require-implements`/
     // `@phpstan-sealed` - resolved directly to fully-qualified class
     // names (a tag's own value can legally be a union of several, already
@@ -258,6 +264,11 @@ pub struct ClassInfo {
     pub require_extends: Vec<String>,
     pub require_implements: Vec<String>,
     pub sealed: Vec<String>,
+    // `@mixin Type` - resolved FQNs, same shape/flattening as the three
+    // above. Not yet looked up in the target's own `methods`/`properties`
+    // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
+    // mirroring `resolve_deferred_type_imports`'s own two-step shape.
+    pub mixins: Vec<String>,
 }
 
 /// See `ClassInfo::type_imports`'s own doc comment.
@@ -491,6 +502,33 @@ impl ClassInfo {
             }
         }
 
+        // `@method` (Phase 36 follow-up) - a virtual method with no real
+        // declaration at all. Deliberately *not* inserted into `methods`
+        // here the way `@property` is just above: `methods` at this point
+        // only reflects this class's own directly-declared methods, not
+        // yet any trait-flattened-in ones (`Registry::flatten_traits` is
+        // a separate, later pass) - inserting eagerly here would let a
+        // same-named `@method` tag wrongly win over a real trait method
+        // that hasn't been merged in yet, since `flatten_traits`'s own
+        // merge is *also* vacant-only (real corpus false positive this
+        // avoids: `pestphp/pest-plugin-arch`'s own `Blueprint`, whose own
+        // `@method void assertDoesNotDependOn(Layer $target, Layer
+        // $dependency)` would otherwise have permanently shadowed the
+        // real, `use`-flattened `DependenciesAsserts::assertDoesNotDependOn`
+        // - different parameter names, no real body - producing bogus
+        // undefined-variable errors on the trait's own real code).
+        // `Registry::resolve_method_tags` runs this insertion later
+        // instead, once `flatten_traits` has had its own say.
+        let method_tags: Vec<(String, FunctionSig)> = class_doc
+            .as_ref()
+            .map(|d| {
+                d.method_tags
+                    .iter()
+                    .map(|tag| (tag.name.clone(), method_tag_sig(tag, &template_params, ctx)))
+                    .collect()
+            })
+            .unwrap_or_default();
+
         // A `@var` immediately above a `const` declaration (a real,
         // common convention for pinning a `const array`'s own element
         // type more precisely than either its native hint - not even
@@ -626,6 +664,10 @@ impl ClassInfo {
             .as_ref()
             .map(|d| resolve_tag_types(&d.sealed))
             .unwrap_or_default();
+        let mixins = class_doc
+            .as_ref()
+            .map(|d| resolve_tag_types(&d.mixins))
+            .unwrap_or_default();
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
         let attribute_targets = compute_attribute_targets(&c.attrs);
 
@@ -656,11 +698,13 @@ impl ClassInfo {
             require_extends,
             require_implements,
             sealed,
+            mixins,
             deprecated,
             attribute_targets,
             enum_case_values: HashMap::new(),
             type_aliases,
             type_imports,
+            method_tags,
         }
     }
 
@@ -748,6 +792,13 @@ impl ClassInfo {
                 purity_dependencies: None,
                 is_transitively_pure: false,
                 is_stub: false,
+                // A real, unconditional PHP built-in, not a textual
+                // declaration - but never reachable through `required_
+                // abstract_methods`'s own interface-only scan either way
+                // (an enum is never itself an interface), so this is
+                // about `is_magic`'s own general meaning staying
+                // accurate, not fixing a second live bug.
+                is_magic: true,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -786,6 +837,7 @@ impl ClassInfo {
                     purity_dependencies: None,
                     is_transitively_pure: false,
                     is_stub: false,
+                    is_magic: true,
                 },
             );
             methods.insert(
@@ -809,6 +861,7 @@ impl ClassInfo {
                     purity_dependencies: None,
                     is_transitively_pure: false,
                     is_stub: false,
+                    is_magic: true,
                 },
             );
         }
@@ -1020,11 +1073,20 @@ impl ClassInfo {
             require_extends: Vec::new(),
             require_implements: Vec::new(),
             sealed: Vec::new(),
+            // An enum can `@mixin` in real PHPStan's own grammar (nothing
+            // stops the tag syntactically), but this is a genuinely rare
+            // combination not modeled here - same disclosed scope trim as
+            // `type_aliases`/`type_imports`/`require_extends` above.
+            mixins: Vec::new(),
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             attribute_targets: compute_attribute_targets(&e.attrs),
             enum_case_values,
             type_aliases: HashMap::new(),
             type_imports: Vec::new(),
+            // Same disclosed scope trim as `mixins` just above - a real
+            // `@method` on an enum's own docblock is a genuinely rare
+            // combination not modeled here.
+            method_tags: Vec::new(),
         }
     }
 
@@ -1096,6 +1158,8 @@ impl ClassInfo {
         self.require_extends.extend(other.require_extends);
         self.require_implements.extend(other.require_implements);
         self.sealed.extend(other.sealed);
+        self.mixins.extend(other.mixins);
+        self.method_tags.extend(other.method_tags);
         self.deprecated = self.deprecated.or(other.deprecated);
         self.attribute_targets = self.attribute_targets.or(other.attribute_targets);
         if self.extends.is_empty() {
@@ -1133,6 +1197,71 @@ fn object_class_names(ty: Type) -> Vec<String> {
         Type::Object(name, _) => vec![name],
         Type::Union(members) => members.into_iter().flat_map(object_class_names).collect(),
         _ => Vec::new(),
+    }
+}
+
+/// `@method`'s own tag-to-`FunctionSig` synthesis - mirrors the plain
+/// `@property`-to-`PropertySig` synthesis right above it as closely as
+/// the two grammars allow. `ty`/`ty_native` deliberately both end up the
+/// same resolved value: a virtual member's own "native" type is a
+/// meaningless question (there's no real declaration to have one), so
+/// this simply reuses the docblock-resolved type for both, matching
+/// `is_own_doc`/`explicit_mixed_hint` being irrelevant here too - a
+/// synthesized member's own `FunctionSig` never participates in
+/// `flatten_phpdoc_inheritance`'s own backfill machinery in the first
+/// place (it's already fully resolved, not merged from anywhere).
+fn method_tag_sig(
+    tag: &docblock::MethodTag,
+    template_params: &HashMap<String, TemplateParam>,
+    ctx: &NameContext,
+) -> FunctionSig {
+    let resolve = |text: &str| -> Type {
+        let ty = types::parse_type_string(text);
+        let ty = mark_template_params(ty, template_params);
+        resolve_names_in_type(ty, ctx)
+    };
+    let return_type = tag
+        .return_type
+        .as_deref()
+        .map(resolve)
+        .unwrap_or(Type::Mixed);
+    let params = tag
+        .params
+        .iter()
+        .map(|p| {
+            let ty = p.ty.as_deref().map(resolve).unwrap_or(Type::Mixed);
+            ParamSig {
+                name: p.name.clone(),
+                ty: ty.clone(),
+                ty_native: ty,
+                variadic: p.variadic,
+                has_default: p.has_default,
+                by_ref: p.by_ref,
+                has_own_doc: true,
+                explicit_mixed_hint: false,
+            }
+        })
+        .collect();
+    FunctionSig {
+        params,
+        return_type: return_type.clone(),
+        return_type_native: return_type,
+        return_has_own_doc: true,
+        return_explicit_mixed_hint: false,
+        no_discard: false,
+        visibility: Visibility::Public,
+        is_internal: false,
+        has_override_attr: false,
+        deprecated: None,
+        throws: None,
+        assert_if_true: Vec::new(),
+        assert_if_false: Vec::new(),
+        assert: Vec::new(),
+        body: None,
+        purity_dependencies: None,
+        is_transitively_pure: false,
+        is_stub: false,
+        is_magic: true,
     }
 }
 

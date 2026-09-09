@@ -199,9 +199,11 @@ impl Registry {
         let mut registry = Registry::default();
         registry.index(program);
         registry.flatten_traits();
+        registry.resolve_method_tags();
         registry.flatten_phpdoc_inheritance();
         registry.resolve_deferred_value_of();
         registry.resolve_deferred_type_imports();
+        registry.resolve_deferred_mixins();
         registry
     }
 
@@ -343,6 +345,32 @@ impl Registry {
             }
         }
         changed
+    }
+
+    /// `@method`'s own deferred insertion - `ClassInfo::method_tags`'s own
+    /// construction site (`from_decl`) has the full "why this can't just
+    /// insert eagerly" explanation: a same-named real trait method hasn't
+    /// been flattened in yet at that point, and both insertions are
+    /// vacant-only, so inserting first would let the tag win by accident.
+    /// Runs once, right after `flatten_traits` reaches its own fixed
+    /// point (every real method, own or trait-derived, already settled)
+    /// and before `flatten_phpdoc_inheritance` (irrelevant either way - a
+    /// synthesized signature is always fully resolved already, never a
+    /// backfill candidate) - no fixed-point loop of its own needed, since
+    /// a class's own `method_tags` list is fixed the moment `from_decl`
+    /// built it.
+    #[hotpath::measure]
+    pub(crate) fn resolve_method_tags(&mut self) {
+        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        for class_name in class_names {
+            let Some(mut info) = self.classes.remove(&class_name) else {
+                continue;
+            };
+            for (name, sig) in std::mem::take(&mut info.method_tags) {
+                info.methods.entry(name).or_insert(sig);
+            }
+            self.classes.insert(class_name, info);
+        }
     }
 
     /// Phase 87: real PHPStan backfills a method's own missing `@param`/
@@ -578,6 +606,57 @@ impl Registry {
             info.type_aliases.extend(aliases);
             info.type_imports.clear();
             self.classes.insert(class_name, info);
+        }
+    }
+
+    /// `@mixin`'s own deferred half - mirrors `resolve_deferred_type_
+    /// imports`'s exact two-step shape (a read-only collection pass, then
+    /// a second pass applying it), for the identical reason: the mixin
+    /// target may not be indexed yet at `ClassInfo::from_decl` time.
+    ///
+    /// Only a *public* method/property is pulled in - confirmed directly
+    /// against real PHPStan's own `MixinMethodsClassReflectionExtension`/
+    /// `MixinPropertiesClassReflectionExtension`, both of which resolve
+    /// the mixin target from `OutOfClassScope` (no special access at
+    /// all, the same visibility a caller anywhere outside the class
+    /// itself would see) - and only when this class doesn't already
+    /// declare that name for real, same "real declaration always wins"
+    /// precedent `@property`/`@method` synthesis already have.
+    ///
+    /// Not chased through a mixin's own further `@mixin`s (one level
+    /// only) - the same "don't attempt a fixed-point solve for a shape
+    /// not yet confirmed to occur in practice" leniency `build_type_
+    /// aliases`'s own alias-of-alias handling already accepts.
+    #[hotpath::measure]
+    pub(crate) fn resolve_deferred_mixins(&mut self) {
+        let mut method_additions: Vec<(String, String, FunctionSig)> = Vec::new();
+        let mut property_additions: Vec<(String, String, PropertySig)> = Vec::new();
+        for (class_name, info) in &self.classes {
+            for mixin_fqn in &info.mixins {
+                let Some(mixin_info) = self.classes.get(mixin_fqn) else {
+                    continue;
+                };
+                for (name, sig) in &mixin_info.methods {
+                    if sig.visibility == Visibility::Public && !info.methods.contains_key(name) {
+                        method_additions.push((class_name.clone(), name.clone(), sig.clone()));
+                    }
+                }
+                for (name, sig) in &mixin_info.properties {
+                    if sig.visibility == Visibility::Public && !info.properties.contains_key(name) {
+                        property_additions.push((class_name.clone(), name.clone(), sig.clone()));
+                    }
+                }
+            }
+        }
+        for (class_name, name, sig) in method_additions {
+            if let Some(info) = self.classes.get_mut(&class_name) {
+                info.methods.entry(name).or_insert(sig);
+            }
+        }
+        for (class_name, name, sig) in property_additions {
+            if let Some(info) = self.classes.get_mut(&class_name) {
+                info.properties.entry(name).or_insert(sig);
+            }
         }
     }
 
@@ -1772,7 +1851,20 @@ impl Registry {
                 continue;
             };
             if info.kind == ClassKind::Interface {
-                required.extend(info.methods.keys().cloned());
+                // A purely magic `@method` tag (`FunctionSig::is_magic`'s
+                // own doc comment - real corpus false positive this
+                // excludes: Tracy's own `IBarPanel`, `@method ?string
+                // getAgentInfo()`) documents a capability, not a
+                // requirement - real PHP itself has no way to even
+                // express "this interface method is optional," so an
+                // interface's own *real*, textually-declared methods are
+                // still all unconditionally required exactly as before.
+                required.extend(
+                    info.methods
+                        .iter()
+                        .filter(|(_, sig)| !sig.is_magic)
+                        .map(|(name, _)| name.clone()),
+                );
             } else {
                 required.extend(info.abstract_methods.iter().cloned());
             }
