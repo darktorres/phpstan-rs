@@ -761,8 +761,9 @@ pub(crate) use throws::body_contains_explicit_throw;
 #[cfg(test)]
 pub(crate) use expr::generalize_by_key_set;
 pub(crate) use narrowing::{
-    is_real_variable_key, narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to,
-    narrowing_key, purge_stale_narrowing_for,
+    array_value_type_for_key, is_real_variable_key, narrow_array_shape_by_key_presence,
+    narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to, narrowing_key,
+    purge_stale_narrowing_for,
 };
 pub(crate) use visibility::MemberVisibilityCheck;
 

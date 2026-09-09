@@ -1939,13 +1939,47 @@ variable/property/method-receiver half is done (see Done). `empty()`'s
 own falsiness-aware variant needs machinery this pass didn't build
 (both nullability and falsiness need to be unambiguous, which keeps
 real PHPStan's own equivalent silent on almost every ordinary shape
-too). The offset/property-chain half (`isset($x['key'])`) is gated
-behind real property-initialization/offset-existence dataflow this
-project doesn't model (Phase 62). One narrow residual: a function
-bundling both a legacy and modern native-typed variant behind a runtime
-`PHP_VERSION_ID` branch (not just `function_exists()`) can still share
-one registry slot with the wrong nullability assumption (4 corpus
-occurrences).
+too). One narrow residual: a function bundling both a legacy and
+modern native-typed variant behind a runtime `PHP_VERSION_ID` branch
+(not just `function_exists()`) can still share one registry slot with
+the wrong nullability assumption (4 corpus occurrences).
+
+The offset/property-chain half (`isset($x['key'])`/`isset($this->prop)`,
+and the matching `??`/`??=` treatment) is now also done, built as a new
+recursive link-walker (`Checker::resolve_always_exists`/
+`check_pointless_offset_or_property_probe`, `checker/expr.rs`) mirroring
+real PHPStan's own `IssetabilityDescriptor` chain-walking shape
+(confirmed live at Piwigo's own `level: 10` via `checkAdvancedIsset`,
+unlike Phase 62's own always-off flag). The offset link reuses Phase
+50's own `array_value_type_for_key`/`narrow_array_shape_by_key_presence`
+directly - no new dataflow needed, it was already a type-level query.
+The property link's hardest real sub-case - whether `$this->prop` is
+*already proven initialized* at this exact point, a genuinely
+flow-sensitive fact in real PHPStan's own `Scope` - is **deliberately
+not replicated**: doing so would mean re-architecting Phase 62's own
+one-shot `checker/uninitialized_dataflow.rs` walker into general-purpose,
+per-statement narrowing-engine machinery, disproportionate for one
+sub-case of one sub-case. Substituted instead with a simplified,
+safe-direction static gate (`PropertySig::has_default`) - exempts
+(never flags) any property with no default at all, regardless of
+promoted/readonly/hooked status, deliberately erring toward missing a
+few true positives (a promoted property with no default of its own)
+rather than ever risking a false positive, the same "favor false
+negatives" precedent this project holds throughout. A provably-absent
+offset (a key an `ArrayShape` never declares at all) is a real,
+separate diagnostic (`isset.offset`/`nullCoalesce.offset`, "does not
+exist") rather than folded into the same "always exists" path.
+Corpus-verified against both the scoped Piwigo diff and the full
+unscoped `vendor/`-included corpus (~90 genuine new findings, e.g.
+`pathinfo()`'s own always-present `dirname` key, several stdlib
+classes' non-nullable properties redundantly probed with `??`) -
+along the way, found and fixed a real, pre-existing, unrelated bug
+this new consumer happened to surface: `docblock.rs`'s multi-line tag
+joining didn't strip a wrapped array-shape field's own trailing `//
+description` before parsing, corrupting the shape into garbage
+(`pestphp/pest-plugin-browser`'s own `JavaScriptSerializer::parseValue`
+docblock); also cleared 7 pre-existing `shapeAccess.notFound` false
+positives that same corruption had been causing.
 
 **61 - Return-statement completeness, remaining (PARTIAL).** The
 `return.never`/`.void`/`.missing` split is done (see Done). The

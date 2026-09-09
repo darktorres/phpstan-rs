@@ -1046,9 +1046,22 @@ fn a_superglobal_coalesce_assign_does_not_collapse_to_an_empty_shape() {
 // through the ordinary check_expr, so isset($shaped['maybe_missing'])
 // hit the same check_shape_key_access a bare read would - even though
 // probing a possibly-absent key is exactly what isset()/empty() are
-// for, and real PHP/PHPStan never flag it.
+// for, and real PHP/PHPStan never flag it *that way*.
+//
+// Phase 60 correction: real PHPStan's own `checkAdvancedIsset` (live at
+// level 4+, confirmed directly against `vendor/phpstan-src` - this
+// project doesn't model PHPStan's own level system as a separate opt-in
+// toggle any more than it does for any other level-gated check, matching
+// `Diagnostic::level`'s own "metadata for --level filtering, not a
+// runtime gate" precedent) genuinely *does* flag `isset($shaped['b'])`
+// here - `b` is provably absent from `array{a: string}`, a real,
+// distinct diagnostic (`isset.offset`, "does not exist") from the old
+// `check_shape_key_access` bug this test originally guarded against.
+// `empty()` stays silent either way - Phase 60's own offset/property
+// reversal is deliberately `isset()`-only, the same scope
+// `check_pointless_null_probe`'s own bare-variable half already has.
 #[test]
-fn isset_and_empty_on_a_shape_s_missing_key_are_never_flagged() {
+fn isset_and_empty_on_a_shape_s_missing_key_never_hit_the_old_shape_key_bug() {
     let d = diagnostics_for(
         r#"<?php
             /** @param array{a: string} $x */
@@ -1057,7 +1070,16 @@ fn isset_and_empty_on_a_shape_s_missing_key_are_never_flagged() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        "the old check_shape_key_access bug reappeared: {d:?}"
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "expected exactly the one real isset.offset finding: {d:?}"
+    );
+    assert_eq!(d[0].identifier, "isset.offset");
 }
 
 // Real Piwigo corpus bug (test-double-recording idiom): a closure's

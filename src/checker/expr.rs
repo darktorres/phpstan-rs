@@ -1,10 +1,11 @@
 use crate::ast::*;
 use crate::checker::{
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, TemplateBindings,
-    body_contains_yield, collect_goto_targets, expr_contains_yield, is_language_construct,
-    is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
-    narrow_type_excluding, narrowing_key, purge_stale_narrowing_for, resolve_call_args,
-    superglobal_default_type, to_bitwise_not,
+    array_value_type_for_key, body_contains_yield, collect_goto_targets, expr_contains_yield,
+    is_language_construct, is_real_variable_key, is_superglobal, literal_string_key,
+    literal_string_value, merge_scopes, narrow_array_shape_by_key_presence, narrow_type_excluding,
+    narrowing_key, purge_stale_narrowing_for, resolve_call_args, superglobal_default_type,
+    to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -595,6 +596,176 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// Phase 60: the offset/property-chain counterpart of
+    /// `check_pointless_null_probe` just above - mirrors real PHPStan's
+    /// own recursive `IssetabilityDescriptor::resolve`/`IssetCheck::doCheck`
+    /// (`vendor/phpstan-src`, confirmed directly, not assumed), walking
+    /// `e`'s own `Index`/`PropertyAccess` chain base-first (the same
+    /// recursion shape `check_expr_quiet_root` already uses, for a
+    /// different reason). Returns the resolved leaf's own value type once
+    /// *every* link in the chain is confirmed unconditionally present -
+    /// `None` for anything not provably present end-to-end (an ordinary
+    /// variable/property, a `Call`/`MethodCall` anywhere in the chain -
+    /// real `isset()`/`??` never evaluate past one - a `Union` whose
+    /// members disagree, ...). A provably *absent* array offset is a
+    /// real, separate diagnostic reported directly as a side effect here
+    /// (`isset.offset`/`{identifier_prefix}.offset`, "does not exist") -
+    /// not folded into the `None` return, so it isn't silently lost
+    /// partway through a longer chain the way a merely-ambiguous link
+    /// would be.
+    fn resolve_always_exists(
+        &mut self,
+        e: &Expr,
+        locals: &Locals,
+        label: &str,
+        identifier_prefix: &str,
+        operator_description: &str,
+    ) -> Option<Type> {
+        match &e.kind {
+            ExprKind::Variable(name) => {
+                if is_superglobal(name)
+                    || self.loop_depth > 0
+                    || self.static_var_names.contains(name)
+                {
+                    return None;
+                }
+                locals.get(name).cloned()
+            }
+            ExprKind::Index(base, Some(idx)) => {
+                let key = literal_string_key(idx)?;
+                let base_ty = self.resolve_always_exists(
+                    base,
+                    locals,
+                    label,
+                    identifier_prefix,
+                    operator_description,
+                )?;
+                // See this function's own doc comment for why these two
+                // calls, not a bespoke tri-state helper: assuming
+                // "present" is impossible means the key can never be
+                // there; assuming "absent" is impossible means it's
+                // unconditionally there - `narrow_array_shape_by_key_presence`
+                // already answers both questions correctly (including
+                // through a `Union`, recursively), this just asks it
+                // twice rather than duplicating its own logic.
+                if narrow_array_shape_by_key_presence(&base_ty, &key, true) == Type::Never {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "Offset '{key}' on {base_ty} {operator_description} does not exist."
+                        ),
+                        e.span,
+                        0,
+                        &format!("{identifier_prefix}.offset"),
+                    );
+                    return None;
+                }
+                if narrow_array_shape_by_key_presence(&base_ty, &key, false) == Type::Never {
+                    return array_value_type_for_key(&base_ty, &key);
+                }
+                None
+            }
+            ExprKind::PropertyAccess(base, prop, _) => {
+                let base_ty = self.resolve_always_exists(
+                    base,
+                    locals,
+                    label,
+                    identifier_prefix,
+                    operator_description,
+                )?;
+                let (_, sig) = self.find_property_owner(&base_ty, prop)?;
+                // A hooked property's own getter can compute anything,
+                // unrelated to its own init-state - matches every other
+                // `is_virtual`-gated check in this codebase. `!has_default`
+                // is Design ##2's own deliberately safe-direction
+                // exemption (see `PropertySig::has_default`'s own doc
+                // comment): a property with no default *might* genuinely
+                // still be uninitialized, so `isset()`/`??` checking it is
+                // never treated as redundant here, even when its own
+                // declared type is non-nullable.
+                if sig.is_virtual || !sig.has_default {
+                    return None;
+                }
+                Some(sig.ty.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Phase 60: `isset($x->prop)`/`isset($x['key'])`/`$x->prop ?? ...`/
+    /// `$x['key'] ?? ...` where every link in the chain is provably
+    /// always-present - the entry point into `resolve_always_exists`
+    /// just above, called alongside (never instead of)
+    /// `check_pointless_null_probe` at each of that function's own three
+    /// call sites. Scoped to `e` itself being an `Index`/`PropertyAccess`,
+    /// since a bare variable is `check_pointless_null_probe`'s own job
+    /// already, and re-deriving the identical verdict for it here would
+    /// just double-report.
+    fn check_pointless_offset_or_property_probe(
+        &mut self,
+        e: &Expr,
+        locals: &Locals,
+        label: &str,
+        identifier_prefix: &str,
+        operator_description: &str,
+    ) {
+        if !matches!(&e.kind, ExprKind::Index(..) | ExprKind::PropertyAccess(..)) {
+            return;
+        }
+        let Some(leaf_ty) =
+            self.resolve_always_exists(e, locals, label, identifier_prefix, operator_description)
+        else {
+            return;
+        };
+        let Some(verdict) = null_probe_verdict(&leaf_ty) else {
+            return;
+        };
+        match &e.kind {
+            ExprKind::Index(base, Some(idx)) => {
+                // `resolve_always_exists` only ever returns `Some` here
+                // once `literal_string_key(idx)` already succeeded once -
+                // safe to redo, `idx` itself hasn't changed.
+                let Some(key) = literal_string_key(idx) else {
+                    return;
+                };
+                let base_ty = self.infer_expr(base, locals);
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Offset '{key}' on {base_ty} {operator_description} always exists and {verdict}."
+                    ),
+                    e.span,
+                    0,
+                    &format!("{identifier_prefix}.offset"),
+                );
+            }
+            ExprKind::PropertyAccess(base, prop, _) => {
+                let base_ty = self.infer_expr(base, locals);
+                // Real PHPStan's own `PropertyDescriptor::describeProperty`
+                // also distinguishes "fetched on a narrower type than the
+                // property's own declaring class" - simplified here to
+                // always name the resolved owner directly, a real,
+                // disclosed precision gap only ever visible in the
+                // message text itself, never in whether something gets
+                // flagged.
+                let owner = self
+                    .find_property_owner(&base_ty, prop)
+                    .map(|(owner, _)| owner)
+                    .unwrap_or_else(|| base_ty.to_string());
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Property {owner}::${prop} ({leaf_ty}) {operator_description} {verdict}."
+                    ),
+                    e.span,
+                    0,
+                    &format!("{identifier_prefix}.property"),
+                );
+            }
+            _ => {}
+        }
+    }
+
     #[hotpath::measure]
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         // Phase 71: see `Checker::in_bare_statement_position`'s own doc
@@ -822,6 +993,13 @@ impl<'a> Checker<'a> {
                         self.check_expr_quiet_root(&a.value, locals, label);
                         if is_isset_probe {
                             self.check_pointless_null_probe(
+                                &a.value,
+                                locals,
+                                label,
+                                "isset",
+                                "in isset()",
+                            );
+                            self.check_pointless_offset_or_property_probe(
                                 &a.value,
                                 locals,
                                 label,
@@ -1381,6 +1559,13 @@ impl<'a> Checker<'a> {
                     "nullCoalesce",
                     "on left side of ??",
                 );
+                self.check_pointless_offset_or_property_probe(
+                    l,
+                    locals,
+                    label,
+                    "nullCoalesce",
+                    "on left side of ??",
+                );
                 let r_ty = self.check_expr(r, locals, label);
                 self.widen_coalesce_result(l, r_ty, locals)
             }
@@ -1657,6 +1842,13 @@ impl<'a> Checker<'a> {
                 let lhs_ty = if *op == BinOp::Coalesce {
                     let ty = self.check_expr_quiet_root(lhs, locals, label);
                     self.check_pointless_null_probe(
+                        lhs,
+                        locals,
+                        label,
+                        "nullCoalesce",
+                        "on left side of ??=",
+                    );
+                    self.check_pointless_offset_or_property_probe(
                         lhs,
                         locals,
                         label,
