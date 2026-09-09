@@ -183,6 +183,27 @@ pub struct DocBlock {
     // single class's own `from_decl` call can't (the source class may not
     // be indexed yet at all).
     pub type_imports: Vec<TypeImportTag>,
+    // `@phpstan-require-extends Type` - declared on a trait/interface,
+    // requiring every class that ends up using/implementing it to also
+    // `extends` (or otherwise be a subtype of) `Type`. Kept as raw text,
+    // resolved into a real `Type` at `ClassInfo::from_decl` time (same
+    // "parse now, resolve later" split as every other type-bearing tag) -
+    // `checker::oop::check_require_tags` walks every real consumer.
+    pub require_extends: Vec<String>,
+    // `@phpstan-require-implements Type` - a trait's own sibling of
+    // `require_extends` above, requiring the using class to `implements`
+    // `Type` instead (real PHPStan doesn't recognize this on an interface
+    // at all - an interface can't `implements`, only `extends`).
+    pub require_implements: Vec<String>,
+    // `@phpstan-sealed Type` - declares the *complete* list of types
+    // allowed to directly `extends`/`implements` this one (a union of
+    // several is real, common syntax for "exactly these"). Unlike
+    // `require_extends`/`require_implements` above (a transitive "must be
+    // a subtype of," checked against every real consumer anywhere in the
+    // hierarchy), this is a one-level, exact-name allowlist checked
+    // against every *immediate* child only - `checker::oop::
+    // check_sealed_hierarchy`.
+    pub sealed: Vec<String>,
 }
 
 /// One parsed `@phpstan-import-type` tag - see `DocBlock::type_imports`'s
@@ -517,6 +538,24 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
                     block.implements.push(ty.to_string());
+                }
+            }
+            "require-extends" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    block.require_extends.push(ty.to_string());
+                }
+            }
+            "require-implements" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    block.require_implements.push(ty.to_string());
+                }
+            }
+            "sealed" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    block.sealed.push(ty.to_string());
                 }
             }
             // Phase 40: see `DocBlock::api`/`api_do_not_implement`'s own

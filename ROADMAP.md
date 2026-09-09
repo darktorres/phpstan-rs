@@ -1664,10 +1664,11 @@ lexer/parser, `proptest` for `types.rs`'s subtyping logic. Dev-only.
 tag spellings, `@property`-family validation (the `class.notFound`
 slice), `@phpstan-assert`/`-if-true`/`-if-false` (including the
 narrowing they drive at call sites, not just tag parsing), and
-`@phpstan-type`/cross-class `@phpstan-import-type`, and
-`@phpstan-consistent-constructor` (see Done) are done. Still unbuilt:
-`@method`/`@mixin` synthesis into `ClassInfo`;
-`@phpstan-require-extends`/`-implements`/`-sealed`; `@readonly`
+`@phpstan-type`/cross-class `@phpstan-import-type`,
+`@phpstan-consistent-constructor`, and
+`@phpstan-require-extends`/`-implements`/`@phpstan-sealed` (see Done)
+are done. Still unbuilt: `@method`/`@mixin` synthesis into `ClassInfo`;
+`@readonly`
 (documentation-only convention); inline `@var`'s own error-reporting
 half (`VarTagChangedExpressionTypeRule`/`WrongVariableNameInVarTagRule`
 - looked much larger up close than originally scoped: 7+ distinct
@@ -1679,23 +1680,34 @@ not a quick win); an enumerated `@phpstan-*` typo-detection whitelist;
 
 Scoped directly against real `phpstan/phpdoc-parser`'s own grammar
 (`PhpDocParser::parseMethodTagValue`/`parseTypeAliasImportTagValue`/
-`parseRequireExtendsTagValue`/etc.) for the still-unbuilt items above:
-none of them actually need Phase 56's full grammar-level rewrite to
-build. `@phpstan-import-type` is a fixed, trivial keyword grammar
-(`Alias from ClassName [as OtherAlias]`); `@phpstan-require-extends`/
-`-implements`/`-sealed` each parse one ordinary type expression, the
-same grammar `take_type_token` already handles; `@phpstan-consistent-
-constructor` is a bare marker tag, no value at all. `@method`'s own
-grammar is the most complex of the group (optional `static`, return
-type, name, optional `<template>` list, then a parenthesized parameter
-list with per-parameter type/by-ref/variadic/name/`= default`) but is
-still a small, bounded, self-contained sub-grammar - the same shape
-`parse_assert_tag`/`parse_template_tag` in this project's own
-`docblock.rs` already hand-parse directly, not something needing the
-whole module rewritten first. Phase 56's own "every sub-item would
-ideally build on it" framing (see its own entry) was checked directly
-against this and found overstated - each item here is independently
-buildable today.
+`parseRequireExtendsTagValue`/etc.): none of these items actually
+needed Phase 56's full grammar-level rewrite to build. `@phpstan-
+import-type`/`@phpstan-require-extends`/`-implements`/`@phpstan-sealed`
+(all now done, see Done) and `@phpstan-consistent-constructor` (also
+done, a bare marker tag, no value at all) all turned out to be small,
+independently-buildable extensions of machinery already in place -
+`@phpstan-import-type` reuses `@phpstan-type`'s own local-alias
+substitution once a new cross-class deferred-resolution pass makes the
+source class's own table reachable; `@phpstan-require-extends`/
+`-implements` reuse `Registry::is_subclass_of` directly against every
+transitively-pulled-in interface/trait; `@phpstan-sealed` (a one-level,
+exact-name allowlist check against immediate `extends`/`implements`
+parents only - genuinely simpler than its own name suggests, since
+real PHPStan's own enforcement, `AllowedSubTypesRule`, turned out to be
+a different, pre-existing rule than a literal "illegal extends" rule
+built for this tag specifically) needed only a small new registry
+field and checker pass; `@phpstan-consistent-constructor` reuses the
+existing method-override signature-compatibility checker wholesale,
+fed a different ancestor. `@method`'s own remaining grammar is the most
+complex of the group (optional `static`, return type, name, optional
+`<template>` list, then a parenthesized parameter list with per-
+parameter type/by-ref/variadic/name/`= default`) but is still a small,
+bounded, self-contained sub-grammar - the same shape `parse_assert_tag`/
+`parse_template_tag` in this project's own `docblock.rs` already
+hand-parse directly, not something needing the whole module rewritten
+first. Phase 56's own "every sub-item would ideally build on it"
+framing (see its own entry) was checked directly against this and
+found overstated - every item here was independently buildable.
 
 **37 - Attribute target-validity, remaining kinds (PARTIAL).** Existence
 checking, target-validity for property/method/function/param, and

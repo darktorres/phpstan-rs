@@ -247,6 +247,17 @@ pub struct ClassInfo {
     // shape) - merged into `type_aliases` above once resolved, so this
     // field is empty again after that pass runs; never read afterward.
     pub type_imports: Vec<ResolvedTypeImport>,
+    // `@phpstan-require-extends`/`@phpstan-require-implements`/
+    // `@phpstan-sealed` - resolved directly to fully-qualified class
+    // names (a tag's own value can legally be a union of several, already
+    // flattened here by `object_class_names`; a non-`Object` member, e.g.
+    // an unresolvable name, is silently dropped - the "don't guess"
+    // precedent every other type-bearing tag in this project already
+    // follows). See `checker::oop::check_require_tags`/`check_sealed_
+    // hierarchy` for the two, differently-shaped consuming checks.
+    pub require_extends: Vec<String>,
+    pub require_implements: Vec<String>,
+    pub sealed: Vec<String>,
 }
 
 /// See `ClassInfo::type_imports`'s own doc comment.
@@ -591,6 +602,30 @@ impl ClassInfo {
         let is_internal = class_doc.as_ref().is_some_and(|d| d.internal);
         let is_consistent_constructor =
             class_doc.as_ref().is_some_and(|d| d.consistent_constructor);
+        // `@phpstan-require-extends`/`-implements`/`@phpstan-sealed` -
+        // each raw tag's own type expression is parsed, name-resolved,
+        // then flattened to the class names it names (`object_class_names`)
+        // exactly like real PHPStan's own `getObjectClassNames()` call
+        // sites for these same three tags.
+        let resolve_tag_types = |raw: &[String]| -> Vec<String> {
+            raw.iter()
+                .flat_map(|text| {
+                    object_class_names(resolve_names_in_type(types::parse_type_string(text), ctx))
+                })
+                .collect()
+        };
+        let require_extends = class_doc
+            .as_ref()
+            .map(|d| resolve_tag_types(&d.require_extends))
+            .unwrap_or_default();
+        let require_implements = class_doc
+            .as_ref()
+            .map(|d| resolve_tag_types(&d.require_implements))
+            .unwrap_or_default();
+        let sealed = class_doc
+            .as_ref()
+            .map(|d| resolve_tag_types(&d.sealed))
+            .unwrap_or_default();
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
         let attribute_targets = compute_attribute_targets(&c.attrs);
 
@@ -618,6 +653,9 @@ impl ClassInfo {
             is_api_do_not_implement,
             is_internal,
             is_consistent_constructor,
+            require_extends,
+            require_implements,
+            sealed,
             deprecated,
             attribute_targets,
             enum_case_values: HashMap::new(),
@@ -975,6 +1013,13 @@ impl ClassInfo {
             // ever exist to hold it to a consistent constructor contract
             // either way - never meaningful here.
             is_consistent_constructor: false,
+            // An enum can technically `implements`/`use` a tagged
+            // interface/trait, but not `extends` at all - a genuinely
+            // rare combination, not modeled here (matching `type_aliases`/
+            // `type_imports` just below, already left unbuilt for enums).
+            require_extends: Vec::new(),
+            require_implements: Vec::new(),
+            sealed: Vec::new(),
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             attribute_targets: compute_attribute_targets(&e.attrs),
             enum_case_values,
@@ -1048,6 +1093,9 @@ impl ClassInfo {
         self.is_internal = self.is_internal || other.is_internal;
         self.is_consistent_constructor =
             self.is_consistent_constructor || other.is_consistent_constructor;
+        self.require_extends.extend(other.require_extends);
+        self.require_implements.extend(other.require_implements);
+        self.sealed.extend(other.sealed);
         self.deprecated = self.deprecated.or(other.deprecated);
         self.attribute_targets = self.attribute_targets.or(other.attribute_targets);
         if self.extends.is_empty() {
@@ -1069,6 +1117,22 @@ impl ClassInfo {
             self.trait_aliases = other.trait_aliases;
         }
         self
+    }
+}
+
+/// Mirrors real PHPStan's own `Type::getObjectClassNames()` for exactly
+/// the shapes `@phpstan-require-extends`/`-implements`/`@phpstan-sealed`
+/// ever need it for: a bare class reference, or a union of several (a
+/// real, common `@phpstan-sealed A|B|C` shape). Any other member (an
+/// unresolvable name still sitting as a plain `Object`-with-an-unknown-
+/// name, a scalar, `self`/`static`, ...) contributes nothing - the same
+/// "don't guess" leniency this project already applies to every other
+/// type-bearing tag, not a new gap.
+fn object_class_names(ty: Type) -> Vec<String> {
+    match ty {
+        Type::Object(name, _) => vec![name],
+        Type::Union(members) => members.into_iter().flat_map(object_class_names).collect(),
+        _ => Vec::new(),
     }
 }
 

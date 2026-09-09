@@ -1420,6 +1420,39 @@ impl Registry {
         false
     }
 
+    /// Every interface/trait `class` transitively inherits from at all -
+    /// `extends`/`implements` (the same walk `is_subclass_of` already
+    /// does, just collecting every name visited instead of stopping at
+    /// the first match) *and* `uses`, which `is_subclass_of` doesn't chain
+    /// at all (a used trait isn't itself a supertype PHP's own `instanceof`
+    /// recognizes). `class` itself is never included. `@phpstan-require-
+    /// extends`/`-implements`'s own consumer check (`checker::oop::
+    /// check_require_tags`) needs this: real PHPStan's `getInterfaces()`/
+    /// `getTraits(true)` are both transitive the identical way.
+    pub(crate) fn all_ancestor_names(&self, class: &str) -> HashSet<String> {
+        let mut seen = HashSet::new();
+        let mut stack = vec![class.to_string()];
+        let mut result = HashSet::new();
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            let Some(info) = self.classes.get(&current) else {
+                continue;
+            };
+            for parent in info
+                .extends
+                .iter()
+                .chain(info.implements.iter())
+                .chain(info.uses.iter())
+            {
+                result.insert(parent.clone());
+                stack.push(parent.clone());
+            }
+        }
+        result
+    }
+
     /// Every real class/enum that ends up composing `trait_fqn`, walking
     /// past any intermediate *trait* user rather than stopping at direct
     /// `uses` alone (Phase 13 Finding E) - `flatten_traits` merges a used

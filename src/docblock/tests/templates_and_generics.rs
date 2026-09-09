@@ -117,3 +117,21 @@ fn parses_covariant_and_contravariant_template_tags() {
     assert!(block.contravariant_templates.contains("TIn"));
     assert_eq!(block.template_bounds.get("TIn"), Some(&"Bound".to_string()));
 }
+
+#[test]
+fn parses_require_extends_and_require_implements() {
+    let block = parse(
+        r#"/**
+         * @phpstan-require-extends Base
+         * @phpstan-require-implements Contract
+         */"#,
+    );
+    assert_eq!(block.require_extends, vec!["Base".to_string()]);
+    assert_eq!(block.require_implements, vec!["Contract".to_string()]);
+}
+
+#[test]
+fn parses_a_sealed_tag_naming_a_union_of_classes() {
+    let block = parse("/** @phpstan-sealed ChildA|ChildB */");
+    assert_eq!(block.sealed, vec!["ChildA|ChildB".to_string()]);
+}

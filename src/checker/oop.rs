@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::checker::{
-    CheckArgsCall, Checker, DiagnosticBuilder, Locals, body_contains_yield, class_type_word,
-    collect_goto_targets, expr_contains_yield, resolve_call_args,
+    CheckArgsCall, Checker, DiagnosticBuilder, Locals, body_contains_yield, class_kind_identifier,
+    class_type_word, collect_goto_targets, expr_contains_yield, resolve_call_args,
 };
 use crate::docblock;
 use crate::registry::{self, FunctionSig, PropertySig};
@@ -966,6 +966,133 @@ impl<'a> Checker<'a> {
     /// declared `final` anywhere in the ancestor chain, sharing this same
     /// per-method loop since both checks need the same "does this
     /// override collide with an ancestor's declaration" walk.
+    /// `@phpstan-require-extends`/`@phpstan-require-implements`'s own
+    /// consumer half - real PHPStan's `RequireExtendsRule`/
+    /// `RequireImplementsRule`, transcribed (confirmed directly). For
+    /// every interface/trait `fqn` transitively pulls in at all
+    /// (`Registry::all_ancestor_names`, both `extends`/`implements` for
+    /// interfaces and `uses` for traits - both real rules are exactly
+    /// this transitive) that declares one of these tags, `fqn` itself
+    /// must satisfy it (`is_subclass_of`, since both "extend" and
+    /// "implement" here mean "be a subtype of," not "declare directly").
+    pub(crate) fn check_require_tags(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        // Real PHPStan registers both consuming rules for `InClassNode`
+        // only - a *trait* declaration gets its own separate `InTraitNode`
+        // instead (confirmed directly, real PHPStan's own architecture),
+        // so a trait is never itself "the checked class" here, only ever
+        // an ancestor consulted for classes that use it. Without this, a
+        // trait using another require-tagged trait would always wrongly
+        // fail its own check - a trait can't `extends`/`implements`
+        // anything at all, so `is_subclass_of`/membership would never be
+        // satisfiable for one regardless of what any real using class
+        // eventually does.
+        if info.kind == ClassKind::Trait {
+            return;
+        }
+        // Real PHP: a checked class that is itself an interface is
+        // exempt from require-extends (an interface can't `extends` a
+        // concrete class the way a class does) - confirmed directly,
+        // `RequireExtendsRule`'s own top-level guard. Interfaces can't
+        // `use` traits at all, so require-implements never has anything
+        // to check for one either way - no separate guard needed for it.
+        let is_interface = info.kind == ClassKind::Interface;
+        for ancestor_fqn in self.registry.all_ancestor_names(fqn) {
+            let Some(ancestor_info) = self.registry.classes.get(&ancestor_fqn) else {
+                continue;
+            };
+            if !is_interface {
+                for required in ancestor_info.require_extends.clone() {
+                    if self.registry.is_subclass_of(fqn, &required) {
+                        continue;
+                    }
+                    let (kind_word, relation_word) = if ancestor_info.kind == ClassKind::Trait {
+                        ("Trait", "using")
+                    } else {
+                        ("Interface", "implementing")
+                    };
+                    self.report(
+                        fqn.to_string(),
+                        format!(
+                            "{kind_word} {ancestor_fqn} requires {relation_word} class to extend {required}, but {fqn} does not."
+                        ),
+                        span,
+                        0,
+                        "class.missingExtends",
+                    );
+                }
+            }
+            for required in ancestor_info.require_implements.clone() {
+                if self.registry.is_subclass_of(fqn, &required) {
+                    continue;
+                }
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "Trait {ancestor_fqn} requires using class to implement {required}, but {fqn} does not."
+                    ),
+                    span,
+                    0,
+                    "class.missingImplements",
+                );
+            }
+        }
+    }
+
+    /// `@phpstan-sealed`'s own consumer half - real PHPStan's
+    /// `AllowedSubTypesRule`, transcribed (confirmed directly: this is
+    /// the actual enforcement mechanism, not - as the tag's own name
+    /// might suggest - a standalone "illegal extends" rule of its own;
+    /// `@phpstan-sealed`'s own value feeds a generic `AllowedSubTypes
+    /// ClassReflectionExtension` extension point this project doesn't
+    /// otherwise need). Checked against *immediate* parents only (unlike
+    /// `check_require_tags` above) - a sealed hierarchy's own allowlist
+    /// enumerates the complete, direct child set, not every transitive
+    /// descendant.
+    ///
+    /// Real PHPStan's own `getAllowedSubTypes` additionally allows a
+    /// concrete (non-abstract) sealed class its own name for free, with
+    /// no need to list itself - not modeled here, since that self-entry
+    /// can only ever matter to this rule if the checked class were
+    /// literally its own parent (impossible), confirmed directly by
+    /// tracing through `AllowedSubTypesRule`'s own loop: the self-entry
+    /// exists for `getAllowedSubTypes`'s *other* consumers (type-
+    /// narrowing exhaustiveness over a sealed hierarchy, `ObjectType`/
+    /// `StaticType`), a separate, much larger feature this project
+    /// doesn't attempt.
+    pub(crate) fn check_sealed_hierarchy(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        // Same `InClassNode`-only registration as `check_require_tags`
+        // above - a trait is never itself the checked class. Real
+        // PHPStan's own `AllowedSubTypesRule` also never consults `uses`
+        // at all (only `extends`/immediate `implements`), so a trait
+        // being sealed is never actually enforced there either way - not
+        // a gap this exemption introduces on its own.
+        if info.kind == ClassKind::Trait {
+            return;
+        }
+        let kind = info.kind;
+        for parent_fqn in info.extends.iter().chain(info.implements.iter()) {
+            let Some(parent_info) = self.registry.classes.get(parent_fqn) else {
+                continue;
+            };
+            if parent_info.sealed.is_empty() || parent_info.sealed.iter().any(|s| s == fqn) {
+                continue;
+            }
+            self.report(
+                fqn.to_string(),
+                format!("Type {fqn} is not allowed to be a subtype of {parent_fqn}."),
+                span,
+                0,
+                &format!("{}.disallowedSubtype", class_kind_identifier(&kind)),
+            );
+        }
+    }
+
     pub(crate) fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
