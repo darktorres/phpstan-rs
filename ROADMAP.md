@@ -1699,8 +1699,12 @@ bare `&&`/`||`/`xor`/ternary result) is done. Everything else is
 unbuilt: impure-point classification (~20 operation kinds, `certain` vs
 `maybe`), `@phpstan-pure`/`-impure`/`-immutable` tag validation, the
 four statement-level `*WithoutSideEffectsRule`s, and transitive purity
-across the call graph (needs Phase 82's Collector architecture). XL-size
-architectural work, not incremental.
+across the call graph (needs Phase 82's Collector architecture). Only
+the *transitive* piece needs Phase 82 (re-verified directly against
+`vendor/phpstan-src` - see Phase 82's own entry) - the other three
+pieces are self-contained, single-file analyses needing no Collector at
+all, and could be picked up independently of Phase 82 rather than
+waiting on it. XL-size architectural work overall, not incremental.
 
 **42 - Checked-exception / throw-type model, remaining (PARTIAL).**
 `@throws`-vs-`Throwable` validity, `throws.void`, dead-catch detection,
@@ -1882,13 +1886,62 @@ simplification.
 
 **62 - Uninitialized-property dataflow, remaining (PARTIAL).** The core
 "assigned anywhere in the class body" heuristic is done, off by default
-(see Done). Real per-constructor dataflow (the parent-constructor
-chain, `readonly`-specific uninitialized-at-end-of-constructor
-detection, `__unserialize`/`__clone` recognition, double-assignment-in-
-clone detection) remains unbuilt - a considerably larger feature than
-this project's own cheaper heuristic, deliberately not attempted after
-three rounds of real corpus false-positive fixes already went into the
-simpler version.
+(see Done). Real per-constructor dataflow remains unbuilt - deliberately
+not attempted after three rounds of real corpus false-positive fixes
+already went into the simpler version - but this entry's own prior
+description of *what* remains was re-verified directly against
+`vendor/phpstan-src/src/Rules/Properties/UninitializedPropertyRule.php`/
+`Node/ClassPropertiesNode.php`/`Reflection/ConstructorsHelper.php` and
+found meaningfully wrong, not just imprecise:
+- `readonly`-specific handling **isn't part of this rule at all** - real
+  PHPStan's own `UninitializedPropertyRule` explicitly skips every
+  `readonly` (native or PHPDoc) property entirely, both for the
+  "never initialized" and "premature access" halves. Readonly's own
+  "assign exactly once, only from the constructor" contract - including
+  PHP 8.3's clone-reinitialization allowance - is `ReadOnlyPropertyAssignRule`,
+  a genuinely separate rule this project's own `property.readOnlyAssignNotInConstructor`
+  already implements (per `checker/uninitialized.rs`'s own doc comment).
+  So "readonly-specific uninitialized-at-end-of-constructor detection"
+  and "double-assignment-in-clone detection" were never really this
+  phase's own scope to begin with.
+- `__unserialize`/`__clone` aren't recognized as constructors by real
+  PHPStan **out of the box** either - `ConstructorsHelper::
+  getConstructors()` returns only `__construct` (if declared) unless a
+  *user's own* `phpstan.neon` explicitly lists additional ones via its
+  `additionalConstructors` parameter, or a registered
+  `AdditionalConstructorsExtension` supplies one. Piwigo's own
+  `phpstan.neon`/`phpstan-extensions.neon` do neither, so real PHPStan's
+  own default behavior against this exact corpus already treats
+  `__unserialize`/`__clone` as ordinary methods, same as this project.
+- What's genuinely left, confirmed by reading the real algorithm in
+  full: (a) the "premature access" half - flagging a *read* of a
+  property that provably happens before any assignment reaches it on
+  some path, for a property that *does* get initialized somewhere
+  (this project's own current heuristic only ever answers "assigned
+  anywhere at all," never "was it definitely assigned by *this specific
+  point*") - genuinely new path-sensitive dataflow, though this
+  project's own existing `narrowing_key`/`Locals`/`merge_scopes`
+  machinery (already tracking `"this->prop"`-keyed facts through every
+  branch/loop merge for narrowing purposes) is a real, promising
+  foundation to build it on rather than a from-scratch subsystem; and
+  (b) absorbing methods transitively *called from* the constructor into
+  the same "counts as initialization" set (real PHPStan's own
+  fixed-point `getMethodsCalledFromConstructor`) - this project's
+  current "any method, anywhere" heuristic is already *more* lenient
+  than this specific piece of real behavior, not less, so building it
+  properly would need to combine with (a), not simply add reachability
+  on top.
+- A genuinely different consideration from every other phase in this
+  project: Piwigo's own `phpstan.neon` never enables
+  `checkUninitializedProperties` (PHPStan's own default is `false`,
+  confirmed - this project's identical `--check-uninitialized-properties`
+  default mirrors it), so **no full-vendor-corpus diff against real
+  PHPStan output can ever verify this feature at any level** - real
+  PHPStan itself never emits `property.uninitialized` anywhere in this
+  corpus to diff against. Building the premature-access half would need
+  to lean on this project's own established fallback methodology
+  instead (hand-verified `php -r` repros, revert-verified unit tests),
+  not the corpus-diff ground truth every other phase this session used.
 
 **63 - Duplicate-declaration scans, remaining (PARTIAL).** The
 within-body scan and `UsedNamesRule` are done (see Done). Duplicate
@@ -2028,10 +2081,40 @@ remaining (down further after the `value-of`/enum slice above).
 
 **82 - Collector / cross-file aggregation architecture (PLANNED, do not
 schedule standalone).** No two-phase Collector-then-aggregate pass
-exists. Blocks a handful of low-value dedup rules and is a soft
-prerequisite for Phase 41's transitive-purity resolution. Build only
-when Phase 41's transitive half is actually tackled, and let that phase
-absorb the cost. Size: XL, low standalone value.
+exists. Re-verified directly against `vendor/phpstan-src/src/Collectors`
+and every real rule consuming one (not assumed): confirms this entry's
+own "handful of low-value dedup rules" framing precisely - of real
+PHPStan's 14 collectors, 7 feed Phase 41's own transitive-purity model
+(the genuine, only real-value consumer), 2 feed Phase 15's own already-
+named `FunctionCallConstantConditionRule` cross-file dedup, and the
+remaining 5 feed genuinely narrow ones: a renamed-override-parameter-vs-
+named-argument-call mismatch (`MethodCallWithPossiblyRenamedNamedArgumentRule`)
+and an unused-trait-declaration check (`NotAnalysedTraitRule` - notably
+under real PHPStan's own `Rules\Playground` namespace, its web
+playground's own diagnostic, not a general-purpose one). Confirms this
+is a real, soft prerequisite for Phase 41's transitive half specifically
+- but Phase 41's *other* three pieces (impure-point classification,
+`@phpstan-pure`/`-impure`/`-immutable` tag validation, the four
+statement-level `*WithoutSideEffectsRule`s) need no Collector at all and
+could be built entirely independently of this phase, contrary to a
+literal reading of Phase 41's own "XL architectural work, not
+incremental" framing.
+
+Also confirmed the "XL" sizing directly against this project's own
+current architecture, not just asserted: `Project::check_file` builds a
+fresh, per-file `Checker` and discards it once diagnostics are
+extracted - there is no cross-file-persistent state of any kind today.
+A real Collector pass needs (1) a genuinely new, `Project`-level
+accumulation structure surviving across every file's own check, (2) a
+second pass that runs only after every file collects, mapping its own
+findings back to whichever file/line the aggregate violation should
+actually be reported at (often *not* the file that contributed the
+data), and (3) real incremental-invalidation correctness once any of
+this touches `update_file`/the LSP's single-file re-check path (a
+one-file edit needs to both retract that file's own prior contribution
+and consider re-running the aggregate pass, a class of invalidation this
+project's per-file diagnostic model has never needed before) - confirms
+XL is accurate, not overstated.
 
 **83 - Whole-project duplicate class-name detection (PLANNED, low
 priority).** Re-evaluated and confirmed a genuine architectural
