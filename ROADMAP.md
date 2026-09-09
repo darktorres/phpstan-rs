@@ -1678,6 +1678,26 @@ not a quick win); an enumerated `@phpstan-*` typo-detection whitelist;
 `@param-immediately-invoked-callable`/`-later-invoked-callable`/
 `-closure-this`.
 
+Scoped directly against real `phpstan/phpdoc-parser`'s own grammar
+(`PhpDocParser::parseMethodTagValue`/`parseTypeAliasImportTagValue`/
+`parseRequireExtendsTagValue`/etc.) for the still-unbuilt items above:
+none of them actually need Phase 56's full grammar-level rewrite to
+build. `@phpstan-import-type` is a fixed, trivial keyword grammar
+(`Alias from ClassName [as OtherAlias]`); `@phpstan-require-extends`/
+`-implements`/`-sealed` each parse one ordinary type expression, the
+same grammar `take_type_token` already handles; `@phpstan-consistent-
+constructor` is a bare marker tag, no value at all. `@method`'s own
+grammar is the most complex of the group (optional `static`, return
+type, name, optional `<template>` list, then a parenthesized parameter
+list with per-parameter type/by-ref/variadic/name/`= default`) but is
+still a small, bounded, self-contained sub-grammar - the same shape
+`parse_assert_tag`/`parse_template_tag` in this project's own
+`docblock.rs` already hand-parse directly, not something needing the
+whole module rewritten first. Phase 56's own "every sub-item would
+ideally build on it" framing (see its own entry) was checked directly
+against this and found overstated - each item here is independently
+buildable today.
+
 **37 - Attribute target-validity, remaining kinds (PARTIAL).** Existence
 checking, target-validity for property/method/function/param, and
 constructor-argument validation (`attribute.abstract`/`.noConstructor`/
@@ -1855,8 +1875,19 @@ unbuilt, genuinely separate from what 73/74 needed.
 **51 - `Type` coercion surface, remaining (PARTIAL).** Cast legality,
 `IntegerRangeType`'s `abs()`/`~` arithmetic, `print`/`InvalidPartOfEncapsedStringRule`,
 and four more `IntegerRangeType`-consumer extensions are done (see
-Done). Range-preserving `**`/shift arithmetic on `IntegerRangeType`
-remains unbuilt - not corpus-evidenced as a real gap.
+Done). `**`'s own range arithmetic is also already done (`pow_int_range`,
+entry 28) - this entry's own prior "range-preserving `**`/shift
+arithmetic... remains unbuilt" framing was stale on the `**` half,
+checked directly against the code rather than assumed. Only
+range-preserving shift (`<<`/`>>`) remains genuinely unbuilt: confirmed
+directly against real PHPStan's own `getShiftLeftType`/`getShiftRightType`
+(`InitializerExprTypeResolver.php`) that a real, correct formula exists
+and is small - `IntRange(min, max) << N` → `IntRange(min << N, max << N)`
+(same for `>>`), but *only* when the shift amount is a single literal
+non-negative int, not itself a range (real PHPStan falls back to plain
+`int` otherwise, confirmed directly - no cross-product-of-ranges case
+exists for shifts the way `Mul`/`Pow` have). Not corpus-evidenced as a
+real gap either way.
 
 **52 - Invalid-operand-combination (`ErrorType`), remaining (PARTIAL).**
 The operand-validity matrix (binary/comparison/unary/inc-dec) is done
@@ -1906,9 +1937,28 @@ truthiness, `array_is_list`, `str_contains`-family, a real
 `instanceof`-intersection bug, and - this batch - fixed-point loop-body
 convergence are fixed (see Done). Still missing: a comparison-outcome/
 range API for `<`/`>`/`<=`/`>=` generally (only the `count()` special case
-exists - cross-check against Phase 51's own `IntegerRangeType` work
-before building, so the two don't each reinvent range arithmetic); a
-loose `==`/`!=` truth table between differing scalar kinds; a
+exists). Scoped directly against real PHPStan's own mechanism
+(`IntegerRangeType::getSmallerType`/`getSmallerOrEqualType`/`getGreaterType`/
+`getGreaterOrEqualType`, `vendor/phpstan-src`) - real PHPStan's own
+version is genuinely bigger than "just build an `IntRange`": because
+`<`/`>` do PHP's full loose-comparison type-juggling, narrowing `$x < 5`
+also has to subtract `true`/`null`/`false` from `$x`'s own type in some
+cases (a positive-only range excludes `true`, since `5 < true` is
+`false`), not just adjust numeric bounds. A proportionate build for this
+project skips that cross-type juggling entirely - same "favor false
+negatives, don't model loose comparison" precedent this narrowing
+engine already holds for `===`/`!==`-only equality narrowing just below
+- and only narrows when both sides are already known-numeric
+(`Int`/`Float`/`IntRange`/`IntLiteral`), which reduces to a small,
+already-buildable extension: construct an `IntRange` bound from the
+comparison (mirroring `IntegerRangeType::createAllGreaterThanOrEqualTo`/
+`createAllSmallerThan`) and intersect via the existing `narrow_type_to`.
+This genuinely shares no code with Phase 51's own remaining shift-range
+item below beyond the `normalize_int_range`/`int_range_bounds`
+primitives both already build on today - the "cross-check before
+building" coordination note is effectively already satisfied by that
+shared foundation existing, not a live blocker on either side. A loose
+`==`/`!=` truth table between differing scalar kinds; a
 subtracted/negated-type (`T&~U`) representation (so `!$x instanceof Foo`
 on a non-union type is dropped instead of recorded - confirmed still
 live by this batch's own full-corpus verification, e.g. Latte's
@@ -1931,8 +1981,20 @@ own reverted diagnostics - now unblocked, see Done.
 **56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
 a lenient regex tokenizer that silently drops what it doesn't recognize,
 unlike real PHPStan's recoverable-error grammar parser. Architectural,
-not a hard blocker for any one Phase 36 sub-item, but every one of them
-would ideally build on it. Size: XL.
+not a hard blocker for any one Phase 36 sub-item - re-scoped, checked
+directly against real `phpstan/phpdoc-parser`'s own per-tag grammars
+(see Phase 36's own entry): every one of Phase 36's specific remaining
+items has its own small, bounded, self-contained grammar, the same
+"one dedicated sub-parser per complex tag" shape `parse_assert_tag`/
+`parse_template_tag`/`take_type_token` already establish in this
+project - none of them actually needs the whole module's architecture
+replaced first, so "every sub-item would ideally build on it" was
+overstated. This phase's own real motivation is narrower and different:
+robustness of the *general type-expression* grammar itself (deeply
+nested generics/conditional types/complex intersections colliding with
+`take_type_token`'s own balanced-bracket-then-stop heuristic, not any
+one tag's own outer shape) - not corpus-evidenced as a live gap today,
+kept PLANNED. Size: XL.
 
 **60 - Isset/empty/nullsafe reversal, remaining (PARTIAL).** The bare-
 variable/property/method-receiver half is done (see Done). `empty()`'s
