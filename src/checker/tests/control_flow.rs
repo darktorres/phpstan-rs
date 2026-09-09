@@ -2425,6 +2425,65 @@ fn a_grouped_literal_still_resolves_as_if_condition() {
     );
 }
 
+// Phase 15 continuation: a bare function/method/static call condition -
+// real PHPStan's own `FunctionCallConstantConditionRule`/`*Helper`
+// (confirmed directly against `vendor/phpstan-src`, not assumed - see
+// `should_skip_constant_condition`'s own doc comment for the full
+// finding): it isn't a separate rule at all, just this exact same
+// if/while/elseif/ternary/&&/|| family deferring *their own* reporting
+// when their own condition happens to be a call - no Collector, no new
+// diagnostic identifier, only the pre-existing exclusion needed removing.
+#[test]
+fn an_if_with_a_bare_call_condition_whose_declared_return_type_is_a_literal_true_is_flagged() {
+    let d = diagnostics_for(
+        "<?php
+        /** @return true */
+        function alwaysTrue(): bool { return true; }
+        function f(): void { if (alwaysTrue()) { echo 1; } }
+        ",
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "if.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_if_with_a_bare_method_call_condition_whose_declared_return_type_is_a_literal_false_is_flagged()
+ {
+    let d = diagnostics_for(
+        "<?php
+        final class Foo {
+            /** @return false */
+            public function neverTrue(): bool { return false; }
+        }
+        function f(Foo $foo): void { if ($foo->neverTrue()) { echo 1; } }
+        ",
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "if.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_if_with_a_bare_call_condition_of_an_ordinary_bool_return_type_is_not_flagged() {
+    // Regression guard: the overwhelming majority of real bool-returning
+    // calls must stay silent - only a declaration whose own return type
+    // is *literally* `true`/`false` (not just `bool`) is constant.
+    let d = diagnostics_for(
+        "<?php
+        function maybe(): bool { return random_int(0, 1) === 1; }
+        function f(): void { if (maybe()) { echo 1; } }
+        ",
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "if.alwaysTrue" || x.identifier == "if.alwaysFalse"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_while_with_a_literal_false_condition_is_flagged() {
     let d = diagnostics_for("<?php function f() { while (false) { echo 1; } }");

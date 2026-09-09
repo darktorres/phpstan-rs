@@ -810,16 +810,36 @@ pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> std::collections::HashSet<
 }
 
 /// Phase 15 continuation: real PHPStan's own `ConstantConditionRuleHelper
-/// ::shouldSkip` + `FunctionCallConstantConditionHelper::isTypeCheckCandidate`
-/// combined, confirmed directly against `vendor/phpstan-src` - every one
-/// of these shapes either has its own separate, dedicated rule (an
+/// ::shouldSkip`, confirmed directly against `vendor/phpstan-src` - every
+/// one of these shapes has its own separate, dedicated rule (an
 /// equality/identity/ordering comparison, `instanceof`, `!`, `&&`/`||`,
-/// a ternary) or is deferred entirely to a `Collector`-based whole-
-/// codebase aggregation this project doesn't have yet (any bare function/
-/// method/static call - ROADMAP's own Phase 82, "Collector / cross-file
-/// aggregation architecture," ungated by any phase this pass owns).
-/// Excluding them here means `inferred_constant_condition` only ever
-/// answers for the shapes that genuinely have nowhere else to be caught.
+/// a ternary). Excluding them here means `inferred_constant_condition`
+/// only ever answers for the shapes that genuinely have nowhere else to
+/// be caught.
+///
+/// A bare function/method/static call condition (real PHPStan's own
+/// `FunctionCallConstantConditionRule`/`*Helper`) is **not** excluded
+/// here, unlike an earlier version of this comment claimed - re-verified
+/// directly, not assumed, after `PHASE_DEPENDENCIES.md`'s own "genuinely
+/// independent" framing turned out to disagree with this file's own
+/// stale reasoning. Reading `FunctionCallConstantConditionHelper.php` in
+/// full reveals it isn't a separate rule at all: it's the exact same
+/// `if`/`while`/`elseif`/`ternary`/`&&`/`||` rules this project already
+/// has, deferring *their own* reporting - through a shared helper, not a
+/// Collector - only when their own condition happens to be a call, for
+/// two narrow reasons neither of which needs whole-codebase aggregation:
+/// (1) dedup against a sibling `ImpossibleCheckType*` rule family this
+/// project has no equivalent of at all, so this concern doesn't apply
+/// here; (2) reconciling a *trait* method's own call condition across
+/// every class that `use`s it, which `check_trait_methods`'s own
+/// existing per-host re-check plus its own span+message dedup already
+/// provides generically, no new mechanism needed. So a bare call
+/// condition is just another shape `inferred_constant_condition` answers
+/// for directly, the same as any other - real PHPStan's own message/
+/// identifier for it is always whichever rule's own (`if.alwaysTrue`,
+/// `while.alwaysTrue`, ...), never a separate one of its own, confirming
+/// there's genuinely nothing more to build here than removing the
+/// exclusion.
 fn should_skip_constant_condition(e: &Expr) -> bool {
     matches!(
         &e.kind,
@@ -838,9 +858,5 @@ fn should_skip_constant_condition(e: &Expr) -> bool {
             | ExprKind::Unary(UnaryOp::Not, _)
             | ExprKind::Binary(BinOp::And | BinOp::Or, _, _)
             | ExprKind::Ternary(_, _, _)
-            | ExprKind::Call(_, _)
-            | ExprKind::MethodCall(_, _, _, _)
-            | ExprKind::StaticCall(_, _, _)
-            | ExprKind::DynamicMethodCall(_, _, _)
     )
 }

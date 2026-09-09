@@ -1568,12 +1568,26 @@ comparison-outcome type inference (real PHPStan's own `Type::isSmallerThan`/
 than the one `Add`/`Sub` now have (see Done): those two arms gained real,
 narrow `int<min,max>` *arithmetic* this session, but nothing yet computes
 a *comparison*'s own boolean result from two ranges, which is what this
-rule actually needs. Still Phase 55's own separate, larger item. `FunctionCallConstantConditionRule`'s own cross-
-file aggregation (`is_string($x)` constant at every call site, reported
-once as "this check is dead everywhere") needs Collector-style whole-
-codebase aggregation - Pending's own Phase 82. `assert(false)`/
-`assert(0)` as a sub-expression is exactly this same call-shaped-
-condition case, not a separate gap. No match/switch dead-arm/
+rule actually needs. Still Phase 55's own separate, larger item. A bare function/method/
+static call condition (`if (alwaysTrue()) {...}`, real corpus find:
+`hash_update()`'s own phpstorm-stubs signature narrows to a literal
+`true` on PHP 8.4+) is now done too - re-verified directly against
+`vendor/phpstan-src`'s own `FunctionCallConstantConditionHelper.php`
+before building, which corrected this entry's own prior "needs
+Collector-style whole-codebase aggregation" framing: that rule was
+never a separate aggregation mechanism at all, just this exact same
+if/while/elseif/ternary/&&/|| family deferring their own reporting,
+through a shared helper (not a Collector), only when their own
+condition happens to be a call - and only for two narrow reasons
+(dedup against a sibling `ImpossibleCheckType*` rule family this
+project has no equivalent of, and reconciling a trait method's own
+call condition across its using classes, which `check_trait_methods`'s
+own existing per-host dedup already provides). The real fix was
+removing four shapes (`Call`/`MethodCall`/`StaticCall`/
+`DynamicMethodCall`) from `should_skip_constant_condition`'s own
+exclusion list - see that function's own doc comment for the full
+finding. `assert(false)`/`assert(0)` as a sub-expression is exactly
+this same call-shaped-condition case, not a separate gap. No match/switch dead-arm/
 exhaustiveness checking; no impossible-`instanceof`/redundant-
 `is_string()`-etc. detection on a *non-constant* narrowed type (this
 phase's own family only ever catches a condition whose inferred type is

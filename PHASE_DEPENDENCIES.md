@@ -125,23 +125,30 @@ meaningfully off:
   single-file re-check path would need new invalidation semantics this
   project has never had before).
 
-**Follow-up: 82→41 built, differently than planned; 82→15 removed.**
-The "plan both" pass that followed this investigation went one level
-deeper on 82 specifically and found the literal "build a Collector"
-framing above was itself the wrong target, not just XL-sized - see
-Phase 82's own entry (now RETIRED) for the full finding. What actually
-got built for 41's transitive slice is a registry-build-time fixed
-point, not a Collector, and it's done (`registry/purity.rs`; Phase 41,
-Done). Separately, 15's own cross-file dedup piece turned out not to
-need this architecture at all, confirmed directly rather than assumed
-- the 82→15 edge above no longer applies; 15's own remaining piece is
-now listed under "genuinely independent" below instead.
+**Follow-up: 82→41 built, differently than planned; 82→15 removed and
+built too.** The "plan both" pass that followed this investigation went
+one level deeper on 82 specifically and found the literal "build a
+Collector" framing above was itself the wrong target, not just
+XL-sized - see Phase 82's own entry (now RETIRED) for the full finding.
+What actually got built for 41's transitive slice is a registry-
+build-time fixed point, not a Collector, and it's done
+(`registry/purity.rs`; Phase 41, Done). Separately, 15's own cross-file
+dedup piece turned out not to need this architecture at all, confirmed
+directly rather than assumed - re-reading `FunctionCallConstantConditionHelper.php`
+in full (not just its own collector's own shape) revealed it isn't
+really "cross-file aggregation" either: it's real PHPStan's own
+existing if/while/elseif/ternary/&&/|| rules deferring their own
+reporting when their own condition is a call, for two narrow reasons
+neither needing a Collector (a sibling `ImpossibleCheckType*` rule
+family this project has no equivalent of, and a trait method's own
+cross-host reconciliation, which `check_trait_methods`'s own existing
+per-host dedup already provides generically). Built directly - see
+Phase 15's own entry, Done, for the concrete fix
+(`should_skip_constant_condition`'s own four-shape exclusion removed).
 
 ## Genuinely independent (no dependency edge either direction)
 
-Everything else in Pending/partial: **15's own remaining cross-file
-dedup piece** (buildable via this project's own existing single-file
-`infer_expr` machinery - see the 82→15 follow-up above), **18, 19,
+Everything else in Pending/partial: **18, 19,
 36's other sub-items, 39, 40, 42, 45, 46** (needs a `pcre2` binding -
 an external crate, not a phase), **52, 53, 61, 63, 64** (blocked on an
 internal `PropertySig::ty_native` split, not another phase), **67, 68,
