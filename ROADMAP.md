@@ -2148,7 +2148,7 @@ internal representation real PHPStan uses internally, which has no
 independently observable behavior this project's own single-variant-plus-
 sentinel representation doesn't already produce.
 
-**55 - Narrowing-engine generalization, remaining (PARTIAL).** `count()`
+**55 - Narrowing-engine generalization, remaining (DONE).** `count()`
 truthiness, `array_is_list`, `str_contains`-family, a real
 `instanceof`-intersection bug, fixed-point loop-body convergence, and -
 this batch - the comparison-outcome/range API for `<`/`>`/`<=`/`>=`
