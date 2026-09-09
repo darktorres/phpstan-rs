@@ -113,6 +113,13 @@ impl<'a> Checker<'a> {
                     self.check_generic_bounds(t, label, span);
                 }
             }
+            // A real, previously-missing case: `object{...}`'s own field
+            // types were never recursed into for bound-checking either.
+            Type::ObjectShape(fields) => {
+                for (_, t, _) in fields {
+                    self.check_generic_bounds(t, label, span);
+                }
+            }
             _ => {}
         }
     }
@@ -151,6 +158,9 @@ impl<'a> Checker<'a> {
                 members.iter().all(|m| self.is_type_fully_known(m))
             }
             Type::ArrayShape(fields) => fields.iter().all(|(_, t, _)| self.is_type_fully_known(t)),
+            // A real, previously-missing case: `object{...}`'s own field
+            // types were never checked either.
+            Type::ObjectShape(fields) => fields.iter().all(|(_, t, _)| self.is_type_fully_known(t)),
             _ => true,
         }
     }
@@ -515,6 +525,15 @@ impl<'a> Checker<'a> {
                     self.walk_variance(t, pos, class_name, violations);
                 }
             }
+            // A real, previously-missing case: `object{...}`'s own field
+            // types were never walked for declaration-soundness either -
+            // a covariant/contravariant template nested inside one
+            // (`object{value: T}`) went unchecked.
+            Type::ObjectShape(fields) => {
+                for (_, t, _) in fields {
+                    self.walk_variance(t, pos, class_name, violations);
+                }
+            }
             _ => {}
         }
     }
@@ -673,6 +692,19 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &HashSet<Str
                 .collect(),
         ),
         Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .iter()
+                .map(|(k, t, opt)| (k.clone(), substitute_scoped(t, bindings, scope), *opt))
+                .collect(),
+        ),
+        // A real, previously-missing case, found via this session's own
+        // corpus diff (`php-standard-library`'s own `ContainerType<Tk as
+        // array-key, Tv>`, whose own `Tk`/`Tv` reach a caller's return
+        // type nested inside `object{...}` by way of an *interface's*
+        // own template): `object{...}`'s own field types were never
+        // substituted here either, mirroring `types::substitute_
+        // template`'s own identical fix.
+        Type::ObjectShape(fields) => Type::ObjectShape(
             fields
                 .iter()
                 .map(|(k, t, opt)| (k.clone(), substitute_scoped(t, bindings, scope), *opt))

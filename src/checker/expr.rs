@@ -1791,6 +1791,7 @@ impl<'a> Checker<'a> {
                     Some(i) => {
                         self.check_expr(i, locals, label);
                         self.check_shape_key_access(base, i, locals, label);
+                        self.check_dim_fetch_key_type(base, i, locals, label);
                         // Phase 32 Finding F (found while testing it): the
                         // `Index` counterpart of `PropertyAccess`'s own
                         // "check the narrowed key first" handling just
@@ -4192,6 +4193,89 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 50 (reattempt): real PHPStan's `InvalidKeyInArrayDimFetchRule`,
+    /// `offsetAccess.invalidOffset` - confirmed directly against
+    /// `vendor/phpstan-src` that this is genuinely the *same* check as
+    /// `check_array_item_key_type` above (its own `AllowedArrayKeysTypes`
+    /// legal-key-type set, same non-strict default), just applied to a
+    /// dim-fetch's own dimension expression (`$arr[$key]`) instead of an
+    /// array literal's key - not something that also needs to know
+    /// `$arr`'s own *declared* key type (a different, separate concern
+    /// this project doesn't model for dim-fetch at all - `ExprKind::
+    /// Index`'s own value-type inference already gives up to `Mixed` for
+    /// anything but a plain `Array`/`ArrayShape` base).
+    ///
+    /// A first attempt at this exact rule was built, corpus-verified,
+    /// then reverted (see ROADMAP.md's own **Reverted** section) after
+    /// finding +31 false positives, all traced to a used generic
+    /// template parameter's type leaking through as a bogus, namespace-
+    /// qualified `Object` reference instead of staying `Type::
+    /// TemplateParam` (real example: `amphp/sync`'s own `PriorityQueue<T
+    /// of int|string>`) - reusing this project's *own*, already-shared
+    /// `invalid_array_key_description` verbatim sidesteps that: it has no
+    /// arm for `Type::TemplateParam` at all, so it already falls to the
+    /// safe "don't know, don't flag" catch-all for one, exactly the
+    /// leniency a still-generic key type needs. Confirmed via a
+    /// dedicated regression test mirroring the exact `PriorityQueue<T of
+    /// int|string>` shape, and via a full corpus diff after landing (see
+    /// ROADMAP.md's own Phase 50 entry).
+    ///
+    /// Fires on both a read (`$arr[$key]`) and a write (`$arr[$key] =
+    /// ...`) - unlike `check_shape_key_access` (which deliberately skips
+    /// the write side: a *missing* shape key isn't a bug on write, real
+    /// PHP auto-vivifies it), this rule is about the key's own *type*,
+    /// exactly as illegal on a write as a read regardless of whether the
+    /// array grows - so it's called from both `check_expr`'s own
+    /// `Index` arm and `check_assignment_target`'s.
+    ///
+    /// Only fires when `base`'s own inferred type is confidently
+    /// array-shaped (a bare `Array`/`ArrayShape`, or a `Union` where
+    /// *every* member is) - `Mixed`, an `ArrayAccess`-implementing
+    /// object (offset access on one isn't modeled at all), or a `Union`
+    /// mixing array and non-array members are all "don't know," matching
+    /// this project's usual leniency rather than real PHPStan's own
+    /// tri-state `isSuperTypeOf` grading (`reportMaybes`, off by
+    /// default).
+    pub(crate) fn check_dim_fetch_key_type(
+        &mut self,
+        base: &Expr,
+        idx: &Expr,
+        locals: &Locals,
+        label: &str,
+    ) {
+        let base_ty = self.infer_expr(base, locals);
+        if !is_confidently_array(&base_ty) {
+            return;
+        }
+        let idx_ty = self.infer_expr(idx, locals);
+        // A real, corpus-found residual of a pre-existing, disclosed gap
+        // (`DocBlock::type_aliases`'s own doc comment: `@phpstan-import-
+        // type Name from Class`, importing a `@phpstan-type` alias
+        // declared on a *different* class, is "a distinct, separate tag
+        // this project doesn't parse") - the unresolved alias name falls
+        // through as a bogus, unrecognized `Object`, which this check
+        // would otherwise misread as a confirmed-illegal key type instead
+        // of "don't know" (real corpus shapes: `phpunit/php-code-coverage`'s
+        // own `TestIndexType`, `php-cs-fixer`'s own `_ImportType`, both
+        // `@phpstan-import-type`). `is_type_fully_known` is the same
+        // "every `Object` reference is either a recognized pseudo-type or
+        // a genuinely registered class" guard `check_generic_bounds`
+        // already trusts for the identical reason - not new leniency
+        // invented for this check.
+        if !self.is_type_fully_known(&idx_ty) {
+            return;
+        }
+        if let Some(desc) = invalid_array_key_description(&idx_ty) {
+            self.report(
+                label.to_string(),
+                format!("Invalid array key type {desc}."),
+                idx.span,
+                3,
+                "offsetAccess.invalidOffset",
+            );
+        }
+    }
+
     pub(crate) fn array_element_type(ty: &Type) -> Option<Type> {
         match ty {
             Type::Array(_, elem) => Some((**elem).clone()),
@@ -5104,6 +5188,21 @@ fn literal_base_type(t: &Type) -> Option<Type> {
                 .cloned()
         }
         _ => None,
+    }
+}
+
+/// Phase 50 (reattempt): whether `ty` is confidently array-shaped for
+/// `check_dim_fetch_key_type`'s own purposes - a bare `Array`/
+/// `ArrayShape`, or a `Union` where *every* member is (recursively, so a
+/// union of unions still counts) - anything else (`Mixed`, an object,
+/// or a `Union` mixing array and non-array members) is "don't know,"
+/// matching this project's leniency elsewhere rather than real
+/// PHPStan's own tri-state `isArray()` grading.
+fn is_confidently_array(ty: &Type) -> bool {
+    match ty {
+        Type::Array(..) | Type::ArrayShape(_) => true,
+        Type::Union(members) => members.iter().all(is_confidently_array),
+        _ => false,
     }
 }
 

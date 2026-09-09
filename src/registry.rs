@@ -13,7 +13,7 @@ pub use class_info::{ClassInfo, ConstSig, PropertySig};
 pub use function_sig::format_signature;
 pub(crate) use function_sig::resolve_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
-pub(crate) use function_sig::{infer_const_type, substitute_type_aliases};
+pub(crate) use function_sig::{infer_const_type, mark_template_params, substitute_type_aliases};
 pub(crate) use name_context::{NameContext, resolve_names_in_type};
 
 /// A symbol table built by indexing already-parsed source, standing in for

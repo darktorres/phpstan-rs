@@ -651,6 +651,19 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>)
                 .map(|(k, t, opt)| (k, substitute_type_aliases(t, aliases), opt))
                 .collect(),
         ),
+        // A real, previously-missing case, found via this session's own
+        // corpus diff: `object{...}`'s own field types were never
+        // recursed into at all, the one structural wrapper this function
+        // otherwise handles identically to `ArrayShape` above - a
+        // `@phpstan-type` alias referenced inside e.g. `object{key: T}`
+        // (`T` itself a *sibling* alias, not just a template) silently
+        // never got substituted.
+        Type::ObjectShape(fields) => Type::ObjectShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, substitute_type_aliases(t, aliases), opt))
+                .collect(),
+        ),
         other => other,
     }
 }
@@ -730,6 +743,23 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
                 .collect(),
         ),
         Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, mark_template_params(t, params), opt))
+                .collect(),
+        ),
+        // A real, previously-missing case, found via this session's own
+        // corpus diff (`amphp/sync`'s own `PriorityQueue<T of int|
+        // string>`, `@var array<int, object{key: T, priority: int}>`):
+        // `object{...}`'s own field types were never recursed into at
+        // all, so a class-level `@template T` used inside one - not a
+        // rare shape, real PHPStan's own object-shape syntax is commonly
+        // combined with generics this exact way - stayed a plain,
+        // unrecognized `Object("T", [])` instead of becoming
+        // `Type::TemplateParam`, which `resolve_names_in_type` then
+        // (correctly, given what it was handed) treated as a genuine,
+        // as-written class reference.
+        Type::ObjectShape(fields) => Type::ObjectShape(
             fields
                 .into_iter()
                 .map(|(k, t, opt)| (k, mark_template_params(t, params), opt))

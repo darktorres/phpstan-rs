@@ -94,6 +94,13 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(i) = idx {
                     self.check_expr(i, locals, label);
+                    // Unlike `check_shape_key_access` (deliberately
+                    // skipped on the write side just above - a *missing*
+                    // shape key isn't a bug on write, PHP auto-vivifies
+                    // it), a key's own *illegal type* is exactly as real
+                    // a `TypeError` on a write as a read - `$arr[new
+                    // Foo()] = 1` fails before the array ever grows.
+                    self.check_dim_fetch_key_type(base, i, locals, label);
                 }
             }
             _ => {

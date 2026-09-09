@@ -1638,6 +1638,15 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
                 .map(|(k, t, opt)| (k.clone(), substitute_template(t, bindings), *opt))
                 .collect(),
         ),
+        // A real, previously-missing case (found the same way as the
+        // `Object` fix just below - this session's own corpus diff):
+        // `object{...}`'s own field types were never substituted either.
+        Type::ObjectShape(fields) => Type::ObjectShape(
+            fields
+                .iter()
+                .map(|(k, t, opt)| (k.clone(), substitute_template(t, bindings), *opt))
+                .collect(),
+        ),
         // Phase 54: a real, previously-missing case - every other
         // structural wrapper above recurses into its own nested type(s);
         // `Object`'s own generic argument list didn't, so substituting

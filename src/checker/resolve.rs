@@ -66,15 +66,143 @@ impl<'a> Checker<'a> {
     /// sentinel leaked straight into a real diagnostic message
     /// (`shipmonk/dead-code-detector`'s own `CollectedUsage::deserialize()`,
     /// `/** @var array{..., t: value-of<MemberType>, ...} $result */`).
+    ///
+    /// Phase 50 (reattempt): also marks the *current class's own*
+    /// `@template` names as `Type::TemplateParam` (`registry::
+    /// mark_template_params`) *before* resolving names - order matters,
+    /// the same as the registry-build pipeline's own `build_template_
+    /// params` always running before `resolve_names_in_type` - since
+    /// resolving names first would already have namespace-mangled the
+    /// template's own short name beyond recognition. Without this, a
+    /// class-level template referenced inside a raw type string parsed
+    /// through here (an inline `@var`, most commonly) was indistinguishable
+    /// from a genuine, unqualified class reference and got resolved (and
+    /// then, downstream, flagged) as one - the real root cause behind
+    /// this project's own reverted `InvalidKeyInArrayDimFetchRule` first
+    /// attempt (see ROADMAP.md's **Reverted** section): `php-standard-
+    /// library`'s own `SetType`/`MapType`/`MutableSetType`, each with an
+    /// inline `/** @var Type\Type<T> $type */` referencing its own
+    /// class-level `@template`.
+    ///
+    /// Also merges in the *current function/method's own* `@template`s
+    /// (`current_function_template_params` below) - real corpus evidence
+    /// this is needed too, not just a hypothetical: `php-standard-
+    /// library`'s own top-level `group_by()` function, `@template Tk of
+    /// array-key`, `/** @var Tk $key */` referencing it directly (no
+    /// enclosing class at all). Function-level wins on a name collision
+    /// with a class-level template of the same name, mirroring
+    /// `FunctionSig::from_decl`'s own identical "this function's own
+    /// same-named template wins over the class's" precedent.
     pub(crate) fn resolve_type_hint(&self, hint: Option<&str>) -> Type {
         match hint {
             Some(h) => {
-                let ty =
-                    registry::resolve_names_in_type(types::parse_type_string(h), &self.name_ctx);
+                let ty = types::parse_type_string(h);
+                let mut params = self.current_class_template_params();
+                params.extend(self.current_function_template_params());
+                let ty = if params.is_empty() {
+                    ty
+                } else {
+                    registry::mark_template_params(ty, &params)
+                };
+                let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
                 self.registry.resolve_deferred_value_of_now(ty)
             }
             None => Type::Mixed,
         }
+    }
+
+    /// Rebuilds the same `HashMap<String, TemplateParam>` `registry::
+    /// build_template_params` would produce for `self.current_class`, by
+    /// reading it back from the already-indexed `ClassInfo` instead of
+    /// re-parsing a docblock - `resolve_type_hint` needs this to
+    /// recognize a class-level template by name before ever resolving
+    /// names in a type string built independently of the registry's own
+    /// pipeline. Empty outside any class, or for a non-generic one.
+    fn current_class_template_params(
+        &self,
+    ) -> std::collections::HashMap<String, types::TemplateParam> {
+        let Some(class) = &self.current_class else {
+            return std::collections::HashMap::new();
+        };
+        let Some(info) = self.registry.classes.get(class) else {
+            return std::collections::HashMap::new();
+        };
+        info.templates
+            .iter()
+            .map(|name| {
+                let variance = if info.covariant_templates.contains(name) {
+                    types::Variance::Covariant
+                } else if info.contravariant_templates.contains(name) {
+                    types::Variance::Contravariant
+                } else {
+                    types::Variance::Invariant
+                };
+                (
+                    name.clone(),
+                    types::TemplateParam {
+                        name: name.clone(),
+                        bound: Box::new(
+                            info.template_bounds
+                                .get(name)
+                                .cloned()
+                                .unwrap_or(Type::Mixed),
+                        ),
+                        variance,
+                        scope: Some(class.clone()),
+                        default: None,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// The `current_class_template_params` equivalent for the current
+    /// function/method's own `@template`s (`self.current_method`, a
+    /// plain function's bare name or a method's bare name - `FunctionSig`
+    /// doesn't persist its own raw template *names* the way `ClassInfo`
+    /// does, so unlike the class-level lookup above, this reads them back
+    /// off `Type::TemplateParam` nodes already present in the signature's
+    /// own params/return type instead (each one, wherever `mark_template_
+    /// params` already found and marked it at registry-build time, still
+    /// carries its own full bound/variance/default metadata) - filtered
+    /// to `tp.scope == Some(current_method)` so an *inherited* class-level
+    /// template referenced in the same signature isn't double-counted
+    /// here too (already covered above). Only ever finds a template that
+    /// happens to appear somewhere in the signature itself - one declared
+    /// but used *only* inside e.g. a body-local `@var`, never in the
+    /// signature at all, isn't reachable this way; no current corpus
+    /// evidence of that narrower shape.
+    fn current_function_template_params(
+        &self,
+    ) -> std::collections::HashMap<String, types::TemplateParam> {
+        let Some(method_name) = &self.current_method else {
+            return std::collections::HashMap::new();
+        };
+        let sig = match &self.current_class {
+            Some(class) => self.registry.lookup_method(class, method_name),
+            // A plain function's own `label`/`current_method` is
+            // deliberately the bare name (matching real PHPStan's own
+            // uncluttered diagnostic messages), but `Registry::functions`
+            // is keyed by each declaration's real FQN - a namespaced
+            // function's own bare name never matches there at all. Real
+            // corpus false positive this fixed: `php-standard-library`'s
+            // own `Psl\Dict\group_by()` - `lookup_function("group_by")`
+            // silently found nothing (there's no *global* function by
+            // that name), so this whole merge was a silent no-op for
+            // every namespaced function, the overwhelmingly common case.
+            None => self
+                .registry
+                .lookup_function(&self.name_ctx.declared_name(method_name)),
+        };
+        let Some(sig) = sig else {
+            return std::collections::HashMap::new();
+        };
+        let mut out = std::collections::HashMap::new();
+        for p in &sig.params {
+            collect_scoped_template_params(&p.ty, method_name, &mut out);
+        }
+        collect_scoped_template_params(&sig.return_type, method_name, &mut out);
+        out
     }
 
     /// Resolves a `StaticAccess`/`StaticCall` target (`self`/`parent`/
@@ -138,6 +266,14 @@ impl<'a> Checker<'a> {
                     .collect(),
             ),
             Type::ArrayShape(fields) => Type::ArrayShape(
+                fields
+                    .iter()
+                    .map(|(k, t, opt)| (k.clone(), self.resolve_pseudo(t, defining_class), *opt))
+                    .collect(),
+            ),
+            // A real, previously-missing case: `object{...}`'s own field
+            // types never got `self`/`static`/`parent` resolved either.
+            Type::ObjectShape(fields) => Type::ObjectShape(
                 fields
                     .iter()
                     .map(|(k, t, opt)| (k.clone(), self.resolve_pseudo(t, defining_class), *opt))
@@ -232,6 +368,13 @@ impl<'a> Checker<'a> {
                     self.collect_unknown_class_names(t, out);
                 }
             }
+            // A real, previously-missing case: `object{...}`'s own field
+            // types were never checked for existence either.
+            Type::ObjectShape(fields) => {
+                for (_, t, _) in fields {
+                    self.collect_unknown_class_names(t, out);
+                }
+            }
             _ => {}
         }
     }
@@ -263,5 +406,45 @@ impl<'a> Checker<'a> {
                 "class.notFound",
             );
         }
+    }
+}
+
+/// Walks `ty` collecting every distinct `Type::TemplateParam` node whose
+/// own `.scope` matches `scope` exactly - `Checker::
+/// current_function_template_params`'s own recursive helper. Mirrors
+/// `resolve_pseudo`'s/`collect_unknown_class_names`'s own recursive shape
+/// (`Object`'s own generic argument list included, unlike those two -
+/// a template can itself appear nested inside another class's own type
+/// argument, e.g. `array<int, Box<T>>`).
+fn collect_scoped_template_params(
+    ty: &Type,
+    scope: &str,
+    out: &mut std::collections::HashMap<String, types::TemplateParam>,
+) {
+    match ty {
+        Type::TemplateParam(tp) if tp.scope.as_deref() == Some(scope) => {
+            out.entry(tp.name.clone()).or_insert_with(|| tp.clone());
+        }
+        Type::Object(_, args) => {
+            for a in args {
+                collect_scoped_template_params(a, scope, out);
+            }
+        }
+        Type::Array(key, inner) => {
+            collect_scoped_template_params(key, scope, out);
+            collect_scoped_template_params(inner, scope, out);
+        }
+        Type::ClassString(inner) => collect_scoped_template_params(inner, scope, out),
+        Type::Union(members) | Type::Intersection(members) => {
+            for m in members {
+                collect_scoped_template_params(m, scope, out);
+            }
+        }
+        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
+            for (_, t, _) in fields {
+                collect_scoped_template_params(t, scope, out);
+            }
+        }
+        _ => {}
     }
 }

@@ -295,6 +295,17 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .map(|(k, t, opt)| (k, resolve_names_in_type(t, ctx), opt))
                 .collect(),
         ),
+        // A real, previously-missing case: `object{...}`'s own field
+        // types were never resolved at all - a genuine class reference
+        // nested inside one (`object{repo: SomeRepository}`) stayed
+        // unqualified inside a namespaced file instead of being
+        // correctly resolved.
+        Type::ObjectShape(fields) => Type::ObjectShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, resolve_names_in_type(t, ctx), opt))
+                .collect(),
+        ),
         other => other,
     }
 }
