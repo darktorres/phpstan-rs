@@ -1550,8 +1550,11 @@ plan disclosed as out of scope):
 
 Each entry: what's missing, and the root cause blocking it where one's
 known. Numbered by the original phase for cross-reference; the number
-is not a priority order. See `PHASE_DEPENDENCIES.md` for a graph of
-which of these phases actually block each other (most don't).
+is not a priority order. Cross-phase dependencies, when a phase's own
+entry has one, are named inline in that entry's own text - a separate
+dependency graph (`PHASE_DEPENDENCIES.md`) was maintained through most of
+this project's development but retired once every edge it tracked
+became satisfied (no live blockers left to graph).
 
 **15 - Unreachable-code / constant-condition rule catalog (DONE, disclosed
 residuals only).**
