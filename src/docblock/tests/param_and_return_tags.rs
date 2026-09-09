@@ -175,6 +175,28 @@ fn a_return_type_wrapped_across_multiple_lines_is_not_truncated() {
 }
 
 #[test]
+fn a_var_type_wrapped_across_multiple_lines_with_trailing_line_comments_strips_them() {
+    // Real corpus shape (pestphp/pest-plugin-browser's own
+    // JavaScriptSerializer::parseValue): each wrapped shape field
+    // carries its own trailing `// description`. Before this fix, the
+    // comment text got spliced straight into the joined type string and
+    // `take_type_token` parsed "// null" as a bare class-like name,
+    // corrupting the whole shape into garbage.
+    let block = parse(
+        r#"/**
+         * @var array{
+         *      v?: string, // null, undefined
+         *      b?: bool,   // boolean
+         *  } $value
+         */"#,
+    );
+    assert_eq!(
+        block.var_type,
+        Some("array{ v?: string, b?: bool, }".to_string())
+    );
+}
+
+#[test]
 fn a_param_type_wrapped_across_multiple_lines_still_finds_the_variable_name() {
     let block = parse(
         r#"/**

@@ -234,6 +234,18 @@ pub fn parse(raw: &str) -> DocBlock {
     for raw_line in inner.lines() {
         let line = raw_line.trim();
         let line = line.strip_prefix('*').map(str::trim).unwrap_or(line);
+        // A wrapped array-shape/list field commonly carries its own
+        // trailing `// description` (real corpus shape, e.g. pestphp's
+        // `JavaScriptSerializer::parseValue`'s `@var array{v?: string, //
+        // null, undefined, ..., b?: bool, // boolean, ...}`). Without
+        // stripping it, the comment text gets spliced straight into the
+        // joined type string below and `take_type_token` happily parses
+        // "// null" as a bare class-like name, corrupting the whole
+        // shape - `//` never appears in real type-expression syntax, so
+        // stripping from its first occurrence to end of line is safe.
+        let line = line
+            .split_once("//")
+            .map_or(line, |(before, _)| before.trim());
         if line.starts_with('@') || tag_lines.is_empty() {
             tag_lines.push(line.to_string());
         } else if let Some(last) = tag_lines.last_mut() {
