@@ -238,6 +238,7 @@ fn merge_stubs_does_not_override_user_functions() {
             assert_if_true: Vec::new(),
             assert_if_false: Vec::new(),
             assert: Vec::new(),
+            body: None,
         },
     )]);
     assert_eq!(r.functions["strlen"].return_type, Type::Int);

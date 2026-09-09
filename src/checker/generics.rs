@@ -620,6 +620,7 @@ impl<'a> Checker<'a> {
             assert_if_true: substitute_assert_infos(&sig.assert_if_true, &subst),
             assert_if_false: substitute_assert_infos(&sig.assert_if_false, &subst),
             assert: substitute_assert_infos(&sig.assert, &subst),
+            body: sig.body.clone(),
         }
     }
 }

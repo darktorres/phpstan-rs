@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::ast::{Expr, ExprKind, FunctionDecl, Literal, Visibility};
+use crate::ast::{Expr, ExprKind, FunctionDecl, Literal, Stmt, Visibility};
 use crate::checker::{has_explicit_mixed_nested_somewhere, union_types};
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{NameContext, resolve_names_in_type};
@@ -165,6 +166,23 @@ pub struct FunctionSig {
     pub assert_if_true: Vec<AssertInfo>,
     pub assert_if_false: Vec<AssertInfo>,
     pub assert: Vec<AssertInfo>,
+    // Phase 62 (premature-access dataflow): this declaration's own real
+    // AST body, when it has one - `None` for every synthesized signature
+    // this registry ever builds without a real, parseable declaration
+    // behind it (a built-in enum method, a native stdlib stub with no
+    // vendored source body, ...). Exists specifically so a same-class or
+    // cross-file `parent::`/`self::`/`static::`/`$this->` call can be
+    // *recursively walked into* from wherever it's actually declared -
+    // the per-file `Checker` only ever sees the one file it's currently
+    // checking, so without storing bodies here, resolving into an
+    // ancestor class declared in a different file would be impossible.
+    // `Arc`-wrapped rather than cloned per lookup: a real body can be
+    // arbitrarily large, and `FunctionSig` itself is cloned routinely
+    // (template substitution, trait flattening, override merging) by
+    // code that never touches this field at all. `Arc`, not `Rc`, because
+    // `php_stubs.rs`'s own generated-stub caches are `LazyLock<Vec<(String,
+    // FunctionSig)>>` statics, which require `Send + Sync`.
+    pub body: Option<Arc<Vec<Stmt>>>,
 }
 
 /// Which real, checkable thing a `@phpstan-assert`-family tag's own
@@ -1038,6 +1056,7 @@ impl FunctionSig {
             assert_if_true,
             assert_if_false,
             assert,
+            body: Some(Arc::new(f.body.clone())),
         }
     }
 
@@ -1144,6 +1163,12 @@ impl FunctionSig {
             assert_if_true: [self.assert_if_true, other.assert_if_true].concat(),
             assert_if_false: [self.assert_if_false, other.assert_if_false].concat(),
             assert: [self.assert, other.assert].concat(),
+            // Same permissive "either overload's own body wins" as
+            // `deprecated` above - both real overloads are stub-modeled
+            // splits of the same underlying declaration, so either one's
+            // own body is an equally valid absorption target; `self`'s
+            // own (if it has one) is preferred only for determinism.
+            body: self.body.or(other.body),
         }
     }
 }

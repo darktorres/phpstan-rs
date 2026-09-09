@@ -629,6 +629,7 @@ impl ClassInfo {
                 assert_if_true: Vec::new(),
                 assert_if_false: Vec::new(),
                 assert: Vec::new(),
+                body: None,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -663,6 +664,7 @@ impl ClassInfo {
                     assert_if_true: Vec::new(),
                     assert_if_false: Vec::new(),
                     assert: Vec::new(),
+                    body: None,
                 },
             );
             methods.insert(
@@ -682,6 +684,7 @@ impl ClassInfo {
                     assert_if_true: Vec::new(),
                     assert_if_false: Vec::new(),
                     assert: Vec::new(),
+                    body: None,
                 },
             );
         }
