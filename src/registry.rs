@@ -1541,6 +1541,45 @@ impl Registry {
         None
     }
 
+    /// `@phpstan-consistent-constructor`'s own ancestor walk - real
+    /// PHPStan's `ConsistentConstructorHelper::findConsistentConstructor`,
+    /// transcribed (confirmed directly, `vendor/phpstan-src`): starting at
+    /// `class`'s own *parent* (not `class` itself - matches the real
+    /// rule's own call site, which already has the child's own method in
+    /// hand and is looking for what it's being held *to*), walks up
+    /// `extends` until an ancestor tagged `@phpstan-consistent-constructor`
+    /// is found, returning that ancestor's own `__construct` - or `None`
+    /// if the chain ends (or cycles - bounded by `self.classes.len()`,
+    /// same guard `Registry::flatten_traits`'s own cycle protection uses)
+    /// with no tagged ancestor at all, meaning no check applies, real
+    /// PHP's own default.
+    ///
+    /// Deliberately doesn't synthesize a zero-parameter dummy constructor
+    /// for a tagged ancestor with no `__construct` of its own the way real
+    /// PHPStan's `DummyConstructorReflection` does - every `FunctionSig`
+    /// this project returns is borrowed from `self.classes`, and a class
+    /// that bothers tagging itself `@phpstan-consistent-constructor` at
+    /// all almost always also declares the constructor it's pinning down
+    /// (the entire point of the tag), so this narrower scope isn't
+    /// expected to leave real value on the table.
+    pub(crate) fn find_consistent_constructor_ancestor(
+        &self,
+        class: &str,
+    ) -> Option<(String, &FunctionSig)> {
+        let mut current = self.classes.get(class)?.extends.first()?.clone();
+        for _ in 0..self.classes.len().max(1) {
+            let info = self.classes.get(&current)?;
+            if info.is_consistent_constructor {
+                return info
+                    .methods
+                    .get("__construct")
+                    .map(|sig| (current.clone(), sig));
+            }
+            current = info.extends.first()?.clone();
+        }
+        None
+    }
+
     /// Phase 64 follow-up: whether `class` directly `use`s a trait that
     /// declares a method named `method` *abstract* - used only by
     /// `#[\Override]`-attribute checking, which needs to treat

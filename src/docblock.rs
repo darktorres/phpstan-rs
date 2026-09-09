@@ -99,6 +99,15 @@ pub struct DocBlock {
     // `check_uninitialized_properties` already established a precedent
     // for).
     pub internal: bool,
+    // `@phpstan-consistent-constructor` - a class-level bare marker (no
+    // value, same shape as `@api`/`@internal` above): every subclass's
+    // own `__construct` must match this class's own exactly (arity,
+    // types, visibility - the identical compatibility rules an ordinary
+    // method override already gets, deliberately exempted for `__construct`
+    // otherwise, real PHP's own default). Consumed by `Registry::
+    // find_consistent_constructor_ancestor`/`checker::oop::check_one_
+    // method_override`'s own `__construct` special case.
+    pub consistent_constructor: bool,
     // Phase 39: `@deprecated` on a class/interface/trait/enum, function,
     // method, property, or class constant - `None` when the tag isn't
     // present at all; `Some(message)` when it is, where `message` is
@@ -524,6 +533,9 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // no-argument shape as `@api` just above.
             "internal" => {
                 block.internal = true;
+            }
+            "consistent-constructor" => {
+                block.consistent_constructor = true;
             }
             // Phase 39: see `DocBlock::deprecated`'s own doc comment.
             // Unlike `@api`/`@internal`, this tag *does* usually take a

@@ -198,6 +198,9 @@ pub struct ClassInfo {
     // Phase 67: `@internal` on this class/interface/trait/enum's own
     // docblock - see `docblock::DocBlock::internal`'s own doc comment.
     pub is_internal: bool,
+    // `@phpstan-consistent-constructor` on this class's own docblock -
+    // see `docblock::DocBlock::consistent_constructor`'s own doc comment.
+    pub is_consistent_constructor: bool,
     // Phase 39 follow-up: `@deprecated` on this class's own docblock -
     // consulted only at `new Foo()` (`checker::check_deprecated_instantiation`).
     // Deliberately doesn't imply anything about this class's own members
@@ -586,6 +589,8 @@ impl ClassInfo {
         let is_api = class_doc.as_ref().is_some_and(|d| d.api);
         let is_api_do_not_implement = class_doc.as_ref().is_some_and(|d| d.api_do_not_implement);
         let is_internal = class_doc.as_ref().is_some_and(|d| d.internal);
+        let is_consistent_constructor =
+            class_doc.as_ref().is_some_and(|d| d.consistent_constructor);
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
         let attribute_targets = compute_attribute_targets(&c.attrs);
 
@@ -612,6 +617,7 @@ impl ClassInfo {
             is_api,
             is_api_do_not_implement,
             is_internal,
+            is_consistent_constructor,
             deprecated,
             attribute_targets,
             enum_case_values: HashMap::new(),
@@ -965,6 +971,10 @@ impl ClassInfo {
             is_api: false,
             is_api_do_not_implement: false,
             is_internal: class_doc.as_ref().is_some_and(|d| d.internal),
+            // An enum can never `extends` anything, so no subclass could
+            // ever exist to hold it to a consistent constructor contract
+            // either way - never meaningful here.
+            is_consistent_constructor: false,
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             attribute_targets: compute_attribute_targets(&e.attrs),
             enum_case_values,
@@ -1036,6 +1046,8 @@ impl ClassInfo {
         self.is_api_do_not_implement =
             self.is_api_do_not_implement || other.is_api_do_not_implement;
         self.is_internal = self.is_internal || other.is_internal;
+        self.is_consistent_constructor =
+            self.is_consistent_constructor || other.is_consistent_constructor;
         self.deprecated = self.deprecated.or(other.deprecated);
         self.attribute_targets = self.attribute_targets.or(other.attribute_targets);
         if self.extends.is_empty() {

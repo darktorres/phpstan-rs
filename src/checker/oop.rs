@@ -1113,10 +1113,19 @@ impl<'a> Checker<'a> {
         // method. The `#[\Override]` check above is unaffected by this -
         // confirmed directly, `#[\Override]` on a `__construct()` with no
         // ancestor `__construct()` fatals exactly like any other method.
-        if method_name == "__construct" {
-            return;
-        }
-        let Some((ancestor_owner, ancestor_sig)) = ancestor else {
+        //
+        // `@phpstan-consistent-constructor` (`Registry::find_consistent_
+        // constructor_ancestor`'s own doc comment) re-enables exactly this
+        // exemption, but only against the nearest *tagged* ancestor's own
+        // constructor, not the immediate parent's - a genuinely different
+        // ancestor than `ancestor` above (which the `#[\Override]` check
+        // needs to keep using regardless of any tag).
+        let compatibility_ancestor = if method_name == "__construct" {
+            self.registry.find_consistent_constructor_ancestor(fqn)
+        } else {
+            ancestor
+        };
+        let Some((ancestor_owner, ancestor_sig)) = compatibility_ancestor else {
             return;
         };
         // A `private` ancestor method isn't a real override target at
