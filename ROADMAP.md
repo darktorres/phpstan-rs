@@ -440,10 +440,15 @@ shipped. Still unbuilt: `@param-immediately-invoked-callable`/
 mismatch (needs live per-call-site `Scope`-threading), not a scope trim.
 
 **37 - Attribute target-validity, remaining kinds (PARTIAL, most kinds
-done).** See Done for what shipped. `PropertyHookAttributesRule`/
-`ConstantAttributesRule` remain blocked on a real parser gap (a
-property hook's own attribute list, and a top-level `const`'s own, are
-never captured in the AST at all). `attribute.nonRepeatable` (needs a
+done).** See Done for what shipped. `PropertyHookAttributesRule`
+remains blocked on a real parser gap (a property hook's own attribute
+list is never captured in the AST at all). `ConstantAttributesRule` is
+NOT a parser gap - a top-level `const`'s own `#[Attr]` groups are
+already captured on `ClassConst::attrs` via the same leading-attributes
+path every other declaration uses - but no checker call site feeds
+`StmtKind::GlobalConst`'s attrs into `check_attribute_targets` yet, and
+no `ATTRIBUTE_TARGET_CONSTANT` flag (real PHP 8.5's
+`Attribute::TARGET_CONSTANT`) exists in the target-flag list. `attribute.nonRepeatable` (needs a
 same-declaration-list accumulator, a different shape of check than the
 existing per-attribute loop) and `attribute.deprecated` (would
 duplicate this project's own existing `@deprecated` family) are a
@@ -588,8 +593,10 @@ unobservable no-op given how this project already represents a bare
 `class-string`).
 
 **56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
-a lenient regex tokenizer that silently drops what it doesn't
-recognize, unlike real PHPStan's recoverable-error grammar parser. Not
+a lenient, hand-rolled ad-hoc string tokenizer (not built on the
+`regex` crate at all - plain `split_whitespace`/char-scanning) that
+silently drops what it doesn't recognize, unlike real PHPStan's
+recoverable-error grammar parser. Not
 a hard blocker for any current Phase 36 sub-item - each has its own
 small, bounded, self-contained grammar already. This phase's real
 motivation is narrower: robustness of the general type-expression
