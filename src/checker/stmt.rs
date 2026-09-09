@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, body_contains_yield, collect_exit_point_statements, exit_point_description,
+    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
+    Locals, body_contains_yield, collect_exit_point_statements, exit_point_description,
     is_switch_break_equivalent, is_truthy_literal, merge_scopes, purge_stale_narrowing_for,
     stmt_contains_break, stmt_contains_escaping_exit,
 };
@@ -71,6 +72,7 @@ impl<'a> Checker<'a> {
         let inline_var = self.inline_var_annotation(stmt);
         if let Some((name, ty)) = &inline_var {
             purge_stale_narrowing_for(locals, name);
+            self.check_inline_var_annotation_type(stmt, name, ty, locals, label);
             locals.insert(name.clone(), ty.clone());
         }
         match &stmt.kind {
@@ -106,11 +108,15 @@ impl<'a> Checker<'a> {
                 // written with the fully-qualified form throughout (a
                 // common defensive-global-namespace style), so the
                 // narrowing this whole block exists for never ran at all.
-                if let ExprKind::Call(callee, args) = &e.kind
-                    && matches!(&callee.kind, ExprKind::Name(name) if name.trim_start_matches('\\') == "assert")
-                    && let Some(cond_arg) = args.first()
-                {
-                    self.apply_narrowing(&cond_arg.value, locals, true);
+                //
+                // Phase 55 follow-up: `assert($cond) && sideEffect();` (a
+                // real, common idiom - the assertion doubling as a guard
+                // clause for whatever follows) needs the identical
+                // narrowing, not just a bare `assert($cond);` alone -
+                // `bare_assert_condition`'s own doc comment has the
+                // "which chain position is actually safe" reasoning.
+                if let Some(cond) = bare_assert_condition(e) {
+                    self.apply_narrowing(cond, locals, true);
                 }
                 // Phase 27: PHPUnit's own narrowing-relevant assertions
                 // (`self::assertIsString($x)`, `$this->assertNotNull($x)`)
@@ -395,7 +401,7 @@ impl<'a> Checker<'a> {
                     &entry,
                     declared_return,
                     label,
-                    |this, pass_locals, declared_return, label| {
+                    |this, pass_locals, declared_return, label, _pass| {
                         this.in_condition_position = true;
                         this.check_expr(cond, pass_locals, label);
                         // Phase 15, `WhileLoopAlwaysFalseConditionRule`/
@@ -504,25 +510,67 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::DoWhile { body, cond } => {
-                // The condition is only evaluated after the body has
-                // already run once, so there's nothing to narrow going in.
+                // The first pass has nothing to narrow going in - the
+                // condition is only evaluated after the body has already
+                // run once. Every *re*-convergence pass (`pass > 0`) is
+                // different: reaching it at all means the previous pass's
+                // own trailing `cond` evaluated true (that's the only way
+                // a do-while body runs again), so the "continue" half of
+                // `cond`'s own narrowing is a real, provable fact at that
+                // pass's entry - the same narrowing a `while` loop's own
+                // convergence closure already applies unconditionally on
+                // every pass (its condition sits at the *start* of the
+                // body instead), just shifted here to skip pass 0.
+                //
+                // Real corpus bug this fixes (`Latte\Essential\
+                // CachingIterator::__construct`'s `do { $iterator =
+                // $iterator->getIterator(); } while (!$iterator instanceof
+                // \Iterator);`): without this, pass 2's own entry widens
+                // `$iterator` all the way back to the un-narrowed
+                // `Traversable` (the union of pass 1's `IteratorAggregate`
+                // entry and its own post-body `Traversable` exit), and
+                // `$iterator->getIterator()` isn't a real `Traversable`
+                // method - a false `method.notFound`. Applying `!$iterator
+                // instanceof \Iterator`'s own true-branch narrowing here
+                // subtracts `Iterator` back out first (`narrow_type_
+                // excluding`'s existing `Traversable`-minus-`Iterator`
+                // special case), correctly re-narrowing to
+                // `IteratorAggregate` instead.
                 let entry = locals.clone();
                 self.loop_depth += 1;
                 let (body_locals, break_states) = self.converge_loop_body(
                     &entry,
                     declared_return,
                     label,
-                    |this, pass_locals, declared_return, label| {
+                    |this, pass_locals, declared_return, label, pass| {
+                        if pass > 0 {
+                            this.apply_narrowing(cond, pass_locals, true);
+                        }
                         this.check_stmt(body, pass_locals, declared_return, label);
                     },
                 );
-                self.loop_depth -= 1;
                 // A do-while's body always runs at least once - the
                 // converged result replaces `locals` directly, the same
                 // "no zero-iterations merge" choice this arm already made.
                 *locals = body_locals;
                 self.in_condition_position = true;
+                // `loop_depth` deliberately stays incremented one
+                // statement longer than While's own arm needs it to -
+                // real corpus false positive this fixes (Symfony's own
+                // `LoggerTest`'s `do { ...; $attempts++; } while ((...) &&
+                // $attempts < 150);`): this trailing check of the loop's
+                // own condition is *itself* still evaluating a loop-
+                // carried variable's post-convergence type, exactly as
+                // approximate as any pass inside the loop - `check_
+                // constant_numeric_comparison`/`check_constant_loose_
+                // comparison`'s own `self.loop_depth > 0` guard (`checker/
+                // expr.rs`) needs to see it still incremented here, or
+                // `$attempts`'s own convergence-bounded range (this
+                // project's 3-pass approximation reaches nowhere near the
+                // real 150) makes `$attempts < 150` look unconditionally,
+                // wrongly provable.
                 self.check_expr(cond, locals, label);
+                self.loop_depth -= 1;
                 // Phase 15, `DoWhileLoopConstantConditionRule`: real
                 // inferred-type trust, same as `If`/`While` above. Both
                 // directions are gated on breakless-ness here (confirmed
@@ -618,7 +666,7 @@ impl<'a> Checker<'a> {
                             &entry,
                             declared_return,
                             label,
-                            |this, pass_locals, declared_return, label| {
+                            |this, pass_locals, declared_return, label, _pass| {
                                 for e in &cond[..cond.len() - 1] {
                                     this.check_expr(e, pass_locals, label);
                                 }
@@ -670,7 +718,7 @@ impl<'a> Checker<'a> {
                             &entry,
                             declared_return,
                             label,
-                            |this, pass_locals, declared_return, label| {
+                            |this, pass_locals, declared_return, label, _pass| {
                                 this.check_stmt(body, pass_locals, declared_return, label);
                                 for e in step {
                                     this.check_expr(e, pass_locals, label);
@@ -779,7 +827,7 @@ impl<'a> Checker<'a> {
                     &entry,
                     declared_return,
                     label,
-                    |this, pass_locals, declared_return, label| {
+                    |this, pass_locals, declared_return, label, _pass| {
                         if let Some(k) = key {
                             this.bind_simple_target(k, Type::Mixed, pass_locals);
                             this.check_expr(k, pass_locals, label);
@@ -1247,11 +1295,27 @@ impl<'a> Checker<'a> {
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 self.check_attributes(&c.attrs, &fqn);
+                self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
+                if c.kind == ClassKind::Trait {
+                    self.check_trait_is_not_an_attribute_class(&c.attrs, &fqn);
+                }
                 for p in &c.properties {
                     self.check_attributes(&p.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &p.attrs,
+                        ATTRIBUTE_TARGET_PROPERTY,
+                        "property",
+                        &fqn,
+                    );
                 }
                 for cc in &c.consts {
                     self.check_attributes(&cc.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &cc.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                        &fqn,
+                    );
                 }
                 // A conditionally-declared trait (the common `if
                 // (version_compare(...)) { trait Foo {...} }`/`if
@@ -1280,11 +1344,24 @@ impl<'a> Checker<'a> {
             StmtKind::EnumDecl(e) => {
                 let fqn = self.name_ctx.declared_name(&e.name);
                 self.check_attributes(&e.attrs, &fqn);
+                self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
                 for case in &e.cases {
                     self.check_attributes(&case.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &case.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                        &fqn,
+                    );
                 }
                 for cc in &e.consts {
                     self.check_attributes(&cc.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &cc.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                        &fqn,
+                    );
                 }
                 for m in &e.methods {
                     self.check_function(&m.function, Some(&fqn), m.is_static);
@@ -1520,6 +1597,81 @@ impl<'a> Checker<'a> {
         };
         Some((name, ty))
     }
+
+    /// `@var Type $name` / bare `@var Type`'s own error-reporting half -
+    /// real PHPStan's `VarTagTypeRuleHelper`/`VarTagChangedExpressionTypeRule`,
+    /// scoped down to the single highest-value, most common real shape: a
+    /// plain assignment statement (`/** @var Type */ $x = expr;`) whose
+    /// own RHS's naturally-inferred type the declared tag can't possibly
+    /// be describing (not even a supertype of it) - a real, catchable
+    /// mistake (a typo'd type, a stale tag after a refactor). Real
+    /// PHPStan's own version covers substantially more (list/array
+    /// destructuring targets, a native-type-vs-docblock-type split with
+    /// its own separate identifier and config toggle, a
+    /// `containsPhpStanType`-specific "this exact type, don't widen"
+    /// assumption check) - deliberately not replicated, a disclosed scope
+    /// trim matching this project's own simpler type system (no native/
+    /// docblock type split at this granularity) and "favor false
+    /// negatives" precedent throughout. `Type::Mixed` on either side is
+    /// never flagged - it means "no type declared at all" as often as
+    /// real `mixed` in this project's own overloaded convention (see
+    /// this file's own module doc comment), so a mismatch there is
+    /// usually not a real one.
+    fn check_inline_var_annotation_type(
+        &mut self,
+        stmt: &Stmt,
+        name: &str,
+        declared_ty: &Type,
+        locals: &Locals,
+        label: &str,
+    ) {
+        let StmtKind::Expression(e) = &stmt.kind else {
+            return;
+        };
+        let ExprKind::Assign(lhs, rhs) = &e.kind else {
+            return;
+        };
+        let ExprKind::Variable(lhs_name) = &lhs.kind else {
+            return;
+        };
+        if lhs_name != name {
+            return;
+        }
+        if matches!(declared_ty, Type::Mixed) {
+            return;
+        }
+        let rhs_ty = self.infer_expr(rhs, locals);
+        if matches!(rhs_ty, Type::Mixed) {
+            return;
+        }
+        // Real corpus find: `is_assignable(&rhs_ty, declared_ty)` alone
+        // flags the single most common real reason anyone writes an
+        // inline `@var` in the first place - *refining* a wide, less-
+        // precise inferred type (Doctrine's own bare `array`-returning
+        // `getArrayResult()`, real Piwigo shape) into a narrower,
+        // perfectly compatible one (`list<array<string, mixed>>`) - a
+        // list is unconditionally still an array, not a genuine
+        // mismatch. `declared_ty` only ever needs to be *some* plausible
+        // relative of `rhs_ty` - a subtype (the refining case above) or
+        // a supertype (widening, rarer but equally legitimate) - so both
+        // directions have to fail before this is a real, catchable
+        // mistake (a typo'd type, a stale tag after a refactor), matching
+        // this function's own doc comment's "not even a supertype of it"
+        // phrasing exactly (the code just didn't implement it yet).
+        if !self.registry.is_assignable(&rhs_ty, declared_ty)
+            && !self.registry.is_assignable(declared_ty, &rhs_ty)
+        {
+            self.report(
+                label.to_string(),
+                format!(
+                    "PHPDoc tag @var with type {declared_ty} is not compatible with the assigned expression's own type {rhs_ty}."
+                ),
+                lhs.span,
+                2,
+                "varTag.type",
+            );
+        }
+    }
 }
 
 /// Every bare-variable name `kind` itself unconditionally (re)binds via a
@@ -1531,6 +1683,40 @@ impl<'a> Checker<'a> {
 /// overwrite it first. Deliberately doesn't cover `foreach` - see the
 /// comment in `check_stmt` on why a tag on a `foreach` header isn't
 /// supported at all, rather than half-supported.
+/// The condition to narrow for, if `e` is a bare `assert(...)` call
+/// (`\assert` included), or a top-level `&&`-chain whose *leftmost*
+/// operand is one - `None` otherwise. Only the leftmost position is
+/// safe: `&&` evaluates left to right and short-circuits on the first
+/// falsy operand, so the leftmost operand is unconditionally evaluated
+/// the moment this whole statement is reached at all, and (being an
+/// `assert()` call) throws rather than let execution continue if its
+/// own condition were false - meaning reaching *past* this statement
+/// proves it held, exactly like the bare, whole-statement case. Any
+/// operand *after* the first has no such guarantee (if an earlier
+/// operand was falsy, `&&` short-circuits before ever reaching it at
+/// all, and the statement still completes normally either way) - not
+/// walked past the leftmost position, even for a real, common `assert(
+/// $a) && assert($b);` double-assertion, a real, disclosed scope trim
+/// rather than a wrong answer.
+fn bare_assert_condition(e: &Expr) -> Option<&Expr> {
+    fn as_bare_assert_call(e: &Expr) -> Option<&Expr> {
+        let ExprKind::Call(callee, args) = &e.kind else {
+            return None;
+        };
+        let ExprKind::Name(name) = &callee.kind else {
+            return None;
+        };
+        if name.trim_start_matches('\\') != "assert" {
+            return None;
+        }
+        args.first().map(|a| &a.value)
+    }
+    match &e.kind {
+        ExprKind::Binary(BinOp::And, l, _) => as_bare_assert_call(l),
+        _ => as_bare_assert_call(e),
+    }
+}
+
 fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
     match kind {
         StmtKind::Expression(e) => match &e.kind {

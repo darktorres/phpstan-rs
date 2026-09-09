@@ -117,15 +117,29 @@ impl<'a> Checker<'a> {
                 if is_eq || is_neq {
                     let matches_when_true = if is_eq { branch_true } else { !branch_true };
                     self.apply_equality_narrowing(l, r, locals, matches_when_true);
-                } else if branch_true
-                    && let ExprKind::Call(callee, args) = &l.kind
+                } else if let ExprKind::Call(callee, args) = &l.kind
                     && let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "count"
                     && let [single_arg] = args.as_slice()
                     && let Some(key) = narrowing_key(&single_arg.value)
                     && let ExprKind::Literal(Literal::Int(n)) = &r.kind
-                    && ((matches!(op, BinOp::Gt) && *n == 0)
-                        || (matches!(op, BinOp::GtEq) && *n == 1))
+                    && ((branch_true
+                        && ((matches!(op, BinOp::Gt) && *n == 0)
+                            || (matches!(op, BinOp::GtEq) && *n == 1)))
+                        // Real corpus find (Piwigo's own `ImageDerivativeController::
+                        // parseCustomParams`): `if (count($x) < 1) { $this
+                        // ->ierror(...); }` (a real, `never`-typed early-
+                        // exit idiom) proves the exact same "`$x` is non-
+                        // empty" fact on the surviving path, just phrased
+                        // as the *false* branch of the mirrored comparison
+                        // (`count($x) < 1` false, or `count($x) <= 0`
+                        // false, both mean `count($x) >= 1`) - the
+                        // reversed-operand form (`1 > count($x)`) still
+                        // isn't handled, the identical scope trim the
+                        // `Gt`/`GtEq` case above already discloses.
+                        || (!branch_true
+                            && ((matches!(op, BinOp::Lt) && *n == 1)
+                                || (matches!(op, BinOp::LtEq) && *n == 0))))
                 {
                     // Phase 14: `count($x) > 0`/`count($x) >= 1` proves
                     // `$x` non-empty - scoped to exactly this shape with
@@ -1637,6 +1651,16 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
 /// the same way `narrow_type_to`/`narrow_type_excluding` do; anything
 /// that isn't an `ArrayShape` (or a `Union` of them) is left untouched,
 /// this project's usual "don't guess" precedent.
+/// Whether `fields` (an `ArrayShape`'s own field list) carries the
+/// unsealed-shape sentinel (`types::try_parse_array_shape`'s own
+/// `"..."` marker for a real `array{a: int, ...}` PHPDoc shape) - a
+/// shape written this way may hold additional, unlisted keys, so "this
+/// key isn't one of the declared fields" alone is never proof it's
+/// absent the way it is for an ordinary, sealed shape.
+pub(crate) fn is_unsealed_shape(fields: &[(String, Type, bool)]) -> bool {
+    fields.iter().any(|(name, _, _)| name == "...")
+}
+
 pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: bool) -> Type {
     match ty {
         Type::ArrayShape(fields) => match fields.iter().find(|(k, _, _)| k == key) {
@@ -1647,6 +1671,17 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
                     ty.clone()
                 }
             }
+            // An *unsealed* shape (`array{a: int, ...}`, `types::
+            // try_parse_array_shape`'s own `"..."` sentinel field) can
+            // carry keys beyond the ones it lists - `key` simply not
+            // being one of the declared fields is never proof it's
+            // absent, unlike a sealed shape's identical situation just
+            // below. Only the `present` direction is affected: "is `key`
+            // known to be *present*" still correctly stays unprovable
+            // either way (an unsealed shape doesn't promise anything
+            // about a specific unlisted key being there, only that it
+            // *could* be).
+            None if is_unsealed_shape(fields) => ty.clone(),
             None => {
                 if present {
                     Type::Never

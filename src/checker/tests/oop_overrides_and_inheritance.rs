@@ -1375,6 +1375,127 @@ fn phpstan_readonly_property_assign_flags_writes_outside_the_constructor() {
     assert_eq!(readonly_hits, 2, "expected both writes flagged, got: {d:?}");
 }
 
+// Real corpus find (`cyclonedx/cyclonedx-library`'s own
+// `Component::__clone()`): PHP 8.3 added a real, deliberate exception for
+// reassigning a `readonly` property once from within the declaring
+// class's own `__clone()` - a "deep clone" idiom, not a bug.
+#[test]
+fn a_readonly_reassignment_inside_clone_is_allowed_on_php_8_3_plus() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public function __construct(public readonly array $items) {}
+                public function __clone(): void {
+                    $this->items = [...$this->items];
+                }
+            }
+        "#,
+        |r| r.php_version = Some((8, 3)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.readOnlyAssignNotInConstructor"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_readonly_reassignment_inside_clone_is_still_flagged_below_php_8_3() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public function __construct(public readonly array $items) {}
+                public function __clone(): void {
+                    $this->items = [...$this->items];
+                }
+            }
+        "#,
+        |r| r.php_version = Some((8, 2)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.readOnlyAssignNotInConstructor"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_readonly_reassignment_inside_clone_is_still_flagged_with_no_configured_php_version() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function __construct(public readonly array $items) {}
+                public function __clone(): void {
+                    $this->items = [...$this->items];
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.readOnlyAssignNotInConstructor"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_phpdoc_readonly_tagged_property_written_outside_the_constructor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @readonly */
+                public int $x;
+                public function __construct(int $x) { $this->x = $x; }
+                public function setX(int $x): void { $this->x = $x; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(
+            |x| x.identifier == "property.readOnlyAssignNotInConstructor"
+                && x.message.contains("Foo::$x is readonly")
+        ),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_phpstan_readonly_tag_is_recognized_the_same_as_the_bare_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @phpstan-readonly */
+                public int $x;
+                public function __construct(int $x) { $this->x = $x; }
+                public function setX(int $x): void { $this->x = $x; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.readOnlyAssignNotInConstructor"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_property_with_no_readonly_tag_at_all_is_never_flagged_for_a_setter_write() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public int $x;
+                public function __construct(int $x) { $this->x = $x; }
+                public function setX(int $x): void { $this->x = $x; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.readOnlyAssignNotInConstructor"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // Phase 64: narrowing a method's own visibility on override is a real,
 // unconditional PHP fatal error (confirmed directly against real `php`:
 // "Access level to Child::foo() must be public (as in class Base)").

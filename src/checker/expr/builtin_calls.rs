@@ -555,6 +555,157 @@ impl<'a> Checker<'a> {
                     };
                 }
             }
+            // Phase 73/74 follow-up: `array_pop`/`array_shift` remove and
+            // return the last/first element (by reference - the caller's
+            // own argument shrinks by one, deliberately not modeled here,
+            // only this expression's own *result* type is), or `null` on
+            // an already-empty array - the identical three-way "known
+            // empty / known non-empty / ambiguous" split `array_pointer_
+            // result` already implements for `reset`/`current`/`end`,
+            // just with `null` as the empty-marker instead of `false`
+            // (confirmed via `php`: both, unlike `current`, never
+            // additionally union with the marker once non-emptiness is
+            // already provable - same `force_union: false` shape).
+            "array_pop" | "array_shift" if args.len() == 1 => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
+                    return Self::array_pointer_result(&arr_ty, elem_ty, Type::Null, false);
+                }
+            }
+            // Phase 73/74 follow-up: `array_splice` returns an array of
+            // the *removed* elements (or `[]` if nothing was removed) -
+            // always the input's own value type, re-sequenced from zero
+            // (confirmed via `php`: the removed slice's own original
+            // keys are never preserved), non-emptiness never guaranteed
+            // (an explicit zero-length `$length` legitimately removes
+            // nothing).
+            "array_splice" if !args.is_empty() => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
+                    return Type::Intersection(vec![
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem_ty)),
+                        Type::Accessory(AccessoryKind::ArrayList),
+                    ]);
+                }
+            }
+            // Phase 73/74 follow-up: `array_replace`/`array_replace_recursive`
+            // overlay every argument's own key/value pairs onto the
+            // first, later arguments winning any key collision - the
+            // result's own key type is the union of every argument's own
+            // key type, same for values (mirrors `array_merge`'s already-
+            // established key/value-union shape one call up in this same
+            // match, just without that function's own int-key
+            // renumbering quirk - `array_replace`, confirmed via `php`,
+            // always preserves int keys exactly as given, never
+            // renumbers them). List-ness/non-emptiness aren't tracked
+            // here (a later argument overwriting every key of an earlier,
+            // non-empty one is a real, if rare, way to end up with fewer
+            // surviving keys than any single argument had) - the same
+            // "don't guess past what's certain" leniency this file
+            // already applies elsewhere.
+            "array_replace" | "array_replace_recursive" if !args.is_empty() => {
+                let mut key_ty: Option<Type> = None;
+                let mut val_ty: Option<Type> = None;
+                for a in args {
+                    let arg_ty = self.infer_expr(&a.value, locals);
+                    if let Some(k) = Self::array_key_type(&arg_ty) {
+                        key_ty =
+                            Some(key_ty.map_or(k.clone(), |existing| union_types(existing, k)));
+                    }
+                    if let Some(v) = Self::array_element_type(&arg_ty) {
+                        val_ty =
+                            Some(val_ty.map_or(v.clone(), |existing| union_types(existing, v)));
+                    }
+                }
+                if let (Some(k), Some(v)) = (key_ty, val_ty) {
+                    return Type::Array(Box::new(k), Box::new(v));
+                }
+            }
+            // Phase 73/74 follow-up: `array_pad` pads (or truncates,
+            // negative `$size`) `$array` up to `abs($size)` elements with
+            // copies of `$value` - the result's own value type is the
+            // union of the input's own element type and the pad value's
+            // own type (confirmed via `php`: an already-long-enough array
+            // is returned completely unchanged, so the pad value's type
+            // never *replaces* the original, only ever widens it). Key
+            // type/list-ness aren't modeled precisely (padding can
+            // truncate from either end depending on `$size`'s sign,
+            // genuinely re-sequencing keys either way) - same leniency.
+            "array_pad" if args.len() == 3 => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let pad_ty = self.infer_expr(&args[2].value, locals);
+                if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
+                    return Type::Array(
+                        Box::new(Type::unknown_array_key()),
+                        Box::new(union_types(elem_ty, pad_ty)),
+                    );
+                }
+            }
+            // Phase 73/74 follow-up: the result's keys are the *values*
+            // of `$array` (only `int|string` ones are legal at runtime -
+            // any other value type throws a real `TypeError`, so this
+            // doesn't attempt to narrow further based on the input's own
+            // value type precision), each mapped to its own occurrence
+            // count - real PHP always returns a plain `int` count,
+            // non-emptiness matching the input's.
+            "array_count_values" if args.len() == 1 => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                if Self::is_array_like(&arr_ty) {
+                    let counted = Type::Array(
+                        Box::new(Type::Union(vec![Type::Int, Type::String])),
+                        Box::new(Type::Int),
+                    );
+                    return if Self::is_known_non_empty_array(&arr_ty) {
+                        Type::Intersection(vec![
+                            counted,
+                            Type::Accessory(AccessoryKind::NonEmptyArray),
+                        ])
+                    } else {
+                        counted
+                    };
+                }
+            }
+            // Phase 73/74 follow-up: keys are re-cased (`CASE_UPPER`/
+            // `CASE_LOWER`) but never added, removed, or retyped - an
+            // `int` key is entirely unaffected (only a *string* key is
+            // ever re-cased at all), so unlike every other function in
+            // this match, the input's own type - key type, value type,
+            // list-ness, non-emptiness, all of it - survives completely
+            // unchanged. Confirmed via `php`: `array_change_key_case([0
+            // => 'a', 'Foo' => 'b'])` keeps key `0` as the int `0`, only
+            // `'Foo'` changes case.
+            "array_change_key_case" if matches!(args.len(), 1..=2) => {
+                return self.infer_expr(&args[0].value, locals);
+            }
+            // Phase 73/74 follow-up: with `$num` omitted or exactly the
+            // literal `1` (the overwhelmingly common real call shape),
+            // `array_rand` returns a single random *key* (never an
+            // array) - the input's own key type, not the bare `array|
+            // string|int` union its plain stub signature gives with no
+            // way to know which. A literal `$num` above `1` returns an
+            // array of that many keys instead - confirmed via `php`.
+            "array_rand" if matches!(args.len(), 1..=2) => {
+                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let num_literal = args
+                    .get(1)
+                    .map(|a| self.infer_expr(&a.value, locals))
+                    .and_then(|t| match t {
+                        Type::IntLiteral(n) => Some(n),
+                        _ => None,
+                    });
+                if let Some(key_ty) = Self::array_key_type(&arr_ty) {
+                    match num_literal.unwrap_or(1) {
+                        1 => return key_ty,
+                        n if n > 1 => {
+                            return Type::Array(
+                                Box::new(Type::unknown_array_key()),
+                                Box::new(key_ty),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
             // Phase 74: the internal-array-pointer family
             // (`ArrayPointerFunctionsDynamicReturnTypeExtension`/
             // `ArrayCurrentDynamicReturnTypeExtension`/
@@ -1396,7 +1547,7 @@ impl<'a> Checker<'a> {
     /// `next`/`prev` alone set it, since moving the pointer can run off
     /// either end regardless of how many elements exist; anything else
     /// (emptiness genuinely unknown) unions the two.
-    fn array_pointer_result(
+    pub(crate) fn array_pointer_result(
         arr_ty: &Type,
         result_ty: Type,
         empty_marker: Type,

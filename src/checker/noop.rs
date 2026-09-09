@@ -61,9 +61,11 @@
 //! printer this project doesn't have, to name the useless expression in
 //! the message).
 
-use crate::ast::{BinOp, Expr, ExprKind, UnaryOp};
+use crate::ast::{BinOp, Expr, ExprKind, FunctionDecl, UnaryOp};
 use crate::ast_walk::expr_children;
 use crate::checker::{Checker, Locals};
+use crate::docblock;
+use crate::registry::FunctionSig;
 use crate::types::Type;
 
 /// Whether `e`'s own subtree provably has no observable side effect at
@@ -238,5 +240,66 @@ impl<'a> Checker<'a> {
             _ => return,
         };
         self.report(label.to_string(), message, e.span, 4, identifier);
+    }
+
+    /// `@phpstan-pure`/`@phpstan-impure` tag validation (Phase 41 follow-
+    /// up) - real PHPStan's own `FunctionPurityCheck`, scoped to the one
+    /// direction this project's own *binary* purity classification
+    /// (`FunctionSig::is_transitively_pure` - deliberately not the
+    /// richer per-point `certain`/`maybe` taxonomy real PHPStan's own
+    /// version needs, see Phase 41's own Done writeup) can support
+    /// without a real risk of false positives: a declaration tagged
+    /// `@phpstan-impure` that this project's own classifier *proves*
+    /// pure (`impureFunction.pure`/`impureMethod.pure`, confirmed
+    /// directly against real PHPStan's own identical identifier/message
+    /// pair). The opposite direction (`@phpstan-pure` tagged on
+    /// something the classifier calls impure) is deliberately **not**
+    /// built - `is_transitively_pure == false` conflates "genuinely
+    /// impure" with "unknown, so conservatively disqualified" (an
+    /// unresolvable receiver unconditionally disqualifies a declaration
+    /// here, per this project's own disclosed precision limit versus
+    /// real PHPStan), so flagging that direction would misfire on every
+    /// actually-pure function this project simply can't *prove* pure -
+    /// the same "favor false negatives" precedent this project holds
+    /// throughout, applied to which *direction* of a two-way check is
+    /// safe to build at all, not just how each one individually is
+    /// worded.
+    pub(crate) fn check_declared_purity_tag(
+        &mut self,
+        f: &FunctionDecl,
+        sig: Option<&FunctionSig>,
+        is_method: bool,
+        label: &str,
+    ) {
+        let Some(sig) = sig else {
+            return;
+        };
+        if !sig.is_transitively_pure {
+            return;
+        }
+        let Some(doc) = f.doc_comment.as_deref() else {
+            return;
+        };
+        if !doc.contains("@phpstan-impure") && !doc.contains("@impure") {
+            return;
+        }
+        let block = docblock::parse(doc);
+        if !block.impure {
+            return;
+        }
+        let (description, identifier) = if is_method {
+            ("Method", "impureMethod.pure")
+        } else {
+            ("Function", "impureFunction.pure")
+        };
+        self.report(
+            label.to_string(),
+            format!(
+                "{description} {label}() is marked as impure but does not have any side effects."
+            ),
+            f.name_span,
+            0,
+            identifier,
+        );
     }
 }

@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, narrowing_key,
+    Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, is_unsealed_shape, narrowing_key,
     purge_stale_narrowing_for, union_types,
 };
 use crate::types::{self, AccessoryKind, Type};
@@ -350,7 +350,30 @@ impl<'a> Checker<'a> {
         // constructor parameter never reaches this check at all (no
         // `ExprKind::Assign` node exists for it in source), so it counts
         // as the allowed first write automatically.
+        //
+        // Real corpus find (`cyclonedx/cyclonedx-library`'s own
+        // `Component::__clone()`): PHP 8.3 added a real, deliberate
+        // exception for exactly this shape - reassigning a `readonly`
+        // property once from within the declaring class's own
+        // `__clone()` (`ReadOnlyPropertyAssignRule`'s own `$inClone`
+        // gate, confirmed directly against `vendor/phpstan-src`) - a
+        // "deep clone" idiom, not a bug. Gated on the configured
+        // `php_version` being `>= 8.3` (`PhpFeature::
+        // ReadonlyPropertyReinitializationOnClone`), matching real
+        // PHPStan's own identical version check exactly - unset or
+        // older stays silent-*into-flagging*, not the other way around:
+        // reassigning here on PHP < 8.3 is a real, unconditional runtime
+        // error, so the safe default without a configured version is to
+        // keep treating `__clone()` the same as any other non-
+        // constructor method.
+        let in_clone_reinit = self.current_class.as_deref() == Some(owner.as_str())
+            && self.current_method.as_deref() == Some("__clone")
+            && self.registry.php_version.is_some_and(|v| {
+                crate::php_version::PhpFeature::ReadonlyPropertyReinitializationOnClone
+                    .is_available(v)
+            });
         if prop_sig.is_readonly
+            && !in_clone_reinit
             && (self.current_class.as_deref() != Some(owner.as_str())
                 || self.current_method.as_deref() != Some("__construct"))
         {
@@ -460,10 +483,14 @@ impl<'a> Checker<'a> {
         if shapes.is_empty() || shapes.len() != members.len() {
             return;
         }
-        if shapes
-            .iter()
-            .any(|fields| fields.iter().any(|(name, _, _)| *name == key))
-        {
+        // An unsealed shape (`is_unsealed_shape`'s own doc comment) may
+        // carry the key even though it isn't one of its declared fields
+        // - the same "any union member could plausibly have it" leniency
+        // this check already extends to a key genuinely declared on only
+        // *one* arm of the union, just for a different reason.
+        if shapes.iter().any(|fields| {
+            fields.iter().any(|(name, _, _)| *name == key) || is_unsealed_shape(fields)
+        }) {
             return;
         }
         self.report(

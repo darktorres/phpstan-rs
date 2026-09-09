@@ -137,6 +137,101 @@ fn phpdoc_array_shorthand_with_a_parenthesized_intersection_element_type_parses(
     );
 }
 
+// Real, serious corpus find (nikic/php-parser's own `@param array{int,
+// string, string}[] $patches`): `try_parse_array_shape`/`try_parse_
+// object_shape` were only ever tried once, against the *original*,
+// un-stripped string - a shape wrapped in this exact array-shorthand
+// suffix never ends with the shape's own closing `}` at that point (it
+// ends with `[]`), so it fell straight through to the generic class-name
+// branch and mangled the shape's own literal text into a bogus,
+// namespace-qualified "class name".
+#[test]
+fn a_positional_array_shape_wrapped_in_array_shorthand_parses() {
+    assert_eq!(
+        parse_type_string("array{int, string, string}[]"),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::ArrayShape(vec![
+                ("0".to_string(), Type::Int, false),
+                ("1".to_string(), Type::String, false),
+                ("2".to_string(), Type::String, false),
+            ]))
+        )
+    );
+}
+
+#[test]
+fn a_keyed_array_shape_wrapped_in_array_shorthand_parses() {
+    assert_eq!(
+        parse_type_string("array{a: int}[]"),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::ArrayShape(vec![("a".to_string(), Type::Int, false)]))
+        )
+    );
+}
+
+#[test]
+fn an_object_shape_wrapped_in_array_shorthand_parses() {
+    assert_eq!(
+        parse_type_string("object{a: int}[]"),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::ObjectShape(vec![("a".to_string(), Type::Int, false)]))
+        )
+    );
+}
+
+// Phase 80 follow-up: `OffsetAccessType` - `SomeShape['key']` extracts
+// one field's own value type.
+#[test]
+fn offset_access_type_on_an_array_shape_extracts_the_field_type() {
+    assert_eq!(
+        parse_type_string("array{name: string, age: int}['age']"),
+        Type::Int
+    );
+}
+
+#[test]
+fn offset_access_type_accepts_a_bare_unquoted_key() {
+    assert_eq!(parse_type_string("array{0: string, 1: int}[1]"), Type::Int);
+}
+
+#[test]
+fn offset_access_type_on_a_missing_key_degrades_to_mixed() {
+    assert_eq!(
+        parse_type_string("array{name: string}['missing']"),
+        Type::Mixed
+    );
+}
+
+#[test]
+fn offset_access_type_on_a_plain_array_uses_its_uniform_value_type() {
+    assert_eq!(
+        parse_type_string("array<string, int>['anything']"),
+        Type::Int
+    );
+}
+
+#[test]
+fn an_empty_bracket_after_offset_access_still_parses_as_array_shorthand() {
+    // `SomeShape['key'][]` - the outer `[]` is the ordinary array-
+    // shorthand suffix, not another offset access (its key part would
+    // be empty).
+    assert_eq!(
+        parse_type_string("array{age: int}['age'][]"),
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
+    );
+}
+
+#[test]
+fn offset_access_type_recurses_through_a_union() {
+    assert_eq!(
+        parse_type_string("(array{a: int}|array{a: string})['a']"),
+        Type::Union(vec![Type::Int, Type::String])
+    );
+}
+
 #[test]
 fn dollar_this_phpdoc_pseudo_type_is_treated_as_static() {
     // `@return $this` is a real, documented PHPStan/Psalm convention

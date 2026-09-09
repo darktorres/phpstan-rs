@@ -412,6 +412,35 @@ fn count_greater_than_zero_narrows_to_non_empty_array() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus find (Piwigo's own `ImageDerivativeController::
+// parseCustomParams`): `if (count($x) < 1) { neverReturns(); }` (a real,
+// `never`-typed early-exit idiom) proves the exact same "`$x` is non-
+// empty" fact on the surviving path as the direct `count($x) > 0` form
+// above - just phrased as the *false* branch of the mirrored comparison.
+#[test]
+fn count_less_than_one_in_a_terminating_branch_narrows_to_non_empty_array() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function bail(): never { throw new \Exception(); }
+            function f(array $x): void {
+                if (count($x) < 1) {
+                    bail();
+                }
+                sink($x);
+            }
+            function g(array $x): void {
+                if (count($x) <= 0) {
+                    bail();
+                }
+                sink($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Phase 55: a bare `count($x)` truthiness check (no explicit `> 0`/
 // `>= 1` comparison) - the same "provably non-empty" fact the
 // comparison form above already proves.

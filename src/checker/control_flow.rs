@@ -282,7 +282,7 @@ impl<'a> Checker<'a> {
         entry: &Locals,
         declared_return: Option<&Type>,
         label: &str,
-        mut run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str),
+        mut run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str, usize),
     ) -> (Locals, Vec<Locals>) {
         const MAX_PASSES: usize = 3;
         let mut pass_entry = entry.clone();
@@ -292,7 +292,7 @@ impl<'a> Checker<'a> {
             self.loop_break_states.push(Vec::new());
             self.loop_continue_states.push(Vec::new());
             let diagnostics_before = self.diagnostics.len();
-            run_pass(self, &mut body_locals, declared_return, label);
+            run_pass(self, &mut body_locals, declared_return, label, pass);
             let break_states = self.loop_break_states.pop().unwrap_or_default();
             let continue_states = self.loop_continue_states.pop().unwrap_or_default();
             let mut next_entry = merge_scopes(entry, &body_locals);

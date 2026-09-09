@@ -1711,3 +1711,143 @@ fn an_unbound_method_own_template_nested_inside_a_generic_argument_with_a_concre
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 54 follow-up: generic-reference arity/well-formedness on an
+// @extends/@implements clause specifically.
+
+#[test]
+fn extending_a_single_template_class_with_two_type_arguments_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            class Collection {}
+            /**
+             * @extends Collection<int, string>
+             */
+            class IntCollection extends Collection {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.moreTypes"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn extending_a_two_template_class_with_one_type_argument_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template K
+             *   @template V
+             */
+            class Map {}
+            /**
+             * @extends Map<string>
+             */
+            class StringMap extends Map {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.lessTypes"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn extending_with_the_exact_declared_arity_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            class Collection {}
+            /**
+             * @extends Collection<int>
+             */
+            class IntCollection extends Collection {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_missing_argument_covered_by_a_template_default_is_never_flagged() {
+    // K has no default (required); V does - only 1 argument is needed,
+    // not 2, even though the class declares 2 templates.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template K
+             *   @template V = int
+             */
+            class Map {}
+            /**
+             * @extends Map<string>
+             */
+            class StringMap extends Map {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Real corpus false positive (Piwigo's own custom `phpstan-stubs/
+// LatteCachingIterator.stub.php`): a class with *no* declared templates
+// at all being given type arguments in someone else's `@extends` tag is
+// `generics.notGeneric` territory (a different, deliberately unbuilt
+// check - see `check_generic_reference_arity`'s own doc comment), not
+// `generics.moreTypes` - this project's own `@template`-tag parsing
+// might simply have a gap for the referenced class, indistinguishable
+// from "genuinely not generic" from here.
+#[test]
+fn extending_a_class_with_zero_declared_templates_and_real_type_args_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            /** @extends Base<int, string, bool> */
+            class Derived extends Base {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Real corpus false positive (Symfony's own `ServiceCollectionInterface`,
+// which `extends ServiceProviderInterface, \Countable, \IteratorAggregate`
+// with *two* of those three each carrying their own `@extends <Args>`
+// tag): `ClassInfo::extends_args` is a flat, un-keyed list - real PHP
+// interfaces can `extends` more than one parent, each with an
+// independent argument list this field has no way to keep separate, so
+// two `@extends<...>` tags parse into one conflated list. Arity-checking
+// against that conflated list is only trustworthy when there's exactly
+// one `extends` target to begin with.
+#[test]
+fn an_interface_extending_two_generic_parents_at_once_is_never_flagged_for_arity() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            interface First {}
+            /** @template K
+             *   @template V
+             */
+            interface Second {}
+            /**
+             * @extends First<int>
+             * @extends Second<string, bool>
+             */
+            interface Combined extends First, Second {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

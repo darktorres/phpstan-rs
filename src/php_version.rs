@@ -127,6 +127,12 @@ pub enum PhpFeature {
     /// `UnsetCastRemoved`. `PhpVersion::supportsCaseInsensitiveConstantNames`
     /// (`DefineParametersRule`).
     CaseInsensitiveConstantsRemoved,
+    /// A `readonly` property may be reassigned once from within the
+    /// declaring class's own `__clone()` method (a real, deliberate
+    /// "deep clone" idiom, not a bug) - `PhpVersion::
+    /// supportsReadonlyPropertyReinitializationOnClone`
+    /// (`ReadOnlyPropertyAssignRule`'s own `$inClone` gate).
+    ReadonlyPropertyReinitializationOnClone,
 }
 
 impl PhpFeature {
@@ -144,7 +150,9 @@ impl PhpFeature {
             | CaseInsensitiveConstantsRemoved => (8, 0),
             FinalClassConstants | ArrayUnpackingWithStringKeys => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
-            NativeTypedClassConstants | ReadOnlyAnonymousClasses => (8, 3),
+            NativeTypedClassConstants
+            | ReadOnlyAnonymousClasses
+            | ReadonlyPropertyReinitializationOnClone => (8, 3),
             FinalPromotedProperties
             | VoidCast
             | DeprecatedNonStandardCasts

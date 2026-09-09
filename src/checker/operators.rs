@@ -32,7 +32,7 @@
 //! elevated false-positive rate against this project's own unions -
 //! not a good trade for a rule whose whole point is confidence.
 
-use crate::ast::{BinOp, UnaryOp};
+use crate::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
 use crate::checker::Checker;
 use crate::token::Span;
 use crate::types::{AccessoryKind, Type, is_subtype};
@@ -253,6 +253,63 @@ impl<'a> Checker<'a> {
             format!("Binary operation \"{op_str}\" between {l_ty} and {r_ty} results in an error."),
             span,
             2,
+            identifier,
+        );
+    }
+
+    /// Phase 52 follow-up: `$x / 0`/`$x % 0` - a real, unconditional PHP
+    /// fatal error (`DivisionByZeroError`, confirmed directly via
+    /// `php -r`) whenever the divisor is *statically known* to be zero.
+    /// Real PHPStan's own equivalent (`BinaryOpHandler`, confirmed
+    /// directly) models this as a *throw point* (`DivisionByZeroError`
+    /// added to the expression's own inferred throw set), not an
+    /// `ErrorType`/`binaryOp.invalid`-style diagnostic - this project
+    /// has no general expression-level throw-point inference to feed
+    /// that into (Phase 42's own still-open "transitive throws across
+    /// the call graph" item), so this is a deliberate, disclosed
+    /// adaptation: a dedicated diagnostic instead, under this project's
+    /// own identifiers (`division.byZero`/`modulo.byZero`, not real
+    /// PHPStan's own naming, since this isn't really the same mechanism)
+    /// rather than force-fitting it into the unrelated throw-tracking
+    /// machinery. Scoped to a literal `0`/`0.0` divisor only - a
+    /// provably-zero *range* (`int<0, 0>`) is a real, if much rarer,
+    /// residual not attempted, and a computed (non-literal) divisor is
+    /// never guessed at either way. Takes the divisor's own raw
+    /// expression, not just its inferred type - a plain float literal
+    /// (`0.0`) infers to bare `Type::Float` everywhere else in this
+    /// checker (`Type::FloatLiteral` is only ever produced by parsing a
+    /// docblock type *string*, never an ordinary literal float
+    /// *expression*), so the type alone would silently miss the single
+    /// most common real spelling of a literal-zero float divisor -
+    /// checked directly against the AST node itself instead, the same
+    /// "peek at the literal syntax directly" precedent `is_false_literal`/
+    /// `is_true_literal` already establish elsewhere in this codebase.
+    pub(crate) fn check_division_by_literal_zero(
+        &mut self,
+        op: &BinOp,
+        divisor: &Expr,
+        divisor_ty: &Type,
+        span: Span,
+        label: &str,
+    ) {
+        let (op_word, identifier) = match op {
+            BinOp::Div => ("Division", "division.byZero"),
+            BinOp::Mod => ("Modulo", "modulo.byZero"),
+            _ => return,
+        };
+        let is_zero = match divisor_ty {
+            Type::IntLiteral(0) => true,
+            Type::FloatLiteral(n) => *n == 0.0,
+            _ => matches!(&divisor.kind, ExprKind::Literal(Literal::Float(f)) if *f == 0.0),
+        };
+        if !is_zero {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!("{op_word} by zero."),
+            span,
+            0,
             identifier,
         );
     }

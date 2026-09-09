@@ -1,11 +1,12 @@
 use crate::ast::*;
 use crate::checker::{
+    ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, TemplateBindings,
     array_value_type_for_key, body_contains_yield, collect_goto_targets, expr_contains_yield,
-    is_language_construct, is_real_variable_key, is_superglobal, literal_string_key,
-    literal_string_value, merge_scopes, narrow_array_shape_by_key_presence, narrow_type_excluding,
-    narrowing_key, purge_stale_narrowing_for, resolve_call_args, superglobal_default_type,
-    to_bitwise_not,
+    is_language_construct, is_real_variable_key, is_superglobal, is_unsealed_shape,
+    literal_string_key, literal_string_value, merge_scopes, narrow_array_shape_by_key_presence,
+    narrow_type_excluding, narrowing_key, purge_stale_narrowing_for, resolve_call_args,
+    superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -35,6 +36,31 @@ use preg_shapes::{
 fn is_string_shaped(ty: &Type) -> bool {
     matches!(ty, Type::String | Type::StringLiteral(_))
         || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)))
+}
+
+/// Real corpus find (`Piwigo\Site\SiteRepository::findGalleriesUrlById`'s
+/// own `$id < -32768`): unary `-`'s own type-inference arm returned
+/// `inner_ty` completely unchanged for *both* `Neg` and `Plus` - correct
+/// for `+` (a true no-op on the value, only ever coercing a numeric
+/// string), but wrong for `-`, which was silently never negating a
+/// literal/range operand's own *value* at all - `-32768` inferred as
+/// `IntLiteral(32768)` (positive!), not `IntLiteral(-32768)`. Every
+/// consumer that only cares "is this an int" never noticed; this
+/// project's own range-based narrowing/constant-comparison machinery
+/// (which cares about the exact value) did, the moment anything started
+/// consuming it that way. `IntRange`'s own min/max swap on negation
+/// (`-int<a, b>` is `int<-b, -a>`, negation reverses order) mirrors real
+/// PHPStan's own `IntegerRangeType::equal()`-adjacent negation handling.
+/// Anything else (a bare `Type::Int`, `Type::Float`, ...) has no
+/// specific value to flip, so it's returned unchanged - exactly what the
+/// old code already did for those cases, correctly.
+fn negate_numeric_literal(ty: Type) -> Type {
+    match ty {
+        Type::IntLiteral(n) => Type::IntLiteral(-n),
+        Type::FloatLiteral(f) => Type::FloatLiteral(-f),
+        Type::IntRange(min, max) => Type::IntRange(max.map(|m| -m), min.map(|m| -m)),
+        other => other,
+    }
 }
 
 /// Phase 85: a bare `ExprKind::Name` with no registered global constant
@@ -310,6 +336,256 @@ fn shift_int_range(l_min: Option<i64>, l_max: Option<i64>, amount: i64, left: bo
     normalize_int_range(shift_bound(l_min), shift_bound(l_max))
 }
 
+/// Whether `l OP r` (`op` one of `Lt`/`Gt`/`LtEq`/`GtEq`) is provably
+/// always true or always false, given each side's own `(min, max)`
+/// bounds (`None` for an unbounded end) - `Some(true)`/`Some(false)`
+/// only when every possible value pair agrees, `None` for "depends on
+/// the actual runtime values" (including when either side is
+/// completely unbounded in the relevant direction). Mirrors real
+/// PHPStan's own `IntegerRangeType::isSmallerThan`/`isSmallerThanOrEqual`
+/// corner-comparison logic (confirmed directly, `vendor/phpstan-src`) -
+/// deliberately simplified to the pure-numeric case only, matching this
+/// project's own established "no loose-comparison modeling" precedent
+/// (`checker/narrowing.rs`'s own `comparison_narrowed_bounds`, the
+/// identical scope decision for the narrowing direction of this same
+/// comparison family).
+fn compare_range_outcome(
+    op: &BinOp,
+    l: (Option<i64>, Option<i64>),
+    r: (Option<i64>, Option<i64>),
+) -> Option<bool> {
+    let (l_min, l_max) = l;
+    let (r_min, r_max) = r;
+    match op {
+        BinOp::Lt => {
+            if let (Some(lmax), Some(rmin)) = (l_max, r_min)
+                && lmax < rmin
+            {
+                return Some(true);
+            }
+            if let (Some(lmin), Some(rmax)) = (l_min, r_max)
+                && lmin >= rmax
+            {
+                return Some(false);
+            }
+            None
+        }
+        BinOp::LtEq => {
+            if let (Some(lmax), Some(rmin)) = (l_max, r_min)
+                && lmax <= rmin
+            {
+                return Some(true);
+            }
+            if let (Some(lmin), Some(rmax)) = (l_min, r_max)
+                && lmin > rmax
+            {
+                return Some(false);
+            }
+            None
+        }
+        BinOp::Gt => {
+            if let (Some(lmin), Some(rmax)) = (l_min, r_max)
+                && lmin > rmax
+            {
+                return Some(true);
+            }
+            if let (Some(lmax), Some(rmin)) = (l_max, r_min)
+                && lmax <= rmin
+            {
+                return Some(false);
+            }
+            None
+        }
+        BinOp::GtEq => {
+            if let (Some(lmin), Some(rmax)) = (l_min, r_max)
+                && lmin >= rmax
+            {
+                return Some(true);
+            }
+            if let (Some(lmax), Some(rmin)) = (l_max, r_min)
+                && lmax < rmin
+            {
+                return Some(false);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Whether `e` reads a property (instance or static) anywhere in its
+/// own expression tree - a real, disclosed guard for `check_constant_
+/// loose_comparison`/`check_constant_numeric_comparison`: this project
+/// doesn't invalidate a property's own narrowed type across an arbitrary
+/// intervening method call (real PHPStan's own `MutatingScope` does,
+/// generally assuming any call *might* mutate any property unless
+/// proven otherwise) - real corpus false positive this fixes
+/// (`Piwigo\Admin\Integrity\CheckIntegrity::check`): `$this->retrieve_list
+/// = [];` followed by `$this->dispatchListCheckIntegrity();` (which, per
+/// its own name, populates it) then `if (count($this->retrieve_list) >
+/// 0)` - this project still believes `$this->retrieve_list` is the
+/// empty array literal it was *last assigned*, making `count(...)`'s own
+/// exact-`IntLiteral(0)` special case (`array_shape`'s own zero-field
+/// count) look "always false" against the literal `0` it's compared to,
+/// even though the intervening call almost certainly changed it. Not
+/// an exhaustive AST walk (covers the shapes that actually occur in
+/// call arguments/operators: `Call`/`MethodCall` args and receiver,
+/// `Binary`/`Unary`/`Grouping`/`Index`) - missing a rarer shape only
+/// means this guard occasionally under-protects, never over-flags,
+/// matching this project's own "favor false negatives" precedent.
+fn expr_reads_a_property(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::PropertyAccess(..)
+        | ExprKind::DynamicPropertyAccess(..)
+        | ExprKind::StaticAccess(..) => true,
+        ExprKind::Call(callee, args) => {
+            expr_reads_a_property(callee) || args.iter().any(|a| expr_reads_a_property(&a.value))
+        }
+        ExprKind::MethodCall(base, _, args, _) => {
+            expr_reads_a_property(base) || args.iter().any(|a| expr_reads_a_property(&a.value))
+        }
+        ExprKind::Binary(_, l, r) => expr_reads_a_property(l) || expr_reads_a_property(r),
+        ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) => expr_reads_a_property(inner),
+        ExprKind::Index(base, idx) => {
+            expr_reads_a_property(base) || idx.as_deref().is_some_and(expr_reads_a_property)
+        }
+        _ => false,
+    }
+}
+
+/// `null_probe_verdict`/`empty_probe_verdict`'s own shared shape - a
+/// null-probe or falsiness verdict function, selected once per `isset()`/
+/// `empty()` call site (`existence_probe_kind`) and threaded through to
+/// both `check_pointless_null_probe` and `check_pointless_offset_or_
+/// property_probe`.
+type NullProbeVerdictFn = fn(&Type) -> Option<&'static str>;
+
+/// Bounds for `</>/<=/>=`'s own range-outcome check - a bare `Type::Int`
+/// counts as an unbounded range (matching `checker::narrowing`'s own
+/// `numeric_bounds_for_narrowing`), an ordinary, not-yet-narrowed `int`
+/// parameter being exactly the common real case this needs to stay
+/// silent on; anything else defers to `int_range_bounds`. Shared between
+/// `infer_binary`'s own constant-folding arm and `check_constant_
+/// numeric_comparison`'s standalone diagnostic below - both need the
+/// identical answer.
+fn numeric_comparison_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
+    match ty {
+        Type::Int => Some((None, None)),
+        other => int_range_bounds(other),
+    }
+}
+
+/// PHP's own bool-cast truthiness for `ty`, generalized past a bare
+/// literal wherever the answer is still fully unambiguous - `None`
+/// whenever it genuinely isn't (a bare `int`/`string`/`array`, a
+/// variable's widened type, a `Union` whose members disagree, ...).
+/// Real PHP's exact falsy set: `0`, `0.0`, `""`, `"0"`, `null`, `false`,
+/// `[]`; everything else (every object, unconditionally - even one with
+/// no properties) is truthy. `Union`/`Intersection` recurse: a union
+/// needs every member to agree; an intersection only needs one member
+/// with a definite answer, since narrowing only ever adds information.
+/// `ArrayList` is deliberately excluded from the "always truthy"
+/// accessory set below - unlike `NonEmptyArray`/`NonFalsyString`, a bare
+/// `list<T>` doesn't itself exclude the empty list.
+fn type_truthiness(ty: &Type) -> Option<bool> {
+    match ty {
+        Type::True => Some(true),
+        Type::False | Type::Null => Some(false),
+        Type::IntLiteral(n) => Some(*n != 0),
+        Type::FloatLiteral(n) => Some(*n != 0.0),
+        Type::StringLiteral(s) => Some(!s.is_empty() && s != "0"),
+        Type::Object(..) => Some(true),
+        Type::ArrayShape(fields) => {
+            let real_fields: Vec<_> = fields.iter().filter(|(name, _, _)| name != "...").collect();
+            if real_fields.iter().any(|(_, _, optional)| !optional) {
+                // At least one *required* field guarantees the array can
+                // never be empty, sealed or not.
+                Some(true)
+            } else if real_fields.is_empty() && !is_unsealed_shape(fields) {
+                // No fields at all, and sealed - this is exactly `[]`.
+                Some(false)
+            } else {
+                // Every known field is optional (or the shape is
+                // unsealed with no known fields at all) - genuinely
+                // ambiguous, it could be `[]` or not.
+                None
+            }
+        }
+        Type::Accessory(AccessoryKind::NonFalsyString | AccessoryKind::NonEmptyArray) => Some(true),
+        Type::Union(members) => {
+            let mut iter = members.iter().map(type_truthiness);
+            let first = iter.next()??;
+            iter.all(|v| v == Some(first)).then_some(first)
+        }
+        Type::Intersection(members) => members.iter().find_map(type_truthiness),
+        _ => None,
+    }
+}
+
+/// The provable outcome of a loose `==` comparison between two literal
+/// scalar types (`!=` is just its negation), or `None` when not
+/// statically decidable - matches real PHPStan's own
+/// `LooseComparisonHelper::compareConstantScalars`, read directly from
+/// `vendor/phpstan-src` rather than assumed. Deliberately narrower than
+/// that helper in one disclosed respect: PHP 8.0 changed exactly one
+/// corner of the loose-comparison table - a non-numeric string compared
+/// against a number now casts the *number* to a string instead of the
+/// string to a number (`PhpVersion::castsNumbersToStringsOnLooseComparison`),
+/// so that one branch below is only attempted once `php_version` is
+/// configured at 8.0+, matching this project's existing "a version-gated
+/// fact stays silent with no configured version" precedent
+/// (`php_version.rs`) rather than guessing a runtime default. Every
+/// other branch here is exactly as version-independent in real PHP as it
+/// is below: same-kind literals, numeric-string-vs-number (always
+/// numeric, regardless of version), and bool/null-vs-anything (always a
+/// plain bool-cast-both-sides comparison).
+fn loose_compare_literals(
+    l: &Type,
+    r: &Type,
+    php_version: Option<crate::php_version::PhpVersion>,
+) -> Option<bool> {
+    // bool/null vs anything: PHP casts *both* sides to bool and compares
+    // - version-independent, and subsumes the same-kind True/False/Null
+    // combinations too (no need to special-case them separately below).
+    if matches!(l, Type::True | Type::False | Type::Null)
+        || matches!(r, Type::True | Type::False | Type::Null)
+    {
+        return Some(type_truthiness(l)? == type_truthiness(r)?);
+    }
+    match (l, r) {
+        (Type::IntLiteral(a), Type::IntLiteral(b)) => Some(a == b),
+        (Type::FloatLiteral(a), Type::FloatLiteral(b)) => Some(a == b),
+        (Type::IntLiteral(a), Type::FloatLiteral(b))
+        | (Type::FloatLiteral(b), Type::IntLiteral(a)) => Some(*a as f64 == *b),
+        (Type::StringLiteral(a), Type::StringLiteral(b)) => {
+            if types::is_numeric_string_literal(a) && types::is_numeric_string_literal(b) {
+                Some(a.trim().parse::<f64>().ok()? == b.trim().parse::<f64>().ok()?)
+            } else {
+                Some(a == b)
+            }
+        }
+        (Type::IntLiteral(n), Type::StringLiteral(s))
+        | (Type::StringLiteral(s), Type::IntLiteral(n)) => {
+            if types::is_numeric_string_literal(s) {
+                Some(*n as f64 == s.trim().parse::<f64>().ok()?)
+            } else if php_version.is_some_and(|v| v >= (8, 0)) {
+                Some(n.to_string() == *s)
+            } else {
+                None
+            }
+        }
+        (Type::FloatLiteral(n), Type::StringLiteral(s))
+        | (Type::StringLiteral(s), Type::FloatLiteral(n)) => {
+            if types::is_numeric_string_literal(s) {
+                Some(*n == s.trim().parse::<f64>().ok()?)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Real PHPStan's own `InitializerExprTypeResolver::getModType`,
 /// transcribed - unlike `Mul`/`Sub`/`Pow`, whose own corner/point
 /// formulas already reduce to the exact answer for two literal operands
@@ -494,6 +770,25 @@ fn null_probe_verdict(ty: &Type) -> Option<&'static str> {
     }
 }
 
+/// Phase 60 follow-up, `empty()`'s own falsiness-aware verdict - real
+/// PHPStan's `EmptyRule` (`vendor/phpstan-src`, read directly): unlike
+/// `null_probe_verdict` just above, `empty()` tests falsiness, not just
+/// null-ness, so both `isNull()` *and* `toBoolean()->isFalse()` have to
+/// be unambiguous before it says anything - by the time both are
+/// resolved, the message reduces to exactly one of these two outcomes
+/// (`isNull`-specific wording is provably unreachable once falsiness is
+/// already known, confirmed by tracing `EmptyRule::processNode`'s own
+/// branch order). `type_truthiness` already recurses through `Union`/
+/// `Intersection`/`ArrayShape`/accessory kinds, so this is a thin
+/// wrapper, not a separate reimplementation.
+fn empty_probe_verdict(ty: &Type) -> Option<&'static str> {
+    match type_truthiness(ty) {
+        Some(true) => Some("is not falsy"),
+        Some(false) => Some("is always falsy"),
+        None => None,
+    }
+}
+
 impl<'a> Checker<'a> {
     /// Looks up a bare global-constant reference (`ExprKind::Name`,
     /// already excluding `true`/`false`/`null` - see `bare_name_literal_
@@ -510,6 +805,34 @@ impl<'a> Checker<'a> {
     /// `bare_name_literal_type`'s existing `Mixed` fallback in place.
     fn global_constant_type(&self, name: &str) -> Option<Type> {
         let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+        // Real, serious corpus find: `PHP_VERSION_ID`'s own vendored
+        // `phpstorm-stubs` declaration (`Core/Core_d.php`) is a literal
+        // `define('PHP_VERSION_ID', 50306)` - phpstorm-stubs' own
+        // generation environment's *actual* PHP version at the time it
+        // was captured, baked in as if it were a real, permanent
+        // constant value. Trusting that as this constant's own type
+        // meant `PHP_VERSION_ID >= 80300`-style portability checks
+        // (extremely common throughout the real vendor ecosystem, e.g.
+        // amphp's own PHP 8.3+ feature gates) looked provably,
+        // unconditionally *false* everywhere, the moment anything
+        // consumed the exact literal value for a "provably constant"
+        // purpose - this project's own `--php-version`/`php_version`
+        // config key (`php_version.rs`) exists for exactly this
+        // ambiguity, and is the right source of truth here instead: an
+        // `IntRange` spanning every possible patch digit (0-99, real
+        // PHP's own patch component, never modeled beyond major.minor -
+        // see `php_version.rs`'s own doc comment) when configured, or a
+        // fully unbounded `Type::Int` - genuinely unknown, not a
+        // specific literal - when it isn't.
+        if primary == "PHP_VERSION_ID" || fallback.as_deref() == Some("PHP_VERSION_ID") {
+            return Some(match self.registry.php_version {
+                Some((major, minor)) => {
+                    let base = major as i64 * 10000 + minor as i64 * 100;
+                    Type::IntRange(Some(base), Some(base + 99))
+                }
+                None => Type::Int,
+            });
+        }
         self.registry
             .global_constants
             .get(&primary)
@@ -589,6 +912,7 @@ impl<'a> Checker<'a> {
         label: &str,
         identifier_prefix: &str,
         operator_description: &str,
+        verdict_fn: NullProbeVerdictFn,
     ) {
         let ExprKind::Variable(name) = &e.kind else {
             return;
@@ -621,7 +945,7 @@ impl<'a> Checker<'a> {
         let Some(ty) = locals.get(name) else {
             return;
         };
-        let Some(verdict) = null_probe_verdict(ty) else {
+        let Some(verdict) = verdict_fn(ty) else {
             return;
         };
         self.report(
@@ -745,6 +1069,7 @@ impl<'a> Checker<'a> {
         label: &str,
         identifier_prefix: &str,
         operator_description: &str,
+        verdict_fn: NullProbeVerdictFn,
     ) {
         if !matches!(&e.kind, ExprKind::Index(..) | ExprKind::PropertyAccess(..)) {
             return;
@@ -754,7 +1079,7 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        let Some(verdict) = null_probe_verdict(&leaf_ty) else {
+        let Some(verdict) = verdict_fn(&leaf_ty) else {
             return;
         };
         match &e.kind {
@@ -801,6 +1126,149 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
+    }
+
+    /// Phase 55 follow-up, real PHPStan's own `ConstantLooseComparisonRule`
+    /// (level 4): flags a `==`/`!=` whose outcome is provably constant
+    /// from both operands' own literal types - `loose_compare_literals`'s
+    /// own doc comment has the full scope/version-gating reasoning.
+    /// Fires independently of `infer_binary`'s identical constant-folding
+    /// (consumed separately by the `if`/`while`/ternary/... constant-
+    /// condition family) since real PHPStan's own rule fires on *every*
+    /// occurrence of the comparison, not just ones in condition position,
+    /// matching its own dedicated identifiers/wording exactly. Guarded
+    /// on `self.loop_depth == 0` for the identical reason `check_
+    /// constant_numeric_comparison`'s own doc comment (right below) is:
+    /// a counting `for ($j = 0; $j !== 3; $j++)` idiom is exactly as
+    /// vulnerable to this project's own bounded-pass convergence
+    /// approximation as the numeric-range case. Also guarded on neither
+    /// operand reading a property (`expr_reads_a_property`'s own doc
+    /// comment).
+    #[allow(clippy::too_many_arguments)]
+    fn check_constant_loose_comparison(
+        &mut self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        l_ty: &Type,
+        r_ty: &Type,
+        span: Span,
+        label: &str,
+    ) {
+        if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
+            return;
+        }
+        if !matches!(op, BinOp::Eq | BinOp::NotEq) {
+            return;
+        }
+        let Some(equal) = loose_compare_literals(l_ty, r_ty, self.registry.php_version) else {
+            return;
+        };
+        let outcome = if matches!(op, BinOp::Eq) {
+            equal
+        } else {
+            !equal
+        };
+        let sigil = if matches!(op, BinOp::Eq) { "==" } else { "!=" };
+        let rule_name = if matches!(op, BinOp::Eq) {
+            "equal"
+        } else {
+            "notEqual"
+        };
+        self.report(
+            label.to_string(),
+            format!(
+                "Loose comparison using {sigil} between {l_ty} and {r_ty} will always evaluate to {}.",
+                if outcome { "true" } else { "false" }
+            ),
+            span,
+            4,
+            &format!("{rule_name}.always{}", if outcome { "True" } else { "False" }),
+        );
+    }
+
+    /// Phase 15 follow-up, real PHPStan's own
+    /// `NumberComparisonOperatorsConstantConditionRule` (level 4): flags a
+    /// `</>/<=/>=` comparison whose outcome is provably constant from
+    /// both operands' known int ranges - `numeric_comparison_bounds`/
+    /// `compare_range_outcome`'s own doc comments have the range-
+    /// arithmetic reasoning; this is purely the reporting half, mirroring
+    /// `check_constant_loose_comparison` just above's identical shape
+    /// (its own standalone rule, fired on every occurrence, not folded
+    /// into `if`/`while`'s own generic constant-condition family). Real
+    /// identifiers/wording (`smaller`/`greater`/`smallerOrEqual`/
+    /// `greaterOrEqual`, confirmed directly against `vendor/phpstan-src`)
+    /// are PHP's own operator names, not this project's own `Lt`/`Gt`/...
+    /// spelling.
+    ///
+    /// Guarded on `self.loop_depth == 0` for the identical reason
+    /// `check_pointless_null_probe` already is: this project's own loop
+    /// convergence (`converge_loop_body`) is a bounded, fixed-pass
+    /// approximation of a real fixed point, not a true one - a counting
+    /// `for ($j = 0; $j < 3; $j++)`'s own condition, checked on any one
+    /// pass, sees `$j` as some specific (if widening) literal/range
+    /// rather than the fully general `int` real PHPStan's own genuine
+    /// fixed-point solver would settle on, so "provably true/false"
+    /// here inside a loop is systematically unsound - a real corpus
+    /// false positive this guard fixes: the single most common loop
+    /// idiom in PHP (`0 < 3` "always true") would otherwise misfire on
+    /// every ordinary counting loop. Also guarded on neither operand
+    /// reading a property (`expr_reads_a_property`'s own doc comment) -
+    /// a second real corpus false positive this same guard fixes
+    /// (`Piwigo\Admin\Integrity\CheckIntegrity::check`'s own `if
+    /// (count($this->retrieve_list) > 0)`, checked right after an
+    /// intervening method call this project doesn't model as
+    /// potentially repopulating that property).
+    #[allow(clippy::too_many_arguments)]
+    fn check_constant_numeric_comparison(
+        &mut self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        l_ty: &Type,
+        r_ty: &Type,
+        span: Span,
+        label: &str,
+    ) {
+        if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
+            return;
+        }
+        let rule_name = match op {
+            BinOp::Lt => "smaller",
+            BinOp::Gt => "greater",
+            BinOp::LtEq => "smallerOrEqual",
+            BinOp::GtEq => "greaterOrEqual",
+            _ => return,
+        };
+        let Some(l_bounds) = numeric_comparison_bounds(l_ty) else {
+            return;
+        };
+        let Some(r_bounds) = numeric_comparison_bounds(r_ty) else {
+            return;
+        };
+        let Some(outcome) = compare_range_outcome(op, l_bounds, r_bounds) else {
+            return;
+        };
+        let sigil = match op {
+            BinOp::Lt => "<",
+            BinOp::Gt => ">",
+            BinOp::LtEq => "<=",
+            BinOp::GtEq => ">=",
+            _ => unreachable!(),
+        };
+        self.report(
+            label.to_string(),
+            format!(
+                "Comparison operation \"{sigil}\" between {l_ty} and {r_ty} is always {}.",
+                if outcome { "true" } else { "false" }
+            ),
+            span,
+            4,
+            &format!(
+                "{rule_name}.always{}",
+                if outcome { "True" } else { "False" }
+            ),
+        );
     }
 
     #[hotpath::measure]
@@ -938,6 +1406,44 @@ impl<'a> Checker<'a> {
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
+                // Real corpus find: `array_pop`/`array_shift`'s own
+                // by-ref first argument gets widened right below
+                // (`predefine_byref_or_unknown_args`'s own dedicated
+                // arm for these two - correctly dropping any known
+                // non-emptiness, since removing an element can leave
+                // `[]`) *before* this same call's own return type is
+                // computed further down - reading the *already-widened*
+                // array there made a provably non-empty array (Gettext's
+                // own `array_shift(explode(...))`, `explode()`'s own
+                // return type unconditionally non-empty) look like it
+                // could return `null`, when the value actually removed
+                // and returned is the pre-widening array's own,
+                // definitely-present first/last element. Captured here,
+                // before the widening runs, and substituted back in once
+                // the ordinary return-type computation below has run.
+                //
+                // Disclosed residual, not fully closed by this: fixes
+                // the common `$x = array_shift($arr); needsFoo($x);`
+                // shape (this expression's own returned type, consumed
+                // by an assignment or `return`) but not `needsFoo(
+                // array_shift($arr))` (the identical call passed
+                // *directly* as another call's own argument) - argument-
+                // type checking (`check_args`, `checker/calls.rs`)
+                // independently re-derives each argument's type via
+                // `infer_expr` from whatever `locals` holds *then*,
+                // rather than reusing this already-corrected value, so
+                // it still sees the post-widening (nullable) answer.
+                // Fixing that would mean threading each argument's
+                // already-checked type through to `check_args` instead
+                // of letting it re-infer independently - a real,
+                // separate architecture change, out of scope here.
+                let array_shift_pop_pre_widen_ty: Option<Type> = matches!(
+                    resolved_name.as_deref(),
+                    Some("array_shift") | Some("array_pop")
+                )
+                .then(|| args.first())
+                .flatten()
+                .map(|a| self.infer_expr(&a.value, locals));
                 self.predefine_byref_or_unknown_args(
                     resolved_name.as_deref(),
                     sig,
@@ -972,18 +1478,23 @@ impl<'a> Checker<'a> {
                 // like `is_language_construct` itself, since neither is a
                 // real, resolvable function call.
                 let is_existence_probe = matches!(&callee.kind, ExprKind::Name(name) if name == "isset" || name == "empty");
-                // Phase 60: `isset($x)` specifically (not `empty($x)` too -
-                // real PHPStan's own `EmptyRule` requires BOTH nullability
-                // *and* falsy-ness to be unambiguous before it says
-                // anything, since `empty()` tests falsiness, not just
-                // null-ness - `toBoolean()->isFalse()` staying `maybe` for
-                // an ordinary non-empty-unproven `array`/`string`/`int`
-                // keeps real PHPStan silent on exactly the shape this
-                // project's own `null_probe_verdict` would otherwise
-                // wrongly flag. Left for a follow-up rather than modeled
-                // here.
-                let is_isset_probe =
-                    matches!(&callee.kind, ExprKind::Name(name) if name == "isset");
+                // Phase 60 follow-up: `isset($x)` and `empty($x)` each get
+                // their own verdict function - `null_probe_verdict` (just
+                // nullability) for the former, `empty_probe_verdict` (full
+                // falsiness, via `type_truthiness`) for the latter,
+                // matching real PHPStan's own `EmptyRule` requiring BOTH
+                // nullability *and* falsiness to be unambiguous before it
+                // says anything.
+                let existence_probe_kind: Option<(&str, &str, NullProbeVerdictFn)> =
+                    match &callee.kind {
+                        ExprKind::Name(name) if name == "isset" => {
+                            Some(("isset", "in isset()", null_probe_verdict))
+                        }
+                        ExprKind::Name(name) if name == "empty" => {
+                            Some(("empty", "in empty()", empty_probe_verdict))
+                        }
+                        _ => None,
+                    };
                 // Phase 53: `array_map($callback, $items)`'s own
                 // contextual parameter-type injection - computed once,
                 // up front, from `$items`' own element type (not
@@ -996,6 +1507,60 @@ impl<'a> Checker<'a> {
                     && args.len() == 2)
                     .then(|| self.infer_expr(&args[1].value, locals))
                     .and_then(|ty| Self::array_element_type(&ty));
+                // Phase 53 follow-up: the same contextual parameter-type
+                // injection as `array_map` just above, extended to
+                // `array_filter`/`usort`/`uasort`/`array_walk`/
+                // `preg_replace_callback` - each computes its own
+                // `(callback argument index, param overrides)` pair once
+                // up front, the identical shape `array_map_elem_override`
+                // already established, just generalized to a callback
+                // that isn't always argument 0 and doesn't always take
+                // exactly one parameter. `check_closure_literal_with_
+                // param_overrides`'s own exact-arity requirement already
+                // handles every mode/shape this doesn't specifically
+                // recognize (e.g. `array_filter`'s `ARRAY_FILTER_USE_*`
+                // modes, `array_walk`'s optional third `$arg` callback
+                // parameter) by simply falling back to a plain check,
+                // with no separate gate needed here.
+                let contextual_callback_override: Option<(usize, Vec<Type>)> =
+                    resolved_name.as_deref().and_then(|name| match name {
+                        "array_filter" if args.len() == 2 => {
+                            let arr_ty = self.infer_expr(&args[0].value, locals);
+                            Self::array_element_type(&arr_ty).map(|t| (1, vec![t]))
+                        }
+                        "usort" | "uasort" if args.len() == 2 => {
+                            let arr_ty = self.infer_expr(&args[0].value, locals);
+                            Self::array_element_type(&arr_ty).map(|t| (1, vec![t.clone(), t]))
+                        }
+                        "array_walk" if args.len() == 2 => {
+                            let arr_ty = self.infer_expr(&args[0].value, locals);
+                            match (
+                                Self::array_element_type(&arr_ty),
+                                Self::array_key_type(&arr_ty),
+                            ) {
+                                (Some(elem), Some(key)) => Some((1, vec![elem, key])),
+                                _ => None,
+                            }
+                        }
+                        // `$matches`'s own real shape depends on the
+                        // pattern's own capture groups, which this
+                        // project doesn't re-derive here from an
+                        // arbitrary (possibly non-literal) pattern
+                        // argument - a generic `array<int|string, string>`
+                        // (real PHP's own actual runtime shape for a
+                        // pattern with no *named* capture groups, the
+                        // common case) is still strictly more useful
+                        // than the `Mixed` the callback's own unhinted
+                        // parameter would otherwise get.
+                        "preg_replace_callback" if args.len() >= 3 => Some((
+                            1,
+                            vec![Type::Array(
+                                Box::new(Type::unknown_array_key()),
+                                Box::new(Type::String),
+                            )],
+                        )),
+                        _ => None,
+                    });
                 for (i, a) in args.iter().enumerate() {
                     if is_this_binding_call
                         && matches!(
@@ -1028,20 +1593,24 @@ impl<'a> Checker<'a> {
                         );
                     } else if is_existence_probe {
                         self.check_expr_quiet_root(&a.value, locals, label);
-                        if is_isset_probe {
+                        if let Some((identifier_prefix, operator_description, verdict_fn)) =
+                            existence_probe_kind
+                        {
                             self.check_pointless_null_probe(
                                 &a.value,
                                 locals,
                                 label,
-                                "isset",
-                                "in isset()",
+                                identifier_prefix,
+                                operator_description,
+                                verdict_fn,
                             );
                             self.check_pointless_offset_or_property_probe(
                                 &a.value,
                                 locals,
                                 label,
-                                "isset",
-                                "in isset()",
+                                identifier_prefix,
+                                operator_description,
+                                verdict_fn,
                             );
                         }
                     } else if i == 0
@@ -1055,6 +1624,18 @@ impl<'a> Checker<'a> {
                     {
                         // Body already checked with the injected element
                         // type above - no plain check_expr fallback.
+                    } else if let Some((idx, overrides)) = &contextual_callback_override
+                        && i == *idx
+                        && self.check_closure_literal_with_param_overrides(
+                            unwrap_grouping(&a.value),
+                            overrides,
+                            locals,
+                            label,
+                        )
+                    {
+                        // Same as the `array_map` arm just above, for
+                        // one of the other four contextually-checked
+                        // functions.
                     } else {
                         self.check_expr(&a.value, locals, label);
                     }
@@ -1271,15 +1852,24 @@ impl<'a> Checker<'a> {
                 // Reuses the `resolved_name`/`sig` already resolved above
                 // - the same lookup `infer_expr`'s own `Call` arm would
                 // otherwise redundantly redo from scratch.
-                sig.map(|s| {
-                    self.infer_builtin_call_return_type(
-                        resolved_name.as_deref().unwrap_or_default(),
-                        s,
-                        args,
-                        locals,
-                    )
-                })
-                .unwrap_or_else(|| call_fallback_return_type(callee))
+                let call_ty = sig
+                    .map(|s| {
+                        self.infer_builtin_call_return_type(
+                            resolved_name.as_deref().unwrap_or_default(),
+                            s,
+                            args,
+                            locals,
+                        )
+                    })
+                    .unwrap_or_else(|| call_fallback_return_type(callee));
+                match array_shift_pop_pre_widen_ty.and_then(|pre_widen_ty| {
+                    Self::array_element_type(&pre_widen_ty).map(|elem_ty| {
+                        Self::array_pointer_result(&pre_widen_ty, elem_ty, Type::Null, false)
+                    })
+                }) {
+                    Some(corrected) => corrected,
+                    None => call_ty,
+                }
             }
             ExprKind::MethodCall(recv, method, args, nullsafe) => {
                 // Finding 49's other real shape: `(function () {...})
@@ -1595,6 +2185,7 @@ impl<'a> Checker<'a> {
                     label,
                     "nullCoalesce",
                     "on left side of ??",
+                    null_probe_verdict,
                 );
                 self.check_pointless_offset_or_property_probe(
                     l,
@@ -1602,6 +2193,7 @@ impl<'a> Checker<'a> {
                     label,
                     "nullCoalesce",
                     "on left side of ??",
+                    null_probe_verdict,
                 );
                 let r_ty = self.check_expr(r, locals, label);
                 self.widen_coalesce_result(l, r_ty, locals)
@@ -1611,6 +2203,9 @@ impl<'a> Checker<'a> {
                 let r_ty = self.check_expr(r, locals, label);
                 self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span, label);
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span, label);
+                self.check_division_by_literal_zero(op, r, &r_ty, r.span, label);
+                self.check_constant_loose_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
+                self.check_constant_numeric_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
                 // Phase 15, `LogicalXorConstantConditionRule`: real
                 // inferred-type trust - see `check_logical_xor`'s own doc
                 // comment (`checker/control_flow.rs`). `BinOp::And`/`Or`
@@ -1668,6 +2263,31 @@ impl<'a> Checker<'a> {
                     let is_increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
                     let updated = match &current {
                         Type::Null if is_increment => Type::Int,
+                        // Real corpus find: a literal/range-typed operand
+                        // used to pass straight through unchanged here -
+                        // `++$x`/`--$x` on `IntLiteral(0)` stayed exactly
+                        // `IntLiteral(0)` forever, never actually
+                        // advancing - the identical "value never applied"
+                        // bug class `negate_numeric_literal`'s own doc
+                        // comment already found for unary `-`. A counter
+                        // incremented inside a loop then checked
+                        // afterward (`$n = 0; foreach (...) { ...; $n++;
+                        // } if ($n > 0)`, a real, extremely common idiom)
+                        // looked "always false" against a check that only
+                        // fires once anything actually consumes the
+                        // literal's own exact value.
+                        Type::IntLiteral(n) => {
+                            Type::IntLiteral(if is_increment { n + 1 } else { n - 1 })
+                        }
+                        Type::FloatLiteral(f) => {
+                            Type::FloatLiteral(if is_increment { f + 1.0 } else { f - 1.0 })
+                        }
+                        Type::IntRange(min, max) => {
+                            let shift = |b: Option<i64>| {
+                                b.map(|v| if is_increment { v + 1 } else { v - 1 })
+                            };
+                            Type::IntRange(shift(*min), shift(*max))
+                        }
                         other => other.clone(),
                     };
                     purge_stale_narrowing_for(locals, name);
@@ -1724,6 +2344,8 @@ impl<'a> Checker<'a> {
                 self.check_unary_operand_validity(op, &inner_ty, inner.span, label);
                 if is_string_shaped(&inner_ty) {
                     Type::Int
+                } else if *op == UnaryOp::Neg {
+                    negate_numeric_literal(inner_ty)
                 } else {
                     inner_ty
                 }
@@ -1884,6 +2506,7 @@ impl<'a> Checker<'a> {
                         label,
                         "nullCoalesce",
                         "on left side of ??=",
+                        null_probe_verdict,
                     );
                     self.check_pointless_offset_or_property_probe(
                         lhs,
@@ -1891,6 +2514,7 @@ impl<'a> Checker<'a> {
                         label,
                         "nullCoalesce",
                         "on left side of ??=",
+                        null_probe_verdict,
                     );
                     ty
                 } else {
@@ -1899,6 +2523,7 @@ impl<'a> Checker<'a> {
                 let rhs_ty = self.check_expr(rhs, locals, label);
                 if *op != BinOp::Coalesce {
                     self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span, label);
+                    self.check_division_by_literal_zero(op, rhs, &rhs_ty, rhs.span, label);
                 }
                 if let ExprKind::Variable(name) = &lhs.kind {
                     let ty = self.infer_binary(op, lhs, rhs, locals);
@@ -2199,9 +2824,21 @@ impl<'a> Checker<'a> {
                 // `check_function` above.
                 for p in &decl.properties {
                     self.check_attributes(&p.attrs, &decl.name);
+                    self.check_attribute_targets(
+                        &p.attrs,
+                        ATTRIBUTE_TARGET_PROPERTY,
+                        "property",
+                        &decl.name,
+                    );
                 }
                 for cc in &decl.consts {
                     self.check_attributes(&cc.attrs, &decl.name);
+                    self.check_attribute_targets(
+                        &cc.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                        &decl.name,
+                    );
                 }
                 Type::Mixed
             }
@@ -2753,8 +3390,17 @@ impl<'a> Checker<'a> {
                 body,
                 is_static,
                 return_type,
+                attrs,
                 ..
             } => {
+                // Phase 37: `ClosureAttributesRule` - existence (already
+                // checked for every other attribute-bearing declaration)
+                // plus target-validity, both missing entirely for a
+                // closure expression's own `#[Attr]` group until now (a
+                // real, previously-undetected gap: this arm never called
+                // `check_attributes` at all, existence-only or otherwise).
+                self.check_attributes(attrs, label);
+                self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function", label);
                 // Unlike an arrow function, a plain closure does NOT
                 // automatically see the enclosing scope - only variables
                 // explicitly named in `use (...)` are captured (by value
@@ -2864,8 +3510,13 @@ impl<'a> Checker<'a> {
                 params,
                 body,
                 return_type,
+                attrs,
                 ..
             } => {
+                // Phase 37: `ArrowFunctionAttributesRule` - see the
+                // `Closure` arm's own identical comment just above.
+                self.check_attributes(attrs, label);
+                self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function", label);
                 // An arrow function DOES automatically capture the whole
                 // enclosing scope by value (implicit, no `use (...)`
                 // needed) - a plain clone of `locals` is exactly that.
@@ -3660,10 +4311,12 @@ impl<'a> Checker<'a> {
             // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) -
             // the same implicit-numeric-coercion rule arithmetic
             // operators apply generally.
-            ExprKind::Unary(UnaryOp::Neg | UnaryOp::Plus, inner) => {
+            ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
                 if is_string_shaped(&inner_ty) {
                     Type::Int
+                } else if *op == UnaryOp::Neg {
+                    negate_numeric_literal(inner_ty)
                 } else {
                     inner_ty
                 }
@@ -4511,6 +5164,7 @@ impl<'a> Checker<'a> {
             Type::ArrayShape(fields) => Some(
                 fields
                     .iter()
+                    .filter(|(name, _, _)| name != "...")
                     .map(|(_, t, _)| t.clone())
                     .reduce(union_types)
                     .unwrap_or(Type::Mixed),
@@ -4919,14 +5573,53 @@ impl<'a> Checker<'a> {
                 (Type::True, Type::False) | (Type::False, Type::True) => Type::True,
                 _ => Type::Bool,
             },
-            BinOp::Eq
-            | BinOp::Identical
-            | BinOp::NotEq
-            | BinOp::NotIdentical
-            | BinOp::Lt
-            | BinOp::Gt
-            | BinOp::LtEq
-            | BinOp::GtEq => Type::Bool,
+            BinOp::Identical | BinOp::NotIdentical => Type::Bool,
+            // Phase 55 follow-up, `ConstantLooseComparisonRule`:
+            // `loose_compare_literals`'s own doc comment has the full
+            // scope/version-gating reasoning.
+            BinOp::Eq | BinOp::NotEq => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                match loose_compare_literals(&lt, &rt, self.registry.php_version) {
+                    Some(equal) => {
+                        let outcome = if matches!(op, BinOp::Eq) {
+                            equal
+                        } else {
+                            !equal
+                        };
+                        if outcome { Type::True } else { Type::False }
+                    }
+                    None => Type::Bool,
+                }
+            }
+            // Phase 15 follow-up, real PHPStan's own
+            // `NumberComparisonOperatorsConstantConditionRule`: the exact
+            // same relationship as `Eq`/`NotEq` just above has to its own
+            // `ConstantLooseComparisonRule` - a real, standalone rule,
+            // never folded into `if`/`while`'s own generic constant-
+            // condition family (confirmed directly against `vendor/
+            // phpstan-src`: it's its own `#[RegisteredRule]`, with its
+            // own `smaller.always*`/`greater.always*`/`smallerOrEqual.
+            // always*`/`greaterOrEqual.always*` identifiers, not `if.
+            // always*`). `should_skip_constant_condition` (`checker/
+            // control_flow.rs`) already excludes all four of these ops
+            // from the generic `if`/`while` path for exactly this reason -
+            // this constant-folding half only feeds `check_constant_
+            // numeric_comparison`'s own standalone diagnostic below, not
+            // that generic path at all.
+            BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                if let (Some(l_bounds), Some(r_bounds)) = (
+                    numeric_comparison_bounds(&lt),
+                    numeric_comparison_bounds(&rt),
+                ) && let Some(outcome) = compare_range_outcome(op, l_bounds, r_bounds)
+                {
+                    if outcome { Type::True } else { Type::False }
+                } else {
+                    Type::Bool
+                }
+            }
             // The spaceship operator returns -1/0/1 (an int), not a bool -
             // its single most common real use is returning a value
             // directly from a comparator (`usort`/`uasort`/...).

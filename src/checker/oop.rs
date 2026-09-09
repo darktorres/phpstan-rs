@@ -14,9 +14,11 @@ use crate::types::Type;
 /// `php -r`, see `registry::class_info::attribute_target_constant_value`'s
 /// identical table) - only the ones this project's own call sites for
 /// `check_attribute_targets` need so far.
+pub(crate) const ATTRIBUTE_TARGET_CLASS: u32 = 1;
 pub(crate) const ATTRIBUTE_TARGET_FUNCTION: u32 = 2;
 pub(crate) const ATTRIBUTE_TARGET_METHOD: u32 = 4;
 pub(crate) const ATTRIBUTE_TARGET_PROPERTY: u32 = 8;
+pub(crate) const ATTRIBUTE_TARGET_CLASS_CONSTANT: u32 = 16;
 pub(crate) const ATTRIBUTE_TARGET_PARAMETER: u32 = 32;
 
 /// The full set of PHP magic-method names (`nikic/php-parser`'s own
@@ -201,6 +203,36 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Real PHPStan's `TraitAttributeClassRule` (`attribute.trait`,
+    /// level 0): a *trait* declaration can never itself be marked
+    /// `#[\Attribute]` (only a real class can be an Attribute class at
+    /// all) - a different kind of check than target-*validity* (which
+    /// governs where an *existing* attribute class may be *used*, not
+    /// what may declare itself as one), so it's not folded into
+    /// `check_attribute_targets` above. The attribute name is compared
+    /// case-insensitively with no namespace resolution, matching real
+    /// PHPStan's own `toLowerString()` (`\Attribute` and a same-named
+    /// unrelated class both match - the same leniency `is_override_
+    /// attribute_name`/`is_no_discard_attribute_name` already use for
+    /// this exact class of marker-attribute check).
+    pub(crate) fn check_trait_is_not_an_attribute_class(
+        &mut self,
+        attrs: &[Attribute],
+        label: &str,
+    ) {
+        for attr in attrs {
+            if attr.name.trim_start_matches('\\').to_lowercase() == "attribute" {
+                self.report(
+                    label.to_string(),
+                    "Trait cannot be an Attribute class.".to_string(),
+                    attr.span,
+                    0,
+                    "attribute.trait",
+                );
+            }
+        }
+    }
+
     /// Finding 46's class-level half: extending a class declared `final`
     /// is a real, unconditional fatal error in PHP at class-declaration
     /// time, regardless of whether the subclass overrides anything at
@@ -379,6 +411,57 @@ impl<'a> Checker<'a> {
                     .non_ignorable(),
                 );
             }
+        }
+    }
+
+    /// `InvalidPHPStanDocTagRule` (`phpDoc.phpstanTag`) - a `@phpstan-*`
+    /// tag real PHPStan doesn't recognize at all (a real, common way to
+    /// catch a typo, e.g. `@phpstan-parm`, silently doing nothing instead
+    /// of what was intended). Scoped to a class's own docblock plus
+    /// every one of its methods'/properties'/consts' - real PHPStan's own
+    /// rule additionally covers arbitrary statement-level and function-
+    /// level docblocks (`check_unknown_phpstan_tags_on` is called
+    /// separately for top-level functions, `check_function`'s own call
+    /// site) - a bare statement's own inline docblock isn't covered, a
+    /// disclosed scope trim (lower value: `@phpstan-*` tags are
+    /// overwhelmingly declaration-level in practice).
+    pub(crate) fn check_unknown_phpstan_tags_in_class(&mut self, fqn: &str, c: &ClassDecl) {
+        self.check_unknown_phpstan_tags_on(fqn, c.doc_comment.as_deref(), c.name_span);
+        for m in &c.methods {
+            self.check_unknown_phpstan_tags_on(
+                fqn,
+                m.function.doc_comment.as_deref(),
+                m.function.name_span,
+            );
+        }
+        for p in &c.properties {
+            self.check_unknown_phpstan_tags_on(fqn, p.doc_comment.as_deref(), p.span);
+        }
+        for cc in &c.consts {
+            self.check_unknown_phpstan_tags_on(fqn, cc.doc_comment.as_deref(), cc.name_span);
+        }
+    }
+
+    /// See `check_unknown_phpstan_tags_in_class`'s own doc comment - the
+    /// one-declaration-at-a-time worker both that function and
+    /// `check_function`'s own top-level-function call site share.
+    pub(crate) fn check_unknown_phpstan_tags_on(
+        &mut self,
+        label: &str,
+        doc_comment: Option<&str>,
+        span: Span,
+    ) {
+        let Some(doc) = doc_comment else {
+            return;
+        };
+        for tag in docblock::unknown_phpstan_tags(doc) {
+            self.report(
+                label.to_string(),
+                format!("Unknown PHPDoc tag: @phpstan-{tag}"),
+                span,
+                2,
+                "phpDoc.phpstanTag",
+            );
         }
     }
 

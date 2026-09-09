@@ -177,6 +177,16 @@ pub struct ClassInfo {
     // referenced with concrete type arguments (`Collection<Foo>`), not
     // just parsed past like it was before this phase.
     pub template_bounds: HashMap<String, Type>,
+    // `@template T = Default` (Phase 54/80) - the resolved default for
+    // whichever of `templates` above declared one, mirroring `template_
+    // bounds`'s own shape/construction exactly (same `class_doc.
+    // template_defaults` raw-string source, same `resolve_generic_tag`
+    // resolution). A generic reference supplying fewer type arguments
+    // than `templates.len()` is only a real arity error
+    // (`check_generic_reference_arity`, `checker/generics.rs`) for a
+    // template name *absent* from this map - one *with* a default is
+    // legitimately optional to supply.
+    pub template_defaults: HashMap<String, Type>,
     // Names from `templates` above additionally declared
     // `@template-covariant`/`@template-contravariant` (Phase 10.5's
     // variance half) - a name absent from both stays invariant.
@@ -394,7 +404,11 @@ impl ClassInfo {
                     PropertySig {
                         ty,
                         is_static: p.is_static,
-                        is_readonly: p.is_readonly,
+                        // `@readonly` (`DocBlock::readonly`'s own doc
+                        // comment) folds into the exact same flag native
+                        // `readonly` already sets - both flow through
+                        // identical downstream enforcement.
+                        is_readonly: p.is_readonly || doc_ty.as_ref().is_some_and(|d| d.readonly),
                         set_ty,
                         is_virtual,
                         visibility: p.visibility.clone(),
@@ -444,12 +458,22 @@ impl ClassInfo {
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
+                // A promoted param's own inline `@readonly` (rare - most
+                // real code that reaches for `@readonly` at all predates
+                // promoted properties, let alone tags one - but cheap to
+                // support given `p.doc_comment` is already parsed above
+                // for `@var`'s own fallback).
+                let doc_readonly = p
+                    .doc_comment
+                    .as_deref()
+                    .map(docblock::parse)
+                    .is_some_and(|d| d.readonly);
                 properties.insert(
                     p.name.clone(),
                     PropertySig {
                         ty,
                         is_static: false,
-                        is_readonly: p.promoted_readonly,
+                        is_readonly: p.promoted_readonly || doc_readonly,
                         set_ty: None,
                         is_virtual: false,
                         visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
@@ -604,6 +628,15 @@ impl ClassInfo {
                     .collect()
             })
             .unwrap_or_default();
+        let template_defaults: HashMap<String, Type> = class_doc
+            .as_ref()
+            .map(|d| {
+                d.template_defaults
+                    .iter()
+                    .map(|(name, raw)| (name.clone(), resolve_generic_tag(raw)))
+                    .collect()
+            })
+            .unwrap_or_default();
         let covariant_templates = class_doc
             .as_ref()
             .map(|d| d.covariant_templates.clone())
@@ -689,6 +722,7 @@ impl ClassInfo {
             extends_args,
             implements_args,
             template_bounds,
+            template_defaults,
             covariant_templates,
             contravariant_templates,
             is_api,
@@ -1055,6 +1089,7 @@ impl ClassInfo {
             extends_args: Vec::new(),
             implements_args,
             template_bounds: HashMap::new(),
+            template_defaults: HashMap::new(),
             covariant_templates: HashSet::new(),
             contravariant_templates: HashSet::new(),
             // Real PHPStan's own API surface has no enums to mark `@api`
@@ -1144,6 +1179,7 @@ impl ClassInfo {
         self.contravariant_templates
             .extend(other.contravariant_templates);
         self.template_bounds.extend(other.template_bounds);
+        self.template_defaults.extend(other.template_defaults);
         self.implements_args.extend(other.implements_args);
         // Same "a tag present on either declaration sticks" reasoning as
         // the `HashSet::extend` calls above - a stub override that

@@ -108,6 +108,38 @@ pub struct DocBlock {
     // find_consistent_constructor_ancestor`/`checker::oop::check_one_
     // method_override`'s own `__construct` special case.
     pub consistent_constructor: bool,
+    // `@readonly` (also `@phpstan-readonly`, recognized for free via this
+    // project's own established "second pass strips `phpstan-`, same
+    // arm" mechanism - real PHPStan's own further aliases, `@psalm-
+    // readonly`/`@phan-read-only`, aren't chased, matching this project's
+    // own "`@phpstan-*` and bare, not every third-party tool's own
+    // spelling" scope elsewhere) - a property-level
+    // bare marker (no value): the docblock-only precursor to PHP 8.1's
+    // native `readonly` keyword, folded into `PropertySig::is_readonly`
+    // at `ClassInfo::from_decl` time so it flows through the exact same
+    // enforcement/variance/override machinery a native `readonly`
+    // property already gets - a deliberate simplification versus real
+    // PHPStan's own separate `ReadOnlyByPhpDocPropertyAssignRule` (a
+    // distinct rule, its own three diagnostic identifiers), matching
+    // this project's own already-simpler single-identifier native-
+    // `readonly` enforcement (`checker/assignment.rs`'s own
+    // `property.readOnlyAssignNotInConstructor`, itself already a
+    // pragmatic collapse of real PHPStan's own multi-identifier native
+    // rule). `@phpstan-readonly-allow-private-mutation`'s own narrower
+    // exemption (writable from any method in the declaring class, not
+    // just the constructor) isn't modeled - a real, disclosed precision
+    // gap, low corpus value for a rare tag variant.
+    pub readonly: bool,
+    // `@phpstan-pure`/`@phpstan-impure` - bare markers declaring a
+    // function/method's own intended purity, checked against this
+    // project's own computed classification
+    // (`checker::noop::check_declared_purity_tag`) rather than trusted
+    // outright. `pure` is parsed but not currently consumed anywhere -
+    // see that function's own doc comment for why only the `impure`
+    // direction is safe to check with this project's own binary (not
+    // `certain`/`maybe`-graded) purity model.
+    pub pure: bool,
+    pub impure: bool,
     // Phase 39: `@deprecated` on a class/interface/trait/enum, function,
     // method, property, or class constant - `None` when the tag isn't
     // present at all; `Some(message)` when it is, where `message` is
@@ -627,6 +659,15 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             "consistent-constructor" => {
                 block.consistent_constructor = true;
             }
+            "readonly" => {
+                block.readonly = true;
+            }
+            "pure" => {
+                block.pure = true;
+            }
+            "impure" => {
+                block.impure = true;
+            }
             // Phase 39: see `DocBlock::deprecated`'s own doc comment.
             // Unlike `@api`/`@internal`, this tag *does* usually take a
             // free-text argument (the deprecation reason) - kept
@@ -851,6 +892,93 @@ fn parse_method_tag_param(p: &str) -> Option<MethodTagParam> {
         variadic,
         has_default,
     })
+}
+
+/// Every `@phpstan-*` tag name real PHPStan itself recognizes - `real
+/// PhpDoc/Tag`'s own inventory, transcribed directly (`InvalidPHPStanDocTagRule
+/// ::POSSIBLE_PHPSTAN_TAGS`, `vendor/phpstan-src`, not guessed) - the
+/// prefix itself stripped, matching every other tag-name comparison in
+/// this file. `@phpstan-all-methods-pure`/`-impure` (a real, if rare,
+/// class-level purity-tag pair this project's own `apply_tag` doesn't
+/// otherwise parse - Phase 41's own transitive-purity slice never needed
+/// a declared-intent tag, only computed purity) are kept in this list
+/// purely so a real, valid use of either doesn't get wrongly flagged as
+/// unknown - not a claim that this project consumes them for anything.
+const KNOWN_PHPSTAN_TAGS: &[&str] = &[
+    "param",
+    "param-out",
+    "var",
+    "extends",
+    "implements",
+    "use",
+    "template",
+    "template-contravariant",
+    "template-covariant",
+    "return",
+    "throws",
+    "ignore",
+    "ignore-next-line",
+    "ignore-line",
+    "method",
+    "pure",
+    "impure",
+    "immutable",
+    "type",
+    "import-type",
+    "property",
+    "property-read",
+    "property-write",
+    "consistent-constructor",
+    "assert",
+    "assert-if-true",
+    "assert-if-false",
+    "self-out",
+    "this-out",
+    "allow-private-mutation",
+    "readonly",
+    "readonly-allow-private-mutation",
+    "require-extends",
+    "require-implements",
+    "sealed",
+    "param-immediately-invoked-callable",
+    "param-later-invoked-callable",
+    "param-closure-this",
+    "all-methods-pure",
+    "all-methods-impure",
+];
+
+/// `@phpstan-*`-prefixed tag *names* found in `raw` that aren't in
+/// `KNOWN_PHPSTAN_TAGS` above - real PHPStan's own `InvalidPHPStanDocTagRule`
+/// (`phpDoc.phpstanTag`), a real, common way to catch a typo'd tag
+/// (`@phpstan-parm`) silently doing nothing instead of what was intended.
+/// A plain text scan, not routed through the rest of this module's own
+/// tag-line-joining machinery - deliberately so: that machinery exists
+/// to extract a tag's own *value*, but this only ever needs the tag
+/// *names* actually written, recognized or not, including one this
+/// module's own `apply_tag` would otherwise silently drop on the floor
+/// (its only way to report "you wrote a tag we don't understand" at
+/// all). A real, disclosed imprecision: a literal `@phpstan-` substring
+/// inside a description/code-example rather than a real tag position
+/// would also match - accepted as a corner case real PHPStan's own
+/// tokenizing lexer doesn't share, but not expected to occur in
+/// practice (a docblock talking *about* a tag almost always still writes
+/// it at the start of its own line, the position that matters for this
+/// scan too, just not enforced separately here).
+pub(crate) fn unknown_phpstan_tags(raw: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut rest = raw;
+    while let Some(idx) = rest.find("@phpstan-") {
+        let after = &rest[idx + "@phpstan-".len()..];
+        let end = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .unwrap_or(after.len());
+        let tag = &after[..end];
+        if !tag.is_empty() && !KNOWN_PHPSTAN_TAGS.contains(&tag) {
+            result.push(tag.to_string());
+        }
+        rest = &after[end..];
+    }
+    result
 }
 
 #[cfg(test)]

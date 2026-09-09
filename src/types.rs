@@ -255,8 +255,15 @@ impl fmt::Display for Type {
                 let parts: Vec<String> = fields
                     .iter()
                     .map(|(name, ty, optional)| {
+                        // The unsealed-shape sentinel (`try_parse_array_
+                        // shape`'s own doc comment) displays as the bare
+                        // `...` marker it was parsed from, not an
+                        // ordinary `key: type` field.
+                        if name == "..." {
+                            return "...".to_string();
+                        }
                         let q = if *optional { "?" } else { "" };
-                        format!("{name}{q}: {ty}")
+                        format!("{}{q}: {ty}", display_shape_key(name))
                     })
                     .collect();
                 write!(f, "array{{{}}}", parts.join(", "))
@@ -266,7 +273,7 @@ impl fmt::Display for Type {
                     .iter()
                     .map(|(name, ty, optional)| {
                         let q = if *optional { "?" } else { "" };
-                        format!("{name}{q}: {ty}")
+                        format!("{}{q}: {ty}", display_shape_key(name))
                     })
                     .collect();
                 write!(f, "object{{{}}}", parts.join(", "))
@@ -547,15 +554,25 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
         }
         // PHPStan/Psalm's "unsealed shape" marker (`...<string, mixed>`
         // or bare `...`) says the array may carry other, unlisted keys
-        // too - a real, if rare, extra-precision feature this project
-        // doesn't model (same as the accessory/refinement types Phase
-        // 10 already skips). Found the hard way: `?` below used to
+        // too. Recorded as a sentinel field (`"..."`, impossible to
+        // collide with any real key this same grammar could ever parse -
+        // `looks_like_shape_key` only ever accepts a bare integer, a
+        // quoted string, or a bare-identifier-shaped token, never three
+        // literal dots) rather than the value's own type, which this
+        // project doesn't attempt to track precisely for the unsealed
+        // portion (`Type::Mixed`, matching a plain `array`'s own
+        // unknown-value-type default) - `is_unsealed_shape`/
+        // `narrowing::narrow_array_shape_by_key_presence`'s own doc
+        // comment cover how this gets consumed. Previously silently
+        // discarded entirely (found the hard way: `?` below used to
         // propagate this field's missing `:` into failing the ENTIRE
         // shape parse, silently falling through to treating the whole
-        // `array{...}` text as a literal (and then namespace-mangled)
-        // class name - degrading just this one field is the safe
-        // choice, not aborting every other real field alongside it.
+        // `array{...}` text as a literal, then namespace-mangled, class
+        // name - degrading just this one field, rather than aborting
+        // every other real field alongside it, is still the right
+        // choice, just no longer a silent no-op once degraded).
         if field_str.starts_with("...") {
+            fields.push(("...".to_string(), Type::Mixed, false));
             continue;
         }
         // Phase 33 Finding 3: a *positional* (unkeyed) field
@@ -579,6 +596,18 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
                     Some(k) => (k.trim(), true),
                     None => (key_part, false),
                 };
+                // `looks_like_shape_key` above already accepts a
+                // `'...'`/`"..."`-quoted key (a real, common shape for a
+                // key that isn't a valid bare identifier, e.g. `array{
+                // 'content-type': string}`) - the surrounding quote
+                // characters themselves were never stripped before this
+                // fix, so the field ended up keyed by the *literal*
+                // quoted text (`"'content-type'"`) instead of the real
+                // string PHP itself would use as the array key
+                // (`"content-type"`), silently breaking every real
+                // lookup against it (`literal_string_key` on `$arr
+                // ['content-type']` produces the unquoted form).
+                let key = strip_shape_key_quotes(key);
                 if let Ok(n) = key.parse::<i64>() {
                     next_index = next_index.max(n + 1);
                 }
@@ -636,6 +665,8 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
             Some(k) => (k.trim(), true),
             None => (key_part, false),
         };
+        // See `try_parse_array_shape`'s own identical fix's doc comment.
+        let key = strip_shape_key_quotes(key);
         fields.push((
             key.to_string(),
             parse_type_string(type_part.trim()),
@@ -643,6 +674,78 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
         ));
     }
     Some(Type::ObjectShape(fields))
+}
+
+/// Strips one layer of matching `'...'`/`"..."` quoting from a shape
+/// field key, if present - `looks_like_shape_key` accepts a quoted key
+/// as a real, common way to write one that isn't a valid bare identifier
+/// (`array{'content-type': string}`), but the field itself must be
+/// stored under the *unquoted* text (`"content-type"`, what `literal_
+/// string_key` on a real `$arr['content-type']` access actually
+/// produces) - otherwise every real lookup against it silently fails to
+/// match. A bare (unquoted) key, integer or identifier-shaped, passes
+/// through unchanged.
+/// The inverse of `strip_shape_key_quotes`, for display: a shape key
+/// shown bare only when it's exactly the shape `looks_like_shape_key`
+/// itself accepts unquoted (a bare integer, or an identifier-shaped
+/// token - alphabetic/underscore start, alphanumeric/underscore/hyphen
+/// rest) - anything else (a key containing a space, a leading digit
+/// followed by non-digits, an empty string, ...) is single-quoted, so a
+/// diagnostic message displaying this type stays round-trippable back
+/// through this same parser rather than silently showing a key text
+/// that would parse as something else (or fail to parse at all) if
+/// pasted back into a real `@var`/`@param` tag.
+fn display_shape_key(key: &str) -> String {
+    let is_bare_integer = key.parse::<i64>().is_ok();
+    let is_bare_identifier = {
+        let mut chars = key.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    };
+    if is_bare_integer || is_bare_identifier {
+        key.to_string()
+    } else {
+        format!("'{}'", key.replace('\\', "\\\\").replace('\'', "\\'"))
+    }
+}
+
+fn strip_shape_key_quotes(key: &str) -> &str {
+    for quote in ['\'', '"'] {
+        if let Some(inner) = key.strip_prefix(quote).and_then(|k| k.strip_suffix(quote)) {
+            return inner;
+        }
+    }
+    key
+}
+
+/// Phase 80 follow-up, real PHPStan's own `OffsetAccessType::getResult()`:
+/// extracts `key`'s own value type out of `base`. Only the shapes that
+/// come up in practice are resolved (`ArrayShape`/`ObjectShape`'s own
+/// per-field lookup, a plain `Array`'s uniform value type, `Union`
+/// recursing member-wise); anything else (an unresolved class, `Mixed`,
+/// ...) falls back to `Mixed` - safe, and matches this parser's own
+/// established "an unresolvable PHPDoc construct never hard-fails,
+/// it just degrades" convention throughout.
+fn offset_access_type(base: &Type, key: &str) -> Type {
+    match base {
+        Type::ArrayShape(fields) | Type::ObjectShape(fields) => fields
+            .iter()
+            .find(|(k, _, _)| k == key)
+            .map(|(_, v, _)| v.clone())
+            .unwrap_or(Type::Mixed),
+        Type::Array(_, value_ty) => (**value_ty).clone(),
+        Type::Union(members) => {
+            let resolved: Vec<Type> = members.iter().map(|m| offset_access_type(m, key)).collect();
+            match resolved.len() {
+                0 => Type::Mixed,
+                1 => resolved.into_iter().next().unwrap(),
+                _ => Type::Union(resolved),
+            }
+        }
+        _ => Type::Mixed,
+    }
 }
 
 /// Whether `key_part` (the text before a candidate `:` inside an
@@ -802,6 +905,59 @@ fn parse_type_atom(s: &str) -> Type {
     while let Some(stripped) = s.strip_suffix("[]") {
         s = stripped.trim();
         array_depth += 1;
+    }
+
+    // Real, serious corpus find (nikic/php-parser's own `@param
+    // array{int, string, string}[] $patches`): `try_parse_array_shape`/
+    // `try_parse_object_shape` are only ever tried once, at the very top
+    // of this function, against the *original*, un-stripped `s` - a
+    // shape wrapped in the `[]`-array-shorthand suffix just stripped
+    // above (`array{...}[]`, `object{...}[]`) never ends with the shape's
+    // own closing `}` at that point (it ends with `[]`), so both checks
+    // correctly declined, and the shape was never re-attempted against
+    // the *reduced* string afterward - falling straight through to the
+    // generic class-name branch far below and mangling the shape's own
+    // literal text into a bogus, namespace-qualified "class name" (this
+    // exact corpus case: `PhpParser\Lexer\array{int, string, string}`).
+    if array_depth > 0
+        && let Some(shape) = try_parse_array_shape(s).or_else(|| try_parse_object_shape(s))
+    {
+        let mut ty = shape;
+        for _ in 0..array_depth {
+            ty = Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty));
+        }
+        return ty;
+    }
+
+    // Phase 80 follow-up: PHPDoc/PHPStan's own `OffsetAccessType` syntax -
+    // `SomeShape['key']` (a bare/unquoted key works too, e.g. an int
+    // key) extracts one key's own value type out of whatever `SomeShape`
+    // resolves to. Checked *after* the `[]`-array-shorthand loop just
+    // above (which only ever strips a genuinely *empty* bracket, so it
+    // can't have consumed this) - `SomeShape['key'][]` still parses
+    // correctly this way: the trailing empty `[]` is stripped first
+    // (`array_depth = 1`), leaving exactly `SomeShape['key']` for this
+    // check to resolve, then wrapped back into an array below like any
+    // other array-shorthand result. Deliberately not specially
+    // recursive for a chained `Foo['a']['b']`: `s.rfind('[')` finds the
+    // *last* bracket pair first (`['b']`), leaving `base_part` as
+    // `"Foo['a']"` - recursing into `parse_type_string` for that
+    // naturally resolves the inner `['a']` the identical way on its own
+    // next call, one bracket peeled per level.
+    if s.ends_with(']')
+        && let Some(open) = s.rfind('[')
+    {
+        let key_part = s[open + 1..s.len() - 1].trim();
+        if !key_part.is_empty() {
+            let base_part = s[..open].trim();
+            let key = strip_shape_key_quotes(key_part);
+            let base_ty = parse_type_string(base_part);
+            let mut ty = offset_access_type(&base_ty, key);
+            for _ in 0..array_depth {
+                ty = Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty));
+            }
+            return ty;
+        }
     }
 
     // `(A|B)[]`/`(A&B)[]` - a parenthesized union/intersection wrapped in
@@ -1029,11 +1185,21 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "value-of" => match generic_args {
             [single] => match parse_type_string(single) {
                 Type::Array(_, value) => *value,
-                Type::ArrayShape(fields) => match fields.len() {
-                    0 => Type::Never,
-                    1 => fields.into_iter().next().unwrap().1,
-                    _ => Type::Union(fields.into_iter().map(|(_, ty, _)| ty).collect()),
-                },
+                // The unsealed-shape sentinel (`try_parse_array_shape`'s
+                // own doc comment) is never a real field - filtered out
+                // before counting/collecting, the same way `Registry::
+                // is_assignable`'s own `ArrayShape` arms already have to.
+                Type::ArrayShape(fields) => {
+                    let fields: Vec<_> = fields
+                        .into_iter()
+                        .filter(|(name, _, _)| name != "...")
+                        .collect();
+                    match fields.len() {
+                        0 => Type::Never,
+                        1 => fields.into_iter().next().unwrap().1,
+                        _ => Type::Union(fields.into_iter().map(|(_, ty, _)| ty).collect()),
+                    }
+                }
                 Type::Object(name, args) if args.is_empty() => {
                     Type::Object("$$valueof".to_string(), vec![Type::Object(name, args)])
                 }
@@ -1044,16 +1210,22 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "key-of" => match generic_args {
             [single] => match parse_type_string(single) {
                 Type::Array(key, _) => *key,
-                Type::ArrayShape(fields) => match fields.len() {
-                    0 => Type::Never,
-                    1 => shape_key_literal(&fields[0].0),
-                    _ => Type::Union(
-                        fields
-                            .iter()
-                            .map(|(name, _, _)| shape_key_literal(name))
-                            .collect(),
-                    ),
-                },
+                Type::ArrayShape(fields) => {
+                    let fields: Vec<_> = fields
+                        .into_iter()
+                        .filter(|(name, _, _)| name != "...")
+                        .collect();
+                    match fields.len() {
+                        0 => Type::Never,
+                        1 => shape_key_literal(&fields[0].0),
+                        _ => Type::Union(
+                            fields
+                                .iter()
+                                .map(|(name, _, _)| shape_key_literal(name))
+                                .collect(),
+                        ),
+                    }
+                }
                 _ => Type::Mixed,
             },
             _ => Type::Mixed,
@@ -1356,7 +1528,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
             Type::Accessory(AccessoryKind::NonEmptyString),
         ) => true,
         (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::NonEmptyArray)) => {
-            !fields.is_empty()
+            fields.iter().any(|(name, _, _)| name != "...")
         }
         (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::ArrayList)) => fields
             .iter()
@@ -1535,7 +1707,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
 /// leading/trailing whitespace (real PHP's own numeric-string leniency)
 /// then accepts an optional sign, digits, an optional single `.` with
 /// more digits, and an optional exponent.
-fn is_numeric_string_literal(s: &str) -> bool {
+pub(crate) fn is_numeric_string_literal(s: &str) -> bool {
     let s = s.trim();
     let s = s.strip_prefix(['+', '-']).unwrap_or(s);
     if s.is_empty() {

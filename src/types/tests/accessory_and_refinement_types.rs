@@ -249,24 +249,35 @@ fn array_shape_field_can_itself_be_a_union() {
 #[test]
 fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
     // `...<K, V>` (PHPStan/Psalm's "this shape may carry other,
-    // unlisted keys too" marker - not modeled, same as other
-    // accessory/refinement types this project skips) has no `:` in
-    // it - found on real code that this used to make the field loop's
-    // `?` propagate a None out of the whole function, silently
-    // failing the ENTIRE shape parse (falling through to treating
-    // `array{...}` as a literal, then namespace-mangled, class name)
-    // over one unmodeled marker, discarding every real field
-    // alongside it.
+    // unlisted keys too" marker) has no `:` in it - found on real code
+    // that this used to make the field loop's `?` propagate a None out
+    // of the whole function, silently failing the ENTIRE shape parse
+    // (falling through to treating `array{...}` as a literal, then
+    // namespace-mangled, class name) over one unmodeled marker,
+    // discarding every real field alongside it.
+    //
+    // Phase 50 follow-up: the marker itself is now recorded as a real
+    // sentinel field (`("...".to_string(), Type::Mixed, false)`, see
+    // `types::is_unsealed_shape`'s own doc comment) instead of being
+    // silently discarded - consumed by `checker::narrowing`'s "never
+    // prove an unsealed shape's key is absent" gate and `checker::
+    // assignment`'s matching `isset()`/access-existence leniency.
     let shape = parse_type_string("array{items: int, ...<string, mixed>}");
     assert_eq!(
         shape,
-        Type::ArrayShape(vec![("items".to_string(), Type::Int, false)])
+        Type::ArrayShape(vec![
+            ("items".to_string(), Type::Int, false),
+            ("...".to_string(), Type::Mixed, false),
+        ])
     );
     // A bare `...` (no generic args) is valid too.
     let shape2 = parse_type_string("array{items: int, ...}");
     assert_eq!(
         shape2,
-        Type::ArrayShape(vec![("items".to_string(), Type::Int, false)])
+        Type::ArrayShape(vec![
+            ("items".to_string(), Type::Int, false),
+            ("...".to_string(), Type::Mixed, false),
+        ])
     );
 }
 

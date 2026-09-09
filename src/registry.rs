@@ -2463,24 +2463,38 @@ impl Registry {
             // `Array(Mixed)` - a shape literal deserves the identical
             // treatment per field, not a stricter one just because its
             // own type happens to be more structurally precise.
-            (Type::ArrayShape(fields), Type::Array(_, b)) => fields.iter().all(|(_, ty, _)| {
-                (!self.strict_mixed_arrays && matches!(ty, Type::Mixed))
-                    || self.is_assignable(ty, b)
-            }),
+            (Type::ArrayShape(fields), Type::Array(_, b)) => fields
+                .iter()
+                .filter(|(name, _, _)| name != "...")
+                .all(|(_, ty, _)| {
+                    (!self.strict_mixed_arrays && matches!(ty, Type::Mixed))
+                        || self.is_assignable(ty, b)
+                }),
             // Same completion for shape-to-shape: a literal's own shape
             // satisfies a declared shape when every field the declared
             // shape actually requires is present (an optional field may
             // be missing) with an assignable type - extra fields the
             // literal has beyond what's required are ignored, the same
             // "structural, not exact" spirit `Array(Mixed)`'s own
-            // leniency already uses elsewhere in this match.
+            // leniency already uses elsewhere in this match. The
+            // unsealed-shape sentinel (`is_unsealed_shape`'s own doc
+            // comment) is filtered out of both sides first - it's a
+            // marker, not a real required field, and would otherwise
+            // wrongly fail this check the moment either shape happened
+            // to be unsealed (`None => *optional` sees a "required"
+            // field named `"..."` that plainly never exists on the
+            // other side).
             (Type::ArrayShape(sub_fields), Type::ArrayShape(sup_fields)) => {
-                sup_fields.iter().all(|(name, sup_ty, optional)| {
-                    match sub_fields.iter().find(|(n, _, _)| n == name) {
+                sup_fields.iter().filter(|(name, _, _)| name != "...").all(
+                    |(name, sup_ty, optional)| match sub_fields
+                        .iter()
+                        .filter(|(n, _, _)| n != "...")
+                        .find(|(n, _, _)| n == name)
+                    {
                         Some((_, sub_ty, _)) => self.is_assignable(sub_ty, sup_ty),
                         None => *optional,
-                    }
-                })
+                    },
+                )
             }
             // Phase 80: the `object{...}`-flavored sibling of the two
             // `ArrayShape` rules just above - a real class instance

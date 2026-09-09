@@ -1395,3 +1395,120 @@ fn a_computed_key_suppresses_further_duplicate_key_checking() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 50 follow-up: unsealed-shape tracking (`array{a: int, ...}`) and
+// a real, previously-undiscovered quoted-shape-key parsing bug found
+// while scoping it.
+
+#[test]
+fn isset_on_an_undeclared_key_of_an_unsealed_shape_is_never_flagged_as_absent() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array{a: int, ...} $x */
+            function f(array $x): void {
+                if (isset($x['b'])) {
+                    echo 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "isset.offset"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn isset_on_an_undeclared_key_of_a_sealed_shape_is_still_flagged_as_absent() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array{a: int} $x */
+            function f(array $x): void {
+                if (isset($x['b'])) {
+                    echo 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "isset.offset"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn accessing_an_undeclared_key_of_an_unsealed_shape_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array{a: int, ...} $x */
+            function f(array $x): void {
+                $y = $x['b'];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_quoted_shape_key_with_a_hyphen_is_parsed_and_looked_up_correctly() {
+    // Real bug found while scoping this phase: a quoted key's own
+    // surrounding quote characters were never stripped, so the field
+    // was stored as the literal text `'content-type'` (quotes
+    // included) instead of the real string PHP itself uses as the
+    // array key - silently breaking every real lookup against it.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array{'content-type': string} $x */
+            function f(array $x): void {
+                $y = $x['content-type'];
+                $z = $x['nonexistent-key'];
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "shapeAccess.notFound");
+}
+
+#[test]
+fn a_shape_with_a_hyphenated_key_displays_it_bare() {
+    // A hyphen is part of this project's own "bare shape key" grammar
+    // (`looks_like_shape_key`'s own doc comment - real corpus
+    // convention, gettext's `plural-forms` key) - round-trips unquoted.
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $x): void {}
+            /** @param array{'content-type': string} $x */
+            function f(array $x): void {
+                needsInt($x);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(
+        d[0].message.contains("array{content-type: string}"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_shape_with_a_key_needing_quotes_displays_it_quoted() {
+    // A space isn't part of the bare-key grammar at all - must round-
+    // trip quoted.
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $x): void {}
+            /** @param array{'foo bar': string} $x */
+            function f(array $x): void {
+                needsInt($x);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(
+        d[0].message.contains("array{'foo bar': string}"),
+        "got: {d:?}"
+    );
+}

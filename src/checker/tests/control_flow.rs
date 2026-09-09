@@ -1057,9 +1057,10 @@ fn a_superglobal_coalesce_assign_does_not_collapse_to_an_empty_shape() {
 // here - `b` is provably absent from `array{a: string}`, a real,
 // distinct diagnostic (`isset.offset`, "does not exist") from the old
 // `check_shape_key_access` bug this test originally guarded against.
-// `empty()` stays silent either way - Phase 60's own offset/property
-// reversal is deliberately `isset()`-only, the same scope
-// `check_pointless_null_probe`'s own bare-variable half already has.
+// Phase 60 follow-up: `empty()` now gets the identical offset/property
+// treatment as `isset()` (both funnel through the same real PHPStan
+// `IssetCheck`) - `empty($x['c'])` is flagged too, `empty.offset`, since
+// `c` is just as provably absent as `b`.
 #[test]
 fn isset_and_empty_on_a_shape_s_missing_key_never_hit_the_old_shape_key_bug() {
     let d = diagnostics_for(
@@ -1074,12 +1075,9 @@ fn isset_and_empty_on_a_shape_s_missing_key_never_hit_the_old_shape_key_bug() {
         !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
         "the old check_shape_key_access bug reappeared: {d:?}"
     );
-    assert_eq!(
-        d.len(),
-        1,
-        "expected exactly the one real isset.offset finding: {d:?}"
-    );
-    assert_eq!(d[0].identifier, "isset.offset");
+    assert_eq!(d.len(), 2, "expected isset.offset and empty.offset: {d:?}");
+    assert!(d.iter().any(|x| x.identifier == "isset.offset"));
+    assert!(d.iter().any(|x| x.identifier == "empty.offset"));
 }
 
 // Real Piwigo corpus bug (test-double-recording idiom): a closure's
@@ -2512,6 +2510,202 @@ fn a_while_with_a_literal_false_condition_is_flagged() {
     assert!(
         d.iter().any(|x| x.identifier == "while.alwaysFalse"),
         "got: {d:?}"
+    );
+}
+
+// Phase 15 follow-up: `NumberComparisonOperatorsConstantConditionRule` -
+// a `</>/<=/>=` comparison whose own outcome is provable from both
+// operands' known int ranges joins the same constant-condition family,
+// with zero new checker code (`infer_binary`'s own comparison arm now
+// returns a literal `Type::True`/`Type::False` when provable).
+
+#[test]
+fn an_if_with_a_provably_always_false_less_than_comparison_is_flagged() {
+    let d = diagnostics_for(
+        "<?php
+        /** @param int<20, 30> $x */
+        function f(int $x): void { if ($x < 10) { echo 1; } }
+        ",
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "smaller.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_if_with_a_provably_always_true_greater_than_or_equal_comparison_is_flagged() {
+    let d = diagnostics_for(
+        "<?php
+        /** @param int<20, 30> $x */
+        function f(int $x): void { if ($x >= 10) { echo 1; } }
+        ",
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "greaterOrEqual.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged() {
+    let d = diagnostics_for(
+        "<?php
+        function f(int $x): void { if ($x < 10) { echo 1; } }
+        ",
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "if.alwaysTrue" || x.identifier == "if.alwaysFalse"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Real corpus find (`Piwigo\Site\SiteRepository::findGalleriesUrlById`):
+// unary `-` on an int literal used to leave its own *value* unnegated
+// (`-32768` inferred as `IntLiteral(32768)`, dropping the sign entirely -
+// only `+`'s numeric-string coercion was actually applied, `-` fell
+// through to the identical "return unchanged" branch). Narrowing `$id`
+// by the *false* branch of `$id < -32768` then wrongly produced
+// `int<32768, max>` instead of `int<-32768, max>`, making the second half
+// of `$id < -32768 || $id > 32767` look "always true" against the real
+// upper bound.
+#[test]
+fn a_negative_int_literal_narrows_with_the_correct_sign() {
+    let d = diagnostics_for(
+        "<?php
+        function f(int $id): void {
+            if ($id < -32768 || $id > 32767) {
+                return;
+            }
+        }
+        ",
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "greater.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Real corpus find: `++$x`/`--$x` on an `IntLiteral`/`IntRange`-typed
+// operand used to return the operand's own type completely unchanged -
+// `$n = 0; foreach (...) { ...; $n++; } if ($n > 0)` (a real, extremely
+// common accumulator idiom) looked "always false" against a check that
+// only fires once anything actually consumes the literal's own exact
+// value, since `$n` never actually advanced past `IntLiteral(0)` no
+// matter how many times `$n++` ran.
+#[test]
+fn a_counter_incremented_inside_a_loop_and_checked_after_is_never_flagged() {
+    let d = diagnostics_for(
+        "<?php
+        function f(array $items): void {
+            $n = 0;
+            foreach ($items as $item) {
+                if ($item) {
+                    $n++;
+                }
+            }
+            if ($n > 0) {
+                echo 1;
+            }
+        }
+        ",
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "greater.alwaysFalse"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Real corpus find (Symfony's own `LoggerTest`): a do-while's own
+// trailing condition, checked once more right after the loop exits, is
+// *itself* still consulting a loop-carried variable's post-convergence
+// (bounded-pass-approximated) type - `do { ...; $attempts++; } while
+// ($attempts < 150);` looked "always true" because this project's own
+// 3-pass convergence never actually reaches anywhere near 150, even
+// though real semantics genuinely allow it. `loop_depth`'s own guard on
+// `check_constant_numeric_comparison` needs to still see this one
+// trailing check as "inside the loop" for exactly this reason.
+#[test]
+fn a_do_while_s_own_trailing_condition_against_a_loop_carried_counter_is_never_flagged() {
+    let d = diagnostics_for(
+        "<?php
+        function f(): void {
+            $attempts = 0;
+            do {
+                $attempts++;
+            } while ($attempts < 150);
+        }
+        ",
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "smaller.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Real, serious corpus find: the vendored `phpstorm-stubs`' own
+// `define('PHP_VERSION_ID', 50306)` (a placeholder baked in from
+// whatever PHP version generated that stub snapshot) used to be trusted
+// as `PHP_VERSION_ID`'s own literal type everywhere - every real
+// `PHP_VERSION_ID >= 80300`-style portability check throughout the
+// entire vendor ecosystem looked unconditionally, wrongly *false*, the
+// moment anything consumed the literal value for a "provably constant"
+// purpose. `checker::expr::Checker::global_constant_type` now derives
+// this from the configured `php_version` instead (an `IntRange`
+// spanning every possible patch digit) - or a fully unbounded
+// `Type::Int` with none configured, never a specific literal.
+#[test]
+fn php_version_id_reflects_the_configured_php_version_not_the_stub_s_own_placeholder() {
+    let d = diagnostics_for_with(
+        "<?php
+        function f(): void {
+            if (PHP_VERSION_ID >= 80300) {
+                echo 1;
+            }
+        }
+        ",
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "greaterOrEqual.alwaysFalse"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn php_version_id_with_no_configured_php_version_is_never_flagged() {
+    let d = diagnostics_for(
+        "<?php
+        function f(): void {
+            if (PHP_VERSION_ID >= 80300) {
+                echo 1;
+            }
+        }
+        ",
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "greaterOrEqual.alwaysFalse"
+                || x.identifier == "greaterOrEqual.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_comparison_whose_ranges_genuinely_overlap_is_never_flagged() {
+    let d = diagnostics_for(
+        "<?php
+        /** @param int<0, 30> $x */
+        function f(int $x): void { if ($x < 10) { echo 1; } }
+        ",
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "if.alwaysTrue" || x.identifier == "if.alwaysFalse"),
+        "unexpected diagnostics: {d:?}"
     );
 }
 

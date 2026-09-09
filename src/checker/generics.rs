@@ -272,8 +272,29 @@ impl<'a> Checker<'a> {
         // interface name carries its own span in the AST, so both use the
         // declaration's own span - imprecise. but still real.
         let mut types_to_check: Vec<Type> = Vec::new();
+        // Real corpus false positive (Symfony's own `ServiceCollectionInterface`,
+        // which `extends ServiceProviderInterface, \Countable,
+        // \IteratorAggregate` with *two* of those three carrying their own
+        // `@extends ...<Args>` tag): `extends_args` is a flat, un-keyed
+        // `Vec<Type>` (unlike `implements_args`, already a real `HashMap`)
+        // - real PHP interfaces can `extends` more than one parent, each
+        // with its own independent argument list, but this field has no
+        // way to keep more than one ancestor's own arguments apart, so
+        // multiple `@extends<...>` tags parse into one conflated list.
+        // Harmless for `check_generic_bounds`'s own tolerant, `zip`-based
+        // bound-checking just below (an extra/misattributed argument is
+        // simply never looked at), but `check_generic_reference_arity`'s
+        // own exact-count comparison is far more sensitive to it - only
+        // trustworthy when there's exactly one `extends` target to begin
+        // with, the one case `extends_args` is actually guaranteed to
+        // belong to.
+        let mut arity_check_types: Vec<Type> = Vec::new();
         if let Some(parent) = info.extends.first() {
-            types_to_check.push(Type::Object(parent.clone(), info.extends_args.clone()));
+            let parent_ty = Type::Object(parent.clone(), info.extends_args.clone());
+            if info.extends.len() == 1 {
+                arity_check_types.push(parent_ty.clone());
+            }
+            types_to_check.push(parent_ty);
         }
         // `implements_args` is a `HashMap` with no guaranteed iteration
         // order - sorted by key so two diagnostics from it always come out
@@ -282,13 +303,103 @@ impl<'a> Checker<'a> {
         let mut iface_names: Vec<&String> = info.implements_args.keys().collect();
         iface_names.sort();
         for iface in iface_names {
-            types_to_check.push(Type::Object(
-                iface.clone(),
-                info.implements_args[iface].clone(),
-            ));
+            let iface_ty = Type::Object(iface.clone(), info.implements_args[iface].clone());
+            arity_check_types.push(iface_ty.clone());
+            types_to_check.push(iface_ty);
         }
-        for ty in types_to_check {
-            self.check_generic_bounds(&ty, fqn, span);
+        for ty in &types_to_check {
+            self.check_generic_bounds(ty, fqn, span);
+        }
+        for ty in &arity_check_types {
+            self.check_generic_reference_arity(ty, fqn, span);
+        }
+    }
+
+    /// Phase 54 follow-up: `GenericObjectTypeCheck`'s own arity/well-
+    /// formedness half (`generics.lessTypes`/`.moreTypes`, confirmed
+    /// directly against `vendor/phpstan-src`) - a genuinely different
+    /// rule than `check_generic_bounds`'s own bound-checking, which
+    /// silently truncates via `zip` (an extra argument beyond `info.
+    /// templates.len()` is simply never looked at) rather than flagging
+    /// the mismatch itself. Deliberately scoped to only this function's
+    /// own `extends`/`implements` call site - not `check_generic_bounds`
+    /// itself, which runs pervasively over *every* generic type
+    /// reference anywhere (a property type, a param/return hint, ...) -
+    /// matching real PHPStan's own identically narrow scope here
+    /// (`ClassAncestorsRule`/`InterfaceAncestorsRule`, not the general-
+    /// purpose `GenericObjectTypeCheck` caller used for every other
+    /// position, which has its own, much larger set of callers this
+    /// project doesn't attempt to mirror one-for-one). Every template
+    /// with its own `@template T = Default` (`template_defaults`) is
+    /// optional - only a template with *no* default is "required" for
+    /// `lessTypes` purposes. Real PHPStan's own third case,
+    /// `generics.notGeneric` (a reference supplying args to a class
+    /// with *no* templates at all), is deliberately not built here: this
+    /// project can't always tell "genuinely not generic" apart from
+    /// "this project's own template-tag parsing has a gap for this
+    /// class," and misfiring on the latter across *every* `extends`/
+    /// `implements` in the corpus is a real, broad false-positive risk
+    /// the narrower arity-only checks below don't share (`0 < args.len()`
+    /// on a class with zero known templates would already be caught as
+    /// `moreTypes` instead, at the same, more conservative confidence
+    /// level as any other class here).
+    fn check_generic_reference_arity(&mut self, ty: &Type, label: &str, span: Span) {
+        let Type::Object(class, args) = ty else {
+            return;
+        };
+        if args.is_empty() {
+            return;
+        }
+        let Some(info) = self.registry.classes.get(class) else {
+            return;
+        };
+        // Real corpus false positive (Piwigo's own custom `phpstan-stubs/
+        // LatteCachingIterator.stub.php`, its own extensive comment
+        // explains why: Latte's `CachingIterator` retroactively "restores"
+        // generics onto real PHP's own `\CachingIterator`, whose actual
+        // phpstorm-stubs declaration carries zero `@template` tags at
+        // all, via `@extends \CachingIterator<TKey, TValue, Iterator<TKey,
+        // TValue>>` alone): a referenced class with *no* declared
+        // templates at all is real PHPStan's own `generics.notGeneric`
+        // territory - a different check, already deliberately not built
+        // (see this file's own `check_generic_reference_arity` doc
+        // comment) precisely because this project's own `@template`-tag
+        // parsing can have a real gap for a class whose only template
+        // declaration lives on the *referencing* side, not this one -
+        // "genuinely non-generic" and "this project just doesn't see its
+        // templates" are indistinguishable from here, so this stays
+        // silent rather than guess.
+        if info.templates.is_empty() {
+            return;
+        }
+        let required = info
+            .templates
+            .iter()
+            .filter(|name| !info.template_defaults.contains_key(*name))
+            .count();
+        if required > args.len() {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Generic type {ty} requires at least {required} type argument(s), {} given.",
+                    args.len()
+                ),
+                span,
+                6,
+                "generics.lessTypes",
+            );
+        } else if info.templates.len() < args.len() {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Generic type {ty} accepts at most {} type argument(s), {} given.",
+                    info.templates.len(),
+                    args.len()
+                ),
+                span,
+                6,
+                "generics.moreTypes",
+            );
         }
     }
 

@@ -1533,6 +1533,32 @@ fn array_shift_on_a_list_preserves_list_ness_but_not_non_emptiness() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus find (Gettext's own `MoLoader::loadString`): `array_shift`/
+// `array_pop`'s own by-ref argument widening (just above) correctly
+// drops non-emptiness from the *array* afterward, but used to also
+// leak into this *expression's own returned value* - `array_shift`
+// removing the one, definitely-present element of a provably non-empty
+// array (`explode()`'s own always-non-empty result) looked like it
+// could return `null`, even though the pre-call array's own known
+// non-emptiness guarantees the removed/returned element is real.
+#[test]
+fn array_shift_on_a_provably_non_empty_array_never_returns_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsString(string $s): void {}
+            function f(string $s): void {
+                $parts = explode("\x00", $s);
+                $first = array_shift($parts);
+                needsString($first);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "argument.type"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // Phase 68: `ArrayFilterRule`/`ArrayValuesRule` - a no-op call, cheap to
 // detect once precise element/list-ness inference already exists.
 

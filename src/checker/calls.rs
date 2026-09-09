@@ -139,6 +139,27 @@ impl<'a> Checker<'a> {
                     }
                     "asort" | "arsort" | "ksort" | "krsort" | "uasort" | "uksort" | "natsort"
                     | "natcasesort" => continue,
+                    // Phase 53 follow-up: `array_walk` never adds, removes,
+                    // or reorders keys, and never changes a value's own
+                    // type either unless the callback's own `$value`
+                    // parameter is itself declared by-ref and reassigns it
+                    // - a shape this project doesn't track through a
+                    // closure literal's own body. Left completely
+                    // unchanged, the same "preserve the exact key
+                    // structure" reasoning as `asort`/`ksort`/... just
+                    // above - real corpus find: without this, the stub's
+                    // own declared `array|object &$array` param type
+                    // (confirmed in `phpstorm-stubs`) failed `Checker::
+                    // is_array_like`'s guard below (a bare `Union`, not a
+                    // plain `Array`/`ArrayShape`) and widened all the way
+                    // to `Mixed`, silently discarding `$array`'s own real
+                    // element/key types for the rest of the statement -
+                    // including this same call's own contextual callback-
+                    // parameter injection (`checker/expr.rs`'s
+                    // `contextual_callback_override`), which read the
+                    // already-widened `Mixed` before ever getting a
+                    // chance to see the real type.
+                    "array_walk" => continue,
                     // A Piwigo-corpus round found this same "generic
                     // widening loses list-ness" gap for the other real,
                     // common by-ref array mutators: `array_push`/

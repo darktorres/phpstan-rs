@@ -323,6 +323,30 @@ fn unary_minus_on_a_gmp_instance_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus find: unary `-` on an int literal used to leave the
+// literal's own *value* unnegated (only `+`'s numeric-string coercion was
+// actually implemented; `-` fell through to the same "return unchanged"
+// branch) - `-5` inferred as `IntLiteral(5)`, not `IntLiteral(-5)`. Only
+// a consumer that cares about the exact *value* (not just "is this an
+// int") can tell the difference - `checker::expr::loose_compare_
+// literals`'s own constant-folding does: with the bug, `-5 == 5` would
+// wrongly fold to `equal.alwaysTrue` (both sides silently the same
+// literal); correctly negated, it's `equal.alwaysFalse`.
+#[test]
+fn unary_minus_negates_an_int_literal_s_own_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): bool {
+                return -5 == 5;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "equal.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn comparing_an_int_to_a_possibly_null_array_is_flagged() {
     let d = diagnostics_for(
@@ -474,4 +498,130 @@ fn incrementing_an_int_a_float_or_a_string_variable_is_never_flagged() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Real corpus find: `++`/`--` on an `IntLiteral`-typed variable used to
+// leave the literal's own *value* completely unchanged (returning the
+// operand's own type as-is, the same "value never applied" bug class
+// unary `-`'s own fix (`negate_numeric_literal`) already found). Only a
+// consumer that cares about the exact value can tell the difference -
+// `checker::expr::loose_compare_literals`'s own constant-folding does:
+// with the bug, `0++ == 1` (well-formed as `$n = 0; $n++; $n == 1`)
+// would wrongly fold to `equal.alwaysFalse` (`$n` silently still `0`).
+#[test]
+fn incrementing_an_int_literal_advances_its_own_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): bool {
+                $n = 0;
+                $n++;
+                return $n == 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "equal.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn decrementing_an_int_literal_reduces_its_own_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): bool {
+                $n = 5;
+                $n--;
+                return $n == 4;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "equal.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+// Phase 52 follow-up: division/modulo by a literal zero.
+
+#[test]
+fn dividing_by_a_literal_zero_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): int|float {
+                return $x / 0;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "division.byZero");
+}
+
+#[test]
+fn modulo_by_a_literal_zero_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): int {
+                return $x % 0;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "modulo.byZero");
+}
+
+#[test]
+fn dividing_by_a_literal_zero_point_zero_float_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(float $x): float {
+                return $x / 0.0;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "division.byZero");
+}
+
+#[test]
+fn dividing_by_a_non_zero_literal_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): int {
+                return $x / 2;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "division.byZero"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn dividing_by_an_ordinary_int_variable_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x, int $y): int {
+                return $x / $y;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "division.byZero"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn compound_assign_division_by_a_literal_zero_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): void {
+                $x /= 0;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "division.byZero");
 }

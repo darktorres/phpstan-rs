@@ -243,11 +243,13 @@ fn an_attribute_naming_an_undefined_class_is_flagged() {
 
 #[test]
 fn an_attribute_naming_a_real_declared_class_is_not_flagged() {
-    // Negative case for the above: a genuinely known class (declared
-    // right there in the same file) must not be flagged just because
-    // it's being used as an attribute.
+    // Negative case for the above: a genuinely known, genuinely
+    // `#[\Attribute]`-marked class (declared right there in the same
+    // file, targeting classes) must not be flagged just because it's
+    // being used as an attribute.
     let d = diagnostics_for(
         r#"<?php
+            #[\Attribute]
             class MyAttr {}
 
             #[MyAttr]
@@ -606,6 +608,188 @@ fn a_user_defined_attribute_class_targeting_only_properties_used_on_a_property_i
     assert!(
         !d.iter()
             .any(|x| x.identifier == "attribute.target" || x.identifier == "attribute.notAttribute"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 37 follow-up: target-validity for the remaining declaration
+// kinds - class, class constant, enum case, and closure/arrow-fn (a
+// property/method/function/param already had this).
+
+#[test]
+fn a_method_only_attribute_used_on_a_class_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_METHOD)]
+            class MethodOnly {}
+
+            #[MethodOnly]
+            class C {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"
+            && x.message == "Attribute class MethodOnly does not have the class target."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_only_attribute_used_on_a_class_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_CLASS)]
+            class ClassOnly {}
+
+            #[ClassOnly]
+            class C {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.target"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_only_attribute_used_on_a_class_constant_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_CLASS)]
+            class ClassOnly {}
+
+            class C {
+                #[ClassOnly]
+                const X = 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"
+            && x.message == "Attribute class ClassOnly does not have the class constant target."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_constant_only_attribute_used_on_a_class_constant_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_CLASS_CONSTANT)]
+            class ConstOnly {}
+
+            class C {
+                #[ConstOnly]
+                const X = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.target"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_constant_only_attribute_used_on_an_enum_case_is_never_flagged() {
+    // Real PHP: an enum case's own attribute target is TARGET_CLASS_CONSTANT,
+    // not a separate "enum case" target.
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_CLASS_CONSTANT)]
+            class ConstOnly {}
+
+            enum Suit {
+                #[ConstOnly]
+                case Hearts;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.target"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_method_only_attribute_used_on_an_enum_case_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_METHOD)]
+            class MethodOnly {}
+
+            enum Suit {
+                #[MethodOnly]
+                case Hearts;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_function_only_attribute_used_on_a_closure_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_FUNCTION)]
+            class FunctionOnly {}
+
+            function test(): void {
+                $f = #[FunctionOnly] function () {};
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.target"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_property_only_attribute_used_on_a_closure_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_PROPERTY)]
+            class PropOnly {}
+
+            function test(): void {
+                $f = #[PropOnly] function () {};
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_trait_marked_as_an_attribute_class_itself_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            trait Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.trait"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_class_marked_as_an_attribute_class_is_never_flagged_for_attribute_trait() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.trait"),
         "unexpected diagnostics: {d:?}"
     );
 }
