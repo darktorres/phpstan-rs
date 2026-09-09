@@ -1553,22 +1553,21 @@ known. Numbered by the original phase for cross-reference; the number
 is not a priority order. See `PHASE_DEPENDENCIES.md` for a graph of
 which of these phases actually block each other (most don't).
 
-**15 - Unreachable-code / constant-condition rule catalog (PARTIAL).**
+**15 - Unreachable-code / constant-condition rule catalog (DONE, disclosed
+residuals only).**
 `UnreachableStatementRule` (`deadCode.unreachable`) and the full,
 inferred-type-trusting constant-boolean-condition family (`if`/`elseif`/
 `while`/`do-while`/ternary/`&&`/`||`/`xor`/`!`, see Done) are both done.
 What real PHPStan's own family still has that this doesn't, each for a
 real, freshly-verified technical reason (not proportionality):
 `NumberComparisonOperatorsConstantConditionRule` (`</>/<=/>=` whose own
-inferred type happens to be a constant boolean) - confirmed directly that
-`infer_binary`'s own comparison arm unconditionally returns bare
-`Type::Bool`; genuinely nothing to catch until this project builds real
-comparison-outcome type inference (real PHPStan's own `Type::isSmallerThan`/
-`isSmallerThanOrEqual` equivalent) - a different half of "the range API"
-than the one `Add`/`Sub` now have (see Done): those two arms gained real,
-narrow `int<min,max>` *arithmetic* this session, but nothing yet computes
-a *comparison*'s own boolean result from two ranges, which is what this
-rule actually needs. Still Phase 55's own separate, larger item. A bare function/method/
+inferred type happens to be a constant boolean) is now Done too -
+Phase 55's own comparison-outcome/range narrowing closed the "nothing yet
+computes a comparison's own boolean result from two ranges" gap this
+entry used to describe, and `check_constant_numeric_comparison`
+(`checker/expr.rs`) is the direct consumer, gated the same way
+`check_constant_loose_comparison` is (`loop_depth == 0`, neither operand
+reading a property). A bare function/method/
 static call condition (`if (alwaysTrue()) {...}`, real corpus find:
 `hash_update()`'s own phpstorm-stubs signature narrows to a literal
 `true` on PHP 8.4+) is now done too - re-verified directly against
@@ -1598,11 +1597,17 @@ feature, not owned by any phase). Full `goto`/label control-flow edges
 unmodeled and out of scope, but the one concrete false positive this
 produced (`deadCode.unreachable` flagging a labeled statement a real
 `goto` elsewhere in the same function jumps straight to) is fixed - see
-Done, fix (25). `exits_function_or_loop`'s own recursion through a
-`Try`/nested `Switch` inside a switch case is unmodeled the same way
-`always_terminates`'s own doesn't recurse into those either - a real,
-disclosed residual, narrower than the shapes already fixed (see Done,
-fixes (26)-(28)). A genuinely *mixed* case-ending branch (one side
+Done, fix (25). `exits_function_or_loop`'s own recursion through a `Try`
+as a switch case's own last statement is now Done too (mirrors
+`always_terminates`'s own pre-existing `Try` arm, just recursing through
+`exits_function_or_loop` instead - sound with no extra level-counting,
+since a `try`/`catch` introduces no `break`/`continue` scope of its own).
+A nested `Switch` in that same position is deliberately still not
+handled: unlike `Try`, a nested switch *does* introduce a new `break`/
+`continue` level, so correctly answering "does this nested switch exit
+the outer function/loop" needs its own `continue N` levels reinterpreted
+one level shallower before recursing - real complexity, the same kind
+the next-disclosed gap below has, not effort. A genuinely *mixed* case-ending branch (one side
 break-equivalent, the other diverging a different way entirely - a
 `: never`-returning call, `return`, `throw`) is a real, disclosed
 residual gap too: `exits_function_or_loop`'s own recursion correctly

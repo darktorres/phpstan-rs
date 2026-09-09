@@ -28,7 +28,7 @@ graph LR
     P60["60: isset/empty/nullsafe\nreversal — DONE, one disclosed\nresidual"]
     P82["82: Collector / cross-file\naggregation — RETIRED, built as a\nregistry fixed point instead"]
     P41["41: Purity / side-effect\nmodel — transitive slice DONE,\n@phpstan-impure done, rest PARTIAL"]
-    P15["15: Unreachable-code / constant-\ncondition catalog — PARTIAL"]
+    P15["15: Unreachable-code / constant-\ncondition catalog — DONE"]
     P55["55: Narrowing-engine\ngeneralization — DONE"]
     P56["56: Grammar-level PHPDoc\nparser rewrite — PLANNED"]
     P36["36: PHPDoc tag ecosystem\nexpansion — PARTIAL, @readonly +\ninline @var error-reporting +\ntypo-whitelist done, only\n@param-immediately-invoked-callable\nfamily left"]

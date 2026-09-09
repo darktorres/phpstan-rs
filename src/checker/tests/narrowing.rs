@@ -2997,6 +2997,38 @@ fn switch_fallthrough_case_does_not_leak_its_own_narrowing_past_a_later_terminat
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 15's own disclosed `exits_function_or_loop` gap, the `Try` half:
+// before this fix, a switch's own *last* case ending in a `try`/`catch`
+// that unconditionally exits (both the `try` body and every `catch`
+// return/throw) fell through `exits_function_or_loop`'s catch-all `_ =>
+// false` arm, wrongly concluding that case's own locals "reach after the
+// switch" (`reaches_after_switch`'s `is_last && !exits_function_or_loop`
+// arm). Merging that case's locals (where `$result` was never assigned)
+// into the switch's real exit state (`case null`'s, where it was) made
+// `$result` look only maybe-defined after the switch.
+#[test]
+fn switch_last_case_ending_in_a_try_catch_does_not_reach_after_the_switch() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(?string $x): string {
+                switch ($x) {
+                    case null:
+                        $result = "was-null";
+                        break;
+                    default:
+                        try {
+                            return "";
+                        } catch (\Throwable $e) {
+                            throw $e;
+                        }
+                }
+                return $result;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn match_true_pattern_narrows_each_arm_and_default() {
     let d = diagnostics_for(

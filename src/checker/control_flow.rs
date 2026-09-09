@@ -231,6 +231,49 @@ impl<'a> Checker<'a> {
                         .as_deref()
                         .is_some_and(|e| self.exits_function_or_loop(e, locals))
             }
+            // Phase 15's own disclosed gap, half closed: a `try`/`catch`
+            // introduces no new `break`/`continue` scope of its own (a
+            // bare `continue;` inside a `try` still targets whatever
+            // loop/switch already enclosed the `try`, exactly as if the
+            // `try` weren't there), so recursing the identical way
+            // `always_terminates`'s own `Try` arm does - just through
+            // `exits_function_or_loop` instead - is sound with no extra
+            // level-counting to get right. The *other* half of the
+            // originally-disclosed gap (a nested `Switch` as a case's own
+            // last statement) is deliberately still not handled here: a
+            // nested switch *does* introduce a new level for `break`/
+            // `continue` purposes, so correctly answering "does this
+            // nested switch exit the outer function/loop" needs the
+            // nested switch's own `continue N` levels reinterpreted one
+            // level shallower before recursing - real complexity, not
+            // effort, and the exact reason this half was originally left
+            // out (see this function's own doc comment above).
+            // Phase 15's own disclosed gap, half closed: a `try`/`catch`
+            // introduces no new `break`/`continue` scope of its own (a
+            // bare `continue;` inside a `try` still targets whatever
+            // loop/switch already enclosed the `try`, exactly as if the
+            // `try` weren't there), so recursing the identical way
+            // `always_terminates`'s own `Try` arm does - just through
+            // `exits_function_or_loop` instead - is sound with no extra
+            // level-counting to get right. The *other* half of the
+            // originally-disclosed gap (a nested `Switch` as a case's own
+            // last statement) is deliberately still not handled here: a
+            // nested switch *does* introduce a new level for `break`/
+            // `continue` purposes, so correctly answering "does this
+            // nested switch exit the outer function/loop" needs the
+            // nested switch's own `continue N` levels reinterpreted one
+            // level shallower before recursing - real complexity, not
+            // effort, and the exact reason this half was originally left
+            // out (see this function's own doc comment above).
+            StmtKind::Try { body, catches, .. } => {
+                body.last()
+                    .is_some_and(|s| self.exits_function_or_loop(s, locals))
+                    && catches.iter().all(|c| {
+                        c.body
+                            .last()
+                            .is_some_and(|s| self.exits_function_or_loop(s, locals))
+                    })
+            }
             _ => false,
         }
     }
