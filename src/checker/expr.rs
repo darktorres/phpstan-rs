@@ -87,7 +87,7 @@ fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// relationship `IntLiteral` has to `Int`"). `infer_binary`'s own
 /// `Add`/`Sub` arms use this to compute a real, narrow arithmetic result
 /// range instead of collapsing straight to bare `Int`.
-fn int_range_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
+pub(crate) fn int_range_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
     match ty {
         Type::IntLiteral(n) => Some((Some(*n), Some(*n))),
         Type::IntRange(min, max) => Some((*min, *max)),
@@ -109,7 +109,7 @@ fn int_range_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
 /// alternative `union_types` there still unions in (`10 / 4` is always
 /// exactly `2.5`, never any int, so its own int "half" collapses to
 /// `Never`, absorbed away by the union, correctly leaving bare `float`).
-fn normalize_int_range(min: Option<i64>, max: Option<i64>) -> Type {
+pub(crate) fn normalize_int_range(min: Option<i64>, max: Option<i64>) -> Type {
     match (min, max) {
         (None, None) => Type::Int,
         (Some(a), Some(b)) if a > b => Type::Never,

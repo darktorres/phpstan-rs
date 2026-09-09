@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, build_matched_shape, literal_string_key, literal_string_value, union_types,
+    Checker, Locals, build_matched_shape, int_range_bounds, literal_string_key,
+    literal_string_value, normalize_int_range, union_types,
 };
 use crate::regex_groups;
 use crate::registry::Registry;
@@ -132,6 +133,46 @@ impl<'a> Checker<'a> {
                     // the reversed form (`0 < count($x)`) isn't handled.
                     let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                     locals.insert(key, upgrade_array_to_non_empty(&current));
+                } else if matches!(op, BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq)
+                    && let Some((keyed_expr, bound_expr, keyed_on_left)) =
+                        int_comparison_operands(l, r)
+                    && let Some(key) = narrowing_key(keyed_expr)
+                {
+                    // Phase 55 follow-up: `$x < N`/`$x >= N`/... (either
+                    // operand order) narrows `$x`'s own int range - scoped
+                    // directly against real PHPStan's own `IntegerRangeType
+                    // ::getSmallerType`/`getGreaterType` family
+                    // (`vendor/phpstan-src`), deliberately simplified: real
+                    // PHPStan's version also has to subtract `true`/`null`/
+                    // `false` per PHP's own loose-comparison rules for `<`/
+                    // `>`, which this project doesn't model (same "no loose-
+                    // comparison modeling" precedent the `===`/`!==`-only
+                    // equality arm above already holds) - so this only acts
+                    // when both the narrowed side's *current* type and the
+                    // other side's *inferred* type are already unambiguously
+                    // numeric (a bare `Type::Int` counts as an unbounded
+                    // range here, unlike `int_range_bounds` itself), and the
+                    // other side is a single literal value, not a genuine
+                    // range (matching the `count() > 0` arm's own "exactly
+                    // this shape" scoping just above, not general range-vs-
+                    // range subtraction).
+                    let current = self.current_narrowed_type(keyed_expr, &key, locals);
+                    if let Some((cur_min, cur_max)) = numeric_bounds_for_narrowing(&current) {
+                        let bound_ty = self.infer_expr(bound_expr, locals);
+                        if let Some((Some(bound), Some(bound_max))) = int_range_bounds(&bound_ty)
+                            && bound == bound_max
+                            && let Some((new_min, new_max)) = comparison_narrowed_bounds(
+                                op,
+                                keyed_on_left,
+                                branch_true,
+                                cur_min,
+                                cur_max,
+                                bound,
+                            )
+                        {
+                            locals.insert(key, normalize_int_range(new_min, new_max));
+                        }
+                    }
                 }
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
@@ -1777,6 +1818,113 @@ fn upgrade_array_to_non_empty(ty: &Type) -> Type {
             Type::Intersection(members)
         }
         _ => ty.clone(),
+    }
+}
+
+/// `<`/`>`/`<=`/`>=`'s own two-operand shape: which side is narrowable
+/// (`narrowing_key` succeeds), which side is the comparison bound, and
+/// whether the narrowable side was written on the left (`$x < N`) or the
+/// right (`N < $x`) - `comparison_narrowed_bounds` needs to know the
+/// latter to interpret the operator correctly (`N < $x` means `$x > N`,
+/// not `$x < N`). `None` when neither side has a narrowing key at all.
+fn int_comparison_operands<'e>(l: &'e Expr, r: &'e Expr) -> Option<(&'e Expr, &'e Expr, bool)> {
+    if narrowing_key(l).is_some() {
+        Some((l, r, true))
+    } else if narrowing_key(r).is_some() {
+        Some((r, l, false))
+    } else {
+        None
+    }
+}
+
+/// `int_range_bounds`'s own "isn't range-representable at all" `None`
+/// widened to also accept a bare `Type::Int` as the fully-unbounded range
+/// `(None, None)` - the common starting point for a plain `int` parameter
+/// before any comparison has narrowed it (`int_range_bounds` itself stays
+/// strict, since `infer_binary`'s own arithmetic call sites need to tell
+/// "unbounded `int`" apart from "not an int at all" for their own,
+/// different reasons).
+fn numeric_bounds_for_narrowing(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
+    match ty {
+        Type::Int => Some((None, None)),
+        _ => int_range_bounds(ty),
+    }
+}
+
+/// A comparison's own truth value, canonicalized to "the narrowed side
+/// is smaller/smaller-or-equal/greater/greater-or-equal than the bound" -
+/// `<`/`<=`/`>`/`>=` all four collapse to Smaller/SmallerOrEqual here (a
+/// negated comparison mirrors real PHPStan's own identical `Greater(l,
+/// r)` -> `Smaller(r, l)` rewrite, `BinaryOpHandler.php`, confirmed
+/// directly), so `comparison_narrowed_bounds` only ever has to reason
+/// about two shapes, not four.
+enum ComparisonOutcome {
+    Smaller,
+    SmallerOrEqual,
+    Greater,
+    GreaterOrEqual,
+}
+
+impl ComparisonOutcome {
+    fn negate(self) -> Self {
+        match self {
+            ComparisonOutcome::Smaller => ComparisonOutcome::GreaterOrEqual,
+            ComparisonOutcome::SmallerOrEqual => ComparisonOutcome::Greater,
+            ComparisonOutcome::Greater => ComparisonOutcome::SmallerOrEqual,
+            ComparisonOutcome::GreaterOrEqual => ComparisonOutcome::Smaller,
+        }
+    }
+}
+
+/// The new `(min, max)` bound pair for the narrowed side, once `op`
+/// (written as `l op r`, `keyed_on_left` saying which of `l`/`r` is the
+/// narrowed side) is known true (`branch_true`) or false - `None` only on
+/// `i64` overflow computing an exclusive bound's own off-by-one (`bound -
+/// 1`/`bound + 1`), an edge real code never hits (a literal compared
+/// against `i64::MIN`/`i64::MAX`), where leaving `locals` untouched is the
+/// same "give up gracefully" choice every other range-arithmetic helper
+/// in this project already makes rather than risk a wrong bound.
+fn comparison_narrowed_bounds(
+    op: &BinOp,
+    keyed_on_left: bool,
+    branch_true: bool,
+    cur_min: Option<i64>,
+    cur_max: Option<i64>,
+    bound: i64,
+) -> Option<(Option<i64>, Option<i64>)> {
+    let outcome = match (op, keyed_on_left) {
+        (BinOp::Lt, true) | (BinOp::Gt, false) => ComparisonOutcome::Smaller,
+        (BinOp::LtEq, true) | (BinOp::GtEq, false) => ComparisonOutcome::SmallerOrEqual,
+        (BinOp::Gt, true) | (BinOp::Lt, false) => ComparisonOutcome::Greater,
+        (BinOp::GtEq, true) | (BinOp::LtEq, false) => ComparisonOutcome::GreaterOrEqual,
+        _ => return None,
+    };
+    let outcome = if branch_true {
+        outcome
+    } else {
+        outcome.negate()
+    };
+    match outcome {
+        ComparisonOutcome::Smaller => {
+            let candidate = bound.checked_sub(1)?;
+            Some((
+                cur_min,
+                Some(cur_max.map_or(candidate, |m| m.min(candidate))),
+            ))
+        }
+        ComparisonOutcome::SmallerOrEqual => {
+            Some((cur_min, Some(cur_max.map_or(bound, |m| m.min(bound)))))
+        }
+        ComparisonOutcome::Greater => {
+            let candidate = bound.checked_add(1)?;
+            Some((
+                Some(cur_min.map_or(candidate, |m| m.max(candidate))),
+                cur_max,
+            ))
+        }
+        ComparisonOutcome::GreaterOrEqual => {
+            Some((Some(cur_min.map_or(bound, |m| m.max(bound))), cur_max))
+        }
     }
 }
 

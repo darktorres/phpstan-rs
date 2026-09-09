@@ -746,7 +746,9 @@ pub(crate) use control_flow::{
     merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
-pub(crate) use expr::{build_matched_shape, union_types, unwrap_grouping};
+pub(crate) use expr::{
+    build_matched_shape, int_range_bounds, normalize_int_range, union_types, unwrap_grouping,
+};
 pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::has_explicit_mixed_nested_somewhere;
 pub(crate) use oop::{

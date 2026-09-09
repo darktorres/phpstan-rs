@@ -3404,3 +3404,158 @@ fn a_reassignment_in_a_middle_or_conjunct_is_visible_to_a_later_conjunct() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 55 follow-up: `<`/`>`/`<=`/`>=` against a literal narrows a
+// plain/ranged int variable's own range - scoped to a single literal
+// bound and a numeric-only current type, matching this project's own
+// "no loose-comparison modeling" precedent (see `comparison_narrowed_
+// bounds`'s own doc comment).
+
+#[test]
+fn less_than_a_literal_narrows_the_upper_bound_exclusive() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, 9> $x */
+            function needsNarrower(int $x): void {}
+            function test(int $x): void {
+                if ($x < 10 && $x >= 0) {
+                    needsNarrower($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn less_than_or_equal_to_a_literal_narrows_the_upper_bound_inclusive() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, 10> $x */
+            function needsNarrower(int $x): void {}
+            function test(int $x): void {
+                if ($x <= 10 && $x >= 0) {
+                    needsNarrower($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+    // Proves the bound is exact, not just "some non-negative int" -
+    // one narrower than the real result must still be rejected.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, 9> $x */
+            function needsTighter(int $x): void {}
+            function test(int $x): void {
+                if ($x <= 10 && $x >= 0) {
+                    needsTighter($x);
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("int<0, 10>"), "got: {d:?}");
+}
+
+#[test]
+fn greater_than_a_literal_narrows_the_lower_bound_exclusive() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<1, max> $x */
+            function needsNarrower(int $x): void {}
+            function test(int $x): void {
+                if ($x > 0) {
+                    needsNarrower($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, max> $x */
+            function needsNarrower(int $x): void {}
+            function test(int $x): void {
+                if ($x >= 0) {
+                    needsNarrower($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_literal_on_the_left_is_narrowed_via_the_mirrored_operator() {
+    // `0 <= $x` means `$x >= 0`, not `$x <= 0` - proves the operand-order
+    // swap actually mirrors the operator, not just relabels it.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, max> $x */
+            function needsNarrower(int $x): void {}
+            function test(int $x): void {
+                if (0 <= $x) {
+                    needsNarrower($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn the_false_branch_of_a_comparison_narrows_via_the_negated_outcome() {
+    // `!($x < 10)` means `$x >= 10`.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<10, max> $x */
+            function needsNarrower(int $x): void {}
+            function test(int $x): void {
+                if ($x < 10) {
+                    return;
+                }
+                needsNarrower($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn comparison_against_a_non_literal_bound_is_never_narrowed() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, max> $x */
+            function needsNarrower(int $x): void {}
+            function test(int $x, int $limit): void {
+                if ($x < $limit) {
+                    needsNarrower($x);
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("int given"), "got: {d:?}");
+}
+
+#[test]
+fn comparison_on_a_non_numeric_current_type_is_never_narrowed() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<0, max> $x */
+            function needsNarrower(int|string $x): void {}
+            function test(int|string $x): void {
+                if ($x < 10) {
+                    needsNarrower($x);
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
