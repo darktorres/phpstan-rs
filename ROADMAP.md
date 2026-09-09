@@ -1247,6 +1247,110 @@ same ground:
 - Phase 50's own reverted `InvalidKeyInArrayDimFetchRule` reattempt
   itself - this phase only removes the stated blocker (real variance-
   aware generic comparison now existing at all), not building Phase 50.
+  (Built as its own separate follow-up later this same session - see
+  Phase 50's own Done entry; the real root cause there turned out to be
+  unrelated to this phase's own generic-comparison work.)
+
+Phase 50 reattempt: `InvalidKeyInArrayDimFetchRule` (`offsetAccess.
+invalidOffset`), the sixth phase picked from `PHASE_DEPENDENCIES.md`'s
+own "unblock others" list this session, after its own stated blocker
+(Phase 54's `is_assignable`/`substitute_template` gaps) shipped.
+Investigated before reattempting rather than assuming the prior revert
+was automatically fixed: reading `vendor/phpstan-src` directly confirmed
+this rule is genuinely the *same* legal-key-type check
+`InvalidKeyInArrayItemRule` already does for an array literal's own key
+(`AllowedArrayKeysTypes`'s own non-strict default set), just applied to
+a dim-fetch's dimension expression instead - not something that also
+needs to know the container's own *declared* key type, a different,
+separate concern this project doesn't model for dim-fetch at all.
+Reusing the literal-key check's own already-shared `invalid_array_key_
+description` verbatim, fired on both a read (`$arr[$key]`) and a write
+(`$arr[$key] = ...`, unlike `check_shape_key_access`, which deliberately
+skips the write side for a different, real-auto-vivification reason),
+only when the container's own type is confidently `Array`/`ArrayShape`
+(or a `Union` where every member is).
+
+Two real, distinct root causes found via this session's own corpus diff
+and revert-verification, neither matching the original revert's own
+write-up closely enough to trust without checking:
+
+(1) Ten different type-tree-walking functions (`mark_template_params`,
+`resolve_names_in_type`, `substitute_template`, `substitute_scoped`,
+`substitute_type_aliases`, `check_generic_bounds`, `is_type_fully_known`,
+`walk_variance`, `resolve_pseudo`, `collect_unknown_class_names`) already
+recursed into `Type::ArrayShape` but had no equivalent `Type::
+ObjectShape` arm at all - a class-level `@template` (or any name needing
+substitution/resolution/existence-checking) referenced inside an
+`object{...}` shape's own field type silently fell through unmarked,
+unresolved, or unchecked in every one of them. Real corpus false
+positive this fixed: `amphp/sync`'s own `PriorityQueue<T of int|
+string>`, `@var array<int, object{key: T, priority: int}>` - `T` never
+became `Type::TemplateParam` at all, so it read as a bogus, unqualified
+(this specific case: not even namespace-mangled, since `resolve_names_
+in_type` had the identical gap) class reference. Found by reading the
+real `amphp/sync` source directly after the original repro attempt
+(mirroring the revert's own generic `PriorityQueue<T>` shape without the
+`object{...}` wrapper) failed to reproduce anything - a reminder that a
+synthetic repro has to match the *real* shape precisely, not just the
+type signature in the abstract.
+
+(2) `Checker::resolve_type_hint` (used by inline `@var` annotations,
+among the other independent-parsing call sites Phase 80's own work
+already named) never applied `mark_template_params` to the type it
+built, unlike the registry-build pipeline's own `build_template_params`
+always running before name resolution - order matters, since resolving
+names first already destroys the short name a template needs to be
+recognized by. New `Checker::current_class_template_params`/
+`current_function_template_params` rebuild the same template map
+`build_template_params` would, reading it back from already-indexed
+registry data (a `FunctionSig` doesn't persist its own raw template
+*names*, unlike `ClassInfo` - the function-level lookup instead walks
+already-marked `Type::TemplateParam` nodes already present in the
+signature's own params/return type). Real corpus false positives this
+fixed: `php-standard-library`'s own `SetType`/`MapType`/
+`MutableSetType`/`ContainerType`, each with an inline `/** @var
+Type\Type<T> $type */` referencing its own class-level `@template`.
+Fixing this surfaced a second, real bug within the same fix: the
+function-level lookup needs the current function's real FQN
+(`Registry::functions` is keyed by it), but `current_method`/`label`
+deliberately store the bare name (matching real PHPStan's own
+uncluttered diagnostic messages) - a first regression test written
+without a `namespace` statement passed even *before* this second fix
+(a bare name already equals its own FQN in the global namespace, so it
+never exercised the real gap), caught only once a namespaced regression
+test mirroring the actual real corpus shape (`php-standard-library`'s
+own `Psl\Dict\group_by()`) was deliberately written instead. Fixed with
+`self.name_ctx.declared_name(...)`.
+
+A third, smaller finding, not a new bug but a real corpus-found residual
+of an already-disclosed, deliberate scope trim: `@phpstan-import-type
+Name from Class` (importing a `@phpstan-type` alias declared on a
+*different* class) is a tag this project's docblock parser has never
+parsed (`DocBlock::type_aliases`'s own doc comment says so directly) -
+the unresolved alias name reads as a bogus, unregistered `Object`, which
+this new check would otherwise misread as a confirmed-illegal key type.
+Guarded with the already-existing `Checker::is_type_fully_known` (the
+identical "every `Object` reference is either a recognized pseudo-type
+or a genuinely registered class" leniency `check_generic_bounds` already
+trusts), not new machinery. Real corpus shapes: `phpunit/php-code-
+coverage`'s own `TestIndexType`, `php-cs-fixer`'s own `_ImportType`.
+
+Corpus-verified on both scopes: Piwigo's own app-only scope byte-
+identical. The full vendor-included scope's own final, remaining diff
+(after all three fixes) is fully triaged, not just counted: one real
+pre-existing false positive fixed as a side effect of fix (1) above
+(Rector's own `PhpDocNodeByTypeFinder`, a different `TNode` leaking the
+identical way `PriorityQueue`'s own `T` did); two message-precision
+corrections (Rector's/Easy Coding Standard's own prefixed `react/
+promise` builds no longer show a mangled, namespace-qualified template
+name in an unrelated pre-existing `property.notFound` message); and one
+genuine new true positive, not a false positive introduced by this work
+- Tracy's own `TracyExtension`, `@property object{..., bar: list<string|
+Nette\DI\Definitions\Statement>, ...}`, correctly newly flagged as
+referencing an uninstalled dependency (`nette/di` confirmed absent from
+this corpus's own `vendor/` entirely) - previously silently missed by
+the exact same `ObjectShape` gap fix (1) closed, now correctly caught
+for the first time.
 
 ## Performance & tooling
 
@@ -1664,23 +1768,14 @@ argument legality are done (see Done). Full constant-array-spread
 expansion (type-checking individual unpacked elements against their own
 target parameter) is a deliberate scope trim, not attempted.
 
-**50 - `Type::Array` key-type / offset engine, remaining (PARTIAL).**
-The key-type parameter itself and `InvalidKeyInArrayItemRule` are done
-(see Done). `InvalidKeyInArrayDimFetchRule` (the offset read/write-site
-counterpart) was built and corpus-verified, then reverted - see
-**Reverted**. Its own stated blocker (Phase 54's `substitute_template`/
-`is_assignable` gaps) is now fixed (see Phase 54, Done) - but the
-Reverted entry's own root cause (a used template parameter's type
-leaking through as a bogus namespace-qualified class reference,
-specifically in a context with no registry/template access as a free
-function) wasn't independently re-verified as the same gap or as
-resolved by this phase; a reattempt should re-verify from scratch
-rather than assume it's now automatically unblocked, per this project's
-own "verify before trusting a prior write-up" precedent (the 51->76
-phantom dependency, `PHASE_DEPENDENCIES.md`).
+**50 - `Type::Array` key-type / offset engine, remaining (PARTIAL,
+`InvalidKeyInArrayDimFetchRule` reattempt done).** The key-type
+parameter itself, `InvalidKeyInArrayItemRule`, and (see Done)
+`InvalidKeyInArrayDimFetchRule`'s successful reattempt are all done.
 `ArrayShape`'s own int-vs-string key precision, unsealed-shape
 (`array{...}`) tracking, and `HasOffsetType`/`HasOffsetValueType`
-accessory facts remain unbuilt.
+accessory facts remain unbuilt - still blocks 73/74's
+`array_key_exists` narrowing (`PHASE_DEPENDENCIES.md`).
 
 **51 - `Type` coercion surface, remaining (PARTIAL).** Cast legality,
 `IntegerRangeType`'s `abs()`/`~` arithmetic, `print`/`InvalidPartOfEncapsedStringRule`,
@@ -1993,14 +2088,18 @@ before defaulting to another full revert.
   real bugs of the identical shape (a condition/its own dependencies
   checked against a stale or wrongly-narrowed scope) - see Done for the
   full list.
-- **`InvalidKeyInArrayDimFetchRule`** (Phase 50). Also a real soundness
-  bug: a *used* (not merely declared) generic template parameter's own
-  type leaks through as a bogus namespace-qualified class reference
-  instead of staying `Type::TemplateParam`, which this check couldn't
-  tell apart from a genuine invalid array key without registry/template
-  context it doesn't have as a free function. +31 diagnostics, all
-  traced to this one gap. Real fix belongs to Phase 54's generics
-  rewrite.
+- **`InvalidKeyInArrayDimFetchRule`** (Phase 50; superseded - reattempted
+  and shipped successfully, see Done). The original revert's own real
+  soundness bug: a *used* (not merely declared) generic template
+  parameter's own type leaked through as a bogus namespace-qualified
+  class reference instead of staying `Type::TemplateParam`, which this
+  check couldn't tell apart from a genuine invalid array key. +31
+  diagnostics, all traced to this one gap at the time. The reattempt
+  found the real root cause was narrower and more specific than this
+  entry's own original framing suggested (ten different type-tree-
+  walking functions missing a `Type::ObjectShape` arm, plus `Checker::
+  resolve_type_hint` never applying `mark_template_params` at all) - see
+  Done for the full, verified picture.
 - **Genuinely-empty-concrete-method-body check** (Phase 61). Verified
   individually correct (confirmed via `php -l`: a real `TypeError` at
   the call site) and NOT a soundness bug - the corpus regression
