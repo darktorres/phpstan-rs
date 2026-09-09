@@ -1102,6 +1102,152 @@ exists in either corpus at all, matching the user's own standing
 directive that corpus silence isn't a reason not to build a real,
 disclosed feature.
 
+Phase 54: variance-aware generic type-argument assignability, the fifth
+phase picked from `PHASE_DEPENDENCIES.md`'s own "unblock others" list
+this session, built in full (not a narrow slice) at the user's own
+explicit request to maximize properness over churn-avoidance rather than
+let effort concerns pre-narrow scope. Investigated directly against
+`vendor/phpstan-src` before designing rather than trusting this entry's
+own prior wording, which turned out to be slightly off: `TemplateParam.
+variance` and the old flat class-level `covariant_templates`/
+`contravariant_templates` sets are just two views of the *same*
+declaration-time data, not a real divergence, and `checker::generics::
+walk_variance`'s own per-slot composition already recursed correctly
+through arbitrarily deep nesting at declaration-check time. Three real
+gaps were found instead:
+
+(1) `types::substitute_template`/`checker::generics::substitute_scoped`
+had no `Type::Object(name, args)` arm at all - every other structural
+wrapper (`Array`/`ClassString`/`Union`/`Intersection`/`ArrayShape`)
+recursed into its own nested type(s); `Object`'s own generic argument
+list fell to the catch-all, unchanged. Substituting `T -> int` through
+e.g. `Box<T>` silently stayed `Box<T>` instead of becoming `Box<int>`.
+Fixed with the missing arm in both functions.
+
+(2) `Registry::is_assignable`'s `(Object(a,_), Object(b,_))` arm ignored
+type arguments entirely, by explicit prior design comment predating this
+phase's own variance metadata - `Collection<Cat>` and `Collection<Dog>`
+were mutually assignable, always, and Phase 10.5/43's own `check_variance`/
+`check_property_variances` only ever validated that a class's *own
+declaration* uses its variance soundly, never applied it when comparing
+two concrete instantiations for real assignability. Now compares
+positionally: `Covariant`/`Contravariant` slots delegate to `is_assignable`
+in the appropriate direction; `Invariant` (the default) requires mutual
+`is_assignable` both ways - deliberately not raw structural `==`, since
+`checker::expr::union_types` never canonicalizes member order, making `==`
+order-sensitive and more likely to falsely reject two independently-built
+but semantically identical unions than mutual `is_assignable` is to miss a
+real mismatch. A missing trailing argument pads to plain `Mixed`, not
+that template's own declared bound - verified concretely, not assumed:
+padding with the bound would make an ordinary bare reference to any class
+with a real (non-`Mixed`) bound (`@template T of SomeInterface`, a common
+shape) fail the Invariant check against *any* concrete argument, since
+`bound != concrete-subtype` invariantly - a real, dangerous false-positive
+class avoided before it ever shipped. `class_template_bindings`/
+`class_template_bindings_rec`/`slot_variance` were hoisted from `Checker`
+into `Registry` (pure `self.classes` data, no checker-specific state) so
+`is_assignable` can map a subclass's own type arguments into an ancestor's
+frame the same way `extends_args`/`implements_args` substitution already
+does elsewhere.
+
+(3) Real PHPStan's own call-site variance annotation syntax
+(`Collection<covariant Foo>`/`Collection<contravariant Foo>`/`Collection<*>`)
+wasn't parsed at all - confirmed real and current (not hypothetical) by
+reading `phpdoc-parser`'s own `GenericTypeNode`/`PhpDoc\TypeNodeResolver::
+resolveGenericTypeNode` directly, and later found in real, popular
+library code during corpus verification (`doctrine/persistence`'s own
+`ClassMetadata::getReflectionClass(): ReflectionClass<covariant T>`).
+Encoded with the same "sentinel via an existing `Type::Object` variant,
+guarded by a name no real PHP identifier can collide with" idiom Phase 80
+established for `value-of<T>`'s own `"$$valueof"` - `"$$covariant"`/
+`"$$contravariant"` each wrap the real argument type, `"$$bivariant"`
+(`*`) wraps nothing. New `Registry::effective_slot_variance` reads the
+marker when present, overriding the class's own declared slot variance
+for that one comparison - confirmed this exact two-step rule (call-site
+wins when present, otherwise the class's own declaration) is genuinely
+shared by *both* real consumers by reading `GenericObjectType::
+isSuperTypeOf`/`getReferencedTemplateTypes` directly, so `walk_variance`
+(declaration-soundness) was wired to the same helper as `is_assignable`
+(runtime compatibility), not just one of the two.
+
+Two real bugs found via this session's own corpus diff and revert-
+verification before landing, each fixed with its own dedicated regression
+test:
+
+(a) A method's own unbound `@template E` nested inside a generic
+argument (not a bare param type) reached the new comparison completely
+unsubstituted and got compared structurally against the real, concrete
+argument - `checker::calls`'s own call-argument template binding only
+ever binds a template used as a *bare* param type, never one nested
+inside another class's own generic argument list. Real corpus shape,
+verbatim: Piwigo's own `TypedRepository::narrow(EntityRepository<E>
+$repository)` with `@template E of object`, producing 596 false
+positives on the very first corpus-diff pass. Fixed by treating a raw,
+still-unbound `TemplateParam` exactly like `Mixed` in this comparison -
+"not yet known, ask again once it's bound," not a real mismatch.
+
+(b) `walk_variance`'s own `Object(class, args)` arm mishandled a
+call-site variance sentinel by recursing into it generically, as if
+`"$$covariant"`/etc. were a real nested class with its own slot to look
+up via `effective_slot_variance("$$covariant", 0, ...)` - always `None`
+(never a registered class), silently stopping the walk right there. This
+project's own revert-verification methodology caught it: a deliberately
+broken wiring test (removing the override from the recursive call)
+*still passed*, for the wrong reason - the walk had already stopped
+before ever reaching the wrapped template, independent of whether the
+override was consulted at all. Fixed with a dedicated sentinel-unwrapping
+arm that continues the walk at the *already*-composed position instead
+of treating the wrapper as its own class boundary.
+
+Corpus-verified on both scopes: Piwigo's own app-only scope byte-
+identical. The full vendor-included scope nets -27 diagnostics (60
+added, 87 removed) - every unique location individually triaged, not
+just counted: 33 real, pre-existing false positives fixed (Doctrine's
+own `AbstractLexer<T, V>`, `V` leaking unsubstituted into `strlen()`/
+return-type checks as a bogus type, fixed by (1) above); 52 of the 59
+added locations are the *same* pre-existing diagnostic with corrected
+message text (a raw, unresolved `T`, or `"covariant T"` mangled into a
+bogus namespace-qualified class name by the old parser, now correctly
+substituted/parsed); the remaining 7 new-location diagnostics are all
+vendor-only and were each read against real source: 2 match real
+phpstorm-stubs semantics exactly (native `Iterator`'s own `TKey` is
+genuinely `@template TKey` - only `TValue` is `@template-covariant` -
+so a narrower `TKey` invariantly mismatches, exactly as real PHPStan
+would also report against the identical stub); 3 fall under this
+phase's own disclosed `Static`-variance exclusion below (Symfony's
+`ArrayNodeDefinition`/`TreeBuilder`-style self-referential `static`-in-
+generics fluent builder pattern); 2 are a narrow Doctrine ORM internal
+edge case (`{@inheritDoc}` combined with a runtime-conditional dual
+trait declaration) that reads as a message-quality wash, not a new
+false positive on anything a real developer would encounter.
+
+Explicitly investigated and excluded, each with a verified (not effort-
+based) reason - `PHASE_DEPENDENCIES.md`'s own docs update covers the
+same ground:
+- Real PHPStan's `Static` call-site/internal variance kind and the whole
+  `Rules/Generics/GenericAncestorsCheck`/`GenericObjectTypeCheck` rule
+  family it belongs to (validating that a class's own `@extends`/
+  `@implements` argument list is itself variance-legal, and rejecting a
+  call-site marker specifically in that position) - a genuinely
+  different, unbuilt rule this project has never named as in-scope
+  anywhere, not a variance-kind gap in the feature built here.
+- Generic-reference arity/well-formedness checking (real PHPStan's
+  `generics.classNotGeneric`/`notEnoughTypeArguments`/
+  `extraTypesArguments`) - confirmed by grepping this project's own
+  diagnostic identifiers that no such check exists at all today (e.g.
+  `class Foo extends Collection<int, string>` supplying too many
+  arguments is never flagged) - a real, disclosed, currently-open gap,
+  newly found by this investigation, but a distinct rule about reference
+  *shape*, not the substitution/variance engine this phase builds.
+- The ~19-concrete-`Template*Type`-subclass internal representation real
+  PHPStan uses - an implementation-strategy difference with no
+  independently observable behavior, not a feature; this project's one
+  `TemplateParam`/`Object(class,args)`-plus-sentinel shape produces the
+  same externally-visible answers.
+- Phase 50's own reverted `InvalidKeyInArrayDimFetchRule` reattempt
+  itself - this phase only removes the stated blocker (real variance-
+  aware generic comparison now existing at all), not building Phase 50.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -1522,7 +1668,16 @@ target parameter) is a deliberate scope trim, not attempted.
 The key-type parameter itself and `InvalidKeyInArrayItemRule` are done
 (see Done). `InvalidKeyInArrayDimFetchRule` (the offset read/write-site
 counterpart) was built and corpus-verified, then reverted - see
-**Reverted**, blocked on Phase 54's generics-substitution rewrite.
+**Reverted**. Its own stated blocker (Phase 54's `substitute_template`/
+`is_assignable` gaps) is now fixed (see Phase 54, Done) - but the
+Reverted entry's own root cause (a used template parameter's type
+leaking through as a bogus namespace-qualified class reference,
+specifically in a context with no registry/template access as a free
+function) wasn't independently re-verified as the same gap or as
+resolved by this phase; a reattempt should re-verify from scratch
+rather than assume it's now automatically unblocked, per this project's
+own "verify before trusting a prior write-up" precedent (the 51->76
+phantom dependency, `PHASE_DEPENDENCIES.md`).
 `ArrayShape`'s own int-vs-string key precision, unsealed-shape
 (`array{...}`) tracking, and `HasOffsetType`/`HasOffsetValueType`
 accessory facts remain unbuilt.
@@ -1548,17 +1703,33 @@ parameter list/return type/purity/template map; contextual injection
 for `array_filter`/`usort`/`array_walk`/`preg_replace_callback` is
 unbuilt (`array_map` only, for now).
 
-**54 - Generic template richness (PARTIAL).** `TemplateParam` carries a
-real bound/variance/scope/default (not a bare name) and the bound-aware
-subtype/assignability rules are done (see Done). `substitute_template`/
-`class_template_bindings`/`check_variance` still read the old flat
-class-level `covariant_templates`/`contravariant_templates` name-sets
-rather than each `TemplateParam`'s own field, so variance doesn't
-compose through *nested* generics - the single largest remaining
-architectural gap in the whole type system (PHPStan splits "template
-bound to X" into ~19 concrete subclasses this project still represents
-as one variant). Size: XL, genuine algorithmic rewrite. Blocks Phase
-50's reverted `InvalidKeyInArrayDimFetchRule` reattempt.
+**54 - Generic template richness (PARTIAL, variance-aware assignability
+done).** `TemplateParam` carries a real bound/variance/scope/default (not
+a bare name), the bound-aware subtype/assignability rules, `substitute_
+template`/`substitute_scoped`'s missing nested-generic-argument recursion,
+`Registry::is_assignable`'s own variance-aware comparison of two generic
+instantiations' type arguments (previously ignored entirely), and real
+PHPStan's call-site variance annotation syntax (`Collection<covariant
+Foo>`/`<contravariant Foo>`/`<*>`) are all done (see Done) - the prior
+"still read the old flat class-level name-sets instead of each
+`TemplateParam`'s own field" framing here was checked directly against
+the code and found to be a non-issue (the two are just different views
+of identical data); the real, now-fixed gaps were the missing nested-
+generic-argument recursion and `is_assignable`'s own total disregard for
+generic arguments, not variance composition itself. Unblocked Phase 50's
+reverted `InvalidKeyInArrayDimFetchRule` reattempt (a separate, still-open
+follow-up - this phase only removed the blocker, didn't rebuild the rule).
+Still open, each disclosed with a verified reason (not effort-based) in
+this phase's own Done writeup: real PHPStan's `Static` call-site/internal
+variance and the whole `GenericAncestorsCheck`/`GenericObjectTypeCheck`
+rule family it belongs to - a genuinely different, unbuilt rule, not a
+variance-kind gap; generic-reference arity/well-formedness checking
+(`Collection<int, string>` extending a single-`@template` class is never
+flagged) - a real, newly-found, currently-open gap, but a distinct rule
+about reference shape; and the ~19-concrete-`Template*Type`-subclass
+internal representation real PHPStan uses internally, which has no
+independently observable behavior this project's own single-variant-plus-
+sentinel representation doesn't already produce.
 
 **55 - Narrowing-engine generalization, remaining (PARTIAL).** `count()`
 truthiness, `array_is_list`, `str_contains`-family, a real
@@ -1755,7 +1926,9 @@ work); letting a conditional return type pick a specific call site's real
 branch instead of always widening to the union of both. Phase 54's own
 `TemplateKeyOfType`/`TemplateObjectShapeType` bound kinds can now build on
 an already-resolved `ClassInfo.template_bounds` (the specific piece Phase
-54 needed from here), though Phase 54 itself remains untouched. Size: M
+54 needed from here) - though that specific bound-kind item is still open;
+Phase 54's own variance-aware assignability work (unrelated to this) has
+since shipped in full, see Phase 54, Done. Size: M
 remaining (down further after the `value-of`/enum slice above).
 
 **82 - Collector / cross-file aggregation architecture (PLANNED, do not
