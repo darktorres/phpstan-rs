@@ -63,7 +63,8 @@
 
 use crate::ast::{BinOp, Expr, ExprKind, UnaryOp};
 use crate::ast_walk::expr_children;
-use crate::checker::Checker;
+use crate::checker::{Checker, Locals};
+use crate::types::Type;
 
 /// Whether `e`'s own subtree provably has no observable side effect at
 /// all - see the module doc comment for why this exists and what it
@@ -121,6 +122,119 @@ impl<'a> Checker<'a> {
                 "Unused result of ternary operator.".to_string(),
                 "ternary.resultUnused",
             ),
+            _ => return,
+        };
+        self.report(label.to_string(), message, e.span, 4, identifier);
+    }
+
+    /// Phase 41/82's transitive-purity payoff: a bare, statement-level
+    /// call whose target `registry::purity::Registry::
+    /// resolve_transitive_purity` proved effect-free is dead code, the
+    /// exact same family as `check_noop_statement` above (a discarded
+    /// call-shaped expression instead of a logical/ternary one) - real
+    /// PHPStan's own four `CallTo*StatementWithoutImpurePointsRule`s,
+    /// unified into one check here since only the message/identifier
+    /// differ per call shape, all four transcribed directly from
+    /// `vendor/phpstan-src`, not guessed. Resolution mirrors whatever
+    /// this project's own ordinary call-checking already does for each
+    /// shape (`infer_expr`/`find_method_owner`/`resolve_static_class_name`),
+    /// since real type inference is available here, unlike
+    /// `registry::purity`'s own registry-build-time classification pass;
+    /// this reads `is_transitively_pure` straight off whatever
+    /// `FunctionSig` the call actually, concretely resolves to, with no
+    /// need to reconstruct a `PurityDependency` key at all.
+    pub(crate) fn check_pure_call_without_effect(
+        &mut self,
+        e: &Expr,
+        locals: &Locals,
+        label: &str,
+    ) {
+        let (message, identifier) = match &e.kind {
+            ExprKind::Call(callee, _) => {
+                let ExprKind::Name(name) = &callee.kind else {
+                    return;
+                };
+                let Some(sig) = self.registry.lookup_function(name) else {
+                    return;
+                };
+                if !sig.is_transitively_pure {
+                    return;
+                }
+                (
+                    format!("Call to function {name}() on a separate line has no effect."),
+                    "function.resultUnused",
+                )
+            }
+            ExprKind::MethodCall(recv, method, _, _) => {
+                let recv_ty = self.infer_expr(recv, locals);
+                let Some((owner, sig)) = self.find_method_owner(&recv_ty, method) else {
+                    return;
+                };
+                if !sig.is_transitively_pure {
+                    return;
+                }
+                // Real PHPStan's own `PossiblyPureMethodCallCollector`
+                // re-applies the identical overridability gate
+                // `registry::purity`'s own classification pass already
+                // used to decide `sig.is_transitively_pure` in the first
+                // place - a *different* question (does *this* call site
+                // definitely reach `sig` itself, not some subclass's own
+                // override of it). Only handled for a plain `Object`
+                // receiver, matching this whole feature's own disclosed
+                // scope (a `Union`/`Intersection` receiver is treated
+                // conservatively - not flagged - the same "don't guess"
+                // default everywhere else in this feature).
+                let Type::Object(recv_class, _) = &recv_ty else {
+                    return;
+                };
+                if !crate::registry::is_non_overridable(
+                    self.registry,
+                    recv_class,
+                    &owner,
+                    method,
+                    sig,
+                ) {
+                    return;
+                }
+                (
+                    format!("Call to method {owner}::{method}() on a separate line has no effect."),
+                    "method.resultUnused",
+                )
+            }
+            ExprKind::StaticCall(class_name, method, _) => {
+                let Some(resolved_class) = self.resolve_static_class_name(class_name) else {
+                    return;
+                };
+                let Some((owner, sig)) = self
+                    .registry
+                    .lookup_method_with_owner(&resolved_class, method)
+                else {
+                    return;
+                };
+                if !sig.is_transitively_pure {
+                    return;
+                }
+                (
+                    format!("Call to {owner}::{method}() on a separate line has no effect."),
+                    "staticMethod.resultUnused",
+                )
+            }
+            ExprKind::New(_, _) => {
+                let new_ty = self.infer_expr(e, locals);
+                let Type::Object(class, _) = &new_ty else {
+                    return;
+                };
+                let Some(sig) = self.registry.lookup_method(class, "__construct") else {
+                    return;
+                };
+                if !sig.is_transitively_pure {
+                    return;
+                }
+                (
+                    format!("Call to new {class}() on a separate line has no effect."),
+                    "new.resultUnused",
+                )
+            }
             _ => return,
         };
         self.report(label.to_string(), message, e.span, 4, identifier);

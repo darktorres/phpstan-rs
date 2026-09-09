@@ -630,6 +630,9 @@ impl ClassInfo {
                 assert_if_false: Vec::new(),
                 assert: Vec::new(),
                 body: None,
+                purity_dependencies: None,
+                is_transitively_pure: false,
+                is_stub: false,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -665,6 +668,9 @@ impl ClassInfo {
                     assert_if_false: Vec::new(),
                     assert: Vec::new(),
                     body: None,
+                    purity_dependencies: None,
+                    is_transitively_pure: false,
+                    is_stub: false,
                 },
             );
             methods.insert(
@@ -685,6 +691,9 @@ impl ClassInfo {
                     assert_if_false: Vec::new(),
                     assert: Vec::new(),
                     body: None,
+                    purity_dependencies: None,
+                    is_transitively_pure: false,
+                    is_stub: false,
                 },
             );
         }
@@ -899,7 +908,31 @@ impl ClassInfo {
     /// `extends`/`implements` of its own must not blank out the real
     /// class's).
     pub(crate) fn merge(mut self, other: ClassInfo) -> ClassInfo {
-        self.methods.extend(other.methods);
+        // Not a bare `HashMap::extend` (a plain overwrite, `self`'s own
+        // colliding entry discarded outright) - a real corpus find
+        // (Piwigo's own vendored *copy* of `jetbrains/phpstorm-stubs`,
+        // analyzed as ordinary project source in this project's own
+        // unscoped, whole-`vendor/`-included corpus check specifically):
+        // `other`'s own `FFI::memset()` stub method silently overwrote
+        // this project's own internal, correctly `FunctionSig::is_stub`-
+        // marked one, losing that marker and wrongly letting
+        // `registry::purity` classify `memset()` - a raw-memory-write
+        // native function - as pure. Routing a colliding method through
+        // `FunctionSig::merge` instead (the same function already used
+        // for a top-level function's identical "declared twice" shape)
+        // keeps its own permissive "either side's marker sticks" `is_stub`
+        // computation in the one place that owns it, rather than
+        // reimplementing that same reasoning here a second time.
+        for (name, other_sig) in other.methods {
+            match self.methods.remove(&name) {
+                Some(self_sig) => {
+                    self.methods.insert(name, self_sig.merge(other_sig));
+                }
+                None => {
+                    self.methods.insert(name, other_sig);
+                }
+            }
+        }
         self.properties.extend(other.properties);
         self.consts.extend(other.consts);
         self.enum_case_values.extend(other.enum_case_values);

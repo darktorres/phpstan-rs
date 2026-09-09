@@ -183,6 +183,42 @@ pub struct FunctionSig {
     // `php_stubs.rs`'s own generated-stub caches are `LazyLock<Vec<(String,
     // FunctionSig)>>` statics, which require `Send + Sync`.
     pub body: Option<Arc<Vec<Stmt>>>,
+    // Phase 41/82 (transitive purity): `None` until `Registry::
+    // resolve_transitive_purity` classifies this declaration's own body
+    // (`registry::purity::classify_body`) - stays `None` forever for
+    // every synthesized signature with no real body (`body` is also
+    // `None`) and for one this project's classifier can never prove
+    // effect-free no matter what its dependencies turn out to be (a
+    // non-call impure point, an explicit throw, a by-ref parameter, an
+    // `@phpstan-assert` tag, or an unresolvable call). `Some(vec![])` -
+    // *not* the same as `None` - is the fixed point's own base case: no
+    // dependencies at all, unconditionally effect-free already.
+    pub purity_dependencies: Option<Vec<crate::registry::PurityDependency>>,
+    // Set by the same fixed point once every one of `purity_dependencies`
+    // is itself proven pure - `false` for everything until then,
+    // including every declaration whose own `purity_dependencies` is
+    // `None`. The one field this whole feature's own consuming
+    // diagnostic (a bare, discarded call to a now-pure declaration)
+    // actually reads.
+    pub is_transitively_pure: bool,
+    // Phase 41/82: `true` for every signature `php_stubs.rs` generates
+    // from vendored `phpstorm-stubs`/`phpstan-src` source - a real,
+    // necessary exclusion found via corpus verification, not assumed:
+    // a stub file's own function/method body is *always* empty (`{}`) -
+    // real PHP builtins like `header()`/`exit()`/`class_exists()` are
+    // natively implemented, real side effects included, with nothing
+    // resembling their actual behavior expressed in PHP at all. Without
+    // this flag, `registry::purity::classify_body` would see an empty
+    // body and wrongly conclude every one of PHP's own thousands of
+    // built-in functions is provably pure - confirmed directly: the
+    // very first full-corpus verification round flagged `header()` as
+    // dead code. `false` for every real, first-party declaration
+    // (`from_decl`'s own construction has no way to know it's *inside*
+    // a stub file at parse time - `php_stubs.rs`'s own
+    // `generate_from_source`/`generate_classes_from_source` set this
+    // `true` on their own returned signatures afterward instead, the
+    // one place that actually knows).
+    pub is_stub: bool,
 }
 
 /// Which real, checkable thing a `@phpstan-assert`-family tag's own
@@ -1057,6 +1093,9 @@ impl FunctionSig {
             assert_if_false,
             assert,
             body: Some(Arc::new(f.body.clone())),
+            purity_dependencies: None,
+            is_transitively_pure: false,
+            is_stub: false,
         }
     }
 
@@ -1169,6 +1208,27 @@ impl FunctionSig {
             // own body is an equally valid absorption target; `self`'s
             // own (if it has one) is preferred only for determinism.
             body: self.body.or(other.body),
+            // Merging happens during indexing/stub-merging, always
+            // before `Registry::resolve_transitive_purity` ever runs -
+            // both sides are always `None`/`false` at this point, same
+            // as any other not-yet-classified signature.
+            purity_dependencies: None,
+            is_transitively_pure: false,
+            // `||`, not `&&`: a real corpus find (Piwigo's own vendored
+            // *copy* of `jetbrains/phpstorm-stubs`, analyzed as ordinary
+            // project source rather than excluded like this project's
+            // own scoped config does - the unscoped, whole-`vendor/`
+            // corpus check specifically) - merging a stub-derived
+            // signature (this project's own internal `header()` stub)
+            // with a *second*, independently-parsed declaration of the
+            // same name (Piwigo's own vendored stub file, itself
+            // *also* just as fake/bodyless) must stay excluded from
+            // purity classification either way, since neither body is a
+            // real implementation - hardcoding `false` here (an earlier
+            // version of this fix) silently un-marked exactly this
+            // shape and reintroduced the original `header()`/`exit()`
+            // false-positive bug through a second path.
+            is_stub: self.is_stub || other.is_stub,
         }
     }
 }

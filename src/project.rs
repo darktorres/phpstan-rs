@@ -255,6 +255,7 @@ impl Project {
         self.registry.flatten_traits();
         self.registry.flatten_phpdoc_inheritance();
         self.registry.resolve_deferred_value_of();
+        self.registry.resolve_transitive_purity();
         self.rebuild_pest_config();
     }
 
@@ -315,6 +316,7 @@ impl Project {
         self.registry.flatten_traits();
         self.registry.flatten_phpdoc_inheritance();
         self.registry.resolve_deferred_value_of();
+        self.registry.resolve_transitive_purity();
         register_references(&mut self.dependents, path, &references);
 
         self.files.insert(

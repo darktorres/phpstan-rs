@@ -37,7 +37,7 @@ methodology behind every corpus number cited above.
 - Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): last measured
   42,840 diagnostics. Re-run before citing - it drifts as vendored
   dependencies change and isn't re-measured every round.
-- Test suite: 2091+ unit tests, all passing.
+- Test suite: 2260+ unit tests, all passing.
 
 ---
 
@@ -1694,17 +1694,60 @@ for method calls (e.g. through a constructor-promoted service property)
 isn't attempted - a deliberate, disclosed scope trim, not a gap found
 later.
 
-**41 - Purity / side-effect model (PARTIAL).** `NoopRule` (a discarded
-bare `&&`/`||`/`xor`/ternary result) is done. Everything else is
-unbuilt: impure-point classification (~20 operation kinds, `certain` vs
-`maybe`), `@phpstan-pure`/`-impure`/`-immutable` tag validation, the
-four statement-level `*WithoutSideEffectsRule`s, and transitive purity
-across the call graph (needs Phase 82's Collector architecture). Only
-the *transitive* piece needs Phase 82 (re-verified directly against
-`vendor/phpstan-src` - see Phase 82's own entry) - the other three
-pieces are self-contained, single-file analyses needing no Collector at
-all, and could be picked up independently of Phase 82 rather than
-waiting on it. XL-size architectural work overall, not incremental.
+**41 - Purity / side-effect model, transitive slice (DONE); remaining
+(PARTIAL).** `NoopRule` (a discarded bare `&&`/`||`/`xor`/ternary
+result) was already done. The *transitive* purity slice - deciding
+which functions/methods/constructors are provably effect-free, and
+flagging a bare, discarded statement-level call to one
+(`function.resultUnused`/`method.resultUnused`/
+`staticMethod.resultUnused`/`new.resultUnused`) - is now built too
+(`registry/purity.rs`, `checker::noop::check_pure_call_without_effect`),
+folded together with Phase 82's own re-architecture (see that entry -
+"Collector" was never the right shape for this project; the real
+mechanism is a registry-build-time fixed point, the same placement
+`flatten_phpdoc_inheritance`/`resolve_deferred_value_of` already use).
+A real, disclosed precision restriction versus real PHPStan's own
+identical algorithm: real PHPStan's `MethodCall`/`StaticCall`
+resolution depends on live `Scope` type inference, which doesn't exist
+at this project's own registry-build time - so a call is only ever
+resolved as a dependency when its target is knowable without inference
+(`$this->`/`self::`/`static::`/`parent::`/`new self()`/`new
+static()`/`new LiteralClassName()`/a plain function call by name); any
+other receiver shape unconditionally disqualifies the whole
+declaration, exactly like real PHPStan's own "unknown callee" case
+already does. Verified against the full vendored corpus (~20,300
+files, not just Piwigo's own scoped `src/`): found and fixed four real
+bugs along the way, none of them guessed - a vendored stub's own
+function/method body is always empty (`header()`/`exit()`/
+`class_exists()`/`FFI::memset()` all looked "provably pure" from body
+alone before `FunctionSig::is_stub` and its propagation through both
+`FunctionSig::merge`/`ClassInfo::merge` were fixed - the second,
+subtler half of that bug only ever surfaced when a project's own
+*vendored copy* of `jetbrains/phpstorm-stubs` got analyzed as ordinary
+project source, silently overwriting this project's own internally
+pre-marked stub signature for the same builtin during a class-level
+merge); and a property write reached through any depth of array-index
+nesting (`$this->arr[] = $x;`, real shape: Piwigo's own
+`PageState::addError()`) wasn't recognized as a `propertyAssign` impure
+point at all. One real, disclosed limitation *inherited from real
+PHPStan's own actual algorithm*, not introduced here: neither project
+counts constructor-promoted-property initialization as an impure
+point (real PHPStan doesn't either - a promoted property's own
+assignment is synthesized by the engine, invisible to any AST walk),
+so a `parent::__construct(...)` call chaining into a promoted-only
+ancestor constructor gets flagged as a discarded no-op even though it
+genuinely does initialize the object's own inherited state - the
+dominant remaining shape in the real corpus diff, confirmed by reading
+`vendor/phpstan-src`'s own identical `resolveCall`/`SimpleImpurePoint`
+logic, not assumed to be a bug of this project's own making.
+
+Everything else in this phase remains unbuilt: the fuller ~20-kind
+impure-point classification with real `certain`-vs-`maybe` grading and
+its own diagnostic messages (this feature only ever needed a single
+boolean per declaration, not the richer taxonomy), and
+`@phpstan-pure`/`-impure`/`-immutable` tag validation - both
+self-contained, single-file analyses needing no fixed point at all,
+genuinely independent of everything built here.
 
 **42 - Checked-exception / throw-type model, remaining (PARTIAL).**
 `@throws`-vs-`Throwable` validity, `throws.void`, dead-catch detection,
@@ -2119,42 +2162,43 @@ Phase 54's own variance-aware assignability work (unrelated to this) has
 since shipped in full, see Phase 54, Done. Size: M
 remaining (down further after the `value-of`/enum slice above).
 
-**82 - Collector / cross-file aggregation architecture (PLANNED, do not
-schedule standalone).** No two-phase Collector-then-aggregate pass
-exists. Re-verified directly against `vendor/phpstan-src/src/Collectors`
-and every real rule consuming one (not assumed): confirms this entry's
-own "handful of low-value dedup rules" framing precisely - of real
-PHPStan's 14 collectors, 7 feed Phase 41's own transitive-purity model
-(the genuine, only real-value consumer), 2 feed Phase 15's own already-
-named `FunctionCallConstantConditionRule` cross-file dedup, and the
-remaining 5 feed genuinely narrow ones: a renamed-override-parameter-vs-
-named-argument-call mismatch (`MethodCallWithPossiblyRenamedNamedArgumentRule`)
-and an unused-trait-declaration check (`NotAnalysedTraitRule` - notably
-under real PHPStan's own `Rules\Playground` namespace, its web
-playground's own diagnostic, not a general-purpose one). Confirms this
-is a real, soft prerequisite for Phase 41's transitive half specifically
-- but Phase 41's *other* three pieces (impure-point classification,
-`@phpstan-pure`/`-impure`/`-immutable` tag validation, the four
-statement-level `*WithoutSideEffectsRule`s) need no Collector at all and
-could be built entirely independently of this phase, contrary to a
-literal reading of Phase 41's own "XL architectural work, not
-incremental" framing.
+**82 - Collector / cross-file aggregation architecture (RETIRED - real
+architecture built as a registry fixed point instead; see Phase 41,
+Done).** A literal two-phase Collector-then-aggregate pass, mirroring
+real PHPStan's own `Collector`/`CollectedDataNode` machinery, was never
+built - and, per the finding below, never should be. Real PHPStan's own
+`Collector` architecture exists to solve a problem this project's
+single-process, in-memory tool doesn't have: getting each file's own
+contribution back from PHPStan's *parallel worker processes* to one
+place before a `CollectedDataNode`-consuming rule runs. This project
+already builds one whole-project `Registry` before any file is ever
+checked - `flatten_phpdoc_inheritance`/`resolve_deferred_value_of`
+already establish the exact right shape ("a pass that runs once, after
+every class is indexed, needing the whole project visible") for
+anything a real Collector-consuming rule would otherwise need. Of real
+PHPStan's 14 collectors (enumerated and read in full, not assumed): 7
+feed Phase 41's own transitive-purity model (the genuine, only
+real-value consumer, and the one actually built - see that entry's own
+Done half, `registry/purity.rs`'s own doc comment has the full
+architectural finding), 2 feed Phase 15's own
+`FunctionCallConstantConditionRule` cross-file dedup (still open, see
+below), and the remaining 5 feed genuinely narrow ones: a
+renamed-override-parameter-vs-named-argument-call mismatch
+(`MethodCallWithPossiblyRenamedNamedArgumentRule`) and an
+unused-trait-declaration check (`NotAnalysedTraitRule` - notably under
+real PHPStan's own `Rules\Playground` namespace, its web playground's
+own diagnostic, not a general-purpose one) - neither built, both
+low-value, both self-contained if ever picked up (no shared
+architecture between them).
 
-Also confirmed the "XL" sizing directly against this project's own
-current architecture, not just asserted: `Project::check_file` builds a
-fresh, per-file `Checker` and discards it once diagnostics are
-extracted - there is no cross-file-persistent state of any kind today.
-A real Collector pass needs (1) a genuinely new, `Project`-level
-accumulation structure surviving across every file's own check, (2) a
-second pass that runs only after every file collects, mapping its own
-findings back to whichever file/line the aggregate violation should
-actually be reported at (often *not* the file that contributed the
-data), and (3) real incremental-invalidation correctness once any of
-this touches `update_file`/the LSP's single-file re-check path (a
-one-file edit needs to both retract that file's own prior contribution
-and consider re-running the aggregate pass, a class of invalidation this
-project's per-file diagnostic model has never needed before) - confirms
-XL is accurate, not overstated.
+Phase 15's own remaining cross-file dedup piece is **not** blocked on
+anything built here after all: it's directly buildable via this
+project's own existing single-file `infer_expr` machinery, the same way
+every other single-file analysis in this project already works -
+confirmed directly, not assumed, while investigating what Phase 41's
+own transitive-purity slice actually needed. `PHASE_DEPENDENCIES.md`'s
+own 82->15 edge is updated to reflect this: still open, but correctly
+no longer described as needing this architecture at all.
 
 **83 - Whole-project duplicate class-name detection (PLANNED, low
 priority).** Re-evaluated and confirmed a genuine architectural

@@ -621,6 +621,9 @@ impl<'a> Checker<'a> {
             assert_if_false: substitute_assert_infos(&sig.assert_if_false, &subst),
             assert: substitute_assert_infos(&sig.assert, &subst),
             body: sig.body.clone(),
+            purity_dependencies: sig.purity_dependencies.clone(),
+            is_transitively_pure: sig.is_transitively_pure,
+            is_stub: sig.is_stub,
         }
     }
 }

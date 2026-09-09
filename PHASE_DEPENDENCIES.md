@@ -26,8 +26,8 @@ graph LR
     P73["73/74: Array/string stdlib\ncoverage (remaining) — PARTIAL"]
     P62["62: Uninitialized-property\ndataflow — DONE (both halves)"]
     P60["60: isset/empty/nullsafe\nreversal (remaining) — PARTIAL"]
-    P82["82: Collector / cross-file\naggregation — PLANNED, don't\nschedule standalone"]
-    P41["41: Purity / side-effect\nmodel — PARTIAL, only the\ntransitive piece needs 82"]
+    P82["82: Collector / cross-file\naggregation — RETIRED, built as a\nregistry fixed point instead"]
+    P41["41: Purity / side-effect\nmodel — transitive slice DONE,\nrest PARTIAL"]
     P15["15: Unreachable-code / constant-\ncondition catalog — PARTIAL"]
     P55["55: Narrowing-engine\ngeneralization (remaining) — PARTIAL"]
     P56["56: Grammar-level PHPDoc\nparser rewrite — PLANNED"]
@@ -40,8 +40,7 @@ graph LR
     P80 -->|done; unblocks| P54
     P50 -->|needed by| P73
     P62 -->|gates| P60
-    P82 -->|needed by| P41
-    P82 -->|needed by| P15
+    P82 -.->|satisfied differently;\nsee edge list| P41
     P55 -->|done; unblocked| P15
     P55 -.->|cross-check before building| P51
     P56 -.->|every sub-item would\nideally build on it| P36
@@ -63,8 +62,8 @@ architectural nice-to-have, explicitly "not a hard blocker").
 | **80** Object-shape/key-of/conditional-type syntax | **54**'s `TemplateKeyOfType`/`TemplateObjectShapeType` bound kinds | prerequisite | 80 done → edge satisfied for the specific deferred-resolution piece (`value-of<T>` naming a real enum, via `Registry::resolve_deferred_value_of`); `ClassInfo.template_bounds` is now walked and resolved, ready to build on - this specific bound-kind item is still open (54's own separate variance-aware-assignability work has since shipped in full, unrelated to this piece) |
 | **50** Array key-type/offset engine (remaining) | **73/74**'s `array_key_exists` narrowing | needs | `InvalidKeyInArrayDimFetchRule` itself now done (see Done), but 50's own `HasOffsetType`/`HasOffsetValueType` accessory facts - the specific piece 73/74 needs - still aren't built → still blocked |
 | **62** Uninitialized-property dataflow | **60**'s offset/property-chain `isset($x['key'])` half | gates | 62 itself is now DONE (both halves - see Phase 62's own entry), but the specific shape 60 needs still isn't what got built → **edge still open, re-scoped, not satisfied**: 62's new `checker/uninitialized_dataflow.rs` is a standalone, one-shot walker that emits a diagnostic directly, never exposing a reusable per-statement fact through the main checker's own `Locals`/narrowing engine - 60's own "offset/property-chain `isset()` reversal" needs exactly that (a narrowing-usable "is this offset/property definitely not yet set" fact consulted mid-expression, the same way ordinary narrowing already consults `Locals`), which is a different shape of dataflow entirely, genuinely still unbuilt |
-| **82** Collector / cross-file aggregation | **41**'s transitive purity across the call graph | needs | 82 explicitly PLANNED, "don't schedule standalone" → still blocked. Re-verified directly against `vendor/phpstan-src/src/Collectors` and every consuming rule: confirms only 41's *transitive* piece needs this - 41's own other three pieces (impure-point classification, tag validation, the four `*WithoutSideEffectsRule`s) need no Collector at all and are `PHASE_DEPENDENCIES`-independent of 82 |
-| **82** Collector / cross-file aggregation | **15**'s `FunctionCallConstantConditionRule` cross-file dedup | needs | same → still blocked |
+| **82** Collector / cross-file aggregation | **41**'s transitive purity across the call graph | needs | **edge satisfied, differently than planned**: 82 was never actually needed as a literal Collector architecture at all - real PHPStan's own `Collector`/`CollectedDataNode` machinery exists to reconcile results across its *parallel worker processes*, a problem this project's single-process, in-memory tool doesn't have. The real, correct equivalent (a registry-build-time fixed point, the same shape `flatten_phpdoc_inheritance`/`resolve_deferred_value_of` already use) was planned and built directly (`registry/purity.rs`; see Phase 41, Done) - Phase 82 itself is now RETIRED, its own entry rewritten to explain the finding rather than left as a literal architecture to build later |
+| **82** Collector / cross-file aggregation | **15**'s `FunctionCallConstantConditionRule` cross-file dedup | needs | **edge removed, not satisfied**: confirmed directly (while investigating 41's own transitive slice) that this piece never actually needed Collector-style architecture either - it's buildable via this project's own existing single-file `infer_expr` machinery, the same way every other single-file analysis already works. Still genuinely unbuilt, but now correctly independent, not blocked on anything |
 | **55** Narrowing-engine generalization | **15** (original constant-boolean-condition family) | was the prerequisite | 55's fixed-point loop convergence shipped → **edge satisfied, 15 reinstated in full** (see Done) |
 | **55** Narrowing-engine generalization (comparison-outcome/range API) | **51** IntegerRangeType work | coordinate, don't duplicate | both still open; explicitly flagged so whichever is built first doesn't reinvent range arithmetic |
 | **56** Grammar-level PHPDoc parser rewrite | **36** PHPDoc tag ecosystem (every sub-item) | soft/architectural | 56 PLANNED; not a hard blocker, sub-items of 36 proceed independently today |
@@ -126,15 +125,30 @@ meaningfully off:
   single-file re-check path would need new invalidation semantics this
   project has never had before).
 
+**Follow-up: 82→41 built, differently than planned; 82→15 removed.**
+The "plan both" pass that followed this investigation went one level
+deeper on 82 specifically and found the literal "build a Collector"
+framing above was itself the wrong target, not just XL-sized - see
+Phase 82's own entry (now RETIRED) for the full finding. What actually
+got built for 41's transitive slice is a registry-build-time fixed
+point, not a Collector, and it's done (`registry/purity.rs`; Phase 41,
+Done). Separately, 15's own cross-file dedup piece turned out not to
+need this architecture at all, confirmed directly rather than assumed
+- the 82→15 edge above no longer applies; 15's own remaining piece is
+now listed under "genuinely independent" below instead.
+
 ## Genuinely independent (no dependency edge either direction)
 
-Everything else in Pending/partial: **18, 19, 36's other sub-items, 39, 40,
-42, 45, 46** (needs a `pcre2` binding - an external crate, not a phase),
-**52, 53, 61, 63, 64** (blocked on an internal `PropertySig::ty_native`
-split, not another phase), **67, 68, 69, 70, 71, 73/74's other sub-items,
-75, 76** (its remaining scope - `filter_input()`, `FILTER_REQUIRE_ARRAY`/
-`FILTER_FORCE_ARRAY`, PHP 8.4's `FILTER_THROW_ON_FAILURE` - needs no
-other phase, confirmed above), **77, 78, 83, 84**. These can be picked up
+Everything else in Pending/partial: **15's own remaining cross-file
+dedup piece** (buildable via this project's own existing single-file
+`infer_expr` machinery - see the 82→15 follow-up above), **18, 19,
+36's other sub-items, 39, 40, 42, 45, 46** (needs a `pcre2` binding -
+an external crate, not a phase), **52, 53, 61, 63, 64** (blocked on an
+internal `PropertySig::ty_native` split, not another phase), **67, 68,
+69, 70, 71, 73/74's other sub-items, 75, 76** (its remaining scope -
+`filter_input()`, `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY`, PHP
+8.4's `FILTER_THROW_ON_FAILURE` - needs no other phase, confirmed
+above), **77, 78, 83, 84**. These can be picked up
 in any order with respect to each other - their Pending entries name
 *reasons* (low corpus incidence, size, deliberate scope trims) but never
 another phase number as a blocker.

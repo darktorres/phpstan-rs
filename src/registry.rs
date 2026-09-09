@@ -7,6 +7,7 @@ use crate::types::{self, Type, Variance};
 mod class_info;
 mod function_sig;
 mod name_context;
+mod purity;
 
 pub(crate) use class_info::hook_body_references_property;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
@@ -15,6 +16,8 @@ pub(crate) use function_sig::resolve_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
 pub(crate) use function_sig::{infer_const_type, mark_template_params, substitute_type_aliases};
 pub(crate) use name_context::{NameContext, resolve_names_in_type};
+pub use purity::PurityDependency;
+pub(crate) use purity::is_non_overridable;
 
 /// A symbol table built by indexing already-parsed source, standing in for
 /// the reflection a real PHP runtime would normally provide (see the
@@ -172,6 +175,27 @@ pub struct Registry {
 
 impl Registry {
     pub fn build(program: &[Stmt]) -> Registry {
+        let mut registry = Registry::index_and_flatten(program);
+        registry.resolve_transitive_purity();
+        registry
+    }
+
+    /// Every step `build` runs, *except* the final purity classification -
+    /// see `resolve_transitive_purity`'s own call site in `build` for why
+    /// that split exists. `php_stubs.rs`'s own `generate_from_source`/
+    /// `generate_classes_from_source` call this directly instead of
+    /// `build`: they only ever build a registry to extract raw
+    /// `FunctionSig`/`ClassInfo` values out of vendored stub source, and a
+    /// stub file's own function body is always empty - classifying it
+    /// would mean every one of PHP's own built-in functions (`header()`,
+    /// `exit()`, ...) looks provably pure, then gets that wrong verdict
+    /// baked permanently into the `LazyLock`-cached stub signatures every
+    /// real project's own registry later merges in (a real bug, found via
+    /// full-corpus verification, not assumed) - `FunctionSig::is_stub`
+    /// isn't even set yet at this point (`php_stubs.rs` sets it
+    /// afterward, on the values this function returns), so classifying
+    /// here couldn't have skipped them via that gate either way.
+    pub(crate) fn index_and_flatten(program: &[Stmt]) -> Registry {
         let mut registry = Registry::default();
         registry.index(program);
         registry.flatten_traits();

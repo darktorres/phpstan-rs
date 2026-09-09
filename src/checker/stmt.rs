@@ -81,6 +81,8 @@ impl<'a> Checker<'a> {
                 // Phase 41 stage 1: NoopRule's own supported slice - see
                 // `checker::noop`'s own module doc comment.
                 self.check_noop_statement(e, label);
+                // Phase 41/82: a bare call to a now-known-pure declaration.
+                self.check_pure_call_without_effect(e, locals, label);
                 // `assert($cond)` is a real, common narrowing idiom real
                 // PHPStan explicitly documents support for - if execution
                 // continues past this statement, `$cond` held, so it's

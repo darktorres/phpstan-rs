@@ -67,8 +67,19 @@ pub fn generate_from_source(source: &str) -> Vec<(String, FunctionSig)> {
     let program = Parser::new(tokens)
         .parse_program()
         .expect("vendored phpstorm-stubs source failed to parse");
-    let registry = Registry::build(&program);
-    registry.functions.into_iter().collect()
+    let registry = Registry::index_and_flatten(&program);
+    registry
+        .functions
+        .into_iter()
+        .map(|(name, mut sig)| {
+            // See `FunctionSig::is_stub`'s own doc comment: a stub file's
+            // own body is never real - `Registry::index_and_flatten` has
+            // no way to know that on its own, so this is set here
+            // instead, the one place that does.
+            sig.is_stub = true;
+            (name, sig)
+        })
+        .collect()
 }
 
 /// Phase 89: phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
@@ -156,8 +167,21 @@ pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
     let program = Parser::new(tokens)
         .parse_program()
         .expect("vendored phpstorm-stubs source failed to parse");
-    let registry = Registry::build(&program);
-    registry.classes.into_iter().collect()
+    let registry = Registry::index_and_flatten(&program);
+    registry
+        .classes
+        .into_iter()
+        .map(|(name, mut info)| {
+            // Same reasoning as `generate_from_source`'s own
+            // `FunctionSig::is_stub` marking, one level down: every
+            // method a stub class declares has an equally empty,
+            // unreal body.
+            for sig in info.methods.values_mut() {
+                sig.is_stub = true;
+            }
+            (name, info)
+        })
+        .collect()
 }
 
 /// All classes generated from the vendored phpstorm-stubs sources, merged

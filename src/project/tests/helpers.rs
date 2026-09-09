@@ -12,8 +12,32 @@ use std::path::PathBuf;
 /// of `pest_directory_scoping` tests that call `check_file` directly
 /// rather than through that helper.
 pub(super) fn without_missing_typehint_diagnostics(mut d: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    d.retain(|x| !x.identifier.starts_with("missingType."));
+    d.retain(|x| !x.identifier.starts_with("missingType.") && !is_pure_call_result_unused(x));
     d
+}
+
+/// Phase 41/82's transitive-purity payoff (`checker::noop::
+/// check_pure_call_without_effect`) fires on a bare, discarded call to
+/// any declaration this project's own registry can prove effect-free -
+/// which several of this file's own Pest fixtures (a trivial, empty
+/// `it($description, $callback) {}`-style helper, an empty
+/// `assertContract(): void {}` method, both called as bare statements)
+/// genuinely are. `checker::tests::helpers::is_pure_call_result_unused_diagnostic`
+/// filters this same family out for the identical reason, in the
+/// sibling `checker` test suite - see its own doc comment; this
+/// function's own name stays `without_missing_typehint_diagnostics`
+/// (not renamed) since every existing call site already names it that
+/// way and the two exclusions belong together for the same underlying
+/// reason (a real, correct diagnostic family that predates, and is
+/// incidental to, what these particular fixtures mean to test).
+fn is_pure_call_result_unused(d: &Diagnostic) -> bool {
+    matches!(
+        d.identifier.as_str(),
+        "function.resultUnused"
+            | "method.resultUnused"
+            | "staticMethod.resultUnused"
+            | "new.resultUnused"
+    )
 }
 
 pub(super) struct TempDir(pub(super) PathBuf);
