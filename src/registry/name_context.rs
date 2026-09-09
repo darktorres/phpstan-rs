@@ -244,12 +244,28 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // this special case, the generic arm just below would instead try
         // to resolve `"$$valueof"` itself as if it were a genuine (and
         // nonsensical) class reference.
-        Type::Object(name, args) if name == "$$valueof" => Type::Object(
-            name,
-            args.into_iter()
-                .map(|a| resolve_names_in_type(a, ctx))
-                .collect(),
-        ),
+        //
+        // Phase 54: `"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`
+        // (`types::parse_generic_arg`'s own call-site variance sentinels)
+        // need the exact same treatment, for the exact same reason - a
+        // real corpus fixture inside any `namespace` block would
+        // otherwise mangle e.g. `"$$covariant"` into `App\$$covariant`
+        // before `Registry::effective_slot_variance` ever gets a chance
+        // to recognize it, the identical class of bug Phase 80's own
+        // `"$$valueof"` regression test found.
+        Type::Object(name, args)
+            if matches!(
+                name.as_str(),
+                "$$valueof" | "$$covariant" | "$$contravariant" | "$$bivariant"
+            ) =>
+        {
+            Type::Object(
+                name,
+                args.into_iter()
+                    .map(|a| resolve_names_in_type(a, ctx))
+                    .collect(),
+            )
+        }
         Type::Object(name, args) => Type::Object(
             ctx.resolve(&name),
             args.into_iter()

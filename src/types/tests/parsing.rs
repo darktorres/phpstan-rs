@@ -199,6 +199,75 @@ fn generic_user_class_keeps_base_name_and_type_args() {
     );
 }
 
+// Phase 54: real PHPStan's own call-site variance annotation syntax
+// (`covariant Foo`/`contravariant Foo`/`*`) inside a generic argument
+// list - confirmed real and current against `phpdoc-parser`'s own
+// `GenericTypeNode` in `vendor/phpstan-src`. Direct parser-level
+// assertions, independent of any downstream consumer, since the
+// checker-level tests exercising this (`checker::tests::
+// generics_and_templates`) can pass "by accident" if parsing regresses
+// to treating the whole annotated argument as one bogus, unrelated
+// class name - a real gap this test file's own revert-verification
+// found: `Collection<contravariant T>` degrading to a literal class
+// named `"contravariant T"` still produced zero diagnostics downstream,
+// for an entirely different (and wrong) reason.
+
+#[test]
+fn generic_arg_with_covariant_marker_parses_to_the_sentinel() {
+    assert_eq!(
+        parse_type_string("Collection<covariant Foo>"),
+        Type::Object(
+            "Collection".to_string(),
+            vec![Type::Object(
+                "$$covariant".to_string(),
+                vec![Type::Object("Foo".to_string(), Vec::new())]
+            )]
+        )
+    );
+}
+
+#[test]
+fn generic_arg_with_contravariant_marker_parses_to_the_sentinel() {
+    assert_eq!(
+        parse_type_string("Collection<contravariant Foo>"),
+        Type::Object(
+            "Collection".to_string(),
+            vec![Type::Object(
+                "$$contravariant".to_string(),
+                vec![Type::Object("Foo".to_string(), Vec::new())]
+            )]
+        )
+    );
+}
+
+#[test]
+fn generic_arg_with_bivariant_marker_parses_to_the_sentinel() {
+    assert_eq!(
+        parse_type_string("Collection<*>"),
+        Type::Object(
+            "Collection".to_string(),
+            vec![Type::Object("$$bivariant".to_string(), Vec::new())]
+        )
+    );
+}
+
+#[test]
+fn a_call_site_variance_marker_survives_nested_inside_the_wrapped_type() {
+    // The wrapped type itself can be an arbitrary nested generic, not
+    // just a bare class reference - `parse_generic_arg` recurses through
+    // the ordinary `parse_type_string` pipeline for it.
+    assert_eq!(
+        parse_type_string("Collection<covariant Box<int>>"),
+        Type::Object(
+            "Collection".to_string(),
+            vec![Type::Object(
+                "$$covariant".to_string(),
+                vec![Type::Object("Box".to_string(), vec![Type::Int])]
+            )]
+        )
+    );
+}
+
 #[test]
 fn union_inside_generic_args_is_not_a_top_level_union() {
     // Without depth-aware splitting, the `|` inside `<>` would be

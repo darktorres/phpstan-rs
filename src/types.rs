@@ -271,6 +271,20 @@ impl fmt::Display for Type {
                     .collect();
                 write!(f, "object{{{}}}", parts.join(", "))
             }
+            // Phase 54: call-site variance sentinels print in real
+            // PHPStan's own `GenericTypeNode::__toString()` format
+            // (`covariant Foo`/`contravariant Foo`/`*`) rather than
+            // leaking the internal `"$$covariant"<Foo>`-shaped sentinel
+            // name into a real diagnostic message - unlike `"$$valueof"`
+            // (Phase 80), which is always resolved away before display,
+            // these persist in the type tree as a permanent annotation.
+            Type::Object(name, args) if name == "$$bivariant" => write!(f, "*"),
+            Type::Object(name, args) if name == "$$covariant" => {
+                write!(f, "covariant {}", args[0])
+            }
+            Type::Object(name, args) if name == "$$contravariant" => {
+                write!(f, "contravariant {}", args[0])
+            }
             Type::Object(name, args) => {
                 write!(f, "{name}")?;
                 if !args.is_empty() {
@@ -1177,16 +1191,71 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "object" => Type::Object("object".to_string(), Vec::new()),
         // A user-defined generic class (`Collection<User>`): each type
         // argument is itself a full type string (could be a union, a
-        // nested generic, ...), so it's re-run through `parse_type_string`
-        // - the same recursive-field pattern `try_parse_array_shape`
-        // already uses. A bare (non-generic) reference just gets an empty
+        // nested generic, ...), so it's re-run through `parse_generic_arg`
+        // (Phase 54: call-site-variance-aware; falls straight through to
+        // `parse_type_string` - the same recursive-field pattern
+        // `try_parse_array_shape` already uses - for an ordinary
+        // argument). A bare (non-generic) reference just gets an empty
         // arg list, indistinguishable from "erased"/unspecified generics
         // on a class that does declare `@template` - `TemplateParam`
         // substitution treats an unbound parameter as `Mixed` either way.
         _ => Type::Object(
             original.to_string(),
-            generic_args.iter().map(|a| parse_type_string(a)).collect(),
+            generic_args.iter().map(|a| parse_generic_arg(a)).collect(),
         ),
+    }
+}
+
+/// Phase 54: real PHPStan's own call-site variance annotation syntax on
+/// one generic type argument - `Collection<covariant Foo>`,
+/// `Collection<contravariant Foo>`, or `Collection<*>` ("don't check
+/// this argument at all"). Confirmed directly against `phpdoc-parser`'s
+/// own `GenericTypeNode::VARIANCE_*` constants/`__toString()` and
+/// `PhpDoc\TypeNodeResolver::resolveGenericTypeNode` in
+/// `vendor/phpstan-src` - real, current PHPStan syntax, parsed on every
+/// generic type position (`@param`/`@return`/`@var`/`@extends`/
+/// `@implements` alike), not just a hypothetical. Encoded with the same
+/// "sentinel via an existing `Type::Object` variant, guarded by a name
+/// no real PHP identifier can ever collide with" idiom Phase 80 already
+/// established for `value-of<T>`'s own `"$$valueof"` -
+/// `"$$covariant"`/`"$$contravariant"` each wrap the real argument
+/// type; `"$$bivariant"` (`*`) has no real argument to wrap. Consulted
+/// by `Registry::effective_slot_variance` (`registry.rs`), which lets a
+/// marker here override a class's own declared slot variance for one
+/// comparison, exactly matching `GenericObjectType::isSuperTypeOf`'s/
+/// `getReferencedTemplateTypes`'s own "call-site variance wins when
+/// present" rule.
+fn parse_generic_arg(a: &str) -> Type {
+    let trimmed = a.trim();
+    if trimmed == "*" {
+        return Type::Object("$$bivariant".to_string(), Vec::new());
+    }
+    if let Some(rest) = trimmed.strip_prefix("covariant ") {
+        return Type::Object("$$covariant".to_string(), vec![parse_type_string(rest)]);
+    }
+    if let Some(rest) = trimmed.strip_prefix("contravariant ") {
+        return Type::Object("$$contravariant".to_string(), vec![parse_type_string(rest)]);
+    }
+    parse_type_string(trimmed)
+}
+
+/// Strips a `parse_generic_arg` call-site variance sentinel down to the
+/// real type it wraps, for every consumer that only cares "what type is
+/// really being referenced here," not the variance override itself
+/// (existence-checking, bound-checking, substitution's own recursive
+/// rebuild, ...). `Registry::effective_slot_variance`/`is_assignable`
+/// are the two places that DO care about the marker itself and read it
+/// directly rather than through this helper. `"$$bivariant"` (`*`) has
+/// no real type to unwrap to at all - `None` here means "nothing to
+/// verify," the same as this project already treats any other
+/// unresolvable/erased generic argument elsewhere.
+pub(crate) fn strip_call_site_variance(ty: &Type) -> Option<&Type> {
+    match ty {
+        Type::Object(name, args) if name == "$$covariant" || name == "$$contravariant" => {
+            Some(&args[0])
+        }
+        Type::Object(name, _) if name == "$$bivariant" => None,
+        other => Some(other),
     }
 }
 
@@ -1567,6 +1636,30 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
             fields
                 .iter()
                 .map(|(k, t, opt)| (k.clone(), substitute_template(t, bindings), *opt))
+                .collect(),
+        ),
+        // Phase 54: a real, previously-missing case - every other
+        // structural wrapper above recurses into its own nested type(s);
+        // `Object`'s own generic argument list didn't, so substituting
+        // `T -> int` through e.g. `Box<T>` silently left it as `Box<T>`
+        // completely unchanged instead of `Box<int>`. Also what carries
+        // a call-site variance sentinel's own wrapped inner type through
+        // substitution correctly (`"$$covariant"`/`"$$contravariant"`/
+        // `"$$bivariant"` are all just `Object`s with this same shape -
+        // no separate arm needed for them).
+        // Phase 54: a real, previously-missing case - every other
+        // structural wrapper above recurses into its own nested type(s);
+        // `Object`'s own generic argument list didn't, so substituting
+        // `T -> int` through e.g. `Box<T>` silently left it as `Box<T>`
+        // completely unchanged instead of `Box<int>`. Also what carries
+        // a call-site variance sentinel's own wrapped inner type through
+        // substitution correctly (`"$$covariant"`/`"$$contravariant"`/
+        // `"$$bivariant"` are all just `Object`s with this same shape -
+        // no separate arm needed for them).
+        Type::Object(name, args) => Type::Object(
+            name.clone(),
+            args.iter()
+                .map(|a| substitute_template(a, bindings))
                 .collect(),
         ),
         other => other.clone(),

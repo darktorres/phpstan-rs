@@ -201,6 +201,17 @@ impl<'a> Checker<'a> {
     /// project already made once for bound-checking.
     pub(crate) fn collect_unknown_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         match ty {
+            // Phase 54: a call-site variance sentinel's own name is
+            // never a real class reference to flag - matches this
+            // function's own existing, deliberate leniency of not
+            // recursing into a generic argument list at all (see this
+            // function's own doc comment above), so the wrapped inner
+            // type isn't recursed into here either.
+            Type::Object(name, _)
+                if matches!(
+                    name.as_str(),
+                    "$$covariant" | "$$contravariant" | "$$bivariant"
+                ) => {}
             Type::Object(name, _args) => {
                 if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
                     out.push(name.clone());

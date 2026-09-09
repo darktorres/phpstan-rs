@@ -1219,3 +1219,495 @@ fn a_method_s_own_template_still_binds_on_a_non_generic_class() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 54: `Registry::is_assignable` now actually applies variance to a
+// generic class's own type arguments, instead of ignoring them entirely
+// (`Collection<Cat>` and `Collection<Dog>` used to be mutually
+// assignable, always). These exercise it through ordinary argument-type
+// checking (`checker/calls.rs`), the same real call site every one of
+// these comparisons goes through in practice.
+
+#[test]
+fn an_invariant_generic_class_rejects_a_narrower_argument_by_default() {
+    // No `@template-covariant`/`-contravariant` at all - the default,
+    // by far the most common real shape - so `Collection<Cat>` and
+    // `Collection<Animal>` are genuinely different types now, even
+    // though `Cat extends Animal`. Previously silent (type arguments
+    // were ignored entirely).
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @param Collection<Animal> $c */
+            function needsAnimalCollection($c) {}
+            /** @param Collection<Cat> $c */
+            function f($c) {
+                needsAnimalCollection($c);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("Collection<Animal>")),
+        "expected an argument-type mismatch naming Collection<Animal>, got: {d:?}"
+    );
+}
+
+#[test]
+fn an_invariant_generic_class_rejects_a_broader_argument_too() {
+    // The reverse direction of the test above - proves this is genuine
+    // invariance, not just "narrower rejected, broader accepted"
+    // (which would actually be covariance).
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @param Collection<Cat> $c */
+            function needsCatCollection($c) {}
+            /** @param Collection<Animal> $c */
+            function f($c) {
+                needsCatCollection($c);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("Collection<Cat>")),
+        "expected an argument-type mismatch naming Collection<Cat>, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_declared_covariant_generic_class_accepts_a_narrower_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template-covariant T
+             */
+            class Box {}
+            /** @param Box<Animal> $b */
+            function needsAnimalBox($b) {}
+            /** @param Box<Cat> $b */
+            function f($b) {
+                needsAnimalBox($b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_declared_covariant_generic_class_still_rejects_a_broader_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template-covariant T
+             */
+            class Box {}
+            /** @param Box<Cat> $b */
+            function needsCatBox($b) {}
+            /** @param Box<Animal> $b */
+            function f($b) {
+                needsCatBox($b);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("Box<Cat>")),
+        "expected an argument-type mismatch naming Box<Cat>, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_declared_contravariant_generic_class_accepts_a_broader_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template-contravariant T
+             */
+            class Comparator {}
+            /** @param Comparator<Cat> $c */
+            function needsCatComparator($c) {}
+            /** @param Comparator<Animal> $c */
+            function f($c) {
+                needsCatComparator($c);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_declared_contravariant_generic_class_still_rejects_a_narrower_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template-contravariant T
+             */
+            class Comparator {}
+            /** @param Comparator<Animal> $c */
+            function needsAnimalComparator($c) {}
+            /** @param Comparator<Cat> $c */
+            function f($c) {
+                needsAnimalComparator($c);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("Comparator<Animal>")),
+        "expected an argument-type mismatch naming Comparator<Animal>, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_bare_erased_generic_reference_is_never_flagged_either_direction() {
+    // The overwhelmingly common real shape: no `<T>` at all. Padding a
+    // missing slot with plain `Mixed` (not the class's own declared
+    // bound - see `Registry::is_assignable`'s own doc comment for why
+    // that distinction matters) keeps this silent, matching this
+    // project's established "erased generic = don't know = don't flag"
+    // leniency everywhere else - even though `Collection` here declares
+    // a real, non-`Mixed` bound on its own template.
+    let d = diagnostics_for(
+        r#"<?php
+            class Shape {}
+            class Circle extends Shape {}
+            /**
+             * @template T of Shape
+             */
+            class Collection {}
+            /** @param Collection<Circle> $c */
+            function needsCircleCollection($c) {}
+            /** @param Collection $c */
+            function f($c) {
+                needsCircleCollection($c);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_bare_erased_generic_argument_is_never_flagged_when_passed_where_a_concrete_one_is_declared() {
+    // The mirror direction: a concretely-typed value passed where a bare
+    // reference is expected is trivially fine too (every slot on the
+    // `sup` side pads to `Mixed`, always skipped).
+    let d = diagnostics_for(
+        r#"<?php
+            class Circle {}
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @param Collection $c */
+            function needsAnyCollection($c) {}
+            /** @param Collection<Circle> $c */
+            function f($c) {
+                needsAnyCollection($c);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_non_generic_subclass_fixing_the_parent_s_argument_is_assignable_to_the_matching_instantiation()
+{
+    // `IntCollection` isn't generic itself, but its own `@extends
+    // Collection<int>` permanently fixes Collection's own `T` to `int` -
+    // `is_assignable` needs to map `IntCollection`'s own (empty) type
+    // arguments into `Collection`'s frame via `extends_args`, the same
+    // ancestor walk `class_template_bindings` already performs
+    // elsewhere, to see this correctly.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @extends Collection<int> */
+            class IntCollection extends Collection {}
+            /** @param Collection<int> $c */
+            function needsIntCollection($c) {}
+            function f(IntCollection $c) {
+                needsIntCollection($c);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_non_generic_subclass_fixing_the_parent_s_argument_is_not_assignable_to_a_different_one() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @extends Collection<int> */
+            class IntCollection extends Collection {}
+            /** @param Collection<string> $c */
+            function needsStringCollection($c) {}
+            function f(IntCollection $c) {
+                needsStringCollection($c);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("Collection<string>")),
+        "expected an argument-type mismatch naming Collection<string>, got: {d:?}"
+    );
+}
+
+// Phase 54: real PHPStan's own call-site variance annotation syntax
+// (`Collection<covariant Foo>`/`Collection<contravariant Foo>`/
+// `Collection<*>`) - confirmed real and current against `phpdoc-parser`'s
+// own `GenericTypeNode`/`PhpDoc\TypeNodeResolver::resolveGenericTypeNode`
+// in `vendor/phpstan-src`. `types::parse_generic_arg` parses it into a
+// sentinel `Registry::effective_slot_variance` reads directly.
+
+#[test]
+fn a_call_site_covariant_marker_overrides_the_class_s_own_invariant_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @param Collection<covariant Animal> $c */
+            function needsAnimalCollection($c) {}
+            /** @param Collection<Cat> $c */
+            function f($c) {
+                needsAnimalCollection($c);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_call_site_bivariant_marker_accepts_any_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Whatever {}
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @param Collection<*> $c */
+            function needsAnyCollection($c) {}
+            /** @param Collection<Whatever> $c */
+            function f($c) {
+                needsAnyCollection($c);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn without_a_call_site_marker_the_class_s_own_invariant_default_still_applies() {
+    // Proves the marker itself - not mere proximity to a correct-looking
+    // assignment - is what does the work in the two tests above: the
+    // exact same shape with the marker removed goes back to being
+    // flagged.
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @param Collection<Animal> $c */
+            function needsAnimalCollection($c) {}
+            /** @param Collection<Cat> $c */
+            function f($c) {
+                needsAnimalCollection($c);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("Collection<Animal>")),
+        "expected an argument-type mismatch naming Collection<Animal>, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_site_variance_marker_prints_legibly_in_a_diagnostic_message() {
+    // `Display for Type` gained a dedicated case for these sentinels -
+    // without it, this would leak the internal `$$covariant<Foo>`-shaped
+    // sentinel name into a real diagnostic message instead of real
+    // PHPStan's own `covariant Foo` syntax.
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Cat extends Animal {}
+            /**
+             * @template T
+             */
+            class Collection {}
+            /** @param Collection<covariant Cat> $c */
+            function needsCatCollection($c) {}
+            /** @param Collection<Animal> $c */
+            function f($c) {
+                needsCatCollection($c);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type"
+                && x.message.contains("Collection<covariant Cat>")),
+        "expected the call-site marker to print as 'covariant Cat', got: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_site_variance_marker_inside_a_declared_parameter_overrides_declaration_soundness_checking()
+ {
+    // `checker::generics::walk_variance` (declaration-soundness, not
+    // assignability) must consult the exact same override -
+    // `Box`'s own `@template-covariant T` may only appear in an output
+    // (return) position, but a call-site `contravariant` marker on the
+    // nested `Collection<contravariant T>` flips the composed position
+    // from input back to output, making this sound - proof
+    // `Registry::effective_slot_variance` is really wired into
+    // `walk_variance`, not just `is_assignable`.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template U
+             */
+            class Collection {}
+            /**
+             * @template-covariant T
+             */
+            class Good {
+                /** @param Collection<contravariant T> $c */
+                public function consume($c): void {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn without_the_call_site_marker_the_same_nesting_is_flagged_as_unsound() {
+    // The exact same nesting as the test above with the marker removed -
+    // `Collection`'s own declared variance is Invariant by default, so
+    // the parameter (input) position isn't flipped, and `T`'s own
+    // covariant declaration is genuinely violated. Proves the marker in
+    // the test above - not something else about this nesting shape - is
+    // what makes it sound.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template U
+             */
+            class Collection {}
+            /**
+             * @template-covariant T
+             */
+            class Bad {
+                /** @param Collection<T> $c */
+                public function consume($c): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("@template-covariant T")
+            && x.message.contains("input (parameter) position")),
+        "expected a covariance-violation diagnostic for T nested in Collection<T>, got: {d:?}"
+    );
+}
+
+#[test]
+fn an_unbound_method_own_template_nested_inside_a_generic_argument_is_never_flagged() {
+    // Regression test for a real false-positive class found via this
+    // session's own corpus diff (596 new diagnostics on a single real
+    // shape): `checker::calls`'s own call-argument template binding
+    // only ever binds a template used as a *bare* param type (`T
+    // $value`), never one nested inside another class's own generic
+    // argument list - so `E` here reaches `is_assignable`'s new
+    // variance-aware comparison exactly as unbound as it was declared,
+    // not substituted with the real argument's own entity type the way
+    // real PHPStan's own inference would. Comparing it structurally
+    // against the real, concrete argument is exactly as wrong as
+    // comparing `Mixed` would be - real corpus shape verbatim: Piwigo's
+    // own `TypedRepository::narrow(EntityRepository<E> $repository)`
+    // with `@template E of object`, called with a real, concrete
+    // `EntityRepository<ConcreteEntity>` value.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             */
+            class EntityRepository {}
+            class ConcreteEntity {}
+            class TypedRepository {
+                /**
+                 * @template E of object
+                 * @param EntityRepository<E> $repository
+                 */
+                public static function narrow($repository): void {}
+            }
+            function f(EntityRepository $r) {
+                TypedRepository::narrow($r);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_unbound_method_own_template_nested_inside_a_generic_argument_with_a_concrete_receiver_is_never_flagged()
+ {
+    // The exact real corpus shape: the argument itself is a concretely
+    // generic-typed value (`EntityRepository<ConcreteEntity>`), not
+    // another unbound template.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             */
+            class EntityRepository {}
+            class ConcreteEntity {}
+            class TypedRepository {
+                /**
+                 * @template E of object
+                 * @param EntityRepository<E> $repository
+                 */
+                public static function narrow($repository): void {}
+            }
+            /** @param EntityRepository<ConcreteEntity> $r */
+            function f($r) {
+                TypedRepository::narrow($r);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

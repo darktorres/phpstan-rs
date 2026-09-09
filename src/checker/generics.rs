@@ -37,17 +37,35 @@ impl<'a> Checker<'a> {
                     && let Some(info) = self.registry.classes.get(class)
                     && !info.template_bounds.is_empty()
                 {
+                    // Phase 54: bound-checking cares about the real
+                    // referenced type, not a call-site variance marker
+                    // wrapping it (`Collection<covariant Foo>` still
+                    // needs `Foo` itself checked against the bound,
+                    // `is_assignable`'s own variance handling is a
+                    // separate concern) - `strip_call_site_variance`
+                    // unwraps for both the substitution bindings and the
+                    // actual bound comparison; the *displayed* `arg`
+                    // below stays the original, marker-and-all, so a
+                    // real violation message still shows `covariant Foo`
+                    // rather than silently dropping the annotation.
                     let bindings: TemplateBindings = info
                         .templates
                         .iter()
                         .cloned()
-                        .zip(args.iter().cloned())
+                        .zip(args.iter().map(|a| {
+                            types::strip_call_site_variance(a)
+                                .cloned()
+                                .unwrap_or(Type::Mixed)
+                        }))
                         .collect();
                     for (name, arg) in info.templates.iter().zip(args.iter()) {
                         let Some(bound) = info.template_bounds.get(name) else {
                             continue;
                         };
                         let bound = types::substitute_template(bound, &bindings);
+                        let Some(checked_arg) = types::strip_call_site_variance(arg) else {
+                            continue;
+                        };
                         // Same "don't know, don't guess" leniency every
                         // other undefined-symbol-adjacent check in this
                         // project already applies to a class the registry
@@ -61,10 +79,10 @@ impl<'a> Checker<'a> {
                         // PHPStan\Type\Type`, reads as violating a bound
                         // this project simply has no way to verify either
                         // way, not one it's actually confirmed broken.
-                        if *arg != Type::Mixed
-                            && self.is_type_fully_known(arg)
+                        if *checked_arg != Type::Mixed
+                            && self.is_type_fully_known(checked_arg)
                             && self.is_type_fully_known(&bound)
-                            && !self.registry.is_assignable(arg, &bound)
+                            && !self.registry.is_assignable(checked_arg, &bound)
                         {
                             self.report(
                                 label.to_string(),
@@ -107,6 +125,20 @@ impl<'a> Checker<'a> {
     /// bound it has no way to actually verify, rather than guess wrong.
     pub(crate) fn is_type_fully_known(&self, ty: &Type) -> bool {
         match ty {
+            // Phase 54: a call-site variance sentinel's own name is
+            // never a real class to look up - defer to whatever it
+            // wraps (`"$$bivariant"` wraps nothing at all, trivially
+            // "known" the same way this function's own catch-all
+            // treats anything it doesn't otherwise recognize).
+            Type::Object(name, _)
+                if matches!(
+                    name.as_str(),
+                    "$$covariant" | "$$contravariant" | "$$bivariant"
+                ) =>
+            {
+                types::strip_call_site_variance(ty)
+                    .is_none_or(|inner| self.is_type_fully_known(inner))
+            }
             Type::Object(name, args) => {
                 (name == "object" || self.registry.classes.contains_key(name))
                     && args.iter().all(|a| self.is_type_fully_known(a))
@@ -386,32 +418,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// This class's own declared variance for the `index`-th `@template`
-    /// of `class` (`Covariant`/`Contravariant`/`Invariant` - the same
-    /// three-way classification `TemplateParam::variance` itself carries,
-    /// just looked up by position rather than read off an already-marked
-    /// node) - `None` when `class` isn't a registered class at all, or
-    /// declares fewer templates than `index` needs, either of which means
-    /// this project has no real basis to say whether subtyping flows
-    /// through that slot at all, let alone which direction. `walk_variance`
-    /// treats `None` as "don't recurse into this argument," matching this
-    /// project's general "don't know, don't guess" leniency elsewhere
-    /// (`Checker::is_type_fully_known` above) rather than defaulting to
-    /// `Invariant` and risking a false positive on a real but unregistered
-    /// (uninstalled dependency, PHAR-bundled `phpstan/phpstan` itself, ...)
-    /// generic class.
-    fn slot_variance(&self, class: &str, index: usize) -> Option<types::Variance> {
-        let info = self.registry.classes.get(class)?;
-        let name = info.templates.get(index)?;
-        Some(if info.covariant_templates.contains(name) {
-            types::Variance::Covariant
-        } else if info.contravariant_templates.contains(name) {
-            types::Variance::Contravariant
-        } else {
-            types::Variance::Invariant
-        })
-    }
-
     /// Walks `ty` composing `pos` through every nested generic argument
     /// slot (see `check_variance`'s own doc comment for the composition
     /// rules), flagging a `TemplateParam` belonging to `class_name` itself
@@ -422,7 +428,17 @@ impl<'a> Checker<'a> {
     /// `ArrayShape` are structural wrappers that don't themselves carry a
     /// declared variance to compose with, so they pass `pos` through
     /// unchanged - only an `Object`'s own type-argument slots can flip or
-    /// force it, via `slot_variance`.
+    /// force it, via `Registry::effective_slot_variance`.
+    ///
+    /// Phase 54: uses `effective_slot_variance`, not the class's bare
+    /// declared variance alone - a call-site variance marker written on
+    /// this exact argument (`Collection<covariant T>`) overrides
+    /// `Collection`'s own declared slot variance for this composition,
+    /// exactly mirroring real PHPStan's `VarianceCheck`/
+    /// `getReferencedTemplateTypes`, which consult the identical
+    /// call-site-overrides-declared rule this project's own
+    /// `is_assignable` now also uses (`registry.rs`) - both are real
+    /// consumers of the same effective-variance concept, not just one.
     fn walk_variance(
         &self,
         ty: &Type,
@@ -451,9 +467,35 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
+            // Phase 54: a call-site variance sentinel isn't a real nested
+            // class with its own slot to look up - the *enclosing* call
+            // (the arm just below, one level up) already read the
+            // override and composed `pos` accordingly before ever
+            // recursing into this node. Without this dedicated arm, the
+            // generic `Object(class, args)` case below would instead try
+            // `effective_slot_variance("$$covariant", 0, ...)`, which
+            // always returns `None` (`"$$covariant"` is never a
+            // registered class) - silently stopping the walk right here,
+            // so a real violation nested inside the wrapped type would
+            // never be found, for the wrong reason. Confirmed the hard
+            // way via this project's own revert-verification: a
+            // deliberately broken wiring test still passed, because this
+            // exact silent-stop already produced the same "no violation
+            // found" result independent of whether the override was
+            // ever consulted at all.
+            Type::Object(class, _)
+                if matches!(
+                    class.as_str(),
+                    "$$covariant" | "$$contravariant" | "$$bivariant"
+                ) =>
+            {
+                if let Some(inner) = types::strip_call_site_variance(ty) {
+                    self.walk_variance(inner, pos, class_name, violations);
+                }
+            }
             Type::Object(class, args) => {
                 for (i, arg) in args.iter().enumerate() {
-                    if let Some(slot) = self.slot_variance(class, i) {
+                    if let Some(slot) = self.registry.effective_slot_variance(class, i, arg) {
                         self.walk_variance(arg, pos.compose(slot), class_name, violations);
                     }
                 }
@@ -477,106 +519,21 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Binds a generic-typed receiver's own carried type arguments
-    /// (`Collection<User>` -> `{"T": Object("User", [])}`) against
-    /// `target`'s own declared `@template` parameter names, walking up
-    /// `class`'s `extends`/`implements` chain to reach it if `target`
-    /// isn't `class` itself (Phase 10.5) - so a concrete subclass that
-    /// fixes its parent's template param (`class IntCollection extends
-    /// Collection<int> {}`) resolves `Collection`'s own `T` to `int` even
-    /// though `IntCollection` isn't generic itself, and a generic
-    /// subclass that passes its own template through (`class Box<T>
-    /// extends Collection<T> {}`) resolves it to whatever `Box`'s own `T`
-    /// is bound to at each use, not a fixed value.
-    ///
-    /// `target` matters because template names are scoped to the class
-    /// that declares them, not globally unique - two unrelated classes in
-    /// the same chain commonly both use `T` (confirmed the hard way on a
-    /// real corpus: `symfony/type-info`'s `NullableType<T of Type>
-    /// extends UnionType<T|BuiltinType<...>>`, where `UnionType` has its
-    /// *own*, unrelated `T`). Returning bindings scoped to exactly
-    /// `target`'s own level - not a single flat map merged across the
-    /// whole chain - is what keeps those two `T`s from colliding into
-    /// whichever one happened to be computed last.
-    ///
-    /// A non-generic class (empty `templates`), a bare unspecified-generic
-    /// reference (empty `type_args`), or a chain with no matching
-    /// `@extends`/`@implements` tag along the way to `target` all just
-    /// leave that level's names unbound - `substitute_template` already
-    /// treats an unbound `TemplateParam` as `Mixed`, the right
-    /// conservative fallback for an "erased" generic.
+    /// Thin delegation to `Registry::class_template_bindings` (Phase 54
+    /// hoisted the real logic there, alongside `is_assignable`, since
+    /// neither ever needed anything but `self.registry`/`self.classes` -
+    /// kept here too since real call sites (`checker/assignment.rs`,
+    /// `checker/expr.rs`) already call it as `self.class_template_
+    /// bindings(...)`). See `Registry::class_template_bindings`'s own doc
+    /// comment for the full binding/ancestor-walk semantics.
     pub(crate) fn class_template_bindings(
         &self,
         class: &str,
         type_args: &[Type],
         target: &str,
     ) -> TemplateBindings {
-        let mut seen = HashSet::new();
-        self.class_template_bindings_rec(class, type_args, target, &mut seen)
-            .unwrap_or_default()
-    }
-
-    /// `None` means `target` isn't reachable along this path at all (so
-    /// the caller should treat every one of its templates as unbound,
-    /// same as `Some` with an empty map) - the distinction only matters
-    /// internally, to know when to keep searching sibling branches below.
-    /// `seen` guards against a cyclic `extends`/`implements` graph
-    /// (invalid PHP, but a malformed/partially-loaded real corpus could
-    /// still produce one) - cloned per branch, not threaded through by
-    /// mutable reference, so two independent ancestors (e.g. two
-    /// interfaces that both eventually reach a common shared parent, a
-    /// real "diamond" shape) can each still be searched.
-    pub(crate) fn class_template_bindings_rec(
-        &self,
-        class: &str,
-        type_args: &[Type],
-        target: &str,
-        seen: &mut HashSet<String>,
-    ) -> Option<TemplateBindings> {
-        if !seen.insert(class.to_string()) {
-            return None;
-        }
-        let info = self.registry.classes.get(class)?;
-        let own_bindings: TemplateBindings = info
-            .templates
-            .iter()
-            .cloned()
-            .zip(type_args.iter().cloned())
-            .collect();
-
-        if class == target {
-            return Some(own_bindings);
-        }
-
-        if let Some(parent) = info.extends.first() {
-            let parent_args: Vec<Type> = info
-                .extends_args
-                .iter()
-                .map(|t| types::substitute_template(t, &own_bindings))
-                .collect();
-            if let Some(found) =
-                self.class_template_bindings_rec(parent, &parent_args, target, &mut seen.clone())
-            {
-                return Some(found);
-            }
-        }
-        for iface in &info.implements {
-            let iface_args: Vec<Type> = info
-                .implements_args
-                .get(iface)
-                .map(|args| {
-                    args.iter()
-                        .map(|t| types::substitute_template(t, &own_bindings))
-                        .collect()
-                })
-                .unwrap_or_default();
-            if let Some(found) =
-                self.class_template_bindings_rec(iface, &iface_args, target, &mut seen.clone())
-            {
-                return Some(found);
-            }
-        }
-        None
+        self.registry
+            .class_template_bindings(class, type_args, target)
     }
 
     /// Applies `class_template_bindings`' substitution to every param and
@@ -719,6 +676,16 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &HashSet<Str
             fields
                 .iter()
                 .map(|(k, t, opt)| (k.clone(), substitute_scoped(t, bindings, scope), *opt))
+                .collect(),
+        ),
+        // Phase 54: mirrors `types::substitute_template`'s own identical,
+        // previously-missing fix - `Object`'s own generic argument list
+        // wasn't recursed into at all, so a class-level template used
+        // inside e.g. `Box<T>` never actually got substituted.
+        Type::Object(name, args) => Type::Object(
+            name.clone(),
+            args.iter()
+                .map(|a| substitute_scoped(a, bindings, scope))
                 .collect(),
         ),
         other => other.clone(),

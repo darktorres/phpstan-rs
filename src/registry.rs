@@ -1,8 +1,8 @@
 use rustc_hash::FxHashMap;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::{ClassKind, Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
-use crate::types::{self, Type};
+use crate::types::{self, Type, Variance};
 
 mod class_info;
 mod function_sig;
@@ -1705,20 +1705,185 @@ impl Registry {
         })
     }
 
+    /// This class's own declared variance for the `index`-th `@template`
+    /// of `class` (`Covariant`/`Contravariant`/`Invariant` - the same
+    /// three-way classification `TemplateParam::variance` itself carries,
+    /// just looked up by position rather than read off an already-marked
+    /// node) - `None` when `class` isn't a registered class at all, or
+    /// declares fewer templates than `index` needs, either of which means
+    /// this project has no real basis to say whether subtyping flows
+    /// through that slot at all, let alone which direction. Callers treat
+    /// `None` as "don't know, don't guess" - matching this project's
+    /// general leniency elsewhere - rather than defaulting to `Invariant`
+    /// and risking a false positive on a real but unregistered
+    /// (uninstalled dependency, PHAR-bundled `phpstan/phpstan` itself, ...)
+    /// generic class. Phase 54: hoisted from `checker::generics` (pure
+    /// `self.classes` data, no checker-specific state) alongside
+    /// `class_template_bindings`/`is_assignable`, its two real consumers.
+    fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
+        let info = self.classes.get(class)?;
+        let name = info.templates.get(index)?;
+        Some(if info.covariant_templates.contains(name) {
+            Variance::Covariant
+        } else if info.contravariant_templates.contains(name) {
+            Variance::Contravariant
+        } else {
+            Variance::Invariant
+        })
+    }
+
+    /// Phase 54: the variance that actually governs one generic argument
+    /// slot - a call-site variance marker written directly on `arg`
+    /// (`types::strip_call_site_variance`'s own sentinels,
+    /// `"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`) always wins
+    /// when present; otherwise falls back to `class`'s own declared
+    /// variance for that slot (`slot_variance`, `Invariant` by default
+    /// when the class declares no variance for it, `None`/"don't know"
+    /// when `class` or the slot itself isn't registered at all). Read
+    /// directly off real PHPStan's own `GenericObjectType::
+    /// isSuperTypeOf`/`getReferencedTemplateTypes`, both of which resolve
+    /// a slot's variance with this exact same two-step rule - confirmed
+    /// this is genuinely the same concept both assignability
+    /// (`is_assignable` below) and declaration-soundness composition
+    /// (`checker::generics::walk_variance`) need, not something specific
+    /// to one or the other. `None` here (as opposed to `Invariant`) means
+    /// "no real basis to say anything about this slot at all," the same
+    /// "don't know, don't guess" case `slot_variance` itself already
+    /// returns `None` for.
+    pub(crate) fn effective_slot_variance(
+        &self,
+        class: &str,
+        index: usize,
+        arg: &Type,
+    ) -> Option<Variance> {
+        match arg {
+            Type::Object(name, _) if name == "$$covariant" => Some(Variance::Covariant),
+            Type::Object(name, _) if name == "$$contravariant" => Some(Variance::Contravariant),
+            // Real PHPStan has no separate "bivariant" `Variance` value
+            // reachable through ordinary composition (`Bivariant` only
+            // ever comes from a call-site `*`, never a class's own
+            // declared variance) - this project doesn't need one either,
+            // since every consumer already treats "always compatible,
+            // don't recurse further" as its own terminal case rather
+            // than a fourth composable variance kind. `is_assignable`
+            // checks for the `"$$bivariant"` sentinel directly for this
+            // reason; `walk_variance` recursing into a bivariant slot's
+            // own (never meaningfully variance-checkable) argument is
+            // harmless - there's no real type there to find a
+            // `TemplateParam` inside in the first place.
+            Type::Object(name, _) if name == "$$bivariant" => None,
+            _ => self.slot_variance(class, index),
+        }
+    }
+
+    /// Binds a generic-typed receiver's own carried type arguments
+    /// (`Collection<User>` -> `{"T": Object("User", [])}`) against
+    /// `target`'s own declared `@template` parameter names, walking up
+    /// `class`'s `extends`/`implements` chain to reach it if `target`
+    /// isn't `class` itself (Phase 10.5) - so a concrete subclass that
+    /// fixes its parent's template param (`class IntCollection extends
+    /// Collection<int> {}`) resolves `Collection`'s own `T` to `int` even
+    /// though `IntCollection` isn't generic itself, and a generic
+    /// subclass that passes its own template through (`class Box<T>
+    /// extends Collection<T> {}`) resolves it to whatever `Box`'s own `T`
+    /// is bound to at each use, not a fixed value.
+    ///
+    /// `target` matters because template names are scoped to the class
+    /// that declares them, not globally unique - two unrelated classes in
+    /// the same chain commonly both use `T` (confirmed the hard way on a
+    /// real corpus: `symfony/type-info`'s `NullableType<T of Type>
+    /// extends UnionType<T|BuiltinType<...>>`, where `UnionType` has its
+    /// *own*, unrelated `T`). Returning bindings scoped to exactly
+    /// `target`'s own level - not a single flat map merged across the
+    /// whole chain - is what keeps those two `T`s from colliding into
+    /// whichever one happened to be computed last.
+    ///
+    /// A non-generic class (empty `templates`), a bare unspecified-generic
+    /// reference (empty `type_args`), or a chain with no matching
+    /// `@extends`/`@implements` tag along the way to `target` all just
+    /// leave that level's names unbound - `substitute_template` already
+    /// treats an unbound `TemplateParam` as `Mixed`, the right
+    /// conservative fallback for an "erased" generic. Phase 54: hoisted
+    /// from `checker::generics` alongside `slot_variance`/`is_assignable`.
+    pub(crate) fn class_template_bindings(
+        &self,
+        class: &str,
+        type_args: &[Type],
+        target: &str,
+    ) -> HashMap<String, Type> {
+        let mut seen = HashSet::new();
+        self.class_template_bindings_rec(class, type_args, target, &mut seen)
+            .unwrap_or_default()
+    }
+
+    /// `None` means `target` isn't reachable along this path at all (so
+    /// the caller should treat every one of its templates as unbound,
+    /// same as `Some` with an empty map) - the distinction only matters
+    /// internally, to know when to keep searching sibling branches below.
+    /// `seen` guards against a cyclic `extends`/`implements` graph
+    /// (invalid PHP, but a malformed/partially-loaded real corpus could
+    /// still produce one) - cloned per branch, not threaded through by
+    /// mutable reference, so two independent ancestors (e.g. two
+    /// interfaces that both eventually reach a common shared parent, a
+    /// real "diamond" shape) can each still be searched.
+    fn class_template_bindings_rec(
+        &self,
+        class: &str,
+        type_args: &[Type],
+        target: &str,
+        seen: &mut HashSet<String>,
+    ) -> Option<HashMap<String, Type>> {
+        if !seen.insert(class.to_string()) {
+            return None;
+        }
+        let info = self.classes.get(class)?;
+        let own_bindings: HashMap<String, Type> = info
+            .templates
+            .iter()
+            .cloned()
+            .zip(type_args.iter().cloned())
+            .collect();
+
+        if class == target {
+            return Some(own_bindings);
+        }
+
+        if let Some(parent) = info.extends.first() {
+            let parent_args: Vec<Type> = info
+                .extends_args
+                .iter()
+                .map(|t| types::substitute_template(t, &own_bindings))
+                .collect();
+            if let Some(found) =
+                self.class_template_bindings_rec(parent, &parent_args, target, &mut seen.clone())
+            {
+                return Some(found);
+            }
+        }
+        for iface in &info.implements {
+            let iface_args: Vec<Type> = info
+                .implements_args
+                .get(iface)
+                .map(|args| {
+                    args.iter()
+                        .map(|t| types::substitute_template(t, &own_bindings))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Some(found) =
+                self.class_template_bindings_rec(iface, &iface_args, target, &mut seen.clone())
+            {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     /// Type-compatibility check that consults the class hierarchy for
     /// `Object` types; every other case defers to `types::is_subtype`,
     /// which has no notion of class context.
     pub fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
-            // Type arguments are deliberately ignored here (not checked
-            // for equality/variance) - this project doesn't model
-            // variance at all (see `Type::Object`'s own doc comment), and
-            // guessing wrong in either direction is worse than just not
-            // checking: too strict flags real code passing a subtype's
-            // narrower generic argument, too loose silently accepts a
-            // genuine mismatch either way once real variance rules would
-            // matter. Matches this checker's general preference for fewer
-            // false positives over catching everything.
             // The native `object` type hint (`Type::Object("object", _)` -
             // `types::parse_type_string`'s own sentinel for it, since
             // `object` is a reserved word no real class can ever be named)
@@ -1749,7 +1914,166 @@ impl Registry {
             }
             (Type::String | Type::StringLiteral(_), Type::Callable) => true,
             (Type::Array(_, _) | Type::ArrayShape(_), Type::Callable) => true,
-            (Type::Object(a, _), Type::Object(b, _)) => a == b || self.is_subclass_of(a, b),
+            // Phase 54: type arguments used to be ignored here entirely
+            // (`Collection<Cat>` and `Collection<Dog>` were mutually
+            // assignable, always) - this project now genuinely models
+            // variance (`Type::TemplateParam::variance`, `@template-
+            // covariant`/`-contravariant`, and Phase 54's own call-site
+            // `covariant`/`contravariant`/`*` annotations,
+            // `types::parse_generic_arg`), so this comparison now
+            // actually applies it instead of skipping it. If `sup`'s own
+            // class isn't registered at all (an uninstalled dependency,
+            // or a PHAR-bundled one like `phpstan/phpstan` itself with no
+            // loose source to parse - the same "can't verify, don't
+            // guess" case `check_generic_bounds`'s own doc comment
+            // names), fall back to the pre-Phase-54 name/hierarchy-only
+            // comparison unchanged - the one deliberate leniency left in
+            // this design.
+            // Phase 54: type arguments used to be ignored here entirely
+            // (`Collection<Cat>` and `Collection<Dog>` were mutually
+            // assignable, always) - this project now genuinely models
+            // variance (`Type::TemplateParam::variance`, `@template-
+            // covariant`/`-contravariant`, and Phase 54's own call-site
+            // `covariant`/`contravariant`/`*` annotations,
+            // `types::parse_generic_arg`), so this comparison now
+            // actually applies it instead of skipping it. If `sup`'s own
+            // class isn't registered at all (an uninstalled dependency,
+            // or a PHAR-bundled one like `phpstan/phpstan` itself with no
+            // loose source to parse - the same "can't verify, don't
+            // guess" case `check_generic_bounds`'s own doc comment
+            // names), fall back to the pre-Phase-54 name/hierarchy-only
+            // comparison unchanged - the one deliberate leniency left in
+            // this design.
+            (Type::Object(a, args_a), Type::Object(b, args_b)) => {
+                if a != b && !self.is_subclass_of(a, b) {
+                    return false;
+                }
+                let Some(info_b) = self.classes.get(b) else {
+                    return true;
+                };
+                // A missing trailing slot (an "erased"/under-supplied
+                // generic reference - a bare `Collection` with no `<T>`
+                // at all is the overwhelmingly common real shape) resolves
+                // to plain `Mixed`, not that template's own declared
+                // bound. Deliberately verified, not assumed: padding with
+                // the *bound* instead would make a bare reference to any
+                // class with a real (non-`Mixed`) bound - a very common
+                // shape, `@template T of SomeInterface` - fail the
+                // Invariant comparison below against *any* concrete
+                // argument, since `bound != concrete-subtype` invariantly
+                // (`is_assignable(bound, concrete)` fails whenever
+                // `concrete` is a strict subtype of `bound`) - a real,
+                // dangerous new false-positive class this project doesn't
+                // have data to avoid anyway: `ClassInfo` only persists
+                // `template_bounds`, never a class-level `@template T =
+                // Default` map the way `TemplateParam.default` carries
+                // one for a function/method's own templates (`types::
+                // substitute_template`'s own real, shipped behavior pads
+                // with `.default`, falling back to `Mixed` - never the
+                // bound). Plain `Mixed` is both what's actually available
+                // and what already skips this slot's comparison entirely
+                // via the "either side Mixed" rule below - correctly
+                // lenient for the common case without guessing wrong.
+                // `args_a` is in `a`'s own frame - map it into `b`'s own
+                // template names via the same ancestor-substitution walk
+                // `extends_args`/`implements_args` already use elsewhere,
+                // unless `a == b` and it's already in the right frame.
+                let effective_args_a: Vec<Type> = if a == b {
+                    args_a.clone()
+                } else {
+                    let bindings = self.class_template_bindings(a, args_a, b);
+                    info_b
+                        .templates
+                        .iter()
+                        .map(|name| bindings.get(name).cloned().unwrap_or(Type::Mixed))
+                        .collect()
+                };
+                for (i, _name) in info_b.templates.iter().enumerate() {
+                    let a_i = effective_args_a.get(i).cloned().unwrap_or(Type::Mixed);
+                    let b_i = args_b.get(i).cloned().unwrap_or(Type::Mixed);
+                    // A call-site variance marker on `sup`'s own argument
+                    // (`Collection<covariant Foo>`) overrides `b`'s own
+                    // declared slot variance for this one comparison,
+                    // exactly matching `GenericObjectType::isSuperTypeOf`/
+                    // `getReferencedTemplateTypes` read directly from
+                    // `vendor/phpstan-src` - `None` here means a
+                    // `"$$bivariant"` (`*`) marker, real PHPStan's own
+                    // "don't check this argument at all."
+                    let Some(variance) = self.effective_slot_variance(b, i, &b_i) else {
+                        continue;
+                    };
+                    let a_i = types::strip_call_site_variance(&a_i)
+                        .cloned()
+                        .unwrap_or(Type::Mixed);
+                    let b_i = types::strip_call_site_variance(&b_i)
+                        .cloned()
+                        .unwrap_or(Type::Mixed);
+                    // Either side unresolved/erased - don't know, don't
+                    // guess, matches this project's leniency everywhere
+                    // else a generic argument can't be verified. A raw,
+                    // still-unbound `TemplateParam` (a method/function's
+                    // own `@template`, e.g. `E` in `EntityRepository<E>
+                    // $repository`) is included here too, not just
+                    // `Mixed` - a real, corpus-found false positive this
+                    // fixed: `checker::calls`'s own call-argument
+                    // template binding only ever binds a template used
+                    // as a *bare* param type (`T $value`), never one
+                    // nested inside another class's own generic argument
+                    // list, so `E` reaches this comparison exactly as
+                    // unbound as it was declared - comparing it
+                    // structurally against the real, concrete argument
+                    // is exactly as wrong as comparing `Mixed` would be.
+                    // Real corpus shape: Piwigo's own `TypedRepository::
+                    // narrow(EntityRepository<E> $repository)` with
+                    // `@template E of object` - before this skip existed,
+                    // the pre-existing `(TemplateParam(tp), _) =>
+                    // matches!(*tp.bound, Type::Mixed) || is_assignable(
+                    // &tp.bound, sup)` arm ran the `object`-bound `E`'s
+                    // own upper bound against the real argument's
+                    // concrete class, `is_assignable(object, Concrete
+                    // Entity)`, and correctly said `false` (an arbitrary
+                    // object is genuinely not guaranteed to be that one
+                    // specific class - not a bug in that arm; a weak
+                    // bound like `object` legitimately can't prove the
+                    // narrower assignment sound). Skipping this slot
+                    // entirely for an unbound template - rather than
+                    // trying to make that comparison artificially permit
+                    // it - is what's actually correct: the real answer
+                    // isn't "yes" here, it's "not yet known, ask again
+                    // once `E` is bound," which this project's own call-
+                    // argument binding is simply never invoked for at
+                    // this nested position.
+                    if a_i == Type::Mixed
+                        || b_i == Type::Mixed
+                        || matches!(a_i, Type::TemplateParam(_))
+                        || matches!(b_i, Type::TemplateParam(_))
+                    {
+                        continue;
+                    }
+                    let ok = match variance {
+                        Variance::Covariant => self.is_assignable(&a_i, &b_i),
+                        Variance::Contravariant => self.is_assignable(&b_i, &a_i),
+                        // Mutual assignability approximates real
+                        // PHPStan's exact `equals()` here - deliberately
+                        // chosen over raw structural `==`, since this
+                        // codebase's own `Union`/`Intersection` values
+                        // have no canonical member order
+                        // (`checker::expr::union_types` dedupes but never
+                        // sorts), making `==` order-sensitive and *more*
+                        // likely to falsely reject two independently
+                        // built but semantically identical unions than
+                        // mutual `is_assignable` is to miss a genuine
+                        // mismatch.
+                        Variance::Invariant => {
+                            self.is_assignable(&a_i, &b_i) && self.is_assignable(&b_i, &a_i)
+                        }
+                    };
+                    if !ok {
+                        return false;
+                    }
+                }
+                true
+            }
             // Phase 79: hierarchy-aware version of `types::is_subtype`'s
             // own bare `EnumCase -> Object` name-equality rule - a case
             // is assignable not just to its own enum's bare type but to

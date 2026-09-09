@@ -34,3 +34,25 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
         ])
     );
 }
+
+#[test]
+fn substitute_template_recurses_into_a_generic_class_reference() {
+    // Phase 54: a real, previously-missing case - `substitute_template`
+    // had no `Type::Object(name, args)` arm at all, so substituting
+    // `T -> int` through `Box<T>` silently left it as `Box<T>`
+    // completely unchanged instead of `Box<int>`. Confirmed via
+    // coverage that no prior test exercised an `Object` argument.
+    let mut bindings = HashMap::new();
+    bindings.insert("T".to_string(), Type::Int);
+
+    let box_of_t = Type::Object(
+        "Box".to_string(),
+        vec![Type::TemplateParam(TemplateParam::unbounded(
+            "T".to_string(),
+        ))],
+    );
+    assert_eq!(
+        substitute_template(&box_of_t, &bindings),
+        Type::Object("Box".to_string(), vec![Type::Int])
+    );
+}
