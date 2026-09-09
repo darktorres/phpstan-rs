@@ -74,7 +74,7 @@ impl<'a> Checker<'a> {
             if p.type_hint.is_none() {
                 continue;
             }
-            if class_ever_assigns_property(c, &p.name) {
+            if property_assigned_anywhere_in_hierarchy(self, c, fqn, &p.name) {
                 continue;
             }
             self.report(
@@ -91,7 +91,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn class_ever_assigns_property(c: &ClassDecl, prop: &str) -> bool {
+pub(super) fn class_ever_assigns_property(c: &ClassDecl, prop: &str) -> bool {
     c.methods.iter().any(|m| {
         // Phase 62 corpus find: a static "named constructor" (`public
         // static function create(...): static { $node = new static;
@@ -104,6 +104,59 @@ fn class_ever_assigns_property(c: &ClassDecl, prop: &str) -> bool {
         let self_vars = collect_self_instance_vars(&m.function.body, &c.name);
         body_ever_assigns_property(&m.function.body, prop, &self_vars)
     })
+}
+
+/// Whether `prop` is assigned *anywhere* reachable from `fqn`'s own
+/// hierarchy - `class_ever_assigns_property` alone only ever looks at
+/// `c`'s own directly-declared methods, which misses a real, disclosed
+/// shape: a property re-declared across an inheritance chain (common
+/// when a subclass narrows a parent's own property type), initialized
+/// only by an *ancestor's* own constructor logic (`parent::__construct()`
+/// absorption's own motivating case - see the Phase 62 plan's "Cross-
+/// method absorption" section). A genuine leniency fix, not a narrowing:
+/// this can only make the existing "never initialized" verdict *less*
+/// eager to flag, matching this whole check's own already-established
+/// permissive direction. Ancestors are walked via the registry
+/// (`FunctionSig::body`), not AST - the current file may not even
+/// contain them. Deliberately doesn't walk *downward* into a subclass's
+/// own overrides (an unbounded, open-hierarchy question a single-class
+/// check can't answer at all - real PHPStan's own abstract-class
+/// exemption exists for the same reason, just for the narrower case
+/// where the base class can't be instantiated on its own to begin with).
+pub(super) fn property_assigned_anywhere_in_hierarchy(
+    checker: &Checker,
+    c: &ClassDecl,
+    fqn: &str,
+    prop: &str,
+) -> bool {
+    if class_ever_assigns_property(c, prop) {
+        return true;
+    }
+    let mut current = checker
+        .registry
+        .classes
+        .get(fqn)
+        .and_then(|info| info.extends.first().cloned());
+    let mut seen = HashSet::new();
+    while let Some(ancestor) = current {
+        if !seen.insert(ancestor.clone()) {
+            break; // cycle guard for a malformed/circular hierarchy
+        }
+        let Some(info) = checker.registry.classes.get(&ancestor) else {
+            break;
+        };
+        let found = info.methods.values().any(|sig| {
+            sig.body.as_ref().is_some_and(|body| {
+                let self_vars = collect_self_instance_vars(body, &ancestor);
+                body_ever_assigns_property(body, prop, &self_vars)
+            })
+        });
+        if found {
+            return true;
+        }
+        current = info.extends.first().cloned();
+    }
+    false
 }
 
 fn body_ever_assigns_property(stmts: &[Stmt], prop: &str, self_vars: &HashSet<String>) -> bool {

@@ -24,7 +24,7 @@ graph LR
     P80["80: Object-shape/key-of/\nconditional-type syntax — PARTIAL,\nvalue-of/enum slice done"]
     P51["51: Type coercion\nsurface (remaining) — PARTIAL"]
     P73["73/74: Array/string stdlib\ncoverage (remaining) — PARTIAL"]
-    P62["62: Uninitialized-property\ndataflow (remaining) — PARTIAL"]
+    P62["62: Uninitialized-property\ndataflow — DONE (both halves)"]
     P60["60: isset/empty/nullsafe\nreversal (remaining) — PARTIAL"]
     P82["82: Collector / cross-file\naggregation — PLANNED, don't\nschedule standalone"]
     P41["41: Purity / side-effect\nmodel — PARTIAL, only the\ntransitive piece needs 82"]
@@ -62,7 +62,7 @@ architectural nice-to-have, explicitly "not a hard blocker").
 | **54** Generic template richness | **50**'s reverted `InvalidKeyInArrayDimFetchRule` reattempt | blocks | 54's own stated blocker fixed and shipped → edge satisfied → **50's own reattempt built and shipped too, same session** (see Phase 50, Done) - though the real root cause found there (`Type::ObjectShape` missing from ten type-tree-walking functions; `Checker::resolve_type_hint` never applying `mark_template_params`) turned out unrelated to what 54 itself fixed, confirming the "re-verify, don't assume" caution was warranted |
 | **80** Object-shape/key-of/conditional-type syntax | **54**'s `TemplateKeyOfType`/`TemplateObjectShapeType` bound kinds | prerequisite | 80 done → edge satisfied for the specific deferred-resolution piece (`value-of<T>` naming a real enum, via `Registry::resolve_deferred_value_of`); `ClassInfo.template_bounds` is now walked and resolved, ready to build on - this specific bound-kind item is still open (54's own separate variance-aware-assignability work has since shipped in full, unrelated to this piece) |
 | **50** Array key-type/offset engine (remaining) | **73/74**'s `array_key_exists` narrowing | needs | `InvalidKeyInArrayDimFetchRule` itself now done (see Done), but 50's own `HasOffsetType`/`HasOffsetValueType` accessory facts - the specific piece 73/74 needs - still aren't built → still blocked |
-| **62** Uninitialized-property dataflow (remaining) | **60**'s offset/property-chain `isset($x['key'])` half | gates | 62's real dataflow not built → still blocked. Re-verified directly against `vendor/phpstan-src`: 62's own prior "remaining scope" description was found meaningfully stale (readonly/clone/`__unserialize` handling was never really this rule's own scope at all - see Phase 62's own entry) - the real remaining piece is narrower (path-sensitive "assigned by this point" tracking, buildable on this project's own existing `narrowing_key`/`Locals` machinery) but still genuinely unbuilt, so this edge's own status is unchanged |
+| **62** Uninitialized-property dataflow | **60**'s offset/property-chain `isset($x['key'])` half | gates | 62 itself is now DONE (both halves - see Phase 62's own entry), but the specific shape 60 needs still isn't what got built → **edge still open, re-scoped, not satisfied**: 62's new `checker/uninitialized_dataflow.rs` is a standalone, one-shot walker that emits a diagnostic directly, never exposing a reusable per-statement fact through the main checker's own `Locals`/narrowing engine - 60's own "offset/property-chain `isset()` reversal" needs exactly that (a narrowing-usable "is this offset/property definitely not yet set" fact consulted mid-expression, the same way ordinary narrowing already consults `Locals`), which is a different shape of dataflow entirely, genuinely still unbuilt |
 | **82** Collector / cross-file aggregation | **41**'s transitive purity across the call graph | needs | 82 explicitly PLANNED, "don't schedule standalone" → still blocked. Re-verified directly against `vendor/phpstan-src/src/Collectors` and every consuming rule: confirms only 41's *transitive* piece needs this - 41's own other three pieces (impure-point classification, tag validation, the four `*WithoutSideEffectsRule`s) need no Collector at all and are `PHASE_DEPENDENCIES`-independent of 82 |
 | **82** Collector / cross-file aggregation | **15**'s `FunctionCallConstantConditionRule` cross-file dedup | needs | same → still blocked |
 | **55** Narrowing-engine generalization | **15** (original constant-boolean-condition family) | was the prerequisite | 55's fixed-point loop convergence shipped → **edge satisfied, 15 reinstated in full** (see Done) |
@@ -98,15 +98,21 @@ meaningfully off:
   in-clone) named things that were never really `UninitializedPropertyRule`'s
   own scope at all (readonly is excluded from that rule entirely in
   real PHPStan; clone-reinitialization belongs to the separate,
-  already-built `ReadOnlyPropertyAssignRule`). The real remaining piece
-  is narrower: path-sensitive "was this property definitely assigned by
-  this exact point" tracking (the "premature access" half), which this
-  project's own existing `narrowing_key`/`Locals`/`merge_scopes`
-  machinery is a real foundation for, not a from-scratch subsystem.
-  Also: Piwigo's own `phpstan.neon` never enables
-  `checkUninitializedProperties` (real PHPStan's own default is off),
-  so unlike every other phase this session, no corpus diff against real
-  PHPStan output can ever verify this feature at any level.
+  already-built `ReadOnlyPropertyAssignRule`). The real remaining piece -
+  path-sensitive "was this property definitely assigned by this exact
+  point" tracking, the "premature access" half - was subsequently
+  planned and built in full (`checker/uninitialized_dataflow.rs`; see
+  Phase 62's own Done entry) as a small, standalone dataflow, not built
+  on `narrowing_key`/`Locals`/`merge_scopes` directly after all (kept
+  deliberately separate from the main checker's own traversal - only
+  mirrors their *shape*). Also confirmed live during that build: Piwigo's
+  own `phpstan.neon` never enables `checkUninitializedProperties` (real
+  PHPStan's own default is off), so no diff against Piwigo's own scoped
+  corpus output can verify this feature at any level - real verification
+  instead came from a full, unscoped run against the whole vendored
+  `vendor/` tree with the flag force-enabled, which is what actually
+  found the three real bugs and one disclosed limitation documented in
+  Phase 62's own entry.
 - **82** - confirmed accurate on its main claim ("low standalone
   value," blocks 41's transitive half) by actually enumerating and
   reading every one of real PHPStan's 14 collectors and their consuming

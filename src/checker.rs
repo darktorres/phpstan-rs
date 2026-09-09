@@ -731,6 +731,7 @@ mod resolve;
 mod stmt;
 mod throws;
 mod uninitialized;
+mod uninitialized_dataflow;
 mod unused;
 mod visibility;
 
@@ -982,6 +983,7 @@ impl<'a> Checker<'a> {
                     self.check_property_variances(&fqn, c);
                     self.check_trait_conflicts(&fqn, c.span);
                     self.check_uninitialized_properties(&fqn, c);
+                    self.check_premature_property_access(&fqn, c);
                     self.check_duplicate_class_members(&fqn, c);
                     self.check_method_declaration_sanity(&fqn, c.kind, c.is_abstract, &c.methods);
                     self.check_reserved_class_constant_name(&fqn, &c.consts);

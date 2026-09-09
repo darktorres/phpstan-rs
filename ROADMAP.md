@@ -1884,15 +1884,16 @@ then reverted - see **Reverted**. Generator `TReturn` completeness
 remains unmodeled, matching this project's existing generator
 simplification.
 
-**62 - Uninitialized-property dataflow, remaining (PARTIAL).** The core
-"assigned anywhere in the class body" heuristic is done, off by default
-(see Done). Real per-constructor dataflow remains unbuilt - deliberately
-not attempted after three rounds of real corpus false-positive fixes
-already went into the simpler version - but this entry's own prior
-description of *what* remains was re-verified directly against
+**62 - Uninitialized-property dataflow (DONE, both halves).** The core
+"assigned anywhere in the class body" heuristic (`checker/uninitialized.rs`)
+and the real per-constructor "premature access" dataflow
+(`checker/uninitialized_dataflow.rs`) are both built, off by default via
+the same `--check-uninitialized-properties` flag. This entry's own prior
+description of what the premature-access half would need was re-verified
+directly against
 `vendor/phpstan-src/src/Rules/Properties/UninitializedPropertyRule.php`/
-`Node/ClassPropertiesNode.php`/`Reflection/ConstructorsHelper.php` and
-found meaningfully wrong, not just imprecise:
+`Node/ClassPropertiesNode.php`/`Reflection/ConstructorsHelper.php` before
+building it, and found meaningfully wrong, not just imprecise:
 - `readonly`-specific handling **isn't part of this rule at all** - real
   PHPStan's own `UninitializedPropertyRule` explicitly skips every
   `readonly` (native or PHPDoc) property entirely, both for the
@@ -1913,35 +1914,74 @@ found meaningfully wrong, not just imprecise:
   `phpstan.neon`/`phpstan-extensions.neon` do neither, so real PHPStan's
   own default behavior against this exact corpus already treats
   `__unserialize`/`__clone` as ordinary methods, same as this project.
-- What's genuinely left, confirmed by reading the real algorithm in
-  full: (a) the "premature access" half - flagging a *read* of a
-  property that provably happens before any assignment reaches it on
-  some path, for a property that *does* get initialized somewhere
-  (this project's own current heuristic only ever answers "assigned
-  anywhere at all," never "was it definitely assigned by *this specific
-  point*") - genuinely new path-sensitive dataflow, though this
-  project's own existing `narrowing_key`/`Locals`/`merge_scopes`
-  machinery (already tracking `"this->prop"`-keyed facts through every
-  branch/loop merge for narrowing purposes) is a real, promising
-  foundation to build it on rather than a from-scratch subsystem; and
-  (b) absorbing methods transitively *called from* the constructor into
-  the same "counts as initialization" set (real PHPStan's own
-  fixed-point `getMethodsCalledFromConstructor`) - this project's
-  current "any method, anywhere" heuristic is already *more* lenient
-  than this specific piece of real behavior, not less, so building it
-  properly would need to combine with (a), not simply add reachability
-  on top.
+- What was genuinely left, confirmed by reading the real algorithm in
+  full, and what got built: (a) the "premature access" half - flagging a
+  *read* of a property that provably happens before any assignment
+  reaches it on some path, for a property that *does* get initialized
+  somewhere - a standalone, per-constructor dataflow
+  (`checker/uninitialized_dataflow.rs`'s own `PropertyInitState`, a
+  small dedicated `imbl` set - deliberately *not* built on the main
+  checker's own `Locals`/`merge_scopes`, to keep this new walker fully
+  isolated from the existing traversal); and (b) absorbing methods
+  transitively *called from* the constructor into the same "counts as
+  initialization" set (`$this->method()`/`parent::`/`self::`/`static::`,
+  including virtual/late-static-binding dispatch resolved against the
+  actual most-derived class being checked, not whichever class the
+  currently-recursed-into method happens to be declared on) - a real,
+  disclosed, sound-but-incomplete cycle guard, no full fixed point.
+  Building this exposed a genuine architectural gap the plan hadn't
+  anticipated: the registry only ever stored method *signatures*, never
+  AST bodies, so cross-file absorption (a parent class declared in a
+  different file - the common PSR-4 case) was impossible - fixed by
+  adding `FunctionSig::body: Option<Arc<Vec<Stmt>>>`, populated at
+  index time.
+- Real corpus verification (the whole vendored `vendor/` tree, not just
+  Piwigo's own scoped `src/`, since Piwigo's own config never enables
+  this check at all - see below) found and fixed three genuine bugs
+  the plan hadn't anticipated: `unset($this->prop)` wasn't modeled at
+  all (guzzlehttp/psr7's own `LazyOpenStream::__construct` deliberately
+  unsets a just-declared property to force `__get()`); a fluent setter
+  chain (`$this->a()->b()->c()`, real shape: Monolog's own
+  `SlackRecord::__construct`) was never absorbed past its first link,
+  since only a bare `$this` receiver was recognized, not a `: self`/
+  `: static`-returning call chain rooted in one; and a branch that
+  unconditionally exits the method (`if (...) { return; }` with no
+  `else`, real shape: Symfony `Process::isRunning`/`updateStatus`) was
+  never excluded from a merge, wrongly treating code guarded behind it
+  as reachable either way - fixed by a syntax-only
+  `stmt_definitely_terminates`, deliberately narrower than the main
+  checker's own `always_terminates` (no `infer_expr`, so a call proven
+  to return `never` isn't recognized - a real, accepted, rarer gap). A
+  bare `??`/`isset()`/`empty()` probe needed the identical "never a
+  premature read" quiet-chain exemption `??=` already had, for the same
+  real-PHP reason. One genuine, disclosed limitation remains open,
+  found the same way (Symfony `Process::__construct` -> `setInput()` ->
+  `isRunning()`): a called method's own real logic can be gated behind
+  an *unrelated* property's runtime *value* (`$this->status`) in a way
+  this module has no way to evaluate, since it tracks property
+  *initialization* only, never arbitrary values - closing this for real
+  would mean re-implementing the main checker's own `Locals`/narrowing
+  engine inside this deliberately standalone module. A depth cap on
+  cross-method absorption was tried and reverted: it broke a different,
+  definitely-safe real shape found in the same investigation (Monolog's
+  own `RotatingFileHandler::__construct` -> `setFilenameFormat()` ->
+  `setDateFormat()`, an ordinary two-level unconditional-initialization
+  chain) - trading one false-positive class for another isn't a real
+  fix.
 - A genuinely different consideration from every other phase in this
   project: Piwigo's own `phpstan.neon` never enables
   `checkUninitializedProperties` (PHPStan's own default is `false`,
   confirmed - this project's identical `--check-uninitialized-properties`
-  default mirrors it), so **no full-vendor-corpus diff against real
-  PHPStan output can ever verify this feature at any level** - real
-  PHPStan itself never emits `property.uninitialized` anywhere in this
-  corpus to diff against. Building the premature-access half would need
-  to lean on this project's own established fallback methodology
-  instead (hand-verified `php -r` repros, revert-verified unit tests),
-  not the corpus-diff ground truth every other phase this session used.
+  default mirrors it), so **no diff against Piwigo's own scoped corpus
+  output can ever verify this feature at any level** - confirmed: the
+  standard scoped diff shows zero change, exactly as predicted, before
+  *and* after this phase's own implementation. Real verification instead
+  came from a full, unscoped run against the entire vendored `vendor/`
+  tree (~20,300 files) with the flag force-enabled, spot-checking every
+  genuinely new `property.uninitialized` finding by hand against the
+  real PHP source - the fallback methodology this entry's own prior
+  write-up anticipated needing, plus revert-verified unit tests
+  (`checker/tests/uninitialized_dataflow.rs`).
 
 **63 - Duplicate-declaration scans, remaining (PARTIAL).** The
 within-body scan and `UsedNamesRule` are done (see Done). Duplicate

@@ -35,5 +35,6 @@ mod symbol_existence;
 mod throws;
 mod type_aliases;
 mod uninitialized;
+mod uninitialized_dataflow;
 mod unused_symbols;
 mod visibility;
