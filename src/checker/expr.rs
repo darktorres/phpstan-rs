@@ -273,6 +273,43 @@ fn pow_int_range(
     }
 }
 
+/// Real PHPStan's own `InitializerExprTypeResolver::integerRangeMath`'s
+/// `ShiftLeft`/`ShiftRight` arms, transcribed - unlike `Mul`/`Pow`, real
+/// PHPStan only ever reaches this formula for a *single constant* right
+/// operand (`getShiftLeftType`/`getShiftRightType` themselves bail to
+/// plain `int` the moment the right side isn't a `ConstantIntegerType` -
+/// no range-shifted-by-range case exists at all, confirmed directly), so
+/// `infer_binary`'s own call site only invokes this once `int_range_bounds`
+/// on the right side has already collapsed to a single value. `amount`
+/// outside `0..64` (negative - PHP throws `ArithmeticError` at runtime,
+/// not modeled as `ErrorType` here, matching this project's existing
+/// choice not to surface that family - or too wide to be a real shift
+/// amount) falls back to plain `Type::Int` directly, the same "give up
+/// gracefully" shape every other range-arithmetic arm here already has.
+/// Each bound shifts independently and collapses to `None` (unbounded)
+/// on overflow rather than aborting the whole computation - matching
+/// real PHPStan's own `is_float($min) ? null : $min` guard (PHP silently
+/// promotes an overflowing int to `float`, which these two functions
+/// then treat as "no longer a precise int bound").
+fn shift_int_range(l_min: Option<i64>, l_max: Option<i64>, amount: i64, left: bool) -> Type {
+    let Ok(amount) = u32::try_from(amount) else {
+        return Type::Int;
+    };
+    if amount >= 64 {
+        return Type::Int;
+    }
+    let shift_bound = |v: Option<i64>| -> Option<i64> {
+        v.and_then(|v| {
+            if left {
+                v.checked_shl(amount)
+            } else {
+                Some(v >> amount)
+            }
+        })
+    };
+    normalize_int_range(shift_bound(l_min), shift_bound(l_max))
+}
+
 /// Real PHPStan's own `InitializerExprTypeResolver::getModType`,
 /// transcribed - unlike `Mul`/`Sub`/`Pow`, whose own corner/point
 /// formulas already reduce to the exact answer for two literal operands
@@ -5037,11 +5074,29 @@ impl<'a> Checker<'a> {
             // at all, per `binary_operator_overload_result`'s own gate)
             // is genuinely involved, which yields the object type back
             // instead of a plain `int`.
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
                 self.binary_operator_overload_result(op, &lt, &rt)
                     .unwrap_or(Type::Int)
+            }
+            BinOp::Shl | BinOp::Shr => {
+                let lt = self.infer_expr(l, locals);
+                let rt = self.infer_expr(r, locals);
+                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                    return ty;
+                }
+                // `shift_int_range`'s own doc comment has the transcription
+                // details - only a single constant right operand (`r_min ==
+                // r_max`) is range-preserving at all, matching real
+                // PHPStan's identical restriction.
+                if let (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) =
+                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    && amount == r_max
+                {
+                    return shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl));
+                }
+                Type::Int
             }
             BinOp::Mod => {
                 let lt = self.infer_expr(l, locals);

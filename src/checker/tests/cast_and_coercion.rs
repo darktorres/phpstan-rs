@@ -455,6 +455,99 @@ fn bitwise_not_of_a_plain_unbounded_int_or_string_is_unchanged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 51 follow-up: range-preserving shift arithmetic (`<<`/`>>`) -
+// real PHPStan's own `getShiftLeftType`/`getShiftRightType` only stay
+// range-preserving for a single constant right operand, confirmed
+// directly against `vendor/phpstan-src`.
+
+#[test]
+fn left_shift_of_a_range_by_a_constant_shifts_both_bounds() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<4, 40> $x */
+            function needsNarrower(int $x): void {}
+            /** @param int<1, 10> $x */
+            function test(int $x): void {
+                needsNarrower($x << 2);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<4, 39> $x */
+            function needsTighter(int $x): void {}
+            /** @param int<1, 10> $x */
+            function test(int $x): void {
+                needsTighter($x << 2);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("int<4, 40>"), "got: {d:?}");
+}
+
+#[test]
+fn right_shift_of_a_range_by_a_constant_shifts_both_bounds() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<1, 10> $x */
+            function needsNarrower(int $x): void {}
+            /** @param int<4, 40> $x */
+            function test(int $x): void {
+                needsNarrower($x >> 2);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn shift_by_a_non_constant_amount_falls_back_to_plain_int() {
+    // A non-literal shift amount degrades to bare `int` (real PHPStan's
+    // own restriction too, confirmed directly) - not narrow enough for
+    // a range-typed sink, unlike the constant-shift cases above.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<1, 10> $x */
+            function needsNarrower(int $x): void {}
+            /** @param int<0, 5> $shift */
+            function test(int $x, int $shift): void {
+                needsNarrower($x << $shift);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("int given"), "got: {d:?}");
+
+    let d = diagnostics_for(
+        r#"<?php
+            function accepts(int $i): void {}
+            /** @param int<0, 5> $shift */
+            function test(int $x, int $shift): void {
+                accepts($x << $shift);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn left_shift_of_an_unbounded_range_stays_unbounded_on_that_end() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int<8, max> $x */
+            function needsUnbounded(int $x): void {}
+            /** @param int<1, max> $x */
+            function test(int $x): void {
+                needsUnbounded($x << 3);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // IntegerRangeType-consumer extensions: strlen()/count()/sizeof()/
 // random_int()/rand()/mt_rand() - real PHPStan's own `Strlen`/`Count`/
 // `RandomInt` `FunctionReturnTypeExtension`s, narrowed to the always-
