@@ -77,6 +77,21 @@ pub struct PropertySig {
     // a real, plainly-declared property with its own doc comment, same
     // restriction `is_internal` above already has.
     pub deprecated: Option<String>,
+    // Phase 60: whether this property's own declaration (an ordinary
+    // `PropertyDecl::default`, or a promoted constructor parameter's own
+    // `Param::default`) gives it a default value - `checker/uninitialized
+    // .rs`'s own Phase 62 "genuinely might still be uninitialized"
+    // candidate gate needs the class's own AST to compute this, which
+    // isn't available for an arbitrary `$obj->prop` access (only for
+    // `$this->prop` inside the class currently being checked) - this
+    // field makes the same fact available from `PropertySig` alone, for
+    // `check_pointless_offset_or_property_probe`'s own "maybe genuinely
+    // uninitialized, don't flag isset() as redundant" exemption. `false`
+    // (the safe, permissive default - never *wrongly* exempts a property
+    // that really does always have a value) for every synthetic property
+    // with no real declaration to read a default from (a magic
+    // `@property` tag, an enum's own built-in `name`/`value`).
+    pub has_default: bool,
 }
 
 // Phase 57's own still-open item: a class constant's own `public`/
@@ -318,6 +333,7 @@ impl ClassInfo {
                             .unwrap_or(p.visibility.clone()),
                         is_internal: doc_ty.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc_ty.as_ref().and_then(|d| d.deprecated.clone()),
+                        has_default: p.default.is_some(),
                     },
                 )
             })
@@ -372,6 +388,7 @@ impl ClassInfo {
                             .unwrap_or(Visibility::Public),
                         is_internal: false,
                         deprecated: None,
+                        has_default: p.default.is_some(),
                     },
                 );
             }
@@ -402,6 +419,13 @@ impl ClassInfo {
                         write_visibility: Visibility::Public,
                         is_internal: false,
                         deprecated: None,
+                        // A magic `@property` tag describes a virtual
+                        // member with no real backing declaration at all
+                        // - genuinely unknown whether it "has a default"
+                        // in any real sense, so `false` (the safe,
+                        // never-wrongly-exempting choice) rather than a
+                        // guess.
+                        has_default: false,
                     }
                 });
             }
@@ -781,6 +805,12 @@ impl ClassInfo {
                 write_visibility: Visibility::Public,
                 is_internal: false,
                 deprecated: None,
+                // Unlike a magic `@property` tag, this one's presence is
+                // language-guaranteed (every enum case always has a real
+                // `->name`) - `true`, not the usual synthetic-property
+                // `false`, so `isset($case->name)` can still be
+                // correctly recognized as redundant.
+                has_default: true,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -819,6 +849,9 @@ impl ClassInfo {
                     write_visibility: Visibility::Public,
                     is_internal: false,
                     deprecated: None,
+                    // Same reasoning as `->name` just above - a backed
+                    // enum case's `->value` is language-guaranteed too.
+                    has_default: true,
                 },
             );
         }
