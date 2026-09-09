@@ -1830,13 +1830,27 @@ expansion (type-checking individual unpacked elements against their own
 target parameter) is a deliberate scope trim, not attempted.
 
 **50 - `Type::Array` key-type / offset engine, remaining (PARTIAL,
-`InvalidKeyInArrayDimFetchRule` reattempt done).** The key-type
-parameter itself, `InvalidKeyInArrayItemRule`, and (see Done)
-`InvalidKeyInArrayDimFetchRule`'s successful reattempt are all done.
-`ArrayShape`'s own int-vs-string key precision, unsealed-shape
-(`array{...}`) tracking, and `HasOffsetType`/`HasOffsetValueType`
-accessory facts remain unbuilt - still blocks 73/74's
-`array_key_exists` narrowing (`PHASE_DEPENDENCIES.md`).
+`InvalidKeyInArrayDimFetchRule` reattempt done; `HasOffsetValueType`
+equivalent done).** The key-type parameter itself,
+`InvalidKeyInArrayItemRule`, and (see Done) `InvalidKeyInArrayDimFetchRule`'s
+successful reattempt are all done. `array_key_exists`'s own missing
+half - narrowing the *specific element access* (`$x['key']`) after a
+plain (non-shape) array's own key is proven present, real PHPStan's own
+`HasOffsetValueType` - is now done too, adapted to this project's own
+type system rather than literally replicating real PHPStan's ~40-method
+`CompoundType`/`AccessoryType` hierarchy: this project's own composite
+`narrowing_key` mechanism (`"arr[key]"`, the same one `is_string($info
+['code'])`-style per-element narrowing already uses) is already the
+right, proportionate vehicle - see `array_value_type_for_key`'s own doc
+comment in `checker/narrowing.rs` for the full architectural finding.
+Zero corpus diff (neither a new true positive nor a fixed false
+positive) on both the scoped and full unscoped Piwigo corpus - a real,
+disclosed case of "no matching real-world shape in this corpus,"
+verified correct instead via direct unit tests proving both the
+narrowing itself and its own precision (a real type mismatch through
+the narrowed access is still caught). `ArrayShape`'s own int-vs-string
+key precision and unsealed-shape (`array{...}`) tracking remain
+unbuilt, genuinely separate from what 73/74 needed.
 
 **51 - `Type` coercion surface, remaining (PARTIAL).** Cast legality,
 `IntegerRangeType`'s `abs()`/`~` arithmetic, `print`/`InvalidPartOfEncapsedStringRule`,
@@ -2113,14 +2127,14 @@ currently needed).
 
 **73/74 - Array/string stdlib coverage, remaining (PARTIAL).** Key-type-
 dependent functions (`array_fill_keys`, `array_search`,
-`array_intersect_key`, `array_flip`) and the pointer/`array_diff`/
-`array_intersect` family are done (see Done). Still unbuilt, all zero
-or near-zero corpus incidence: `array_change_key_case`, `array_rand`,
-`array_count_values`, PHP 8.4's `array_find`/`array_find_key`/
-`array_any`/`array_all` (not even stub-registered yet); `array_key_exists`
-narrowing (needs `HasOffsetType`/`HasOffsetValueType` accessory facts,
-Phase 50); `array_pop`/`array_shift`'s own expression-result type;
-`array_splice`/`array_replace`/`array_pad`; a known stub imprecision in
+`array_intersect_key`, `array_flip`), the pointer/`array_diff`/
+`array_intersect` family, and (see Phase 50, Done) `array_key_exists`
+narrowing for a plain array's own specific element access are all done.
+Still unbuilt, all zero or near-zero corpus incidence:
+`array_change_key_case`, `array_rand`, `array_count_values`, PHP 8.4's
+`array_find`/`array_find_key`/`array_any`/`array_all` (not even
+stub-registered yet); `array_pop`/`array_shift`'s own expression-result
+type; `array_splice`/`array_replace`/`array_pad`; a known stub imprecision in
 `array_udiff`/`array_uintersect_assoc`'s variadic-tail typing (zero
 corpus incidence).
 

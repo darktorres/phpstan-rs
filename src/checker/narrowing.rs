@@ -337,6 +337,24 @@ impl<'a> Checker<'a> {
                     let current = self.current_narrowed_type(&arr_arg.value, &arr_key, locals);
                     let narrowed =
                         narrow_array_shape_by_key_presence(&current, lit_key, branch_true);
+                    // Phase 50/73-74: also narrow the specific element
+                    // access itself (`$arr['key']`), not just `$arr`'s
+                    // own overall type - see `array_value_type_for_key`'s
+                    // own doc comment for why this project's own
+                    // composite `narrowing_key` mechanism is the right,
+                    // proportionate stand-in for real PHPStan's
+                    // `HasOffsetValueType`. Only the true branch: a
+                    // *missing* key has no value type to narrow to at
+                    // all (real PHP itself throws a warning and yields
+                    // `null` on read, a fact this project doesn't model
+                    // here - `isset`'s own narrowing already owns the
+                    // "exclude `Null`" half of that for the false
+                    // branch, a different, already-covered concern).
+                    if branch_true
+                        && let Some(value_ty) = array_value_type_for_key(&narrowed, lit_key)
+                    {
+                        locals.insert(format!("{arr_key}[{lit_key}]"), value_ty);
+                    }
                     locals.insert(arr_key, narrowed);
                 } else if let ExprKind::Name(name) = &callee.kind
                     && matches!(
@@ -1609,6 +1627,52 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
             }
         }
         _ => ty.clone(),
+    }
+}
+
+/// Phase 50/73-74's own `HasOffsetValueType` equivalent, adapted to this
+/// project's own type system rather than replicating real PHPStan's -
+/// real PHPStan represents "definitely has offset `key`, value type `V`"
+/// as a whole new `CompoundType`/`AccessoryType` (`Type::Accessory::
+/// HasOffsetType`/`HasOffsetValueType`, ~40 polymorphic methods,
+/// `TypeCombinator`-intersected onto the base array type) because its
+/// own `ConstantArrayType` (the `ArrayShape` equivalent) is reserved for
+/// a *fully* known literal shape - a general `array<K, V>` needs a
+/// *separate* vehicle to carry "and I also know this one extra key
+/// exists" without claiming to know every other key too. This project
+/// has no such restriction (`Type::ArrayShape` was never scoped to
+/// "fully known" in the first place), and already has the exact right
+/// mechanism for "I know more about this one specific access than the
+/// container's own general type says" - a composite `narrowing_key`
+/// entry (`"arr[key]"`), the same one `is_string($info['code'])`-style
+/// per-element narrowing already writes and `infer_expr`'s own `Index`
+/// arm already reads back first. So instead of building a new
+/// accessory-type hierarchy, `array_key_exists`'s own true-branch
+/// narrowing (below) writes `"arr[key]" => this function's own result`
+/// directly, alongside its existing `$arr`-wide `narrow_array_shape_by_
+/// key_presence` call - no new `Type` variant, no `TypeCombinator`
+/// equivalent needed. Derived from `ty` *after* shape-based narrowing
+/// (not the pre-narrowing type), so a `Union` member `narrow_array_
+/// shape_by_key_presence` already proved impossible doesn't also
+/// contribute a bogus value type here. `None` when nothing in `ty`
+/// carries a real value type for `key` at all (an unrelated type, or an
+/// `ArrayShape` genuinely missing the key - only reachable when
+/// `present` was `false`, so the composite key isn't written for that
+/// branch anyway).
+pub(crate) fn array_value_type_for_key(ty: &Type, key: &str) -> Option<Type> {
+    match ty {
+        Type::ArrayShape(fields) => fields
+            .iter()
+            .find(|(k, _, _)| k == key)
+            .map(|(_, v, _)| v.clone()),
+        Type::Array(_, value_ty) => Some((**value_ty).clone()),
+        Type::Union(members) => members
+            .iter()
+            .map(|m| array_value_type_for_key(m, key))
+            .collect::<Option<Vec<Type>>>()?
+            .into_iter()
+            .reduce(union_types),
+        _ => None,
     }
 }
 

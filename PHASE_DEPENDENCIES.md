@@ -20,10 +20,10 @@ graph LR
     P49["49: Call-argument binding\n(remaining) — PARTIAL"]
     P37["37: Attribute target-validity\n(remaining) — PARTIAL, ctor-arg\nvalidation done"]
     P54["54: Generic template\nrichness — PARTIAL, variance-aware\nassignability done"]
-    P50["50: Array key-type/offset\nengine (remaining) — PARTIAL,\nInvalidKeyInArrayDimFetchRule done"]
+    P50["50: Array key-type/offset\nengine (remaining) — PARTIAL,\nInvalidKeyInArrayDimFetchRule +\nHasOffsetValueType equiv. done"]
     P80["80: Object-shape/key-of/\nconditional-type syntax — PARTIAL,\nvalue-of/enum slice done"]
     P51["51: Type coercion\nsurface (remaining) — PARTIAL"]
-    P73["73/74: Array/string stdlib\ncoverage (remaining) — PARTIAL"]
+    P73["73/74: Array/string stdlib\ncoverage — PARTIAL,\narray_key_exists narrowing done"]
     P62["62: Uninitialized-property\ndataflow — DONE (both halves)"]
     P60["60: isset/empty/nullsafe\nreversal (remaining) — PARTIAL"]
     P82["82: Collector / cross-file\naggregation — RETIRED, built as a\nregistry fixed point instead"]
@@ -38,7 +38,7 @@ graph LR
     P49 -->|done; unblocked| P37
     P54 -->|done; unblocks| P50
     P80 -->|done; unblocks| P54
-    P50 -->|needed by| P73
+    P50 -.->|satisfied differently;\nsee edge list| P73
     P62 -->|gates| P60
     P82 -.->|satisfied differently;\nsee edge list| P41
     P55 -->|done; unblocked| P15
@@ -60,7 +60,7 @@ architectural nice-to-have, explicitly "not a hard blocker").
 | **49** Call-argument binding (remaining) | **37**'s attribute constructor-argument validation | needs | edge satisfied → `resolve_call_args`/`check_args` were already fully generic (no expr-node coupling), so 37's own "needs Phase 49's generalization" framing was stale; built directly, no new Phase 49 work needed |
 | **54** Generic template richness | **50**'s reverted `InvalidKeyInArrayDimFetchRule` reattempt | blocks | 54's own stated blocker fixed and shipped → edge satisfied → **50's own reattempt built and shipped too, same session** (see Phase 50, Done) - though the real root cause found there (`Type::ObjectShape` missing from ten type-tree-walking functions; `Checker::resolve_type_hint` never applying `mark_template_params`) turned out unrelated to what 54 itself fixed, confirming the "re-verify, don't assume" caution was warranted |
 | **80** Object-shape/key-of/conditional-type syntax | **54**'s `TemplateKeyOfType`/`TemplateObjectShapeType` bound kinds | prerequisite | 80 done → edge satisfied for the specific deferred-resolution piece (`value-of<T>` naming a real enum, via `Registry::resolve_deferred_value_of`); `ClassInfo.template_bounds` is now walked and resolved, ready to build on - this specific bound-kind item is still open (54's own separate variance-aware-assignability work has since shipped in full, unrelated to this piece) |
-| **50** Array key-type/offset engine (remaining) | **73/74**'s `array_key_exists` narrowing | needs | `InvalidKeyInArrayDimFetchRule` itself now done (see Done), but 50's own `HasOffsetType`/`HasOffsetValueType` accessory facts - the specific piece 73/74 needs - still aren't built → still blocked |
+| **50** Array key-type/offset engine (remaining) | **73/74**'s `array_key_exists` narrowing | needs | **edge satisfied, differently than planned**: real PHPStan's own `HasOffsetType`/`HasOffsetValueType` accessory-type hierarchy was never actually needed - this project's own existing composite `narrowing_key` mechanism (`"arr[key]"`) was already the right, proportionate vehicle for the same fact. Built directly (`array_value_type_for_key`, `checker/narrowing.rs`; see Phase 50, Done) |
 | **62** Uninitialized-property dataflow | **60**'s offset/property-chain `isset($x['key'])` half | gates | 62 itself is now DONE (both halves - see Phase 62's own entry), but the specific shape 60 needs still isn't what got built → **edge still open, re-scoped, not satisfied**: 62's new `checker/uninitialized_dataflow.rs` is a standalone, one-shot walker that emits a diagnostic directly, never exposing a reusable per-statement fact through the main checker's own `Locals`/narrowing engine - 60's own "offset/property-chain `isset()` reversal" needs exactly that (a narrowing-usable "is this offset/property definitely not yet set" fact consulted mid-expression, the same way ordinary narrowing already consults `Locals`), which is a different shape of dataflow entirely, genuinely still unbuilt |
 | **82** Collector / cross-file aggregation | **41**'s transitive purity across the call graph | needs | **edge satisfied, differently than planned**: 82 was never actually needed as a literal Collector architecture at all - real PHPStan's own `Collector`/`CollectedDataNode` machinery exists to reconcile results across its *parallel worker processes*, a problem this project's single-process, in-memory tool doesn't have. The real, correct equivalent (a registry-build-time fixed point, the same shape `flatten_phpdoc_inheritance`/`resolve_deferred_value_of` already use) was planned and built directly (`registry/purity.rs`; see Phase 41, Done) - Phase 82 itself is now RETIRED, its own entry rewritten to explain the finding rather than left as a literal architecture to build later |
 | **82** Collector / cross-file aggregation | **15**'s `FunctionCallConstantConditionRule` cross-file dedup | needs | **edge removed, not satisfied**: confirmed directly (while investigating 41's own transitive slice) that this piece never actually needed Collector-style architecture either - it's buildable via this project's own existing single-file `infer_expr` machinery, the same way every other single-file analysis already works. Still genuinely unbuilt, but now correctly independent, not blocked on anything |

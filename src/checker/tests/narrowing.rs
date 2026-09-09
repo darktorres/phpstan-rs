@@ -1407,6 +1407,61 @@ fn array_key_exists_on_a_plain_array_leaves_the_type_untouched() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 50/73-74: `array_key_exists`'s own `HasOffsetValueType`
+// equivalent - narrowing the *specific element access* (`$x['key']`),
+// not just `$x`'s own overall type, via this project's existing
+// composite `narrowing_key` mechanism rather than a new accessory-type
+// hierarchy. See `array_value_type_for_key`'s own doc comment for the
+// full architectural finding.
+#[test]
+fn array_key_exists_on_a_plain_array_narrows_the_specific_element_access() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $n): void {}
+            /**
+             * @param array<string, int> $x
+             */
+            function handle(array $x): void {
+                if (array_key_exists('a', $x)) {
+                    needsInt($x['a']);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_key_exists_true_branch_element_access_still_catches_a_real_type_mismatch() {
+    // Regression guard: the narrowing above must be precise, not a
+    // blanket "never flag $x[key] again" escape hatch - `int` is still
+    // the wrong type for a `string`-expecting parameter.
+    let d = diagnostics_for(
+        r#"<?php
+            function needsString(string $s): void {}
+            /**
+             * @param array<string, int> $x
+             */
+            function handle(array $x): void {
+                if (array_key_exists('a', $x)) {
+                    needsString($x['a']);
+                }
+            }
+        "#,
+    );
+    assert!(!d.is_empty(), "expected a type mismatch, got none");
+}
+
+#[test]
+fn array_value_type_for_key_returns_none_for_a_missing_shape_key() {
+    let shape = Type::ArrayShape(vec![("a".to_string(), Type::Int, false)]);
+    assert_eq!(
+        narrowing::array_value_type_for_key(&shape, "b"),
+        None,
+        "a shape genuinely missing the key has no value type to offer"
+    );
+}
+
 #[test]
 fn is_string_narrows_a_variable_subscript_array_index_expression() {
     // Phase 33 Finding 5: Translator::translate's real shape.
