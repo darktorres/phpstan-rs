@@ -161,9 +161,34 @@ pub struct DocBlock {
     // later" split every other type-bearing tag has - resolved into a
     // real `Type` (and substituted into every member that references it)
     // at `ClassInfo::from_decl` time, where name resolution is actually
-    // available. Cross-class `@phpstan-import-type Name from Class` is a
-    // distinct, separate tag this project doesn't parse.
+    // available.
     pub type_aliases: HashMap<String, String>,
+    // `@phpstan-import-type Name from Class [as Alias]` - the cross-class
+    // sibling of `@phpstan-type` above, importing another class's own
+    // local alias by name instead of declaring a fresh one. Kept as raw
+    // text here too (`from`/`alias` are simple bare identifiers per real
+    // `phpstan/phpdoc-parser`'s own grammar, never subject to `use`-import
+    // rewriting the way a type expression's own class references are) -
+    // resolved once `Registry::resolve_deferred_type_imports` can see
+    // every class's own already-built `type_aliases` table, which a
+    // single class's own `from_decl` call can't (the source class may not
+    // be indexed yet at all).
+    pub type_imports: Vec<TypeImportTag>,
+}
+
+/// One parsed `@phpstan-import-type` tag - see `DocBlock::type_imports`'s
+/// own doc comment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeImportTag {
+    // The name as declared on the *source* class's own `@phpstan-type`.
+    pub alias: String,
+    // The source class, raw text (resolved against *this* class's own
+    // `use`-imports/namespace at `ClassInfo::from_decl` time, same as
+    // `extends`/`implements`).
+    pub from: String,
+    // `as OtherName` - the name this class's own members reference it by,
+    // when different from `alias`.
+    pub as_name: Option<String>,
 }
 
 /// One parsed `@phpstan-assert`-family tag - see `DocBlock::assert_if_true`'s
@@ -445,6 +470,32 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let ty = take_type_token(remainder);
                 if !name.is_empty() && !ty.is_empty() {
                     block.type_aliases.insert(name.to_string(), ty.to_string());
+                }
+            }
+            "import-type" => {
+                // `Alias from ClassName [as OtherAlias]` - a fixed
+                // keyword grammar (confirmed directly against real
+                // `phpstan/phpdoc-parser`'s own `parseTypeAliasImportTagValue`),
+                // not a type expression, so plain whitespace-splitting is
+                // enough - no `take_type_token` involved.
+                let mut parts = rest.split_whitespace();
+                let alias = parts.next().unwrap_or("");
+                let from = if parts.next() == Some("from") {
+                    parts.next().unwrap_or("")
+                } else {
+                    ""
+                };
+                if !alias.is_empty() && !from.is_empty() {
+                    let as_name = if parts.next() == Some("as") {
+                        parts.next().map(str::to_string)
+                    } else {
+                        None
+                    };
+                    block.type_imports.push(TypeImportTag {
+                        alias: alias.to_string(),
+                        from: from.to_string(),
+                        as_name,
+                    });
                 }
             }
             "extends" => {

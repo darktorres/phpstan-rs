@@ -201,6 +201,7 @@ impl Registry {
         registry.flatten_traits();
         registry.flatten_phpdoc_inheritance();
         registry.resolve_deferred_value_of();
+        registry.resolve_deferred_type_imports();
         registry
     }
 
@@ -480,6 +481,103 @@ impl Registry {
                     &self.classes,
                 );
             }
+        }
+    }
+
+    /// `@phpstan-import-type`'s own deferred half - `ClassInfo::from_decl`
+    /// already resolved both names (`ResolvedTypeImport`'s own doc
+    /// comment), but couldn't look the import up yet: the source class
+    /// may not be indexed at all at that point. Mirrors `resolve_deferred_
+    /// value_of`'s exact two-step shape (a read-only pass collecting
+    /// every resolvable answer, then a second pass applying them) for the
+    /// identical reason - looking a *different* class's own `type_aliases`
+    /// up while mutating *this* class's own would otherwise borrow
+    /// `self.classes` two ways at once.
+    ///
+    /// A source class's own alias is looked up under `{its own
+    /// namespace}\{alias name}` - reconstructed directly from its FQN
+    /// (`class_namespace`) rather than re-running that class's own name
+    /// resolution, which would need its own `NameContext` (not kept
+    /// around once `from_decl` returns). This matches `NameContext::
+    /// resolve`'s own actual behavior for a bare, unqualified name with
+    /// no matching `use`-import (confirmed directly: falls straight
+    /// through to `declared_name`, i.e. plain namespace-prefixing) -
+    /// exactly what a `@phpstan-type` tag's own bare alias name always is
+    /// in practice, never itself subject to `use`-aliasing.
+    ///
+    /// Not a fixed-point loop (an import that itself points at another
+    /// imported - not locally declared - alias isn't chased further) -
+    /// the identical "one level of indirection only" leniency `build_
+    /// type_aliases`'s own second pass already accepts for local aliases
+    /// referencing each other, extended here rather than reinvented.
+    #[hotpath::measure]
+    pub(crate) fn resolve_deferred_type_imports(&mut self) {
+        let mut classes_with_imports: Vec<String> = Vec::new();
+        let mut resolved: Vec<(String, String, Type)> = Vec::new();
+        for (class_name, info) in &self.classes {
+            if info.type_imports.is_empty() {
+                continue;
+            }
+            classes_with_imports.push(class_name.clone());
+            for imp in &info.type_imports {
+                let source_key = declared_name_in_namespace(
+                    class_namespace(&imp.source_class_fqn),
+                    &imp.source_alias_name,
+                );
+                if let Some(ty) = self
+                    .classes
+                    .get(&imp.source_class_fqn)
+                    .and_then(|src| src.type_aliases.get(&source_key))
+                {
+                    resolved.push((class_name.clone(), imp.local_key.clone(), ty.clone()));
+                }
+            }
+        }
+        if classes_with_imports.is_empty() {
+            return;
+        }
+        let mut by_class: HashMap<String, HashMap<String, Type>> = HashMap::new();
+        for (class_name, local_key, ty) in resolved {
+            by_class
+                .entry(class_name)
+                .or_default()
+                .insert(local_key, ty);
+        }
+        for class_name in classes_with_imports {
+            let Some(mut info) = self.classes.remove(&class_name) else {
+                continue;
+            };
+            // A class whose own imports all failed to resolve (its source
+            // class isn't indexed at all, e.g. an external dependency
+            // outside this run's own corpus) still needs `type_imports`
+            // cleared - the one-shot pass above already ran, so there's no
+            // second chance coming; an empty `aliases` map here makes
+            // every `substitute_type_aliases` call below a no-op, correct
+            // but slightly wasted work, traded for not duplicating this
+            // whole loop body into two near-identical copies.
+            let aliases = by_class.remove(&class_name).unwrap_or_default();
+            for sig in info.methods.values_mut() {
+                for param in &mut sig.params {
+                    let ty = std::mem::replace(&mut param.ty, Type::Mixed);
+                    param.ty = substitute_type_aliases(ty, &aliases);
+                }
+                let ty = std::mem::replace(&mut sig.return_type, Type::Mixed);
+                sig.return_type = substitute_type_aliases(ty, &aliases);
+            }
+            for prop in info.properties.values_mut() {
+                let ty = std::mem::replace(&mut prop.ty, Type::Mixed);
+                prop.ty = substitute_type_aliases(ty, &aliases);
+                if let Some(set_ty) = prop.set_ty.take() {
+                    prop.set_ty = Some(substitute_type_aliases(set_ty, &aliases));
+                }
+            }
+            for c in info.consts.values_mut() {
+                let ty = std::mem::replace(&mut c.ty, Type::Mixed);
+                c.ty = substitute_type_aliases(ty, &aliases);
+            }
+            info.type_aliases.extend(aliases);
+            info.type_imports.clear();
+            self.classes.insert(class_name, info);
         }
     }
 
@@ -2268,6 +2366,30 @@ impl Registry {
             }
             _ => types::is_subtype(sub, sup),
         }
+    }
+}
+
+/// The namespace a fully-qualified class name was declared in - everything
+/// before the last `\`, empty for the global namespace. `Registry::
+/// resolve_deferred_type_imports`'s own doc comment explains why this is
+/// exactly the prefix a bare `@phpstan-type` alias name declared on that
+/// same class resolves against.
+fn class_namespace(fqn: &str) -> &str {
+    fqn.rsplit_once('\\').map_or("", |(ns, _)| ns)
+}
+
+/// `NameContext::declared_name`'s exact logic, replicated for a namespace
+/// string reconstructed after the fact (`class_namespace`) rather than a
+/// live `NameContext` - no leading `\` for the global namespace, which a
+/// naive `format!("{ns}\\{bare}")` would always insert (a real bug this
+/// project's own global-namespace corpus fixtures caught immediately: an
+/// alias declared with no namespace at all keys its own `type_aliases`
+/// entry under the bare name, never `"\\Name"`).
+fn declared_name_in_namespace(namespace: &str, bare: &str) -> String {
+    if namespace.is_empty() {
+        bare.to_string()
+    } else {
+        format!("{namespace}\\{bare}")
     }
 }
 

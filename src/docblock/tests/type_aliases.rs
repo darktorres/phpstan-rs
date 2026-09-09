@@ -65,3 +65,39 @@ fn a_type_alias_with_no_type_expression_is_not_recorded() {
         block.type_aliases
     );
 }
+
+#[test]
+fn parses_a_cross_class_type_import() {
+    let block = parse("/** @phpstan-import-type Error from ErrorTypes */");
+    assert_eq!(
+        block.type_imports,
+        vec![TypeImportTag {
+            alias: "Error".to_string(),
+            from: "ErrorTypes".to_string(),
+            as_name: None,
+        }]
+    );
+}
+
+#[test]
+fn parses_a_cross_class_type_import_with_an_as_rename() {
+    let block = parse("/** @phpstan-import-type Error from ErrorTypes as ImportedError */");
+    assert_eq!(
+        block.type_imports,
+        vec![TypeImportTag {
+            alias: "Error".to_string(),
+            from: "ErrorTypes".to_string(),
+            as_name: Some("ImportedError".to_string()),
+        }]
+    );
+}
+
+#[test]
+fn a_type_import_missing_the_from_keyword_is_not_recorded() {
+    let block = parse("/** @phpstan-import-type Error ErrorTypes */");
+    assert!(
+        block.type_imports.is_empty(),
+        "got: {:?}",
+        block.type_imports
+    );
+}

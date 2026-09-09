@@ -234,6 +234,32 @@ pub struct ClassInfo {
     // interfaces`'s own `UriString::parse()`, `/** @var ComponentMap
     // $components */`). Empty for a class with no such tags at all.
     pub type_aliases: HashMap<String, Type>,
+    // This class's own `@phpstan-import-type` tags, name-resolved (`from`
+    // to the source class's own FQN, the imported name to the local key
+    // this class's own members already reference it by) but not yet
+    // looked up in the source class's own `type_aliases` - the source
+    // class may not be indexed at all yet at `from_decl` time. Resolved
+    // by `Registry::resolve_deferred_type_imports`, a later pass over the
+    // fully-indexed registry (mirrors Phase 80's `resolve_deferred_value_of`
+    // shape) - merged into `type_aliases` above once resolved, so this
+    // field is empty again after that pass runs; never read afterward.
+    pub type_imports: Vec<ResolvedTypeImport>,
+}
+
+/// See `ClassInfo::type_imports`'s own doc comment.
+#[derive(Debug, Clone)]
+pub struct ResolvedTypeImport {
+    // The key this class's own already-built member types reference the
+    // import under (`substitute_type_aliases` matches on this exact key,
+    // same as an ordinary local `@phpstan-type` alias would).
+    pub local_key: String,
+    pub source_class_fqn: String,
+    // The name as declared on the *source* class's own `@phpstan-type` -
+    // not yet resolved to that class's own key (needs its own namespace,
+    // reconstructed from `source_class_fqn` at resolution time rather
+    // than carried here, since a class's own containing namespace is
+    // always recoverable from its own FQN).
+    pub source_alias_name: String,
 }
 
 impl ClassInfo {
@@ -263,6 +289,26 @@ impl ClassInfo {
         // doc comment for why this must run *after* `resolve_names_in_
         // type` on each member's surrounding type, not before.
         let type_aliases = build_type_aliases(class_doc.as_ref(), &template_params, ctx);
+        // `@phpstan-import-type` - resolved just enough here (both names,
+        // via this class's own `ctx`) to be looked up in the source
+        // class's own `type_aliases` once it's indexed too; see
+        // `ResolvedTypeImport`'s own doc comment.
+        let type_imports: Vec<ResolvedTypeImport> = class_doc
+            .as_ref()
+            .map(|d| {
+                d.type_imports
+                    .iter()
+                    .map(|imp| {
+                        let local_name = imp.as_name.as_deref().unwrap_or(&imp.alias);
+                        ResolvedTypeImport {
+                            local_key: ctx.resolve(local_name),
+                            source_class_fqn: ctx.resolve(&imp.from),
+                            source_alias_name: imp.alias.clone(),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let methods: HashMap<String, FunctionSig> = c
             .methods
@@ -570,6 +616,7 @@ impl ClassInfo {
             attribute_targets,
             enum_case_values: HashMap::new(),
             type_aliases,
+            type_imports,
         }
     }
 
@@ -922,6 +969,7 @@ impl ClassInfo {
             attribute_targets: compute_attribute_targets(&e.attrs),
             enum_case_values,
             type_aliases: HashMap::new(),
+            type_imports: Vec::new(),
         }
     }
 
@@ -970,6 +1018,7 @@ impl ClassInfo {
         self.consts.extend(other.consts);
         self.enum_case_values.extend(other.enum_case_values);
         self.type_aliases.extend(other.type_aliases);
+        self.type_imports.extend(other.type_imports);
         self.abstract_methods.extend(other.abstract_methods);
         self.final_methods.extend(other.final_methods);
         self.resolved_trait_conflicts

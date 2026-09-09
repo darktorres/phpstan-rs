@@ -1662,12 +1662,11 @@ lexer/parser, `proptest` for `types.rs`'s subtyping logic. Dev-only.
 
 **36 - PHPDoc tag ecosystem expansion (PARTIAL).** `@phpstan-*`-prefixed
 tag spellings, `@property`-family validation (the `class.notFound`
-slice), and `@phpstan-assert`/`-if-true`/`-if-false` (including the
-narrowing they drive at call sites, not just tag parsing) are done.
+slice), `@phpstan-assert`/`-if-true`/`-if-false` (including the
+narrowing they drive at call sites, not just tag parsing), and
+`@phpstan-type`/cross-class `@phpstan-import-type` (see Done) are done.
 Still unbuilt: `@method`/`@mixin` synthesis into `ClassInfo`;
-`@phpstan-type`/`@phpstan-import-type` are done for a *local* alias
-(the define()-registry-backed reattempt, see Done) but cross-class
-`@phpstan-import-type` isn't; `@phpstan-require-extends`/`-implements`/
+`@phpstan-require-extends`/`-implements`/
 `-sealed`; `@phpstan-consistent-constructor`; `@readonly`
 (documentation-only convention); inline `@var`'s own error-reporting
 half (`VarTagChangedExpressionTypeRule`/`WrongVariableNameInVarTagRule`
