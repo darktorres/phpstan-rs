@@ -728,6 +728,7 @@ mod noop;
 mod oop;
 mod operators;
 pub(crate) mod phpstan_api;
+mod property_assignment;
 mod resolve;
 mod stmt;
 mod throws;
