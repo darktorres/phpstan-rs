@@ -702,6 +702,7 @@ dependencies = [
  "imbl",
  "lsp-server",
  "lsp-types",
+ "rayon",
  "regex",
  "rustc-hash",
  "serde",

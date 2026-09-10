@@ -6,6 +6,7 @@ use output::OutputFormat;
 use phpstan_rs::{
     baseline, checker, composer, config, ignore_errors, output, php_version, project,
 };
+use rayon::prelude::*;
 
 /// `phpstan-rs check-project <dir>` - loads every .php file under `dir`
 /// into a `Project` and runs the full checker over all of them at once
@@ -152,10 +153,66 @@ fn run_check_project(
     std::panic::set_hook(default_hook);
     project.finish_loading();
 
-    let results: HashMap<PathBuf, Vec<checker::Diagnostic>> = analyze_files
-        .iter()
-        .map(|path| (path.clone(), project.check_file(path)))
-        .collect();
+    // A bare rayon pool uses the default (small) OS worker-thread stack -
+    // the sibling `check` command's own `WORKER_STACK_SIZE` precedent
+    // (check.rs) and its doc comment record a real, non-adversarial stack
+    // overflow at ~200-300 levels of nested parens on a default-sized
+    // thread stack, well short of the parser's own `MAX_EXPR_DEPTH=1000`
+    // guard - and the checker's own recursive AST walk (`checker/expr.rs`
+    // etc.) has no depth guard of its own, so it needs the same headroom.
+    // A call-local pool (not `build_global()`) keeps this stack-size
+    // choice scoped to `check-project` instead of silently sizing every
+    // other future rayon caller in this binary.
+    const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
+    let pool = rayon::ThreadPoolBuilder::new()
+        .stack_size(WORKER_STACK_SIZE)
+        .build()
+        .expect("failed to build check-project worker pool");
+
+    // Mirrors `check.rs`'s own catch_unwind-with-silenced-hook pattern: a
+    // panic while checking one file is reported and skipped rather than
+    // aborting every other in-flight file's work, and (unlike a bare
+    // `unwrap_or_default()` on the join result) the panic is preserved as
+    // a real per-file error rather than silently discarded along with
+    // whatever else that worker thread hadn't finished yet. The hook is
+    // process-global, so this silences panics from every pool worker
+    // thread, not just whichever one calls `install`. `Project`/`Registry`
+    // have no interior mutability (no `Cell`/`RefCell`/etc. anywhere), so
+    // `&project` is `UnwindSafe` with no `AssertUnwindSafe` wrapper
+    // needed - a panic mid-check can't have left it half-mutated.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let checked_results: Vec<(PathBuf, Result<Vec<checker::Diagnostic>, String>)> =
+        pool.install(|| {
+            analyze_files
+                .par_iter()
+                .map(|path| {
+                    let outcome = std::panic::catch_unwind(|| project.check_file(path));
+                    let outcome = outcome.map_err(|payload| {
+                        payload
+                            .downcast_ref::<String>()
+                            .cloned()
+                            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                            .unwrap_or_else(|| "unknown panic".to_string())
+                    });
+                    (path.clone(), outcome)
+                })
+                .collect()
+        });
+    std::panic::set_hook(default_hook);
+
+    let mut results: HashMap<PathBuf, Vec<checker::Diagnostic>> = HashMap::new();
+    let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
+    for (path, outcome) in checked_results {
+        match outcome {
+            Ok(diagnostics) => {
+                results.insert(path, diagnostics);
+            }
+            Err(msg) => check_panics.push((path, msg)),
+        }
+    }
+    check_panics.sort();
+
     let mut results = apply_level_filter(results, level);
     ignore_errors::filter(&mut results, ignore_error_entries);
 
@@ -180,17 +237,19 @@ fn run_check_project(
         }
     }
 
-    let checked = analyze_files.len() - skipped_analyze;
+    let checked = analyze_files.len() - skipped_analyze - check_panics.len();
 
     // Text is the only format carrying anything beyond raw diagnostics
-    // (the "N more file(s) loaded for context"/"N file(s) skipped" prose)
-    // - `json`/`checkstyle` exist so a CI pipeline can consume clean,
-    // uninterrupted structured data on stdout, so they report only the
-    // diagnostics themselves (`json`'s own `totals.files_checked` is the
-    // one piece of that extra bookkeeping structured output still
-    // carries - context/skip counts would need their own stable fields to
-    // add without guessing at what a consumer wants, so they're left for
-    // a real request rather than invented here).
+    // (the "N more file(s) loaded for context"/"N file(s) skipped"/"N
+    // file(s) errored while checking" prose) - `json`/`checkstyle` exist
+    // so a CI pipeline can consume clean, uninterrupted structured data
+    // on stdout, so they report only the diagnostics themselves (`json`'s
+    // own `totals.files_checked` is the one piece of that extra
+    // bookkeeping structured output still carries, already reflecting
+    // `checked`'s subtraction of both skipped and panicked files - the
+    // rest would need their own stable fields to add without guessing at
+    // what a consumer wants, so they're left for a real request rather
+    // than invented here).
     match format {
         OutputFormat::Text => {
             let mut paths: Vec<&PathBuf> = results.keys().collect();
@@ -206,6 +265,9 @@ fn run_check_project(
                     total += 1;
                 }
             }
+            for (path, msg) in &check_panics {
+                println!("{}: internal error while checking: {msg}", path.display());
+            }
             let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");
             let mut extras = Vec::new();
             let context_loaded = context_files.len() - skipped_context;
@@ -215,6 +277,12 @@ fn run_check_project(
             let skipped_total = skipped_analyze + skipped_context;
             if skipped_total > 0 {
                 extras.push(format!("{skipped_total} file(s) skipped: parse error"));
+            }
+            if !check_panics.is_empty() {
+                extras.push(format!(
+                    "{} file(s) errored while checking",
+                    check_panics.len()
+                ));
             }
             if !extras.is_empty() {
                 summary.push_str(&format!(" ({})", extras.join(", ")));
