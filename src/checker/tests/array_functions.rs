@@ -1920,3 +1920,33 @@ fn array_values_on_a_non_list_array_is_never_flagged() {
 // (reverted) match arm in `builtin_calls.rs` for the two compounding
 // reasons (an unsound "provably non-empty" half, plus real corpus noise
 // even from the safe, always-nullable fallback alone).
+
+// Phase 68.3: `union_types` never merged two structurally different
+// `Array(key, val)` members into one - real corpus false negative found
+// via an isolated repro of `vendor/symfony/var-exporter/ProxyHelper.php`'s
+// own shape (a dynamic-key index-assignment inside a loop's `if`-branch,
+// then `continue`, plus its own fall-through path assigning a different
+// value type to the same array). Before the fix, this produced four
+// separate, redundant `array<...>` union members instead of one precise
+// `array<Foo|false>`.
+#[test]
+fn dynamic_key_writes_across_an_if_continue_branch_and_its_fallthrough_merge_into_one_array_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo {}
+            function f(array $items): void {
+                $result = [];
+                foreach ($items as $key => $flag) {
+                    if ($flag) {
+                        $result[$key] = new Foo();
+                        continue;
+                    }
+                    $result[$key] = false;
+                }
+                assertType('array<false|Foo>', $result);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

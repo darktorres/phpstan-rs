@@ -81,6 +81,51 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         Some(base) => !present_bases.contains(&base),
         None => true,
     });
+    // Phase 68.3: two structurally different `Array(key, val)` members
+    // never merged into one on their own before this - each stayed its
+    // own separate union member instead of the single, precise
+    // `Array(key1|key2, val1|val2)` real PHPStan would infer (`array_
+    // element_type`'s own `Union` arm, and every other consumer that
+    // wants "the" element type of a plain array, silently only ever saw
+    // the *first* matching member). Real corpus false positive this
+    // fixed: `vendor/symfony/var-exporter/ProxyHelper.php`'s dynamic-key
+    // index-assignment inside a loop's `if`-branch (assigning an object,
+    // then `continue`) and its own fall-through path (assigning `false`)
+    // each built their own separate `Array(string, Foo)`/`Array(string,
+    // false)` member instead of merging into one `Array(string,
+    // Foo|false)` - confirmed via an isolated repro producing four
+    // separate, redundant `array<...>` union members instead of one.
+    // Deliberately scoped to a bare `Type::Array` only, not an
+    // accessory-refined `list<T>`/`non-empty-array<T>` (a real
+    // `Intersection`) - a mix of the two is a rarer shape not needed to
+    // fix this repro, left as a real, if narrower, residual.
+    if members
+        .iter()
+        .filter(|m| matches!(m, Type::Array(_, _)))
+        .count()
+        > 1
+    {
+        let mut merged_key: Option<Type> = None;
+        let mut merged_val: Option<Type> = None;
+        members.retain(|m| {
+            let Type::Array(k, v) = m else {
+                return true;
+            };
+            merged_key = Some(match merged_key.take() {
+                None => (**k).clone(),
+                Some(acc) => union_types(acc, (**k).clone()),
+            });
+            merged_val = Some(match merged_val.take() {
+                None => (**v).clone(),
+                Some(acc) => union_types(acc, (**v).clone()),
+            });
+            false
+        });
+        members.push(Type::Array(
+            Box::new(merged_key.unwrap()),
+            Box::new(merged_val.unwrap()),
+        ));
+    }
     if members.len() > MAX_UNION_MEMBERS {
         members = generalize_by_key_set(members);
     }

@@ -172,7 +172,24 @@ identity rather than a same-named `HashSet` (a real bug: a method's own
 name - e.g. `ReflectionClass`'s class-level `T` and `getAttributes()`'s
 own, unrelated method-level `T` - used to get eagerly captured and wiped
 to `Mixed` by the class-level substitution before the method's own
-call-site binding ever ran).
+call-site binding ever ran). `union_types` (Phase 68.3) now merges two
+structurally different `Array(key, val)` members into one `Array(key1|
+key2, val1|val2)` instead of keeping them as separate, redundant union
+members - real corpus false negative this fixed
+(`vendor/symfony/var-exporter/ProxyHelper.php`): a dynamic-key index-
+assignment inside a loop's `if`-branch (assigning an object, then
+`continue`) and its own fall-through path (assigning a different value)
+each built their own separate `Array` member instead of merging into
+one precise type, one of the two root causes behind the earlier,
+dropped `arrayFilter.same`/`arrayFilter.alwaysEmpty` attempt (see
+"Pending/partial", Phase 68). Corpus-verified project-wide: fixes the
+identical redundant-union-member pattern across dozens of unrelated
+findings (cleaner, correctly-merged displayed types), and surfaces
+several new, plausible true positives from a real key type that was
+previously under-reported (a dynamic array key genuinely built from
+more than one source type, e.g. `int|string`, is now visible as such
+project-wide instead of only the first-seen branch's own narrower key
+type).
 
 ## Narrowing engine
 
@@ -916,17 +933,11 @@ done too, but opt-in (`check_array_filter_falsy_noop`, default `false`)
 rather than shipped on by default - an earlier attempt at them was
 dropped entirely after corpus verification caught two live false
 positives, both since root-caused to independent variable-type-tracking
-imprecision unrelated to this check's own logic. One - `finally` not
-accounting for an assignment inside `try` possibly never running - is
-now fixed (see Done, "Narrowing engine"), confirmed via a full corpus
-diff to fix 8 more unrelated false positives project-wide the same
-way, plus surface 4 new, plausible true positives (a variable used in
-`finally` that a real exception path inside `try` could leave
-genuinely undefined). The sibling `ProxyHelper.php` gap (`union_types`
-never merging two structurally different `Array(key, val)` values
-into one `Array(key, val1|val2)`) is still open. Flip the
-`check_array_filter_falsy_noop` default to `true` only once that one
-is fixed too.
+imprecision unrelated to this check's own logic - both now fixed (see
+Done, "Narrowing engine" and "Type system"). Flip the
+`check_array_filter_falsy_noop` default to `true` now that both are
+resolved (not attempted in the same pass as the fix itself, to keep
+the corpus diff attributable to one change at a time).
 
 **75 - String accessory case-tracking (PLANNED).** No `Lowercase`/
 `Uppercase`/`DecimalIntegerString` accessory kinds; `strtolower()`/
@@ -1276,6 +1287,16 @@ Pending entry instead).
   intersect/remove or generic recursive type-tree traverse/map
   combinator) - none block a specific missing rule, revisit only if a
   future corpus round traces a real false positive/negative to one.
+- A dynamic-key array write's own key type isn't narrowed by a
+  preceding `is_int()`/`is_string()`-family guard on the key expression
+  itself, unlike an ordinary variable - `$arr[$row['id']] = ...;`
+  inside `if (is_int($row['id'])) { ... }` still infers the array's own
+  key type from `$row['id']`'s *unnarrowed* type, not `int`. Found via
+  Phase 68.3's own corpus verification (Piwigo's own
+  `CategoryAvailableListController.php:311`, real, if disclosed as
+  correct-per-current-modeling rather than a regression from that fix)
+  once `union_types`'s new `Array` merge (see "Type system") stopped
+  silently hiding it.
 - `array_filter()`'s own return-type inference never narrows away a
   provably-null/falsy *field* of a fixed-position `ArrayShape` input the
   way it does for a homogeneous `Array(K, V)`'s own value type - real
