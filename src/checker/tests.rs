@@ -3,6 +3,7 @@ mod arity_and_signatures;
 mod array_functions;
 mod array_key_validity;
 mod array_literals_and_shapes;
+mod attributes;
 mod builtin_checks;
 mod cast_and_coercion;
 mod closures_and_callables;
