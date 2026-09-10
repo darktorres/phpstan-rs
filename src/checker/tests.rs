@@ -42,6 +42,7 @@ mod require_and_sealed;
 mod string_functions;
 mod symbol_existence;
 mod throws;
+mod trait_composition_and_conflicts;
 mod type_aliases;
 mod uninitialized;
 mod uninitialized_dataflow;
