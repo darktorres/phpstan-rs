@@ -345,6 +345,40 @@ pub(crate) fn is_override_attribute_name(name: &str) -> bool {
         .eq_ignore_ascii_case("Override")
 }
 
+/// Phase 37: same idea again, for PHP 8.4's native `#[\Deprecated]`
+/// marker - real PHPStan's own `ClassAttributesRule`/`TraitAttributesRule`
+/// both use `getAttributes('Deprecated')`, a bare short-name match against
+/// the class-like node's *own* `reflectionClass`-level attributes (not the
+/// general-purpose, fully-resolved `attribute.notFound`/`.target` engine
+/// this project's `check_attributes`/`check_attribute_targets` already
+/// run) - this is a real, unconditional PHP fatal error on a class/
+/// interface/enum declaration (confirmed directly: `#[\Deprecated] class
+/// Foo {}` fatals "Cannot apply #[\Deprecated] to class Foo"), and a
+/// PHP-8.5-gated one on a trait (confirmed directly: real, silent-until-
+/// 8.5 support - a real deprecation warning fires when the trait is used,
+/// not a fatal error).
+pub(crate) fn is_deprecated_attribute_name(name: &str) -> bool {
+    name.trim_start_matches('\\')
+        .rsplit('\\')
+        .next()
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("Deprecated")
+}
+
+/// Phase 37: same idea again, for PHP 8.2's native
+/// `#[\AllowDynamicProperties]` marker - real PHPStan's own
+/// `ClassAttributesRule`/`TraitAttributesRule`, flagging it as pointless/
+/// wrong on a `readonly class`, `enum`, `interface`, or (unconditionally)
+/// `trait` - none of which can ever have a real dynamic property to
+/// permit in the first place.
+pub(crate) fn is_allow_dynamic_properties_attribute_name(name: &str) -> bool {
+    name.trim_start_matches('\\')
+        .rsplit('\\')
+        .next()
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("AllowDynamicProperties")
+}
+
 impl FunctionSig {
     /// `class_templates` is the enclosing class's own `@template` metadata
     /// (empty for a plain function, or a method on a non-generic class) -

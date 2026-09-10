@@ -146,6 +146,14 @@ pub struct ClassInfo {
     pub kind: ClassKind,
     pub is_abstract: bool,
     pub is_final: bool,
+    // Phase 37: `readonly class` (PHP 8.2) - see `ast::ClassDecl::
+    // is_readonly`'s own doc comment for why this is only just now
+    // surfaced at the class level. Always `false` for an enum (real PHP
+    // rejects `readonly enum` at parse time - never reached this field at
+    // all) or a trait composed in (a trait has no `readonly`-ness of its
+    // own to inherit; `readonly class Foo { use T; }` only ever makes
+    // `Foo`'s own properties readonly, never retroactively marks `T`).
+    pub is_readonly: bool,
     pub extends: Vec<String>,
     pub implements: Vec<String>,
     pub methods: HashMap<String, FunctionSig>,
@@ -800,6 +808,7 @@ impl ClassInfo {
             kind: c.kind,
             is_abstract: c.is_abstract,
             is_final: c.is_final,
+            is_readonly: c.is_readonly,
             extends: c.extends.iter().map(|s| ctx.resolve(s)).collect(),
             implements,
             methods,
@@ -1185,6 +1194,9 @@ impl ClassInfo {
             kind: ClassKind::Enum,
             is_abstract: false,
             is_final: true,
+            // Real PHP rejects `readonly enum` at parse time - an enum
+            // can never be `readonly`.
+            is_readonly: false,
             extends: Vec::new(),
             implements,
             methods,

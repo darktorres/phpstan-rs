@@ -853,3 +853,451 @@ fn a_nodiscard_attribute_on_an_ordinary_method_is_never_flagged_via_the_hook_spe
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 37, item 1: `attribute.nonRepeatable` - a non-repeatable
+// attribute class used more than once at the same declaration site.
+
+#[test]
+fn a_non_repeatable_attribute_used_twice_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class Foo {}
+            #[Foo]
+            #[Foo]
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.nonRepeatable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_repeatable_attribute_used_twice_is_never_flagged_nonrepeatable() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_ALL | \Attribute::IS_REPEATABLE)]
+            class Foo {}
+            #[Foo]
+            #[Foo]
+            class Bar {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.nonRepeatable"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_repeatable_attribute_used_once_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class Foo {}
+            #[Foo]
+            class Bar {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.nonRepeatable"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 37, item 2: `attribute.deprecated` - the missing eighth usage-
+// shape of the already-shipped `@deprecated` family, gated on
+// `check_deprecated_usage` like every other one.
+
+#[test]
+fn a_deprecated_attribute_class_is_flagged_when_check_deprecated_usage_is_on() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            /** @deprecated */
+            #[\Attribute]
+            class Foo {}
+            #[Foo]
+            class Bar {}
+        "#,
+        |r| r.check_deprecated_usage = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.deprecated"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_deprecated_attribute_class_is_never_flagged_by_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            #[\Attribute]
+            class Foo {}
+            #[Foo]
+            class Bar {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 37, item 3: `<kind>.deprecatedAttribute` - PHP's native
+// `#[\Deprecated]` misused on a class-like declaration itself (a real,
+// unconditional PHP fatal error for class/interface/enum, confirmed
+// directly against real `php`; PHP-8.5-gated for a trait).
+
+#[test]
+fn native_deprecated_attribute_on_a_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Deprecated]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "class.deprecatedAttribute"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn native_deprecated_attribute_on_an_interface_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Deprecated]
+            interface Foo {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "interface.deprecatedAttribute"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn native_deprecated_attribute_on_an_enum_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Deprecated]
+            enum Foo { case A; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "enum.deprecatedAttribute"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn native_deprecated_attribute_on_a_trait_below_php_8_5_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            #[\Deprecated]
+            trait Foo {}
+        "#,
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "trait.deprecatedAttribute"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn native_deprecated_attribute_on_a_trait_on_php_8_5_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            #[\Deprecated]
+            trait Foo {}
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "trait.deprecatedAttribute"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn native_deprecated_attribute_on_a_trait_with_no_configured_version_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Deprecated]
+            trait Foo {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "trait.deprecatedAttribute"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 37, item 4: `<kind>.allowDynamicProperties`/
+// `.allowDynamicPropertiesReadonly` - PHP's native
+// `#[\AllowDynamicProperties]` on a readonly class, enum, interface, or
+// (unconditionally) trait.
+
+#[test]
+fn native_allow_dynamic_properties_on_a_readonly_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\AllowDynamicProperties]
+            readonly class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "class.allowDynamicPropertiesReadonly"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn native_allow_dynamic_properties_on_an_ordinary_non_readonly_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\AllowDynamicProperties]
+            class Foo {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "class.allowDynamicPropertiesReadonly"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn native_allow_dynamic_properties_on_an_enum_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\AllowDynamicProperties]
+            enum Foo { case A; }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "enum.allowDynamicProperties"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn native_allow_dynamic_properties_on_an_interface_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\AllowDynamicProperties]
+            interface Foo {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "interface.allowDynamicProperties"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn native_allow_dynamic_properties_on_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\AllowDynamicProperties]
+            trait Foo {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "trait.allowDynamicProperties"),
+        "got: {d:?}"
+    );
+}
+
+// Phase 37, item 5: `attribute.interface`/`.enum`/`.abstract`/
+// `.constructorNotPublic` - self-declaration-site parity, generalizing
+// what was originally just the trait-only `attribute.trait` check.
+
+#[test]
+fn an_interface_marked_as_an_attribute_class_itself_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            interface Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.interface"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_marked_as_an_attribute_class_itself_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            enum Foo { case A; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.enum"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_abstract_class_marked_as_an_attribute_class_itself_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            abstract class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.abstract"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_class_with_a_non_public_constructor_is_flagged_for_self_declaration() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class Foo {
+                private function __construct() {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "attribute.constructorNotPublic"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_concrete_attribute_class_with_a_public_constructor_is_never_flagged_for_self_declaration()
+ {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class Foo {
+                public function __construct() {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "attribute.interface"
+                | "attribute.enum"
+                | "attribute.abstract"
+                | "attribute.constructorNotPublic"
+                | "attribute.trait"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 37, item 6: `property.overrideAttribute` - `#[\Override]` on a
+// property is only real PHP syntax from 8.5 on.
+
+#[test]
+fn override_attribute_on_a_property_below_php_8_5_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base {
+                #[\Override]
+                public int $x = 2;
+            }
+        "#,
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.overrideAttribute"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn override_attribute_on_a_property_on_php_8_5_is_never_flagged_for_version() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base {
+                #[\Override]
+                public int $x = 2;
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.overrideAttribute"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn override_attribute_on_a_property_with_no_configured_version_is_never_flagged_for_version() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base {
+                #[\Override]
+                public int $x = 2;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.overrideAttribute"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 37, item 7: attribute-reference `<kind>.nameCase` parity.
+
+#[test]
+fn an_attribute_reference_with_wrong_case_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class FooAttr {}
+            #[fooattr]
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_reference_with_correct_case_is_never_flagged_for_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class FooAttr {}
+            #[FooAttr]
+            class Bar {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.nameCase"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

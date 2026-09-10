@@ -481,9 +481,14 @@ impl<'a> Checker<'a> {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 self.check_attributes(&c.attrs, &fqn);
                 self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
-                if c.kind == ClassKind::Trait {
-                    self.check_trait_is_not_an_attribute_class(&c.attrs, &fqn);
-                }
+                self.check_self_attribute_class_declaration(
+                    &c.attrs,
+                    &fqn,
+                    c.kind,
+                    c.is_abstract,
+                    &fqn,
+                );
+                self.check_class_like_marker_attributes(&c.attrs, c.kind, c.is_readonly, &fqn);
                 for p in &c.properties {
                     self.check_attributes(&p.attrs, &fqn);
                     self.check_attribute_targets(
@@ -535,6 +540,14 @@ impl<'a> Checker<'a> {
                 let fqn = self.name_ctx.declared_name(&e.name);
                 self.check_attributes(&e.attrs, &fqn);
                 self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
+                self.check_self_attribute_class_declaration(
+                    &e.attrs,
+                    &fqn,
+                    ClassKind::Enum,
+                    false,
+                    &fqn,
+                );
+                self.check_class_like_marker_attributes(&e.attrs, ClassKind::Enum, false, &fqn);
                 for case in &e.cases {
                     self.check_attributes(&case.attrs, &fqn);
                     self.check_attribute_targets(

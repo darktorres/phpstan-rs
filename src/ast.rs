@@ -394,6 +394,13 @@ pub struct ClassDecl {
     pub implements_spans: Vec<Span>,
     pub is_abstract: bool,
     pub is_final: bool,
+    // Phase 37: `readonly class` (PHP 8.2) - parsed already (spread onto
+    // each own property in `parse_class_body`, via the parser's own
+    // `class_is_readonly` local), but never surfaced at the class level
+    // itself until now. Needed by `check_class_like_marker_attributes`'s
+    // own `#[\AllowDynamicProperties]`-on-a-readonly-class check (real
+    // PHPStan's own `ClassAttributesRule`).
+    pub is_readonly: bool,
     pub properties: Vec<PropertyDecl>,
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,

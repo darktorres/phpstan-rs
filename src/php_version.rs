@@ -153,6 +153,20 @@ pub enum PhpFeature {
     /// decimal-point float formatting). `PhpVersion::
     /// supportsHhPrintfSpecifier` (`PrintfHelper::parsePlaceholders`).
     PrintfHhSpecifier,
+    /// PHP's native `#[\Deprecated]` attribute actually being respected
+    /// on a *trait* declaration - below this version it's a real, if
+    /// silent, no-op there (unlike a function/method/class constant/enum
+    /// case, or even a plain class/interface/enum, where PHPStan flags it
+    /// as unconditionally wrong regardless of version - real PHP simply
+    /// never implemented engine-level support for those at all).
+    /// `PhpVersion::supportsDeprecatedTraits`
+    /// (`TraitAttributesRule::processNode`).
+    DeprecatedAttributeOnTraits,
+    /// PHP's native `#[\Override]` attribute being usable on a *property*
+    /// declaration, not just a method. `PhpVersion::
+    /// supportsOverrideAttributeOnProperty`
+    /// (`PropertyAttributesRule::processNode`).
+    OverrideAttributeOnProperty,
 }
 
 impl PhpFeature {
@@ -180,7 +194,9 @@ impl PhpFeature {
             | DeprecatedBacktickOperator
             | AttributesOnGlobalConstants
             | FilterThrowOnFailureConstant
-            | DeprecatesNullArrayOffset => (8, 5),
+            | DeprecatesNullArrayOffset
+            | DeprecatedAttributeOnTraits
+            | OverrideAttributeOnProperty => (8, 5),
         }
     }
 

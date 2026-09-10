@@ -17,6 +17,8 @@ mod resolve;
 pub(crate) use class_info::hook_body_references_property;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
 pub use function_sig::format_signature;
+pub(crate) use function_sig::is_allow_dynamic_properties_attribute_name;
+pub(crate) use function_sig::is_deprecated_attribute_name;
 pub(crate) use function_sig::is_no_discard_attribute_name;
 pub(crate) use function_sig::is_override_attribute_name;
 pub(crate) use function_sig::resolve_type;

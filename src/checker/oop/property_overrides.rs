@@ -1,6 +1,7 @@
 use crate::ast::*;
-use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
+use crate::checker::{Checker, DiagnosticBuilder};
+use crate::php_version::PhpFeature;
 use crate::registry::PropertySig;
 use crate::token::Span;
 
@@ -88,6 +89,32 @@ impl<'a> Checker<'a> {
             .any(|a| crate::registry::is_override_attribute_name(&a.name))
         {
             return;
+        }
+        // Phase 37: `#[\Override]` on a *property* is only real PHP
+        // syntax from 8.5 on (confirmed against real PHPStan's own
+        // `PropertyAttributesRule`) - below that, real PHPStan flags this
+        // unconditionally, independent of whether the property would
+        // otherwise be a real, matching override. Unlike this project's
+        // usual "no version configured, don't check" convention, this
+        // still runs both checks regardless - the two conditions are
+        // genuinely orthogonal (a real ancestor mismatch is still a real
+        // ancestor mismatch on any PHP version), matching real PHPStan's
+        // own two independent rules, which can both fire on the same
+        // property at once.
+        if let Some(version) = self.registry.php_version
+            && !PhpFeature::OverrideAttributeOnProperty.is_available(version)
+        {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    fqn.to_string(),
+                    "Attribute class Override can be used with properties only on PHP 8.5 and later."
+                        .to_string(),
+                    span,
+                    0,
+                    "property.overrideAttribute",
+                )
+                .non_ignorable(),
+            );
         }
         if self.registry.has_unresolvable_ancestor(fqn) {
             return;

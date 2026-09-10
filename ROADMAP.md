@@ -308,13 +308,26 @@ its own corrected message/identifier rather than sharing an unrelated
 one.
 Attribute existence-checking plus target-validity for every declaration
 kind the parser captures an attribute list for (property/method/
-function/param/class/trait/enum/enum-case/class-const/closure/arrow-fn),
-plus constructor-argument validation (abstract/no-constructor/non-public-
-constructor checks, arity/named-argument/by-ref/type checking,
-ancestor-chain-aware). `PropertyHookAttributesRule`/`ConstantAttributesRule`
-are blocked on a real parser gap (the AST doesn't capture a property
-hook's or a top-level `const`'s own attribute list at all);
-`attribute.nonRepeatable`/`.deprecated` are a deliberate scope trim.
+function/param/class/trait/enum/enum-case/class-const/closure/arrow-fn/
+property hook/global `const`), plus constructor-argument validation
+(abstract/no-constructor/non-public-constructor checks, arity/named-
+argument/by-ref/type checking, ancestor-chain-aware, case-insensitive
+name resolution). `attribute.nonRepeatable` (a `HashSet` scoped fresh
+per declaration site, matching real PHPStan's own per-`check()`
+accumulator) and `attribute.deprecated` (gated on `check_deprecated_usage`,
+reading a class's own `@deprecated` tag) are done too. PHP's native
+`#[\Deprecated]` misuse on a class-like declaration itself
+(`<kind>.deprecatedAttribute` - a real, unconditional PHP fatal error for
+class/interface/enum, confirmed directly against real `php`; PHP-8.5-
+gated for a trait) and `#[\AllowDynamicProperties]` misuse
+(`<kind>.allowDynamicProperties`/`.allowDynamicPropertiesReadonly` - a
+readonly class, enum, interface, or unconditionally a trait) are done.
+Self-declaration-site parity (`attribute.interface`/`.enum`/`.abstract`/
+`.constructorNotPublic`, generalizing what was originally just the
+trait-only `attribute.trait` check) is done. `#[\Override]` on a
+property is PHP-8.5-gated too (`property.overrideAttribute`). Every
+attribute reference itself also gets `<kind>.nameCase` parity, reusing
+the already-shipped case-sensitivity helper.
 PHPStan-API-usage checks (instantiation, static calls, class-const
 fetches, `instanceof`, `extends`/`implements`/trait-use, and a
 syntactically-typed slice of method calls). Checked-exception
@@ -660,17 +673,6 @@ to want to extend.
 **19 - Fuzz testing (NOT STARTED).** `arbitrary`+`cargo-fuzz` for the
 lexer/parser, `proptest` for `types.rs`'s subtyping logic. Dev-only.
 
-**37 - Attribute target-validity, remaining kinds (PARTIAL, most kinds
-done).** See Done for what shipped. Global `const` declarations and
-property hooks (including the `#[\NoDiscard]`-on-a-hook special case)
-are now covered too - the property hook's own attribute list is
-captured in the AST, and `StmtKind::GlobalConst`'s attrs feed
-`check_attribute_targets` via a new `ATTRIBUTE_TARGET_CONSTANT` flag.
-`attribute.nonRepeatable` (needs a same-declaration-list accumulator, a
-different shape of check than the existing per-attribute loop) and
-`attribute.deprecated` (would duplicate this project's own existing
-`@deprecated` family) remain a deliberate scope trim.
-
 **40 - PHPStan-API-usage checks (PARTIAL).** Done for instantiation,
 static calls, class-const fetches, `instanceof`, `extends`/`implements`/
 trait-use, a syntactically-typed slice of method calls (a directly-
@@ -1001,7 +1003,6 @@ more than the one-line summary here.
 - **`Rules/Classes/ExistingClassesInClassImplementsRule.php`**: phpstan-rs's own check_class_references_exist (src/checker/oop.rs:263-331) is deliberately, per its own doc comment, existence-only: it confirms an extends/implements/trait-use target resolves to *some* known symbol, but never checks it's the *right kind* of symbol.
 - **`Rules/Classes/InvalidPromotedPropertiesRule.php`**: Real PHPStan's InvalidPromotedPropertiesRule enforces several legality constraints on constructor property promotion: promotion is only legal inside `__construct` (property.invalidPromoted otherwise), not inside an abstract constructor, never on a variadic parameter, and is itself gated on PHP 8.0+ (property.promotedNotSupported) with `final` promotion additionally gated on...
 - **`Rules/Classes/ReadOnlyClassRule.php`**: The PHP-version-gate data for this exact rule already exists in the codebase (PhpFeature::ReadOnlyClasses / ReadOnlyAnonymousClasses in src/php_version.rs, with a doc comment explicitly naming ReadOnlyClassRule as the real-PHPStan source), but it is never actually consumed by any checker call site - a `readonly class Foo {}` (needs PHP 8.2+) or `new readonly class {}` (needs...
-- **`Rules/Classes/ClassAttributesRule.php`**: Beyond generic attribute-target-validity (already built and documented), real PHPStan's ClassAttributesRule additionally forbids the built-in #[\Deprecated] attribute on certain declaration kinds (identifier <kind>.deprecatedAttribute) and #[\AllowDynamicProperties] on enums/interfaces/readonly classes (identifier...
 
 ## Functions
 
@@ -1098,7 +1099,6 @@ more than the one-line summary here.
 
 - **`Rules/Traits/ConflictingTraitConstantsRule.php`**: Real PHPStan checks that a class constant overriding one supplied by a used trait keeps the same visibility, final-ness, native type, and (for immediately-used traits) the same value - reporting classConstant.visibility/.nonFinal/.final/.nativeType/.missingNativeType/.value.
 - **`Rules/Traits/ConstantsInTraitsRule.php`**: Real PHPStan reports classConstant.inTrait when a constant is declared inside a trait body but the project's configured PHP version predates 8.2 (constants-in-traits support). phpstan-rs defines a matching PhpFeature::ConstantsInTraits variant with the correct (8,2) threshold in src/php_version.rs, but it is never consumed by any check call site - grepping the codebase for it...
-- **`Rules/Traits/TraitAttributesRule.php`**: TraitAttributesRule bundles three checks: (1) generic attribute-target validity for the trait's own attribute list against TARGET_CLASS, (2) trait.deprecatedAttribute - PHP's built-in #[Deprecated] attribute can only target a trait on PHP 8.5+, and (3) trait.allowDynamicProperties - #[AllowDynamicProperties] can never target a trait.
 
 ## Keywords+Debug
 
