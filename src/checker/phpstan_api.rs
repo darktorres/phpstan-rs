@@ -388,6 +388,66 @@ impl<'a> Walker<'a> {
         });
     }
 
+    /// Phase 40.B: `ApiStaticCallRule::isCovered()`'s real resolution -
+    /// the *referenced* class's own `is_api` isn't the right question at
+    /// all (confirmed by reading `isCovered()` directly): a static call
+    /// is covered when either the method's own *declaring* class carries
+    /// `@api` (except for `__construct`, which real PHPStan explicitly
+    /// exempts from this half - a constructor is never covered by a
+    /// class-level `@api` alone) or the method's own docblock carries
+    /// `@api` directly, regardless of `__construct`. `lookup_method_with_
+    /// owner` (already exists, `registry/hierarchy.rs`) gives both the
+    /// real declaring class and its resolved `FunctionSig.is_api` in one
+    /// call - a referenced class inheriting a method from an unrelated,
+    /// non-`@api` ancestor no longer silently passes just because the
+    /// referenced class's own `is_api` (checked, before this fix, instead
+    /// of the declaring class's) happened to be true. The declaring class
+    /// itself must also genuinely be PHPStan-namespaced code (not just
+    /// the referenced one) - the same `is_phpstan_namespace` gate every
+    /// other check here already applies, re-checked against `owner`
+    /// specifically since inheriting a method from an unrelated,
+    /// non-PHPStan base class is real and shouldn't be flagged at all. A
+    /// method the registry has no record of at all (a dynamic/unresolved
+    /// call) is silently skipped, matching real PHPStan's own
+    /// `!hasNativeMethod` bail.
+    fn report_static_method_not_covered(
+        &mut self,
+        class: &str,
+        method: &str,
+        span: Span,
+        label: &str,
+    ) {
+        let Some((owner, sig)) = self.registry.lookup_method_with_owner(class, method) else {
+            return;
+        };
+        if sig.is_api {
+            return;
+        }
+        if !is_phpstan_namespace(&owner) {
+            return;
+        }
+        let Some(owner_info) = self.registry.classes.get(&owner) else {
+            return;
+        };
+        if owner_info.is_api && method != "__construct" {
+            return;
+        }
+        let action = format!("calling {owner}::{method}()");
+        self.diagnostics.push(Diagnostic {
+            location: label.to_string(),
+            message: format!(
+                "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {owner})"
+            ),
+            span,
+            level: 0,
+            identifier: "phpstanApi.method".to_string(),
+            tip: None,
+            non_ignorable: false,
+            metadata: HashMap::new(),
+            fix: None,
+        });
+    }
+
     /// Phase 40.2/40.4: an unconditional report with no `@api` short-
     /// circuit at all - real PHPStan's own `ApiInstantiationRule` (once
     /// the constructor-own-`@api` exemption has already been checked by
@@ -866,8 +926,7 @@ impl<'a> Walker<'a> {
             }
             ExprKind::StaticCall(class_name, method, args) => {
                 if let Some(fqn) = self.resolve_if_phpstan(class_name, ctx) {
-                    let action = format!("calling {fqn}::{method}()");
-                    self.report_not_covered(&fqn, &action, e.span, label, "phpstanApi.method");
+                    self.report_static_method_not_covered(&fqn, method, e.span, label);
                 }
                 for a in args {
                     self.check_expr(&a.value, ctx, param_types, label);

@@ -196,6 +196,87 @@ fn a_static_call_on_a_non_api_class_is_flagged() {
     );
 }
 
+// Phase 40.B: a static call's own real *declaring* class (which can
+// differ from the referenced class under inheritance), and the method's
+// own docblock `@api` exemption - both real gaps confirmed against real
+// `ApiStaticCallRule::isCovered()`.
+
+#[test]
+fn a_static_call_to_an_inherited_method_checks_the_declaring_classs_own_api_status() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        class BaseHelper {
+            public static function check() {}
+        }
+        /** @api */
+        class Helper extends BaseHelper {}
+        "#,
+        r#"<?php
+        namespace App;
+        function f() {
+            \PHPStan\Rules\Helper::check();
+        }
+        "#,
+    );
+    // Helper itself is @api, but check() is really declared on the
+    // non-@api BaseHelper - real PHPStan flags this (referenced-class-
+    // only checking would have wrongly stayed silent).
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0]
+            .message
+            .contains("calling PHPStan\\Rules\\BaseHelper::check()")
+    );
+}
+
+#[test]
+fn a_static_call_to_a_method_with_its_own_api_doc_is_never_flagged_even_on_a_non_api_class() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        class Helper {
+            /** @api */
+            public static function check() {}
+        }
+        "#,
+        r#"<?php
+        namespace App;
+        function f() {
+            \PHPStan\Rules\Helper::check();
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn a_static_call_to_an_api_classs_own_constructor_is_still_flagged() {
+    // Real PHPStan's own explicit exemption: a class-level @api doesn't
+    // cover __construct - only the constructor's own @api would.
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        /** @api */
+        class Helper {
+            public function __construct() {}
+        }
+        "#,
+        r#"<?php
+        namespace App;
+        function f() {
+            \PHPStan\Rules\Helper::__construct();
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0]
+            .message
+            .contains("calling PHPStan\\Rules\\Helper::__construct()")
+    );
+}
+
 #[test]
 fn a_class_const_fetch_on_a_non_api_class_is_flagged() {
     let diags = diagnostics_for(
