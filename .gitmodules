@@ -16,15 +16,6 @@
 [submodule "vendor/guzzle"]
 	path = vendor/guzzle
 	url = https://github.com/guzzle/guzzle.git
-[submodule "vendor/symfony-console"]
-	path = vendor/symfony-console
-	url = https://github.com/symfony/console.git
-[submodule "vendor/symfony-dependency-injection"]
-	path = vendor/symfony-dependency-injection
-	url = https://github.com/symfony/dependency-injection.git
-[submodule "vendor/symfony-http-foundation"]
-	path = vendor/symfony-http-foundation
-	url = https://github.com/symfony/http-foundation.git
 [submodule "vendor/wordpress"]
 	path = vendor/wordpress
 	url = https://github.com/WordPress/WordPress.git
@@ -34,9 +25,6 @@
 [submodule "vendor/psalm"]
 	path = vendor/psalm
 	url = https://github.com/vimeo/psalm.git
-[submodule "vendor/drupal-core"]
-	path = vendor/drupal-core
-	url = https://github.com/drupal/core.git
 [submodule "vendor/reactphp-http"]
 	path = vendor/reactphp-http
 	url = https://github.com/reactphp/http.git
@@ -55,3 +43,9 @@
 [submodule "vendor/rector-src"]
 	path = vendor/rector-src
 	url = https://github.com/rectorphp/rector-src.git
+[submodule "vendor/drupal"]
+	path = vendor/drupal
+	url = https://github.com/drupal/drupal.git
+[submodule "vendor/symfony"]
+	path = vendor/symfony
+	url = https://github.com/symfony/symfony.git
