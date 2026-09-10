@@ -13,6 +13,7 @@ mod date_interval;
 mod declaration_sanity;
 mod deprecated_usage;
 mod diagnostic_identifiers;
+mod docblock_property_tags;
 mod doctrine_and_stdlib_specials;
 mod duplicates;
 mod enums;
