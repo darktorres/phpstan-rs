@@ -1,1 +1,5 @@
 /target
+# Piwigo corpus-run snapshots (checker.md/CLAUDE.md convention): one file
+# per commit hash, so a before/after diff never needs rebuilding an old
+# commit just to re-run it. See .corpus-runs/README.md.
+/.corpus-runs/*/*.txt

@@ -1,0 +1,48 @@
+# Piwigo corpus-run snapshots
+
+Gitignored (large, environment-specific, not source) - lives here rather
+than a session scratchpad so it survives across sessions and never needs
+rebuilding an old commit just to re-diff against it.
+
+## Layout
+
+    .corpus-runs/scoped/<commit-hash>.txt    - phpstan-rs.toml-scoped run
+    .corpus-runs/unscoped/<commit-hash>.txt  - --no-composer unscoped run
+
+`<commit-hash>` is the short hash of the phpstan-rs commit the binary was
+built from when the run was taken (`git rev-parse --short HEAD`). Piwigo's
+own checkout (`/home/torres/piwigo17-frozen`) is treated as fixed/frozen,
+so it isn't part of the key.
+
+## Producing a run
+
+    cargo build --release --bin phpstan-rs
+    HASH=$(git rev-parse --short HEAD)
+    cd /home/torres/piwigo17-frozen
+    /home/torres/projects/phpstan-rs/target/release/phpstan-rs check-project \
+        --config phpstan-rs.toml 2>&1 | LC_ALL=C sort \
+        > /home/torres/projects/phpstan-rs/.corpus-runs/scoped/$HASH.txt
+    /home/torres/projects/phpstan-rs/target/release/phpstan-rs check-project \
+        --no-composer . 2>&1 | LC_ALL=C sort \
+        > /home/torres/projects/phpstan-rs/.corpus-runs/unscoped/$HASH.txt
+
+Only save a run for a real commit (working-tree/uncommitted state has no
+stable key to file it under - re-run once committed instead).
+
+## Diffing
+
+Before rebuilding an old commit to get a comparison snapshot, check here
+first - `ls .corpus-runs/scoped/` - the commit you want may already have
+one. Only fall back to a worktree rebuild when it's genuinely missing.
+
+    diff .corpus-runs/scoped/<old-hash>.txt .corpus-runs/scoped/<new-hash>.txt
+
+## Known snapshots (as of 2026-09-10)
+
+- `264d910` - last snapshot before the 0247b04/d1d1d61 phase-design batch
+  (355 scoped diagnostics) - no unscoped run exists for this one.
+- `d1d1d61` - post-batch, **before** the use_map/throws regressions were
+  fixed (5012 scoped diagnostics) - kept deliberately as the historical
+  record of that regression, not a state to build against.
+- `c522416` - post-fix (359 scoped / 40503 unscoped) - current baseline
+  for future diffs.
