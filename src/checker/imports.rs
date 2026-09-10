@@ -1,0 +1,230 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::DiagnosticBuilder;
+use crate::ast::*;
+use crate::checker::{Checker, class_kind_identifier};
+
+impl<'a> Checker<'a> {
+    /// Phase 48: real PHPStan's own `ExistingNamesInUseRule`, confirmed
+    /// directly against `vendor/phpstan-src`, only ever existence-checks
+    /// the `use function foo;` and `use const FOO;` forms - a plain,
+    /// class-shaped `use Foo;` goes through `ClassNameCheck::
+    /// checkClassNames` with a `null` usage location, which (per its own
+    /// source) only runs case-sensitivity/forbidden-name checking in that
+    /// case and never calls `hasClass` at all; a class reference is only
+    /// ever existence-checked at the point it's actually *used* (a
+    /// typehint, `new`, `instanceof`, ...), not merely imported. This
+    /// project has no project-wide global-constant registry to check a
+    /// `use const` against (see `UseImport::kind`'s own doc comment for
+    /// why building a partial one would be worse than none), so only the
+    /// function half is checked here - `self.registry.functions` already
+    /// exists and is exactly as reliable a source for this as it is for
+    /// every other function-existence check in this project.
+    pub(crate) fn check_use_function_imports(&mut self, program: &[Stmt]) {
+        for stmt in program {
+            let StmtKind::Use(imports) = &stmt.kind else {
+                continue;
+            };
+            for import in imports {
+                if import.kind != UseKind::Function {
+                    continue;
+                }
+                // A `use`-imported path is always already fully qualified
+                // from the global namespace (real PHP requires this,
+                // leading `\` optional but implied) - unlike an ordinary
+                // reference elsewhere in the file, it never goes through
+                // `NameContext::resolve`'s own use-map/namespace-relative
+                // logic, so a bare `trim_start_matches` is the whole of
+                // it.
+                let fqn = import.path.trim_start_matches('\\');
+                if self.registry.lookup_function(fqn).is_none() {
+                    self.report(
+                        "<main>".to_string(),
+                        format!("used function {fqn} not found"),
+                        stmt.span,
+                        0,
+                        "function.notFound",
+                    );
+                }
+            }
+        }
+    }
+
+    /// Phase 48 follow-up, `ClassForbiddenNameCheck`: a `use`-imported
+    /// class-shaped name matching one of a small, fixed set of internal
+    /// build-tool-mangled prefixes (transcribed from real PHPStan's own
+    /// `INTERNAL_CLASS_PREFIXES`) almost always means a Rector/PHP-Scoper/
+    /// PHPUnit-PHAR/Box-prefixed vendor class leaked into a reference by
+    /// mistake, not a deliberate one - real PHPStan flags this
+    /// unconditionally (`nonIgnorable()`), matching the identical
+    /// `class.prefixed` identifier and wording here. Deliberately scoped
+    /// to the `use`-import site only, not every class reference in the
+    /// file (real PHPStan's own equally broad application would need
+    /// hooking into every existing class-reference checkpoint in this
+    /// project - a real, disclosed scope trim, not attempted here).
+    /// `ClassCaseSensitivityCheck`'s own half of this same real rule
+    /// (`class.nameCase`) is deliberately NOT built alongside this: unlike
+    /// `check_use_function_imports`'s sibling `function.nameCase` check
+    /// (itself not built either, since real PHPStan's own
+    /// `checkFunctionNameCase` config defaults `false` at every level,
+    /// confirmed in `conf/*.neon` - building it unconditionally would flag
+    /// more than real PHPStan does by default), the class case-check's own
+    /// gating flag defaults *active* - but this project's own class-name
+    /// resolution (`registry::name_context::NameContext::resolve`'s own
+    /// `use_map: HashMap<String, String>`) turned out, on direct reading,
+    /// to already be exact-case-keyed with no case-insensitive fallback
+    /// visible anywhere in `registry.rs`/`name_context.rs` - genuinely
+    /// unclear without deeper study whether every class reference already
+    /// silently requires exact-case matching today (in which case this
+    /// diagnostic would be pure noise on top of an existing, unrelated
+    /// gap) or is folded elsewhere this reading didn't find. Not guessed
+    /// past - a real, disclosed uncertainty, not a lazy skip.
+    pub(crate) fn check_use_class_imports(&mut self, program: &[Stmt]) {
+        const INTERNAL_CLASS_PREFIXES: &[(&str, &str)] = &[
+            ("PHPStan", "_PHPStan_"),
+            ("Rector", "RectorPrefix"),
+            ("PHP-Scoper", "_PhpScoper"),
+            ("PHPUnit", "PHPUnitPHAR"),
+            ("Box", "_HumbugBox"),
+        ];
+        for stmt in program {
+            let StmtKind::Use(imports) = &stmt.kind else {
+                continue;
+            };
+            for import in imports {
+                if import.kind != UseKind::Class {
+                    continue;
+                }
+                let path = import.path.trim_start_matches('\\');
+                for (project, prefix) in INTERNAL_CLASS_PREFIXES {
+                    if path.starts_with(prefix) {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                "<main>".to_string(),
+                                format!("Referencing prefixed {project} class: {path}."),
+                                stmt.span,
+                                0,
+                                "class.prefixed".to_string(),
+                            )
+                            .non_ignorable(),
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Phase 63 follow-up, `UsedNamesRule`: a same-file, case-insensitive
+    /// collision between a class-like declaration's own name and a
+    /// `use`-imported (class-shaped only - `use function`/`use const`
+    /// are exempt, matching real PHPStan's own `shouldBeIgnored`) alias,
+    /// in either direction - `use Foo\Bar; class Bar {}` and `class Bar
+    /// {} use Foo\Bar;` are both real, unconditional PHP fatal errors
+    /// ("Cannot declare class Bar because the name is already in use"/
+    /// "Cannot use Foo\Bar as Bar because the name is already in use"),
+    /// confirmed directly via `php -l`. A single left-to-right pass over
+    /// `program`'s own top-level statements, mirroring `check_program`'s
+    /// own identical positional `namespace`-tracking walk exactly (a
+    /// `use`/class-like declaration is only ever legal at file top
+    /// level, and this project's own parser already flattens both real
+    /// PHP `namespace` forms - braced and semicolon - into one flat
+    /// statement list, so there's no separate nested-block case to
+    /// handle here) - `used_names` is keyed by the lowercased namespace
+    /// active at each point, matching real PHPStan's own per-namespace
+    /// scoping (and real PHP's: two same-named classes in two different
+    /// namespaces never collide).
+    pub(crate) fn check_used_names(&mut self, program: &[Stmt]) {
+        // Original-case (for display in a message) and lowercased (the
+        // real map key, since PHP namespace/name comparison here is
+        // case-insensitive) kept side by side.
+        let mut current_namespace = String::new();
+        let mut current_namespace_lower = String::new();
+        let mut used_names: HashMap<String, HashSet<String>> = HashMap::new();
+        for stmt in program {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => {
+                    current_namespace = name.clone();
+                    current_namespace_lower = name.to_ascii_lowercase();
+                }
+                StmtKind::Use(imports) => {
+                    for import in imports {
+                        if import.kind != UseKind::Class {
+                            continue;
+                        }
+                        let path = import.path.trim_start_matches('\\');
+                        let bare = path.rsplit('\\').next().unwrap_or(path);
+                        let alias = import.alias.as_deref().unwrap_or(bare);
+                        let scope = used_names
+                            .entry(current_namespace_lower.clone())
+                            .or_default();
+                        if !scope.insert(alias.to_ascii_lowercase()) {
+                            self.report_builder(
+                                DiagnosticBuilder::new(
+                                    "<main>".to_string(),
+                                    format!(
+                                        "Cannot use {path} as {alias} because the name is already in use."
+                                    ),
+                                    stmt.span,
+                                    0,
+                                    "use.nameInUse".to_string(),
+                                )
+                                .non_ignorable(),
+                            );
+                        }
+                    }
+                }
+                StmtKind::ClassDecl(c) => {
+                    let kind = class_kind_identifier(&c.kind);
+                    let scope = used_names
+                        .entry(current_namespace_lower.clone())
+                        .or_default();
+                    if !scope.insert(c.name.to_ascii_lowercase()) {
+                        let qualified = if current_namespace.is_empty() {
+                            c.name.clone()
+                        } else {
+                            format!("{current_namespace}\\{}", c.name)
+                        };
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                "<main>".to_string(),
+                                format!(
+                                    "Cannot declare {kind} {qualified} because the name is already in use."
+                                ),
+                                c.span,
+                                0,
+                                format!("{kind}.nameInUse"),
+                            )
+                            .non_ignorable(),
+                        );
+                    }
+                }
+                StmtKind::EnumDecl(e) => {
+                    let scope = used_names
+                        .entry(current_namespace_lower.clone())
+                        .or_default();
+                    if !scope.insert(e.name.to_ascii_lowercase()) {
+                        let qualified = if current_namespace.is_empty() {
+                            e.name.clone()
+                        } else {
+                            format!("{current_namespace}\\{}", e.name)
+                        };
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                "<main>".to_string(),
+                                format!(
+                                    "Cannot declare enum {qualified} because the name is already in use."
+                                ),
+                                e.span,
+                                0,
+                                "enum.nameInUse".to_string(),
+                            )
+                            .non_ignorable(),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}

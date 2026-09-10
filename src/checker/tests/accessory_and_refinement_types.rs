@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::types::AccessoryKind;
 
 // Phase 32 Finding L: exact type equality is the wrong tool for "is
 // this the kind of thing being narrowed" - both `narrow_type_to`/
@@ -42,7 +43,7 @@ fn union_types_does_not_collapse_an_int_literal_into_an_unrelated_float() {
 fn union_types_collapses_a_non_empty_string_into_an_already_present_string() {
     let non_empty = Type::Intersection(vec![
         Type::String,
-        Type::Accessory(types::AccessoryKind::NonEmptyString),
+        Type::Accessory(AccessoryKind::NonEmptyString),
     ]);
     assert_eq!(union_types(Type::String, non_empty), Type::String);
 }
@@ -51,7 +52,7 @@ fn union_types_collapses_a_non_empty_string_into_an_already_present_string() {
 fn union_types_collapses_a_list_into_an_already_present_array() {
     let list_ty = Type::Intersection(vec![
         Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
-        Type::Accessory(types::AccessoryKind::ArrayList),
+        Type::Accessory(AccessoryKind::ArrayList),
     ]);
     assert_eq!(
         union_types(
