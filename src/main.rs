@@ -97,6 +97,13 @@ enum Command {
         /// own doc comment for why.
         #[arg(long)]
         check_strict_printf_placeholder_types: bool,
+        /// Enables array_filter()'s own arrayFilter.same/
+        /// arrayFilter.alwaysEmpty no-op checks. Off by default - see
+        /// `registry::Registry::check_array_filter_falsy_noop`'s own doc
+        /// comment for the confirmed corpus false-positive history this
+        /// avoids.
+        #[arg(long)]
+        check_array_filter_falsy_noop: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -163,6 +170,7 @@ fn main() {
             check_empty_method_bodies,
             check_missing_checked_exceptions,
             check_strict_printf_placeholder_types,
+            check_array_filter_falsy_noop,
             php_version,
             generate_baseline,
             baseline,
@@ -180,6 +188,7 @@ fn main() {
             check_empty_method_bodies,
             check_missing_checked_exceptions,
             check_strict_printf_placeholder_types,
+            check_array_filter_falsy_noop,
             php_version,
             generate_baseline,
             baseline,

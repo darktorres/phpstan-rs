@@ -900,10 +900,18 @@ feature shape, needing its own new phase if ever wanted.
 
 **68 - Array no-op diagnostics, remaining (PARTIAL).** Duplicate-key
 detection and the two no-op `array_values`/`array_filter`-empty checks
-are done (see Done). `arrayFilter.same`/`arrayFilter.alwaysEmpty` were
-built and dropped after corpus verification caught two live false
-positives traced to a variable-type-tracking gap unrelated to this
-phase itself.
+are done (see Done). `arrayFilter.same`/`arrayFilter.alwaysEmpty` are
+done too, but opt-in (`check_array_filter_falsy_noop`, default `false`)
+rather than shipped on by default - an earlier attempt at them was
+dropped entirely after corpus verification caught two live false
+positives, both since root-caused to independent variable-type-tracking
+imprecision unrelated to this check's own logic (one, Piwigo's own
+`tests/Integration/GroupServiceTest.php:363`, is still confirmed live -
+a `try`/`finally` not accounting for an assignment inside `try`
+possibly never running). Flip the default to `true` only once that
+gap (and the sibling `ProxyHelper.php` one, not currently reproducing
+against this corpus but not independently fixed either) is actually
+fixed, not just no longer reproducing.
 
 **75 - String accessory case-tracking (PLANNED).** No `Lowercase`/
 `Uppercase`/`DecimalIntegerString` accessory kinds; `strtolower()`/

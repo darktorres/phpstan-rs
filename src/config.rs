@@ -84,6 +84,12 @@ pub struct Config {
     /// this defaults to `false` (unset), the same reason every other
     /// opt-in check above does.
     pub check_strict_printf_placeholder_types: Option<bool>,
+    /// Phase 68.1: opt-in `array_filter()` `arrayFilter.same`/
+    /// `arrayFilter.alwaysEmpty` no-op checks - see `registry::Registry::
+    /// check_array_filter_falsy_noop`'s own doc comment for why this
+    /// defaults to `false` (unset), the same reason every other opt-in
+    /// check above does.
+    pub check_array_filter_falsy_noop: Option<bool>,
     /// A hand-mirrored subset of real PHPStan's own `ignoreErrors:` -
     /// this project has no NEON parser and one isn't otherwise justified
     /// (see `baseline.rs`'s own identical judgment for a related

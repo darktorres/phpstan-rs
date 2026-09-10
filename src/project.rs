@@ -210,6 +210,15 @@ impl Project {
         self.registry.check_strict_printf_placeholder_types = enabled;
     }
 
+    /// Phase 68.1: opts the whole project's checking into `array_filter()`'s
+    /// own `arrayFilter.same`/`arrayFilter.alwaysEmpty` no-op checks,
+    /// following `set_check_empty_method_bodies`'s exact precedent - see
+    /// `registry::Registry::check_array_filter_falsy_noop`'s own doc
+    /// comment for why this defaults to `false`.
+    pub fn set_check_array_filter_falsy_noop(&mut self, enabled: bool) {
+        self.registry.check_array_filter_falsy_noop = enabled;
+    }
+
     /// Phase 38: configures the project's target PHP version
     /// (`registry::Registry::php_version`), following
     /// `set_strict_mixed_arrays`'s exact precedent - a narrow setter

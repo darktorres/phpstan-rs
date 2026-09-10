@@ -140,6 +140,15 @@ pub struct Registry {
     // matching real PHPStan's own stock config exactly (castable is its
     // default too) - same wiring chain as the flags above.
     pub check_strict_printf_placeholder_types: bool,
+    // Phase 68.1: opts into `array_filter()`'s own `arrayFilter.same`/
+    // `arrayFilter.alwaysEmpty` no-op checks (`checker/expr/array_ops.rs`).
+    // Defaults to `false` - an earlier attempt at these was dropped
+    // entirely after corpus verification caught two live false positives,
+    // both since root-caused to independent variable-type-tracking
+    // imprecision (Phase 68.2/68.3), not this check's own logic - opt-in
+    // until a fresh corpus diff re-confirms both stay silent. Same wiring
+    // chain as the flags above.
+    pub check_array_filter_falsy_noop: bool,
     // Phase 38: the project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to

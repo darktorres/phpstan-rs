@@ -438,28 +438,30 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 68: `ArrayFilterRule`, narrowed to just its `arrayFilter.
-    /// empty` half (real PHP's own default no-callback "drop every falsy
-    /// element" behavior on a provably-empty array). The other two real
+    /// Phase 68 / 68.1: `ArrayFilterRule` - `arrayFilter.empty` (real
+    /// PHP's own default no-callback "drop every falsy element" behavior
+    /// on a provably-empty array) is unconditional; the other two real
     /// PHPStan sub-checks (`arrayFilter.same`/`arrayFilter.alwaysEmpty`,
     /// gated on the array's own *element* type being provably always-
-    /// truthy/always-falsy) were dropped after corpus verification
-    /// caught two live false positives - a dynamic-key index-assignment
-    /// inside a loop's `if`-branch not correctly widening the tracked
-    /// element type across the branch (`vendor/symfony/var-exporter/
-    /// ProxyHelper.php`'s `$abstractProperties[$name] = new
-    /// \ReflectionProperty(...)` vs `$abstractProperties[$name] =
-    /// false;`, inferred as bare `array<false>` - the object-valued
-    /// branch went missing entirely), and a `try { $x = ...; } finally {
-    /// array_filter([..., $x]); }` shape not accounting for the
-    /// possibility the assignment inside `try` never ran (Piwigo's own
+    /// truthy/always-falsy) are opt-in (`Registry::check_array_filter_
+    /// falsy_noop`, default `false`) - an *earlier* attempt at them was
+    /// dropped entirely after corpus verification caught two live false
+    /// positives, both since root-caused (Phase 68.2/68.3) to independent
+    /// variable-type-tracking imprecision, not this check's own logic: a
+    /// dynamic-key index-assignment inside a loop's `if`-branch not
+    /// correctly widening the tracked element type across the branch
+    /// (`vendor/symfony/var-exporter/ProxyHelper.php`'s
+    /// `$abstractProperties[$name] = new \ReflectionProperty(...)` vs
+    /// `$abstractProperties[$name] = false;`, inferred as bare
+    /// `array<false>` - the object-valued branch went missing entirely),
+    /// and a `try { $x = ...; } finally { array_filter([..., $x]); }`
+    /// shape not accounting for the possibility the assignment inside
+    /// `try` never ran (Piwigo's own
     /// `tests/Integration/GroupServiceTest.php`, `$copyId = null;`
     /// reassigned only conditionally inside `try`, inferred as bare
-    /// `GroupId` with the `null` branch dropped). Both are pre-existing
-    /// gaps in this project's own variable-type tracking, not something
-    /// to fix as part of this "cheap win" phase - `is_known_empty_array`
-    /// below has no such exposure (purely syntactic, no flow-sensitive
-    /// inference involved).
+    /// `GroupId` with the `null` branch dropped). `is_known_empty_array`
+    /// just above has no such exposure (purely syntactic, no flow-
+    /// sensitive inference involved) - stays unconditional.
     pub(crate) fn check_array_filter_no_op(
         &mut self,
         args: &[Arg],
@@ -482,6 +484,44 @@ impl<'a> Checker<'a> {
                 0,
                 "arrayFilter.empty",
             );
+            return;
+        }
+        // Phase 68.1: `arrayFilter.same`/`arrayFilter.alwaysEmpty` - opt-in
+        // (`Registry::check_array_filter_falsy_noop`, default `false`),
+        // rebuilt after an earlier attempt was dropped for two confirmed
+        // corpus false positives, both since root-caused to independent
+        // variable-type-tracking imprecision (documented in ROADMAP.md)
+        // rather than anything wrong with this check's own logic.
+        if !self.registry.check_array_filter_falsy_noop {
+            return;
+        }
+        let Some(element_ty) = Self::array_element_type(&arr_ty) else {
+            return;
+        };
+        match array_filter_element_falsy_verdict(&element_ty) {
+            Some(false) => {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "call to array_filter() with an array of only non-falsy values ({arr_ty}) has no effect"
+                    ),
+                    span,
+                    0,
+                    "arrayFilter.same",
+                );
+            }
+            Some(true) => {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "call to array_filter() with an array of only falsy values ({arr_ty}) always returns an empty array"
+                    ),
+                    span,
+                    0,
+                    "arrayFilter.alwaysEmpty",
+                );
+            }
+            None => {}
         }
     }
 
@@ -820,5 +860,88 @@ impl<'a> Checker<'a> {
             || matches!(ty, Type::Intersection(members)
                 if members.iter().any(|m| matches!(m, Type::Array(_, _) | Type::ArrayShape(_))))
             || matches!(ty, Type::Union(members) if members.iter().all(Self::is_array_like))
+    }
+}
+
+/// Phase 68.1: real PHP truthiness classification for `array_filter()`'s
+/// own `arrayFilter.same`/`arrayFilter.alwaysEmpty` checks - `Some(true)`
+/// when `ty` is confidently *always* falsy, `Some(false)` when it's
+/// confidently *never* falsy, `None` when it's ambiguous (real PHPStan's
+/// own tri-state "maybe" - neither `isSuperTypeOf(...)::yes()` nor
+/// `::no()`). Deliberately *not* built on `narrow_type_excluding_falsy`
+/// (`checker/narrowing/array_shape.rs`) - that function is designed for
+/// condition-narrowing, where a bare, unrefined `Type::Int`/`Float`/`Bool`
+/// staying unchanged after "narrowing" is a harmless missed-precision
+/// opportunity; reusing that same identity-preserving behavior *here*
+/// (comparing narrowed-vs-original to decide "never falsy") would be
+/// unsound - a bare `int`-typed element genuinely can be exactly `0`,
+/// so it must classify as ambiguous, not "never falsy." This project has
+/// no `FloatLiteral` variant at all, so a bare `Type::Float` is always
+/// ambiguous too (never provably `0.0` or provably nonzero).
+fn array_filter_element_falsy_verdict(ty: &Type) -> Option<bool> {
+    match ty {
+        Type::Null | Type::False => Some(true),
+        Type::True => Some(false),
+        Type::IntLiteral(n) => Some(*n == 0),
+        Type::StringLiteral(s) => Some(s.is_empty() || s == "0"),
+        Type::ArrayShape(fields) => {
+            if fields.is_empty() {
+                Some(true)
+            } else if fields.iter().any(|(name, _, _)| name != "...") {
+                Some(false)
+            } else {
+                // Only an unsealed `"..."` tail - real size unknown.
+                None
+            }
+        }
+        // An object/enum-case instance, or a `class-string`, is always
+        // truthy in real PHP regardless of its own contents.
+        Type::Object(..) | Type::EnumCase(..) | Type::ClassString(..) => Some(false),
+        // A `non-falsy-string` (never `""`/`"0"`) or `non-empty-array`
+        // (never the empty array) accessory intersection is confidently
+        // never falsy, whatever its own unrefined base type is. `list`
+        // (`AccessoryKind::ArrayList`) deliberately does *not* qualify on
+        // its own - real bug found via this item's own corpus
+        // verification (`Deptrac\...\EventHelper::unmatchedSkippedViolations`,
+        // `array<string, list<string>>`): `list<T>` only promises
+        // sequential int keys, never non-emptiness - `[]` is a
+        // perfectly real, empty `list<T>` (confirmed against
+        // `types::parse::parse_type_string`'s own `"list"` arm, which
+        // adds `ArrayList` alone, `NonEmptyArray` only for `non-empty-
+        // list`) - so `list<T>`'s own truthiness stays genuinely
+        // ambiguous, matching real PHPStan exactly.
+        Type::Intersection(members) => members
+            .iter()
+            .any(|m| {
+                matches!(
+                    m,
+                    Type::Accessory(AccessoryKind::NonFalsyString | AccessoryKind::NonEmptyArray)
+                )
+            })
+            .then_some(false),
+        Type::IntRange(lo, hi) => {
+            if *lo == Some(0) && *hi == Some(0) {
+                Some(true)
+            } else if lo.is_some_and(|l| l > 0) || hi.is_some_and(|h| h < 0) {
+                Some(false)
+            } else {
+                None
+            }
+        }
+        Type::Union(members) => {
+            let verdicts: Option<Vec<bool>> = members
+                .iter()
+                .map(array_filter_element_falsy_verdict)
+                .collect();
+            let verdicts = verdicts?;
+            if verdicts.iter().all(|v| *v) {
+                Some(true)
+            } else if verdicts.iter().all(|v| !*v) {
+                Some(false)
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
