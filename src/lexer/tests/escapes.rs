@@ -1,5 +1,6 @@
 //! String escape sequence decoding.
 use super::super::*;
+use crate::token::StringPart;
 
 // Finding 20 from the architecture audit - double-quoted strings only
 // decoded 6 of PHP's real escape sequences; anything else kept the

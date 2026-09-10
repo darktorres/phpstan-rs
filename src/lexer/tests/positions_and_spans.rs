@@ -1,5 +1,6 @@
 //! Token line/column position and span tracking.
 use super::super::*;
+use crate::token::StringPart;
 
 // `tokenize_with_spans` - Phase 11's source-position work.
 

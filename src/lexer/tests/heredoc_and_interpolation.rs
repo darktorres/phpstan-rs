@@ -1,5 +1,6 @@
 //! Heredoc/nowdoc parsing and string interpolation.
 use super::super::*;
+use crate::token::StringPart;
 
 // Coverage measurement (cargo llvm-cov) found lex_heredoc and
 // strip_heredoc_indent had zero test executions - lexer.rs had no
