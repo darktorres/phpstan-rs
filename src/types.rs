@@ -6,7 +6,7 @@ mod subtype;
 mod templates;
 
 pub use parse::parse_type_string;
-pub(crate) use parse::strip_call_site_variance;
+pub(crate) use parse::{canonical_int_key, strip_call_site_variance};
 pub use subtype::is_subtype;
 pub(crate) use subtype::{is_numeric_string_literal, types_equal_for_union};
 pub use templates::{bind_template_param, substitute_template};

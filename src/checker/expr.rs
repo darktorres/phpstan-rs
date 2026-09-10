@@ -4132,9 +4132,7 @@ impl<'a> Checker<'a> {
 /// as a string key here is the same safe-by-omission default this
 /// project uses throughout rather than a wrong answer.
 pub(crate) fn is_canonical_int_key(key: &str) -> bool {
-    !key.is_empty()
-        && key.bytes().all(|b| b.is_ascii_digit())
-        && (key == "0" || !key.starts_with('0'))
+    crate::types::canonical_int_key(key).is_some()
 }
 
 /// Phase 14: whether `e` is the literal `false` - used to scope

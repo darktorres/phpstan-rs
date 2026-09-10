@@ -160,6 +160,82 @@ fn a_positional_array_shape_wrapped_in_array_shorthand_parses() {
     );
 }
 
+// Phase 50: `canonical_int_key` (real PHP's own array-key canonicalization
+// rule, confirmed against `ConstantStringType::toArrayKey()`) - a negative
+// key canonicalizes to a real int key, but a leading-zero string does not
+// (real PHP itself keeps `"01"` as a string key), unlike the bare
+// `str::parse::<i64>()` this project's own shape-key literal used to rely
+// on (`"01".parse::<i64>() == Ok(1)` - Rust's own parser is lenient about
+// leading zeros/`"-0"` in a way real PHP's own canonicalization isn't).
+
+#[test]
+fn canonical_int_key_accepts_zero_and_ordinary_positive_and_negative_integers() {
+    assert_eq!(canonical_int_key("0"), Some(0));
+    assert_eq!(canonical_int_key("5"), Some(5));
+    assert_eq!(canonical_int_key("-5"), Some(-5));
+    assert_eq!(canonical_int_key("123456789"), Some(123456789));
+}
+
+#[test]
+fn canonical_int_key_rejects_leading_zeros_and_negative_zero() {
+    assert_eq!(canonical_int_key("01"), None);
+    assert_eq!(canonical_int_key("00"), None);
+    assert_eq!(canonical_int_key("-0"), None);
+    assert_eq!(canonical_int_key("-01"), None);
+}
+
+#[test]
+fn canonical_int_key_rejects_non_numeric_and_out_of_range_strings() {
+    assert_eq!(canonical_int_key(""), None);
+    assert_eq!(canonical_int_key("foo"), None);
+    assert_eq!(canonical_int_key("1.5"), None);
+    assert_eq!(canonical_int_key("+1"), None);
+    // Overflows i64 - stays a string key, matching real PHP on a 64-bit
+    // build (the value doesn't fit the platform integer range).
+    assert_eq!(canonical_int_key("99999999999999999999"), None);
+}
+
+#[test]
+fn a_negative_shape_key_parses_as_a_real_int_literal() {
+    assert_eq!(
+        parse_type_string("array{-5: int}"),
+        Type::ArrayShape(vec![("-5".to_string(), Type::Int, false)])
+    );
+}
+
+#[test]
+fn a_leading_zero_shape_key_stays_a_string_literal_not_an_int() {
+    assert_eq!(
+        parse_type_string("array{'01': int}"),
+        Type::ArrayShape(vec![("01".to_string(), Type::Int, false)])
+    );
+    // The key itself isn't the assertion - `shape_key_literal` (the
+    // Type::IntLiteral/StringLiteral choice `value-of<T>`/`key-of<T>` and
+    // key-access narrowing consume) is; confirmed via the dedicated
+    // `canonical_int_key` unit tests below instead, since `ArrayShape`
+    // itself only ever stores the raw key string, not which literal kind
+    // it canonicalizes to.
+}
+
+#[test]
+fn an_explicit_zero_key_collides_with_and_overwrites_an_earlier_positional_field() {
+    // Phase 50: `try_parse_array_shape` never used to merge two shape
+    // fields whose keys canonicalize to the same value - this would have
+    // silently produced two separate fields both keyed "0" before the fix.
+    assert_eq!(
+        parse_type_string("array{int, 0: string}"),
+        Type::ArrayShape(vec![("0".to_string(), Type::String, false)])
+    );
+}
+
+#[test]
+fn a_literal_duplicate_shape_key_is_merged_last_one_wins() {
+    assert_eq!(
+        parse_type_string("array{foo: int, foo: string}"),
+        Type::ArrayShape(vec![("foo".to_string(), Type::String, false)])
+    );
+}
+
 #[test]
 fn a_keyed_array_shape_wrapped_in_array_shorthand_parses() {
     assert_eq!(

@@ -402,6 +402,24 @@ fn an_explicit_int_key_colliding_with_an_implicit_one_is_flagged() {
 }
 
 #[test]
+fn a_duplicate_negative_int_key_in_an_array_literal_is_flagged() {
+    // Phase 50: is_canonical_int_key used to reject any leading `-`
+    // outright, so a negative key was never recognized as a real,
+    // duplicate-checkable int key at all.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return [-5 => 'a', -3 => 'b', -5 => 'c'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
 fn a_numeric_string_key_colliding_with_its_int_twin_is_flagged() {
     // Real PHP coerces a numeric-string key to the same int key it
     // names - `'5'` and `5` collide.

@@ -50,6 +50,21 @@ impl<'a> Checker<'a> {
                         next_index = next_index.max(n + 1);
                         n.to_string()
                     }
+                    // Phase 50: a negative int key literal parses as
+                    // unary negation of a positive int literal, not a
+                    // single negative `Literal::Int` token - without this
+                    // arm, a literal negative key (`-5 => ...`) fell into
+                    // the catch-all below and silently abandoned
+                    // duplicate-key checking for the *whole* array
+                    // literal, not just that one item.
+                    ExprKind::Unary(UnaryOp::Neg, inner) => match &inner.kind {
+                        ExprKind::Literal(Literal::Int(n)) => {
+                            let n = -n;
+                            next_index = next_index.max(n + 1);
+                            n.to_string()
+                        }
+                        _ => return,
+                    },
                     _ => return,
                 },
             };

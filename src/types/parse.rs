@@ -225,6 +225,22 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
 /// `array{name: string, age?: int}` - PHPDoc's structural array shape.
 /// Field values can themselves be full type strings (unions, generics,
 /// nested shapes), so each is re-run through `parse_type_string`.
+/// `try_parse_array_shape`'s own field accumulator - overwrites an
+/// already-present field with the same key in place (last-one-wins),
+/// rather than blindly appending a second entry under the same key,
+/// matching real PHPStan's own `ConstantArrayTypeBuilder::setOffsetValueType`
+/// (a later `setOffsetValueType` call for an already-seen key always
+/// replaces it, never duplicates it). A real, reachable shape without
+/// this: an explicit `0:` field colliding with an earlier *positional*
+/// field's own auto-numbered index (`array{int, 0: string}`), or a
+/// literal duplicate key written twice (`array{1: int, 1: string}`).
+fn push_shape_field(fields: &mut Vec<(String, Type, bool)>, key: String, ty: Type, optional: bool) {
+    match fields.iter_mut().find(|(k, _, _)| *k == key) {
+        Some(field) => *field = (key, ty, optional),
+        None => fields.push((key, ty, optional)),
+    }
+}
+
 fn try_parse_array_shape(s: &str) -> Option<Type> {
     let lower = s.to_ascii_lowercase();
     if !lower.starts_with("array") {
@@ -299,19 +315,20 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
                 // lookup against it (`literal_string_key` on `$arr
                 // ['content-type']` produces the unquoted form).
                 let key = strip_shape_key_quotes(key);
-                if let Ok(n) = key.parse::<i64>() {
+                if let Some(n) = canonical_int_key(key) {
                     next_index = next_index.max(n + 1);
                 }
-                fields.push((
+                push_shape_field(
+                    &mut fields,
                     key.to_string(),
                     parse_type_string(type_part.trim()),
                     optional,
-                ));
+                );
             }
             None => {
                 let key = next_index.to_string();
                 next_index += 1;
-                fields.push((key, parse_type_string(field_str), false));
+                push_shape_field(&mut fields, key, parse_type_string(field_str), false);
             }
         }
     }
@@ -387,7 +404,7 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
 /// that would parse as something else (or fail to parse at all) if
 /// pasted back into a real `@var`/`@param` tag.
 pub(crate) fn display_shape_key(key: &str) -> String {
-    let is_bare_integer = key.parse::<i64>().is_ok();
+    let is_bare_integer = canonical_int_key(key).is_some();
     let is_bare_identifier = {
         let mut chars = key.chars();
         chars
@@ -456,10 +473,46 @@ fn offset_access_type(base: &Type, key: &str) -> Type {
 /// keys are canonicalized, so a field name that parses as an integer
 /// names an int key, matching PHP's own key-canonicalization rule.
 fn shape_key_literal(name: &str) -> Type {
-    match name.parse::<i64>() {
-        Ok(n) => Type::IntLiteral(n),
-        Err(_) => Type::StringLiteral(name.to_string()),
+    match canonical_int_key(name) {
+        Some(n) => Type::IntLiteral(n),
+        None => Type::StringLiteral(name.to_string()),
     }
+}
+
+/// Real PHP's own array-key canonicalization rule for a string key,
+/// confirmed against real PHPStan's `ConstantStringType::toArrayKey()`
+/// (itself just native PHP's own `key([$s => null])` behavior): `Some(n)`
+/// exactly when `key` is a "canonical decimal integer" string - an
+/// optional single leading `-`, no leading zero unless the whole value is
+/// literally `"0"`, `"-0"` itself excluded (`(string)(int)"-0"` is `"0"`,
+/// not `"-0"`, so it fails PHP's own real round-trip test), and the value
+/// fits in `i64` (PHP's own platform integer range on any 64-bit build) -
+/// `None` otherwise (stays a string key). `str::parse::<i64>()` alone is
+/// **not** sufficient for this: it happily accepts a leading zero
+/// (`"01".parse::<i64>() == Ok(1)`) and `"-0"`, both of which real PHP
+/// does *not* canonicalize - a real, confirmed bug this function fixes in
+/// what used to be each of its own two callers' bare `.parse::<i64>()`
+/// call directly, not just in `checker::expr::is_canonical_int_key`
+/// (`checker/expr.rs`, that function's own real call sites), which
+/// shared the identical bug via its own, entirely separate implementation
+/// (no leading-zero/magnitude handling at all) before both were unified
+/// here.
+pub(crate) fn canonical_int_key(key: &str) -> Option<i64> {
+    let (negative, digits) = match key.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, key),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if digits != "0" && digits.starts_with('0') {
+        return None;
+    }
+    if negative && digits == "0" {
+        return None;
+    }
+    let value: i64 = digits.parse().ok()?;
+    Some(if negative { -value } else { value })
 }
 
 fn looks_like_shape_key(key_part: &str) -> bool {
