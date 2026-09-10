@@ -39,22 +39,32 @@ reasoning is needed verbatim.)
 
 - Piwigo frozen-corpus diagnostic count (`phpstan-rs.toml`-scoped,
   `/home/torres/piwigo17-frozen`) - the primary false-positive-hunt
-  metric - has fallen from 2312 (start of the Piwigo-corpus hunts) to
-  low double digits, independently verified clean under real PHPStan at
-  level 10 as of the last full re-run *before* the batch of phase work
-  landed in commits `0247b04`/`d1d1d61` (Phases 17, 36, 37, 39, 40, 42,
-  43, 48, 49, 50, 53, 61, 63, 64, 67, 69, 70, 71, 76, 77) - that batch's
-  own corpus diff (build/test/clippy/fmt done; the corpus-diff step
-  itself) has not been run yet. Re-verify against real PHPStan before
-  citing an exact number either way - it drifts release to release even
-  without new checks shipping.
-- Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): tens of
-  thousands of diagnostics, the overwhelming majority genuine findings
-  in third-party code this project doesn't control. Re-run before
-  citing a number - it drifts as vendored dependencies and this
+  metric - is 359 as of `c522416`/`860b2b3`, up from a 355 pre-batch
+  baseline (`264d910`) with every one of the 4 net new diagnostics
+  confirmed genuine (new `throws.unusedType`/type-precision findings
+  from the `0247b04`/`d1d1d61` phase-work batch, Phases 17, 36, 37, 39,
+  40, 42, 43, 48, 49, 50, 53, 61, 63, 64, 67, 69, 70, 71, 76, 77). That
+  batch's own corpus diff *has* now been run (both scoped and
+  `--no-composer` unscoped) and surfaced two real regressions, both
+  fixed: a `NameContext::use_map` cross-kind collision (Phase 48.1's
+  case-insensitive lookup let a `use function`/`use const` import
+  answer an unrelated class reference of the same lowercased name -
+  4602 false `staticMethod.notFound` diagnostics at its worst) and a
+  missing body-presence guard on `check_too_wide_throw_type` (flagged
+  every abstract/interface method's own `@throws` tag as unused).
+  Every run since is saved to `.corpus-runs/{scoped,unscoped}/
+  <commit-hash>.txt` (gitignored, see that directory's own README) -
+  check there before re-running an old commit to get a comparison
+  snapshot. Re-verify against real PHPStan before citing an exact
+  number either way - it drifts release to release even without new
+  checks shipping.
+- Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): 40,503
+  diagnostics as of `c522416`, the overwhelming majority genuine
+  findings in third-party code this project doesn't control. Re-run
+  before citing a number - it drifts as vendored dependencies and this
   project's own precision both change.
-- Test suite: 2600+ unit tests, all passing (build/test/clippy/fmt
-  clean as of `d1d1d61`).
+- Test suite: 2694 unit tests, all passing (build/test/clippy/fmt
+  clean as of `c522416`).
 
 ---
 
@@ -105,7 +115,9 @@ intersection-type mechanism, plus `IntegerRangeType`
 `+`/`-`/`*`/`/`/`%`/`**`/`<<`/`>>` all transcribed directly from real
 PHPStan's own `InitializerExprTypeResolver`) and a real cast/coercion
 method surface (`toInteger`/`toFloat`/`toString` legality, including
-through `Intersection`). `Type::Array` carries a real key type, not
+through `Intersection`). `print`/`InvalidPartOfEncapsedStringRule` and
+the stdlib `IntegerRangeType`-consumer extensions are wired up too.
+`Type::Array` carries a real key type, not
 just a value type. `object{...}` shapes (including a genuinely
 unsealed one, `array{..., ...}`), `value-of<T>`/`key-of<T>` (a
 `value-of<T>` naming a real registered enum resolves via a one-time
@@ -117,6 +129,18 @@ parsed and resolved instead of mangling into bogus class names. Enum
 cases have their own singleton `Type::EnumCase` identity, with
 `::from()`/`::tryFrom()` narrowing to the exact matching case on a
 literal argument. GMP/`BcMath\Number` operator-overload dispatch.
+`Type::Callable(Option<Arc<CallableSig>>)`: a `Closure(...)`/
+`callable(...)` PHPDoc shape's own per-parameter/return signature
+parses into a real `CallableSig`, threaded through `Display`, the
+three `is_assignable` sup-side arms, `member_possible_given_native`,
+the `is_callable()` narrowing arm, and all four recursive `Type`-tree
+walkers (`mark_template_params`/`substitute_type_aliases`/
+`resolve_names_in_type`/`substitute_template`) - `is_subtype` is
+deliberately lenient in both directions between a shape and the bare
+marker, and between two different shapes (no real
+contravariant-parameter/covariant-return comparison attempted), the
+biggest false-positive-avoidance call in this feature (see Rule
+catalog for its consumer-side contextual closure-body checking).
 PHPDoc-inheritance backfill: a method correctly omitting its own
 `@param`/`@return` in favor of an ancestor's/interface's tag resolves
 through that tag instead of looking untyped, including through
@@ -159,6 +183,17 @@ including the mirrored/negated `count($x) < 1` shape. Comparison-outcome
 narrowing for `<`/`>`/`<=`/`>=` between known-numeric operands, and a
 loose (`==`/`!=`) truth table between differing scalar literal kinds,
 transcribed from real PHPStan's own `LooseComparisonHelper`.
+`is_a()`/`class_exists()`-family narrowing was evaluated and declined
+(near-zero corpus incidence, or - for `class_exists()` specifically -
+an unobservable no-op given how this project already represents a
+bare `class-string`). One narrow `isset`/`empty`/nullsafe residual,
+left disclosed rather than chased further: a function bundling both a
+legacy and modern native-typed variant behind a runtime
+`PHP_VERSION_ID` branch (not just `function_exists()`) can still share
+one registry slot with the wrong nullability assumption (4 corpus
+occurrences) - investigated in depth, by all available static
+reasoning it should already resolve correctly, but couldn't be
+conclusively confirmed either way without an isolated corpus run.
 
 Fixed-point loop-body convergence (`Checker::converge_loop_body`,
 mirroring real PHPStan's own bounded `LOOP_SCOPE_ITERATIONS`): a
@@ -175,7 +210,10 @@ that entry and **Reverted** for the real soundness bug this fixed.
 Symbol existence (classes/functions/use-imports/typehints, catch
 clauses, `extends`/`implements`/`instanceof`/trait-use targets), plus a
 `use`-imported build-tool-mangled-prefix check (`class.prefixed`).
-Call-argument binding (named args, spread/unpack, by-ref legality).
+Call-argument binding (named args, spread/unpack, by-ref legality,
+constant-array-spread expansion - `f(...['a', 'b', 'named' => $c])`'s
+own individually-unpacked elements type-checked against their real
+target parameter, for the fully-static-shape case).
 `MissingTypehintCheck`'s full level-6 battery. Property/method/constant/
 class-constant visibility enforcement end to end (read, write, call,
 static access, late-static-binding-unsafe `static::` access, PHP 8.4
@@ -186,14 +224,52 @@ unused private class constants (`classConstant.unused`), unused private
 methods (`method.unused`), and all five unused/never-read/never-written
 property shapes (`property.unused`/`.neverRead`/`.onlyWritten`/
 `.neverWritten`/`.onlyRead`).
-Duplicate-declaration scans within a class/trait/enum body, plus a
-same-file case-insensitive class-vs-`use`-alias collision. Override-
+Duplicate-declaration scans within a class/trait/enum body, a
+same-file case-insensitive class-vs-`use`-alias collision, and
+duplicate top-level *function* declarations (a real, whole-project,
+cross-file scan - distinguished from phpstorm-stubs' own established
+legitimate multi-declaration/real-overload pattern rather than
+conflicting with it). Override-
 compatibility (visibility narrowing, missing/extra/optional/by-ref/
 variadic parameter mismatches, `#[Override]`'s unconditional-fatal-error
 half, running uniformly for a class's own methods and a trait-supplied
 one). Nine declaration-site modifier-consistency checks plus the
 class-constant `final`/native-type-modifier trio. Enum sanity and
 generic-bound checking wired to enums.
+
+Invalid-operand-combination detection (`ErrorType`): the
+operand-validity matrix across binary/comparison/unary/inc-dec
+operators, plus division/modulo-by-literal-zero detection. A `Union`'s
+own legality stays "at least one member is legal" rather than real
+PHPStan's stricter "every member" - a deliberate leniency choice for
+this project's coarser unions.
+
+Purity / side-effect model: a registry-build-time fixed point
+(`registry/purity.rs`, not a Collector - see Phase 82) decides which
+functions/methods/constructors are provably effect-free, flagging a
+discarded statement-level call to one. A call is only ever resolved as
+a dependency when its target is knowable without type inference
+(`$this->`/`self::`/`static::`/`parent::`/`new self()`/`new static()`/
+a literal class name/a plain function call by name); any other
+receiver shape disqualifies the whole declaration, matching real
+PHPStan's own identical "unknown callee" restriction. `@phpstan-impure`
+tag validation is one-directional only (flags a declaration tagged
+impure that this project's classifier can *prove* pure; the opposite
+direction would conflate "genuinely impure" with "unknown,
+conservatively disqualified" in this project's binary model - a real
+false-positive risk). The same-family bare-statement `NoopRule` family
+(`checker/noop.rs`) - a discarded `xor`/`&&`/`||`/ternary expression
+whose result is unused (`logicalXor.resultUnused`/`booleanAnd.
+resultUnused`/`booleanOr.resultUnused`/`ternary.resultUnused`), gated
+on the whole expression being side-effect-free - predates the
+transitive slice above. Unbuilt: the fuller ~20-kind impure-point
+classification with `certain`-vs-`maybe` grading, and
+`@phpstan-immutable` tag validation. One disclosed limitation inherited
+from real PHPStan's own actual algorithm, not a bug of this project's
+making: neither project counts constructor-promoted-property
+initialization as an impure point, so a `parent::__construct(...)`
+call chaining into a promoted-only ancestor constructor can look like
+a discarded no-op even though it genuinely initializes state.
 
 Property-hook checker validation (PHP 8.4): virtual-property detection
 via an empirically-confirmed rule (a hooked property is virtual iff no
@@ -204,14 +280,20 @@ noRead`/`propertySetHook.noAssign`, `SetPropertyHookParameterRule`'s
 native-type-contravariance half, real function-like body checking for
 hook bodies (undefined variables, return-type/generator-return
 mismatches), and `PropertyVarianceRule` reusing the existing
-variance-walk primitive. Promoted-constructor-property inline hooks
-aren't covered - the registry has no path to resolve `set_ty`/
-`is_virtual` for that shape.
+variance-walk primitive, generalized to promoted constructor properties
+too (get/set hooks, variance) - no longer limited to plain property
+declarations.
 
 `@internal` restricted-usage engine (function/method/static-method
 calls, property/constant reads and writes, instantiation, `instanceof`,
 `catch`, implicit `__toString()`), off by default. `@deprecated` usage
-warnings across the identical access-shape set, off by default.
+warnings across the identical access-shape set, off by default - a
+class/interface/trait/enum-level `@deprecated` tag cascades down to
+member usage, a deprecated-usage warning is suppressed from within an
+already-deprecated scope (using another deprecated member from inside a
+deprecated one is expected, not worth flagging), and `__toString()` gets
+its own corrected message/identifier rather than sharing an unrelated
+one.
 Attribute existence-checking plus target-validity for every declaration
 kind the parser captures an attribute list for (property/method/
 function/param/class/trait/enum/enum-case/class-const/closure/arrow-fn),
@@ -232,17 +314,61 @@ this class of heuristic's own real false-positive history): the
 "assigned anywhere in the class body" check, and real per-constructor
 premature-access dataflow (including methods transitively called from
 the constructor, resolved against the actual most-derived class).
+`readonly`-specific handling and `__unserialize`/`__clone`-as-
+constructor recognition turned out, on direct verification against
+real PHPStan's own source, to never have been this rule's own scope at
+all (an illegal *write* outside the constructor belongs to the
+separate, already-built `ReadOnlyPropertyAssignRule`; real PHPStan only
+treats `__unserialize`/`__clone` as constructors when a project's own
+config opts in, which Piwigo's doesn't) - real PHPStan's *other*
+readonly-specific check, a readonly property never assigned at all
+anywhere in the class (`MissingReadOnlyPropertyAssignRule`/
+`MissingReadOnlyByPhpDocPropertyAssignRule`,
+`property.uninitializedReadonly`), is a genuinely separate, currently
+unbuilt rule. One genuine, disclosed limitation remains: a called
+method's own logic gated behind an *unrelated* property's runtime
+value is invisible to this module, since it tracks property
+initialization only, never arbitrary values - closing this would mean
+re-implementing the main checker's narrowing engine inside this
+deliberately standalone walker.
 Return-statement completeness (`return.never`/`.void`/`.missing`, both
 explicit and fall-through) - a separate, more basic check, the actual
 returned expression's type against the declared return type
 (`return.type`), is also built, for named functions, methods, closures,
-and arrow functions alike. Generator declared-vs-actual return-type
-compatibility - the full `Generator<K,V,TSend,TReturn>` shape itself
-remains unmodeled. PHP 8.5's `#[NoDiscard]` attribute is enforced for a
+and arrow functions alike. The genuinely-empty-concrete-method-body
+case was built, corpus-verified, then reverted (see **Reverted** - a
+real, ubiquitous IDE-stub convention this project's broader
+verification corpus doesn't mirror the way real PHPStan's own
+stub-loading does, not a soundness bug), and later re-shipped opt-in
+(`Registry::check_empty_method_bodies`, default off). A generator's own
+falls-off-the-end/bare-`return;`/`return $x;` completeness is checked
+against its declared `TReturn` specifically (see the full `Generator<
+TKey, TYield, TSend, TReturn>` shape below), not the whole
+`Generator<...>` type - a real, independent bug fixed along the way:
+`return $x;` inside a generator used to check against the *whole*
+`Generator<...>` type, which no real `return` statement could ever
+satisfy. PHP 8.5's `#[NoDiscard]` attribute is enforced for a
 statement-level function/method/static-method call
 (`function.resultDiscarded`/`method.resultDiscarded`/`staticMethod.
 resultDiscarded`); the real `(void)`-cast carve-out is deliberately not
 modeled (a disclosed, safe-direction simplification, not a gap).
+
+**Generator/yield type modeling** (Phase 70). `Generator<TKey, TYield,
+TSend, TReturn>` is a real, resolved shape throughout, not left
+unmodeled. `yield $k => $v`'s own type is the enclosing declared
+`TSend`; `yield from $expr`'s own type is `$expr`'s own `TReturn`, with
+five compatibility diagnostics (`generator.nonIterable`/`.keyType`/
+`.valueType`/`.sendType`/`.void`). `foreach` over a `Traversable`/
+`Iterator`/`Generator`/`IteratorAggregate`-typed object infers real
+key/value types too (`Checker::iterable_element_type`, targeting
+`Iterator`/`IteratorAggregate` directly rather than the shared
+`Traversable` ancestor - `Traversable`'s own phpstorm-stubs declaration
+has no real `@template` tag of its own, only a `@template-extends
+iterable<TKey, TValue>` referencing the `iterable` pseudo-type, which
+desugars away before any template ever attaches). `IteratorAggregate`
+resolves through its own `getIterator()`'s declared return type first,
+falling back to the interface's own declared generics when that return
+type doesn't resolve any further.
 
 Format-string checking for `sprintf`/`printf`/`fprintf`/`vsprintf`,
 including positional (`%N$`) specifiers. Regex capture-group inference
@@ -252,29 +378,67 @@ A Piwigo-corpus-driven batch of small builtin checks: function-name
 case-insensitivity, `define()`'s PHP-8-removed third argument,
 `random_int()` literal-bound ordering, useless-return-value builtins,
 array-literal duplicate-key detection, `array_values`/`array_filter`
-no-op conditions, `array_multisort()`'s stub fix. Dozens of individual
-stdlib array/string dynamic-return-type extensions: `array_fill_keys`,
+no-op conditions, `array_multisort()`'s stub fix,
+`call_user_func(_array)`'s argument re-checking (for the two
+statically-resolvable shapes: a string-literal callable, or a
+two-element array literal naming a class/object plus a literal method
+name), `preg_quote()` delimiter cross-checking
+(`argument.invalidPregQuote`), and `function_exists()`-guard
+suppression for the undefined-function check (a disclosed,
+project-specific adaptation with no direct real-PHPStan equivalent).
+Dozens of individual stdlib array/string dynamic-return-type
+extensions: `array_fill_keys`,
 `array_search`, `array_intersect_key`, `array_flip`, `array_change_key_case`,
 `array_rand`, `array_count_values`, `array_splice`, `array_replace(_recursive)`,
 `array_pad`, array-pointer accessors (`array_pop`/`array_shift` included),
 the `array_diff`/`array_intersect` family (a disclosed residual: the
 vendored stub itself, not this checker, types the PHP8+ variadic tail
 of `array_udiff`/`array_uintersect_assoc` as bare `Mixed`), `preg_split`,
-`array_column`, `glob`, `explode`, `tempnam`, `version_compare`,
-`filter_var`'s `FILTER_VALIDATE_*` family (including a literal
-`['options' => [...]]` array's own `default`/`min_range`/`max_range`
-sub-keys), `curl_getinfo`'s ~73-entry table, the `date()`/`idate()`/
+`array_column`, `glob`, `explode`, `tempnam`, `version_compare`. PHP
+8.4's `array_find`/`array_find_key`/`array_any`/`array_all` needed no
+code change at all - the vendored stub already declares them with real
+generic docblocks. `filter_var`'s `FILTER_VALIDATE_*` family (including
+a literal `['options' => [...]]` array's own `default`/`min_range`/
+`max_range` sub-keys and its `FILTER_NULL_ON_FAILURE`/
+`FILTER_THROW_ON_FAILURE` flag-conflict), `FILTER_REQUIRE_ARRAY`/
+`FILTER_FORCE_ARRAY`'s own per-element return type (wrapping the same
+failure-fallback-unioned element type real PHPStan's own `getType()`
+computes), PHP 8.5's `FILTER_THROW_ON_FAILURE`, and `filter_input()`
+itself (reading an unknown offset out of a synthetic `array<string,
+mixed>` standing in for `$_GET`/`$_POST`/etc., unconditionally unioning
+in both `null` and `false` regardless of `FILTER_NULL_ON_FAILURE` - a
+real, counter-intuitive but verified property of real PHPStan's own
+`getOffsetValueType`; `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY`
+correctly bail to the generic stub for `filter_input()` rather than
+silently ignoring the flag). `curl_getinfo`'s ~73-entry table, the
+`date()`/`idate()`/
 `pathinfo()`/`parse_url()`/`sscanf()`/`stat()` family,
 `get_called_class`/`get_parent_class`/`gettype`/`get_debug_type`.
 `DateInterval::__construct()`'s own duration-string grammar validation.
 `UnreachableStatementRule` (`deadCode.unreachable`, level 4), reported
 once per maximal unreachable run without skipping analysis of the rest.
 
-Contextual closure-body checking (a callback's own inferred parameter
-types, not a bare unhinted check) for `array_map`, `array_filter`
-(2-arg default mode), `usort`/`uasort`, `array_walk` (2-param closures),
-and `preg_replace_callback` (a generic `array<int|string, string>`
-`$matches` shape).
+**Structural Callable/Closure type** (Phase 53). Contextual
+closure-body checking (a callback's own inferred parameter types, not
+a bare unhinted check) for `array_map`, `array_filter` (2-arg default
+mode), `usort`/`uasort`, `array_walk` (2-param closures), and
+`preg_replace_callback` (a generic `array<int|string, string>`
+`$matches` shape) - now generalized to *any* `Closure(...)`-typed
+parameter, not just those six special-cased functions, since
+`Type::Callable` is now `Type::Callable(Option<Arc<CallableSig>>)` (see
+Type system): a `Closure(...)`/`callable(...)` PHPDoc shape's own
+per-parameter/return signature parses into a real `CallableSig`
+instead of degrading to a bare marker. Invoking a callable-typed value
+directly (`$fn(...)`) infers its declared return type and checks its
+arguments (`Checker::check_dynamic_callable_args`) - which also fixed
+a real, free bug along the way: a dynamic call's own callee
+sub-expression was never independently `check_expr`'d before, so e.g.
+an undefined property used as a callee produced zero diagnostics.
+Declined: purity/template-map/assertion tracking on a `Type::Callable`
+value - a verified real architectural mismatch (this project's
+template-binding and purity-tracking machinery are both scoped to a
+named, textually-declared signature, and a PHPDoc-only callable shape
+has no body at all).
 
 **Unreachable-code / constant-condition family.** The full, inferred-
 type-trusting family: `if`/`elseif` (with real PHPStan's own
@@ -325,7 +489,21 @@ correctly-typed override into something both falsely permissive on
 input and falsely demanding on output). Every fix has its own dedicated
 regression test, explicitly revert-verified; the family is corpus-clean
 on both the scoped Piwigo diff and the full unscoped vendor-included
-one.
+one. What's left is each a real, verified reason rather than an
+oversight, not a to-do: match/switch dead-arm/exhaustiveness checking
+and impossible-`instanceof`/redundant-`is_string()`-style detection on
+a *non-constant* narrowed type are a different, larger feature this
+family was never scoped to cover (it only ever catches a condition
+whose inferred type is a constant boolean); a nested `switch` as a
+case's own last statement isn't recognized as exiting the enclosing
+function/loop (unlike a `try`, which is, since it introduces no new
+`break`/`continue` scope of its own) - a nested switch's own
+`continue N` levels would need reinterpreting one level shallower
+first, real complexity rather than an oversight; a genuinely mixed
+case-ending branch (one side break-equivalent, the other diverging a
+different way) has the identical real complexity; full `goto`/label
+control-flow modeling (narrowing a value correctly across an arbitrary
+jump) remains out of scope.
 
 **PHPDoc tag ecosystem** (Phase 36). `@phpstan-*`-prefixed tag
 spellings; `@property`-family validation; `@phpstan-assert`/`-if-true`/
@@ -347,11 +525,15 @@ native type isn't wrongly flagged); an enumerated `@phpstan-*`
 typo-detection whitelist. None of this needed a full grammar-level
 PHPDoc parser rewrite first - each tag has its own small, bounded,
 self-contained sub-grammar, the same shape existing hand-written
-tag parsers already establish. Still unbuilt:
-`@param-immediately-invoked-callable`/`-later-invoked-callable`/
-`-closure-this` (needs live per-call-site `Scope`-threading this
-project's checker has no equivalent for - a genuine architectural
-mismatch, not a scope trim).
+tag parsers already establish. `@param-immediately-invoked-callable`/
+`-later-invoked-callable`/`-closure-this` declaration-time validation
+is built too, plus real `$this` injection for the latter at call sites
+(the closure literal passed at the call site gets `$this` seeded to
+the tag's own declared type) - an earlier assessment here called this
+a genuine architectural mismatch needing live per-call-site
+`Scope`-threading this project's checker has no equivalent for; that
+turned out to be wrong once actually attempted; nothing left unbuilt
+in this tag family.
 
 **`Type::Array` key-type / offset engine** (Phase 50).
 `InvalidKeyInArrayDimFetchRule` (reverted once over a template-
@@ -437,23 +619,6 @@ dependency graph (`PHASE_DEPENDENCIES.md`) was maintained through most
 of this project's development but retired once every edge it tracked
 became satisfied (no live blockers left to graph).
 
-**15 - Unreachable-code / constant-condition rule catalog (DONE,
-disclosed residuals only).** See Done for the full family. What's left,
-each a real, verified reason rather than an oversight: match/switch
-dead-arm/exhaustiveness checking and impossible-`instanceof`/redundant-
-`is_string()`-style detection on a *non-constant* narrowed type are a
-different, larger feature this family was never scoped to cover (it
-only ever catches a condition whose inferred type is a constant
-boolean); a nested `switch` as a case's own last statement isn't
-recognized as exiting the enclosing function/loop (unlike a `try`,
-which is, since it introduces no new `break`/`continue` scope of its
-own) - a nested switch's own `continue N` levels would need reinterpreting
-one level shallower first, real complexity rather than an oversight; a
-genuinely mixed case-ending branch (one side break-equivalent, the
-other diverging a different way) has the identical real complexity;
-full `goto`/label control-flow modeling (narrowing a value correctly
-across an arbitrary jump) remains out of scope.
-
 **17 - LSP hover/go-to-definition (PARTIAL).** See Done for what
 shipped. What's left is narrow and deliberate: a closure's own
 `use (&$x)`/`use ($x)` capture only resolves when the outer scope
@@ -470,13 +635,6 @@ to want to extend.
 **19 - Fuzz testing (NOT STARTED).** `arbitrary`+`cargo-fuzz` for the
 lexer/parser, `proptest` for `types.rs`'s subtyping logic. Dev-only.
 
-**36 - PHPDoc tag ecosystem expansion (DONE).** `@param-immediately-
-invoked-callable`/`-later-invoked-callable`/`-closure-this` declaration-
-time validation are built, plus real `$this` injection for the latter
-at call sites (the closure literal passed at the call site gets `$this`
-seeded to the tag's own declared type). Nothing left unbuilt in this
-phase's own scope.
-
 **37 - Attribute target-validity, remaining kinds (PARTIAL, most kinds
 done).** See Done for what shipped. Global `const` declarations and
 property hooks (including the `#[\NoDiscard]`-on-a-hook special case)
@@ -487,15 +645,6 @@ captured in the AST, and `StmtKind::GlobalConst`'s attrs feed
 different shape of check than the existing per-attribute loop) and
 `attribute.deprecated` (would duplicate this project's own existing
 `@deprecated` family) remain a deliberate scope trim.
-
-**39 - `@deprecated` usage warnings (DONE).** Full access-shape
-coverage is done (see Done). A class-level/interface-level/trait-level/
-enum-level `@deprecated` tag now cascades down to member usage;
-deprecated-usage warnings are suppressed from within an already-
-deprecated scope (using another deprecated member from inside a
-deprecated one is expected, not worth flagging); `__toString()` gets
-its own corrected message/identifier rather than sharing an unrelated
-one.
 
 **40 - PHPStan-API-usage checks (PARTIAL).** Done for instantiation,
 static calls, class-const fetches, `instanceof`, `extends`/`implements`/
@@ -527,34 +676,11 @@ disclosed scope trim - the `$this->prop->method()` slice above covers
 the single most common real shape without that larger architectural
 change.
 
-**41 - Purity / side-effect model, transitive slice (DONE); remaining
-(PARTIAL).** `NoopRule`'s own bare-statement family (`checker/noop.rs`) -
-a discarded `xor`/`&&`/`||`/ternary expression whose result is unused
-(`logicalXor.resultUnused`/`booleanAnd.resultUnused`/`booleanOr.
-resultUnused`/`ternary.resultUnused`), gated on the whole expression
-being side-effect-free - was already done before this phase's own
-transitive slice existed. The transitive purity slice - deciding which
-functions/
-methods/constructors are provably effect-free, and flagging a discarded
-statement-level call to one - is built (`registry/purity.rs`, a
-registry-build-time fixed point, not a Collector - see Phase 82). A
-call is only ever resolved as a dependency when its target is knowable
-without type inference (`$this->`/`self::`/`static::`/`parent::`/`new
-self()`/`new static()`/a literal class name/a plain function call by
-name); any other receiver shape disqualifies the whole declaration,
-matching real PHPStan's own identical "unknown callee" restriction.
-`@phpstan-impure` tag validation is built too, one-directional only
-(flags a declaration tagged impure that this project's classifier can
-*prove* pure; the opposite direction would conflate "genuinely impure"
-with "unknown, conservatively disqualified" in this project's binary
-model - a real false-positive risk). Unbuilt: the fuller ~20-kind
-impure-point classification with `certain`-vs-`maybe` grading, and
-`@phpstan-immutable` tag validation. One disclosed limitation inherited
-from real PHPStan's own actual algorithm, not a bug of this project's
-making: neither project counts constructor-promoted-property
-initialization as an impure point, so a `parent::__construct(...)` call
-chaining into a promoted-only ancestor constructor can look like a
-discarded no-op even though it genuinely initializes state.
+**41 - Purity / side-effect model, remaining (PARTIAL).** The
+transitive slice and `NoopRule`'s own bare-statement family are done
+(see Done). Unbuilt: the fuller ~20-kind impure-point classification
+with `certain`-vs-`maybe` grading, and `@phpstan-immutable` tag
+validation.
 
 **42 - Checked-exception / throw-type model, remaining (PARTIAL, only
 one sub-item left declined).** `@throws`-vs-`Throwable` validity,
@@ -580,11 +706,6 @@ Still declined: `MethodThrowTypeCovarianceRule` (no call-graph-wide
 implicit-throw model exists to build it on - an implicit "void when
 untagged" default would false-positive heavily given how inconsistently
 this corpus tags `@throws`).
-
-**43 - Property-hook checker validation (DONE).** Generalized to
-promoted constructor properties too (get/set hooks, variance) - no
-longer limited to plain property declarations. Nothing left unbuilt in
-this phase's own scope.
 
 **45 - Declared-vs-actual-narrowest-type inference (PLANNED).** No
 mechanism compares a declared type against the narrowest type a body
@@ -650,58 +771,10 @@ pipeline is a genuinely smaller residual than before - still a
 size-XL/low-priority stretch goal, go one-by-one only if/when there's a
 concrete reason to prioritize it.
 
-**49 - Call-argument binding (DONE).** Named-argument legality, spread/
-unpack boundary-aware arity checking, by-ref argument legality, and
-constant-array-spread expansion (`f(...['a', 'b', 'named' => $c])`'s
-own individually-unpacked elements now type-checked against their real
-target parameter, for the fully-static-shape case) are all done.
-Nothing left unbuilt in this phase's own scope.
-
 **50 - `Type::Array` key-type / offset engine, remaining (PARTIAL,
 almost everything done).** See Done for what shipped.
 `ArrayShape`'s own int-vs-string key precision remains unbuilt,
 genuinely separate from what shipped so far.
-
-**51 - `Type` coercion surface (DONE).** Cast legality, `IntegerRangeType`
-arithmetic across every operator including range-preserving shifts,
-`print`/`InvalidPartOfEncapsedStringRule`, and the stdlib
-`IntegerRangeType`-consumer extensions are all done. Nothing left
-unbuilt in this phase's own scope.
-
-**52 - Invalid-operand-combination (`ErrorType`), remaining (DONE).**
-The operand-validity matrix (binary/comparison/unary/inc-dec) and
-division/modulo-by-literal-zero detection are done. A `Union`'s own
-legality staying "at least one member is legal" rather than real
-PHPStan's stricter "every member" remains a deliberate leniency choice
-for this project's coarser unions.
-
-**53 - Structural Callable/Closure type (DONE, one sub-item declined).**
-Contextual closure-body checking is done for `array_map`/`array_filter`/
-`usort`/`uasort`/`array_walk`/`preg_replace_callback` (see Done).
-`Type::Callable` is now `Type::Callable(Option<Arc<CallableSig>>)` - a
-`Closure(...)`/`callable(...)` PHPDoc shape's own per-parameter/return
-signature parses into a real `CallableSig` (`types.rs`) instead of
-degrading to the bare marker, threaded through `Display`, the three
-`is_assignable` sup-side arms, `member_possible_given_native`, the
-`is_callable()` narrowing arm, and all four recursive `Type`-tree
-walkers (`mark_template_params`/`substitute_type_aliases`/`resolve_names_in_type`/
-`substitute_template`). `is_subtype` is deliberately lenient in both
-directions between a shape and the bare marker, and between two
-different shapes (no real contravariant-parameter/covariant-return
-comparison attempted) - the biggest false-positive-avoidance call in
-this phase. The contextual closure-body checking above is now
-generalized to *any* `Closure(...)`-typed parameter, not just the six
-special-cased functions; and invoking a callable-typed value directly
-(`$fn(...)`) now infers its declared return type and checks its
-arguments (`Checker::check_dynamic_callable_args`) - which also fixed a
-real, free bug along the way: a dynamic call's own callee sub-expression
-was never independently `check_expr`'d before, so e.g. an undefined
-property used as a callee produced zero diagnostics. Declined: purity/
-template-map/assertion tracking on a `Type::Callable` value - a
-verified real architectural mismatch (this project's template-binding
-and purity-tracking machinery are both scoped to a named, textually-
-declared signature, and a PHPDoc-only callable shape has no body at
-all).
 
 **54 - Generic template richness (PARTIAL, variance-aware assignability
 and arity checking done).** See Done for what shipped. Declined, each
@@ -716,12 +789,6 @@ sentinel representation doesn't already produce); `generics.notGeneric`
 legitimate stub-granted-generics case on a real zero-`@template`
 built-in).
 
-**55 - Narrowing-engine generalization, remaining (DONE).** See Done.
-`is_a()`/`class_exists()`-family narrowing were evaluated and declined
-(near-zero corpus incidence, or - for `class_exists()` specifically - an
-unobservable no-op given how this project already represents a bare
-`class-string`).
-
 **56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
 a lenient, hand-rolled ad-hoc string tokenizer (not built on the
 `regex` crate at all - plain `split_whitespace`/char-scanning) that
@@ -732,61 +799,6 @@ small, bounded, self-contained grammar already. This phase's real
 motivation is narrower: robustness of the general type-expression
 grammar itself (deeply nested generics/conditional types/complex
 intersections), not corpus-evidenced as a live gap today. Size: XL.
-
-**60 - Isset/empty/nullsafe reversal, remaining (DONE, one disclosed
-residual).** See Done. One narrow residual, left disclosed rather than
-chased further: a function bundling both a legacy and modern
-native-typed variant behind a runtime `PHP_VERSION_ID` branch (not just
-`function_exists()`) can still share one registry slot with the wrong
-nullability assumption (4 corpus occurrences) - investigated in depth,
-by all available static reasoning it should already resolve correctly,
-but couldn't be conclusively confirmed either way without an isolated
-corpus run.
-
-**61 - Return-statement completeness (DONE).** The `return.never`/`.void`/
-`.missing` split is done (see Done). The genuinely-empty-concrete-
-method-body case was built, corpus-verified, then reverted (see
-**Reverted** - a real, ubiquitous IDE-stub convention this project's
-broader verification corpus doesn't mirror the way real PHPStan's own
-stub-loading does, not a soundness bug), and later re-shipped opt-in
-(`Registry::check_empty_method_bodies`, default off). Generator
-`TReturn` completeness is done too (`return.missing`/`return.never`'s
-existing generator exemption now checked against TReturn specifically
-when it's a real, non-Mixed/Void type, instead of unconditionally
-exempting every generator) - see Phase 70.
-
-**62 - Uninitialized-property dataflow (DONE, both halves).** The
-"assigned anywhere in the class body" heuristic and real per-constructor
-premature-access dataflow (including transitively-called-method
-absorption) are both built, off by default. `readonly`-specific
-handling and `__unserialize`/`__clone`-as-constructor recognition
-turned out, on direct verification against real PHPStan's own source,
-to never have been this rule's own scope at all (an illegal *write*
-outside the constructor belongs to the separate, already-built
-`ReadOnlyPropertyAssignRule`; real PHPStan only treats `__unserialize`/
-`__clone` as constructors when a project's own config opts in, which
-Piwigo's doesn't). Real PHPStan's *other* readonly-specific check - a
-readonly property never assigned at all anywhere in the class
-(`MissingReadOnlyPropertyAssignRule`/`MissingReadOnlyByPhpDocPropertyAssignRule`,
-`property.uninitializedReadonly`) - is a genuinely separate, currently
-unbuilt rule, not covered by either this phase or `ReadOnlyPropertyAssignRule`.
-One genuine, disclosed
-limitation remains: a called method's own logic gated behind an
-*unrelated* property's runtime value is invisible to this module, since
-it tracks property initialization only, never arbitrary values -
-closing this would mean re-implementing the main checker's narrowing
-engine inside this deliberately standalone walker. Piwigo's own
-`phpstan.neon` never enables this check at all (matching real PHPStan's
-own off-by-default), so verification came from a full unscoped run
-against the vendored `vendor/` tree with the flag force-enabled, not
-the usual scoped diff.
-
-**63 - Duplicate-declaration scans (DONE).** The within-body scan,
-same-file class-vs-alias collision check, and duplicate top-level
-*function* declarations (a real, whole-project, cross-file scan -
-distinguished from phpstorm-stubs' own established legitimate
-multi-declaration/real-overload pattern rather than conflicting with
-it) are all done. Nothing left unbuilt in this phase's own scope.
 
 **64 - Override-compatibility rewrite, remaining (PARTIAL, one sub-item
 left).** Method- and property-override halves are done (see Done),
@@ -840,75 +852,11 @@ sub-placeholders, and `sscanf`/`fscanf`'s own by-ref-output-variable
 count are all done (see Done). A strict-vs-castable matching mode
 remains unbuilt.
 
-**70 - Generator/yield type modeling (DONE).** Declared-return-type-
-compatibility checking was the starting point (see Done); `Generator<
-TKey, TYield, TSend, TReturn>` is now a real, resolved shape throughout.
-`yield $k => $v`'s own type is the enclosing declared TSend;
-`yield from $expr`'s own type is `$expr`'s own TReturn, with five
-compatibility diagnostics (`generator.nonIterable`/`.keyType`/
-`.valueType`/`.sendType`/`.void`). A generator's own falls-off-the-end/
-bare-`return;`/`return $x;` completeness is checked against TReturn
-specifically, not the whole `Generator<...>` type (a real, independent
-bug fixed along the way: `return $x;` inside a generator was checking
-against the *whole* `Generator<...>` type, which no real `return`
-statement could ever satisfy). `foreach` over a `Traversable`/
-`Iterator`/`Generator`/`IteratorAggregate`-typed object now infers real
-key/value types too (`Checker::iterable_element_type`, targeting
-`Iterator`/`IteratorAggregate` directly rather than the shared
-`Traversable` ancestor - `Traversable`'s own phpstorm-stubs declaration
-has no real `@template` tag of its own, only a `@template-extends
-iterable<TKey, TValue>` referencing the `iterable` pseudo-type, which
-desugars away before any template ever attaches). `IteratorAggregate`
-resolves through its own `getIterator()`'s declared return type first,
-falling back to the interface's own declared generics when that return
-type doesn't resolve any further.
-
-**71 - Small builtin checks batch (DONE).** Function-name case-
-insensitivity, `define()`'s removed third argument, `random_int()`
-ordering, useless-return-value builtins, `call_user_func(_array)`'s
-argument re-checking (for the two statically-resolvable shapes: a
-string-literal callable, or a two-element array literal naming a
-class/object plus a literal method name), `filter_var()`'s
-`FILTER_NULL_ON_FAILURE`/`FILTER_THROW_ON_FAILURE` flag-conflict,
-`preg_quote()` delimiter cross-checking (`argument.invalidPregQuote`),
-and `function_exists()`-guard suppression for the undefined-function
-check (a disclosed, project-specific adaptation with no direct real-
-PHPStan equivalent) are all done. Nothing left unbuilt in this phase's
-own scope.
-
-**73/74 - Array/string stdlib coverage, remaining (DONE, one disclosed
-upstream-stub residual).** See Done for the full list shipped this
-round. PHP 8.4's `array_find`/`array_find_key`/`array_any`/`array_all`
-turned out to already work with no code change - the vendored stub
-already declares them with real generic docblocks. One genuine residual:
-`array_udiff`/`array_uintersect_assoc`'s own variadic-tail argument
-typing is imprecise in the vendored stub itself (types the whole PHP8+
-variadic tail as bare `Mixed`) - a third-party stub's own declared
-imprecision, not a bug in this project's checker, and confirmed zero
-corpus incidence.
-
 **75 - String accessory case-tracking (PLANNED).** No `Lowercase`/
 `Uppercase`/`DecimalIntegerString` accessory kinds; `strtolower()`/
 `strtoupper()` and friends don't produce case-tracked types. Literal-
 string is never inferred from concatenation, undermining the feature's
 main real-world use (SQL-injection-safety checking). Size: M.
-
-**76 - `filter_var`/`filter_input` (DONE).** The literal-`FILTER_VALIDATE_*`-
-constant case and a literal `['options' => [...]]` array's `default`/
-`min_range`/`max_range` sub-keys were the starting point (see Done).
-`FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY`'s own per-element return
-type (wrapping the same failure-fallback-unioned element type real
-PHPStan's own `getType()` computes, confirmed by reading it directly -
-an earlier draft here incorrectly dropped the fallback for
-`FILTER_REQUIRE_ARRAY` specifically), PHP 8.5's `FILTER_THROW_ON_FAILURE`,
-and `filter_input()` itself (reading an unknown offset out of a
-synthetic `array<string, mixed>` standing in for `$_GET`/`$_POST`/etc.,
-unconditionally unioning in both `null` and `false` regardless of
-`FILTER_NULL_ON_FAILURE` - a real, counter-intuitive but verified
-property of real PHPStan's own `getOffsetValueType`; `FILTER_REQUIRE_ARRAY`/
-`FILTER_FORCE_ARRAY` correctly bail to the generic stub for
-`filter_input()` rather than silently ignoring the flag) are all done.
-Nothing left unbuilt in this phase's own scope.
 
 **77 - Runtime-capability modeling, remaining (PARTIAL).** Most of the
 originally-scoped functions, plus `SimpleXMLElement`'s own magic-
