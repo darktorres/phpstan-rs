@@ -879,9 +879,7 @@ impl<'a> Checker<'a> {
                     self.check_expr(recv, locals, label)
                 };
                 // Phase 17 Stage B: see `probe_span`'s own doc comment.
-                if self.probe_span == Some(recv.span) {
-                    self.probe_hit = Some(recv_ty.clone());
-                }
+                self.probe_hit_at(recv.span, &recv_ty);
                 // Phase 60: `$x?->method()` is pointless once `$x`'s own
                 // type already proves it's never null - mirrors real
                 // PHPStan's `NullsafeMethodCallRule` exactly (same
@@ -1237,15 +1235,19 @@ impl<'a> Checker<'a> {
                 // Phase 17 follow-up: see `Checker::probe_var_provenance`'s
                 // own doc comment - the exact same "stash it when the span
                 // matches" pattern `probe_hit` already uses.
-                if self.probe_span == Some(e.span) {
-                    self.probe_var_provenance = locals
+                if self.probe_span.get() == Some(e.span) {
+                    *self.probe_var_provenance.borrow_mut() = locals
                         .get_provenance(name)
                         .map(|p| p.iter().copied().collect());
                 }
-                locals
+                let ty = locals
                     .get(name)
                     .cloned()
-                    .unwrap_or_else(|| superglobal_default_type(name))
+                    .unwrap_or_else(|| superglobal_default_type(name));
+                // Phase 17 follow-up: a read's own inferred type, for
+                // hover - see `Checker::probe_hit_at`'s own doc comment.
+                self.probe_hit_at(e.span, &ty);
+                ty
             }
             ExprKind::Unary(
                 op @ (UnaryOp::PreInc | UnaryOp::PostInc | UnaryOp::PreDec | UnaryOp::PostDec),
@@ -2251,9 +2253,7 @@ impl<'a> Checker<'a> {
                 // entirely rather than fall to `_ => {}`.
                 let base_ty = self.check_expr(base, locals, label);
                 // Phase 17 Stage B: see `probe_span`'s own doc comment.
-                if self.probe_span == Some(base.span) {
-                    self.probe_hit = Some(base_ty.clone());
-                }
+                self.probe_hit_at(base.span, &base_ty);
                 // Phase 60: `$x?->prop` is pointless once `$x`'s own type
                 // already proves it's never null - mirrors real PHPStan's
                 // `NullsafePropertyFetchRule` exactly (same identifier,
@@ -2548,8 +2548,9 @@ impl<'a> Checker<'a> {
                     // Phase 17: the `use (...)` clause's own capture token
                     // is itself a real reference to the outer `$x` - same
                     // probe hook `ExprKind::Variable` already has.
-                    if self.probe_span == Some(u.span) {
-                        self.probe_var_provenance = Some(provenance.iter().copied().collect());
+                    if self.probe_span.get() == Some(u.span) {
+                        *self.probe_var_provenance.borrow_mut() =
+                            Some(provenance.iter().copied().collect());
                     }
                     closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
                 }
@@ -2674,8 +2675,9 @@ impl<'a> Checker<'a> {
                         // uses-loop, before this variable existed in
                         // `locals` at all) would have stashed an empty
                         // set - correct it now that the real site is known.
-                        if self.probe_span == Some(u.span) {
-                            self.probe_var_provenance = Some([u.span].into_iter().collect());
+                        if self.probe_span.get() == Some(u.span) {
+                            *self.probe_var_provenance.borrow_mut() =
+                                Some([u.span].into_iter().collect());
                         }
                     } else {
                         let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);

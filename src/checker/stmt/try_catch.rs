@@ -171,7 +171,9 @@ impl<'a> Checker<'a> {
                 // is always `Some` exactly when `var` is (the
                 // parser sets both together), `c.span` is a
                 // defensive fallback only.
-                catch_locals.declare(var.clone(), ty, c.var_span.unwrap_or(c.span));
+                let var_span = c.var_span.unwrap_or(c.span);
+                self.probe_hit_at(var_span, &ty);
+                catch_locals.declare(var.clone(), ty, var_span);
             }
             self.check_block(&c.body, &mut catch_locals, declared_return, label);
             let catch_terminates = c

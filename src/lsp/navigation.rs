@@ -70,9 +70,18 @@ pub(crate) enum Resolved {
     /// A local variable's own declaration site, clicked directly (a
     /// parameter, a `foreach`/`catch`/`static`/`global` binding's own
     /// name) - always same-file, and the click's own position already
-    /// *is* the answer, so no probe is needed at all, unlike `VariableRead`
-    /// below.
-    VariableSelf(Span),
+    /// *is* the answer for go-to-definition, so no probe is needed for
+    /// that. `scope`/`is_static`/`class` exist for hover's own sake only
+    /// (Phase 17 follow-up: what type does this declaration itself bind?,
+    /// which genuinely needs a probe - e.g. a `foreach` binding's type
+    /// depends on inferring the iterable), mirroring `VariableRead`'s
+    /// identical fields below.
+    VariableSelf {
+        span: Span,
+        scope: ProbeScope,
+        is_static: bool,
+        class: Option<String>,
+    },
     /// Phase 17 follow-up: a local variable *read* - resolved via a real,
     /// checker-driven reaching-definitions probe (`Checker::probe_span`/
     /// `probe_var_provenance`, the same mechanism `Instance` above uses
@@ -210,10 +219,25 @@ impl<'a> Walker<'a> {
 
     /// Records `span` as a local variable's own declaration site, self-
     /// resolving (no probe needed - the click's own position already is
-    /// the answer) when the cursor lands directly on it.
-    fn record_var_self(&self, best: &mut Option<Resolved>, name: &str, span: Span) {
-        let _ = name;
-        self.record(best, span, Resolved::VariableSelf(span));
+    /// the answer) for go-to-definition when the cursor lands directly on
+    /// it - `scope`/`is_static`/`class` are only for hover's own later,
+    /// separate probe (see `Resolved::VariableSelf`'s own doc comment).
+    fn record_var_self(
+        &self,
+        best: &mut Option<Resolved>,
+        span: Span,
+        current_class: Option<&str>,
+    ) {
+        self.record(
+            best,
+            span,
+            Resolved::VariableSelf {
+                span,
+                scope: self.probe_scope(),
+                is_static: self.current_is_static,
+                class: current_class.map(str::to_string),
+            },
+        );
     }
 
     /// A binding target - a `foreach` key/value - is a declaration site,
@@ -229,7 +253,7 @@ impl<'a> Walker<'a> {
         best: &mut Option<Resolved>,
     ) {
         match &e.kind {
-            ExprKind::Variable(name) => self.record_var_self(best, name, e.span),
+            ExprKind::Variable(_) => self.record_var_self(best, e.span, current_class),
             ExprKind::ArrayLiteral(items) => {
                 for item in items {
                     if let Some(k) = &item.key {
@@ -345,16 +369,16 @@ impl<'a> Walker<'a> {
             // imprecision `Checker::declare`'s own instrumentation for
             // these two shapes accepts (`checker/stmt.rs`).
             StmtKind::Global(names) => {
-                for name in names {
-                    self.record_var_self(best, name, stmt.span);
+                for _ in names {
+                    self.record_var_self(best, stmt.span, current_class);
                 }
             }
             StmtKind::StaticVar(vars) => {
-                for (name, d) in vars {
+                for (_, d) in vars {
                     if let Some(e) = d {
                         self.expr(e, ctx, current_class, best);
                     }
-                    self.record_var_self(best, name, stmt.span);
+                    self.record_var_self(best, stmt.span, current_class);
                 }
             }
             StmtKind::Switch { subject, cases } => {
@@ -375,8 +399,8 @@ impl<'a> Walker<'a> {
                             *best = Some(Resolved::Class(fqn));
                         }
                     }
-                    if let (Some(var), Some(span)) = (&c.var, c.var_span) {
-                        self.record_var_self(best, var, span);
+                    if let (Some(_), Some(span)) = (&c.var, c.var_span) {
+                        self.record_var_self(best, span, current_class);
                     }
                 }
             }
@@ -584,7 +608,7 @@ impl<'a> Walker<'a> {
         if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
             self.record_type_hint(best, hint, span, current_class, ctx);
         }
-        self.record_var_self(best, &p.name, p.name_span);
+        self.record_var_self(best, p.name_span, current_class);
     }
 
     fn function(

@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
@@ -772,8 +773,25 @@ pub struct Checker<'a> {
     // equals a real span, so the extra check at each call site is the
     // only added cost, and it's checked only where `recv_ty` was already
     // being computed anyway.
-    pub(crate) probe_span: Option<Span>,
-    pub(crate) probe_hit: Option<Type>,
+    //
+    // `Cell`/`RefCell` (not plain fields): Phase 17 follow-up's own
+    // declaration-site hover probe (`Checker::probe_hit_at`) needs to
+    // stash a hit from deep inside `bind_assignment_target`/
+    // `bind_simple_target`/`apply_narrowing` - all three are called from
+    // dozens of sites across the checker, several of them themselves only
+    // ever holding `&self` (e.g. `infer_expr`/`infer_binary`, whose own
+    // narrowing side effects are already expressed through `&mut Locals`,
+    // not `&mut self`). Threading `&mut self` through that whole call
+    // graph just for a one-off LSP probe would be a large, high-risk,
+    // purely-mechanical signature change rippling through the most
+    // heavily-called functions in the module. Interior mutability keeps
+    // every one of those signatures untouched: a probe field is written
+    // through a shared `&self` reference, exactly like any other "off by
+    // default, harmless no-op" side channel - the same reasoning that
+    // already justifies these fields being unconditionally cheap when no
+    // probe is active.
+    pub(crate) probe_span: Cell<Option<Span>>,
+    pub(crate) probe_hit: RefCell<Option<Type>>,
     // Phase 17 follow-up: the LSP's own one-off "where could this local
     // variable read have come from" probe - the real, flow-sensitive
     // counterpart of `lsp::navigation`'s own hand-rolled arm-merging
@@ -786,7 +804,7 @@ pub struct Checker<'a> {
     // `Locals::track`'s own doc comment for why declaration tracking
     // itself is also gated off whenever no probe is active, not just this
     // one read.
-    pub(crate) probe_var_provenance: Option<HashSet<Span>>,
+    pub(crate) probe_var_provenance: RefCell<Option<HashSet<Span>>>,
 }
 
 mod assignment;
@@ -882,9 +900,9 @@ impl<'a> Checker<'a> {
             static_var_names: HashSet::new(),
             rebind_target_classes: HashSet::new(),
             rebind_escape_all: false,
-            probe_span: None,
-            probe_hit: None,
-            probe_var_provenance: None,
+            probe_span: Cell::new(None),
+            probe_hit: RefCell::new(None),
+            probe_var_provenance: RefCell::new(None),
         }
     }
 
@@ -904,6 +922,23 @@ impl<'a> Checker<'a> {
     /// finds itself, rather than one overriding the other.
     pub fn set_pest_hook_properties(&mut self, props: HashSet<String>) {
         self.pest_hook_properties = props;
+    }
+
+    /// Phase 17 follow-up: the declaration-site counterpart of the
+    /// read-site probe hook already inline in `ExprKind::Variable` - stashes
+    /// `ty` in `probe_hit` when `span` is exactly the LSP's own hover-type
+    /// probe target (`probe_span`). A one-line call at every real
+    /// local-variable binding site (every `Locals::declare` call site: the
+    /// parameter-declare loops, `foreach`/`catch`/`static`/`global` binds,
+    /// destructuring-leaf binds), so hovering a variable at its own
+    /// declaration - not just a later read of it - shows an inferred type
+    /// too. `None` (every existing call site, `check-project` included) is
+    /// a complete no-op, the same contract every other probe hook in this
+    /// module already has.
+    pub(crate) fn probe_hit_at(&self, span: Span, ty: &Type) {
+        if self.probe_span.get() == Some(span) {
+            *self.probe_hit.borrow_mut() = Some(ty.clone());
+        }
     }
 
     /// The plain-message path every call site that needs nothing beyond
@@ -1034,7 +1069,7 @@ impl<'a> Checker<'a> {
         // Phase 17 follow-up: mirrors `check_function_with_ancestor_
         // hint`'s own identical wiring - a top-level-script-scope probe
         // (`lsp::navigation::ProbeScope::TopLevel`) needs this too.
-        top_locals.set_track(self.probe_span.is_some());
+        top_locals.set_track(self.probe_span.get().is_some());
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here, mirroring
         // `Registry::index_with_context`'s own identical walk exactly -

@@ -215,7 +215,7 @@ impl<'a> Checker<'a> {
         // active - see `Locals::track`'s own doc comment. Every clone of
         // `locals` from here on (every branch/loop this function's body
         // contains) carries this forward automatically.
-        locals.set_track(self.probe_span.is_some());
+        locals.set_track(self.probe_span.get().is_some());
         match sig {
             // The registry's FunctionSig already has PHPDoc types merged in
             // (Phase 2) - using it here, instead of re-deriving from the
@@ -262,6 +262,9 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
+                    // Phase 17 follow-up: see `Checker::probe_hit_at`'s
+                    // own doc comment.
+                    self.probe_hit_at(ast_param.name_span, &ty);
                     locals.declare(param.name.clone(), ty, ast_param.name_span);
                 }
             }
@@ -384,6 +387,9 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
+                    // Phase 17 follow-up: see `Checker::probe_hit_at`'s
+                    // own doc comment.
+                    self.probe_hit_at(p.name_span, &ty);
                     locals.declare(p.name.clone(), ty, p.name_span);
                 }
             }

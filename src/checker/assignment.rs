@@ -150,6 +150,9 @@ impl<'a> Checker<'a> {
             // recursion re-enters with `item.value` (each destructuring
             // leaf's own real `Expr`, own real span) for the latter case.
             ExprKind::Variable(name) => {
+                // Phase 17 follow-up: see `Checker::probe_hit_at`'s own
+                // doc comment.
+                self.probe_hit_at(lhs.span, &ty);
                 locals.declare(name.clone(), ty, lhs.span);
             }
             ExprKind::ArrayLiteral(items) => match &ty {
@@ -308,6 +311,7 @@ impl<'a> Checker<'a> {
             // Phase 17 follow-up: real rebind - `target` is a `foreach`
             // key's own bare `$var` expression (its only caller), a real
             // declaration site.
+            self.probe_hit_at(target.span, &ty);
             locals.declare(name.clone(), ty, target.span);
         }
     }

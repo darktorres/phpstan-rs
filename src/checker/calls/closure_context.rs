@@ -148,8 +148,9 @@ impl<'a> Checker<'a> {
                     let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
                     // Phase 17: see the identical fix's own comment at
                     // `checker::expr`'s `ExprKind::Closure` arm.
-                    if self.probe_span == Some(u.span) {
-                        self.probe_var_provenance = Some(provenance.iter().copied().collect());
+                    if self.probe_span.get() == Some(u.span) {
+                        *self.probe_var_provenance.borrow_mut() =
+                            Some(provenance.iter().copied().collect());
                     }
                     closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
                 }
@@ -224,8 +225,9 @@ impl<'a> Checker<'a> {
                         // Phase 17: see the identical fix's own comment at
                         // `checker::expr`'s `ExprKind::Closure` arm.
                         locals.declare(u.name.clone(), mutated, u.span);
-                        if self.probe_span == Some(u.span) {
-                            self.probe_var_provenance = Some([u.span].into_iter().collect());
+                        if self.probe_span.get() == Some(u.span) {
+                            *self.probe_var_provenance.borrow_mut() =
+                                Some([u.span].into_iter().collect());
                         }
                     } else {
                         let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);

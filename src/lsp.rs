@@ -258,13 +258,27 @@ impl Server {
                 let owners = resolve_member_owners(registry, &ty, member);
                 self.format_member_hover_multi(&owners, member)
             }
-            // A local variable's own declaration/read - no registry
-            // signature exists for it, and its inferred type isn't
-            // computed here (that would need its own probe, a further,
-            // undisclosed-as-needed follow-up) - no hover text, but a
-            // real, resolved position (`definition` still answers it).
-            navigation::Resolved::VariableSelf(_) | navigation::Resolved::VariableRead { .. } => {
-                None
+            // Phase 17 follow-up: a local variable's own declaration/read -
+            // no registry signature exists for it, but its inferred type
+            // is answerable via the identical throwaway-`Checker` probe
+            // `Instance` above already uses (`probe_receiver_type`'s own
+            // signature already matches both variants' fields exactly -
+            // "what type is at this span, in this scope" is the same
+            // question either way, not something specific to a receiver).
+            navigation::Resolved::VariableSelf {
+                span,
+                scope,
+                is_static,
+                class,
+            }
+            | navigation::Resolved::VariableRead {
+                span,
+                scope,
+                is_static,
+                class,
+            } => {
+                let ty = self.probe_receiver_type(*span, scope, *is_static, class.as_deref())?;
+                Some(ty.to_string())
             }
         }
     }
@@ -323,9 +337,9 @@ impl Server {
         class: Option<&str>,
     ) -> Option<Type> {
         let mut checker = Checker::new(self.project.registry());
-        checker.probe_span = Some(receiver_span);
+        checker.probe_span.set(Some(receiver_span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
-        checker.probe_hit
+        checker.probe_hit.into_inner()
     }
 
     /// Phase 17 follow-up: the local-variable-read counterpart of
@@ -347,10 +361,11 @@ impl Server {
         class: Option<&str>,
     ) -> Vec<Span> {
         let mut checker = Checker::new(self.project.registry());
-        checker.probe_span = Some(span);
+        checker.probe_span.set(Some(span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker
             .probe_var_provenance
+            .into_inner()
             .map(|set| set.into_iter().collect())
             .unwrap_or_default()
     }
@@ -392,7 +407,7 @@ impl Server {
         match &resolved {
             // The click's own position already is the answer - no probe
             // needed.
-            navigation::Resolved::VariableSelf(span) => {
+            navigation::Resolved::VariableSelf { span, .. } => {
                 return Some(GotoDefinitionResponse::Scalar(self.location(&path, *span)));
             }
             // Phase 17 follow-up: a real reaching-definitions probe -
@@ -477,7 +492,8 @@ impl Server {
                     _ => Some(GotoDefinitionResponse::Array(locs)),
                 }
             }
-            navigation::Resolved::VariableSelf(_) | navigation::Resolved::VariableRead { .. } => {
+            navigation::Resolved::VariableSelf { .. }
+            | navigation::Resolved::VariableRead { .. } => {
                 unreachable!("handled in the early match above")
             }
         }

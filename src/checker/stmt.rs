@@ -433,6 +433,7 @@ impl<'a> Checker<'a> {
                     // overwrites, so it's only called when there's
                     // nothing here yet to overwrite.
                     if !locals.contains_key(name) {
+                        self.probe_hit_at(stmt.span, &Type::Mixed);
                         locals.declare(name.clone(), Type::Mixed, stmt.span);
                     }
                 }
@@ -460,6 +461,7 @@ impl<'a> Checker<'a> {
                     // Phase 17 follow-up: real declaration - no per-name
                     // span exists on `StaticVar` (only the whole
                     // statement's), same as `Global` just above.
+                    self.probe_hit_at(stmt.span, &ty);
                     locals.declare(name.clone(), ty, stmt.span);
                     self.static_var_names.insert(name.clone());
                 }

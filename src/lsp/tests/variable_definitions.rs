@@ -149,6 +149,47 @@ fn hover_and_definition_on_a_top_level_instance_call_resolve_via_the_receivers_t
     assert_eq!(def["uri"], uri);
 }
 
+// Phase 17 follow-up: hover now shows an inferred type for a local
+// variable too, not just a class/function/member - both a read and the
+// variable's own declaration site, each via the real checker probe
+// (`Checker::probe_hit_at`), not a hand-rolled approximation.
+
+#[test]
+fn hover_on_a_variable_read_shows_its_inferred_type() {
+    let dir = TempDir::new("hover_var_read");
+    let src = "<?php function f(int $x) { echo $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[hover_request(2, &uri, pos)]);
+    assert_eq!(response_result(&messages, 2)["contents"], "int");
+}
+
+#[test]
+fn hover_on_a_parameter_declaration_shows_its_own_type() {
+    let dir = TempDir::new("hover_var_param_self");
+    let src = "<?php function f(int $x) { echo $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x) {");
+
+    let messages = run(&dir, &[hover_request(2, &uri, pos)]);
+    assert_eq!(response_result(&messages, 2)["contents"], "int");
+}
+
+#[test]
+fn hover_on_a_foreach_bindings_own_declaration_shows_its_element_type() {
+    let dir = TempDir::new("hover_var_foreach_self");
+    let src = "<?php function f(array $items) { foreach ($items as $v) { echo $v; } }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$v) {");
+
+    let messages = run(&dir, &[hover_request(2, &uri, pos)]);
+    assert_eq!(response_result(&messages, 2)["contents"], "mixed");
+}
+
 // Phase 17 follow-up: auto-vivification. A by-ref call argument, an
 // array index-write, or preg_match's own $matches out-parameter is a
 // variable's real first appearance when there's nothing declared for it
