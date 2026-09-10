@@ -17,10 +17,14 @@ survived; the twelfth is salvaged in corrected, narrower form rather than
 discarded, since its underlying premise held even though its original
 citation didn't. Round 4: 12 of 14 survived; both kills are noted at the
 top of that round's own section, one because it turned out to already be
-shipped. Round 5: 11 of 11 survived. Total: 68 confirmed findings across
-sections A-Y plus one corrected finding. Nothing here is scheduled; it's
-a grounded idea backlog, same status as ROADMAP's own "Newly identified
-gaps" until triaged into a numbered phase.
+shipped. Round 5: 11 of 11 survived. Round 6: 7 of 8 survived - a real
+signal of diminishing returns after six rounds, not a weaker pass; the
+one kill (detailed at the top of section Z) turned out to already be
+shipped in real PHPStan's mainline, just under a different file than the
+one first cited. Total: 75 confirmed findings across sections A-AD plus
+one corrected finding. Nothing here is scheduled; it's a grounded idea
+backlog, same status as ROADMAP's own "Newly identified gaps" until
+triaged into a numbered phase.
 
 Two structural facts most items below trace back to, repeatedly:
 
@@ -2063,5 +2067,293 @@ inferred type at all is editing the source to insert `PHPStan\dumpType()`
 and re-running the whole CLI - no channel, on-demand or continuous, for
 rendering a type or resolved parameter name without modifying source,
 since it has no LSP and no editor-facing rendering concept at all.
+
+**Effort: medium.**
+
+---
+
+# Round 6
+
+Six lenses aimed at the remaining unexplored territory: ROADMAP's
+"Won't-port" section (already self-flagging two items as mis-bucketed -
+a productive signal), two more whole-program design-pattern suggestion
+categories, an audit of real PHPStan's *newest* feature support (PHP 8.4
+asymmetric visibility and property hooks, more likely to have rough edges
+than its decade-old core), a third composer-hygiene axis, and dead
+enum-case detection. Smaller yield this round (8 raw proposals, 7
+survived) - a real signal of diminishing returns after six rounds, not a
+weaker methodology; one kill is worth reading for how it happened.
+
+---
+
+## Z. More `Won't-port`-mis-bucketed rules: registered only for phpstan.org's own issue-reproduction bot
+
+### Z1. Standalone numeric-string/float/bool array-key cast warnings
+
+Real PHPStan's `LiteralArrayKeyCastRule` (array-literal keys) and
+`ArrayDimCastRule` (`$arr['5']` read/write dim-fetch on any array-typed
+expression) are fully working, general-purpose, and need no third-party
+config to activate - but both live under `Rules/Playground/` and are
+registered *only* in `vendor/phpstan-src/issue-bot/playground.neon`,
+phpstan.org's own private issue-reproduction bot config. Grepping every
+`conf/*.neon` file (`config.neon`, `parametersSchema.neon`) for
+"Playground" returns zero rule-registration hits - no installable
+package, level config, or strict-rules extension ever turns these on for
+a real project. A pure product-distribution constraint, not a technical
+one: whenever a constant scalar array key's PHP-coerced form differs from
+what's written (`'5'` -> int `5`, `'08'` stays string since not
+canonical, `1.5` -> int `1` truncated, `true`/`false` -> `1`/`0`), these
+rules flag the silent cast - standalone, not only when it happens to
+collide with another key in the same literal. phpstan-rs's existing
+`array.duplicateKey` check (`checker/tests/array_key_validity.rs:
+404-419`) only fires on an actual collision; it never fires standalone
+and has no dim-fetch counterpart. phpstan-rs ships one binary/config
+surface to every user - there's no separate "internal demo" tier
+withholding a check from the shipped CLI - and already has the exact
+primitive needed: `is_canonical_int_key` (`checker/expr.rs:4092-4096`)
+plus constant-key tracking already threaded through array-literal
+building (`checker/expr/array_ops.rs:276,754`).
+
+**Effort: small.**
+
+*(A second candidate from this lens, real PHPStan's
+`Rules/Playground/NotAnalysedTraitRule.php` for unused-trait detection,
+was killed on verification: there are two distinct classes with the
+identical short name in different namespaces - the Playground one cited,
+and a separate mainline `Rules/Traits/NotAnalysedTraitRule.php` carrying
+`#[RegisteredRule(level: 4)]`, autowired into every real PHPStan run at
+level >=4. Real PHPStan already ships this check broadly; the finding
+cited the redundant, non-shipped twin and missed its shipped mainline
+sibling one directory over. phpstan-rs genuinely doesn't implement it
+(`checker/tests/trait_composition_and_conflicts.rs:149-158` explicitly
+asserts only 1 diagnostic where a real run would also flag the trait
+unused) - but that makes it a plain parity gap, not a beyond-parity one.
+Belongs in ROADMAP's "Traits+InternalTag" section (lines 975-979, which
+already tracks sibling `Traits/*.php` gaps) citing
+`Rules/Traits/NotAnalysedTraitRule.php`, not here.)*
+
+---
+
+## AA. More whole-program design-pattern suggestion rules
+
+Two more opt-in suggestions in the shape B1/B2/H-section items already
+established: a whole-program fact PHPStan's architecture can't cheaply
+compute (would need its 14-collector `CollectedDataNode` machinery to
+reconcile across parallel workers) that phpstan-rs's single-process,
+closed-world registry gets almost for free.
+
+### AA1. Whole-program "readonly candidate" suggestion for properties assigned exactly once
+
+For every declared, non-readonly, non-static, non-promoted property, a
+registry-build-time pass walks every `$this->prop = rhs`/`self::$prop =
+rhs` assignment site across the property's whole subclass-aware
+hierarchy and counts syntactic assignment *sites* (not RHS types - a
+different question from H3, which asks whether every RHS *type* across
+sites is narrower than the declared type; a property assigned once with
+a wide, non-narrowable RHS like a fresh `new DateTime()` triggers this
+but never H3, and a property assigned five times with five different
+literal-subtype values triggers H3 but never this). If the total count
+project-wide is exactly 1, and that single site is a plain `Assign`
+(never compound, never by-ref) lexically inside the declaring class's own
+`__construct()`, the property is a mechanically safe "add readonly"
+candidate - real PHP readonly semantics require initialization from
+exactly the declaring class's own scope, exactly once, so a single-site
+constructor-only assignment already satisfies both constraints before the
+diagnostic is even emitted. Real PHPStan's readonly machinery only ever
+validates a property *already* declared readonly against illegal
+re-assignment - `MissingReadOnlyPropertyAssignRule.php:33` and its
+PHPDoc sibling both explicitly skip any property that isn't already
+flagged readonly; it never reasons in the opposite direction. No
+PHPStan collector aggregates per-property assignment *counts* across
+files at all. phpstan-rs already has every primitive this needs,
+unconnected: the exact "is this write inside the declaring class's own
+constructor" signal already exists in `check_property_assignment`
+(`checker/property_assignment.rs:57-70`, the readonly-violation check's
+own gate, reusable in the opposite direction); `checker/unused/
+member_usage.rs`'s existing per-class `MemberUsage.writes: HashSet<
+String>` needs only to become a project-wide *count*; `PropertySig.
+is_readonly` (`registry/class_info.rs:26`) is exactly the flag a
+suggested codemod would flip.
+
+**Effort: medium.**
+
+### AA2. Suggest narrowing a public constructor to private/protected when it's only ever called from one factory method
+
+After the registry is built, walk every `new ClassName(...)` call site
+project-wide and, per class with a `Public` constructor, record the set
+of distinct enclosing-method identities (`current_class` +
+`current_method`, already tracked live on `Checker`,
+`src/checker.rs:510`) from which `new` targets it. If that set has
+exactly one member across the whole closed-world project, and that
+member is a static method of the class itself (a `create()`/
+`fromArray()`-style named constructor) rather than another instance
+method or the class's own constructor, suggest narrowing the constructor
+to enforce the factory as the sole entry point - excluding classes with
+zero call sites, abstract classes, classes extended elsewhere (a
+subclass needs a visible-enough constructor), and classes whose name
+escapes into any dynamic-instantiation-adjacent construct (`new $var(...)`,
+`ReflectionClass`, `unserialize`), mirroring the conservative
+all-or-nothing escape-hatch `MemberUsage::escaped` already uses for the
+analogous private-member-usage problem. Real PHPStan has no factory/
+named-constructor concept anywhere in its rule set (grepped both
+vendored trees for "factory"/"named constructor" - nothing but an
+unrelated `StaticTypeFactory` import); more fundamentally, its only
+whole-application member-usage rule gates on `isPrivate()` specifically
+because determining every call site of anything non-private needs its
+own cross-process collector reconciliation (cited already for B1) - the
+same cost applies identically to aggregating every `new ClassName(...)`
+call site's enclosing method across the whole project. phpstan-rs
+already does the two things this needs simultaneously during ordinary
+checking: `ExprKind::New`'s resolution of every constructor call's target
+class (`checker/expr.rs:1697`) and `Checker`'s live tracking of the
+enclosing method (`checker.rs:510`) - a project-wide pass only needs to
+record `(target_class, current_class, current_method)` triples during the
+existing walk.
+
+**Effort: medium.**
+
+---
+
+## AB. Two PHP 8.4 rough edges - one PHPStan hasn't caught up to itself, one it structurally can't
+
+Real PHPStan's newest feature support (asymmetric visibility, property
+hooks) is exactly where self-inconsistencies would be expected - unlike
+the decade-old core mechanisms every prior round already picked over.
+
+### AB1. Purity/impure-point enforcement for property hooks
+
+Real PHPStan's own `PropertyHooksProcessor::processPropertyHooks`
+(`Analyser/PropertyHooksProcessor.php:113-158`) explicitly gathers
+`ImpurePoint`s from a hook body via `pushNodeGatherer` (property
+assignments recorded at lines 123-131) and stores them on
+`PropertyHookReturnStatementsNode` (which exposes `getImpurePoints()`) -
+but `Rules/Pure/` contains only `PureFunctionRule.php`/`PureMethodRule.php`
+(consuming the ordinary function/method return-statements nodes), and
+`Rules/DeadCode/*WithoutImpurePointsCollector.php` has only Function/
+Method/Constructor variants - no `PurePropertyHookRule` and no
+property-hook-consuming collector exists anywhere. The impure-point data
+property hooks compute is gathered and then never read by any Rule or
+Collector - hooks get zero purity enforcement despite PHPStan's own
+plumbing being built for exactly that purpose. phpstan-rs already has
+both pieces this needs, just not connected to hooks: the registry-build-
+time transitive purity classifier (`registry/purity.rs`) and the
+one-directional `@phpstan-impure` tag-validation check
+(`check_declared_purity_tag`, `checker/noop.rs:267-304`), currently
+wired into exactly one call site - ordinary function/method declarations
+(`checker/function_decl.rs:198`). `checker/oop/property_hooks.rs`'s
+`check_get_hook`/`check_set_hook` (lines 141, 276) never call it. Since
+every phpstan-rs check is a hardcoded function call with no DI/Rule-
+registry indirection, adding one more call site to an already-built,
+already-tested classifier is additive wiring that closes a gap real
+PHPStan's own source shows it gathers the data for but never consumes.
+
+**Effort: medium.**
+
+### AB2. Dead-write detection for `public private(set)` properties
+
+`UnusedPrivatePropertyRule::processNode`
+(`Rules/DeadCode/UnusedPrivatePropertyRule.php:68`) gates entry into the
+entire rule on `if (!$property->isPrivate()) { continue; }`, checking
+only the base `Modifiers::PRIVATE` bit - entirely independent of
+`Modifiers::PRIVATE_SET`/`PROTECTED_SET`, which back separate methods on
+the very same class. So a PHP 8.4 property declared
+`public private(set) string $x` is skipped from the very first line, even
+though its write access is exactly as restricted to the declaring class
+as a fully-private property's - the "never written, only read"
+diagnostic this same rule already computes for plain-private properties
+is structurally unreachable for its asymmetric-visibility sibling.
+phpstan-rs's own mirrored scan currently has the identical gate
+(`if p.visibility != Visibility::Private { continue; }`,
+`checker/unused.rs:216`) - but its `PropertySig` already carries
+`write_visibility` as a field entirely separate from `visibility`
+(`registry/class_info.rs:41`), already consulted independently for real
+property-assignment access-checking and generic variance elsewhere in the
+same codebase. Extending `unused.rs`'s entry gate to also admit
+`p.write_visibility == Visibility::Private` needs no new data at all -
+unlike B1 (which needs a whole new cross-file usage-graph aggregation,
+effort: large), this is same-file, needing only a field phpstan-rs
+already computes and already uses elsewhere, just never consulted by
+this one check.
+
+**Effort: small.**
+
+---
+
+## AC. `misplaced.autoloadDevSymbol`: production code reaching a class only reachable under `autoload-dev`
+
+A third, distinct composer-hygiene axis from K (whole-*package*
+require/require-dev declaration hygiene) and R (a symbol's *own* declared
+location vs. where PSR-4 says it should live) - this asks whether a
+symbol is even loadable under a real production (`--no-dev`) install at
+all, given how the project's *own* `composer.json` splits
+`autoload.psr-4` vs `autoload-dev.psr-4`. For every resolved symbol
+reference, determine which PSR-4 root (if any) the *call-site file*
+falls under (production `autoload.psr-4` vs. dev-only
+`autoload-dev.psr-4`, longest-prefix match) and the same for the
+*declaration site*; flag when the caller resolves under production
+`autoload.psr-4` but the callee's only declared location resolves under
+`autoload-dev.psr-4` and not also under production - `composer
+dump-autoload --no-dev` drops the dev PSR-4 root entirely, so the class
+is simply absent from the generated classmap and the reference fatals at
+runtime with zero warning today, even though every normal dev-mode
+install (what CI and every local phpstan-rs/PHPStan invocation actually
+uses) resolves it fine. Real PHPStan's only autoload-dev-aware code reads
+a single `dev` boolean from `vendor/composer/installed.json` for the
+*entire current process* - it has no notion of "would this symbol still
+resolve under a *different*, hypothetical `--no-dev` install than the one
+actually running." A grep for "autoload-dev" across every `Rules/` file
+in both vendored trees returns zero hits. phpstan-rs already has every
+piece except the forward PSR-4-prefix-to-file lookup: `composer.rs`
+already parses a project's hand-authored `composer.json` via `serde_json`
+for `require`/`require-dev` and `name` - extending that same parse to
+also read `autoload.psr-4`/`autoload-dev.psr-4` is a direct extension of
+proven code. `DeclLocations.classes` (`project/decl_locations.rs:18-22`)
+already maps every declared symbol to its real file path project-wide
+(gated behind `retain_source`, same gap R1 already documents needing to
+close for batch runs). Notably sidesteps the "is this a test file"
+classification gap phpstan-rs has today (no general test-file heuristic
+exists, only `Pest.php`-runner-config detection) - the project's own
+composer.json already makes the production/dev split explicit and
+machine-readable, so a file covered by neither PSR-4 section just
+degrades to "no diagnostic," never a guess.
+
+**Effort: medium.**
+
+---
+
+## AD. Whole-program dead-enum-case detection
+
+A new opt-in check flagging a declared enum case (backed or pure) as dead
+when, project-wide, it's never referenced via `EnumName::CaseName`, never
+appears as a `match`/`switch` arm value, and is never provably produced
+by a literal argument to `::from()`/`::tryFrom()`. Real PHPStan's only
+two case-scoped rules are non-usage-based (`EnumCaseAttributesRule` just
+forwards attribute groups for target validity; `EnumSanityRule` only
+flags duplicate backing values/constructors/native-method redeclaration -
+neither cross-references a case against the rest of the project). More
+fundamentally, its only dead-code family (`UnusedPrivateMethodRule` and
+siblings, cited for B1) gates on `isPrivate()` - but a PHP enum case has
+no visibility syntax at all (phpstan-rs's own registration comment,
+`registry/class_info.rs:1010`, notes this directly: "always public"), so
+PHPStan's existing privacy-gated technique structurally has no
+`isPrivate()` case to ever match, even by extension. phpstan-rs already
+carries every piece as existing, unconnected infrastructure: cases are
+pre-registered per-FQN as `Type::EnumCase` in `ClassInfo.consts`
+(`registry/class_info.rs:1002-1024`), a reverse literal-value-to-case
+lookup already exists for a different purpose
+(`Registry::enum_case_for_value`, `registry/hierarchy.rs:604-611`, built
+for Phase 79's `::from()`/`::tryFrom()` narrowing), and the whole
+project's `Registry` is built once, single-process, before checking
+starts. A real gotcha the implementation must handle: `Match` arm
+conditions are walked generically by `expr_children`, but a `Switch`
+case's own `test` expression is *not* covered by generic `stmt_children`
+(`ast_walk.rs:174` only flat-maps each case's body) - `switch(){ case
+Suit::Hearts: }` needs the same manual special-case `member_usage.rs`/
+`var_usage.rs` already apply for `Switch` elsewhere. A non-literal
+`::from()`/`::tryFrom()` argument, a dynamic `Suit::{$expr}` access, or
+any call to `::cases()` marks the *whole enum* escaped, matching
+`MemberUsage.escaped`'s own conservative all-or-nothing precedent, since
+iterating `::cases()` is a legitimate, common way to use every case
+without ever spelling one out by name.
 
 **Effort: medium.**
