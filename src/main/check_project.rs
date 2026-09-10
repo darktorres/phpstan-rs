@@ -36,24 +36,25 @@ fn apply_level_filter(
     results
 }
 
-/// Loads one file into `project`, tolerating a parse failure rather than
-/// letting it crash the whole run. Returns `false` if the file couldn't
-/// be read or failed to load, in which case it's simply absent from
-/// `project` - same end state as never having attempted it, since the
-/// only place a `ParseError` can originate in `Project::load_file`'s
-/// pipeline is `parse()`, called before any registry/`self.files`
-/// mutation.
-fn try_load_file(project: &mut project::Project, path: &Path, analyzed: bool) -> bool {
-    let Ok(bytes) = fs::read(path) else {
-        return false;
-    };
+/// Reads and parses one file, tolerating a read/parse failure by
+/// returning `None` rather than letting it crash the whole run - same end
+/// state as never having attempted it. Pure: touches no `Project`/shared
+/// registry state at all, so calling this for many files concurrently
+/// (the point of splitting it out from `Project::load_file`) is safe -
+/// deliberately unaware of `analyzed`/context-vs-first-party status, which
+/// only matters once a parsed file reaches the sequential insert loop
+/// below (`Project::insert_parsed_file`'s own `analyzed` parameter).
+/// `catch_unwind` guards the lexer's own, separate, still-panic-based
+/// error handling (the parser itself no longer panics on ordinary
+/// malformed syntax) - the identical precaution `check.rs`'s own lex+parse
+/// worker threads already take, needed here for the same reason.
+fn read_and_parse_file(path: &Path) -> Option<(String, project::ParsedFile)> {
+    let bytes = fs::read(path).ok()?;
     let source = String::from_utf8_lossy(&bytes).into_owned();
-    let result = if analyzed {
-        project.load_analyzed_file(path.to_path_buf(), &source)
-    } else {
-        project.load_file(path.to_path_buf(), &source)
-    };
-    result.is_ok()
+    let parsed = std::panic::catch_unwind(|| project::parse_file(&source))
+        .ok()?
+        .ok()?;
+    Some((source, parsed))
 }
 
 // Phase 40's own new `phpstan_api_check_enabled` gate pushed this past
@@ -129,45 +130,86 @@ fn run_check_project(
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
+    // A bare rayon pool uses the default (small) OS worker-thread stack -
+    // the sibling `check` command's own `WORKER_STACK_SIZE` precedent
+    // (check.rs) and its doc comment record a real, non-adversarial stack
+    // overflow at ~200-300 levels of nested parens on a default-sized
+    // thread stack, well short of the parser's own `MAX_EXPR_DEPTH=1000`
+    // guard - relevant to both phases below, since parsing recurses
+    // through the same shape of nesting and the checker's own recursive
+    // AST walk (`checker/expr.rs` etc.) has no depth guard of its own
+    // either. One call-local pool (not `build_global()`) shared by both
+    // phases keeps this stack-size choice scoped to `check-project`
+    // instead of silently sizing every other future rayon caller in this
+    // binary, and avoids paying pool-construction cost twice.
+    const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
+    let pool = rayon::ThreadPoolBuilder::new()
+        .stack_size(WORKER_STACK_SIZE)
+        .build()
+        .expect("failed to build check-project worker pool");
+
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    // Context files load first: `Registry::index` resolves a
+    // Lexing+parsing each file is embarrassingly parallel - a pure
+    // computation over one file's own source text, with no dependency on
+    // (or mutation of) `project`'s shared registry at all (see
+    // `read_and_parse_file`/`ParsedFile`'s own doc comments). Measured on
+    // a full real-world monorepo corpus: once `check_file` below was
+    // already parallelized, sequential lexing+parsing became the
+    // dominant remaining cost - ~63% of total wall time - which is what
+    // this loop exists to close.
+    let context_parsed: Vec<Option<(String, project::ParsedFile)>> = pool.install(|| {
+        context_files
+            .par_iter()
+            .map(|p| read_and_parse_file(p))
+            .collect()
+    });
+    let analyze_parsed: Vec<Option<(String, project::ParsedFile)>> = pool.install(|| {
+        analyze_files
+            .par_iter()
+            .map(|p| read_and_parse_file(p))
+            .collect()
+    });
+    std::panic::set_hook(default_hook);
+
+    // Context files insert first: `Registry::index` resolves a
     // fully-qualified-name collision with plain last-write-wins (a bare
     // `HashMap::insert`, no existence check, no diagnostic), and while
     // the vendor-only filter in `composer::discover_vendor_context`
     // keeps a project's own first-party directories out of the context
     // set, it can't prevent a genuinely different vendor package
     // declaring a class under the same name as something in the user's
-    // own code (PHP allows unnamespaced global classes). Loading
+    // own code (PHP allows unnamespaced global classes). Inserting
     // context first guarantees the analyzed declaration - the one
     // actually being reported on - always wins the registry slot on any
-    // such collision.
-    let skipped_context = context_files
-        .iter()
-        .filter(|path| !try_load_file(&mut project, path, false))
-        .count();
-    let skipped_analyze = analyze_files
-        .iter()
-        .filter(|path| !try_load_file(&mut project, path, true))
-        .count();
-    std::panic::set_hook(default_hook);
+    // such collision (`analyzed: true` for `analyze_files`, `false` for
+    // `context_files` - see `Project::insert_parsed_file`'s own `analyzed`
+    // parameter doc comment for why this has to reach all the way down to
+    // class indexing). This insertion loop is the one part of loading
+    // that stays sequential: `Registry::index` is order-sensitive by
+    // design, and `par_iter().collect()` above already preserved each
+    // parsed result's original (sorted) index order, so this `zip`
+    // inserts in exactly the same order the old fully-sequential loop
+    // did.
+    let mut skipped_context = 0usize;
+    for (path, parsed) in context_files.iter().zip(context_parsed) {
+        match parsed {
+            Some((source, parsed)) => {
+                project.insert_parsed_file(path.clone(), parsed, source, false)
+            }
+            None => skipped_context += 1,
+        }
+    }
+    let mut skipped_analyze = 0usize;
+    for (path, parsed) in analyze_files.iter().zip(analyze_parsed) {
+        match parsed {
+            Some((source, parsed)) => {
+                project.insert_parsed_file(path.clone(), parsed, source, true)
+            }
+            None => skipped_analyze += 1,
+        }
+    }
     project.finish_loading();
-
-    // A bare rayon pool uses the default (small) OS worker-thread stack -
-    // the sibling `check` command's own `WORKER_STACK_SIZE` precedent
-    // (check.rs) and its doc comment record a real, non-adversarial stack
-    // overflow at ~200-300 levels of nested parens on a default-sized
-    // thread stack, well short of the parser's own `MAX_EXPR_DEPTH=1000`
-    // guard - and the checker's own recursive AST walk (`checker/expr.rs`
-    // etc.) has no depth guard of its own, so it needs the same headroom.
-    // A call-local pool (not `build_global()`) keeps this stack-size
-    // choice scoped to `check-project` instead of silently sizing every
-    // other future rayon caller in this binary.
-    const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
-    let pool = rayon::ThreadPoolBuilder::new()
-        .stack_size(WORKER_STACK_SIZE)
-        .build()
-        .expect("failed to build check-project worker pool");
 
     // Mirrors `check.rs`'s own catch_unwind-with-silenced-hook pattern: a
     // panic while checking one file is reported and skipped rather than

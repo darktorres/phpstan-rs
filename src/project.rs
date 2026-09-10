@@ -308,11 +308,37 @@ impl Project {
         source: &str,
         analyzed: bool,
     ) -> Result<(), ParseError> {
-        let ast = parse(source)?;
-        let (functions, classes) = declared_names(&ast);
-        let references = deps::referenced_names(&ast);
-        let ignore_lines = ignore_comments::ignored_lines(source);
-        let ignore_identifiers = ignore_comments::ignored_identifiers(source);
+        let parsed = parse_file(source)?;
+        self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
+        Ok(())
+    }
+
+    /// The order-sensitive second half of `load_file`, taking an
+    /// already-computed `ParsedFile` (see that type's own doc comment) -
+    /// the split exists so a caller loading many files at once (batch
+    /// `check-project`) can compute every file's `ParsedFile` in parallel
+    /// (pure, no `&self`/registry dependency at all) and then feed them
+    /// into this method one at a time, sequentially, in whatever order
+    /// its own collision-resolution policy needs - exactly the loop
+    /// `load_file` above already ran, just no longer coupled to also
+    /// doing the parse itself synchronously. `analyzed` has the same
+    /// meaning as `load_analyzed_file`'s own - see that method's doc
+    /// comment.
+    pub fn insert_parsed_file(
+        &mut self,
+        path: PathBuf,
+        parsed: ParsedFile,
+        source: String,
+        analyzed: bool,
+    ) {
+        let ParsedFile {
+            ast,
+            functions,
+            classes,
+            references,
+            ignore_lines,
+            ignore_identifiers,
+        } = parsed;
         self.registry.index(&ast, analyzed);
         if self.retain_source {
             self.decl_locations
@@ -330,10 +356,9 @@ impl Project {
                 references,
                 ignore_lines,
                 ignore_identifiers,
-                source: self.retain_source.then(|| source.to_string()),
+                source: self.retain_source.then_some(source),
             },
         );
-        Ok(())
     }
 
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
@@ -601,6 +626,50 @@ impl Default for Project {
 fn parse(source: &str) -> Result<Vec<Stmt>, ParseError> {
     let tokens = Lexer::new(source).tokenize_with_spans();
     Parser::new(tokens).parse_program()
+}
+
+/// Everything about loading one file that's pure - parsing, plus every
+/// fact derived only from the parsed AST or the raw source text, with no
+/// dependency on (or mutation of) a `Project`'s shared registry. Computing
+/// this for many files is embarrassingly parallel (confirmed measured:
+/// on a full real-world monorepo corpus, lexing+parsing this deriving
+/// data for one large batch of files took ~63% of a `check-project` run's
+/// total wall time once `check_file` itself was already parallelized -
+/// the dominant remaining sequential cost) - `insert_parsed_file` below
+/// does the remaining, order-sensitive registry-mutating half, meant to
+/// stay sequential and run in whatever order a caller's own
+/// collision-resolution policy needs (see that method's own doc comment).
+pub struct ParsedFile {
+    ast: Vec<Stmt>,
+    functions: Vec<String>,
+    classes: Vec<String>,
+    references: HashSet<String>,
+    ignore_lines: HashSet<u32>,
+    ignore_identifiers: HashMap<u32, Vec<String>>,
+}
+
+/// Computes a `ParsedFile` from `source` - see that type's own doc
+/// comment. Safe to call concurrently for many files at once (no shared
+/// state touched at all); still runs under the lexer's own, separate,
+/// still-panic-based error handling (unlike the parser, which no longer
+/// panics on ordinary malformed syntax - see `main/check.rs`'s identical
+/// note), so a caller parsing many files in parallel should still wrap
+/// each call in `catch_unwind`, the same precaution `check.rs`'s own
+/// lex+parse worker threads already take.
+pub fn parse_file(source: &str) -> Result<ParsedFile, ParseError> {
+    let ast = parse(source)?;
+    let (functions, classes) = declared_names(&ast);
+    let references = deps::referenced_names(&ast);
+    let ignore_lines = ignore_comments::ignored_lines(source);
+    let ignore_identifiers = ignore_comments::ignored_identifiers(source);
+    Ok(ParsedFile {
+        ast,
+        functions,
+        classes,
+        references,
+        ignore_lines,
+        ignore_identifiers,
+    })
 }
 
 /// Recursively collects every `.php` file under `path` - shared by the CLI
