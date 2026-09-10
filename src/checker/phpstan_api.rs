@@ -112,6 +112,7 @@ pub(crate) fn check_phpstan_api_usage(
         diagnostics: Vec::new(),
         current_prop_types: ParamTypes::new(),
         current_class_implements_phpstan_interface: false,
+        current_class_fqn: None,
         file_path,
     };
     let empty = ParamTypes::new();
@@ -335,6 +336,14 @@ struct Walker<'a> {
     // condition (real PHPStan's own `$scope->isInClass()` plus "does the
     // enclosing class implement a `PHPStan\*` interface").
     current_class_implements_phpstan_interface: bool,
+    // Phase 40.D: set once per `check_class`, alongside the two fields
+    // above (no nesting, no save/restore needed - PHP classes never
+    // nest) - `resolve_if_phpstan`'s own `self`/`static`/`parent`
+    // pseudo-class resolution needs this; `NameContext::resolve` has no
+    // special-casing for any of the three at all (confirmed by its own
+    // doc comment), and this standalone `Walker` has no other "current
+    // class" state of its own the way the main `Checker` does.
+    current_class_fqn: Option<String>,
     // Phase 40.6: `PhpStanNamespaceIn3rdPartyPackageRule`'s own real file
     // path on disk, used only to find the nearest `composer.json` upward
     // from it. `None` in every test (no real file on disk to point at) -
@@ -343,8 +352,24 @@ struct Walker<'a> {
 }
 
 impl<'a> Walker<'a> {
+    /// Phase 40.D: `self`/`static`/`parent` need resolving against
+    /// `current_class_fqn` before ever reaching `ctx.resolve` - that
+    /// function has no special-casing for any of the three (confirmed by
+    /// its own doc comment: "`self`/`parent`/`static`... never reach
+    /// here" is a promise the *main* `Checker`'s own callers uphold, not
+    /// something `NameContext` itself enforces), so without this,
+    /// `parent::someMethod()` inside a class extending a `PHPStan\*` base
+    /// silently resolved `"parent"` as a literal, always-unqualified bare
+    /// name and never matched `is_phpstan_namespace` at all.
     fn resolve_if_phpstan(&self, name: &str, ctx: &NameContext) -> Option<String> {
-        let fqn = ctx.resolve(name);
+        let fqn = match name {
+            "self" | "static" => self.current_class_fqn.clone()?,
+            "parent" => {
+                let current = self.current_class_fqn.as_deref()?;
+                self.registry.classes.get(current)?.extends.first()?.clone()
+            }
+            _ => ctx.resolve(name),
+        };
         is_phpstan_namespace(&fqn).then_some(fqn)
     }
 
@@ -610,12 +635,14 @@ impl<'a> Walker<'a> {
         self.current_prop_types = class_prop_types(c, ctx);
         self.current_class_implements_phpstan_interface =
             class_implements_phpstan_interface(&fqn, self.registry);
+        self.current_class_fqn = Some(fqn.clone());
         for m in &c.methods {
             let method_label = format!("{fqn}::{}", m.function.name);
             self.check_function(&m.function, ctx, &method_label);
         }
         self.current_prop_types = ParamTypes::new();
         self.current_class_implements_phpstan_interface = false;
+        self.current_class_fqn = None;
     }
 
     fn check_enum(&mut self, e: &EnumDecl, ctx: &NameContext) {
@@ -645,11 +672,13 @@ impl<'a> Walker<'a> {
         }
         self.current_class_implements_phpstan_interface =
             class_implements_phpstan_interface(&fqn, self.registry);
+        self.current_class_fqn = Some(fqn.clone());
         for m in &e.methods {
             let method_label = format!("{fqn}::{}", m.function.name);
             self.check_function(&m.function, ctx, &method_label);
         }
         self.current_class_implements_phpstan_interface = false;
+        self.current_class_fqn = None;
     }
 
     /// Phase 40.6: `PhpStanNamespaceIn3rdPartyPackageRule`, direct port

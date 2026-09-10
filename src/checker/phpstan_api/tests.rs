@@ -277,6 +277,90 @@ fn a_static_call_to_an_api_classs_own_constructor_is_still_flagged() {
     );
 }
 
+// Phase 40.D: `self`/`static`/`parent` pseudo-class resolution -
+// `NameContext::resolve` has no special-casing for any of the three, and
+// this standalone `Walker` (unlike the main `Checker`) previously had no
+// "current class" state at all to resolve them against.
+
+#[test]
+fn a_static_call_to_parent_on_a_non_api_base_is_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        class BaseRule {
+            public static function check() {}
+        }
+        "#,
+        r#"<?php
+        namespace PHPStan\Rules;
+        class MyRule extends BaseRule {
+            public static function run() {
+                parent::check();
+            }
+        }
+        "#,
+    );
+    // Also, separately, flags `extends BaseRule` itself (Phase 40.A) -
+    // both are real, independent findings; this test cares only about
+    // the `parent::check()` one.
+    assert!(
+        diags.iter().any(|d| d
+            .message
+            .contains("calling PHPStan\\Rules\\BaseRule::check()")),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_static_call_to_self_on_a_non_api_class_is_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace App;
+        function unused() {}
+        "#,
+        r#"<?php
+        namespace PHPStan\Rules;
+        class MyRule {
+            public static function check() {}
+            public static function run() {
+                self::check();
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0]
+            .message
+            .contains("calling PHPStan\\Rules\\MyRule::check()")
+    );
+}
+
+#[test]
+fn a_static_call_to_static_on_a_non_api_class_is_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace App;
+        function unused() {}
+        "#,
+        r#"<?php
+        namespace PHPStan\Rules;
+        class MyRule {
+            public static function check() {}
+            public static function run() {
+                static::check();
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0]
+            .message
+            .contains("calling PHPStan\\Rules\\MyRule::check()")
+    );
+}
+
 #[test]
 fn a_class_const_fetch_on_a_non_api_class_is_flagged() {
     let diags = diagnostics_for(
