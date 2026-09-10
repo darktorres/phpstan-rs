@@ -1042,6 +1042,89 @@ fn calling_an_unrelated_function_inside_a_phpstan_rule_class_is_not_flagged() {
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
+// Phase 40.F: `NodeConnectingVisitorAttributesRule` - `$node->getAttribute
+// ('parent'|'previous'|'next')` no longer works, only inside a class
+// implementing a `PHPStan\*` interface, only on a real `PhpParser\Node`
+// (sub)type receiver.
+
+#[test]
+fn getting_the_parent_node_attribute_inside_a_phpstan_rule_class_is_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check(\PhpParser\Node $node) {
+                $node->getAttribute('parent');
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    assert!(
+        diags[0]
+            .message
+            .contains("Node attribute 'parent' is no longer available")
+    );
+    assert_eq!(diags[0].identifier, "phpParser.nodeConnectingAttribute");
+}
+
+#[test]
+fn getting_an_unrelated_node_attribute_is_never_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check(\PhpParser\Node $node) {
+                $node->getAttribute('startLine');
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn getting_the_parent_node_attribute_outside_any_phpstan_rule_class_is_never_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule {
+            public function check(\PhpParser\Node $node) {
+                $node->getAttribute('parent');
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn getting_the_parent_attribute_on_a_real_node_subtype_is_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PhpParser {
+            class Node {}
+        }
+        namespace PhpParser\Node\Stmt {
+            class ClassMethod extends \PhpParser\Node {}
+        }
+        "#,
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check(\PhpParser\Node\Stmt\ClassMethod $node) {
+                $node->getAttribute('previous');
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    assert_eq!(diags[0].identifier, "phpParser.nodeConnectingAttribute");
+}
+
 #[test]
 fn instantiating_reflectionclass_inside_a_phpstan_rule_class_is_flagged() {
     let diags = diagnostics_for(

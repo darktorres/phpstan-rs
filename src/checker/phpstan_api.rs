@@ -75,7 +75,7 @@ use std::path::Path;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::checker::{Diagnostic, class_type_word};
+use crate::checker::{Diagnostic, class_type_word, literal_string_value};
 use crate::composer;
 use crate::registry::{NameContext, Registry};
 use crate::token::Span;
@@ -927,6 +927,56 @@ impl<'a> Walker<'a> {
         });
     }
 
+    /// Phase 40.F: `NodeConnectingVisitorAttributesRule`, direct port.
+    /// `$node->getAttribute('parent'|'previous'|'next')` used to work
+    /// when `$node` came through PHPStan's own `NodeConnectingVisitor`
+    /// (no longer the case - real PHPStan flags it as a stale idiom).
+    /// Gated on the identical `current_class_implements_phpstan_interface`
+    /// condition the sibling `RuntimeReflection*`/`OldPhpParser4ClassRule`
+    /// checks already use, plus `recv_fqn` (whatever the syntactically-
+    /// typed receiver slice above already resolved) being `PhpParser\Node`
+    /// or one of its own real subtypes (`Registry::is_subclass_of` is
+    /// self-inclusive, matching real `ObjectType::isSuperTypeOf`'s
+    /// identical semantics for an exact-type receiver).
+    fn check_node_connecting_attribute(
+        &mut self,
+        recv_fqn: &str,
+        method: &str,
+        args: &[Arg],
+        span: Span,
+        label: &str,
+    ) {
+        if !self.current_class_implements_phpstan_interface {
+            return;
+        }
+        if !method.eq_ignore_ascii_case("getAttribute") {
+            return;
+        }
+        if !self.registry.is_subclass_of(recv_fqn, "PhpParser\\Node") {
+            return;
+        }
+        let Some(first) = args.first() else { return };
+        let Some(name) = literal_string_value(&first.value) else {
+            return;
+        };
+        if !matches!(name.as_ref(), "parent" | "previous" | "next") {
+            return;
+        }
+        self.diagnostics.push(Diagnostic {
+            location: label.to_string(),
+            message: format!("Node attribute '{name}' is no longer available."),
+            span,
+            level: 0,
+            identifier: "phpParser.nodeConnectingAttribute".to_string(),
+            tip: Some(
+                "See: https://phpstan.org/blog/preprocessing-ast-for-custom-rules".to_string(),
+            ),
+            non_ignorable: false,
+            metadata: HashMap::new(),
+            fix: None,
+        });
+    }
+
     /// Phase 40.6: `RuntimeReflectionFunctionRule`'s own reporting half.
     fn check_runtime_reflection_function(&mut self, name: &str, span: Span, label: &str) {
         if !self.current_class_implements_phpstan_interface {
@@ -1161,6 +1211,14 @@ impl<'a> Walker<'a> {
                 }
             }
             ExprKind::MethodCall(recv, method, args, _) => {
+                if let ExprKind::Variable(name) = &recv.kind
+                    && let Some(fqn) = param_types.get(name)
+                {
+                    // Phase 40.F: independent of `is_phpstan_namespace` -
+                    // `$node` is typically a plain `PhpParser\Node`
+                    // subtype, not itself `PHPStan\*`-namespaced.
+                    self.check_node_connecting_attribute(fqn, method, args, e.span, label);
+                }
                 if let ExprKind::Variable(name) = &recv.kind
                     && let Some(fqn) = param_types.get(name)
                     && is_phpstan_namespace(fqn)

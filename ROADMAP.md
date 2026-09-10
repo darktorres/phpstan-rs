@@ -1252,10 +1252,11 @@ individually itemized:
   real, buildable exception this label previously mis-bucketed them
   under (they gate the *other* way - on the analyzed class itself
   implementing a `PHPStan\*` interface, not on a referenced class) -
-  Phase 40 now builds all three. `NodeConnectingVisitorAttributesRule`
-  remains unbuilt (a distinct concern - php-parser's own
-  `NodeConnectingVisitor` node-attribute population, not the "does this
-  class implement a PHPStan\* interface" fact the other three share).
+  Phase 40 now builds all three, plus `NodeConnectingVisitorAttributesRule`
+  itself (`phpParser.nodeConnectingAttribute` - never actually declined,
+  just left un-triaged here) - `$node->getAttribute('parent'|'previous'|
+  'next')` on a `PhpParser\Node` (sub)type receiver, gated the same
+  `current_class_implements_phpstan_interface` way as its three siblings.
 - `Playground/*` - registered only in phpstan.org's own issue-bot
   service, never the CLI analyzer.
 - DI/plugin-architecture wrapper classes with zero logic of their own
