@@ -1,0 +1,258 @@
+use crate::ast::*;
+use crate::checker::{Checker, Locals};
+use crate::types::Type;
+
+impl<'a> Checker<'a> {
+    /// Phase 15 continuation: the real, original PHPStan design -
+    /// `ConstantConditionRuleHelper::getBooleanType` - reinstated now
+    /// that `widen_coalesce_result`'s own general-case bug (discarding
+    /// the left side's type entirely instead of unioning it in) is fixed
+    /// and Phase 55's fixed-point loop convergence already fixed the
+    /// other reverted-before source of imprecision. Trusts `e`'s own
+    /// *inferred* type being exactly `Type::True`/`Type::False` - not
+    /// just a syntactic literal (`literal_truthiness`, this function's
+    /// own predecessor this session, is gone: a bare literal already
+    /// infers to `Type::True`/`Type::False` exactly, so inferred-type
+    /// trust is a strict superset of syntactic-literal trust, not a
+    /// different, incompatible design). `should_skip_constant_condition`
+    /// excludes every shape that has - or, for a `Call`-shaped condition,
+    /// deliberately doesn't yet have - its own separate, dedicated check.
+    pub(crate) fn inferred_constant_condition(&self, e: &Expr, locals: &Locals) -> Option<bool> {
+        if should_skip_constant_condition(e) {
+            return None;
+        }
+        match self.infer_expr(e, locals) {
+            Type::True => Some(true),
+            Type::False => Some(false),
+            _ => None,
+        }
+    }
+
+    /// `BooleanAndConstantConditionRule`/`BooleanOrConstantConditionRule` -
+    /// confirmed directly against `vendor/phpstan-src`: three independent
+    /// diagnostics (left side, right side, whole-expression result), the
+    /// left one unconditional, the other two gated by `is_first_level`
+    /// (`Checker::in_condition_position`'s own doc comment - real
+    /// PHPStan's `!isInFirstLevelStatement()` guard: skipped exactly when
+    /// this `&&`/`||` *is* the direct condition of an `if`/`while`/
+    /// ternary, since that's already covered by that construct's own
+    /// check). `whole` is the same `&Expr` `check_expr`'s own `ExprKind::
+    /// Binary` arm already has in hand - never reconstructed. Its own
+    /// diagnostic deliberately calls `infer_expr` directly rather than
+    /// going through `inferred_constant_condition` (unlike left/right,
+    /// above): `whole` is itself a `Binary(And|Or, ..)` node, exactly the
+    /// shape `should_skip_constant_condition` excludes so a *condition*
+    /// shaped like `&&`/`||` defers to this very function instead of
+    /// being double-reported by the generic if/while/ternary check -
+    /// routing this function's own result computation back through that
+    /// same skip-list would make it permanently unreachable.
+    ///
+    /// Real PHPStan's own `isLast`/`reportAlwaysTrueInLastCondition`
+    /// exemption (elseif-chain-position, `check_if`'s own equivalent) is
+    /// deliberately not replicated here: it comes from `LastConditionVisitor`,
+    /// which only ever tags nodes reachable from an `if`/`elseif` chain's
+    /// own condition list, never a bare `&&`/`||` reached as an ordinary
+    /// sub-expression - there is no "chain position" concept for one to
+    /// have, so nothing is actually being skipped by omitting it.
+    ///
+    /// `locals` here is deliberately the scope *before* `l`'s own
+    /// truthy/falsey narrowing, not the caller's already-narrowed one -
+    /// real bug found and fixed this session: an earlier version had the
+    /// caller pass its own already-`apply_narrowing`-ed scope for every
+    /// one of these three checks, including the *left* one - so a bare-
+    /// variable left operand (`$same && true`) was judged against a scope
+    /// where `$same` had *already* been narrowed truthy on the assumption
+    /// the left side holds, making it look constantly true by pure
+    /// circularity regardless of `$same`'s real, unnarrowed type. Real
+    /// corpus false positive this produced: `Piwigo\Controller\Admin\
+    /// ConfigurationSubController::processSizes`'s `if ($same and
+    /// $new_params->sizing->max_crop !== 0.0 and (...))`, where `$same`
+    /// is a genuinely reassignable local. Only the right-side check
+    /// genuinely wants the left-narrowed scope (confirmed against real
+    /// PHPStan's own `getRightScope()`) - narrowed internally here,
+    /// rather than by the caller, so the left check can never see it by
+    /// mistake again. The whole-result check also takes the *unnarrowed*
+    /// `locals`: `infer_expr`/`infer_binary`'s own `BinOp::And`/`Or` arms
+    /// already do their own internal left-narrowing before inferring the
+    /// right side's type, so handing them an already-narrowed scope would
+    /// double-apply it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn check_boolean_and_or(
+        &mut self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        whole: &Expr,
+        locals: &Locals,
+        label: &str,
+        is_first_level: bool,
+    ) {
+        let kind = if *op == BinOp::And {
+            "booleanAnd"
+        } else {
+            "booleanOr"
+        };
+        let symbol = if *op == BinOp::And { "&&" } else { "||" };
+        if let Some(value) = self.inferred_constant_condition(l, locals) {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Left side of {symbol} is always {}.",
+                    if value { "true" } else { "false" }
+                ),
+                l.span,
+                4,
+                &format!("{kind}.leftAlways{}", if value { "True" } else { "False" }),
+            );
+        }
+        if is_first_level {
+            return;
+        }
+        let mut narrowed = locals.clone();
+        self.apply_narrowing(l, &mut narrowed, *op == BinOp::And);
+        if let Some(value) = self.inferred_constant_condition(r, &narrowed) {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Right side of {symbol} is always {}.",
+                    if value { "true" } else { "false" }
+                ),
+                r.span,
+                4,
+                &format!("{kind}.rightAlways{}", if value { "True" } else { "False" }),
+            );
+        }
+        // Deliberately bypasses `inferred_constant_condition` here (unlike
+        // the left/right checks above): `whole` is itself a `Binary(And|
+        // Or, ..)` node, exactly the shape `should_skip_constant_condition`
+        // excludes - that exclusion exists so the generic if/while/ternary
+        // check defers a *condition* shaped like `&&`/`||` to this very
+        // function instead of double-reporting, not to gate this
+        // function's own whole-result computation against itself. Calling
+        // `inferred_constant_condition(whole, ..)` here would always
+        // return `None` (the same "dead code" shape as the `check_expr`
+        // dead-arm bug this session already found and fixed elsewhere).
+        let whole_value = match self.infer_expr(whole, locals) {
+            Type::True => Some(true),
+            Type::False => Some(false),
+            _ => None,
+        };
+        if let Some(value) = whole_value {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Result of {symbol} is always {}.",
+                    if value { "true" } else { "false" }
+                ),
+                whole.span,
+                4,
+                &format!("{kind}.always{}", if value { "True" } else { "False" }),
+            );
+        }
+    }
+
+    /// `LogicalXorConstantConditionRule` - confirmed directly against
+    /// `vendor/phpstan-src`: left/right only, no whole-expression-result
+    /// diagnostic and no `is_first_level` gating at all (unlike `&&`/
+    /// `||`) - `xor` doesn't short-circuit, so there's no "already
+    /// covered by the enclosing if/while's own check" overlap to avoid,
+    /// and no real rule for it exists to model that overlap regardless.
+    pub(crate) fn check_logical_xor(&mut self, l: &Expr, r: &Expr, locals: &Locals, label: &str) {
+        if let Some(value) = self.inferred_constant_condition(l, locals) {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Left side of xor is always {}.",
+                    if value { "true" } else { "false" }
+                ),
+                l.span,
+                4,
+                &format!(
+                    "logicalXor.leftAlways{}",
+                    if value { "True" } else { "False" }
+                ),
+            );
+        }
+        if let Some(value) = self.inferred_constant_condition(r, locals) {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Right side of xor is always {}.",
+                    if value { "true" } else { "false" }
+                ),
+                r.span,
+                4,
+                &format!(
+                    "logicalXor.rightAlways{}",
+                    if value { "True" } else { "False" }
+                ),
+            );
+        }
+    }
+}
+
+/// Real PHP's own two spellings for "this condition is always true":
+/// the literal `true`, and any non-zero integer literal (`while (1)`,
+/// a real, common pre-`true`-keyword-idiom carryover). Deliberately not
+/// attempting anything symbolic beyond a bare literal - a variable or
+/// expression that merely *evaluates* to a truthy constant isn't
+/// something this checker tracks precisely enough to trust here.
+pub(crate) fn is_truthy_literal(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Literal(Literal::Bool(true)) => true,
+        ExprKind::Literal(Literal::Int(n)) => *n != 0,
+        _ => false,
+    }
+}
+
+/// Phase 15 continuation: real PHPStan's own `ConstantConditionRuleHelper
+/// ::shouldSkip`, confirmed directly against `vendor/phpstan-src` - every
+/// one of these shapes has its own separate, dedicated rule (an
+/// equality/identity/ordering comparison, `instanceof`, `!`, `&&`/`||`,
+/// a ternary). Excluding them here means `inferred_constant_condition`
+/// only ever answers for the shapes that genuinely have nowhere else to
+/// be caught.
+///
+/// A bare function/method/static call condition (real PHPStan's own
+/// `FunctionCallConstantConditionRule`/`*Helper`) is **not** excluded
+/// here, unlike an earlier version of this comment claimed - re-verified
+/// directly, not assumed, after `PHASE_DEPENDENCIES.md`'s own "genuinely
+/// independent" framing turned out to disagree with this file's own
+/// stale reasoning. Reading `FunctionCallConstantConditionHelper.php` in
+/// full reveals it isn't a separate rule at all: it's the exact same
+/// `if`/`while`/`elseif`/`ternary`/`&&`/`||` rules this project already
+/// has, deferring *their own* reporting - through a shared helper, not a
+/// Collector - only when their own condition happens to be a call, for
+/// two narrow reasons neither of which needs whole-codebase aggregation:
+/// (1) dedup against a sibling `ImpossibleCheckType*` rule family this
+/// project has no equivalent of at all, so this concern doesn't apply
+/// here; (2) reconciling a *trait* method's own call condition across
+/// every class that `use`s it, which `check_trait_methods`'s own
+/// existing per-host re-check plus its own span+message dedup already
+/// provides generically, no new mechanism needed. So a bare call
+/// condition is just another shape `inferred_constant_condition` answers
+/// for directly, the same as any other - real PHPStan's own message/
+/// identifier for it is always whichever rule's own (`if.alwaysTrue`,
+/// `while.alwaysTrue`, ...), never a separate one of its own, confirming
+/// there's genuinely nothing more to build here than removing the
+/// exclusion.
+fn should_skip_constant_condition(e: &Expr) -> bool {
+    matches!(
+        &e.kind,
+        ExprKind::Binary(
+            BinOp::Eq
+                | BinOp::NotEq
+                | BinOp::Identical
+                | BinOp::NotIdentical
+                | BinOp::Gt
+                | BinOp::GtEq
+                | BinOp::Lt
+                | BinOp::LtEq,
+            _,
+            _,
+        ) | ExprKind::Instanceof(_, _)
+            | ExprKind::Unary(UnaryOp::Not, _)
+            | ExprKind::Binary(BinOp::And | BinOp::Or, _, _)
+            | ExprKind::Ternary(_, _, _)
+    )
+}
