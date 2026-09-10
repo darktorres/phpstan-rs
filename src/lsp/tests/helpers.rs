@@ -72,6 +72,49 @@ pub(super) fn notification(method: &str, params: Value) -> Value {
     json!({"jsonrpc": "2.0", "method": method, "params": params})
 }
 
+/// Loads `files` (each `(name, contents)`) into a fresh workspace via
+/// `initialize`'s own `rootUri` scan, then sends `extra` requests/
+/// notifications, then `exit`. Returns every response/notification
+/// `run_loop` wrote.
+pub(super) fn run(dir: &TempDir, extra: &[Value]) -> Vec<Value> {
+    let mut input = vec![request(
+        1,
+        "initialize",
+        json!({"rootUri": dir.uri(), "capabilities": {}}),
+    )];
+    input.extend_from_slice(extra);
+    input.push(notification("exit", json!({})));
+    let bytes = encode(&input);
+    let mut reader = Cursor::new(bytes);
+    let mut writer = Vec::new();
+    run_loop(&mut reader, &mut writer);
+    decode_all(&writer)
+}
+
+pub(super) fn hover_request(id: i64, uri: &str, pos: Value) -> Value {
+    request(
+        id,
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": pos}),
+    )
+}
+
+pub(super) fn definition_request(id: i64, uri: &str, pos: Value) -> Value {
+    request(
+        id,
+        "textDocument/definition",
+        json!({"textDocument": {"uri": uri}, "position": pos}),
+    )
+}
+
+pub(super) fn response_result(messages: &[Value], id: i64) -> Value {
+    messages
+        .iter()
+        .find(|m| m["id"] == id)
+        .unwrap_or_else(|| panic!("no response with id {id} in {messages:?}"))["result"]
+        .clone()
+}
+
 /// A fresh, unique scratch directory per test - real files on disk,
 /// since `load_workspace` walks the real filesystem via
 /// `collect_php_files`/`std::fs::read`, not something worth faking.
