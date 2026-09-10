@@ -15,6 +15,7 @@ mod constant_conditions;
 mod contextual_callback_params;
 mod control_flow;
 mod date_interval;
+mod date_time_method_return_types;
 mod declaration_sanity;
 mod deprecated_usage;
 mod diagnostic_identifiers;

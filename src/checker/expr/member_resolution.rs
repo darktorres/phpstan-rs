@@ -1,8 +1,11 @@
 use crate::ast::*;
+use crate::checker::expr::builtin_calls::{
+    date_format_return_type, date_interval_format_return_type,
+};
 use crate::checker::expr::doctrine_query_result_list_type;
 use crate::checker::expr::is_doctrine_query_get_result;
 use crate::checker::type_union::union_types;
-use crate::checker::{Checker, Locals, resolve_call_args};
+use crate::checker::{Checker, Locals, literal_string_value, resolve_call_args};
 use crate::registry::{FunctionSig, PropertySig};
 use crate::types::{self, Type};
 
@@ -400,6 +403,69 @@ impl<'a> Checker<'a> {
         match recv_ty {
             Type::Object(class, _) if is_doctrine_query_get_result(self, class, method) => {
                 doctrine_query_result_list_type()
+            }
+            // Phase 78: `DateTimeInterface::format()`'s own already-
+            // shipped `date()` format-character table applies verbatim -
+            // real, substantial corpus usage (dozens of literal
+            // `->format('...')` sites). Falls back to the stub's own
+            // plain `string` (unchanged) whenever the format isn't a
+            // literal, or contains a character the table doesn't
+            // confidently classify.
+            Type::Object(class, _)
+                if method == "format"
+                    && self.registry.is_subclass_of(class, "DateTimeInterface") =>
+            {
+                args.first()
+                    .and_then(|a| literal_string_value(&a.value))
+                    .and_then(|fmt| date_format_return_type(&fmt))
+                    .unwrap_or(Type::String)
+            }
+            // Phase 78: `DateInterval::format()`'s own hand-rolled
+            // specifier table - see `date_interval_format_return_type`'s
+            // own doc comment for why the zero-valued representative
+            // substitution is genuinely sound (not just an
+            // approximation) for the fixed-width specifiers.
+            Type::Object(class, _)
+                if method == "format" && self.registry.is_subclass_of(class, "DateInterval") =>
+            {
+                args.first()
+                    .and_then(|a| literal_string_value(&a.value))
+                    .and_then(|fmt| date_interval_format_return_type(&fmt))
+                    .unwrap_or(Type::String)
+            }
+            // Phase 78: `DateTimeInterface::diff()` narrows the stub's own
+            // plain `DateInterval` return type to also carry a real,
+            // always-int `days` property - mirrors real PHPStan's own
+            // tiny stub-file override (this project deliberately never
+            // vendors PHPStan's own stub files, so reproduced directly
+            // here instead). Real, direct corpus usage with no clamping
+            // user-declared return type.
+            Type::Object(class, _)
+                if method == "diff" && self.registry.is_subclass_of(class, "DateTimeInterface") =>
+            {
+                Type::Intersection(vec![
+                    Type::Object("DateInterval".to_string(), Vec::new()),
+                    Type::ObjectShape(vec![("days".to_string(), Type::Int, false)]),
+                ])
+            }
+            // Phase 78: `SimpleXMLElement::asXML()`'s real 0-arg/1-arg
+            // overload split (verified against real PHPStan's own
+            // `SimpleXMLElementAsXMLMethodReturnTypeExtension`, whose
+            // arity check is the *opposite* direction the design doc's
+            // own paraphrase had it: exactly one argument - a filename to
+            // write to - returns `bool` (write success/failure); zero
+            // arguments (or any other count) returns the XML itself,
+            // `string|false`). Deliberately doesn't extend to the
+            // separate `saveXML()` alias method, matching real PHPStan's
+            // own narrower scope.
+            Type::Object(class, _)
+                if method == "asXML" && self.registry.is_subclass_of(class, "SimpleXMLElement") =>
+            {
+                if args.len() == 1 {
+                    Type::Bool
+                } else {
+                    Type::Union(vec![Type::String, Type::False])
+                }
             }
             Type::Object(class, type_args) => self
                 .registry

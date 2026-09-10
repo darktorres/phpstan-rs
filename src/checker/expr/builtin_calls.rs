@@ -2422,7 +2422,7 @@ fn idate_format_char_range(c: char) -> Option<(i64, i64)> {
 /// `switch` cases, collapsed from "the exact literal/numeric-string type"
 /// down to this coarser yes/no (Phase 77's own scope: a static table, not
 /// a runtime `date()` simulation).
-fn date_format_char_is_always_numeric(c: char) -> Option<bool> {
+pub(crate) fn date_format_char_is_always_numeric(c: char) -> Option<bool> {
     match c {
         // Digits-only output: day/week/month/year numbers, hour/minute/
         // second/sub-second, the leap-year and DST 0/1 flags, Swatch
@@ -2449,7 +2449,7 @@ fn date_format_char_is_always_numeric(c: char) -> Option<bool> {
 /// literal format then always produces non-empty text (`Accessory::
 /// NonEmptyString`), additionally numeric text
 /// (`Accessory::NumericString`) only when every character does.
-fn date_format_return_type(format: &str) -> Option<Type> {
+pub(crate) fn date_format_return_type(format: &str) -> Option<Type> {
     if format.is_empty() {
         // Real `date('')` returns `''` - a degenerate literal this
         // project already infers precisely via the generic stub path
@@ -2467,6 +2467,98 @@ fn date_format_return_type(format: &str) -> Option<Type> {
     let mut members = vec![Type::String, Type::Accessory(AccessoryKind::NonEmptyString)];
     if all_numeric {
         members.push(Type::Accessory(AccessoryKind::NumericString));
+    }
+    Some(Type::Intersection(members))
+}
+
+/// `DateInterval::format($format)`'s own per-specifier substitution
+/// value for a *representative* zero-valued interval (`new DateInterval
+/// ('P0D')`), used only to derive structural accessory facts about the
+/// real output (never returned as a literal itself - the real interval's
+/// actual magnitude is unknown). Transcribed from real PHP's own
+/// documented `DateInterval::format()` specifier table. `%a` (total days)
+/// uses the same conservative `"(unknown)"` representative real PHPStan's
+/// own `DateIntervalFormatReturnTypeHelper` falls back to whenever it
+/// can't prove the receiver's `->days` is a real `int` (i.e. the common
+/// case here, since this project doesn't track that per-instance fact for
+/// an arbitrary `DateInterval`-typed value) - deliberately not the `diff()`-
+/// derived, real-int-`days` branch. `%R`/`%r` (sign) use real PHP's own
+/// positive/non-inverted representative (`"+"`/`""`) - the same
+/// unconditional simplification real PHPStan's own helper makes (it runs
+/// against one fixed representative object, never branching on inversion).
+/// Deliberately skips lowercase/uppercase accessory tracking (`%a` vs
+/// `%A`-style case distinctions elsewhere), matching this project's own
+/// established never-track-case-content precedent.
+fn date_interval_format_char_value(c: char) -> Option<&'static str> {
+    match c {
+        'Y' => Some("0000"),
+        'y' => Some("0"),
+        'M' => Some("00"),
+        'm' => Some("0"),
+        'D' => Some("00"),
+        'd' => Some("0"),
+        'H' => Some("00"),
+        'h' => Some("0"),
+        'I' => Some("00"),
+        'i' => Some("0"),
+        'S' => Some("00"),
+        's' => Some("0"),
+        'F' => Some("000000"),
+        'f' => Some("0"),
+        'R' => Some("+"),
+        'r' => Some(""),
+        'a' => Some("(unknown)"),
+        '%' => Some("%"),
+        _ => None,
+    }
+}
+
+/// Substitutes every `%`-specifier in `format` with its own representative
+/// value (`date_interval_format_char_value`), passing every other
+/// character through verbatim (`DateInterval::format()`'s own literal-text
+/// semantics, unlike `date()`'s own all-characters-are-specifiers
+/// grammar) - `None` ("don't guess") on a truncated trailing `%` or an
+/// unrecognized specifier character.
+fn date_interval_format_literal(format: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut chars = format.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        let spec = chars.next()?;
+        out.push_str(date_interval_format_char_value(spec)?);
+    }
+    Some(out)
+}
+
+/// `DateInterval::format($format)`'s own real return type for a literal
+/// `$format` - `None` (today's plain `string`, unchanged) on anything
+/// `date_interval_format_literal` doesn't confidently substitute.
+/// Because every zero-width-varying specifier real PHP zero-pads to a
+/// fixed width (`%Y`/`%M`/.../`%F`) or substitutes a fixed non-numeric
+/// literal (`%R`, `%a`), the representative substitution's own accessory
+/// properties (non-empty, non-falsy, purely numeric) hold for *every*
+/// real interval magnitude, not just the zero one - genuinely sound, not
+/// an approximation, for those specifiers. `%r`/bare `%d`/`%m`/.../`%f`
+/// can legitimately format to `""`/`"0"` for a real interval (matching
+/// the representative exactly), so correctly contribute no extra
+/// accessory guarantee there, the same restraint real PHPStan's own
+/// helper shows.
+pub(crate) fn date_interval_format_return_type(format: &str) -> Option<Type> {
+    let value = date_interval_format_literal(format)?;
+    let mut members = vec![Type::String];
+    if types::is_numeric_string_literal(&value) {
+        members.push(Type::Accessory(AccessoryKind::NumericString));
+    }
+    if !value.is_empty() && value != "0" {
+        members.push(Type::Accessory(AccessoryKind::NonFalsyString));
+    } else if !value.is_empty() {
+        members.push(Type::Accessory(AccessoryKind::NonEmptyString));
+    }
+    if members.len() == 1 {
+        return None;
     }
     Some(Type::Intersection(members))
 }

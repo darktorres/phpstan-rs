@@ -422,6 +422,14 @@ silently ignoring the flag). `curl_getinfo`'s ~73-entry table, the
 `pathinfo()`/`parse_url()`/`sscanf()`/`stat()` family,
 `get_called_class`/`get_parent_class`/`gettype`/`get_debug_type`.
 `DateInterval::__construct()`'s own duration-string grammar validation.
+`DateTimeInterface::format()`/`DateInterval::format()` return-type
+wiring (the shared `date()` format-character table for the former; a
+hand-rolled, zero-valued-representative specifier table for the
+latter - genuinely sound, not an approximation, for every fixed-width
+specifier), `DateTimeInterface::diff()` narrowing its result to
+`DateInterval&object{days: int}`, and `SimpleXMLElement::asXML()`'s
+real arity-dependent overload split (one argument - a filename - is
+`bool`; zero arguments is `string|false`).
 `UnreachableStatementRule` (`deadCode.unreachable`, level 4), reported
 once per maximal unreachable run without skipping analysis of the rest.
 
@@ -874,11 +882,14 @@ infrastructure this project doesn't have, with no corpus evidence of
 heavy usage to justify building it speculatively.
 
 **78 - DateTime/DOM/SimpleXML, remaining (PARTIAL).** `DateInterval`'s
-own duration-string grammar is done (see Done). `DOMDocument`/
-`SimpleXMLElement` XML-content validation and `DateTime`'s relative-
-date-string parsing both need real PHP-runtime/XML-parser simulation
-this project has no way to do - low-priority, possibly a permanent
-boundary rather than concretely scheduled.
+own duration-string grammar, `DateTimeInterface::format()`/`DateInterval::
+format()` return-type wiring, `DateTimeInterface::diff()`'s `days: int`
+narrowing, and `SimpleXMLElement::asXML()`'s arity-dependent overload
+split are all done (see Done). `DOMDocument`/`SimpleXMLElement` XML-content
+validation and `DateTime`'s relative-date-string parsing both need real
+PHP-runtime/XML-parser simulation this project has no way to do -
+low-priority, possibly a permanent boundary rather than concretely
+scheduled.
 
 **80 - Object-shape/key-of/conditional-type syntax, remaining
 (PARTIAL).** `object{...}` shapes, `value-of<T>`/`key-of<T>`,

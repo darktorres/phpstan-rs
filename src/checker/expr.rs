@@ -1073,19 +1073,28 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                let result = match &receiver {
-                    Some((class, _, _, _)) if is_doctrine_query_get_result(self, class, method) => {
-                        doctrine_query_result_list_type()
-                    }
-                    Some((class, _, _, _)) => sig
-                        .as_ref()
-                        .map(|s| {
-                            let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
-                            self.resolve_pseudo(&resolved_ty, class)
-                        })
-                        .unwrap_or(Type::Mixed),
-                    None => Type::Mixed,
-                };
+                // Real bug found and fixed this session: this arm used to
+                // re-derive the call's own return type independently
+                // (branching on `receiver`/`sig` directly, hand-rolling
+                // just the one Doctrine special case) instead of
+                // delegating to `method_call_return_type` - the same
+                // function `infer_expr`'s own identical arm already uses.
+                // The two had quietly drifted apart: every special case
+                // added to `method_call_return_type` since (Phase 78's
+                // `DateTimeInterface::format()`/`diff()`, `DateInterval::
+                // format()`, `SimpleXMLElement::asXML()`) silently never
+                // applied here, and even the plain `Union`/`Intersection`
+                // per-member precision `method_call_return_type` itself
+                // already has (see its own doc comment) was missing here
+                // too - concretely, `$diff = $a->diff($b); $diff->days;`
+                // (the assignment path, `check_expr`) inferred plain
+                // `DateInterval` for `$diff`, silently discarding the
+                // `days: int` refinement that the exact same call written
+                // as one direct chain (`$a->diff($b)->days`, the
+                // `infer_expr` path `PropertyAccess` walks through)
+                // already got right. Delegating here instead keeps the
+                // two paths permanently in sync.
+                let result = self.method_call_return_type(&recv_ty, method, args, locals);
                 // `$x?->method()` short-circuits to `null` when `$x` is
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
