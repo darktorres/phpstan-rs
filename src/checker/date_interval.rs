@@ -19,8 +19,9 @@
 //! `DateInterval`'s own small, precisely-specified duration syntax, with
 //! no comparable "just verify against real php, case by case" shortcut.
 
-use crate::ast::{Arg, Expr, ExprKind, Literal};
+use crate::ast::{Arg, ExprKind, Literal};
 use crate::checker::Checker;
+use crate::checker::expr::unwrap_grouping;
 use crate::token::Span;
 
 impl<'a> Checker<'a> {
@@ -58,13 +59,6 @@ impl<'a> Checker<'a> {
             0,
             "argument.type",
         );
-    }
-}
-
-fn unwrap_grouping(e: &Expr) -> &Expr {
-    match &e.kind {
-        ExprKind::Grouping(inner) => unwrap_grouping(inner),
-        _ => e,
     }
 }
 
