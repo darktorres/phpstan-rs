@@ -731,6 +731,7 @@ pub(crate) mod phpstan_api;
 mod resolve;
 mod stmt;
 mod throws;
+mod type_union;
 mod uninitialized;
 mod uninitialized_dataflow;
 mod unused;
@@ -748,7 +749,7 @@ pub(crate) use control_flow::{
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{
-    build_matched_shape, int_range_bounds, normalize_int_range, union_types, unwrap_grouping,
+    build_matched_shape, int_range_bounds, normalize_int_range, unwrap_grouping,
 };
 pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::has_explicit_mixed_nested_somewhere;
@@ -757,17 +758,18 @@ pub(crate) use oop::{
     ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER, ATTRIBUTE_TARGET_PROPERTY,
 };
 pub(crate) use throws::body_contains_explicit_throw;
+pub(crate) use type_union::union_types;
 // Only ever called by `union_types` itself in real code (`checker/expr.rs`) -
 // this crate-level re-export exists solely so this module's own test
 // suite can exercise it directly, the same reason `preg_match_matches_shape`
 // isn't re-exported either.
-#[cfg(test)]
-pub(crate) use expr::generalize_by_key_set;
 pub(crate) use narrowing::{
     array_value_type_for_key, is_real_variable_key, is_unsealed_shape,
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
     narrow_type_to, narrowing_key, purge_stale_narrowing_for,
 };
+#[cfg(test)]
+pub(crate) use type_union::generalize_by_key_set;
 pub(crate) use visibility::MemberVisibilityCheck;
 
 impl<'a> Checker<'a> {

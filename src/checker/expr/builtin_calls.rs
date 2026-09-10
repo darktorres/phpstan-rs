@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::checker::type_union::union_types;
 use crate::checker::{
     Checker, Locals, literal_string_key, literal_string_value, narrow_type_excluding,
     narrow_type_excluding_falsy, narrow_type_to, resolve_call_args, to_absolute_number,
@@ -8,7 +9,7 @@ use crate::types::{self, AccessoryKind, Type};
 
 use super::{
     int_range_bounds, is_canonical_int_key, is_false_literal, is_non_falsy_string, is_true_literal,
-    normalize_int_range, union_types,
+    normalize_int_range,
 };
 
 impl<'a> Checker<'a> {

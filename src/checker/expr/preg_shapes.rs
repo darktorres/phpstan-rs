@@ -1,8 +1,7 @@
 use crate::ast::*;
+use crate::checker::type_union::union_types;
 use crate::regex_groups;
 use crate::types::{AccessoryKind, Type};
-
-use super::union_types;
 
 /// The type of one matched group's "leaf" value in `preg_match`'s own
 /// `$matches` shape - plain `string` normally, or the real, positional
