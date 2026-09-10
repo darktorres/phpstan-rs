@@ -13,11 +13,13 @@ surveying agent's own claim) before being kept. Round 1: 14 of 18 survived;
 the other 4 (section E) were provisionally dropped only because their
 citation, `phpstan/phpstan-strict-rules`, wasn't vendored yet - it now is,
 and all 4 are included. Round 2: 15 of 15 survived. Round 3: 11 of 12
-survived; the twelfth is salvaged in corrected, narrower form at the end
-rather than discarded, since its underlying premise held even though its
-original citation didn't. Total: 45 confirmed findings across sections
-A-N plus one corrected finding. Nothing here is scheduled; it's a grounded
-idea backlog, same status as ROADMAP's own "Newly identified gaps" until
+survived; the twelfth is salvaged in corrected, narrower form rather than
+discarded, since its underlying premise held even though its original
+citation didn't. Round 4: 12 of 14 survived; both kills are noted at the
+top of that round's own section, one because it turned out to already be
+shipped. Total: 57 confirmed findings across sections A-T plus one
+corrected finding. Nothing here is scheduled; it's a grounded idea
+backlog, same status as ROADMAP's own "Newly identified gaps" until
 triaged into a numbered phase.
 
 Two structural facts most items below trace back to, repeatedly:
@@ -1221,3 +1223,491 @@ already have *some* tip (static, not computed); method genuinely has
 none, in either codebase.
 
 **Effort: small.**
+
+---
+
+# Round 4
+
+Six more lenses, explicitly pointed at territory the first three rounds
+never mined: ROADMAP's own "Reverted" and "Pending / partial" sections,
+whole-program API-compatibility diffing, PSR-4 filesystem consistency,
+Composer monorepo/path-repository support, and interactive diagnostic
+explainability. 12 of 14 raw proposals survived verification; both kills
+are worth knowing about even though nothing was added for them - one
+turned out to already be shipped (`check_declared_purity_tag`,
+`src/checker/noop.rs:267-304`, wired into `function_decl.rs:198`,
+already consulting `FunctionSig::is_transitively_pure` exactly as
+proposed), and one rested entirely on an uncited "core diff engine" that
+turned out to just be Q1 below, so it's subsumed rather than lost.
+
+---
+
+## O. Reattempting reverted features with real PHPStan's actual technique
+
+ROADMAP's "Reverted" section (grep for that heading) lists features
+phpstan-rs once built, corpus-verified, then undid after real false
+positives. Both items below found that the *revert* was correct given
+what phpstan-rs had available at the time, but that real PHPStan solves
+the identical case with a specific technique phpstan-rs's attempt never
+used - not a coincidence PHPStan avoided the bug, a real mechanism to
+port.
+
+### O1. Foreach's zero-iteration merge: real PHPStan's asymmetric, certainty-downgrading join instead of a symmetric type-union
+
+Real PHPStan does NOT give `foreach` the same zero-iteration merge
+treatment as `while`/`for`. `ForeachHandler.php` computes
+`$exprType->isIterableAtLeastOnce()` (`Type.php:174`, implemented per-type,
+e.g. `ArrayType.php:233`) and branches three ways
+(`ForeachHandler.php:374-390`): definitely->=1 iteration keeps the pure
+post-body scope; definitely 0 iterations reverts to the pure pre-loop
+scope; the "maybe empty" case calls
+`MutatingScope::processAlwaysIterableForeachScopeWithoutPollute()`
+(`MutatingScope.php:4122-4169`) - which is NOT a symmetric type-union
+merge. For each variable, it keeps the post-loop *type* outright and only
+downgrades the certainty (yes->maybe), never unioning the pre-loop type
+back in for a variable that already existed before the loop - exactly the
+case a real idiom needs: a foreach body that mutates its own iteratee
+array through the loop variable
+(`foreach ($items as $day => $data) { $items[$day]['x'] = ...; }`).
+phpstan-rs's only branch-join primitive, `merge_scopes`
+(`src/checker/control_flow.rs:403-440`), unconditionally computes
+`union_types(then_ty, else_ty)` for every shared variable - purely
+symmetric, no certainty concept. ROADMAP's Reverted entry (~lines
+1044-1051) and `checker/stmt/loops.rs:584-615`'s own inline comment
+confirm phpstan-rs's original and re-attempted foreach zero-iteration
+merges both reused this same symmetric primitive and both regressed on
+exactly that self-mutating-iteratee idiom (named by the real corpus
+function that surfaced it, `CalendarMonthly::buildMonthCalendar`) -
+unioning the pre-loop array shape back in re-introduces a stale element
+type every real iteration actually overwrites. Confirming this is
+foreach-specific in PHPStan, not a general technique: `while`/`for`'s own
+zero-iteration handlers use plain symmetric `mergeWith()`, the same tool
+phpstan-rs's existing (non-reverted) while/for merge already uses
+successfully - foreach just borrowed the wrong one. phpstan-rs already
+has the prerequisite Phase 55 fixed-point loop convergence built
+(`converge_loop_body`); the missing piece is narrowly a second, asymmetric
+join primitive mirroring `processAlwaysIterableForeachScopeWithoutPollute`,
+gated on the same "runs >=1 time" provability. Going beyond real PHPStan:
+it carries a legacy `polluteScopeWithAlwaysIterableForeach` config flag
+(`NodeScopeResolver.php:184,807`) forcing it to maintain BOTH the
+symmetric and asymmetric code paths for third-party BC; phpstan-rs has no
+such burden and could adopt the more-precise asymmetric merge
+unconditionally, everywhere a loop join happens - one code path instead
+of PHPStan's two.
+
+**Effort: medium.**
+
+### O2. Register each anonymous class under a real, stable synthetic name, instead of the discarded ancestor-aliasing shortcut
+
+Real PHPStan never infers an anonymous class's type as an alias of its
+extended/implemented type. `AnonymousClassNameHelper::
+getAnonymousClassName()` (`Broker/AnonymousClassNameHelper.php:30-55`)
+gives every anonymous class a real, deterministic synthetic name -
+`AnonymousClass<md5(file:start-line[:line-index])>`, where `line-index`
+(`AnonymousClassVisitor::ATTRIBUTE_LINE_INDEX`,
+`Parser/AnonymousClassVisitor.php:16-56`) disambiguates multiple
+anonymous classes starting on the same line - then registers a full,
+independent `ClassReflection` under it: own methods, own extra members,
+its own `extends`/`implements` as real supertypes. `instanceof`, member
+lookups, and inferred-type checks against it work exactly like a named
+class, with no risk of conflating its own extra members with whatever it
+happens to implement. phpstan-rs currently gives every anonymous class
+the identical literal placeholder name `"class@anonymous"`
+(`src/parser/classes.rs:93-96`, the parser's own comment noting multiple
+anonymous classes in one file "could not share this name safely - never
+indexed into the registry by this name"), and `checker/expr.rs:1816-1861`'s
+`NewAnonymousClass` handling confirms the consequence in its own Phase 90
+comment: an anonymous class's body is only checked ad hoc against one
+directly-named ancestor method signature as a narrow fallback, with no
+real registry entry and no full member-set checking. ROADMAP's own
+Reverted entry (~lines 1058-1066) for the prior ancestor-aliasing attempt
+independently arrives at the identical conclusion real PHPStan already
+implements: "a real fix needs registering the anonymous class's own full
+declaration under some stable synthetic name, not a type-inference
+tweak." Because phpstan-rs's registry is a single whole-program pass over
+every parsed file (no separate BetterReflection SourceLocator/dynamic-name
+layer to thread a synthetic name through), assigning a
+`file:line[:index]`-keyed name mirroring `AnonymousClassNameHelper`'s own
+scheme and indexing the anonymous `ClassDecl` the way a named class is
+indexed is structurally smaller here than in real PHPStan - and unlocks
+full type-checking against every implemented interface/extended parent's
+declared members at once, a strictly larger win than PHPStan's own
+per-name lookup.
+
+**Effort: medium.**
+
+---
+
+## P. Closed-world precision the "Pending / partial" section's own techniques can unlock, beyond just finishing them
+
+Two cases where finishing an in-progress phase using phpstan-rs's own
+closed-world registry (the same reverse-hierarchy index A5 already
+proposes for sealed-hierarchy narrowing) doesn't just reach parity - it
+resolves something real PHPStan is structurally, permanently unable to
+resolve, for reasons unrelated to cost.
+
+### P1. Resolve provably-closed virtual dispatch inside the transitive-purity fixed point
+
+Extend Phase 41's transitive-purity fixed point (`registry/purity.rs`) so
+a `$this->method()` call through a non-final, overridable method isn't
+unconditionally disqualified. Add the same reverse (parent-to-children)
+class index A5 proposes (extending `hierarchy.rs`'s forward-only
+`all_ancestor_names`), enumerate every real override of the target method
+anywhere in the closed analyzed set, and treat the call as a dependency
+on all of them; if the reverse index proves zero overrides exist anywhere
+in the project+vendor universe, resolve the call exactly like a final
+method already is. Real PHPStan's `PossiblyPureCallTransitivePurityResolver::
+resolveCall` (`Rules/DeadCode/PossiblyPureCallTransitivePurityResolver.php:
+168-207`) unconditionally disqualifies the whole caller unless the method
+is private, final, or its declaring/called-on class is final - no attempt
+to enumerate real overrides - and the identical gate is duplicated
+independently in `FunctionPurityCheck::check`
+(`Rules/Pure/FunctionPurityCheck.php:126-141,142-184`), confirming this is
+deliberate, structural policy everywhere PHPStan reasons about call-target
+purity: it has no descendant-enumeration API anywhere in `Reflection/`
+because it must stay sound for a library's downstream consumers who can
+add subclasses it never sees - an open-world constraint, not a cost cap.
+phpstan-rs's `is_non_overridable` (`registry/purity.rs:503-524`) currently
+mirrors this restriction verbatim, by the module's own explicit design
+comment - but phpstan-rs analyzes one closed-world project+vendor universe
+in one process with one frozen `Registry`, the identical property that
+already lets A5 treat "zero subclasses found" as sound. Given the
+identical source and the identical missing `final` keyword, phpstan-rs
+could resolve what real PHPStan is architecturally forced to treat as
+unknowable. Distinct consumer from A5 (narrowing) and B1/H2 (unused-member
+detection, NoDiscard inference) - this one drives the purity
+dependency-resolution fixed point and `@phpstan-pure` validation
+specifically.
+
+**Effort: large.**
+
+### P2. Resolve real Composer package boundaries for `@internal` enforcement, instead of the root-namespace-segment heuristic both projects currently share
+
+Phase 67's already-shipped `@internal` engine approximates "is the caller
+in the same package as the `@internal` symbol" by comparing only the
+first `\`-delimited namespace segment of caller vs. target. Swap that for
+a real composer-package-boundary lookup using the
+`find_composer_package_name`/`detect_phpstan_dependency` infrastructure
+section K already establishes exists in this codebase - resolve both the
+caller's file and the target's declaring file to their owning
+`composer.json` package name, and report only when the packages genuinely
+differ. Closes both directions of the mismatch: false negatives (two
+separately-versioned composer packages sharing one root namespace segment
+- any two same-vendor packages like `symfony/console` and
+`symfony/http-foundation`, both rooted at `Symfony\`) and false positives
+(one composer package legitimately spanning more than one top-level
+namespace). Real PHPStan's `RestrictedInternalUsageHelper::
+shouldBeReported`/`getRootNamespaceFromName`
+(`Rules/InternalTag/RestrictedInternalUsageHelper.php:36-57`) - the shared
+engine behind all five `RestrictedInternal*UsageExtension` classes -
+decides package membership purely via the bare first namespace segment,
+with no composer.json awareness anywhere: architecturally forced, since at
+the point a `Rule`/`Scope` processes one file, PHPStan's reflection layer
+has no persistent whole-program "which package declares this symbol" index
+to query (the same absence section K independently confirms). phpstan-rs's
+`internal_usage.rs` mirrors this exact heuristic on purpose today (its own
+doc comment names it "the common Composer-package-as-top-level-namespace
+convention") - but `composer::find_composer_package_name`
+(`src/composer.rs:144-155`) already exists for a different rule family,
+computed once per whole-project run rather than discarded between files.
+Wiring it into `internal_usage.rs`'s boundary check costs no new
+architecture - only an already-resolved real package name in place of a
+namespace substring.
+
+**Effort: medium.**
+
+---
+
+## Q. Whole-program public-API backward-compatibility diffing
+
+A new capability with no PHPStan-core or `phpstan-strict-rules`
+equivalent at all - grepping both vendored trees for
+BackwardCompat/BCBreak/ApiDiff turns up nothing except PHPStan's own
+inward-facing `Rules/Api/*` family (flags analyzed code referencing
+PHPStan's *own* internal namespace, an unrelated concept). `analyseFile`
+is PHPStan's sole entry point: always one fresh CLI invocation over one
+filesystem snapshot, no notion of loading and comparing two points in
+time. `Project::new()`/`load_file` take no arguments blocking two
+independent, simultaneously-live `Project`/`Registry` snapshots in one
+process - the diff is a plain field-by-field walk over two frozen
+`HashMap<String, ClassInfo>`s.
+
+### Q1. `phpstan-rs api-diff <old-ref> <new-ref>`: structural public-API diff between two Registry snapshots
+
+Loads two independent `Project`/`Registry` instances (one from a git-ref
+checkout or old vendored copy, one from the current tree) and structurally
+diffs every public (non-`@internal`) symbol's `ClassInfo`/`FunctionSig`/
+`PropertySig`/`ConstSig`: a removed public method/property/constant, a
+parameter type narrowed (via `is_subtype`) so a previously-legal caller is
+now rejected, a return type widened so a previously-guaranteed narrower
+type can't be assumed, a visibility narrowed or a symbol newly marked
+`@internal`, a method/class newly `final`, a removed interface/parent, or
+a non-final class gaining a new abstract method breaking existing
+subclasses. phpstan-rs already builds every signature-shape field this
+needs as ordinary struct fields, not reconstructed via reflection each
+run: `ParamSig`/`FunctionSig` (`registry/function_sig.rs:95-176`,
+including visibility, `is_internal`, deprecated, native vs docblock
+types) and `ClassInfo`/`PropertySig`/`ConstSig`
+(`registry/class_info.rs:23-205`, including `is_abstract`/`is_final`/
+`extends`/`implements`/`final_methods`/`final_properties`). `Registry` is
+frozen once per `finish_loading()` and is a plain in-memory `HashMap`, so
+two independently-loaded, independently-frozen registries can coexist in
+one process with no shared-mutable-state hazard - real PHPStan's per-run,
+discard-after-use DI container has no analogous ability to keep two full
+snapshots alive and comparable at once. Distinct from G2 (signature
+fingerprinting): G2 compares shapes within one live incremental session
+on the *same* tree to drive re-check scheduling; this compares two
+independently-loaded, disjoint snapshots to report public-surface breaks
+to a human/CI as the actual product.
+
+**Effort: large.**
+
+### Q2. PHPDoc-level generic/template-bound narrowing as its own break category, invisible to native-signature-only diffing
+
+Extends Q1 with a break category specific to phpstan-rs's PHPDoc-aware
+generics: a class's `@template T of Bound` tightened between two
+snapshots (`@template T of object` narrowed to `@template T of
+Countable`), or an `@extends`/`@implements` type-argument binding
+changed, silently rejects type arguments a caller's existing code still
+passes - even though the native PHP declaration (and therefore the
+byte-identical Reflection-visible signature) never changed. This break
+category has no PHP-native-signature representation whatsoever: a
+`@template`/`@extends`/`@implements` bound lives purely in a docblock
+string, invisible to any BC tool working from the generic PHP Reflection
+surface alone (the same surface real PHPStan's own runtime-reflection
+rules are limited to, per ROADMAP's Won't-port note on
+`RuntimeReflectionFunctionRule`/`RuntimeReflectionInstantiationRule`) - two
+classes whose native declarations are byte-for-byte identical would
+compare as "no change" to such a tool. phpstan-rs's registry already
+carries generic bounds as first-class, already-resolved struct fields, not
+a string to re-parse: `ClassInfo::templates`, `ClassInfo::
+template_bounds: HashMap<String, Type>` (Phase 10.5's already-enforced
+`@template T of Bound`), and `ClassInfo::extends_args`/`implements_args:
+HashMap<String, Vec<Type>>` (`registry/class_info.rs:178-199`) - all
+already on the exact same `ClassInfo` Q1 already walks, so comparing them
+across snapshots (checking narrowing direction via `is_subtype`, not just
+inequality) is additive to Q1's own walk, not new architecture.
+
+**Effort: medium.**
+
+---
+
+## R. PSR-4 filesystem consistency
+
+Real PHPStan's only PSR-4 awareness is consuming `Psr4Mapping` purely to
+*locate* classes for its BetterReflection source locator
+(`Reflection/BetterReflection/SourceLocator/
+ComposerJsonAndInstalledJsonSourceLocatorMaker.php:90-192`) - it never
+validates that a class's actual location matches where PSR-4 says it
+should be. `Rules/Namespaces/` contains exactly 2 files, both about
+`use`-statement resolution; a case-insensitive grep for "psr-4"/"psr4"/
+"autoload" across every `Rules/` file in both vendored trees returns zero
+hits.
+
+### R1. PSR-4 declared-namespace vs. file-path consistency (`psr4.pathMismatch`)
+
+For every declared class/interface/trait/enum FQN, resolve which
+`composer.json` `autoload.psr-4`/`autoload-dev.psr-4` prefix it should
+fall under (longest-prefix match), compute the file path PSR-4 requires,
+and compare against the file it was actually declared in (already
+resolved via `DeclLocations.classes: FxHashMap<FQN, (PathBuf, Span)>`).
+Flag a mismatch - the file loads fine today only because Composer's
+non-optimized/dev autoloader falls back to directory scanning; a
+production `composer dump-autoload --optimize` generates a static
+classmap purely from PSR-4 resolution and silently drops the class,
+producing a runtime "Class not found" with zero PHPStan-shaped warning
+today. phpstan-rs already computes almost every piece as a side effect of
+other work, just not wired together: `DeclLocations.classes` already maps
+every declared FQN to its real file path project-wide, currently gated
+behind `retain_source` for LSP-only use rather than populated for batch
+`check-project` runs (`project.rs:100,107,238`); `composer::
+discover_vendor_context`'s `collect_dirs`/`eval_path`
+(`composer.rs:260-300`) already parses the same generated
+`prefixDirsPsr4` array Composer compiles from `composer.json`'s
+`autoload.psr-4` (root package included) - it just explicitly discards
+every entry that doesn't resolve under `vendor/`
+(`eval_path`'s `starts_with(vendor_dir)` filter, by design per the
+module's own doc comment), throwing away exactly the first-party
+`App\ => app/`-style rows this check needs. Building it: stop discarding
+those rows (or parse `composer.json`'s own `autoload`/`autoload-dev`
+sections directly via `serde_json`, the same pattern
+`detect_phpstan_dependency` already uses), and cross-reference against
+`DeclLocations` once enabled for batch runs - no new filesystem-walking
+or parsing machinery.
+
+**Effort: medium.**
+
+### R2. PSR-4 exact-case path mismatch, as its own diagnostic (`psr4.caseMismatch`)
+
+Once R1 exists, add a narrower diagnostic for when the expected and
+actual paths match case-*insensitively* but differ in letter-casing on
+some segment (class `App\Http\Controller\UserController` declared in
+`app/Http/controller/UserController.php` - lowercase `controller`). Must
+use a byte-exact comparison against real, on-disk directory-entry casing
+(`std::fs::read_dir`, never `std::fs::canonicalize`, which silently
+normalizes case on a case-insensitive volume and would make the bug
+invisible on the very platforms where it happens to still work). Real
+PHPStan's `Psr4Mapping`-consuming lookup only needs to *find* the file at
+all - on the case-insensitive filesystems (macOS default, Windows) most
+PHPStan contributors and CI runners are equally likely to develop on, the
+lookup silently succeeds either way, so there is no PHPStan mechanism
+that would ever observe the mismatch. The real payoff: the "works on the
+author's laptop, breaks in the Linux/Docker production container" bug
+class, one real PHPStan structurally cannot report on because its own
+contributors and test infrastructure run on the same case-insensitive-by-
+default platforms that make the bug invisible to observe. Distinct from
+the existing `class.nameCase`/E4 checks, which compare an in-source
+*reference*'s casing against its own declaration's casing within PHP text
+- this compares a declaration's casing against the real filesystem, a
+cross-domain (source-vs-disk) comparison neither touches.
+
+**Effort: small.**
+
+---
+
+## S. Composer path-repository / monorepo workspace support
+
+### S1. Fix the symlink-escaping vendor-context filter, then auto-promote path-repository siblings to first-party analyzed files
+
+Two parts. **Bug**: `eval_path` (`src/composer.rs:282-300`) resolves a
+candidate vendor path via `std::fs::canonicalize(raw)` then tests
+`resolved.starts_with(vendor_dir)` to decide whether it's genuinely
+vendor-scoped. For a Composer path-repository dependency, `vendor/<pkg>`
+is a real filesystem symlink to the sibling package's own source tree
+outside `vendor/`; canonicalize fully resolves that symlink, so the
+containment check always fails and the entire path-repo package is
+silently dropped from `ComposerContext` (confirmed with a live repro: a
+`vendor/acme/package-b` symlink to a sibling directory resolves to a path
+that never starts with the canonicalized `vendor_dir`). The fix needs to
+distinguish "legitimately in vendor/, but the directory happens to be a
+symlink" from "the raw string genuinely traverses outside vendor/" -
+checking containment on the un-resolved joined path's components, the way
+real PHPStan's own `PathRoutingParser` walks each path component with
+`is_link()` rather than canonicalize-then-prefix-test. **Feature**: once
+symlinks are followed correctly, read `composer.json`'s `repositories`
+array (today only `require`/`require-dev` are parsed,
+`detect_phpstan_dependency`, `composer.rs:119-126`) to recognize which
+`vendor/<pkg>` entries are local `type: path` siblings, and promote just
+those files from `scan_dirs` (context-only, never reported) into
+`analyze_files` (diagnostic-bearing) - one-pass, cross-package
+diagnostics with zero manual config. Real PHPStan's vendor-derived class
+info comes from a reflection-only `SourceLocator`
+(`ComposerJsonAndInstalledJsonSourceLocatorMaker::create`,
+`...SourceLocatorMaker.php:44-171`) never wired to the set of files a
+`Rule` actually runs against (that's `paths:`, a separate, manually
+authored config key) - a path-repo sibling's own bugs are invisible in
+package A's run unless someone manually adds the vendor-symlinked
+directory to `paths:` in every downstream consumer's own config, repeated
+per consumer, with no cross-process dedup since there's no monorepo
+concept anywhere in PHPStan (grepped, zero hits). phpstan-rs already has
+the exact analyze/context split this needs, working in one process with
+one shared `Registry` (`scan_dirs`/`analyze_files`,
+`check_project.rs:101-145`) - only the symlink bug and the
+`repositories`-array read are missing, both local, additive changes.
+
+**Effort: large.**
+
+### S2. `check-project`'s vendor-context discovery is hardcoded to a single root, losing every sibling package's own dependencies in a real workspace
+
+`run_check_project_command` calls `composer::discover_vendor_context(&cwd)`
+and `composer::detect_phpstan_dependency(&cwd)` exactly once, against one
+directory (`check_project.rs:329,332`) - even though the underlying
+`run_check_project` function already accepts an arbitrary list of `dirs`
+to load into one shared `Project`/`Registry` and check together
+(`check_project.rs:63-64,82-84`), a multi-package capability with no
+real-PHPStan analogue at all. For a workspace of several independently-
+`composer install`-ed packages, invoking `check-project package-a/src
+package-b/src` today only discovers whichever ONE package's vendor/
+happens to be the process's `cwd`; the other package's own third-party
+dependencies (types it needs for correct inference) are silently missing.
+Real PHPStan resolves exactly one composer.json/vendor root per process
+(`ComposerHelper::getComposerConfig(string $root)`,
+`Internal/ComposerHelper.php:37-53`, a single `$root` string threaded from
+one CLI invocation's cwd) - a genuine multi-root workspace structurally
+requires one full separate PHPStan process (own DI container, own
+result-cache, own baseline) per package, zero shared type-resolution or
+diagnostic reasoning between them. phpstan-rs's multi-root capability is
+already ~90% built at the CLI-argument and Registry level - only the
+vendor-context-discovery call is hardcoded to a single `cwd`. Fix: for
+each entry in `dirs`, walk upward (reusing `find_composer_package_name`'s
+existing upward walk as the pattern) to find that entry's own nearest
+composer.json, discover its context once per root, and merge+dedup every
+resulting `ComposerContext` before loading - one extra loop, not a
+rebuilt container per root the way a faithful multi-invocation PHPStan
+setup would need.
+
+**Effort: medium.**
+
+---
+
+## T. Diagnostic explainability: derivation traces, not just a final type
+
+Real PHPStan's only type-introspection tool, `PHPStan\dumpType()`,
+computes and prints one final type per call site via a plain `sprintf`
+(`Rules/Debug/DumpTypeRule.php:32-50) with no accumulated reasoning kept -
+each `Scope::getType()` call that fed it is discarded the instant the
+message string is built, and it requires editing the analyzed source and
+re-running the whole CLI, since PHPStan ships no LSP or resident process
+to query interactively at all. Distinct from F1 (a single inferred `Type`
+wired into hover for one span, computed fresh each probe): both items
+below trace the *chain* of operations that produced a type, an entirely
+different data shape.
+
+### T1. Interactive branch-narrowing derivation trace for a diagnostic
+
+Extend `Checker::apply_narrowing` (`src/checker/narrowing.rs:38`, called
+from ~30 sites across the checker) so that, under an opt-in trace mode,
+each narrowing step pushes a (condition span, branch taken, mechanism,
+before-type, after-type) record into a new per-`Locals` side-channel
+modeled directly on the existing `provenance: ProvenanceMap` field and its
+`track` gate (`checker.rs:113-132,224`). At a branch join, `merge_scopes`
+(`control_flow.rs:403-439`) already shows exactly how such a side-channel
+composes across paths - it unions types via `union_types` and does
+`provenance.extend(...)` - so a trace channel merges into a DAG (both
+branches' contributing steps kept) with zero new merge logic to invent.
+Surface it by reusing the exact one-shot instrumented-recheck pattern
+already proven for hover: `probe_span`/`probe_hit`
+(`checker.rs:775-776`) plus `run_probe_scope`/`ProbeScope`
+(`lsp.rs:321-378`) - a new LSP request passes the diagnostic's own span
+and narrowing key instead of a hover position, re-runs `check_function`
+once with tracing on, and returns the recorded step DAG. For a
+non-interactive CI fallback, render a summary into the diagnostic's own
+`metadata: HashMap<String, serde_json::Value>` field (`checker.rs:327-333`,
+which every `Diagnostic` already carries and no current call site
+populates).
+
+**Effort: large.**
+
+### T2. Per-pass loop-convergence widening trace, for a diagnostic whose type came from fixed-point iteration rather than branch narrowing
+
+`Checker::converge_loop_body` (`control_flow.rs:331-384`) runs up to
+`MAX_PASSES = 3` passes, each producing a full `Locals` clone unioned via
+`merge_scopes` into the next entry state - then, for every pass except the
+one finally kept, explicitly discards both that pass's diagnostics
+(`self.diagnostics.truncate(...)`) and its `Locals` state. For a
+diagnostic on a loop variable whose converged type built up over several
+passes (pass 1 sees `int`, pass 2's branch adds `string`, final
+convergence adds `null`), under the same trace mode as T1, a lightweight
+per-pass diff can be appended to a trace record instead of being silently
+overwritten - "pass 2 added `string` via this branch; the final pass
+added `null` via that one." Structurally different from T1: iteration-
+indexed widening has no controlling condition at all, only a pass index,
+so it needs its own step kind rather than reusing the narrowing-step
+shape. Real PHPStan's identical fixed point
+(`NodeScopeResolver::LOOP_SCOPE_ITERATIONS = 3`,
+`NodeScopeResolver.php:120`) discards each pre-convergence pass's scope
+the same way, but additionally widens literal/constant types to their base
+type after only the first candidate pass
+(`GENERALIZE_AFTER_ITERATION = 1`, line 121) - destroying the literal type
+identity a trace would even need to show, on top of having no interactive
+query surface at all. phpstan-rs's convergence loop does plain type-union
+merging with no early generalization (A1 already documents this precision
+gap in the *other* direction - raising the pass cap for more precise final
+types; this is about retaining and exposing the discarded intermediate
+passes for explainability instead) - each pass's precise `Locals` state is
+already fully materialized in memory immediately before being thrown away
+purely to keep iteration bounded, so capturing a before/after diff there
+is retaining data that already exists for one more statement's worth of
+scope, not computing anything new.
+
+**Effort: medium.**
