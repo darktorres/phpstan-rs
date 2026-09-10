@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{Stmt, StmtKind, UseImport};
-use crate::types::Type;
+use crate::types::{CallableParam, CallableSig, Type};
 
 /// A single leading `\` marks "fully qualified from the global namespace"
 /// (`\Exception`) - every declaration is keyed by its own fully-qualified
@@ -112,12 +112,40 @@ impl NameContext {
         &self.namespace
     }
 
+    /// Phase 48.2: whether `first_segment` (a reference's own first `\`-
+    /// separated segment, as written in source) matched a real `use`-
+    /// import in this file - lets a caller skip the `class.nameCase`
+    /// family of checks for exactly this case, matching real PHPStan's
+    /// own default `checkImportedClassNameCase: false` config.
+    pub(crate) fn is_use_imported(&self, first_segment: &str) -> bool {
+        self.use_map
+            .contains_key(&first_segment.to_ascii_lowercase())
+    }
+
+    /// Phase 48.1: `use_map`'s own keys are stored lowercased - real PHP
+    /// resolves a `use`-imported class/interface/trait/enum name (and a
+    /// `use function` one) case-insensitively, the same rationale
+    /// `Registry::lookup_function`'s own doc comment already gives.
+    /// Unlike `lookup_function`'s exact-then-fallback-scan shape, a
+    /// straight lowercase-key store is correct and simpler here: PHP
+    /// forbids two *different* `use`-imports in one file colliding
+    /// case-insensitively, so there's no shadowing-order concern to
+    /// preserve. Disclosed, narrow residual: `use_map` is shared across
+    /// all three `use` namespaces (class/function/const - `UseImport::
+    /// kind` isn't consulted here), and real PHP constants *are* case-
+    /// sensitive - a file importing two differently-cased constant
+    /// aliases that collide only after lowercasing (e.g. `use const
+    /// Foo\BAR, Baz\bar;`) would now mis-resolve one of them. This is
+    /// exceptionally rare in practice (nobody names two distinct global
+    /// constants differing only by case and imports both in one file),
+    /// and constant existence is already, separately, never checked
+    /// against this map at all (see `UseImport::kind`'s own doc comment).
     pub(crate) fn add_uses(&mut self, imports: &[UseImport]) {
         for import in imports {
             let path = strip_leading_backslash(&import.path);
             let bare = path.rsplit('\\').next().unwrap_or(&path).to_string();
             let short_name = import.alias.clone().unwrap_or_else(|| bare.clone());
-            self.use_map.insert(short_name, path);
+            self.use_map.insert(short_name.to_ascii_lowercase(), path);
         }
     }
 
@@ -169,7 +197,7 @@ impl NameContext {
         let mut segments = name.splitn(2, '\\');
         let first = segments.next().unwrap_or(name);
         let rest = segments.next();
-        if let Some(imported_path) = self.use_map.get(first) {
+        if let Some(imported_path) = self.use_map.get(&first.to_ascii_lowercase()) {
             return match rest {
                 Some(r) => format!("{imported_path}\\{r}"),
                 None => imported_path.clone(),
@@ -189,7 +217,7 @@ impl NameContext {
     /// (namespaced file, unqualified name, no matching import).
     pub(crate) fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
         let is_unqualified = !name.contains('\\');
-        let use_matched = is_unqualified && self.use_map.contains_key(name);
+        let use_matched = is_unqualified && self.use_map.contains_key(&name.to_ascii_lowercase());
         if !is_unqualified || use_matched || self.namespace.is_empty() {
             (self.resolve(name), None)
         } else {
@@ -306,6 +334,23 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .map(|(k, t, opt)| (k, resolve_names_in_type(t, ctx), opt))
                 .collect(),
         ),
+        // Phase 53: mirrors `mark_template_params`/`substitute_type_aliases`'s
+        // own equivalent arms - a class reference inside a `Closure(...)`
+        // shape's own param/return types needs the same namespace
+        // resolution as anywhere else.
+        Type::Callable(Some(sig)) => Type::Callable(Some(std::sync::Arc::new(CallableSig {
+            params: sig
+                .params
+                .iter()
+                .map(|p| CallableParam {
+                    ty: resolve_names_in_type(p.ty.clone(), ctx),
+                    variadic: p.variadic,
+                    optional: p.optional,
+                    by_ref: p.by_ref,
+                })
+                .collect(),
+            return_type: Box::new(resolve_names_in_type((*sig.return_type).clone(), ctx)),
+        }))),
         other => other,
     }
 }

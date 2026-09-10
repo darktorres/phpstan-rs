@@ -184,6 +184,73 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 48.7: `RequireExtendsCheck`/`RequireImplementsDefinitionTraitRule`'s
+    /// existence half - `@phpstan-require-extends`/`@phpstan-require-
+    /// implements`'s own RHS class names are already resolved
+    /// (`ClassInfo::require_extends`/`require_implements`) and semantically
+    /// consumed (`check_require_tags` above - "does a consumer of this
+    /// trait/interface actually satisfy the requirement"), but the
+    /// requirement's own target class was never itself existence-checked.
+    /// Real PHPStan's own message wording, ported verbatim; the interface-
+    /// vs-class/final-class refinements those two real rules also make
+    /// are deliberately not built, same disclosed-but-not-attempted
+    /// nuance as `check_method_tag_types`/`check_mixin_types`.
+    pub(crate) fn check_require_tag_types(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        for required in &info.require_extends {
+            if !self.class_name_exists(required) {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "PHPDoc tag @phpstan-require-extends contains unknown class {required}."
+                    ),
+                    span,
+                    0,
+                    "class.notFound",
+                );
+            }
+        }
+        for required in &info.require_implements {
+            if !self.class_name_exists(required) {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "PHPDoc tag @phpstan-require-implements contains unknown class {required}."
+                    ),
+                    span,
+                    0,
+                    "class.notFound",
+                );
+            }
+        }
+    }
+
+    /// Phase 48.7: `SealedDefinitionClassRule`'s existence half -
+    /// `@phpstan-sealed`'s own RHS class names are already resolved
+    /// (`ClassInfo::sealed`) and semantically consumed (`check_sealed_
+    /// hierarchy`), but the sealed target's own existence was never
+    /// itself checked. Real PHPStan's own message wording, ported
+    /// verbatim; the enum/non-object refinements that real rule also
+    /// makes are deliberately not built, same established nuance.
+    pub(crate) fn check_sealed_tag_types(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        for sealed in &info.sealed {
+            if !self.class_name_exists(sealed) {
+                self.report(
+                    fqn.to_string(),
+                    format!("PHPDoc tag @phpstan-sealed contains unknown class {sealed}."),
+                    span,
+                    0,
+                    "class.notFound",
+                );
+            }
+        }
+    }
+
     /// Phase 48.6: `LocalTypeAliasesCheck`'s existence half - a
     /// `@phpstan-type Name TypeExpr` alias's own RHS is already resolved
     /// (`ClassInfo::type_aliases`) but never existence-checked. Only the

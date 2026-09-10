@@ -2,10 +2,10 @@ use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, TemplateBindings,
-    body_contains_yield, collect_goto_targets, expr_contains_yield, is_language_construct,
-    is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
-    narrow_type_excluding, narrowing_key, purge_stale_narrowing_for, resolve_call_args,
-    superglobal_default_type, to_bitwise_not,
+    body_contains_yield, collect_goto_targets, expr_contains_yield, generator_template_param,
+    is_language_construct, is_real_variable_key, is_superglobal, literal_string_key,
+    literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
+    purge_stale_narrowing_for, resolve_call_args, superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -26,6 +26,11 @@ use crate::checker::type_union::union_types;
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
 pub(crate) use ranges::{int_range_bounds, normalize_int_range};
 
+// Phase 42 Sub-item D: `checker::throws::dynamic` reuses this exact
+// bitwise-or-flag-chain scan for `JSON_THROW_ON_ERROR`/
+// `FILTER_THROW_ON_FAILURE`, the same helper `builtin_calls.rs`'s own
+// `json_encode`/`filter_var` return-type narrowing already uses.
+pub(crate) use builtin_calls::contains_flag_name;
 pub(crate) use preg_shapes::build_matched_shape;
 use preg_shapes::{
     PregFlags, parse_preg_flags, preg_leaf_type, preg_match_all_pattern_order_shape,
@@ -506,12 +511,44 @@ impl<'a> Checker<'a> {
                             this_ty,
                             None,
                         );
+                    } else if let Some(Type::Callable(Some(callable_sig))) =
+                        sig.and_then(|s| s.params.get(i)).map(|p| &p.ty)
+                        && matches!(
+                            unwrap_grouping(&a.value).kind,
+                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                        )
+                        && self.check_closure_literal_with_param_overrides(
+                            unwrap_grouping(&a.value),
+                            &callable_sig
+                                .params
+                                .iter()
+                                .map(|p| p.ty.clone())
+                                .collect::<Vec<_>>(),
+                            locals,
+                            label,
+                        )
+                    {
+                        // Phase 53 Sub-item B: a `Closure(...)`-shaped
+                        // PHPDoc parameter type gives an unhinted closure/
+                        // arrow-fn literal argument's own params their
+                        // declared types, the same contextual-checking
+                        // mechanism `array_map`/the four other special-
+                        // cased functions above already use.
                     } else {
                         self.check_expr(&a.value, locals, label);
                     }
                 }
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
+                        // Phase 42 Sub-item A/D: this function's own throw
+                        // contribution - tried before `sig.throws` itself.
+                        let bare = name
+                            .rsplit('\\')
+                            .next()
+                            .unwrap_or(name)
+                            .to_ascii_lowercase();
+                        let dynamic_throw = self.dynamic_function_throw_type(&bare, args, locals);
+                        self.record_call_throw_point(dynamic_throw, Some(sig));
                         // Phase 67: `@internal`.
                         self.check_internal_function_call(name, sig, e.span, label);
                         // Phase 39: `@deprecated`.
@@ -596,18 +633,38 @@ impl<'a> Checker<'a> {
                             {
                                 self.check_scanf_argument_count(bare, args, label, e.span);
                             }
+                            if bare.eq_ignore_ascii_case("call_user_func")
+                                || bare.eq_ignore_ascii_case("call_user_func_array")
+                            {
+                                self.check_call_user_func(bare, args, locals, label, e.span);
+                            }
+                            self.check_preg_quote_delimiter(bare, args, label);
                         }
                         if !is_bare_statement {
                             self.check_useless_return_value_call(name, args, locals, e.span, label);
                         }
-                    } else {
+                    } else if !locals.guarded_functions.contains(
+                        &name
+                            .rsplit('\\')
+                            .next()
+                            .unwrap_or(name)
+                            .to_ascii_lowercase(),
+                    ) {
                         // Since resolve_function_candidates always
                         // produces a definite name (there's no "can't
                         // resolve" case left for functions the way
                         // `ExprKind::New`'s class resolution still has for a
                         // multi-segment name with no matching import),
                         // every miss here is a real undefined-function
-                        // finding.
+                        // finding. Phase 71 Item 4: unless it's runtime-
+                        // guarded by a `function_exists()` check this
+                        // project's own (necessarily less complete than a
+                        // live PHP process's) registry doesn't otherwise
+                        // know how to resolve - purely presentational
+                        // (doesn't affect `resolved_name`/`sig` above, so
+                        // argument checking against a "found" signature
+                        // still correctly never happens for a guarded,
+                        // still-genuinely-unresolvable call).
                         self.report(
                             label.to_string(),
                             format!("call to undefined function {name}()"),
@@ -616,6 +673,34 @@ impl<'a> Checker<'a> {
                             "function.notFound",
                         );
                     }
+                } else if !matches!(&callee.kind, ExprKind::Name(_)) {
+                    // Phase 53 Sub-item C: `resolved_name` is `None` here
+                    // specifically because `callee` isn't a plain function-
+                    // name reference at all (`$fn(...)`, `$arr['key'](...)`,
+                    // `($this->makeCallback())(...)`) - every language-
+                    // construct name (`isset`, `print`, ...) that also
+                    // produces `None` above is excluded by the `ExprKind::
+                    // Name` guard, so this branch never fires for those,
+                    // unchanged from before. A real, previously-free bug
+                    // fixed along the way: this callee sub-expression was
+                    // never independently `check_expr`'d before, so e.g. an
+                    // undefined property read used as a callee (`($this->
+                    // missing)()`) produced zero diagnostics.
+                    let callee_ty = self.check_expr(callee, locals, label);
+                    if let Type::Callable(Some(callable_sig)) = callee_ty {
+                        self.check_dynamic_callable_args(
+                            &callable_sig,
+                            args,
+                            locals,
+                            label,
+                            e.span,
+                        );
+                    }
+                    // Phase 42 Sub-item A: a `Closure(...)`-shaped PHPDoc
+                    // callable carries no `@throws` info of its own, and
+                    // any other dynamic-callee shape has even less to go
+                    // on - genuinely unbounded.
+                    self.current_function_has_unannotated_call = true;
                 }
                 // Phase 12 Findings A/B/C: `preg_match`'s by-ref
                 // `$matches` shape, including `PREG_OFFSET_CAPTURE`/
@@ -748,7 +833,7 @@ impl<'a> Checker<'a> {
                             locals,
                         )
                     })
-                    .unwrap_or_else(|| call_fallback_return_type(callee));
+                    .unwrap_or_else(|| self.call_fallback_return_type(callee, locals));
                 match array_shift_pop_pre_widen_ty.and_then(|pre_widen_ty| {
                     Self::array_element_type(&pre_widen_ty).map(|elem_ty| {
                         Self::array_pointer_result(&pre_widen_ty, elem_ty, Type::Null, false)
@@ -883,6 +968,16 @@ impl<'a> Checker<'a> {
                 let sig = receiver.as_ref().map(|(class, type_args, owner, sig)| {
                     self.substitute_class_templates(sig, class, type_args, owner)
                 });
+                // Phase 42 Sub-item A/D: this method call's own throw
+                // contribution.
+                if let Some((class, _, _, _)) = &receiver {
+                    let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
+                    self.record_call_throw_point(dynamic_throw, sig.as_ref());
+                } else {
+                    // No resolved receiver class at all - genuinely
+                    // unbounded, same reasoning as a dynamic callee.
+                    self.current_function_has_unannotated_call = true;
+                }
                 let resolved = sig
                     .as_ref()
                     .map(|s| resolve_call_args(args, &s.params))
@@ -1315,11 +1410,24 @@ impl<'a> Checker<'a> {
                         "throw.notThrowable",
                     );
                 }
+                // Phase 42 Sub-item A: mirrors `check_throw`'s own
+                // identical recording for the statement form.
+                self.current_function_explicit_throw_points
+                    .push((inner_ty.clone(), inner.span));
+                self.current_function_throw_points.push(inner_ty);
                 Type::Never
             }
             ExprKind::YieldFrom(inner) => {
-                self.check_expr(inner, locals, label);
-                Type::Mixed
+                let inner_ty = self.check_expr(inner, locals, label);
+                let result_ty = generator_template_param(&inner_ty, self.registry, "TReturn");
+                self.check_yield_from_compatibility(
+                    &inner_ty,
+                    &result_ty,
+                    e.span,
+                    label,
+                    is_bare_statement,
+                );
+                result_ty
             }
             // Never given a stable nominal type by infer_expr either,
             // since multiple clone-with-overrides expressions could
@@ -1340,7 +1448,10 @@ impl<'a> Checker<'a> {
                 if let Some(v) = value {
                     self.check_expr(v, locals, label);
                 }
-                Type::Mixed
+                self.current_declared_return_type
+                    .as_ref()
+                    .map(|t| generator_template_param(t, self.registry, "TSend"))
+                    .unwrap_or(Type::Mixed)
             }
             ExprKind::Instanceof(inner, target) => {
                 self.check_expr(inner, locals, label);
@@ -1599,6 +1710,21 @@ impl<'a> Checker<'a> {
                     Type::Object(class, _) => Some(class.clone()),
                     _ => None,
                 };
+                // Phase 48.1: rebind to the registry's own canonical-case
+                // spelling up front (once, here) rather than at each
+                // individual lookup below - `lookup_method`'s own
+                // ancestor-walk (`Registry::lookup_in_hierarchy_with_owner`)
+                // starts from an exact-case `self.classes.get(&current)`
+                // with no case-insensitive fallback of its own, so a
+                // differently-cased `new foo()` of a real `class Foo {}`
+                // would otherwise resolve no constructor at all even
+                // after the existence check below stops misreporting it.
+                let resolved_class = resolved_class.map(|class| {
+                    self.registry
+                        .lookup_class(&class)
+                        .map(|(canonical, _)| canonical.to_string())
+                        .unwrap_or(class)
+                });
                 // A dynamic target (`new $className()`) or an unresolved
                 // pseudo-type (`new parent()` with no parent class) has no
                 // concrete name to check - only a plain `new Name()` (or
@@ -1652,7 +1778,17 @@ impl<'a> Checker<'a> {
                     // the class is otherwise instantiable at all, so
                     // this runs unconditionally before that dispatch.
                     self.check_date_interval_constructor(class, args, e.span, label);
-                    if let Some(info) = self.registry.classes.get(class) {
+                    // Phase 42 Sub-item A/D: this constructor's own throw
+                    // contribution.
+                    let dynamic_throw = self.dynamic_new_throw_type(class, args);
+                    self.record_call_throw_point(dynamic_throw, ctor_sig);
+                    // Phase 48.1: case-insensitive lookup - a real,
+                    // previously-missed call site (this exact "instantiating
+                    // a differently-cased reference to a real class" shape
+                    // is the whole point of Phase 48.1, but this particular
+                    // choke point still used the raw, case-sensitive
+                    // `registry.classes.get` instead of `lookup_class`).
+                    if let Some((_, info)) = self.registry.lookup_class(class) {
                         if info.kind == ClassKind::Interface {
                             self.report(
                                 label.to_string(),
@@ -1786,6 +1922,14 @@ impl<'a> Checker<'a> {
                     .as_ref()
                     .and_then(|class| self.registry.lookup_method_with_owner(class, method));
                 let sig = sig_with_owner.as_ref().map(|(_, s)| *s);
+                // Phase 42 Sub-item A/D: this static call's own throw
+                // contribution.
+                if let Some(class) = &resolved_class {
+                    let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
+                    self.record_call_throw_point(dynamic_throw, sig);
+                } else {
+                    self.current_function_has_unannotated_call = true;
+                }
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
@@ -1912,6 +2056,22 @@ impl<'a> Checker<'a> {
                             0,
                             "staticMethod.notFound",
                         );
+                    } else if !self.registry.classes.contains_key(class) {
+                        // Phase 48.7: `StaticMethodCallCheck`'s own
+                        // "class doesn't exist at all" half - a real,
+                        // previously-silent gap: neither branch above
+                        // fires for a genuinely undefined class (no `sig`
+                        // to check args against, and the `contains_key`
+                        // guard on the undefined-method branch correctly
+                        // excludes it too), so a call like `NoSuchClass::
+                        // method()` produced zero diagnostics.
+                        self.report(
+                            label.to_string(),
+                            format!("static method call target class {class} not found"),
+                            e.span,
+                            0,
+                            "class.notFound",
+                        );
                     }
                 }
                 match (&resolved_class, sig) {
@@ -1955,6 +2115,25 @@ impl<'a> Checker<'a> {
                     return Type::Mixed;
                 };
                 if !self.registry.classes.contains_key(&class) {
+                    // Phase 48.7: `AccessStaticPropertiesCheck`/
+                    // `ClassConstantRule`'s own "class doesn't exist at
+                    // all" half - a real, previously-silent gap
+                    // (confirmed directly: this whole arm used to return
+                    // `Type::Mixed` here with zero diagnostic, for both a
+                    // static-property and a class-constant reference on a
+                    // genuinely undefined class).
+                    let subject = if member.starts_with('$') {
+                        "static property access"
+                    } else {
+                        "class constant access"
+                    };
+                    self.report(
+                        label.to_string(),
+                        format!("{subject} target class {class} not found"),
+                        e.span,
+                        0,
+                        "class.notFound",
+                    );
                     return Type::Mixed;
                 }
                 if let Some(prop_name) = member.strip_prefix('$') {
@@ -2408,10 +2587,27 @@ impl<'a> Checker<'a> {
                 // check_block never routes through check_function at all.
                 let previous_generator_flag = self.current_function_is_generator;
                 self.current_function_is_generator = body_contains_yield(body);
+                let previous_declared_return_type = self.current_declared_return_type.take();
+                self.current_declared_return_type =
+                    declared_return.as_ref().map(|t| match &self.current_class {
+                        Some(c) => self.resolve_pseudo(t, c),
+                        None => t.clone(),
+                    });
                 let previous_goto_targets = std::mem::replace(
                     &mut self.current_function_goto_targets,
                     collect_goto_targets(body),
                 );
+                // Phase 42 Sub-item A: a closure's own throw points never
+                // belong to the *enclosing* function's own count (calling
+                // the closure, not merely declaring it, is what would
+                // matter, and this project doesn't model that) - starts
+                // fresh, discarded (not merged back) on restore, same
+                // shape as `current_function_is_generator` just above.
+                let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+                let previous_unannotated_call =
+                    std::mem::take(&mut self.current_function_has_unannotated_call);
+                let previous_explicit_throw_points =
+                    std::mem::take(&mut self.current_function_explicit_throw_points);
                 self.check_generator_return_type(declared_return.as_ref(), e.span, &closure_label);
                 self.check_block(
                     body,
@@ -2420,6 +2616,10 @@ impl<'a> Checker<'a> {
                     &closure_label,
                 );
                 self.current_function_is_generator = previous_generator_flag;
+                self.current_declared_return_type = previous_declared_return_type;
+                self.current_function_throw_points = previous_throw_points;
+                self.current_function_has_unannotated_call = previous_unannotated_call;
+                self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;
                 // Phase 59: a `use(...)` capture never referenced anywhere
                 // in the closure's own body it was just checked against
@@ -2517,9 +2717,26 @@ impl<'a> Checker<'a> {
                 let declared_return = return_type
                     .as_deref()
                     .map(|_| self.resolve_type_hint(return_type.as_deref()));
+                let previous_declared_return_type = self.current_declared_return_type.take();
+                self.current_declared_return_type =
+                    declared_return.as_ref().map(|t| match &self.current_class {
+                        Some(c) => self.resolve_pseudo(t, c),
+                        None => t.clone(),
+                    });
+                // Phase 42 Sub-item A: same reasoning as the `Closure`
+                // arm just above.
+                let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+                let previous_unannotated_call =
+                    std::mem::take(&mut self.current_function_has_unannotated_call);
+                let previous_explicit_throw_points =
+                    std::mem::take(&mut self.current_function_explicit_throw_points);
                 self.check_generator_return_type(declared_return.as_ref(), e.span, label);
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 self.current_function_is_generator = previous_generator_flag;
+                self.current_declared_return_type = previous_declared_return_type;
+                self.current_function_throw_points = previous_throw_points;
+                self.current_function_has_unannotated_call = previous_unannotated_call;
+                self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 // Its body is a single implicit-return expression, not a
                 // StmtKind::Return - the equivalent of check_stmt's own
                 // Return-vs-declared_return check, kept here since
@@ -2599,13 +2816,23 @@ impl<'a> Checker<'a> {
                                         );
                                     }
                                     None => {
-                                        self.report(
-                                            label.to_string(),
-                                            format!("call to undefined function {primary}()"),
-                                            e.span,
-                                            0,
-                                            "function.notFound",
-                                        );
+                                        // Phase 71 Item 4: same `function_
+                                        // exists()`-guard suppression as
+                                        // the ordinary-call site above.
+                                        let bare = primary
+                                            .rsplit('\\')
+                                            .next()
+                                            .unwrap_or(&primary)
+                                            .to_ascii_lowercase();
+                                        if !locals.guarded_functions.contains(&bare) {
+                                            self.report(
+                                                label.to_string(),
+                                                format!("call to undefined function {primary}()"),
+                                                e.span,
+                                                0,
+                                                "function.notFound",
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -2891,9 +3118,9 @@ impl<'a> Checker<'a> {
                         .map(|(resolved_name, sig)| {
                             self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
                         })
-                        .unwrap_or_else(|| call_fallback_return_type(callee))
+                        .unwrap_or_else(|| self.call_fallback_return_type(callee, locals))
                 }
-                _ => call_fallback_return_type(callee),
+                _ => self.call_fallback_return_type(callee, locals),
             },
             ExprKind::MethodCall(recv, method, args, nullsafe) => {
                 // A nullsafe receiver is virtually always nullable
@@ -3041,6 +3268,21 @@ impl<'a> Checker<'a> {
             ExprKind::Name(name) => self
                 .global_constant_type(name)
                 .unwrap_or_else(|| bare_name_literal_type(name)),
+            // Phase 70.A: mirrors `check_expr`'s own `ExprKind::Yield`/
+            // `YieldFrom` arms - needed here too, not just there, since
+            // `assertType()`'s own testing-DSL recognition (this file,
+            // above) computes its "actual" type via `infer_expr`, not
+            // `check_expr`, so a bare `Mixed` fallback here would silently
+            // stay wrong for every `assertType('...', yield ...)` fixture
+            // regardless of `check_expr`'s own, already-correct arm.
+            ExprKind::Yield(_, _) => self
+                .current_declared_return_type
+                .as_ref()
+                .map(|t| generator_template_param(t, self.registry, "TSend"))
+                .unwrap_or(Type::Mixed),
+            ExprKind::YieldFrom(inner) => {
+                generator_template_param(&self.infer_expr(inner, locals), self.registry, "TReturn")
+            }
             _ => Type::Mixed,
         }
     }
@@ -3801,28 +4043,41 @@ pub(crate) fn invalid_array_key_description(ty: &Type) -> Option<String> {
     }
 }
 
-/// The type of a call this project can't look up a real signature for -
-/// `exit`/`die` are real PHP language constructs (`is_language_construct`)
-/// with no stub of their own, but unlike the others in that list
-/// (`isset`/`empty`/`unset`/`eval`/`include*`/`print`), PHP itself declares
-/// them `never`: control flow can't continue past one. `always_terminates`
-/// (`checker/control_flow.rs`) recognizes a terminating expression
-/// statement via exactly `infer_expr(e, locals) == Type::Never` - without
-/// this, a guard clause built on `exit()`/`die()` instead of `return`/
-/// `throw` (extremely common in this codebase's CLI tools and test
-/// fixtures) was never recognized as terminating, leaking its own
-/// never-actually-reached branch's narrowing into the surrounding scope.
-fn call_fallback_return_type(callee: &Expr) -> Type {
-    match &callee.kind {
-        ExprKind::Name(name) if matches!(name.to_ascii_lowercase().as_str(), "exit" | "die") => {
-            Type::Never
+impl<'a> Checker<'a> {
+    /// The type of a call this project can't look up a real signature for -
+    /// `exit`/`die` are real PHP language constructs (`is_language_construct`)
+    /// with no stub of their own, but unlike the others in that list
+    /// (`isset`/`empty`/`unset`/`eval`/`include*`/`print`), PHP itself declares
+    /// them `never`: control flow can't continue past one. `always_terminates`
+    /// (`checker/control_flow.rs`) recognizes a terminating expression
+    /// statement via exactly `infer_expr(e, locals) == Type::Never` - without
+    /// this, a guard clause built on `exit()`/`die()` instead of `return`/
+    /// `throw` (extremely common in this codebase's CLI tools and test
+    /// fixtures) was never recognized as terminating, leaking its own
+    /// never-actually-reached branch's narrowing into the surrounding scope.
+    ///
+    /// Phase 53 Sub-item C: gained `&self`/`locals` so a callee whose own
+    /// inferred type is a shaped `Closure(...)` (`Type::Callable(Some(sig))`)
+    /// can fall back to that shape's own declared return type instead of
+    /// `Mixed` - the same real bug fix `check_expr`'s own dynamic-call
+    /// branch makes on the diagnostic-producing side.
+    fn call_fallback_return_type(&self, callee: &Expr, locals: &Locals) -> Type {
+        match &callee.kind {
+            ExprKind::Name(name)
+                if matches!(name.to_ascii_lowercase().as_str(), "exit" | "die") =>
+            {
+                Type::Never
+            }
+            // `print` always evaluates to the literal `int(1)` in real PHP -
+            // confirmed directly against `vendor/phpstan-src`'s own
+            // `PrintHandler::resolveType`, which returns `new
+            // ConstantIntegerType(1)` unconditionally.
+            ExprKind::Name(name) if name == "print" => Type::IntLiteral(1),
+            _ => match self.infer_expr(callee, locals) {
+                Type::Callable(Some(sig)) => (*sig.return_type).clone(),
+                _ => Type::Mixed,
+            },
         }
-        // `print` always evaluates to the literal `int(1)` in real PHP -
-        // confirmed directly against `vendor/phpstan-src`'s own
-        // `PrintHandler::resolveType`, which returns `new
-        // ConstantIntegerType(1)` unconditionally.
-        ExprKind::Name(name) if name == "print" => Type::IntLiteral(1),
-        _ => Type::Mixed,
     }
 }
 

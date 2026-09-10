@@ -289,3 +289,51 @@ fn without_narrowing_the_union_typed_receiver_is_still_flagged() {
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert_eq!(d[0].identifier, "property.notFound");
 }
+
+// Phase 48.7: `AssertRuleHelper`'s existence half - the tag's own type
+// text, not just its target, is checked for unknown classes.
+
+#[test]
+fn an_assert_tag_naming_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert NoSuchClass $x */
+            function assertNoSuchClass($x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_assert_if_true_tag_naming_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @phpstan-assert-if-true NoSuchClass $x */
+                public function check($x): bool { return true; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_assert_tag_naming_a_known_class_is_not_flagged_for_existence() {
+    let d = diagnostics_for(
+        r#"<?php
+            class RealClass {}
+            /** @phpstan-assert RealClass $x */
+            function assertRealClass($x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

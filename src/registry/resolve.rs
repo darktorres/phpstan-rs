@@ -8,6 +8,70 @@ use crate::registry::{ClassInfo, FunctionSig, PropertySig, substitute_type_alias
 use crate::types::Type;
 
 impl Registry {
+    /// Phase 48.1: a real, verified correctness bug - PHP itself resolves
+    /// class/interface/trait/enum names case-insensitively (the same
+    /// rationale `Registry::lookup_function`'s own doc comment already
+    /// gives for functions), but every *internal* registry graph-walk
+    /// (`flatten_traits`, `flatten_phpdoc_inheritance`, the ancestor/
+    /// interface-satisfaction walks in `registry/hierarchy.rs`, ...) does
+    /// a plain, exact-case `self.classes.get(name)`. Rather than thread a
+    /// case-insensitive fallback through every one of those ~20 call
+    /// sites (real, ongoing maintenance risk - a new one added later
+    /// could easily forget it), this runs once, right after indexing
+    /// finishes and *before* any of those graph-walks - a single
+    /// O(classes) rewrite pass that canonicalizes every reference-shaped
+    /// field on each `ClassInfo` (`extends`, `implements`, `uses`,
+    /// `mixins`, each `TraitAlias::trait_name`, each `ResolvedTypeImport::
+    /// source_class_fqn`) to the real declared key's own case, wherever
+    /// the differently-cased reference resolves at all. A reference that
+    /// still doesn't resolve after lowercasing is left completely
+    /// untouched - a genuine typo, which the existing `class.notFound`-
+    /// family checks already catch; this function only ever narrows what
+    /// "resolves" means, never widens it. Every internal `self.classes.
+    /// get(&current)`-style lookup stays a plain, allocation-free `HashMap`
+    /// lookup, now simply correct because the stored string is always
+    /// canonical - matching `lookup_function`'s own stated philosophy.
+    #[hotpath::measure]
+    pub(crate) fn canonicalize_class_name_case(&mut self) {
+        let mut canonical_by_lower: HashMap<String, String> = HashMap::new();
+        for key in self.classes.keys() {
+            canonical_by_lower
+                .entry(key.to_ascii_lowercase())
+                .or_insert_with(|| key.clone());
+        }
+        let canonicalize = |name: &mut String| {
+            if let Some(canonical) = canonical_by_lower.get(&name.to_ascii_lowercase())
+                && canonical != name
+            {
+                *name = canonical.clone();
+            }
+        };
+        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        for class_name in class_names {
+            let Some(mut info) = self.classes.remove(&class_name) else {
+                continue;
+            };
+            for name in info
+                .extends
+                .iter_mut()
+                .chain(info.implements.iter_mut())
+                .chain(info.uses.iter_mut())
+                .chain(info.mixins.iter_mut())
+            {
+                canonicalize(name);
+            }
+            for alias in &mut info.trait_aliases {
+                if let Some(trait_name) = &mut alias.trait_name {
+                    canonicalize(trait_name);
+                }
+            }
+            for import in &mut info.type_imports {
+                canonicalize(&mut import.source_class_fqn);
+            }
+            self.classes.insert(class_name, info);
+        }
+    }
+
     /// A `use TraitName;` can reference a trait declared later in the same
     /// file (PHP resolves this at compile time, not top-to-bottom), so
     /// flattening has to be a second pass over the fully-indexed classes -

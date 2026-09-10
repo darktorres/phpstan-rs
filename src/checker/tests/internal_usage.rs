@@ -864,3 +864,155 @@ fn extending_a_non_internal_class_is_never_flagged() {
         "got: {d:?}"
     );
 }
+
+// Phase 67 Item B: `param`/`return` native type-hints for the `@internal`
+// class-name-usage check.
+
+#[test]
+fn a_parameter_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            function f(\Vendor\Internal\Foo $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_return_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            function f(): \Vendor\Internal\Foo {
+                throw new \Exception();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_nullable_parameter_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            function f(?\Vendor\Internal\Foo $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_union_parameter_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            function f(\Vendor\Internal\Foo|int $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_parameter_typehint_referencing_an_internal_class_from_the_same_root_namespace_is_never_flagged()
+ {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Vendor\App;
+            function f(\Vendor\Internal\Foo $x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_self_typed_parameter_on_an_internal_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {
+                public function withOther(self $other): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_constructor_property_parameter_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            class C {
+                public function __construct(private \Vendor\Internal\Foo $foo) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_docblock_only_param_tag_referencing_an_internal_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            /** @param \Vendor\Internal\Foo $x */
+            function f($x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}

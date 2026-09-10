@@ -8,7 +8,8 @@ mod generators;
 
 pub(crate) use boolean_conditions::is_truthy_literal;
 pub(crate) use generators::{
-    body_contains_yield, expr_contains_yield, type_allows_generator_return,
+    body_contains_yield, expr_contains_yield, generator_missing_return_type,
+    generator_template_param, type_allows_generator_return,
 };
 
 /// Whether `stmt` merely exits a `switch` itself rather than the whole
@@ -401,6 +402,24 @@ impl<'a> Checker<'a> {
 /// no further change needed at any of those call sites.
 pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
     let mut merged = then_locals.fresh_scope();
+    // Phase 71 Item 4: a `function_exists()` guard only survives a merge
+    // point when both incoming branches agree it's guaranteed - the same
+    // reasoning every other narrowed fact here already gets (`union_types`
+    // above widens a type across both branches; a guard, being a boolean
+    // fact rather than a type, "widens" to "not guaranteed" the moment
+    // either branch doesn't have it). Since only the `function_exists(...)`
+    // true-branch itself ever inserts a name (`apply_narrowing`), this
+    // also correctly makes the fact vanish the instant execution falls
+    // through a non-terminating `if` with no early exit on the other
+    // side - `check_if`'s own existing `then_terminates`/`else_terminates`
+    // branch-selection logic (not this function) is what already makes
+    // the "unconditional early return in the negative branch persists the
+    // fact past the `if`" idiom work, by handing back the whole surviving
+    // branch's `Locals` (guard set included) instead of a merge at all.
+    merged.guarded_functions = then_locals
+        .guarded_functions
+        .clone()
+        .intersection(else_locals.guarded_functions.clone());
     for (name, then_ty) in then_locals.iter() {
         if let Some(else_ty) = else_locals.get(name) {
             let mut provenance = then_locals

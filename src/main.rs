@@ -80,6 +80,15 @@ enum Command {
         /// (IDE-stub/native-extension declaration files) this avoids.
         #[arg(long)]
         check_empty_method_bodies: bool,
+        /// Enables the opt-in "missing checked exception" family
+        /// (`throws.missingType` on a real, explicit `throw` whose own
+        /// type isn't covered by any `@throws` tag). Off by default - the
+        /// riskiest of this project's opt-in checks given the real
+        /// corpus's documented inconsistent `@throws` tagging, see
+        /// `registry::Registry::check_missing_checked_exceptions`'s own
+        /// doc comment for why.
+        #[arg(long)]
+        check_missing_checked_exceptions: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -144,6 +153,7 @@ fn main() {
             check_internal_usage,
             check_deprecated_usage,
             check_empty_method_bodies,
+            check_missing_checked_exceptions,
             php_version,
             generate_baseline,
             baseline,
@@ -159,6 +169,7 @@ fn main() {
             check_internal_usage,
             check_deprecated_usage,
             check_empty_method_bodies,
+            check_missing_checked_exceptions,
             php_version,
             generate_baseline,
             baseline,

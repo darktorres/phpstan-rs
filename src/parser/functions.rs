@@ -31,6 +31,7 @@ impl Parser {
             // promotion, so it's still just consumed and dropped.
             let mut promoted_visibility = None;
             let mut promoted_readonly = false;
+            let mut promoted_final = false;
             loop {
                 // PHP 8.4 asymmetric visibility on a promoted property
                 // (`public public(set) string $a`) - see the identical
@@ -59,7 +60,9 @@ impl Parser {
                     Token::Keyword(Keyword::Readonly) => {
                         promoted_readonly = true;
                     }
-                    Token::Keyword(Keyword::Final) => {}
+                    Token::Keyword(Keyword::Final) => {
+                        promoted_final = true;
+                    }
                     _ => break,
                 }
                 self.advance();
@@ -103,6 +106,7 @@ impl Parser {
                 variadic,
                 promoted_visibility,
                 promoted_readonly,
+                promoted_final,
                 hooks,
                 attrs,
                 doc_comment,

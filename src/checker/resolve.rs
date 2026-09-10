@@ -1,4 +1,4 @@
-use crate::checker::Checker;
+use crate::checker::{Checker, class_type_word};
 use crate::registry::{self};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -307,7 +307,50 @@ impl<'a> Checker<'a> {
         matches!(
             name,
             "object" | "Traversable" | "resource" | "class@anonymous"
-        ) || self.registry.classes.contains_key(name)
+        ) || self.registry.lookup_class(name).is_some()
+    }
+
+    /// Phase 48.2: `ClassCaseSensitivityCheck`'s equivalent, scoped to a
+    /// class/enum declaration's own `extends`/`implements`/trait-`use`
+    /// references (the historically highest-signal reference kinds, and
+    /// the ones that already carry per-item spans - `ClassDecl::extends_
+    /// spans`/`implements_spans`/`uses_spans` - for a precise report
+    /// location) rather than all ~15 MVP existence-check call sites -
+    /// a deliberate, disclosed narrowing to keep this addition self-
+    /// contained, matching this project's own established precedent of
+    /// shipping a real, correct subset rather than a half-built full
+    /// sweep. Skips a `use`-imported reference (real PHPStan's own
+    /// default `checkImportedClassNameCase: false`) and a built-in stub
+    /// class (`checkInternalClassCaseSensitivity: false`) - both
+    /// unconditionally, matching real PHPStan's own non-bleeding-edge
+    /// default config exactly. `raw` is the reference exactly as written
+    /// in source (needed fresh here, not `ClassInfo::extends`/etc., which
+    /// `Registry::canonicalize_class_name_case` already rewrites to
+    /// canonical case at registry-build time - there would be nothing
+    /// left to compare against a "real declared case" from that field).
+    pub(crate) fn check_class_name_case(&mut self, fqn: &str, raw: &str, span: Span) {
+        let mut segments = raw.trim_start_matches('\\').splitn(2, '\\');
+        let first_segment = segments.next().unwrap_or(raw);
+        if self.name_ctx.is_use_imported(first_segment) {
+            return;
+        }
+        let resolved = self.name_ctx.resolve(raw);
+        let Some((canonical, info)) = self.registry.lookup_class(&resolved) else {
+            return;
+        };
+        if self.registry.built_in_stub_classes.contains(canonical) {
+            return;
+        }
+        if canonical != resolved {
+            let type_word = class_type_word(info.kind);
+            self.report(
+                fqn.to_string(),
+                format!("{type_word} referenced with incorrect case: {resolved}."),
+                span,
+                0,
+                &format!("{}.nameCase", type_word.to_lowercase()),
+            );
+        }
     }
 
     /// Walks an already name-resolved `Type` (every `Object` inside it

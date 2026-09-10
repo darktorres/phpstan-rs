@@ -21,10 +21,11 @@
 //! `__toString()` call - neither is implemented here (see ROADMAP.md's
 //! own Phase 67 entry for the full list of what's still open).
 
-use crate::ast::ClassKind;
+use crate::ast::{ClassKind, FunctionDecl};
 use crate::checker::Checker;
 use crate::registry::{ConstSig, FunctionSig, PropertySig};
 use crate::token::Span;
+use crate::types::Type;
 
 /// `Class`/`Interface`/`Trait`/`Enum` - matches real PHPStan's own
 /// `ClassReflection::getClassTypeDescription()`, used both in message
@@ -452,5 +453,129 @@ impl<'a> Checker<'a> {
             0,
             &format!("traitUse.internal{type_word}"),
         );
+    }
+
+    /// Phase 67 Item B: `param`/`return` native type-hints for the
+    /// `@internal` class-name-usage check - operates on each param's and
+    /// the return's *native* type-hint text only (`resolve_type_hint`,
+    /// not the docblock-merged type any `sig`-based lookup would give),
+    /// matching real PHPStan's own `FunctionDefinitionCheck` exactly
+    /// (there is no `ClassNameUsageLocation` for a `@param`/`@return`
+    /// PHPDoc tag's own type at all - confirmed by reading the full
+    /// constant list). Named functions/methods only - a closure/arrow-fn
+    /// literal's own native param/return hints have their own, separate
+    /// inline checking in `checker/expr.rs` this doesn't touch (a
+    /// disclosed, narrower residual matching real PHPStan's own
+    /// `checkFunction`/`checkClassMethod` vs. `checkAnonymousFunction`
+    /// architectural split).
+    pub(crate) fn check_internal_param_and_return_types(
+        &mut self,
+        f: &FunctionDecl,
+        class_name: Option<&str>,
+        label: &str,
+    ) {
+        if !self.registry.check_internal_usage {
+            return;
+        }
+        let context = match class_name {
+            Some(_) => format!("method {label}()"),
+            None => format!("function {label}()"),
+        };
+        for p in &f.params {
+            let ty = self.resolve_type_hint(p.type_hint.as_deref());
+            let ty = match class_name {
+                Some(c) => self.resolve_pseudo(&ty, c),
+                None => ty,
+            };
+            let mut classes = Vec::new();
+            collect_referenced_class_names(&ty, &mut classes);
+            for class in classes {
+                self.report_internal_param_or_return(
+                    &class,
+                    &format!("Parameter ${}", p.name),
+                    &context,
+                    "parameter",
+                    p.type_hint_span.unwrap_or(p.name_span),
+                    label,
+                );
+            }
+        }
+        if f.return_type.is_some() {
+            let ty = self.resolve_type_hint(f.return_type.as_deref());
+            let ty = match class_name {
+                Some(c) => self.resolve_pseudo(&ty, c),
+                None => ty,
+            };
+            let mut classes = Vec::new();
+            collect_referenced_class_names(&ty, &mut classes);
+            for class in classes {
+                self.report_internal_param_or_return(
+                    &class,
+                    "Return type",
+                    &context,
+                    "return",
+                    f.return_type_span.unwrap_or(f.span),
+                    label,
+                );
+            }
+        }
+    }
+
+    fn report_internal_param_or_return(
+        &mut self,
+        class: &str,
+        subject: &str,
+        context: &str,
+        id_prefix: &str,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(info) = self.registry.classes.get(class) else {
+            return;
+        };
+        if !info.is_internal || !self.should_report_internal_usage(class) {
+            return;
+        }
+        let type_word = class_type_word(info.kind);
+        self.report(
+            label.to_string(),
+            format!(
+                "{subject} of {context} has typehint with internal {} {class}.",
+                type_word.to_lowercase()
+            ),
+            span,
+            0,
+            &format!("{id_prefix}.internal{type_word}"),
+        );
+    }
+}
+
+/// Sibling of `checker::resolve::collect_unknown_class_names`, minus the
+/// existence check: native PHP type-hint syntax can only ever produce
+/// `Object`/`Union`/`Intersection` (no `Array`/`ClassString`/`ArrayShape`/
+/// `ObjectShape` - those are PHPDoc-only constructs `resolve_type_hint`
+/// never emits from a bare native hint string), so the walk only needs
+/// those two arms. The `$$covariant`/`$$contravariant`/`$$bivariant`
+/// call-site-variance sentinels (`Type::Object`-shaped but not real class
+/// names) are excluded too, matching every other consumer of a resolved
+/// `Type::Object` name in this codebase.
+fn collect_referenced_class_names(ty: &Type, out: &mut Vec<String>) {
+    match ty {
+        Type::Object(name, _)
+            if !matches!(
+                name.as_str(),
+                "$$covariant" | "$$contravariant" | "$$bivariant"
+            ) =>
+        {
+            if !out.iter().any(|n| n == name) {
+                out.push(name.clone());
+            }
+        }
+        Type::Union(members) | Type::Intersection(members) => {
+            for m in members {
+                collect_referenced_class_names(m, out);
+            }
+        }
+        _ => {}
     }
 }

@@ -287,7 +287,9 @@ fn filter_var_recognizes_null_on_failure_inside_an_or_chain() {
 #[test]
 fn filter_var_with_require_array_flag_falls_back_to_the_generic_stub() {
     // Genuinely more complex than this narrow slice attempts - don't
-    // guess, just leave the generic stub type in place.
+    // guess, just leave the generic stub type in place. (A non-provably-
+    // array input - see the Phase 76 sub-item A tests below for the
+    // provably-array case, which *is* now handled.)
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -297,6 +299,199 @@ fn filter_var_with_require_array_flag_falls_back_to_the_generic_stub() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 76 sub-item A: `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` per-
+// element return type.
+
+#[test]
+fn filter_var_with_require_array_flag_and_a_known_array_input_wraps_the_element_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string> $values */
+            function f(array $values): void {
+                assertType('array<int|false>', filter_var($values, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn filter_var_with_force_array_flag_wraps_regardless_of_input_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType('array<int|false>', filter_var($x, FILTER_VALIDATE_INT, FILTER_FORCE_ARRAY));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn filter_var_require_array_takes_priority_over_force_array_when_both_are_set() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string> $values */
+            function f(array $values): void {
+                assertType(
+                    'array<int|false>',
+                    filter_var($values, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY | FILTER_FORCE_ARRAY)
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn filter_var_min_range_option_survives_require_array_wrap() {
+    // The `|false` fallback is still unioned into the per-element type
+    // even with a `min_range` option present - confirmed directly
+    // against real PHPStan's own `getType()`: `$exactType === null` (a
+    // non-literal array element's own value is never "exact") triggers
+    // the fallback-union unconditionally, independent of whether a
+    // range option also narrowed the base type.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string> $values */
+            function f(array $values): void {
+                assertType(
+                    'array<int<1, max>|false>',
+                    filter_var($values, FILTER_VALIDATE_INT, [
+                        'flags' => FILTER_REQUIRE_ARRAY,
+                        'options' => ['min_range' => 1],
+                    ])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Phase 76 sub-item B: PHP 8.5's `FILTER_THROW_ON_FAILURE`.
+
+#[test]
+fn filter_var_with_throw_on_failure_removes_the_false_fallback() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType('int', filter_var($x, FILTER_VALIDATE_INT, FILTER_THROW_ON_FAILURE));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn filter_var_with_throw_on_failure_ored_with_another_flag_still_removes_the_fallback() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'int',
+                    filter_var($x, FILTER_VALIDATE_INT, FILTER_FLAG_ALLOW_OCTAL | FILTER_THROW_ON_FAILURE)
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn filter_var_with_throw_on_failure_and_a_literal_default_option_still_removes_the_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType(
+                    'int',
+                    filter_var($x, FILTER_VALIDATE_INT, [
+                        'flags' => FILTER_THROW_ON_FAILURE,
+                        'options' => ['default' => 42],
+                    ])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Phase 76 sub-item C: `filter_input()` itself.
+
+#[test]
+fn filter_input_validate_int_returns_int_or_null_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType('int|null|false', filter_input(INPUT_GET, 'x', FILTER_VALIDATE_INT));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn filter_input_with_null_on_failure_still_includes_both_null_and_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType(
+                    'int|null|false',
+                    filter_input(INPUT_GET, 'x', FILTER_VALIDATE_INT, FILTER_NULL_ON_FAILURE)
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn filter_input_with_a_literal_default_option_keeps_the_unconditional_null_and_false() {
+    // `int|42` simplifies to plain `int` (this project's own `union_types`
+    // already collapses a literal into its own already-present base type -
+    // see `filter_var_with_a_default_option_uses_it_as_the_failure_
+    // fallback_instead_of_false`'s identical, already-established note),
+    // so the real thing this test demonstrates is that `null`/`false`
+    // still both appear even with a *custom* default option given, not
+    // that the literal default itself survives unsimplified.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType(
+                    'int|null|false',
+                    filter_input(INPUT_GET, 'x', FILTER_VALIDATE_INT, ['options' => ['default' => 42]])
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn filter_input_with_require_array_flag_falls_back_to_the_generic_stub() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType(
+                    'mixed',
+                    filter_input(INPUT_GET, 'x', FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY)
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
 // Phase 76 follow-up: an `['options' => [...]]` array's own `default`/

@@ -440,6 +440,31 @@ impl Registry {
         None
     }
 
+    /// Phase 64 Item 3: `find_final_ancestor_method`'s property-side
+    /// mirror - PHP 8.4's own `final` property modifier. Walks only
+    /// `extends`, same reasoning as the method version (properties have
+    /// no `implements`/interface side at all, and this project doesn't
+    /// propagate a trait's own `final_properties` the way it does
+    /// `abstract_methods` either).
+    pub fn find_final_ancestor_property(&self, class: &str, property: &str) -> Option<String> {
+        let info = self.classes.get(class)?;
+        let mut seen = HashSet::new();
+        let mut stack: Vec<String> = info.extends.clone();
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            let Some(current_info) = self.classes.get(&current) else {
+                continue;
+            };
+            if current_info.final_properties.contains(property) {
+                return Some(current);
+            }
+            stack.extend(current_info.extends.iter().cloned());
+        }
+        None
+    }
+
     /// Every method name `class` must provide a concrete (non-abstract)
     /// implementation of somewhere in its own hierarchy: every abstract
     /// method declared by an ancestor class, every method declared by an
@@ -602,5 +627,23 @@ impl Registry {
                 .find(|(k, _)| k.eq_ignore_ascii_case(name))
                 .map(|(_, v)| v)
         })
+    }
+
+    /// Phase 48.1: `lookup_function`'s own class-side mirror - real PHP
+    /// resolves class/interface/trait/enum names case-insensitively too,
+    /// the same rationale `lookup_function`'s own doc comment already
+    /// gives for functions. Returns the *canonical* declared key
+    /// alongside the info so a caller can rebind its own local variable
+    /// to it (a fresh-per-check-time lookup, not a structural registry
+    /// field - see `canonicalize_class_name_case`'s own doc comment for
+    /// why those two need different treatment).
+    pub fn lookup_class(&self, name: &str) -> Option<(&str, &ClassInfo)> {
+        if let Some((k, v)) = self.classes.get_key_value(name) {
+            return Some((k.as_str(), v));
+        }
+        self.classes
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(k, v)| (k.as_str(), v))
     }
 }

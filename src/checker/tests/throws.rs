@@ -239,3 +239,429 @@ fn a_throw_inside_a_nested_if_still_contradicts_throws_void() {
         "got: {d:?}"
     );
 }
+
+// Phase 42 Sub-items A/C: `TooWideFunctionThrowTypeRule`/
+// `TooWideMethodThrowTypeRule` - a declared `@throws` member never
+// actually produced anywhere in the body is flagged `throws.unusedType`.
+
+#[test]
+fn a_declared_throws_type_actually_thrown_is_not_flagged_too_wide() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \RuntimeException */
+            function f(): void {
+                throw new \RuntimeException('real');
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_declared_throws_type_never_thrown_anywhere_is_flagged_too_wide() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \RuntimeException */
+            function f(): void {
+                echo 'never throws anything';
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"
+            && x.message.contains(
+                "Function f() has RuntimeException in PHPDoc @throws tag but it's not thrown."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_declared_throws_type_thrown_by_a_called_functions_own_throws_tag_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \RuntimeException */
+            function inner(): void {
+                throw new \RuntimeException('real');
+            }
+            /** @throws \RuntimeException */
+            function outer(): void {
+                inner();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_declared_throws_type_on_a_method_never_thrown_is_flagged_with_method_wording() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Repo {
+                /** @throws \RuntimeException */
+                public function find(): void {
+                    echo 'never throws';
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"
+            && x.message
+                .contains("Method Repo::find() has RuntimeException in PHPDoc @throws tag but it's not thrown.")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_to_a_function_with_no_throws_tag_at_all_is_not_treated_as_unannotated() {
+    // Sub-item A's own deliberate calibration: an ordinary, resolved
+    // function with simply no `@throws` tag (the overwhelmingly common
+    // case, e.g. real stdlib calls like `strlen()`) must NOT suppress
+    // this whole check - only a genuinely unresolvable/dynamic call
+    // should.
+    let d = diagnostics_for(
+        r#"<?php
+            function noThrowsTagAtAll(): void {}
+            /** @throws \RuntimeException */
+            function f(): void {
+                noThrowsTagAtAll();
+                echo 'still never throws RuntimeException';
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_to_a_genuinely_unresolvable_function_suppresses_the_too_wide_check() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \RuntimeException */
+            function f(callable $cb): void {
+                $cb();
+                echo 'never explicitly throws, but the dynamic call might';
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_void_throws_tag_is_never_flagged_too_wide() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws void */
+            function f(): void {
+                echo 'never throws, exactly as declared';
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_throw_inside_a_nested_closure_does_not_satisfy_the_outer_functions_own_throws_tag() {
+    // Mirrors the `throws.void` test of the same shape above: a closure's
+    // own throw points belong to *it*, not the enclosing declaration.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \RuntimeException */
+            function f(): void {
+                $g = function () {
+                    throw new \RuntimeException('belongs to the closure, not f()');
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+// Phase 42 Sub-item D: per-callee dynamic throw-type extensions.
+
+#[test]
+fn intdiv_by_a_literal_nonzero_divisor_satisfies_a_division_by_zero_error_throws_tag_check() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \DivisionByZeroError */
+            function f(): void {
+                intdiv(10, 2);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "a literal nonzero divisor can never divide by zero, so the tag should still be unused: {d:?}"
+    );
+}
+
+#[test]
+fn intdiv_by_a_non_literal_divisor_satisfies_a_division_by_zero_error_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \DivisionByZeroError */
+            function f(int $divisor): void {
+                intdiv(10, $divisor);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn assert_with_no_custom_exception_satisfies_an_assertion_error_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \AssertionError */
+            function f(bool $cond): void {
+                assert($cond);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn assert_with_a_custom_throwable_second_argument_satisfies_that_types_own_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \LogicException */
+            function f(bool $cond): void {
+                assert($cond, new \LogicException('custom'));
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn json_encode_with_throw_on_error_flag_satisfies_a_json_exception_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \JsonException */
+            function f($x): void {
+                json_encode($x, JSON_THROW_ON_ERROR);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn json_encode_without_throw_on_error_flag_does_not_satisfy_a_json_exception_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \JsonException */
+            function f($x): void {
+                json_encode($x);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn constructing_reflection_class_satisfies_a_reflection_exception_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \ReflectionException */
+            function f(string $class): void {
+                new \ReflectionClass($class);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn calling_sub_on_a_datetime_satisfies_a_date_invalid_operation_exception_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \DateInvalidOperationException */
+            function f(\DateTime $dt, \DateInterval $i): void {
+                $dt->sub($i);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 42 bonus item: opt-in "missing checked exception" family - off
+// by default, enabled per-test via `diagnostics_for_with`.
+
+#[test]
+fn the_missing_checked_exception_check_is_off_by_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                throw new \RuntimeException('undocumented');
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.missing"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_explicit_throw_not_covered_by_any_throws_tag_is_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(): void {
+                throw new \RuntimeException('undocumented');
+            }
+        "#,
+        |r| r.check_missing_checked_exceptions = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.missing"
+            && x.message.contains(
+                "Function f() throws RuntimeException but it's not covered by any @throws tag."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_explicit_throw_covered_by_its_own_throws_tag_is_not_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            /** @throws \RuntimeException */
+            function f(): void {
+                throw new \RuntimeException('documented');
+            }
+        "#,
+        |r| r.check_missing_checked_exceptions = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.missing"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_explicit_throw_covered_by_a_broader_throws_tag_is_not_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            /** @throws \Exception */
+            function f(): void {
+                throw new \RuntimeException('a real RuntimeException is-a Exception');
+            }
+        "#,
+        |r| r.check_missing_checked_exceptions = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.missing"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_throw_type_not_covered_by_a_narrower_throws_tag_is_still_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            /** @throws \LogicException */
+            function f(): void {
+                throw new \RuntimeException('not a LogicException');
+            }
+        "#,
+        |r| r.check_missing_checked_exceptions = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.missing"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_throw_covered_by_a_called_functions_own_throws_tag_is_still_flagged() {
+    // Sub-item A's own deliberate calibration: a *called* function's own
+    // `@throws` tag counts for the caller's own `TooWideFunctionThrowTypeRule`
+    // comparison, but never for this check - what a callee documents is
+    // that callee's own author's responsibility, not proof this
+    // declaration's own explicit `throw` is covered.
+    let d = diagnostics_for_with(
+        r#"<?php
+            /** @throws \RuntimeException */
+            function inner(): void {
+                throw new \RuntimeException('inner is fully documented');
+            }
+            function outer(): void {
+                throw new \RuntimeException('outer has no tag of its own');
+            }
+        "#,
+        |r| r.check_missing_checked_exceptions = true,
+    );
+    assert_eq!(
+        d.iter()
+            .filter(|x| x.identifier == "throws.missing")
+            .count(),
+        1,
+        "got: {d:?}"
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "throws.missing" && x.location == "outer"),
+        "expected exactly outer() to be flagged, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_throw_inside_a_method_uses_method_wording_when_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Repo {
+                public function find(): void {
+                    throw new \RuntimeException('undocumented');
+                }
+            }
+        "#,
+        |r| r.check_missing_checked_exceptions = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.missing"
+            && x.message
+                .contains("Method Repo::find() throws RuntimeException but it's not covered by any @throws tag.")),
+        "got: {d:?}"
+    );
+}

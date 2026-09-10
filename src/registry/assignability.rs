@@ -32,11 +32,11 @@ impl Registry {
             // matches this project's existing "don't guess, don't
             // false-positive" leniency elsewhere (e.g. the `Array(Mixed)`
             // leniency just below).
-            (Type::Object(class, _), Type::Callable) => {
+            (Type::Object(class, _), Type::Callable(_)) => {
                 self.lookup_method(class, "__invoke").is_some()
             }
-            (Type::String | Type::StringLiteral(_), Type::Callable) => true,
-            (Type::Array(_, _) | Type::ArrayShape(_), Type::Callable) => true,
+            (Type::String | Type::StringLiteral(_), Type::Callable(_)) => true,
+            (Type::Array(_, _) | Type::ArrayShape(_), Type::Callable(_)) => true,
             // Phase 54: type arguments used to be ignored here entirely
             // (`Collection<Cat>` and `Collection<Dog>` were mutually
             // assignable, always) - this project now genuinely models

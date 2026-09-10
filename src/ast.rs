@@ -150,6 +150,12 @@ pub struct Param {
     // `public readonly int $id` in a promoted constructor parameter.
     // Meaningless when promoted_visibility is None.
     pub promoted_readonly: bool,
+    // Phase 64 Item 3: `public final int $id` in a promoted constructor
+    // parameter - real, valid PHP (confirmed via `php -l`), unlike
+    // `abstract` (an abstract constructor can't declare any promoted
+    // property at all - real fatal error). Meaningless when
+    // promoted_visibility is None.
+    pub promoted_final: bool,
     // A promoted property's own hooks, defined inline in the constructor's
     // parameter list rather than on an ordinary property declaration.
     // Boxed because PropertyHooks::set itself embeds a Param - unboxed,
@@ -217,6 +223,12 @@ pub struct PropertyDecl {
     pub write_visibility: Option<Visibility>,
     pub is_static: bool,
     pub is_readonly: bool,
+    // PHP 8.4 `final`/`abstract` property modifiers (Phase 64 Item 3) -
+    // `is_abstract_member`/`is_final_member` were already parsed for
+    // `MethodDecl`/`ClassConst`, just never threaded through to a plain
+    // property declaration until now.
+    pub is_abstract: bool,
+    pub is_final: bool,
     pub type_hint: Option<String>,
     // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment.
     pub type_hint_span: Option<Span>,
@@ -239,6 +251,12 @@ pub enum PropertyHookBody {
     Arrow(Expr),
     // `get { ... }` / `set(...) { ... }`
     Block(Vec<Stmt>),
+    // Phase 64 Item 1: `get;` / `set(...);` - a hook declared, with no
+    // body at all (only legal inside an abstract class/interface). Real
+    // PHP distinguishes this from "no hook declared" (`PropertyHooks::
+    // get`/`set` staying `None`) - `hasHook()` needs to answer "is a
+    // hook declared at all," independent of whether it has a body.
+    Abstract,
 }
 
 #[derive(Debug, Clone)]

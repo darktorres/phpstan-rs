@@ -375,20 +375,30 @@ fn an_explicit_never_doc_survives_reconciliation_against_a_native_void_hint() {
 }
 
 // Phase 60 corpus find: a PHPStan/Psalm callable-shape doc member
-// (`Closure(Tv): bool`) degrades to plain `Type::Callable` at parse
-// time (no per-parameter/return signature is tracked) - `is_subtype
+// (`Closure(Tv): bool`) used to degrade to plain `Type::Callable` at
+// parse time (no per-parameter/return signature tracked) - `is_subtype
 // (Callable, Closure)` is correctly `false` in general (not every
 // `callable` is a `Closure` instance), but that used to make
 // `reconcile_with_native` wrongly discard the doc member even when the
 // native hint names `Closure` exactly, collapsing `null|Closure` down
-// to bare `null` (`Psl\Dict\filter()`'s real shape). The now-kept
-// `Callable` member is further refined back to the native hint's own
-// `Closure` - strictly more precise, and (a second real corpus find)
-// avoids a *different* false positive: a same-signature override
-// looking like an illegal narrowing purely because the ancestor's own
-// resolved type had degraded to `Callable` while the child's never did.
+// to bare `null` (`Psl\Dict\filter()`'s real shape). Back then, the
+// now-kept `Callable` member was further refined back to the native
+// hint's own bare `Closure` object type, since the bare marker carried
+// no signature info of its own to lose.
+//
+// Phase 53 Sub-item A superseded that last step: `Closure(mixed): bool`
+// now parses into a real, shaped `Type::Callable(Some(sig))` instead of
+// the bare marker - `refine_callable_member`'s own guard (`registry/
+// function_sig/type_resolution.rs`) deliberately does NOT touch an
+// already-shaped member anymore, since it's already a genuine
+// refinement in its own right, strictly more precise than degrading it
+// to a signature-less `Closure` object type would be. The `is_subtype`/
+// override-narrowing false positives this test's own history describes
+// are still avoided - `is_subtype`'s own `(Callable(Some(_)), Callable
+// (None))` leniency (`types/subtype.rs`) is the mechanism now, not this
+// refinement step.
 #[test]
-fn a_callable_shape_doc_member_is_refined_to_the_closure_native_hint() {
+fn a_callable_shape_doc_member_keeps_its_own_real_signature_alongside_the_closure_native_hint() {
     let r = build_registry(
         r#"<?php
             class Closure {}
@@ -396,13 +406,15 @@ fn a_callable_shape_doc_member_is_refined_to_the_closure_native_hint() {
             function f(null|Closure $predicate = null) {}
         "#,
     );
-    assert_eq!(
-        r.functions["f"].params[0].ty,
-        Type::Union(vec![
-            Type::Object("Closure".to_string(), Vec::new()),
-            Type::Null
-        ])
-    );
+    let Type::Union(members) = &r.functions["f"].params[0].ty else {
+        panic!(
+            "expected a top-level union, got {:?}",
+            r.functions["f"].params[0].ty
+        );
+    };
+    assert_eq!(members.len(), 2);
+    assert_eq!(members[0].to_string(), "callable(mixed): bool");
+    assert_eq!(members[1], Type::Null);
 }
 
 // Phase 74 corpus find: an `array<K, V>`-shaped doc member's own *key*

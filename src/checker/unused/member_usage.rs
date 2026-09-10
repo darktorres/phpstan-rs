@@ -251,6 +251,7 @@ fn walk_hook_body_for_members(
                 walk_stmt_for_members(s, fqn, ctx, usage);
             }
         }
+        PropertyHookBody::Abstract => {}
     }
 }
 

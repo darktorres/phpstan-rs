@@ -327,7 +327,7 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         ])),
         "is_null" => Some(Type::Null),
         "is_object" => Some(Type::Object("object".to_string(), Vec::new())),
-        "is_callable" => Some(Type::Callable),
+        "is_callable" => Some(Type::Callable(None)),
         // Phase 28, real shape: `proc_open()`/`fsockopen()` return
         // `resource|false`, guarded everywhere in this corpus with
         // `if (! is_resource($x)) { throw ...; }` before `fclose`/

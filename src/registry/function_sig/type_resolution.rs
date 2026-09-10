@@ -138,7 +138,12 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
 /// otherwise (an untyped-native `callable $p`, or one this project
 /// still can't say anything more precise about).
 fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
-    if m != Type::Callable {
+    // Phase 53: only the bare marker is "coarse" in the sense this
+    // function exists to fix - a real parsed `Closure(...)`/
+    // `callable(...)` shape (`Some(sig)`) is already a genuine
+    // refinement in its own right and shouldn't be thrown away in favor
+    // of a plain native class type.
+    if !matches!(m, Type::Callable(None)) {
         return m;
     }
     match native_ty {
@@ -252,7 +257,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // resolved to bare `null` once the `Closure(...)`-shaped member
         // was filtered out, in turn making Phase 60's `nullCoalesce`
         // check wrongly flag `$predicate ??= ...` as "always null."
-        Type::Callable => true,
+        Type::Callable(_) => true,
         // Phase 74 corpus find: an array's own *key* type was checked
         // against `native_ty` via the same full `is_subtype` as every
         // other member, including its key - fine for a concrete key

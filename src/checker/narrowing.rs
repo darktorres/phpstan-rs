@@ -1,9 +1,11 @@
 use crate::ast::*;
 use crate::checker::{
     Checker, Locals, build_matched_shape, int_range_bounds, literal_string_value,
-    normalize_int_range,
+    normalize_int_range, unwrap_grouping,
 };
 use crate::regex_groups;
+use crate::registry::FunctionSig;
+use crate::token::Span;
 use crate::types::{AccessoryKind, Type};
 mod accessory_range;
 mod array_shape;
@@ -61,6 +63,32 @@ impl<'a> Checker<'a> {
             };
             purge_stale_narrowing_for(locals, matches_name);
             locals.insert(matches_name.clone(), narrowed);
+        }
+        // Phase 71 Item 4: `function_exists('foo')`'s own true branch
+        // proves `foo` is callable for the rest of that branch - a
+        // disclosed, project-specific adaptation (this project's own
+        // registry, unlike real PHPStan's live reflection, can genuinely
+        // lack a symbol that still exists at runtime) mirroring the
+        // already-shipped `InnerFunctionRule` declaration-side adaptation.
+        // Only the exact literal-string-argument shape is recognized - a
+        // computed argument never populates the guard, matching this
+        // project's usual "don't guess" leniency. The `&&` arm below
+        // already recurses into this for free (`if (function_exists('foo')
+        // && ...)`).
+        if branch_true
+            && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
+            && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
+            && fn_name
+                .rsplit('\\')
+                .next()
+                .unwrap_or(fn_name)
+                .eq_ignore_ascii_case("function_exists")
+            && let [guarded_arg] = args.as_slice()
+            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
+        {
+            locals
+                .guarded_functions
+                .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
         }
         match &cond.kind {
             // `&&` narrows the "both true" branch by composing each side
@@ -644,6 +672,40 @@ impl<'a> Checker<'a> {
                 locals.insert(key, narrow_type_excluding_falsy(&current));
             }
             _ => {}
+        }
+    }
+
+    /// Phase 48.7: `AssertRuleHelper`'s equivalent - a `@phpstan-assert`-
+    /// family tag's own type is already resolved into a real `AssertInfo`
+    /// (`FunctionSig::assert`/`assert_if_true`/`assert_if_false`) and
+    /// consumed for narrowing (`apply_narrowing`'s own `check_assert_call`
+    /// dispatch above), but its own referenced classes were never
+    /// existence-checked - pure reuse of `check_type_class_names_exist`,
+    /// same pattern as `check_method_tag_types`/`check_mixin_types`/
+    /// `check_type_alias_types` (`oop.rs`). Called once per declaration,
+    /// alongside `check_declared_purity_tag`/`check_declared_param_
+    /// callable_tags` (`function_decl.rs`).
+    pub(crate) fn check_assert_tag_types(
+        &mut self,
+        sig: Option<&FunctionSig>,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(sig) = sig else {
+            return;
+        };
+        for info in sig
+            .assert
+            .iter()
+            .chain(&sig.assert_if_true)
+            .chain(&sig.assert_if_false)
+        {
+            self.check_type_class_names_exist(
+                &info.ty,
+                &format!("PHPDoc tag @phpstan-assert on {label}"),
+                span,
+                label,
+            );
         }
     }
 }

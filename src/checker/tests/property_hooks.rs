@@ -499,3 +499,145 @@ fn a_promoted_plain_readwrite_property_with_a_covariant_template_type_is_flagged
     );
     assert!(d.iter().any(|x| x.identifier == "generics.variance"));
 }
+
+// Phase 64 Item 1: property hooks - `notReadable`/`notWritable`/
+// `abstractOverridingNonAbstractHook`. Confirmed live via `php -r`: the
+// engine itself raises no error for any of these - a write through a
+// `notWritable` override silently no-ops instead (real footgun this
+// check exists to catch statically).
+
+#[test]
+fn overriding_a_readable_hooked_property_with_a_set_only_hook_is_flagged_not_readable() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                private int $backing = 0;
+                public int $x {
+                    get => $this->backing;
+                    set(int $v) { $this->backing = $v; }
+                }
+            }
+            class Child extends Base {
+                public int $x {
+                    set(int $v) {}
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.notReadable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_writable_hooked_property_with_a_get_only_hook_is_flagged_not_writable() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                private int $backing = 0;
+                public int $x {
+                    get => $this->backing;
+                    set(int $v) { $this->backing = $v; }
+                }
+            }
+            class Child extends Base {
+                public int $x {
+                    get => 5;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.notWritable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_fully_hooked_property_with_the_same_hooks_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                private int $backing = 0;
+                public int $x {
+                    get => $this->backing;
+                    set(int $v) { $this->backing = $v; }
+                }
+            }
+            class Child extends Base {
+                private int $backing2 = 0;
+                public int $x {
+                    get => $this->backing2;
+                    set(int $v) { $this->backing2 = $v; }
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.notReadable"
+                || x.identifier == "property.notWritable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn making_a_non_abstract_hook_abstract_on_override_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                private int $backing = 0;
+                public int $x {
+                    get => $this->backing;
+                }
+            }
+            abstract class Child extends Base {
+                abstract public int $x { get; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.abstractOverridingNonAbstractHook"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_abstract_hook_overriding_an_ancestors_own_abstract_hook_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class Base {
+                abstract public int $x { get; }
+            }
+            abstract class Child extends Base {
+                abstract public int $x { get; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.abstractOverridingNonAbstractHook"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_plain_non_hooked_property_override_is_never_checked_for_hook_readability() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base { public int $x = 2; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "property.notReadable"
+                | "property.notWritable"
+                | "property.abstractOverridingNonAbstractHook"
+        )),
+        "got: {d:?}"
+    );
+}

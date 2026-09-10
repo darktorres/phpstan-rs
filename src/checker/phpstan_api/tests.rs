@@ -33,7 +33,7 @@ fn diagnostics_for(stub_src: &str, consumer_src: &str) -> Vec<Diagnostic> {
     let mut combined = stub.clone();
     combined.extend(consumer.clone());
     let registry = Registry::build(&combined);
-    check_phpstan_api_usage(&consumer, &registry)
+    check_phpstan_api_usage(&consumer, &registry, None)
 }
 
 #[test]
@@ -591,6 +591,420 @@ fn a_reference_to_an_unresolved_phpstan_shaped_class_is_not_flagged() {
         namespace App;
         function f() {
             new \PHPStan\NoSuchClass();
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn calling_a_method_through_a_promoted_property_on_a_non_api_class_is_flagged() {
+    // Phase 40.1: `$this->scope->getType()` through a constructor-
+    // promoted property - the one extra receiver shape this walker's own
+    // minimal local type tracker (`class_prop_types`) now recognizes,
+    // beyond the pre-existing bare-`$variable` case.
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Analyser;
+        class Scope {
+            public function getType() {}
+        }
+        "#,
+        r#"<?php
+        namespace PHPStan\Rules;
+        class SomeRule {
+            public function __construct(private \PHPStan\Analyser\Scope $scope) {}
+            public function processNode() {
+                $this->scope->getType();
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0]
+            .message
+            .contains("calling PHPStan\\Analyser\\Scope::getType()")
+    );
+    assert_eq!(diags[0].location, "PHPStan\\Rules\\SomeRule::processNode");
+}
+
+#[test]
+fn calling_a_method_through_an_ordinary_typed_property_on_a_non_api_class_is_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Analyser;
+        class Scope {
+            public function getType() {}
+        }
+        "#,
+        r#"<?php
+        namespace PHPStan\Rules;
+        class SomeRule {
+            private \PHPStan\Analyser\Scope $scope;
+            public function processNode() {
+                $this->scope->getType();
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0]
+            .message
+            .contains("calling PHPStan\\Analyser\\Scope::getType()")
+    );
+}
+
+#[test]
+fn calling_a_method_through_a_promoted_api_property_is_not_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Analyser;
+        /** @api */
+        class Scope {
+            public function getType() {}
+        }
+        "#,
+        r#"<?php
+        namespace App;
+        class SomeRule {
+            public function __construct(private \PHPStan\Analyser\Scope $scope) {}
+            public function processNode() {
+                $this->scope->getType();
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+// Phase 40.6: `RuntimeReflectionFunctionRule`/`RuntimeReflectionInstantiationRule`/
+// `OldPhpParser4ClassRule` - all three gate on `class_implements_phpstan_
+// interface`, so every positive test below declares its enclosing class
+// as `implements \PHPStan\Rules\Rule` (a bare, undeclared interface
+// reference is enough: `class_implements_phpstan_interface` only needs
+// the *name* to resolve into the `PHPStan\` namespace, not a real
+// registry entry for it - `Registry::all_ancestor_names` walks
+// `ClassInfo::implements`, populated straight from the raw, resolved
+// `implements` clause regardless of whether the interface itself was
+// ever declared anywhere in this test's own tiny source).
+
+#[test]
+fn calling_is_a_inside_a_phpstan_rule_class_is_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check($x) {
+                is_a($x, 'Foo');
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    assert!(diags[0].message.contains("Function is_a()"));
+    assert_eq!(diags[0].identifier, "phpstanApi.runtimeReflection");
+}
+
+#[test]
+fn calling_is_a_outside_any_phpstan_rule_class_is_not_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule {
+            public function check($x) {
+                is_a($x, 'Foo');
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn calling_an_unrelated_function_inside_a_phpstan_rule_class_is_not_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check($x) {
+                strlen($x);
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn instantiating_reflectionclass_inside_a_phpstan_rule_class_is_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check($x) {
+                new \ReflectionClass($x);
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    assert!(diags[0].message.contains("Creating new ReflectionClass"));
+    assert_eq!(diags[0].identifier, "phpstanApi.runtimeReflection");
+}
+
+#[test]
+fn instantiating_an_unrelated_class_inside_a_phpstan_rule_class_is_not_flagged_by_this_rule() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check($x) {
+                new \stdClass();
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn referencing_a_renamed_php_parser_4_class_via_new_is_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check() {
+                new \PhpParser\Node\Scalar\LNumber(1);
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    assert!(
+        diags[0]
+            .message
+            .contains("It has been renamed to PhpParser\\Node\\Scalar\\Int_ in PHP-Parser v5.")
+    );
+    assert_eq!(diags[0].identifier, "phpParser.classRenamed");
+}
+
+#[test]
+fn referencing_a_renamed_php_parser_4_class_via_instanceof_is_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check($node) {
+                $node instanceof \PhpParser\Node\Stmt\UseUse;
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    assert!(
+        diags[0]
+            .message
+            .contains("It has been renamed to PhpParser\\Node\\UseItem in PHP-Parser v5.")
+    );
+}
+
+#[test]
+fn referencing_a_renamed_php_parser_4_class_via_class_constant_is_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check() {
+                $x = \PhpParser\Node\Scalar\DNumber::class;
+            }
+        }
+        "#,
+    );
+    assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    assert!(
+        diags[0]
+            .message
+            .contains("It has been renamed to PhpParser\\Node\\Scalar\\Float_ in PHP-Parser v5.")
+    );
+}
+
+#[test]
+fn referencing_a_renamed_php_parser_4_class_outside_a_phpstan_rule_class_is_not_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule {
+            public function check() {
+                new \PhpParser\Node\Scalar\LNumber(1);
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn referencing_a_still_current_php_parser_class_name_is_not_flagged() {
+    let diags = diagnostics_for(
+        "<?php",
+        r#"<?php
+        namespace App;
+        class MyRule implements \PHPStan\Rules\Rule {
+            public function check() {
+                new \PhpParser\Node\Scalar\Int_(1);
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+// Phase 40.6: `PhpStanNamespaceIn3rdPartyPackageRule` - the one rule of
+// the three that needs a real file path on disk (`find_composer_package_
+// name`'s own upward walk), so these tests build their own tiny
+// temporary directory tree rather than using `diagnostics_for` (which
+// always passes `None`).
+mod namespace_in_3rd_party_package {
+    use std::path::{Path, PathBuf};
+
+    use super::super::check_phpstan_api_usage;
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
+    use crate::registry::Registry;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "phpstan_rs_phpstan_api_test_{label}_{}_{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+
+        fn write(&self, rel: &str, contents: &str) -> PathBuf {
+            let path = self.0.join(rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&path, contents).unwrap();
+            path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn diagnostics_for_file(php_path: &Path, src: &str) -> Vec<crate::checker::Diagnostic> {
+        let tokens = Lexer::new(src).tokenize_with_spans();
+        let program = Parser::new(tokens).parse_program().unwrap();
+        let registry = Registry::build(&program);
+        check_phpstan_api_usage(&program, &registry, Some(php_path))
+    }
+
+    #[test]
+    fn a_phpstan_namespace_declared_outside_any_phpstan_slash_package_is_flagged() {
+        let dir = TempDir::new("not_phpstan_pkg");
+        dir.write("composer.json", r#"{"name": "acme/some-extension"}"#);
+        let php_path = dir.write("src/MyRule.php", "");
+        let diags = diagnostics_for_file(
+            &php_path,
+            r#"<?php
+            namespace PHPStan\Rules;
+            class MyRule {}
+            "#,
+        );
+        assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+        assert!(
+            diags[0]
+                .message
+                .contains("Declaring PHPStan namespace is not allowed in 3rd party packages.")
+        );
+        assert_eq!(diags[0].identifier, "phpstanApi.phpstanNamespace");
+    }
+
+    #[test]
+    fn a_phpstan_namespace_declared_inside_a_real_phpstan_slash_package_is_not_flagged() {
+        let dir = TempDir::new("real_phpstan_pkg");
+        dir.write("composer.json", r#"{"name": "phpstan/phpstan"}"#);
+        let php_path = dir.write("src/Rules/Rule.php", "");
+        let diags = diagnostics_for_file(
+            &php_path,
+            r#"<?php
+            namespace PHPStan\Rules;
+            class Rule {}
+            "#,
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+
+    #[test]
+    fn a_phpstan_namespace_declared_with_no_composer_json_anywhere_is_flagged() {
+        let dir = TempDir::new("no_composer_json_at_all");
+        let php_path = dir.write("src/MyRule.php", "");
+        let diags = diagnostics_for_file(
+            &php_path,
+            r#"<?php
+            namespace PHPStan\Rules;
+            class MyRule {}
+            "#,
+        );
+        assert_eq!(diags.len(), 1, "diagnostics: {diags:?}");
+    }
+
+    #[test]
+    fn a_non_phpstan_namespace_is_never_flagged_regardless_of_package() {
+        let dir = TempDir::new("non_phpstan_ns");
+        dir.write("composer.json", r#"{"name": "acme/some-extension"}"#);
+        let php_path = dir.write("src/MyRule.php", "");
+        let diags = diagnostics_for_file(
+            &php_path,
+            r#"<?php
+            namespace App;
+            class MyRule {}
+            "#,
+        );
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+}
+
+#[test]
+fn a_property_access_on_something_other_than_this_is_not_checked_via_the_prop_types_path() {
+    // Only `$this->prop` is recognized - a different receiver variable's
+    // own property access isn't, matching this walker's own deliberately
+    // narrow, syntactically-typed scope (no general receiver-type
+    // inference).
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Analyser;
+        class Scope {
+            public function getType() {}
+        }
+        "#,
+        r#"<?php
+        namespace PHPStan\Rules;
+        class SomeRule {
+            public function __construct(private \PHPStan\Analyser\Scope $scope) {}
+        }
+        function f(SomeRule $r) {
+            $other = $r;
         }
         "#,
     );

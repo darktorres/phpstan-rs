@@ -652,13 +652,25 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     });
                 }
             }
-            "extends" => {
+            // `@template-extends`/`@template-implements` are real
+            // PHPStan-recognized synonyms for plain `@extends`/
+            // `@implements` (semantically identical - both name a
+            // generic parent/interface's own concrete type arguments),
+            // used throughout phpstorm-stubs itself (`Generator`'s own
+            // `@template-implements Iterator<TKey, TYield>`, confirmed
+            // directly in `vendor/phpstorm-stubs/standard/_types.php`) -
+            // a real, previously-missing gap: without this, `Generator`'s
+            // own `implements_args["Iterator"]` was silently empty, and
+            // `Registry::class_template_bindings(_, _, "Iterator")` on
+            // any `Generator<...>`-typed value zipped its real type
+            // arguments against nothing, always coming back empty.
+            "extends" | "template-extends" => {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
                     block.extends = Some(ty.to_string());
                 }
             }
-            "implements" => {
+            "implements" | "template-implements" => {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
                     block.implements.push(ty.to_string());
@@ -801,6 +813,25 @@ fn parse_template_tag(rest: &str) -> Option<(String, Option<String>, Option<Stri
 fn take_type_token(s: &str) -> &str {
     let mut depth = 0i32;
     let mut quote: Option<char> = None;
+    // Phase 53: true from the moment a `)` brings `depth` back to 0 *and*
+    // a `:` genuinely follows it (skipping whitespace) - a `Closure(...):
+    // ReturnType`/`callable(...): ReturnType` shape's own trailing return
+    // type sits outside the parens, separated from them by this `:`, and
+    // the plain depth-0-whitespace-stops rule below would otherwise
+    // truncate right after the `:` (a real, confirmed bug: `@param
+    // Closure(int): string $fn` lost everything from " string" onward,
+    // silently degrading to the bare `Closure(int):` fragment). Decided
+    // once, right at the `)`, via a bounded lookahead - not a blanket
+    // "tolerate whitespace after any `)`" rule, which would wrongly
+    // swallow an *ordinary* parenthesized type's own real terminating
+    // space too (`(A&B) $x` must still stop right after its own `)`,
+    // since nothing but the next token follows it). Cleared the moment
+    // the first real (non-whitespace) return-type character is consumed,
+    // so a *later* space - the real terminator before e.g. `$fn` - still
+    // stops normally; recurses correctly for a nested callable-shape
+    // return type too (`Closure(int): Closure(string): bool`), since
+    // each `)` closing back to depth 0 re-triggers its own lookahead.
+    let mut in_return_type_transition = false;
     for (i, c) in s.char_indices() {
         if let Some(q) = quote {
             if c == q {
@@ -809,11 +840,33 @@ fn take_type_token(s: &str) -> &str {
             continue;
         }
         match c {
-            '\'' | '"' => quote = Some(c),
-            '<' | '{' | '(' | '[' => depth += 1,
-            '>' | '}' | ')' | ']' => depth -= 1,
-            c if c.is_whitespace() && depth == 0 => return &s[..i],
-            _ => {}
+            '\'' | '"' => {
+                quote = Some(c);
+                in_return_type_transition = false;
+            }
+            '<' | '{' | '(' | '[' => {
+                depth += 1;
+                in_return_type_transition = false;
+            }
+            ')' => {
+                depth -= 1;
+                in_return_type_transition =
+                    depth == 0 && s[i + c.len_utf8()..].trim_start().starts_with(':');
+            }
+            '>' | '}' | ']' => {
+                depth -= 1;
+                in_return_type_transition = false;
+            }
+            ':' if in_return_type_transition => {}
+            c if c.is_whitespace() && depth == 0 => {
+                if in_return_type_transition {
+                    continue;
+                }
+                return &s[..i];
+            }
+            _ => {
+                in_return_type_transition = false;
+            }
         }
     }
     s

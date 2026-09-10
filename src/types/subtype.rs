@@ -49,6 +49,25 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::Never, _) => true,
         (a, b) if a == b => true,
 
+        // Phase 53: a shaped callable is always compatible with a bare
+        // marker, in both directions - deliberately lenient, matching
+        // this file's own established "can't verify, don't guess wrong"
+        // pattern one screen down (`ClassString`/`String` interchange-
+        // ability). Two *different* shapes are also declared
+        // unconditionally compatible rather than attempting real
+        // contravariant-parameter/covariant-return comparison
+        // (`CallableTypeHelper::isParametersAcceptorSuperTypeOf`'s own
+        // job in real PHPStan) - reproducing that correctly needs the
+        // exact variance machinery this project's own Phase 53 design
+        // deliberately declines to build (sub-item D). This means a
+        // parsed callable shape is only ever used *forward* (describing
+        // what happens when a value is invoked) and never *backward* (to
+        // reject an assignment) - the single biggest false-positive-
+        // avoidance call in this whole sub-item.
+        (Type::Callable(Some(_)), Type::Callable(None)) => true,
+        (Type::Callable(None), Type::Callable(Some(_))) => true,
+        (Type::Callable(Some(_)), Type::Callable(Some(_))) => true,
+
         (Type::IntLiteral(_), Type::Int) => true,
         (Type::StringLiteral(_), Type::String) => true,
         (Type::True, Type::Bool) | (Type::False, Type::Bool) => true,

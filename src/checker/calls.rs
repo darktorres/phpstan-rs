@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::checker::expr::is_canonical_int_key;
-use crate::checker::{Checker, Locals, purge_stale_narrowing_for, union_types, unwrap_grouping};
+use crate::checker::{
+    Checker, Locals, literal_string_value, purge_stale_narrowing_for, union_types, unwrap_grouping,
+};
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -442,6 +444,96 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// Phase 53 Sub-item C: argument-checking for a call through a value
+    /// statically known to be a shaped `Closure(...)`-typed callable
+    /// (`$fn(...)`, `$arr['make']()`, `($this->makeCallback())()`, etc) -
+    /// a deliberately trimmed, standalone subset of `check_args`'s own
+    /// count/type loop, not a reuse of it: `CallableSig`'s own
+    /// `CallableParam` carries no parameter name at all (a PHPDoc
+    /// callable shape never spells one out), so named-argument
+    /// resolution - the whole reason `check_args` needs `resolve_call_
+    /// args`/`resolved` in the first place - isn't possible here.
+    /// Positional-only: a named or spread argument silently skips this
+    /// whole check rather than guessing, the same "don't know, don't
+    /// guess" leniency this project uses throughout. Reuses `check_args`'s
+    /// own `arguments.count`/`argument.type` identifiers and message
+    /// shape, with `"Closure"` standing in for a real callee name (one
+    /// doesn't exist for a dynamically-held callable value).
+    pub(crate) fn check_dynamic_callable_args(
+        &mut self,
+        sig: &types::CallableSig,
+        args: &[Arg],
+        locals: &Locals,
+        label: &str,
+        span: Span,
+    ) {
+        if args.iter().any(|a| a.name.is_some() || a.spread) {
+            return;
+        }
+        let required = sig
+            .params
+            .iter()
+            .filter(|p| !p.variadic && !p.optional)
+            .count();
+        let last_is_variadic = sig.params.last().is_some_and(|p| p.variadic);
+        if args.len() < required {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Closure() expects at least {required} argument(s), {} given",
+                    args.len()
+                ),
+                span,
+                0,
+                "arguments.count",
+            );
+        } else if !last_is_variadic && args.len() > sig.params.len() {
+            let quantifier = if required == sig.params.len() {
+                "exactly"
+            } else {
+                "at most"
+            };
+            self.report(
+                label.to_string(),
+                format!(
+                    "Closure() expects {quantifier} {} argument(s), {} given",
+                    sig.params.len(),
+                    args.len()
+                ),
+                span,
+                0,
+                "arguments.count",
+            );
+        }
+        for (i, a) in args.iter().enumerate() {
+            let param = match sig.params.get(i) {
+                Some(p) => p,
+                None => match sig.params.last() {
+                    Some(p) if p.variadic => p,
+                    _ => continue,
+                },
+            };
+            let arg_ty = self.infer_expr(&a.value, locals);
+            if arg_ty == Type::Mixed {
+                continue;
+            }
+            if !self.registry.is_assignable(&arg_ty, &param.ty) {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Closure() argument #{} expects {}, {} given",
+                        i + 1,
+                        param.ty,
+                        arg_ty
+                    ),
+                    a.value.span,
+                    5,
+                    "argument.type",
+                );
+            }
+        }
+    }
+
     /// Phase 49: `f(...['a', 'b', 'named' => $c])`-style spread arguments
     /// whose own inferred type is a literal `Type::ArrayShape` have every
     /// eventual argument slot known statically - real PHP resolves each
@@ -662,6 +754,217 @@ impl<'a> Checker<'a> {
             positional_index += 1;
         }
     }
+
+    /// Phase 71 Item 3: `RegularExpressionQuotingRule`'s equivalent -
+    /// applies to the 7 pattern-taking functions whose pattern argument
+    /// sits at position 0 and is written as a string concatenation. Finds
+    /// the pattern's own real delimiter (the leftmost concat operand's
+    /// literal first character), then walks the *whole* concat tree for
+    /// any `preg_quote(...)` call, flagging one with no delimiter
+    /// argument at all, or one whose given delimiter doesn't match the
+    /// pattern's real delimiter and isn't one of `preg_quote`'s own
+    /// always-escaped characters (mirrors real PHPStan's own
+    /// `isDefaultEscaped`/`removeDefaultEscapedDelimiters` exactly - a
+    /// mismatch against one of those is inconsequential, since `preg_
+    /// quote` escapes it either way).
+    pub(crate) fn check_preg_quote_delimiter(&mut self, name: &str, args: &[Arg], label: &str) {
+        const PREG_PATTERN_FUNCTIONS: &[&str] = &[
+            "preg_match",
+            "preg_match_all",
+            "preg_filter",
+            "preg_grep",
+            "preg_replace",
+            "preg_replace_callback",
+            "preg_split",
+        ];
+        if !PREG_PATTERN_FUNCTIONS
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(name))
+        {
+            return;
+        }
+        let Some(pattern_arg) = args.first() else {
+            return;
+        };
+        let pattern_expr = unwrap_grouping(&pattern_arg.value);
+        let ExprKind::Binary(BinOp::Concat, _, _) = &pattern_expr.kind else {
+            return;
+        };
+        let Some(delimiter) = concat_leftmost_delimiter(pattern_expr) else {
+            return;
+        };
+        // `preg_quote($str)` always escapes this fixed character set
+        // regardless of any `$delimiter` argument - when the pattern's
+        // own real delimiter already falls in it, it's covered "for
+        // free," so neither a missing `$delimiter` argument nor a
+        // mismatched one actually leaves it unescaped. Tested against
+        // the *pattern's* own delimiter, not the given one - a real bug
+        // this fix corrects: the original draft tested the wrong side,
+        // which made giving `#` for a `/`-delimited pattern (genuinely
+        // wrong - `/` stays unescaped) silently pass, purely because `#`
+        // itself happens to be in this set.
+        const ALWAYS_ESCAPED: &[char] = &[
+            '.', '\\', '+', '*', '?', '[', '^', ']', '$', '(', ')', '{', '}', '=', '!', '<', '>',
+            '|', ':', '-', '#',
+        ];
+        if ALWAYS_ESCAPED.contains(&delimiter) {
+            return;
+        }
+        let mut quote_calls = Vec::new();
+        find_preg_quote_calls(pattern_expr, &mut quote_calls);
+        for call_args in quote_calls {
+            if call_args.len() == 1 {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Call to preg_quote() is missing delimiter {delimiter} to be effective."
+                    ),
+                    call_args[0].value.span,
+                    0,
+                    "argument.invalidPregQuote",
+                );
+                continue;
+            }
+            let Some(given) = call_args
+                .get(1)
+                .and_then(|a| literal_string_value(&a.value))
+            else {
+                continue;
+            };
+            if !given.starts_with(delimiter) {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Call to preg_quote() uses invalid delimiter {given} while pattern uses {delimiter}."
+                    ),
+                    call_args[1].value.span,
+                    0,
+                    "argument.invalidPregQuote",
+                );
+            }
+        }
+    }
+
+    /// Phase 71 Item 1: resolves the two common, statically-knowable
+    /// `call_user_func(_array)` callable shapes to a real `FunctionSig` -
+    /// a plain string-literal function name, or a two-element array
+    /// literal naming a class/object plus a literal method name. Any
+    /// other shape (a closure literal, a bare variable of unknown type,
+    /// `Closure::fromCallable(...)`, an invokable object, ...) returns
+    /// `None` - don't guess past what's statically known, matching
+    /// `check_format_string_call`'s own literal-format-string precedent.
+    fn resolve_call_user_func_callable(
+        &self,
+        callable_expr: &Expr,
+        locals: &Locals,
+    ) -> Option<&FunctionSig> {
+        let callable_expr = unwrap_grouping(callable_expr);
+        if let Some(name) = literal_string_value(callable_expr) {
+            return self.registry.lookup_function(name.trim_start_matches('\\'));
+        }
+        let ty = self.infer_expr(callable_expr, locals);
+        let Type::ArrayShape(fields) = &ty else {
+            return None;
+        };
+        let method_ty = fields
+            .iter()
+            .find(|(k, _, _)| k == "1")
+            .map(|(_, t, _)| t)?;
+        let Type::StringLiteral(method) = method_ty else {
+            return None;
+        };
+        let class_ty = fields
+            .iter()
+            .find(|(k, _, _)| k == "0")
+            .map(|(_, t, _)| t)?;
+        let class = match class_ty {
+            Type::StringLiteral(c) => c.as_str(),
+            Type::ClassString(inner) => match inner.as_ref() {
+                Type::Object(c, _) => c.as_str(),
+                _ => return None,
+            },
+            Type::Object(c, _) => c.as_str(),
+            _ => return None,
+        };
+        self.registry.lookup_method(class, method)
+    }
+
+    /// Phase 71 Item 1: `call_user_func`/`call_user_func_array`'s own
+    /// argument re-checking - once the callable resolves (see `resolve_
+    /// call_user_func_callable`'s own doc comment for the two shapes this
+    /// covers), the resolved arguments feed straight into the existing,
+    /// call-shape-agnostic `check_args`, reusing its own `arguments.
+    /// count`/`argument.type`/`argument.byRef` diagnostics verbatim - no
+    /// new identifiers. `call_user_func_array`'s own second argument is
+    /// only trusted when written as a literal array expression at the
+    /// call site (mirrors `vsprintf`/`vprintf`'s own "trust only a
+    /// literal/sequential shape" precedent in `calls/format_string.rs`) -
+    /// real `Arg` nodes (needed for `check_args`'s by-ref/span handling)
+    /// only exist for a literal array's own elements, not for a value
+    /// reached only through its inferred `Type::ArrayShape`.
+    pub(crate) fn check_call_user_func(
+        &mut self,
+        name: &str,
+        args: &[Arg],
+        locals: &mut Locals,
+        label: &str,
+        span: Span,
+    ) {
+        if name.eq_ignore_ascii_case("call_user_func") {
+            if args.is_empty() || args[1..].iter().any(|a| a.spread) {
+                return;
+            }
+            let Some(sig) = self.resolve_call_user_func_callable(&args[0].value, locals) else {
+                return;
+            };
+            let sig = sig.clone();
+            let callee_args = &args[1..];
+            let resolved = resolve_call_args(callee_args, &sig.params);
+            self.check_args(CheckArgsCall {
+                callee_label: "callable passed to call_user_func()",
+                sig: &sig,
+                args: callee_args,
+                resolved: &resolved,
+                locals,
+                label,
+                defining_class: None,
+                span,
+            });
+        } else if name.eq_ignore_ascii_case("call_user_func_array") {
+            if args.len() != 2 {
+                return;
+            }
+            let Some(sig) = self.resolve_call_user_func_callable(&args[0].value, locals) else {
+                return;
+            };
+            let sig = sig.clone();
+            let ExprKind::ArrayLiteral(items) = &unwrap_grouping(&args[1].value).kind else {
+                return;
+            };
+            if items.iter().any(|item| item.spread || item.key.is_some()) {
+                return;
+            }
+            let synthesized: Vec<Arg> = items
+                .iter()
+                .map(|item| Arg {
+                    name: None,
+                    spread: false,
+                    value: item.value.clone(),
+                })
+                .collect();
+            let resolved = resolve_call_args(&synthesized, &sig.params);
+            self.check_args(CheckArgsCall {
+                callee_label: "callable passed to call_user_func_array()",
+                sig: &sig,
+                args: &synthesized,
+                resolved: &resolved,
+                locals,
+                label,
+                defining_class: None,
+                span,
+            });
+        }
+    }
 }
 
 /// PHP superglobals are implicitly defined in every scope without any
@@ -800,6 +1103,46 @@ fn array_shape_fields(ty: &Type) -> Option<&[(String, Type, bool)]> {
             shape
         }
         _ => None,
+    }
+}
+
+/// Descends a concat chain's own `.left` operand (unwrapping `Grouping`
+/// at each step) until it reaches a non-`Concat` leaf, then reads that
+/// leaf's own literal string value's first character - the pattern's
+/// real delimiter, matching real PHP's own left-associative concat
+/// evaluation order (`'/' . $x . '/'` starts with the leftmost `'/'`
+/// literal). `None` when the leaf isn't a literal at all (a variable, a
+/// function call) - don't guess.
+fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
+    let e = unwrap_grouping(e);
+    if let ExprKind::Binary(BinOp::Concat, l, _) = &e.kind {
+        return concat_leftmost_delimiter(l);
+    }
+    literal_string_value(e)?.trim_start().chars().next()
+}
+
+/// Recursive walk of every operand of a concat tree (both `.left` and
+/// `.right` at every node, unlike `concat_leftmost_delimiter`'s own
+/// left-only descent) collecting each `preg_quote(...)` call's own
+/// argument list found anywhere in it.
+fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
+    let e = unwrap_grouping(e);
+    match &e.kind {
+        ExprKind::Binary(BinOp::Concat, l, r) => {
+            find_preg_quote_calls(l, out);
+            find_preg_quote_calls(r, out);
+        }
+        ExprKind::Call(callee, args) => {
+            if let ExprKind::Name(n) = &unwrap_grouping(callee).kind
+                && n.rsplit('\\')
+                    .next()
+                    .unwrap_or(n)
+                    .eq_ignore_ascii_case("preg_quote")
+            {
+                out.push(args);
+            }
+        }
+        _ => {}
     }
 }
 

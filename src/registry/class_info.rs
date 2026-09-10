@@ -97,6 +97,21 @@ pub struct PropertySig {
     // with no real declaration to read a default from (a magic
     // `@property` tag, an enum's own built-in `name`/`value`).
     pub has_default: bool,
+    // Phase 64 Item 3: PHP 8.4 `abstract` property modifier (only legal
+    // on a hooked property inside an abstract class, but tracked here
+    // unconditionally like `is_readonly` above - the parser/engine
+    // already enforce the legality half). `false` for every synthetic
+    // property (promoted param, magic `@property` tag, enum built-in) -
+    // none of those shapes can ever be declared `abstract`.
+    pub is_abstract: bool,
+    // Phase 64 Item 1: whether a `get`/`set` hook is *declared at all*
+    // (real PHP's own `hasHook()`), independent of whether it has a real
+    // body - `PropertyHookBody::Abstract` is what makes this question
+    // answerable at all (see that variant's own doc comment). `false`
+    // for every synthetic property (promoted param, magic `@property`
+    // tag, enum built-in) - none of those can carry hooks.
+    pub has_get_hook: bool,
+    pub has_set_hook: bool,
 }
 
 // Phase 57's own still-open item: a class constant's own `public`/
@@ -143,6 +158,12 @@ pub struct ClassInfo {
     pub abstract_methods: HashSet<String>,
     // Method names declared `final` in this class's own body.
     pub final_methods: HashSet<String>,
+    // Phase 64 Item 3: property names declared `final` in this class's
+    // own body (PHP 8.4) - same "not walked up the hierarchy" shape as
+    // `final_methods` above; `Registry::find_final_ancestor_property`
+    // does that walk. Real PHP fatals overriding a `final` property in a
+    // subclass exactly like a `final` method.
+    pub final_properties: HashSet<String>,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
@@ -386,6 +407,36 @@ impl ClassInfo {
             .filter(|m| m.is_final && m.visibility != Visibility::Private)
             .map(|m| m.function.name.clone())
             .collect();
+        // Phase 64 Item 3: same private-is-not-overridable exemption
+        // `final_methods` above already applies, one member kind over -
+        // a `private` property (final or not) is never part of a
+        // subclass's overridable surface either.
+        let mut final_properties: HashSet<String> = c
+            .properties
+            .iter()
+            .filter(|p| p.is_final && p.visibility != Visibility::Private)
+            .map(|p| p.name.clone())
+            .collect();
+        // `public final int $x` is real, valid PHP on a promoted
+        // constructor property too (confirmed via `php -l`, and real PHP
+        // does enforce `Cannot override final property` for it - the
+        // design draft that originally scoped this phase wrongly assumed
+        // no `final`/`abstract` syntax exists on a promoted property at
+        // all; that's only true for `abstract`, which really is
+        // impossible there - an abstract constructor can't declare any
+        // promoted property, real fatal error).
+        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+            final_properties.extend(
+                ctor.function
+                    .params
+                    .iter()
+                    .filter(|p| {
+                        p.promoted_final
+                            && p.promoted_visibility.as_ref() != Some(&Visibility::Private)
+                    })
+                    .map(|p| p.name.clone()),
+            );
+        }
 
         let mut properties: HashMap<String, PropertySig> = c
             .properties
@@ -424,6 +475,9 @@ impl ClassInfo {
                         is_internal: doc_ty.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc_ty.as_ref().and_then(|d| d.deprecated.clone()),
                         has_default: p.default.is_some(),
+                        is_abstract: p.is_abstract,
+                        has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
+                        has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
                     },
                 )
             })
@@ -499,6 +553,13 @@ impl ClassInfo {
                         is_internal: false,
                         deprecated: None,
                         has_default: p.default.is_some(),
+                        is_abstract: false,
+                        // Unlike `is_abstract` above (impossible on a
+                        // promoted property - an abstract constructor
+                        // can't declare one at all), promoted properties
+                        // genuinely can carry inline hooks (Phase 43.1).
+                        has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
+                        has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
                     },
                 );
             }
@@ -536,6 +597,9 @@ impl ClassInfo {
                         // never-wrongly-exempting choice) rather than a
                         // guess.
                         has_default: false,
+                        is_abstract: false,
+                        has_get_hook: false,
+                        has_set_hook: false,
                     }
                 });
             }
@@ -731,6 +795,7 @@ impl ClassInfo {
             uses: c.uses.iter().map(|s| ctx.resolve(s)).collect(),
             abstract_methods,
             final_methods,
+            final_properties,
             trait_aliases,
             resolved_trait_conflicts: c.resolved_trait_conflicts.iter().cloned().collect(),
             templates,
@@ -1008,6 +1073,9 @@ impl ClassInfo {
                 // `false`, so `isset($case->name)` can still be
                 // correctly recognized as redundant.
                 has_default: true,
+                is_abstract: false,
+                has_get_hook: false,
+                has_set_hook: false,
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -1049,6 +1117,9 @@ impl ClassInfo {
                     // Same reasoning as `->name` just above - a backed
                     // enum case's `->value` is language-guaranteed too.
                     has_default: true,
+                    is_abstract: false,
+                    has_get_hook: false,
+                    has_set_hook: false,
                 },
             );
         }
@@ -1102,6 +1173,10 @@ impl ClassInfo {
             uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
             abstract_methods,
             final_methods,
+            // An enum can't declare instance properties at all (see
+            // `ast::EnumDecl`'s own doc comment) - never a `final`-
+            // property candidate either.
+            final_properties: HashSet::new(),
             trait_aliases,
             resolved_trait_conflicts: e.resolved_trait_conflicts.iter().cloned().collect(),
             templates: Vec::new(),
@@ -1192,6 +1267,7 @@ impl ClassInfo {
         self.type_imports.extend(other.type_imports);
         self.abstract_methods.extend(other.abstract_methods);
         self.final_methods.extend(other.final_methods);
+        self.final_properties.extend(other.final_properties);
         self.resolved_trait_conflicts
             .extend(other.resolved_trait_conflicts);
         self.covariant_templates.extend(other.covariant_templates);

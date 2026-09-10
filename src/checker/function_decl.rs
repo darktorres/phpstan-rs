@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
     ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, body_contains_explicit_throw, body_contains_yield,
-    collect_goto_targets, type_allows_generator_return,
+    collect_goto_targets, generator_missing_return_type, type_allows_generator_return,
 };
 use crate::docblock;
 use crate::registry::{FunctionSig, Registry, resolve_names_in_type, resolve_type};
@@ -197,6 +197,8 @@ impl<'a> Checker<'a> {
         }
         self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
         self.check_declared_param_callable_tags(f, &label);
+        self.check_internal_param_and_return_types(f, class_name, &label);
+        self.check_assert_tag_types(sig, f.span, &label);
 
         // Phase 58: `(name, resolved type, AST span)` per parameter,
         // collected below in lockstep with `locals`'s own per-branch
@@ -625,10 +627,23 @@ impl<'a> Checker<'a> {
         self.saw_dynamic_var_construct = false;
         let previous_generator_flag = self.current_function_is_generator;
         self.current_function_is_generator = body_contains_yield(&f.body);
+        let previous_declared_return_type = self.current_declared_return_type.take();
+        self.current_declared_return_type =
+            declared_return.as_ref().map(|t| match &self.current_class {
+                Some(c) => self.resolve_pseudo(t, c),
+                None => t.clone(),
+            });
         let previous_goto_targets = std::mem::replace(
             &mut self.current_function_goto_targets,
             collect_goto_targets(&f.body),
         );
+        // Phase 42 Sub-item A: see `Checker::current_function_throw_points`'s
+        // own doc comment.
+        let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+        let previous_unannotated_call =
+            std::mem::take(&mut self.current_function_has_unannotated_call);
+        let previous_explicit_throw_points =
+            std::mem::take(&mut self.current_function_explicit_throw_points);
         self.check_generator_return_type(native_return.as_ref(), f.span, &label);
 
         // `check_block`, not a bare loop over `check_stmt`: a function's
@@ -656,14 +671,36 @@ impl<'a> Checker<'a> {
         // end, the same reasoning `always_terminates`'s own `Block` arm
         // uses for a nested `{ ... }` - `f.body` just isn't itself one
         // `Stmt`, so it needs the same check spelled out here directly.
+        // Phase 61.B: a generator stays exempt from this whole check
+        // *unless* its own declared `Generator<TKey, TValue, TSend,
+        // TReturn>` carries a real, non-Mixed/Void TReturn - in which
+        // case falling off the end (or an explicit bare `return;`,
+        // `check_stmt`'s own identical exemption) is exactly as real a
+        // miss as it is for an ordinary function, just checked against
+        // TReturn instead of the outer Generator type itself (a real
+        // `return`/fall-through inside a generator never produces an
+        // actual `Generator` object to compare against).
+        let generator_treturn = self
+            .current_function_is_generator
+            .then(|| {
+                generator_missing_return_type(
+                    self.current_declared_return_type.as_ref(),
+                    self.registry,
+                )
+            })
+            .flatten();
         if let Some(expected) = &declared_return
             && (!f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete))
             && !f.body.iter().any(|s| self.always_terminates(s, &locals))
-            && !self.current_function_is_generator
+            && (!self.current_function_is_generator || generator_treturn.is_some())
         {
-            let expected = match &self.current_class {
-                Some(c) => self.resolve_pseudo(expected, c),
-                None => expected.clone(),
+            let expected = if let Some(treturn) = generator_treturn {
+                treturn
+            } else {
+                match &self.current_class {
+                    Some(c) => self.resolve_pseudo(expected, c),
+                    None => expected.clone(),
+                }
             };
             // Phase 61: a `never`-typed function/method whose body simply
             // falls off the end without ever throwing/exiting is the same
@@ -702,11 +739,31 @@ impl<'a> Checker<'a> {
         // like the checks already running inside the loop above.
         self.check_unused_constructor_parameters(f, class_name, &label);
 
+        // Phase 42 Sub-item C / bonus item: both run once the whole body
+        // (every real throw point it contains) has been checked, still
+        // ahead of the `saw_dynamic_var_construct` truncation just below -
+        // a declaration using `extract()`/`eval()` gets these diagnostics
+        // swept away along with everything else from its own body, the
+        // same leniency already applied throughout this function.
+        let subject = match class_name {
+            Some(c) => format!("Method {c}::{}()", f.name),
+            None => format!("Function {}()", f.name),
+        };
+        let throws_tag = sig.and_then(|s| s.throws.as_ref());
+        if let Some(throws) = throws_tag {
+            self.check_too_wide_throw_type(throws, &subject, f.span, &label);
+        }
+        self.check_missing_checked_exceptions(throws_tag, &subject, &label);
+
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
         }
         self.saw_dynamic_var_construct = previous_dynamic_flag;
         self.current_function_is_generator = previous_generator_flag;
+        self.current_declared_return_type = previous_declared_return_type;
+        self.current_function_throw_points = previous_throw_points;
+        self.current_function_has_unannotated_call = previous_unannotated_call;
+        self.current_function_explicit_throw_points = previous_explicit_throw_points;
         self.current_function_goto_targets = previous_goto_targets;
 
         self.current_class = previous_class;

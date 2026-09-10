@@ -109,6 +109,18 @@ pub struct Registry {
     // wiring chain and "real value, but real vendor-corpus noise"
     // rationale.
     pub check_deprecated_usage: bool,
+    // Phase 42 bonus item: opts into `Checker::check_missing_checked_exceptions`
+    // (`checker/throws/missing.rs`) - flags a real, explicit `throw`
+    // whose own type isn't covered by any `@throws` tag on the enclosing
+    // declaration. Defaults to `false` - real PHPStan has no such rule at
+    // all (checked-exception enforcement isn't part of core `phpstan/
+    // phpstan`, and even the closest real third-party analogue isn't a
+    // simple drop-in), and this project's own design doc explicitly flags
+    // it as the riskiest item in the whole Phase 42 batch given the real
+    // corpus's documented inconsistent `@throws` tagging - same "real
+    // value, but real vendor-corpus noise" rationale, and the identical
+    // wiring chain, as `check_internal_usage`/`check_deprecated_usage`.
+    pub check_missing_checked_exceptions: bool,
     // Phase 61: opts into the "genuinely empty concrete method body"
     // return-completeness check (`Checker::check_function_with_ancestor_hint`'s
     // own `return.missing`/`return.never` fall-through). Defaults to
@@ -158,7 +170,7 @@ pub struct Registry {
     // never-taken members onto the real class everything else sees -
     // exactly the regression `unconditional_class_wins_over_a_later_
     // conditional_stub` catches.
-    built_in_stub_classes: HashSet<String>,
+    pub(crate) built_in_stub_classes: HashSet<String>,
     // Phase 32 Finding C: the function-side sibling of the tracking set
     // above - phpstorm-stubs represents a real PHP internal function
     // overload (different signatures by argument shape, not version) as
@@ -215,6 +227,7 @@ impl Registry {
     pub(crate) fn index_and_flatten(program: &[Stmt]) -> Registry {
         let mut registry = Registry::default();
         registry.index(program);
+        registry.canonicalize_class_name_case();
         registry.flatten_traits();
         registry.resolve_method_tags();
         registry.flatten_phpdoc_inheritance();

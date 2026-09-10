@@ -51,6 +51,15 @@ type ProvenanceMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
+// Phase 71 Item 4: lowercased, bare `function_exists('foo')`-guarded
+// function names currently proven guarded on this exact control-flow
+// path - `Locals`-scoped (not a `Checker` field) for the same reason
+// every other flow-sensitive fact here is: it needs to merge/narrow
+// per-branch exactly like `types`/`provenance` do, via `apply_narrowing`/
+// `merge_scopes`, not persist for a whole function body unconditionally.
+type GuardedFunctionSet =
+    imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
+
 /// A checked scope's variable-name-to-inferred-type bindings, plus (Phase
 /// 17 follow-up) an opt-in, parallel declaration-span side-channel the
 /// LSP's own local-variable-navigation feature reads through `Checker::
@@ -104,6 +113,7 @@ type ProvenanceMap = imbl::GenericHashMap<
 pub(crate) struct Locals {
     types: LocalsMap,
     provenance: ProvenanceMap,
+    pub(crate) guarded_functions: GuardedFunctionSet,
     // Whether `declare`/`insert_with_provenance` actually do anything -
     // `false` (via `Default`) for every ordinary `check-project` run,
     // `true` only for the one throwaway, per-request `Checker` `lsp.rs`'s
@@ -202,6 +212,7 @@ impl Locals {
         Locals {
             types: LocalsMap::default(),
             provenance: ProvenanceMap::default(),
+            guarded_functions: GuardedFunctionSet::default(),
             track: self.track,
         }
     }
@@ -531,6 +542,56 @@ pub struct Checker<'a> {
     // StmtKind::Return(None) arm, which has no direct access to the
     // enclosing function's body to answer this itself.
     pub(crate) current_function_is_generator: bool,
+    // Phase 70.A: the enclosing function/method's own *docblock*-preferring
+    // declared return type (not `native_return` - only the docblock
+    // spelling can carry `Generator<TKey, TValue, TSend, TReturn>`'s own
+    // generic args), `resolve_pseudo`'d against the current class already -
+    // set/restored alongside `current_function_is_generator` at the same
+    // choke point. Consulted by `ExprKind::Yield`/`YieldFrom` (`checker/
+    // expr.rs`) to resolve `yield`'s own TSend and `yield from`'s own
+    // TReturn via `generator_template_param`, since neither expression has
+    // any other way to see the enclosing declaration from mid-body.
+    pub(crate) current_declared_return_type: Option<Type>,
+    // Phase 42 Sub-item A: every real throw point recorded so far inside
+    // the enclosing function/method/closure body - an explicit `throw`
+    // expression's own thrown-value type (`checker/stmt/try_catch.rs`'s
+    // `check_throw`, `checker/expr.rs`'s own `ExprKind::Throw` arm), or a
+    // call's own resolved `@throws` type (`FunctionSig.throws`, or a
+    // matching `checker/throws/dynamic.rs` per-callee override tried
+    // first) - recorded at each of `ExprKind::Call`/`New`/`MethodCall`/
+    // `StaticCall`'s own already-resolved-signature choke points. `Type::
+    // Void` (a callee explicitly declared to throw nothing) contributes
+    // nothing at all, matching real PHPStan's own identical treatment.
+    // Consumed by `checker/throws/too_wide.rs`'s `TooWideFunctionThrowTypeRule`/
+    // `TooWideMethodThrowTypeRule` port - see that module's own doc
+    // comment for the full "is a declared `@throws` member actually ever
+    // thrown" comparison this feeds.
+    pub(crate) current_function_throw_points: Vec<Type>,
+    // Phase 42 Sub-item A: set `true` the moment any call inside the
+    // enclosing function/method/closure body resolves to *no signature at
+    // all* (a dynamic call, or a genuinely unresolvable one) - real PHP
+    // allows an arbitrarily-implemented callee to throw literally
+    // anything, so such a call's real throw-ness genuinely can't be
+    // bounded from here. Deliberately does NOT also fire for a resolved
+    // signature that simply has no `@throws` tag of its own - see
+    // `Checker::record_call_throw_point`'s own doc comment
+    // (`checker/throws.rs`) for why that distinction matters. Consumed by
+    // `checker/throws/too_wide.rs`'s `TooWideFunctionThrowTypeRule`/
+    // `TooWideMethodThrowTypeRule` port, which suppresses its whole
+    // comparison for a declaration this is `true` for, favoring a missed
+    // diagnostic over a wrongly-confident one.
+    pub(crate) current_function_has_unannotated_call: bool,
+    // Phase 42 bonus item: the explicit-`throw`-only subset of
+    // `current_function_throw_points`, each paired with its own `throw`
+    // expression's span - populated at the same two choke points
+    // (`check_throw`/`ExprKind::Throw`), but never by `record_call_
+    // throw_point` (a call's own `@throws`-derived contribution belongs
+    // to *that callee*, not something *this* declaration's own code
+    // wrote). Consumed by `checker/throws/missing.rs`'s "missing checked
+    // exception" family, opt-in via `Registry::check_missing_checked_
+    // exceptions` - see that module's own doc comment for why only the
+    // explicit subset is checked.
+    pub(crate) current_function_explicit_throw_points: Vec<(Type, Span)>,
     // Set for the duration of one function/method/closure body to every
     // label name `goto`-targeted anywhere in it (`collect_goto_targets`'s
     // own doc comment has the full real corpus false positive this
@@ -764,8 +825,9 @@ pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{
     body_contains_yield, collect_exit_point_statements, collect_goto_targets,
-    exit_point_description, expr_contains_yield, is_switch_break_equivalent, is_truthy_literal,
-    merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
+    exit_point_description, expr_contains_yield, generator_missing_return_type,
+    generator_template_param, is_switch_break_equivalent, is_truthy_literal, merge_scopes,
+    stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{
@@ -804,6 +866,10 @@ impl<'a> Checker<'a> {
             current_scope_deprecated: false,
             saw_dynamic_var_construct: false,
             current_function_is_generator: false,
+            current_declared_return_type: None,
+            current_function_throw_points: Vec::new(),
+            current_function_has_unannotated_call: false,
+            current_function_explicit_throw_points: Vec::new(),
             current_function_goto_targets: std::collections::HashSet::new(),
             in_bare_statement_position: false,
             in_condition_position: false,
@@ -1007,13 +1073,27 @@ impl<'a> Checker<'a> {
                     self.check_final_class_extension(&fqn, c.span);
                     self.check_class_references_exist(&fqn, c.span);
                     self.check_internal_inheritance(&fqn, c.kind, c.span);
+                    for (i, parent) in c.extends.iter().enumerate() {
+                        let span = c.extends_spans.get(i).copied().unwrap_or(c.span);
+                        self.check_class_name_case(&fqn, parent, span);
+                    }
+                    for (i, iface) in c.implements.iter().enumerate() {
+                        let span = c.implements_spans.get(i).copied().unwrap_or(c.span);
+                        self.check_class_name_case(&fqn, iface, span);
+                    }
+                    for (i, used) in c.uses.iter().enumerate() {
+                        let span = c.uses_spans.get(i).copied().unwrap_or(c.span);
+                        self.check_class_name_case(&fqn, used, span);
+                    }
                     self.check_method_tag_types(&fqn, c.span);
                     self.check_mixin_types(&fqn, c.span);
                     self.check_type_alias_types(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
                     self.check_property_overrides(&fqn, c);
                     self.check_require_tags(&fqn, c.span);
+                    self.check_require_tag_types(&fqn, c.span);
                     self.check_sealed_hierarchy(&fqn, c.span);
+                    self.check_sealed_tag_types(&fqn, c.span);
                     self.check_unknown_phpstan_tags_in_class(&fqn, c);
                     self.check_property_hooks(&fqn, c);
                     self.check_property_variances(&fqn, c);
@@ -1097,6 +1177,14 @@ impl<'a> Checker<'a> {
                     self.check_class_completeness(&fqn, e.span);
                     self.check_class_references_exist(&fqn, e.span);
                     self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
+                    for (i, iface) in e.implements.iter().enumerate() {
+                        let span = e.implements_spans.get(i).copied().unwrap_or(e.span);
+                        self.check_class_name_case(&fqn, iface, span);
+                    }
+                    for (i, used) in e.uses.iter().enumerate() {
+                        let span = e.uses_spans.get(i).copied().unwrap_or(e.span);
+                        self.check_class_name_case(&fqn, used, span);
+                    }
                     self.check_ancestor_generic_bounds(&fqn, e.span);
                     self.check_enum_template_tag(&fqn, e);
                     self.check_enum_case_values(&fqn, e);

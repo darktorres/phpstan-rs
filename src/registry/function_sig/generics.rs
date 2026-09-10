@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::docblock::DocBlock;
 use crate::registry::name_context::{NameContext, resolve_names_in_type};
-use crate::types::{self, TemplateParam, Type};
+use crate::types::{self, CallableParam, CallableSig, TemplateParam, Type};
 
 /// Rewrites every `Object(name, _)` in `ty` whose `name` matches a key in
 /// `aliases` into that alias's own (already fully-resolved) `Type` -
@@ -68,6 +69,20 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>)
                 .map(|(k, t, opt)| (k, substitute_type_aliases(t, aliases), opt))
                 .collect(),
         ),
+        // Phase 53: mirrors `mark_template_params`'s own new arm above.
+        Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
+            params: sig
+                .params
+                .iter()
+                .map(|p| CallableParam {
+                    ty: substitute_type_aliases(p.ty.clone(), aliases),
+                    variadic: p.variadic,
+                    optional: p.optional,
+                    by_ref: p.by_ref,
+                })
+                .collect(),
+            return_type: Box::new(substitute_type_aliases((*sig.return_type).clone(), aliases)),
+        }))),
         other => other,
     }
 }
@@ -183,6 +198,23 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
                 .map(|(k, t, opt)| (k, mark_template_params(t, params), opt))
                 .collect(),
         ),
+        // Phase 53: the real motivating corpus case (Doctrine DBAL's own
+        // `@param Closure(self):T $func`) - without this, `T` inside the
+        // shape stays an unresolved `Object("T", [])` instead of becoming
+        // a real `TemplateParam`.
+        Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
+            params: sig
+                .params
+                .iter()
+                .map(|p| CallableParam {
+                    ty: mark_template_params(p.ty.clone(), params),
+                    variadic: p.variadic,
+                    optional: p.optional,
+                    by_ref: p.by_ref,
+                })
+                .collect(),
+            return_type: Box::new(mark_template_params((*sig.return_type).clone(), params)),
+        }))),
         other => other,
     }
 }

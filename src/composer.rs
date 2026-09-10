@@ -126,6 +126,34 @@ pub fn detect_phpstan_dependency(project_dir: &Path) -> bool {
     })
 }
 
+/// Phase 40.6: walks upward from `from_dir` (a directory, not a file - a
+/// caller with a file path needs to pass its own `.parent()`) looking for
+/// the nearest `composer.json` and returns its own `"name"` field, if
+/// present and a string - `PhpStanNamespaceIn3rdPartyPackageRule`'s own
+/// "which package owns this file" question
+/// (`vendor/phpstan-src/src/Rules/Api/PhpStanNamespaceIn3rdPartyPackageRule
+/// .php`'s own `findComposerJsonContents`, ported almost verbatim). No
+/// `composer.json` at this level recurses to the parent directory,
+/// stopping once the filesystem root is reached (`Path::parent()`
+/// returning `None` there ends the recursion for free). A `composer.json`
+/// that *does* exist but fails to read or parse as JSON, or has no
+/// `"name"` string field, returns `None` immediately without walking any
+/// further up - matching real PHPStan's own behavior exactly (its own
+/// `JsonException`/`CouldNotReadFileException` catch blocks return `null`
+/// from that one call, they don't retry a parent directory either).
+pub(crate) fn find_composer_package_name(from_dir: &Path) -> Option<String> {
+    if !from_dir.is_dir() {
+        return None;
+    }
+    let composer_json = from_dir.join("composer.json");
+    if !composer_json.is_file() {
+        return find_composer_package_name(from_dir.parent()?);
+    }
+    let bytes = std::fs::read(&composer_json).ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    Some(json.get("name")?.as_str()?.to_string())
+}
+
 fn discover_inner(composer_dir: &Path, vendor_dir: &Path, base_dir: &Path) -> ComposerContext {
     let static_path = composer_dir.join("autoload_static.php");
     if static_path.is_file()

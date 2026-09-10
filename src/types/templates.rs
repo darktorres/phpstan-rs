@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::types::Type;
+use crate::types::{CallableParam, CallableSig, Type};
 
 /// Unifies a template-bearing param type against an actual argument type,
 /// recording the binding it implies. Only the two shapes that come up in
@@ -113,6 +114,23 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
                 .map(|a| substitute_template(a, bindings))
                 .collect(),
         ),
+        // Phase 53: mirrors the other three walkers' own equivalent arms -
+        // a template param inside a `Closure(...)` shape's own param/return
+        // types (e.g. `Closure(T): U`) needs the same substitution as
+        // anywhere else.
+        Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
+            params: sig
+                .params
+                .iter()
+                .map(|p| CallableParam {
+                    ty: substitute_template(&p.ty, bindings),
+                    variadic: p.variadic,
+                    optional: p.optional,
+                    by_ref: p.by_ref,
+                })
+                .collect(),
+            return_type: Box::new(substitute_template(&sig.return_type, bindings)),
+        }))),
         other => other.clone(),
     }
 }

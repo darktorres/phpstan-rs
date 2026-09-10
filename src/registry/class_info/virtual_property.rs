@@ -60,6 +60,9 @@ pub(crate) fn hook_body_references_property(body: &PropertyHookBody, prop_name: 
         PropertyHookBody::Block(stmts) => {
             stmts.iter().any(|s| stmt_references_property(s, prop_name))
         }
+        // An abstract hook can't reference `$this->prop` at all - no
+        // real body exists to reference anything.
+        PropertyHookBody::Abstract => false,
     }
 }
 

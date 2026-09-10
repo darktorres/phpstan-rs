@@ -68,6 +68,7 @@ impl Parser {
                     variadic: false,
                     promoted_visibility: None,
                     promoted_readonly: false,
+                    promoted_final: false,
                     hooks: None,
                     attrs,
                     doc_comment: None,
@@ -87,9 +88,14 @@ impl Parser {
             } else if self.check(&Token::LBrace) {
                 Some(PropertyHookBody::Block(self.parse_stmt_list_block()?))
             } else {
-                // Abstract form: `get;` / `set;`, no body at all.
+                // Abstract form: `get;` / `set;`, no body at all - a
+                // hook that's declared but has no body (Phase 64 Item 1),
+                // unambiguously distinct from no hook being declared at
+                // all (this whole `if`/`else` chain only runs once `is_set`
+                // has already confirmed a real `get`/`set` keyword was
+                // consumed).
                 self.expect_semicolon()?;
-                None
+                Some(PropertyHookBody::Abstract)
             };
 
             if is_set {

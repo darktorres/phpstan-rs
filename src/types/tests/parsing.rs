@@ -492,14 +492,26 @@ fn a_plain_list_is_not_a_subtype_of_a_non_empty_list_of_the_same_element_type() 
 // `"Closure(self):T"` fell through to the generic class-name branch
 // and got mangled into a bogus, namespace-qualified "class name"
 // once resolved against the current file's own namespace.
+//
+// Phase 53 Sub-item A: this syntax is now parsed into a real, shaped
+// `Type::Callable(Some(sig))` instead of degrading to the bare marker -
+// `self`/`T` stay unresolved `Object` references here (only `parse_
+// type_string` itself runs in this test, not the later name-resolution/
+// template-marking passes), but the structural shape itself is real.
 #[test]
-fn closure_shape_syntax_degrades_to_plain_callable() {
-    assert_eq!(parse_type_string("Closure(self):T"), Type::Callable);
+fn closure_shape_syntax_parses_into_a_real_shape() {
     assert_eq!(
-        parse_type_string("Closure(int, string): bool"),
-        Type::Callable
+        parse_type_string("Closure(self):T").to_string(),
+        "callable(self): T"
     );
-    assert_eq!(parse_type_string("callable(int): void"), Type::Callable);
+    assert_eq!(
+        parse_type_string("Closure(int, string): bool").to_string(),
+        "callable(int, string): bool"
+    );
+    assert_eq!(
+        parse_type_string("callable(int): void").to_string(),
+        "callable(int): void"
+    );
 }
 
 #[test]
@@ -508,7 +520,9 @@ fn closure_shape_syntax_still_works_inside_a_union() {
     let Type::Union(members) = ty else {
         panic!("expected a top-level union, got {ty:?}");
     };
-    assert_eq!(members, vec![Type::Callable, Type::Null]);
+    assert_eq!(members.len(), 2);
+    assert_eq!(members[0].to_string(), "callable(self): T");
+    assert_eq!(members[1], Type::Null);
 }
 
 #[test]
@@ -528,15 +542,25 @@ fn a_class_name_merely_starting_with_closure_is_not_mistaken_for_the_callable_sh
 // "closure(")` is false), falling through to the generic-class branch
 // and mangling into a bogus `Type::Object("Closure(CancelledException)",
 // [])` "class" (reported as a false `class.notFound`).
+//
+// `\Closure(CancelledException)` itself has no trailing `: ReturnType` -
+// the real phpdoc-parser grammar's own mandatory piece - so it still
+// degrades to the bare marker exactly as before; `\Closure(int, string):
+// bool` does have one, so (Phase 53 Sub-item A) it now parses into a
+// real shape instead.
 #[test]
-fn fully_qualified_closure_shape_syntax_also_degrades_to_plain_callable() {
+fn fully_qualified_closure_shape_syntax_with_no_return_type_degrades_to_plain_callable() {
     assert_eq!(
         parse_type_string("\\Closure(CancelledException)"),
-        Type::Callable
+        Type::Callable(None)
     );
+}
+
+#[test]
+fn fully_qualified_closure_shape_syntax_with_a_return_type_parses_into_a_real_shape() {
     assert_eq!(
-        parse_type_string("\\Closure(int, string): bool"),
-        Type::Callable
+        parse_type_string("\\Closure(int, string): bool").to_string(),
+        "callable(int, string): bool"
     );
 }
 

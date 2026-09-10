@@ -67,7 +67,7 @@ impl<'a> Checker<'a> {
 /// extended date-time form reused as a duration. Leading/trailing
 /// whitespace is tolerated (confirmed: `" P1Y"`/`"P1Y "` both succeed);
 /// nothing else is.
-fn is_valid_date_interval_spec(spec: &str) -> bool {
+pub(crate) fn is_valid_date_interval_spec(spec: &str) -> bool {
     let s = spec.trim();
     is_valid_designator_form(s) || is_valid_iso_datetime_form(s)
 }

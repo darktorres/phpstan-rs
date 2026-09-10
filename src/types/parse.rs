@@ -1,4 +1,6 @@
-use crate::types::{AccessoryKind, Type};
+use std::sync::Arc;
+
+use crate::types::{AccessoryKind, CallableParam, CallableSig, Type};
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,
 /// `"int|string"`, `"\App\Foo"`, `"Countable&Iterator"`, or a PHPDoc type
@@ -62,6 +64,101 @@ pub fn parse_type_string(raw: &str) -> Type {
 /// `depth` below zero and silently swallowing every top-level separator
 /// for the rest of the string - `'->'|'::' ` mangled into the single,
 /// nonsensical literal `Type::StringLiteral("->'|'::")`.
+/// Phase 53: the byte index of the `)` matching the FIRST `(` in `s`
+/// (`s` must start at or before that `(`), tracking bracket depth/quotes
+/// the same way `split_top_level` does - no existing helper answers "an
+/// opening bracket's own matching close" (`split_top_level` only ever
+/// splits *on* a top-level separator).
+fn find_matching_paren(s: &str) -> Option<usize> {
+    let open = s.find('(')?;
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    for (i, c) in s[open..].char_indices() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '<' | '{' | '(' | '[' => depth += 1,
+            '>' | '}' | ')' | ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Phase 53 Sub-item A: real structural parsing of a `Closure(...)`/
+/// `callable(...)` PHPDoc shape - `stripped` is `s` with any leading `\`
+/// already removed (case preserved, unlike the `lower` prefix-matching
+/// gate at this function's own call site). `None` on anything not
+/// confidently understood (a missing/unbalanced `(`, or the mandatory
+/// trailing `: ReturnType` missing - real phpdoc-parser's own grammar,
+/// confirmed directly: `TypeParser::parseCallable` unconditionally
+/// consumes a `:` token) - the caller falls back to today's bare
+/// `Type::Callable(None)` marker in that case, exactly as before this
+/// sub-item existed, so a shape this doesn't recognize can only ever
+/// lose precision, never mis-parse.
+fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
+    let close = find_matching_paren(stripped)?;
+    let open = stripped.find('(')?;
+    let inner = &stripped[open + 1..close];
+    let rest = stripped[close + 1..].trim_start();
+    let ret_text = rest.strip_prefix(':')?;
+
+    let raw_params: Vec<&str> = if inner.trim().is_empty() {
+        Vec::new()
+    } else {
+        split_top_level(inner, ',')
+    };
+    let mut params = Vec::with_capacity(raw_params.len());
+    for raw in raw_params {
+        let mut text = raw.trim();
+        let optional = text.strip_suffix('=').is_some_and(|t| {
+            text = t.trim_end();
+            true
+        });
+        // A trailing `$name` token (optional per the grammar, and this
+        // struct never tracks it - discarded, not stored).
+        if let Some(dollar) = text.rfind('$')
+            && text[dollar..]
+                .chars()
+                .skip(1)
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            text = text[..dollar].trim_end();
+        }
+        let variadic = text.strip_suffix("...").is_some_and(|t| {
+            text = t.trim_end();
+            true
+        });
+        let by_ref = text.strip_suffix('&').is_some_and(|t| {
+            text = t.trim_end();
+            true
+        });
+        if text.is_empty() {
+            return None;
+        }
+        params.push(CallableParam {
+            ty: parse_type_string(text),
+            variadic,
+            optional,
+            by_ref,
+        });
+    }
+    Some(Type::Callable(Some(Arc::new(CallableSig {
+        params,
+        return_type: Box::new(parse_type_string(ret_text)),
+    }))))
+}
+
 fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0i32;
@@ -431,30 +528,26 @@ fn parse_type_atom(s: &str) -> Type {
     // ReturnType` or `callable(...): ReturnType` - describes a callable
     // value's own signature, not a generic type-argument list (only
     // `<...>` is one, per `split_generic_args`) and not a real class
-    // name despite `Closure(...)` superficially resembling one. This
-    // project doesn't track a callable's own per-parameter/return
-    // signature at all, so - matching its own established leniency for a
-    // bare `callable`/`Closure` type elsewhere (`is_assignable`'s
-    // `(Type::Array(_) | Type::ArrayShape(_), Type::Callable) => true`
-    // and friends) - this degrades to the same `Type::Callable` a bare
-    // `callable` hint already produces. Real corpus shape: Doctrine
-    // DBAL's own `@param Closure(self):T $func` - without this, the
-    // whole literal string `"Closure(self):T"` fell through to the
-    // generic class-name branch below and got mangled into a bogus,
-    // namespace-qualified "class name" (`Doctrine\DBAL\Closure(self):T`).
-    // Stripped of a leading `\` first - real corpus code commonly spells
-    // this fully qualified (`@param \Closure(CancelledException) $cb`,
-    // amphp/amp's own convention throughout), which otherwise defeated
-    // this exact check (`"\closure(...".starts_with("closure(")` is
-    // false), falling through to the generic-class branch and mangling
-    // into a bogus `Type::Object("Closure(CancelledException)", [])`.
-    let lower = s.trim_start_matches('\\').to_ascii_lowercase();
+    // name despite `Closure(...)` superficially resembling one. Real
+    // corpus shape: Doctrine DBAL's own `@param Closure(self):T $func` -
+    // without this, the whole literal string `"Closure(self):T"` fell
+    // through to the generic class-name branch below and got mangled
+    // into a bogus, namespace-qualified "class name" (`Doctrine\DBAL\
+    // Closure(self):T`). Stripped of a leading `\` first - real corpus
+    // code commonly spells this fully qualified (`@param \Closure
+    // (CancelledException) $cb`, amphp/amp's own convention throughout),
+    // which otherwise defeated this exact check (`"\closure(...".starts_
+    // with("closure(")` is false), falling through to the generic-class
+    // branch and mangling into a bogus `Type::Object("Closure
+    // (CancelledException)", [])`.
+    let stripped = s.trim_start_matches('\\');
+    let lower = stripped.to_ascii_lowercase();
     if lower.starts_with("closure(")
         || lower.starts_with("closure (")
         || lower.starts_with("callable(")
         || lower.starts_with("callable (")
     {
-        return Type::Callable;
+        return try_parse_callable_shape(stripped).unwrap_or(Type::Callable(None));
     }
 
     // A real, documented PHPStan/Psalm convention: a quoted literal
@@ -942,7 +1035,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "closure" if original.starts_with('\\') => {
             Type::Object("\\Closure".to_string(), Vec::new())
         }
-        "callable" => Type::Callable,
+        "callable" => Type::Callable(None),
         "self" => Type::SelfRef,
         "parent" => Type::ParentRef,
         // `@return $this` is a real, PHPStan-documented PHPDoc convention -

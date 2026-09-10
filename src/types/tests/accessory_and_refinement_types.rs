@@ -350,11 +350,12 @@ fn array_shape_with_a_hyphenated_bare_key_still_parses_as_keyed() {
 #[test]
 fn array_shape_with_a_positional_closure_field_is_not_split_at_its_own_colon() {
     let shape = parse_type_string("array{Closure(int): string, int}");
-    assert_eq!(
-        shape,
-        Type::ArrayShape(vec![
-            ("0".to_string(), Type::Callable, false),
-            ("1".to_string(), Type::Int, false),
-        ])
-    );
+    let Type::ArrayShape(fields) = &shape else {
+        panic!("expected an array shape, got {shape:?}");
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].0, "0");
+    assert_eq!(fields[0].1.to_string(), "callable(int): string");
+    assert!(!fields[0].2);
+    assert_eq!(fields[1], ("1".to_string(), Type::Int, false));
 }

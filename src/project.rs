@@ -183,6 +183,15 @@ impl Project {
         self.registry.check_deprecated_usage = enabled;
     }
 
+    /// Phase 42 bonus item: opts the whole project's checking into the
+    /// "missing checked exception" family, following `set_check_
+    /// deprecated_usage`'s exact precedent - see `registry::Registry::
+    /// check_missing_checked_exceptions`'s own doc comment for why this
+    /// defaults to `false`.
+    pub fn set_check_missing_checked_exceptions(&mut self, enabled: bool) {
+        self.registry.check_missing_checked_exceptions = enabled;
+    }
+
     /// Phase 61: opts the whole project's checking into the reinstated
     /// empty-concrete-method-body completeness check, following
     /// `set_check_deprecated_usage`'s exact precedent - see
@@ -275,6 +284,7 @@ impl Project {
     /// Finalizes an initial batch of `load_file` calls (trait flattening).
     #[hotpath::measure]
     pub fn finish_loading(&mut self) {
+        self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
         self.registry.resolve_method_tags();
         self.registry.flatten_phpdoc_inheritance();
@@ -343,6 +353,7 @@ impl Project {
         // registry's trait flattening can't be assumed still correct -
         // re-run it. Still far cheaper than a full reload: a HashMap scan
         // over already-parsed ClassInfo, not a re-parse of anything.
+        self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
         self.registry.resolve_method_tags();
         self.registry.flatten_phpdoc_inheritance();
@@ -459,6 +470,7 @@ impl Project {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
                 &file.ast,
                 &self.registry,
+                Some(path),
             ));
             // `into_diagnostics` above already sorted the checker's own
             // diagnostics into span order - re-sort once more now that

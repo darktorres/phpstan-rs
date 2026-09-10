@@ -1,7 +1,8 @@
 use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
-    Locals, merge_scopes, purge_stale_narrowing_for,
+    Locals, generator_missing_return_type, generator_template_param, merge_scopes,
+    purge_stale_narrowing_for,
 };
 use crate::docblock;
 use crate::types::Type;
@@ -204,6 +205,24 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(expected, c),
                         None => expected.clone(),
                     };
+                    // Phase 70.A follow-up: inside a real generator, a
+                    // `return $x;` statement's own value sets `Generator::
+                    // getReturn()` - it's checked against the declared
+                    // `Generator<TKey, TValue, TSend, TReturn>`'s own
+                    // TReturn, never against the whole `Generator<...>`
+                    // type itself (that would always mismatch: no real
+                    // `return` statement inside a generator body ever
+                    // produces an actual `Generator` object). A pre-
+                    // existing gap this project's own generator-exemption
+                    // convention already correctly applies to the bare-
+                    // `return;`/falls-off-the-end cases just below and in
+                    // `check_function` - `Return(Some(e))` was the one
+                    // case still missing it.
+                    let expected = if self.current_function_is_generator {
+                        generator_template_param(&expected, self.registry, "TReturn")
+                    } else {
+                        expected
+                    };
                     // Phase 61: a `never`-typed function/method reaching
                     // *any* `return` at all - value or bare - is its own
                     // dedicated real-PHPStan identifier/message
@@ -276,13 +295,31 @@ impl<'a> Checker<'a> {
                 // A bare `return;` inside a generator (Finding 3) sets
                 // Generator::getReturn()'s own value, not this function's
                 // return value - real PHPStan never checks it against the
-                // declared Generator/Iterator/Traversable return type.
+                // declared Generator/Iterator/Traversable return type
+                // directly. Phase 61.B: it's still checked against the
+                // declared TReturn specifically, same as `check_function`'s
+                // own falls-off-the-end completeness check - a bare
+                // `return;` sets `getReturn()` to `null`, a real mismatch
+                // when TReturn requires a concrete, non-nullable type.
+                let generator_treturn = self
+                    .current_function_is_generator
+                    .then(|| {
+                        generator_missing_return_type(
+                            self.current_declared_return_type.as_ref(),
+                            self.registry,
+                        )
+                    })
+                    .flatten();
                 if let Some(expected) = declared_return
-                    && !self.current_function_is_generator
+                    && (!self.current_function_is_generator || generator_treturn.is_some())
                 {
-                    let expected = match &self.current_class {
-                        Some(c) => self.resolve_pseudo(expected, c),
-                        None => expected.clone(),
+                    let expected = if let Some(treturn) = generator_treturn {
+                        treturn
+                    } else {
+                        match &self.current_class {
+                            Some(c) => self.resolve_pseudo(expected, c),
+                            None => expected.clone(),
+                        }
                     };
                     // Phase 61: see the identical `return.never` special
                     // case on `Return(Some(e))` just above - a bare

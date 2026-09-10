@@ -1489,6 +1489,114 @@ fn keeping_the_same_static_ness_on_override_is_never_flagged() {
     );
 }
 
+// Phase 64 Item 3: PHP 8.4 `final` property modifier.
+
+#[test]
+fn overriding_a_final_property_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public final int $x = 1; }
+            class Child extends Base { public int $x = 2; }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinal"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_final_property_two_hops_up_the_extends_chain_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public final int $x = 1; }
+            class Middle extends Base {}
+            class Child extends Middle { public int $x = 2; }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinal"
+                && x.message.contains("Base::$x")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_non_final_property_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base { public int $x = 2; }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinal"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_private_property_does_not_restrict_a_subclass_redeclaring_the_same_name() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { private final int $x = 1; }
+            class Child extends Base { public int $x = 2; }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinal"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_final_promoted_constructor_property_is_flagged() {
+    // `public final int $x` is real, valid PHP on a promoted constructor
+    // property too (confirmed via `php -l`/`php -r`: real PHP enforces
+    // "Cannot override final property Base::$x" here exactly like an
+    // ordinary property declaration) - only `abstract` is truly
+    // impossible on a promoted property (an abstract constructor can't
+    // declare one at all).
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function __construct(public final int $x = 1) {}
+            }
+            class Child extends Base {
+                public function __construct(public int $x = 2) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinal"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_private_promoted_property_does_not_restrict_a_subclass_redeclaring_the_same_name() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function __construct(private final int $x = 1) {}
+            }
+            class Child extends Base {
+                public function __construct(public int $x = 2) {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinal"),
+        "got: {d:?}"
+    );
+}
+
 // Phase 64 Item 5: property `#[Override]` attribute.
 
 #[test]

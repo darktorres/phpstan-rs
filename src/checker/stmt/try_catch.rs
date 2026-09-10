@@ -257,5 +257,13 @@ impl<'a> Checker<'a> {
                 "throw.notThrowable",
             );
         }
+        // Phase 42 Sub-item A: a real, explicit throw point - pushed
+        // unconditionally (even a not-provably-Throwable value, already
+        // flagged above in its own right) rather than trying to guess
+        // "should this count," matching this file's own "don't second-
+        // guess an already-reported diagnostic" convention elsewhere.
+        self.current_function_explicit_throw_points
+            .push((thrown_ty.clone(), e.span));
+        self.current_function_throw_points.push(thrown_ty);
     }
 }

@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
     Checker, Locals, body_contains_yield, is_truthy_literal, merge_scopes, stmt_contains_break,
-    stmt_contains_escaping_exit,
+    stmt_contains_escaping_exit, union_types,
 };
 use crate::types::Type;
 
@@ -428,6 +428,107 @@ impl<'a> Checker<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Phase 70.C: `array_element_type`/`array_key_type`'s own parallel
+    /// case for an object-shaped `foreach` subject - `Traversable`,
+    /// `Iterator`, `Generator` (a real `Iterator` descendant), or
+    /// `IteratorAggregate`. Returns `(key type, value type)`.
+    /// Deliberately not folded into `array_element_type`/`array_key_type`
+    /// themselves (both plain free functions, no registry access) -
+    /// every other caller of those two genuinely never has an object
+    /// subject, and this needs `&self.registry` throughout.
+    ///
+    /// Targets `Iterator`/`IteratorAggregate` directly rather than the
+    /// plan's originally-suggested common ancestor `Traversable` - a
+    /// real, verified reason, not a stylistic choice: `Traversable`'s own
+    /// phpstorm-stubs declaration (`vendor/phpstorm-stubs/Core/Core_c.php`)
+    /// has no real `@template` tag of its own, only a `@template-extends
+    /// iterable<TKey, TValue>` referencing the `iterable` *pseudo*-type
+    /// (which `types::parse_type_string` desugars straight to `array|
+    /// Traversable` before any template ever attaches) - `Registry::
+    /// class_template_bindings(_, _, "Traversable")` would always return
+    /// an empty map, no matter what's passed in, since `ClassInfo::
+    /// templates` for `Traversable` itself is empty. `Iterator`/
+    /// `IteratorAggregate` both carry real, functional `@template TKey`/
+    /// `@template-covariant TValue` tags of their own, and every real,
+    /// concrete `Traversable` implementor is required by the PHP engine
+    /// itself to implement one of the two (`Traversable` can't be
+    /// implemented directly - a real fatal error) - so this covers every
+    /// concrete case; a variable statically typed as the bare `Traversable`
+    /// interface itself (or a raw `Traversable<K,V>` docblock reference,
+    /// never actually widened to a real implementor) is the one
+    /// remaining, narrow gap, and falls back to `None`/`Mixed` like any
+    /// other unresolvable case in this project.
+    ///
+    /// `IteratorAggregate` resolves through its own `getIterator()`'s
+    /// declared return type first (real, common shape: `getIterator():
+    /// Iterator<K, V>` rather than the class itself declaring `@template-
+    /// implements Traversable<K,V>`) - only falling back to `Iterator
+    /// Aggregate`'s own template bindings directly when that return type
+    /// doesn't resolve any further (e.g. a bare, non-generic `Iterator`/
+    /// `Traversable` return hint) - a small, deliberate leniency beyond
+    /// what real PHPStan's own method-return-type-only resolution does,
+    /// since the interface's own declared generics are still a real,
+    /// likely-correct answer in that case.
+    fn iterable_element_type(&self, ty: &Type) -> Option<(Type, Type)> {
+        match ty {
+            Type::Object(name, args) => {
+                if self.registry.is_subclass_of(name, "IteratorAggregate") {
+                    let agg_bindings =
+                        self.registry
+                            .class_template_bindings(name, args, "IteratorAggregate");
+                    if let Some(sig) = self.registry.lookup_method(name, "getIterator") {
+                        let declared = self.resolve_pseudo(&sig.return_type, name);
+                        // Avoid infinite recursion on a (real but
+                        // pathological) `getIterator(): static`-shaped
+                        // declaration that resolved right back to this
+                        // same class.
+                        let recurses_into_self =
+                            matches!(&declared, Type::Object(inner, _) if inner == name);
+                        if !recurses_into_self
+                            && let Some(result) = self.iterable_element_type(&declared)
+                        {
+                            return Some(result);
+                        }
+                    }
+                    if !agg_bindings.is_empty() {
+                        return Some((
+                            agg_bindings.get("TKey").cloned().unwrap_or(Type::Mixed),
+                            agg_bindings.get("TValue").cloned().unwrap_or(Type::Mixed),
+                        ));
+                    }
+                }
+                let bindings = self
+                    .registry
+                    .class_template_bindings(name, args, "Iterator");
+                if bindings.is_empty() {
+                    return None;
+                }
+                Some((
+                    bindings.get("TKey").cloned().unwrap_or(Type::Mixed),
+                    bindings.get("TValue").cloned().unwrap_or(Type::Mixed),
+                ))
+            }
+            Type::Union(members) => {
+                let mut keys = Vec::new();
+                let mut values = Vec::new();
+                for m in members {
+                    let (k, v) = self.iterable_element_type(m)?;
+                    keys.push(k);
+                    values.push(v);
+                }
+                Some((
+                    keys.into_iter().reduce(union_types).unwrap_or(Type::Mixed),
+                    values
+                        .into_iter()
+                        .reduce(union_types)
+                        .unwrap_or(Type::Mixed),
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_foreach(
         &mut self,
         subject: &Expr,
@@ -471,7 +572,21 @@ impl<'a> Checker<'a> {
         // silently inferred `Mixed` for the loop variable, a
         // real, confirmed regression (one of the most common
         // constructs in real PHP).
-        let element_ty = Self::array_element_type(&subject_ty).unwrap_or(Type::Mixed);
+        // Phase 70.C: an array-shaped subject keeps taking the pre-
+        // existing, array-specific path unchanged; anything that path
+        // can't handle (an object) now tries `iterable_element_type`
+        // before finally giving up to `Mixed`/`Mixed` - see that
+        // function's own doc comment for exactly what it covers
+        // (`Traversable`/`Iterator`/`Generator`/`IteratorAggregate`).
+        let (key_ty, element_ty) = match Self::array_element_type(&subject_ty) {
+            Some(elem) => (
+                Self::array_key_type(&subject_ty).unwrap_or(Type::Mixed),
+                elem,
+            ),
+            None => self
+                .iterable_element_type(&subject_ty)
+                .unwrap_or((Type::Mixed, Type::Mixed)),
+        };
         // Phase 29: `Foreach` still checks its body once directly
         // against the real `locals` (deliberately *not* also
         // adopting `While`/`For`'s own separate "may run zero
@@ -527,7 +642,7 @@ impl<'a> Checker<'a> {
             label,
             |this, pass_locals, declared_return, label, _pass| {
                 if let Some(k) = key {
-                    this.bind_simple_target(k, Type::Mixed, pass_locals);
+                    this.bind_simple_target(k, key_ty.clone(), pass_locals);
                     this.check_expr(k, pass_locals, label);
                 }
                 // A foreach value can itself be a destructuring

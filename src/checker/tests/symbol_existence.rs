@@ -498,6 +498,285 @@ fn a_real_use_function_import_is_not_flagged() {
 // lookup, wrongly flagging any differently-cased call (a builtin or a
 // user-declared function alike) as undefined.
 
+// Phase 71 Item 4: `function_exists()`-guard suppression for the
+// undefined-function check - a disclosed, project-specific adaptation
+// (this project's own registry can legitimately lack a symbol real PHP
+// itself resolves fine at runtime, unlike real PHPStan's own live
+// reflection).
+
+#[test]
+fn function_exists_guard_suppresses_undefined_function_call() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                if (function_exists('totallyMadeUpFunctionName')) {
+                    totallyMadeUpFunctionName();
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn negated_function_exists_guard_with_early_return_suppresses_call_after_if() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                if (!function_exists('totallyMadeUpFunctionName')) {
+                    return;
+                }
+                totallyMadeUpFunctionName();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn function_exists_guard_does_not_leak_past_non_terminating_else() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                if (function_exists('totallyMadeUpFunctionName')) {
+                    echo "found";
+                } else {
+                    echo "not found";
+                }
+                totallyMadeUpFunctionName();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn function_exists_guard_with_dynamic_name_stays_unsuppressed() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(string $name): void {
+                if (function_exists($name)) {
+                    totallyMadeUpFunctionName();
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn function_exists_guard_first_class_callable_syntax_suppressed() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                if (function_exists('totallyMadeUpFunctionName')) {
+                    $f = totallyMadeUpFunctionName(...);
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn function_exists_guard_scoped_correctly_across_closures() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                if (function_exists('totallyMadeUpFunctionName')) {
+                    $cb = function () {
+                        totallyMadeUpFunctionName();
+                    };
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.notFound"),
+        "got: {d:?}"
+    );
+}
+
+// Phase 48.1: real PHP resolves class/interface/trait/enum names case-
+// insensitively too, the same bug class already fixed for functions
+// (Phase 71).
+
+#[test]
+fn a_differently_cased_new_of_a_user_declared_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            function test(): void {
+                new foo();
+                new FOO();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_extends_target_resolves_correctly() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class bar { abstract public function f(): void; }
+            class Child extends Bar {}
+        "#,
+    );
+    // Not just "no class.notFound" - the completeness check must also
+    // see the real ancestor's abstract method through the differently-
+    // cased `extends` reference, or `Child` would wrongly look complete.
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "class.abstractMethodNotImplemented"),
+        "expected the completeness check to still see the real ancestor, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_use_imported_alias_reference_resolves_to_the_real_class() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            class Foo {}
+
+            namespace Other;
+            use App\Foo as Bar;
+            function test(): void {
+                new bar();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_genuinely_undefined_class_is_still_flagged_regardless_of_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                new totallyMadeUpClassName();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"),
+        "got: {d:?}"
+    );
+}
+
+// Phase 48.2: `class.nameCase`/`interface.nameCase`/`trait.nameCase`/
+// `enum.nameCase`, scoped to a class/enum declaration's own `extends`/
+// `implements`/trait-`use` references.
+
+#[test]
+fn a_differently_cased_extends_reference_to_a_user_class_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Child extends base {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_implements_reference_to_a_user_interface_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {}
+            class C implements iface {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "interface.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_trait_use_reference_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            class C { use t; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "trait.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_use_imported_reference_is_never_flagged_name_case_regardless_of_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            class Base {}
+
+            namespace Other;
+            use App\Base;
+            class Child extends base {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_reference_to_a_builtin_class_is_never_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class C extends exception {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_exact_case_reference_is_never_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Child extends Base {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_differently_cased_call_to_a_builtin_function_is_never_flagged() {
     let d = diagnostics_for(
@@ -848,4 +1127,78 @@ fn a_phpstan_import_type_from_an_unknown_class_is_not_flagged_by_default() {
         !d.iter().any(|x| x.identifier == "class.notFound"),
         "unexpected diagnostics: {d:?}"
     );
+}
+
+// Phase 48.7: `StaticMethodCallCheck`/`AccessStaticPropertiesCheck`/
+// `ClassConstantRule`'s own "the class part itself doesn't exist" half -
+// a real, previously-silent gap (confirmed via direct code reading, not
+// just the design doc's own flagged-for-verification note): a `::`
+// reference through a genuinely undefined class produced zero
+// diagnostics before this.
+
+#[test]
+fn calling_a_static_method_on_a_genuinely_undefined_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                \NoSuchClassAtAll::doSomething();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"
+            && x.message
+                .contains("static method call target class NoSuchClassAtAll not found")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn accessing_a_static_property_on_a_genuinely_undefined_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                echo \NoSuchClassAtAll::$prop;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"
+            && x.message
+                .contains("static property access target class NoSuchClassAtAll not found")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn accessing_a_class_constant_on_a_genuinely_undefined_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                echo \NoSuchClassAtAll::SOME_CONST;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"
+            && x.message
+                .contains("class constant access target class NoSuchClassAtAll not found")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_static_method_call_on_a_known_class_is_still_only_flagged_as_a_missing_method() {
+    // Regression guard: the new "class not found" branch must not also
+    // fire (or double-report) once the class itself is real.
+    let d = diagnostics_for(
+        r#"<?php
+            class RealClass {}
+            function f(): void {
+                RealClass::doesNotExist();
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "staticMethod.notFound");
 }

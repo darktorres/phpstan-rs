@@ -348,9 +348,16 @@ fn property_hooks_parse() {
     assert_eq!(param.as_ref().unwrap().name, "value");
     assert!(matches!(body, PropertyHookBody::Block(_)));
 
+    // Phase 64 Item 1: a bodyless hook (`get;`/`set;`) parses to
+    // `Some(PropertyHookBody::Abstract)`/`Some((None, PropertyHookBody::
+    // Abstract))`, not `None` - distinguishing "an abstract hook was
+    // declared with no body" from "no hook at all", which `None` alone
+    // couldn't tell apart.
     let bare_hooks = c.properties[1].hooks.as_ref().expect("expected hooks");
-    assert!(bare_hooks.get.is_none());
-    assert!(bare_hooks.set.is_none());
+    assert!(matches!(bare_hooks.get, Some(PropertyHookBody::Abstract)));
+    let (set_param, set_body) = bare_hooks.set.as_ref().expect("expected set hook");
+    assert!(set_param.is_none());
+    assert!(matches!(set_body, PropertyHookBody::Abstract));
 }
 
 #[test]
@@ -375,6 +382,28 @@ fn an_attribute_on_a_property_hook_parses() {
     assert_eq!(hooks.get_attrs[0].name, "Foo");
     assert_eq!(hooks.set_attrs.len(), 1);
     assert_eq!(hooks.set_attrs[0].name, "Bar");
+}
+
+#[test]
+fn property_hook_declared_abstract_with_no_body_is_distinct_from_no_hook_at_all() {
+    let program = parse(
+        r#"<?php
+            abstract class C {
+                abstract public int $x { get; }
+                public int $y = 1;
+            }
+        "#,
+    );
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    let x_hooks = c.properties[0]
+        .hooks
+        .as_ref()
+        .expect("expected hooks on $x");
+    assert!(matches!(x_hooks.get, Some(PropertyHookBody::Abstract)));
+    assert!(x_hooks.set.is_none());
+    assert!(c.properties[1].hooks.is_none());
 }
 
 #[test]

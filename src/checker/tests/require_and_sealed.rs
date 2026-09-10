@@ -191,3 +191,86 @@ fn an_untagged_hierarchy_is_never_flagged() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 48.7: `@phpstan-require-extends`/`@phpstan-require-implements`/
+// `@phpstan-sealed`'s own existence half - the RHS class name itself.
+
+#[test]
+fn a_require_extends_tag_naming_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-require-extends NoSuchBase */
+            interface Marker {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"
+            && x.message.contains(
+                "PHPDoc tag @phpstan-require-extends contains unknown class NoSuchBase."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_require_extends_tag_naming_a_known_class_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            /** @phpstan-require-extends Base */
+            interface Marker {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_require_implements_tag_naming_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-require-implements NoSuchInterface */
+            trait T {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"
+            && x.message.contains(
+                "PHPDoc tag @phpstan-require-implements contains unknown class NoSuchInterface."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_sealed_tag_naming_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-sealed NoSuchSubtype */
+            interface Sealed {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"
+            && x.message
+                .contains("PHPDoc tag @phpstan-sealed contains unknown class NoSuchSubtype.")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_sealed_tag_naming_a_known_class_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Allowed {}
+            /** @phpstan-sealed Allowed */
+            interface Sealed {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

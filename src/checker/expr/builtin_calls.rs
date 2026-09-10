@@ -257,75 +257,132 @@ impl<'a> Checker<'a> {
                 ]);
                 return union_types(list_ty, Type::False);
             }
-            // Phase 76: a deliberately narrow slice of real PHPStan's own
-            // `FilterFunctionReturnTypeHelper` - only two shapes are
-            // modeled: a literal `FILTER_VALIDATE_*` constant as the
-            // filter, with either a plain int flags argument (no
-            // `options` array) or a real, literal `['options' => [...]]`
-            // array narrowing `default`/`min_range`/`max_range` (the
-            // real corpus shape this phase's own prior write-up named as
-            // its still-open gap - see below). `FILTER_REQUIRE_ARRAY`/
-            // `FILTER_FORCE_ARRAY`, a computed filter value, sanitize
-            // filters, `FILTER_DEFAULT`, and PHP 8.4's
-            // `FILTER_THROW_ON_FAILURE` all still fall through to the
-            // generic stub type unchanged rather than guessing at real
-            // PHPStan's own considerably more involved logic for them.
-            // `FILTER_NULL_ON_FAILURE` is checked the same lenient
-            // bitwise-or-chain-of-names way `preg_split`'s own flags
-            // argument just above already is, since real code commonly
-            // ORs it together with an unrelated flag (e.g.
-            // `FILTER_VALIDATE_IP`'s own `FILTER_FLAG_NO_PRIV_RANGE`).
+            // Phase 76: real PHPStan's own `FilterFunctionReturnTypeHelper`,
+            // scoped to what's statically provable - see `filter_validate_
+            // result`'s own doc comment for exactly what's modeled and
+            // what's deliberately not (a computed filter value, sanitize
+            // filters, `FILTER_DEFAULT`).
             "filter_var" if (2..=3).contains(&args.len()) => {
-                let flags_ty = args.get(2).map(|a| self.infer_expr(&a.value, locals));
-                let flags_is_options_array = flags_ty.as_ref().is_some_and(Self::is_array_like);
-                let options_fields = flags_ty.as_ref().and_then(filter_var_options_fields);
+                let flags_arg = args.get(2).map(|a| &a.value);
+                let flags_ty = flags_arg.map(|e| self.infer_expr(e, locals));
                 if let ExprKind::Name(filter_name) = &args[1].value.kind
-                    && let Some(base_ty) =
-                        filter_validate_type_for_constant(filter_name.trim_start_matches('\\'))
-                    && !args
-                        .get(2)
-                        .is_some_and(|a| contains_flag_name(&a.value, "FILTER_REQUIRE_ARRAY"))
-                    && !args
-                        .get(2)
-                        .is_some_and(|a| contains_flag_name(&a.value, "FILTER_FORCE_ARRAY"))
+                    && let Some((element_ty, fallback, throw_on_failure)) = filter_validate_result(
+                        filter_name.trim_start_matches('\\'),
+                        flags_arg,
+                        flags_ty.as_ref(),
+                    )
                 {
-                    let null_on_failure = args
-                        .get(2)
-                        .is_some_and(|a| contains_flag_name(&a.value, "FILTER_NULL_ON_FAILURE"));
-                    let implicit_fallback = if null_on_failure {
-                        Type::Null
+                    let require_array = flags_arg.is_some_and(|e| {
+                        contains_flag_name_with_options(e, "FILTER_REQUIRE_ARRAY")
+                    });
+                    let force_array = flags_arg
+                        .is_some_and(|e| contains_flag_name_with_options(e, "FILTER_FORCE_ARRAY"));
+                    let value_ty = self.infer_expr(&args[0].value, locals);
+                    // Sub-item A: `FILTER_REQUIRE_ARRAY` wins when both
+                    // are literally present (real PHPStan's own
+                    // precedence). Only the two *provable* shapes are
+                    // modeled (favor false negatives over replicating
+                    // PHPStan's full trinary-logic state machine) - a
+                    // `FILTER_REQUIRE_ARRAY` call on a not-provably-array
+                    // input falls straight through to the generic stub
+                    // below, unchanged.
+                    if require_array && !Self::is_array_like(&value_ty) {
+                        return Type::Mixed;
+                    }
+                    // Real PHPStan's own `getType()` (`vendor/phpstan-src/
+                    // src/Type/Php/FilterFunctionReturnTypeHelper.php`):
+                    // the fallback is unioned into the *element* type
+                    // first (whenever the per-element value can't be
+                    // proven exact, which this project's own coarser
+                    // per-array-not-per-element inference always is), and
+                    // only *that* gets wrapped in the array - never a
+                    // bare, un-widened element type. Confirmed directly
+                    // by reading the real source: an earlier draft here
+                    // special-cased `FILTER_REQUIRE_ARRAY` to skip the
+                    // fallback-union entirely, a real, corrected bug
+                    // (`array<int>` instead of the real `array<int|
+                    // false>`).
+                    let unioned = if throw_on_failure {
+                        element_ty.clone()
                     } else {
-                        Type::False
+                        union_types(element_ty.clone(), fallback.clone())
                     };
-                    if !flags_is_options_array {
-                        return union_types(base_ty, implicit_fallback);
+                    if require_array || force_array {
+                        let key_ty = if Self::is_array_like(&value_ty) {
+                            Self::array_key_type(&value_ty).unwrap_or_else(Type::unknown_array_key)
+                        } else {
+                            Type::unknown_array_key()
+                        };
+                        return Type::Array(Box::new(key_ty), Box::new(unioned));
                     }
-                    // Real PHPStan's own `getFilterTypeOptions()`: only
-                    // `FILTER_VALIDATE_INT` gets `min_range`/`max_range`
-                    // treatment - `FILTER_VALIDATE_FLOAT` is deliberately
-                    // excluded there too ("PHPStan does not yet support
-                    // FloatRangeType"), and neither does this project.
-                    if let Some(fields) = options_fields {
-                        let fallback =
-                            filter_var_option(fields, "default").unwrap_or(implicit_fallback);
-                        let result_ty =
-                            if filter_name.trim_start_matches('\\') == "FILTER_VALIDATE_INT" {
-                                let min = filter_var_option(fields, "min_range")
-                                    .and_then(|t| int_range_bounds(&t))
-                                    .and_then(|(min, _)| min);
-                                let max = filter_var_option(fields, "max_range")
-                                    .and_then(|t| int_range_bounds(&t))
-                                    .and_then(|(_, max)| max);
-                                if min.is_some() || max.is_some() {
-                                    normalize_int_range(min, max)
-                                } else {
-                                    base_ty
-                                }
-                            } else {
-                                base_ty
-                            };
-                        return union_types(result_ty, fallback);
+                    return unioned;
+                }
+            }
+            // Phase 76 Sub-item C: `filter_input($type, $var_name,
+            // $filter, $flags)` - modeled as reading an unknown offset out
+            // of a synthetic `array<string, mixed>` (standing in for
+            // `$_GET`/`$_POST`/etc.), then delegating to the same `filter_
+            // validate_result` `filter_var` uses, shifted one argument
+            // position over. Real PHPStan's own trace (`getOffsetValueType`
+            // on an always-`maybe`-present synthetic array) collapses to
+            // unconditionally unioning in both `Type::Null` and `Type::
+            // False` regardless of `FILTER_NULL_ON_FAILURE` - a genuine,
+            // counter-intuitive but verified property (the flag changes
+            // *which* fallback attaches to which underlying cause, not
+            // whether both appear in the final union) - and this holds
+            // even when `FILTER_THROW_ON_FAILURE` is set, since that only
+            // strips the *validation-failure* fallback, never the
+            // "variable doesn't exist" one (a genuinely missing variable
+            // just returns `null` in real PHP, it doesn't throw). `$type`
+            // (`INPUT_GET`/`INPUT_POST`/...) is deliberately never
+            // inspected - this project has no "internal function throws
+            // TypeError" tracking to model an invalid `$type` with.
+            // `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` are deliberately
+            // not modeled here in this first cut (`filter_input`'s own
+            // input is always the synthetic array, so only sub-item A's
+            // unconditional-wrap case could ever apply, and it's not
+            // worth the extra branch without corpus evidence) - falls
+            // through to the generic stub, same as today.
+            "filter_input" if (2..=4).contains(&args.len()) => {
+                let flags_arg = args.get(3).map(|a| &a.value);
+                let flags_ty = flags_arg.map(|e| self.infer_expr(e, locals));
+                // `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` aren't
+                // modeled for `filter_input` (unlike `filter_var` above) -
+                // `filter_input`'s own subject is always the synthetic
+                // `array<string, mixed>` standing in for `$_GET`/etc., so
+                // only sub-item A's unconditional-wrap case could ever
+                // apply, and it's not worth the extra branch without
+                // corpus evidence. This is a real, previously-missing
+                // check, not just a comment: without it, the plain scalar
+                // path below ran anyway, silently ignoring the flag
+                // instead of actually falling through to the generic stub
+                // as documented.
+                if flags_arg.is_some_and(|e| {
+                    contains_flag_name_with_options(e, "FILTER_REQUIRE_ARRAY")
+                        || contains_flag_name_with_options(e, "FILTER_FORCE_ARRAY")
+                }) {
+                    return Type::Mixed;
+                }
+                if let ExprKind::Name(filter_name) = &args[2].value.kind
+                    && let Some((element_ty, fallback, throw_on_failure)) = filter_validate_result(
+                        filter_name.trim_start_matches('\\'),
+                        flags_arg,
+                        flags_ty.as_ref(),
+                    )
+                {
+                    // Order matches `Null` before the validation-failure
+                    // fallback deliberately - `union_types` preserves
+                    // first-seen insertion order in its own `Display`, and
+                    // `Null`-then-fallback-then-`False` is this project's
+                    // own established convention for this exact three-way
+                    // union (confirmed against the sibling `FILTER_NULL_
+                    // ON_FAILURE` test, which already expects this order).
+                    let mut result = element_ty;
+                    result = union_types(result, Type::Null);
+                    if !throw_on_failure {
+                        result = union_types(result, fallback);
                     }
+                    return union_types(result, Type::False);
                 }
             }
             // Scoped to the common 2-arg single-array form - the real
@@ -1242,7 +1299,7 @@ impl<'a> Checker<'a> {
             "json_encode" if args.len() >= 2 && contains_json_throw_on_error(&args[1].value) => {
                 let resolved = resolve_call_args(args, &sig.params);
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return strip_false_member(generic);
+                return strip_type_member(generic, &Type::False);
             }
             // Phase 34 Finding A: the real stub declares `curl_getinfo`
             // unconditionally `mixed` - real PHPStan's own
@@ -1757,6 +1814,94 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
 /// returns `None`, matching real PHPStan's own `getOptions()` "not a
 /// constant array -> no options recognized" leniency rather than
 /// guessing.
+/// Phase 76: the shared core of `filter_var`'s/`filter_input`'s own
+/// return-type inference - everything real PHPStan's own
+/// `FilterFunctionReturnTypeHelper::getType()` computes *before* the
+/// final union with the "validation failed" fallback, so each caller can
+/// apply the union/array-wrap logic appropriate to its own shape without
+/// duplicating the option-parsing. Returns `None` when `filter_name`
+/// isn't a literal `FILTER_VALIDATE_*` constant this project models at
+/// all (a computed filter value, a sanitize filter, `FILTER_DEFAULT` -
+/// real PHPStan's own logic for the latter two depends on the *input*
+/// value's own type, not just the filter constant, genuinely more than
+/// this slice attempts).
+///
+/// `(element_ty, fallback, throw_on_failure)`: `element_ty` is the
+/// successfully-validated value's own type (already `min_range`/
+/// `max_range`-narrowed for `FILTER_VALIDATE_INT` when a literal options
+/// array supplies them); `fallback` is what a failed validation produces
+/// (`FILTER_NULL_ON_FAILURE`'s own detection, both via a bare bitwise-OR
+/// chain and via a literal `['flags' => ...]` options-array key -
+/// `contains_flag_name_with_options` handles both - or a literal
+/// `'default'` option, which wins over the implicit `null`/`false` when
+/// present); `throw_on_failure` is `FILTER_THROW_ON_FAILURE`'s own
+/// detection (PHP 8.5), for the caller to strip the fallback with
+/// instead of unioning it in.
+fn filter_validate_result(
+    filter_name: &str,
+    flags_expr: Option<&Expr>,
+    flags_ty: Option<&Type>,
+) -> Option<(Type, Type, bool)> {
+    let base_ty = filter_validate_type_for_constant(filter_name)?;
+    let null_on_failure =
+        flags_expr.is_some_and(|e| contains_flag_name_with_options(e, "FILTER_NULL_ON_FAILURE"));
+    let throw_on_failure =
+        flags_expr.is_some_and(|e| contains_flag_name_with_options(e, "FILTER_THROW_ON_FAILURE"));
+    let implicit_fallback = if null_on_failure {
+        Type::Null
+    } else {
+        Type::False
+    };
+    let flags_is_options_array = flags_ty.is_some_and(Checker::is_array_like);
+    if !flags_is_options_array {
+        return Some((base_ty, implicit_fallback, throw_on_failure));
+    }
+    // A literal `['options' => ...]` shape whose own `'options'` value
+    // isn't itself a literal array (a real corpus shape: `['options' =>
+    // $dynamic]`) is genuinely un-analyzable - real PHPStan's own
+    // leniency here (`$hasOptions->maybe()` in `getType()`) still
+    // contributes *something* (folds back to the plain, options-free
+    // case), but this project's own `filter_var`/`filter_input` callers
+    // both want a much stronger "too complicated, give up on the whole
+    // call" signal instead: a `None` here, not `Some((base_ty, ...))`,
+    // is what lets them fall through to their own generic stub-type
+    // path. Distinct from "no `'options'` key was ever written at all"
+    // (the ordinary flags-only call, `filter_var($x, F, FILTER_FLAG)`),
+    // which correctly keeps using the plain per-filter base type below.
+    let flags_ty_ref = flags_ty.expect("flags_is_options_array implies Some");
+    let fields = filter_var_options_fields(flags_ty_ref);
+    if fields.is_none()
+        && let Type::ArrayShape(flags_fields) = flags_ty_ref
+        && flags_fields.iter().any(|(k, _, _)| k == "options")
+    {
+        return None;
+    }
+    let Some(fields) = fields else {
+        return Some((base_ty, implicit_fallback, throw_on_failure));
+    };
+    let fallback = filter_var_option(fields, "default").unwrap_or(implicit_fallback);
+    // Real PHPStan's own `getFilterTypeOptions()`: only `FILTER_VALIDATE_
+    // INT` gets `min_range`/`max_range` treatment - `FILTER_VALIDATE_
+    // FLOAT` is deliberately excluded there too ("PHPStan does not yet
+    // support FloatRangeType"), and neither does this project.
+    let element_ty = if filter_name == "FILTER_VALIDATE_INT" {
+        let min = filter_var_option(fields, "min_range")
+            .and_then(|t| int_range_bounds(&t))
+            .and_then(|(min, _)| min);
+        let max = filter_var_option(fields, "max_range")
+            .and_then(|t| int_range_bounds(&t))
+            .and_then(|(_, max)| max);
+        if min.is_some() || max.is_some() {
+            normalize_int_range(min, max)
+        } else {
+            base_ty
+        }
+    } else {
+        base_ty
+    };
+    Some((element_ty, fallback, throw_on_failure))
+}
+
 fn filter_var_options_fields(flags_ty: &Type) -> Option<&Vec<(String, Type, bool)>> {
     let Type::ArrayShape(fields) = flags_ty else {
         return None;
@@ -1798,7 +1943,7 @@ fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
     }
 }
 
-fn contains_flag_name(e: &Expr, target: &str) -> bool {
+pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
     match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == target,
         ExprKind::Binary(BinOp::BitOr, l, r) => {
@@ -1970,17 +2115,25 @@ fn strip_array_member(ty: Type) -> Type {
 
 /// The `json_encode`/Finding J counterpart of `strip_array_member` above -
 /// identical shape, filtering `Type::False` instead of `Array`/`ArrayShape`.
-fn strip_false_member(ty: Type) -> Type {
+/// Phase 76 Sub-item B follow-up: generalized from the original `strip_
+/// false_member` (still the exact behavior at `target: &Type::False`) -
+/// removes every occurrence of `target` from `ty`, collapsing an
+/// emptied/singleton union the same way. Used both by `json_encode`'s
+/// own `JSON_THROW_ON_ERROR` narrowing and `filter_var`'s/`filter_input`'s
+/// own `FILTER_THROW_ON_FAILURE` narrowing - the same "the failure-
+/// fallback member is definitely gone once the call is guaranteed to
+/// throw instead" shape, one member kind over.
+fn strip_type_member(ty: Type, target: &Type) -> Type {
     match ty {
         Type::Union(members) => {
-            let kept: Vec<Type> = members.into_iter().filter(|m| *m != Type::False).collect();
+            let kept: Vec<Type> = members.into_iter().filter(|m| m != target).collect();
             match kept.len() {
                 0 => Type::Mixed,
                 1 => kept.into_iter().next().unwrap(),
                 _ => Type::Union(kept),
             }
         }
-        Type::False => Type::Mixed,
+        other if other == *target => Type::Mixed,
         other => other,
     }
 }

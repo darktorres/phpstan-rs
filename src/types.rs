@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 mod display;
 mod parse;
 mod subtype;
@@ -90,7 +92,13 @@ pub enum Type {
     // is actually recognized, mirroring how plain `Object`-vs-`Object`
     // hierarchy checks already work.
     EnumCase(String, String),
-    Callable,
+    // Phase 53: `None` is today's bare marker (any callable value at
+    // all, no shape known); `Some(sig)` is a real, parsed `Closure(int):
+    // string`/`callable(int): string` PHPDoc signature - `Arc`, not a
+    // bare `Box`, since `Type` is cloned pervasively throughout this
+    // checker and a parsed shape can be non-trivially sized (params plus
+    // a nested return type).
+    Callable(Option<Arc<CallableSig>>),
     SelfRef,
     ParentRef,
     StaticRef,
@@ -198,6 +206,38 @@ impl TemplateParam {
             default: None,
         }
     }
+}
+
+/// Phase 53: one parameter of a parsed `Closure(...)`/`callable(...)`
+/// PHPDoc shape - deliberately a small, dedicated struct rather than
+/// reusing `registry::ParamSig` (that struct's sibling, `FunctionSig`,
+/// can't cheaply derive `PartialEq` - it embeds `body: Option<Arc<Vec<
+/// Stmt>>>`, and `Stmt` only derives `Debug, Clone`, so making the whole
+/// AST `PartialEq`-able just for this one variant would be a real,
+/// disproportionate blast radius - confirmed, not assumed). No `name`
+/// field: the real phpdoc-parser grammar's own optional `$name` token is
+/// parsed and discarded, never needed for anything this struct is used
+/// for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallableParam {
+    pub ty: Type,
+    pub variadic: bool,
+    // A trailing `=` in the shape grammar (`Closure(int=): void`).
+    pub optional: bool,
+    // A leading `&` in the shape grammar (`Closure(&int): void`).
+    pub by_ref: bool,
+}
+
+/// Phase 53: a parsed `Closure(...)`/`callable(...)` PHPDoc shape's own
+/// params-plus-return-type slice - deliberately *not* the rest of what
+/// real PHPStan's own `CallableType` tracks (a template-type map, purity,
+/// an assertions set) - see `Type::Callable`'s own doc comment and this
+/// phase's own design notes for why that's a verified architectural
+/// mismatch, not an oversight.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallableSig {
+    pub params: Vec<CallableParam>,
+    pub return_type: Box<Type>,
 }
 
 impl Type {

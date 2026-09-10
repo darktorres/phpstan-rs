@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let native_ty = self.resolve_type_hint(param.type_hint.as_deref());
-            if !self.param_type_could_satisfy(&native_ty, &Type::Callable) {
+            if !self.param_type_could_satisfy(&native_ty, &Type::Callable(None)) {
                 let identifier = if *immediately {
                     "paramImmediatelyInvokedCallable.nonCallable"
                 } else {

@@ -77,7 +77,28 @@ impl fmt::Display for Type {
                 Ok(())
             }
             Type::EnumCase(fqn, case) => write!(f, "{fqn}::{case}"),
-            Type::Callable => write!(f, "callable"),
+            Type::Callable(None) => write!(f, "callable"),
+            Type::Callable(Some(sig)) => {
+                let parts: Vec<String> = sig
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let mut s = String::new();
+                        if p.by_ref {
+                            s.push('&');
+                        }
+                        s.push_str(&p.ty.to_string());
+                        if p.variadic {
+                            s.push_str("...");
+                        }
+                        if p.optional {
+                            s.push('=');
+                        }
+                        s
+                    })
+                    .collect();
+                write!(f, "callable({}): {}", parts.join(", "), sig.return_type)
+            }
             Type::SelfRef => write!(f, "self"),
             Type::ParentRef => write!(f, "parent"),
             Type::StaticRef => write!(f, "static"),

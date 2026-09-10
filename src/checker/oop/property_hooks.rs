@@ -149,6 +149,14 @@ impl<'a> Checker<'a> {
     ) {
         let label = format!("{fqn}::${name} (get hook)");
         self.check_hook_attributes(attrs, &label);
+        // Phase 64 Item 1: an abstract hook has no body at all - "does
+        // the body read the property" is meaningless for it, and
+        // `notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`
+        // (the checks that actually apply to an abstract hook) live on
+        // `check_property_hook_override` instead, not here.
+        if matches!(body, PropertyHookBody::Abstract) {
+            return;
+        }
         // `GetNonVirtualPropertyHookReadRule`: a non-virtual property's
         // `get` hook that never references its own backing storage at
         // all almost certainly forgot to (real PHP still compiles it -
@@ -175,6 +183,20 @@ impl<'a> Checker<'a> {
         );
         let declared_return = Some(prop_sig.ty.clone());
         let previous_generator_flag = self.current_function_is_generator;
+        let previous_declared_return_type = std::mem::replace(
+            &mut self.current_declared_return_type,
+            declared_return.clone(),
+        );
+        // Phase 42 Sub-item A: same reasoning as every other function-
+        // shaped save/restore site - `TooWidePropertyHookThrowTypeRule`
+        // itself isn't ported (out of this phase's own scope), but a real
+        // `throw` inside a hook body must still not leak into whatever
+        // gets checked next.
+        let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+        let previous_unannotated_call =
+            std::mem::take(&mut self.current_function_has_unannotated_call);
+        let previous_explicit_throw_points =
+            std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(e) => {
                 self.current_function_is_generator = expr_contains_yield(e);
@@ -186,6 +208,11 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     collect_goto_targets(stmts),
                 ))
+            }
+            // No real body at all - nothing to scan for yield/goto.
+            PropertyHookBody::Abstract => {
+                self.current_function_is_generator = false;
+                None
             }
         };
         self.check_generator_return_type(declared_return.as_ref(), span, &label);
@@ -231,8 +258,14 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
+            // No real statement/expression to type-check at all.
+            PropertyHookBody::Abstract => {}
         }
         self.current_function_is_generator = previous_generator_flag;
+        self.current_declared_return_type = previous_declared_return_type;
+        self.current_function_throw_points = previous_throw_points;
+        self.current_function_has_unannotated_call = previous_unannotated_call;
+        self.current_function_explicit_throw_points = previous_explicit_throw_points;
         if let Some(previous) = previous_goto_targets {
             self.current_function_goto_targets = previous;
         }
@@ -253,7 +286,16 @@ impl<'a> Checker<'a> {
     ) {
         let label = format!("{fqn}::${name} (set hook)");
         self.check_hook_attributes(attrs, &label);
-        if !prop_sig.is_virtual && !registry::hook_body_references_property(body, name) {
+        // Phase 64 Item 1: an abstract hook has no body - "does it
+        // assign the property" is meaningless for it (unlike `check_get_
+        // hook`, the rest of this function - native-type contravariance,
+        // class-existence on the parameter type - is still fully
+        // meaningful for an abstract set hook's own declared parameter,
+        // so only this one check is skipped, not the whole function).
+        if !matches!(body, PropertyHookBody::Abstract)
+            && !prop_sig.is_virtual
+            && !registry::hook_body_references_property(body, name)
+        {
             self.report(
                 fqn.to_string(),
                 format!(
@@ -364,6 +406,17 @@ impl<'a> Checker<'a> {
         locals.declare(param_name, value_ty, param_span);
         let declared_return = Some(Type::Void);
         let previous_generator_flag = self.current_function_is_generator;
+        let previous_declared_return_type = std::mem::replace(
+            &mut self.current_declared_return_type,
+            declared_return.clone(),
+        );
+        // Phase 42 Sub-item A: see `check_get_hook`'s own identical
+        // comment.
+        let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+        let previous_unannotated_call =
+            std::mem::take(&mut self.current_function_has_unannotated_call);
+        let previous_explicit_throw_points =
+            std::mem::take(&mut self.current_function_explicit_throw_points);
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(e) => {
                 self.current_function_is_generator = expr_contains_yield(e);
@@ -376,6 +429,10 @@ impl<'a> Checker<'a> {
                     collect_goto_targets(stmts),
                 ))
             }
+            PropertyHookBody::Abstract => {
+                self.current_function_is_generator = false;
+                None
+            }
         };
         self.check_generator_return_type(declared_return.as_ref(), span, &label);
         match body {
@@ -385,8 +442,13 @@ impl<'a> Checker<'a> {
             PropertyHookBody::Block(stmts) => {
                 self.check_block(stmts, &mut locals, declared_return.as_ref(), &label);
             }
+            PropertyHookBody::Abstract => {}
         }
         self.current_function_is_generator = previous_generator_flag;
+        self.current_declared_return_type = previous_declared_return_type;
+        self.current_function_throw_points = previous_throw_points;
+        self.current_function_has_unannotated_call = previous_unannotated_call;
+        self.current_function_explicit_throw_points = previous_explicit_throw_points;
         if let Some(previous) = previous_goto_targets {
             self.current_function_goto_targets = previous;
         }

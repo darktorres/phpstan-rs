@@ -111,6 +111,8 @@ fn collect_hook_body(body: &PropertyHookBody, names: &mut HashSet<String>) {
                 collect_stmt(s, names);
             }
         }
+        // No real body at all - nothing to collect from.
+        PropertyHookBody::Abstract => {}
     }
 }
 

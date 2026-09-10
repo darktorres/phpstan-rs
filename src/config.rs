@@ -15,6 +15,7 @@
 //! check_uninitialized_properties = false
 //! check_internal_usage = false
 //! check_deprecated_usage = false
+//! check_missing_checked_exceptions = false
 //! scan_paths = ["vendor/some-manual-extra"]
 //! no_composer = false
 //! php_version = "8.1"
@@ -72,6 +73,11 @@ pub struct Config {
     /// `check_uninitialized_properties`/`check_internal_usage`/
     /// `check_deprecated_usage` above all do.
     pub check_empty_method_bodies: Option<bool>,
+    /// Phase 42 bonus item: opt-in "missing checked exception" family -
+    /// see `registry::Registry::check_missing_checked_exceptions`'s own
+    /// doc comment for why this defaults to `false` (unset), the same
+    /// reason every other opt-in check above does.
+    pub check_missing_checked_exceptions: Option<bool>,
     /// A hand-mirrored subset of real PHPStan's own `ignoreErrors:` -
     /// this project has no NEON parser and one isn't otherwise justified
     /// (see `baseline.rs`'s own identical judgment for a related
