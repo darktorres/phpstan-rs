@@ -1,6 +1,7 @@
 //! Tests for check_chunk and format_signature, the deterministic checking logic in main.rs.
-use super::super::*;
+use super::super::check::check_chunk;
 use super::helpers::*;
+use phpstan_rs::registry::{self, format_signature};
 use phpstan_rs::types;
 
 #[test]

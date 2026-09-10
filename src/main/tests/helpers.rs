@@ -1,4 +1,5 @@
-use super::super::*;
+use std::fs;
+use std::path::PathBuf;
 
 // main.rs had 0% test coverage before this - check_chunk and
 // format_signature are real, deterministic logic that doesn't touch
