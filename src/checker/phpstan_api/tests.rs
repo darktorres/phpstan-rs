@@ -468,6 +468,90 @@ fn an_instanceof_check_against_an_api_interface_is_never_flagged() {
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
+// Phase 40.E: `ApiInstanceofTypeRule`, entirely independent of `@api`
+// status - a real, deprecated-since-forever idiom (`instanceof StringType`
+// instead of `Type::isString()`) real PHPStan flags unconditionally on its
+// own compiled `#[InstanceofDeprecated]` table.
+
+#[test]
+fn an_instanceof_check_against_a_deprecated_type_class_is_flagged_with_its_replacement_hint() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Type;
+        /** @api */
+        class StringType {}
+        "#,
+        r#"<?php
+        namespace App;
+        function f($x) {
+            if ($x instanceof \PHPStan\Type\StringType) {
+            }
+        }
+        "#,
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.identifier == "phpstanApi.instanceofType"
+                && d.message.contains("Use Type::isString() instead")),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn an_instanceof_check_against_an_accessory_type_subtype_is_never_flagged_as_deprecated() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Type\Accessory;
+        /** @api */
+        interface AccessoryType {}
+        /** @api */
+        class AccessoryNonEmptyStringType implements AccessoryType {}
+        "#,
+        r#"<?php
+        namespace App;
+        function f($x) {
+            if ($x instanceof \PHPStan\Type\Accessory\AccessoryNonEmptyStringType) {
+            }
+        }
+        "#,
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.identifier == "phpstanApi.instanceofType"),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn an_instanceof_check_against_a_deprecated_type_class_inside_a_type_traverser_callable_is_never_flagged()
+ {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Type;
+        /** @api */
+        class StringType {}
+        interface TypeTraverserCallable {}
+        "#,
+        r#"<?php
+        namespace App;
+        class MyCallback implements \PHPStan\Type\TypeTraverserCallable {
+            public function run($x) {
+                if ($x instanceof \PHPStan\Type\StringType) {
+                }
+            }
+        }
+        "#,
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.identifier == "phpstanApi.instanceofType"),
+        "got: {diags:?}"
+    );
+}
+
 #[test]
 fn extending_a_non_api_phpstan_class_is_flagged_as_not_covered() {
     let diags = diagnostics_for(

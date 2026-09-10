@@ -130,6 +130,129 @@ pub(crate) fn check_phpstan_api_usage(
 /// actual PHPStan API surface - excluded via a case-*sensitive* prefix
 /// match, deliberately mirroring `ApiRuleHelper`'s own `str_starts_with`
 /// exactly (no case-insensitivity exemption for either sub-namespace).
+/// Phase 40.E: `ApiInstanceofTypeRule`'s own compiled `#[InstanceofDeprecated]`
+/// table (`vendor/phpstan-src/src/Type/**/*.php`, one entry per real
+/// attribute site - confirmed by exhaustive grep, not assumed complete).
+/// Keyed by lowercase FQN (matching real PHPStan's own `strtolower()`
+/// lookup-map construction); the value is the attribute's own
+/// `insteadUse` hint, `None` for the two sites that declare the attribute
+/// with no replacement suggestion at all.
+const INSTANCEOF_DEPRECATED_CLASSES: &[(&str, Option<&str>)] = &[
+    ("phpstan\\type\\booleantype", Some("Type::isBoolean()")),
+    (
+        "phpstan\\type\\arraytype",
+        Some("Type::isArray() or Type::getArrays()"),
+    ),
+    ("phpstan\\type\\floattype", Some("Type::isFloat()")),
+    ("phpstan\\type\\iterabletype", Some("Type::isIterable()")),
+    (
+        "phpstan\\type\\objectshapetype",
+        Some("Type::isObject() and Type::hasProperty()"),
+    ),
+    ("phpstan\\type\\integertype", Some("Type::isInteger()")),
+    ("phpstan\\type\\stringtype", Some("Type::isString()")),
+    (
+        "phpstan\\type\\accessory\\oversizedarraytype",
+        Some("Type::isOversizedArray()"),
+    ),
+    (
+        "phpstan\\type\\objectwithoutclasstype",
+        Some("Type::isObject()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\accessorynonemptystringtype",
+        Some("Type::isNonEmptyString()"),
+    ),
+    (
+        "phpstan\\type\\objecttype",
+        Some("Type::isObject() or Type::getObjectClassNames()"),
+    ),
+    ("phpstan\\type\\voidtype", Some("Type::isVoid()")),
+    (
+        "phpstan\\type\\accessory\\haspropertytype",
+        Some("Type::hasProperty()"),
+    ),
+    (
+        "phpstan\\type\\callabletype",
+        Some("Type::isCallable() and Type::getCallableParametersAcceptors()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\accessorytype",
+        Some("methods on PHPStan\\Type\\Type"),
+    ),
+    ("phpstan\\type\\nulltype", Some("Type::isNull()")),
+    (
+        "phpstan\\type\\constantscalartype",
+        Some(
+            "Type::isConstantScalarValue() or Type::getConstantScalarTypes() or Type::getConstantScalarValues()",
+        ),
+    ),
+    (
+        "phpstan\\type\\accessory\\accessorynonfalsystringtype",
+        Some("Type::isNonFalsyString()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\accessoryuppercasestringtype",
+        Some("Type::isUppercaseString()"),
+    ),
+    (
+        "phpstan\\type\\typewithclassname",
+        Some("Type::getObjectClassNames() or Type::getObjectClassReflections()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\accessorynumericstringtype",
+        Some("Type::isNumericString()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\accessoryarraylisttype",
+        Some("Type::isList()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\accessorylowercasestringtype",
+        Some("Type::isLowercaseString()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\hasoffsettype",
+        Some("Type::hasOffsetValueType()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\accessoryliteralstringtype",
+        Some("Type::isLiteralString()"),
+    ),
+    (
+        "phpstan\\type\\constant\\constantstringtype",
+        Some("Type::getConstantStrings()"),
+    ),
+    (
+        "phpstan\\type\\enum\\enumcaseobjecttype",
+        Some("Type::getEnumCaseObject() or Type::getEnumCases()"),
+    ),
+    (
+        "phpstan\\type\\generic\\genericclassstringtype",
+        Some("Type::isClassStringType() and Type::getClassStringObjectType()"),
+    ),
+    (
+        "phpstan\\type\\constant\\constantbooleantype",
+        Some("Type::isTrue() or Type::isFalse()"),
+    ),
+    (
+        "phpstan\\type\\constant\\constantarraytype",
+        Some("Type::getConstantArrays()"),
+    ),
+    (
+        "phpstan\\type\\classstringtype",
+        Some("Type::isClassStringType()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\nonemptyarraytype",
+        Some("Type::isIterableAtLeastOnce()"),
+    ),
+    (
+        "phpstan\\type\\accessory\\hasmethodtype",
+        Some("Type::hasMethod()"),
+    ),
+];
+
 fn is_phpstan_namespace(fqn: &str) -> bool {
     fqn.len() >= 8
         && fqn.as_bytes()[..8].eq_ignore_ascii_case(b"PHPStan\\")
@@ -371,6 +494,63 @@ impl<'a> Walker<'a> {
             _ => ctx.resolve(name),
         };
         is_phpstan_namespace(&fqn).then_some(fqn)
+    }
+
+    /// Phase 40.E: `ApiInstanceofTypeRule`, direct port - a wholly
+    /// separate rule from `ApiInstanceofRule` above (this one fires
+    /// independent of `@api` status entirely, keyed only on
+    /// `INSTANCEOF_DEPRECATED_CLASSES`). Two real, narrow exemptions
+    /// ported alongside the table itself: the enclosing class
+    /// implementing `PHPStan\Type\TypeTraverserCallable` (real
+    /// PHPStan's own internal type-traversal callback idiom
+    /// legitimately needs this exact pattern), and the target class
+    /// itself being `AccessoryType` or one of its own real subtypes
+    /// (`ClassReflection::is()`'s self-inclusive semantics, confirmed by
+    /// reading it directly - every concrete `Accessory*` type is itself
+    /// an `AccessoryType` subtype, so this exemption is real for the
+    /// whole family, not just the bare marker interface, however
+    /// counterintuitive that looks against the same family's own
+    /// individual table entries).
+    fn check_instanceof_deprecated(&mut self, fqn: &str, span: Span, label: &str) {
+        let Some((_, hint)) = INSTANCEOF_DEPRECATED_CLASSES
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(fqn))
+        else {
+            return;
+        };
+        if let Some(current) = &self.current_class_fqn
+            && self
+                .registry
+                .is_subclass_of(current, "PHPStan\\Type\\TypeTraverserCallable")
+        {
+            return;
+        }
+        if self
+            .registry
+            .is_subclass_of(fqn, "PHPStan\\Type\\Accessory\\AccessoryType")
+        {
+            return;
+        }
+        let message = match hint {
+            Some(h) => {
+                format!("Doing instanceof {fqn} is error-prone and deprecated. Use {h} instead.")
+            }
+            None => format!("Doing instanceof {fqn} is error-prone and deprecated."),
+        };
+        self.diagnostics.push(Diagnostic {
+            location: label.to_string(),
+            message,
+            span,
+            level: 0,
+            identifier: "phpstanApi.instanceofType".to_string(),
+            tip: Some(
+                "Learn more: https://phpstan.org/blog/why-is-instanceof-type-wrong-and-getting-deprecated"
+                    .to_string(),
+            ),
+            non_ignorable: false,
+            metadata: HashMap::new(),
+            fix: None,
+        });
     }
 
     /// "Referencing this at all requires `@api`" - covers every reference
@@ -1029,6 +1209,11 @@ impl<'a> Walker<'a> {
                 // real PHPStan's own terms, but false-negative-favoring
                 // from this project's usual convention) narrowing until/
                 // unless this walker folds into the main `Checker` pass.
+                if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
+                    // Phase 40.E: independent of `@api` status entirely -
+                    // see `check_instanceof_deprecated`'s own doc comment.
+                    self.check_instanceof_deprecated(&fqn, e.span, label);
+                }
                 if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
                     && let Some(info) = self.registry.classes.get(&fqn)
                 {
