@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{Stmt, StmtKind, UseImport};
+use crate::ast::{Stmt, StmtKind, UseImport, UseKind};
 use crate::types::{CallableParam, CallableSig, Type};
 
 /// A single leading `\` marks "fully qualified from the global namespace"
@@ -49,8 +49,11 @@ fn strip_namespace_relative_prefix(name: &str) -> Option<&str> {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NameContext {
     namespace: String,
-    // Short name (or `as Alias`) -> the full path it was imported from.
-    use_map: HashMap<String, String>,
+    // Short name (or `as Alias`) -> (the full path it was imported from,
+    // which of PHP's three `use`-namespaces it belongs to). The kind is
+    // load-bearing, not decorative - see `add_uses`'s own doc comment for
+    // the real corpus regression that came from ever conflating them.
+    use_map: HashMap<String, (String, UseKind)>,
 }
 
 impl NameContext {
@@ -113,13 +116,19 @@ impl NameContext {
     }
 
     /// Phase 48.2: whether `first_segment` (a reference's own first `\`-
-    /// separated segment, as written in source) matched a real `use`-
-    /// import in this file - lets a caller skip the `class.nameCase`
-    /// family of checks for exactly this case, matching real PHPStan's
-    /// own default `checkImportedClassNameCase: false` config.
+    /// separated segment, as written in source) matched a real *class*-
+    /// kind `use`-import in this file - lets a caller skip the `class.
+    /// nameCase` family of checks for exactly this case, matching real
+    /// PHPStan's own default `checkImportedClassNameCase: false` config.
+    /// Class-kind only, same reasoning as `resolve`'s own kind filter
+    /// just below - a class-shaped reference can only ever have been
+    /// legitimately imported via a plain `use Foo;`, never `use function`/
+    /// `use const`.
     pub(crate) fn is_use_imported(&self, first_segment: &str) -> bool {
-        self.use_map
-            .contains_key(&first_segment.to_ascii_lowercase())
+        matches!(
+            self.use_map.get(&first_segment.to_ascii_lowercase()),
+            Some((_, UseKind::Class))
+        )
     }
 
     /// Phase 48.1: `use_map`'s own keys are stored lowercased - real PHP
@@ -140,12 +149,28 @@ impl NameContext {
     /// constants differing only by case and imports both in one file),
     /// and constant existence is already, separately, never checked
     /// against this map at all (see `UseImport::kind`'s own doc comment).
+    ///
+    /// `import.kind` is stored alongside the path (not discarded) and
+    /// consulted by every reader below - real corpus false positive
+    /// caught live: PHPUnit's own `Framework/TestCase.php` declares both
+    /// `use function assert;` (the global `assert()` function) and
+    /// `extends Assert` (`PHPUnit\Framework\Assert`, same namespace, no
+    /// `use` needed for it at all) in the same file. Before the kind was
+    /// tracked, the case-insensitive lookup below let the *function*
+    /// import for `assert` answer a *class* reference to `Assert` (`"assert"
+    /// == "assert"` post-lowercasing), resolving `extends Assert` to the
+    /// bare global-function name `"assert"` instead of `PHPUnit\Framework\
+    /// Assert` - silently severing the entire `TestCase`-`Assert`
+    /// inheritance link and turning every `self::assertSame(...)`-shaped
+    /// call across the whole corpus's test suite into a false
+    /// `staticMethod.notFound`.
     pub(crate) fn add_uses(&mut self, imports: &[UseImport]) {
         for import in imports {
             let path = strip_leading_backslash(&import.path);
             let bare = path.rsplit('\\').next().unwrap_or(&path).to_string();
             let short_name = import.alias.clone().unwrap_or_else(|| bare.clone());
-            self.use_map.insert(short_name.to_ascii_lowercase(), path);
+            self.use_map
+                .insert(short_name.to_ascii_lowercase(), (path, import.kind));
         }
     }
 
@@ -172,6 +197,16 @@ impl NameContext {
     /// runs, and `ExprKind::New`'s self/parent/static branch never calls this
     /// either.
     pub(crate) fn resolve(&self, name: &str) -> String {
+        self.resolve_as(name, UseKind::Class)
+    }
+
+    /// `resolve`'s own real implementation, parameterized by which of
+    /// PHP's three `use`-namespaces a match must belong to - see `add_uses`'s
+    /// own doc comment for the real corpus regression this parameter
+    /// exists to prevent (a class-shaped reference must never resolve
+    /// through a `use function`/`use const` import sharing the same bare
+    /// name, and vice versa).
+    fn resolve_as(&self, name: &str, kind: UseKind) -> String {
         if let Some(fq) = name.strip_prefix('\\') {
             return fq.to_string();
         }
@@ -197,7 +232,9 @@ impl NameContext {
         let mut segments = name.splitn(2, '\\');
         let first = segments.next().unwrap_or(name);
         let rest = segments.next();
-        if let Some(imported_path) = self.use_map.get(&first.to_ascii_lowercase()) {
+        if let Some((imported_path, matched_kind)) = self.use_map.get(&first.to_ascii_lowercase())
+            && *matched_kind == kind
+        {
             return match rest {
                 Some(r) => format!("{imported_path}\\{r}"),
                 None => imported_path.clone(),
@@ -217,9 +254,13 @@ impl NameContext {
     /// (namespaced file, unqualified name, no matching import).
     pub(crate) fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
         let is_unqualified = !name.contains('\\');
-        let use_matched = is_unqualified && self.use_map.contains_key(&name.to_ascii_lowercase());
+        let use_matched = is_unqualified
+            && matches!(
+                self.use_map.get(&name.to_ascii_lowercase()),
+                Some((_, UseKind::Function))
+            );
         if !is_unqualified || use_matched || self.namespace.is_empty() {
-            (self.resolve(name), None)
+            (self.resolve_as(name, UseKind::Function), None)
         } else {
             (self.declared_name(name), Some(name.to_string()))
         }

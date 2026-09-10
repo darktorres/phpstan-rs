@@ -280,6 +280,29 @@ fn a_declared_throws_type_never_thrown_anywhere_is_flagged_too_wide() {
 }
 
 #[test]
+fn an_abstract_methods_own_throws_tag_is_never_flagged_too_wide() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class Base {
+                /** @throws \RuntimeException */
+                abstract public function f(): void;
+            }
+            interface HasThrows {
+                /** @throws \RuntimeException */
+                public function g(): void;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "an abstract/interface method has no body to check for a real throw \
+         point at all - its own @throws tag documents what a real \
+         implementor is expected to throw, not what this (nonexistent) \
+         body throws: {d:?}"
+    );
+}
+
+#[test]
 fn a_declared_throws_type_thrown_by_a_called_functions_own_throws_tag_is_not_flagged() {
     let d = diagnostics_for(
         r#"<?php

@@ -745,15 +745,30 @@ impl<'a> Checker<'a> {
         // a declaration using `extract()`/`eval()` gets these diagnostics
         // swept away along with everything else from its own body, the
         // same leniency already applied throughout this function.
-        let subject = match class_name {
-            Some(c) => format!("Method {c}::{}()", f.name),
-            None => format!("Function {}()", f.name),
-        };
-        let throws_tag = sig.and_then(|s| s.throws.as_ref());
-        if let Some(throws) = throws_tag {
-            self.check_too_wide_throw_type(throws, &subject, f.span, &label);
+        //
+        // Gated on the identical "has a real body at all" condition the
+        // `return.missing`/`return.never` check just above already uses -
+        // an abstract/interface declaration's own `@throws` tag documents
+        // what a real implementor is expected to throw, not what *this*
+        // (nonexistent) body throws, so `check_too_wide_throw_type`'s own
+        // "nothing was thrown at all, flag every declared member" fallback
+        // would otherwise unconditionally fire on every single `@throws`
+        // tag any interface/abstract method ever carries - a real,
+        // corpus-confirmed false-positive flood caught verifying this
+        // pass (`phpstorm-stubs`' own `Imagick`/`ImagickKernel`, and
+        // amphp's own `Cancellation::throwIfRequested`, among thousands
+        // of others across the unscoped vendor tree).
+        if !f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete) {
+            let subject = match class_name {
+                Some(c) => format!("Method {c}::{}()", f.name),
+                None => format!("Function {}()", f.name),
+            };
+            let throws_tag = sig.and_then(|s| s.throws.as_ref());
+            if let Some(throws) = throws_tag {
+                self.check_too_wide_throw_type(throws, &subject, f.span, &label);
+            }
+            self.check_missing_checked_exceptions(throws_tag, &subject, &label);
         }
-        self.check_missing_checked_exceptions(throws_tag, &subject, &label);
 
         if self.saw_dynamic_var_construct {
             self.diagnostics.truncate(diagnostics_before);
