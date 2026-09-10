@@ -18,11 +18,17 @@ impl<'a> Checker<'a> {
     /// logic for its own overwrite-on-duplicate handling - this walks
     /// the same shape independently so it can report every duplicate
     /// found, rather than reusing that function's own discard-on-
-    /// overwrite `Vec`. Bails on the *first* non-literal key, same
-    /// "don't guess" leniency `infer_array_literal_type` already has -
-    /// a computed key could coincide with any later key, so nothing
-    /// past it can be soundly checked either.
-    pub(crate) fn check_array_literal_duplicate_keys(&mut self, items: &[ArrayItem], label: &str) {
+    /// overwrite `Vec`. Bails on the *first* key it can't confidently
+    /// resolve at all (via a bare AST literal, or `infer_expr` below),
+    /// the same "don't guess" leniency `infer_array_literal_type` already
+    /// has, since a computed key could coincide with any later key, so
+    /// nothing past it can be soundly checked either.
+    pub(crate) fn check_array_literal_duplicate_keys(
+        &mut self,
+        items: &[ArrayItem],
+        locals: &Locals,
+        label: &str,
+    ) {
         if items.iter().any(|item| item.spread) {
             return;
         }
@@ -65,7 +71,35 @@ impl<'a> Checker<'a> {
                         }
                         _ => return,
                     },
-                    _ => return,
+                    // Phase 68.4: real PHPStan's own key resolution goes
+                    // well beyond a bare AST literal (a class constant, a
+                    // `defined()` constant, any statically-known-scalar
+                    // expression) - routing through the same `infer_expr`
+                    // every other key-typed consumer already uses gets
+                    // all of that for free, canonicalizing PHP's own
+                    // bool/null key coercion the same way a real key
+                    // would (`true`/`false` become the int key `1`/`0`;
+                    // `null` becomes the empty-string key `""`) - still
+                    // deliberately bailing (not guessing) on anything
+                    // that doesn't resolve this way either, e.g. a plain
+                    // variable or an unresolvable constant.
+                    _ => match self.infer_expr(k, locals) {
+                        Type::IntLiteral(n) => {
+                            next_index = next_index.max(n + 1);
+                            n.to_string()
+                        }
+                        Type::StringLiteral(s) => s,
+                        Type::True => {
+                            next_index = next_index.max(2);
+                            "1".to_string()
+                        }
+                        Type::False => {
+                            next_index = next_index.max(1);
+                            "0".to_string()
+                        }
+                        Type::Null => String::new(),
+                        _ => return,
+                    },
                 },
             };
             match seen.iter_mut().find(|(k, _)| *k == key) {

@@ -407,7 +407,11 @@ top-level alternation, numeric/non-empty-string fallback typing).
 A Piwigo-corpus-driven batch of small builtin checks: function-name
 case-insensitivity, `define()`'s PHP-8-removed third argument,
 `random_int()` literal-bound ordering, useless-return-value builtins,
-array-literal duplicate-key detection, `array_values`/`array_filter`
+array-literal duplicate-key detection (key resolution goes through
+`infer_expr`, not just a bare AST literal - a class constant, a
+`define()`d global constant, and PHP's own bool/null key coercion
+(`true`/`false` to the int key `1`/`0`, `null` to the empty-string key)
+are all real, statically-known-scalar keys too), `array_values`/`array_filter`
 no-op conditions, `array_multisort()`'s stub fix,
 `call_user_func(_array)`'s argument re-checking (for the two
 statically-resolvable shapes: a string-literal callable, or a

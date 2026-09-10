@@ -1666,7 +1666,7 @@ impl<'a> Checker<'a> {
                     }
                     self.check_expr(&item.value, locals, label);
                 }
-                self.check_array_literal_duplicate_keys(items, label);
+                self.check_array_literal_duplicate_keys(items, locals, label);
                 self.infer_array_literal_type(items, locals)
             }
             ExprKind::Index(base, idx) => {

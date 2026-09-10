@@ -541,6 +541,131 @@ fn a_spread_array_literal_is_never_flagged_for_duplicate_keys() {
     );
 }
 
+// Phase 68.4: key resolution now goes through `infer_expr`, so it's not
+// limited to a bare AST literal anymore - a class constant, a `define()`d
+// global constant, or a literal bool/null key are all real, statically-
+// known-scalar keys real PHPStan itself resolves too.
+
+#[test]
+fn a_duplicate_key_via_a_class_constant_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class C { const KEY = 'a'; }
+            function f(): array {
+                return [C::KEY => 1, 'a' => 2];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_resolved_int_key_via_a_class_constant_advances_the_next_auto_index() {
+    // C::KEY resolves to the int key 0 - the following bare item must
+    // correctly take key 1, not (wrongly) 0 too, so this must stay
+    // unflagged. A version of this widened resolution that forgot to
+    // advance `next_index` for a class-constant-resolved key would
+    // wrongly see a collision here.
+    let d = diagnostics_for(
+        r#"<?php
+            class C { const KEY = 0; }
+            function f(): array {
+                return [C::KEY => 'x', 'y'];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_duplicate_key_via_a_defined_global_constant_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            define('KEY', 'a');
+            function f(): array {
+                return [KEY => 1, 'a' => 2];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_true_key_collides_with_the_int_key_one() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return [true => 'a', 1 => 'b'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_false_key_collides_with_the_int_key_zero() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return [false => 'a', 0 => 'b'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_null_key_collides_with_the_empty_string_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return [null => 'a', '' => 'b'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_constant_key_that_does_not_infer_to_a_scalar_still_suppresses_checking() {
+    // The widened resolution only understands `infer_expr` results that
+    // land on `IntLiteral`/`StringLiteral`/`True`/`False`/`Null` - a class
+    // constant whose own value isn't statically known that precisely
+    // (here, a bare `self::class`, a `ClassString`) still bails on the
+    // whole rest of the literal, the same "don't guess" leniency as any
+    // other unresolvable key.
+    let d = diagnostics_for(
+        r#"<?php
+            class C { const KEY = self::class; }
+            function f(): array {
+                return ['a' => 1, C::KEY => 2, 'a' => 3];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "array.duplicateKey"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_computed_key_suppresses_further_duplicate_key_checking() {
     // Don't guess: once a key can't be statically resolved, nothing
