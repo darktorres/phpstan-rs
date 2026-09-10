@@ -52,6 +52,6 @@
 [submodule "vendor/league-commonmark"]
 	path = vendor/league-commonmark
 	url = https://github.com/thephpleague/commonmark.git
-[submodule "vendor/rector"]
-	path = vendor/rector
-	url = https://github.com/rectorphp/rector.git
+[submodule "vendor/rector-src"]
+	path = vendor/rector-src
+	url = https://github.com/rectorphp/rector-src.git
