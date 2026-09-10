@@ -31,11 +31,13 @@ second pass over ROADMAP's "Reverted" section) genuinely found nothing
 after real investigation and correctly returned zero rather than padding.
 Round 10: 5 of 6 survived; one kill correctly caught a restatement of
 M2's already-recorded policy under a different PHPStan-side citation, and
-one lens again correctly returned zero after real investigation. Total:
-96 confirmed findings across sections A-AN plus one corrected finding.
-Nothing here is scheduled; it's a grounded idea backlog, same status as
-ROADMAP's own "Newly identified gaps" until triaged into a numbered
-phase.
+one lens again correctly returned zero after real investigation. Round
+11: 4 of 5 survived; the fifth lens (self-admitted debt in `Analyser/`/
+`Rules/`, distinct directories from M1-M4's `Type/`/`Reflection/`)
+genuinely found nothing and correctly returned zero. Total: 100 confirmed
+findings across sections A-AO plus one corrected finding. Nothing here is
+scheduled; it's a grounded idea backlog, same status as ROADMAP's own
+"Newly identified gaps" until triaged into a numbered phase.
 
 Two structural facts most items below trace back to, repeatedly:
 
@@ -3202,5 +3204,150 @@ parser at all - a small hand-rolled evaluator covering Composer's common
 constraint forms (`^X.Y`, `~X.Y`, `>=X.Y`, simple `||` OR-groups) is
 needed, a bounded, well-known finite grammar for a single X.Y.Z PHP
 version, not a general semver-range library.
+
+**Effort: medium.**
+
+---
+
+# Round 11
+
+Five precisely-targeted lenses. 4 of 5 found real ground; the fifth (a
+fresh self-admitted-debt search scoped to `Analyser/`/`Rules/`, rather
+than the `Type/`/`Reflection/` directories M1-M4 already mined)
+genuinely found nothing worth reporting and correctly returned zero.
+
+## C (continued). A scheduling-policy refinement, not a new mechanism
+
+### C4. Port real PHPStan's sort-by-size + round-robin job striping into `check_project`'s thread scheduling
+
+Unlike most items in this document, this isn't PHPStan being limited and
+phpstan-rs being able to exceed it - real PHPStan's own `Scheduler`
+already solves the straggler problem correctly, and this is about
+porting the technique it got right, not working around a limitation.
+When C2's proposed `std::thread::scope` parallelization of
+`check_project` gets built, divide `analyze_files` across worker threads
+the way real PHPStan's `Scheduler::scheduleWork` divides files across
+worker *processes*: compute each file's size, sort files descending by
+size, then deal them round-robin into N job buckets so every bucket mixes
+large and small files, re-sorting each bucket back into original file
+order afterward only to keep per-job analysis order stable (PHPStan's
+own comment: "only the job composition should change, not the order in
+which files of a job get analysed - analysis results can be sensitive to
+it"). This replaces a plain `chunks(chunk_size)`-style contiguous split
+with a striped, size-sorted distribution, so no single thread ends up
+owning a run of the project's largest files while sibling threads finish
+early and idle. This matters concretely because building C2 exactly as
+literally described - which cites the sibling parse-only `check`
+command's own `chunks()`-based `std::thread::scope` pattern as its
+proof-of-pattern - would reintroduce the exact imbalance PHPStan's own
+team found worth solving in `Scheduler.php`; `check_project` currently
+has no file-partitioning-across-workers logic at all (`analyze_files.
+iter().map(...)` is strictly sequential today), so there's no existing
+phpstan-rs behavior to regress from, only a chance to get it right from
+the start. Costs nothing extra in phpstan-rs (no process-spawn overhead,
+no IPC - same `std::thread::scope` call site C2 already needs).
+
+**Effort: small.**
+
+---
+
+## AA (continued). A sixth design-pattern suggestion: template variance
+
+### AA6. Suggest `@template-covariant`/`@template-contravariant` when actual usage already proves it safe
+
+`TemplateTypeVariance::validPosition()` treats an invariant-declared (or
+undeclared - the default) template type as valid in *any* position - so a
+plain `@template T` never produces a diagnostic no matter how it's
+actually used in the class body. `VarianceCheck::check()` and its two
+callers (`PropertyVarianceRule`, `MethodSignatureVarianceRule`) only ever
+compare an *already-declared* variance against the position found - no
+code path anywhere in those files, or in `TemplateTypeFactory.php`/
+`TemplateType.php`, aggregates every usage site of an undeclared/
+invariant template parameter to compute what variance would actually be
+sound (grepping phpstan-src for "infer.*variance"/"guessVariance"/
+"computeVariance" returns nothing; phpstan-strict-rules has no
+variance-related rule at all). phpstan-rs's own mirror of this exact
+mechanism, `check_variance`/`check_property_variances`, early-returns
+before doing any walk at all when a class has only default-invariant
+templates - identically to real PHPStan's silent no-op. But the
+traversal this needs already exists in the same file: `walk_variance`
+already composes a `Position` (In/Out/Inv) through every nested generic
+slot for a class's own template occurrences, driven by the same per-class,
+declaration-time call sites already wired for properties and methods -
+no new data, no cross-file/registry-wide pass, just a second,
+always-run, undeclared-template variant of the same walk that *records*
+positions instead of comparing them against a pre-existing declared
+variance. If every recorded position across the whole class was `Out`
+(with at least one occurrence), suggest `@template-covariant T`; if every
+position was `In`, suggest `@template-contravariant T`; any `Inv`
+occurrence, any mix, or zero occurrences means no suggestion at all -
+matching real PHP variance soundness exactly, and mirroring AA1's
+"exactly one qualifying condition or nothing" conservatism.
+
+**Effort: medium.**
+
+---
+
+## AO. Two more LSP capabilities: file-rename refactoring and same-file occurrence highlighting
+
+### AO1. `workspace/willRenameFiles`: PSR-4-consistent rename-file refactoring across the whole project
+
+Distinct from F3 (a cursor-triggered `textDocument/rename` for a symbol,
+which - as F3 itself discloses - doesn't exist yet either): this is
+triggered by a file-explorer drag/move with no cursor position at all,
+and its core computation (deriving a new expected FQN from a new file
+path) is the *reverse* direction of what F3 does - F3 only ever resolves
+symbols already named in source text, never infers a name from a path.
+Also distinct from R1 (which flags a path/FQN mismatch as a diagnostic on
+files that already sit where they are - it never fires on a rename
+event, never computes a *new* FQN, and never rewrites anything): this
+performs an active edit at the moment of the rename gesture, using R1's
+underlying prefix-map data but the mirror-image arithmetic (path-to-FQN,
+not FQN-to-path). On a file-explorer move of a `.php` file, compute the
+FQN the file *used* to declare via a `DeclLocations.classes` reverse
+lookup and the FQN the *new* path implies (a new `path_to_fqn`
+computation: longest-prefix match the new path against each
+`autoload.psr-4`/`autoload-dev.psr-4` entry, strip the matched
+directory, turn remaining segments into namespace segments, use the
+filename stem as the short class name). If the two FQNs differ, respond
+with one `WorkspaceEdit` rewriting the moved file's own `namespace`/
+`class` declaration plus every project-wide use-site span of the old FQN.
+Real PHPStan ships no LSP or IDE-integration module of any kind - the
+same structural absence section F already documents. Honestly disclosed
+as depending on two other proposed, not-yet-built items - R1's PSR-4
+prefix-map access and F3's use-site span index - the same disclosed-
+dependency pattern AH3/AM1 already use in this document.
+
+**Effort: large.**
+
+### AO2. `textDocument/documentHighlight`: same-file occurrence highlighting, needing none of F3's dependency
+
+Highlights every occurrence of the symbol under the cursor *within the
+current file only* - deliberately distinct from F3's whole-project
+find-references, which needs a brand-new use-site span index that isn't
+built yet. This is a small, self-contained generalization of code that
+already exists and works today: `navigation::resolve_at` already walks
+one file's already-parsed AST with a `Walker` that, for every name
+reference/declaration, resolves it to a concrete symbol identity via the
+same `NameContext`/`Registry` machinery hover and definition already
+share, and keeps only the single match whose span contains the cursor
+(`Walker::record` replaces `best` unconditionally on every contained
+span). `documentHighlight` needs the identical traversal and resolution,
+just run twice: once at the cursor position to get the target identity
+(exactly today's `resolve_at`), then a second full walk of the same file
+collecting every span whose resolved identity equals that target (same
+class FQN, same owner+member via the existing `resolve_member_owners`
+probe, or - for a local variable - every read/write reachable from the
+same enclosing scope `ProbeScope` already delimits). No new resolution
+logic, no new index, no cross-file plumbing at all: it's the existing
+`Walker::record` single-best-match pattern turned into a `Vec`
+accumulator, run against the one file already resident in `Project`.
+Unlike F3 (and unlike several other recent LSP findings in this
+document), this genuinely needs none of F3's use-site index -
+`documentHighlight`'s LSP contract is explicitly single-file by spec, so
+the current file's AST, walked once, already carries every occurrence
+hover/definition would each individually resolve to the same identity.
+Real PHPStan ships no LSP or interactive query API of any kind, the same
+structural absence established throughout this document.
 
 **Effort: medium.**
