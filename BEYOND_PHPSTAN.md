@@ -29,10 +29,13 @@ genuine ground even this deep into the survey, unlike rounds 6-7's
 broader re-audit lenses. Round 9: 4 of 5 survived; the fifth lens (a
 second pass over ROADMAP's "Reverted" section) genuinely found nothing
 after real investigation and correctly returned zero rather than padding.
-Total: 91 confirmed findings across sections A-AL plus one corrected
-finding. Nothing here is scheduled; it's a grounded idea backlog, same
-status as ROADMAP's own "Newly identified gaps" until triaged into a
-numbered phase.
+Round 10: 5 of 6 survived; one kill correctly caught a restatement of
+M2's already-recorded policy under a different PHPStan-side citation, and
+one lens again correctly returned zero after real investigation. Total:
+96 confirmed findings across sections A-AN plus one corrected finding.
+Nothing here is scheduled; it's a grounded idea backlog, same status as
+ROADMAP's own "Newly identified gaps" until triaged into a numbered
+phase.
 
 Two structural facts most items below trace back to, repeatedly:
 
@@ -3013,5 +3016,191 @@ own citations establish), so this variant's project-wide aggregation
 needs no cross-process reconciliation - uniquely for this dimension, the
 per-call-site test itself isn't new inference at all, only the
 project-wide retain-and-aggregate step (mirroring X's own design) is.
+
+**Effort: medium.**
+
+---
+
+# Round 10
+
+Five precisely-targeted lenses continuing round 8-9's approach. 5 of 6
+raw proposals survived; one kill is a good example of the verify pass
+doing real work (a proposed M-continuation was correctly identified as
+restating M2's already-recorded policy with a swapped PHPStan-side
+example, not a genuinely new opportunity - "same mechanism, same file,
+same category" beats a different upstream citation), and one lens
+(dead closure `use()` binding detection) genuinely found nothing after
+real investigation and correctly returned zero.
+
+## M (continued). A fourth `BleedingEdgeToggle`-gated default
+
+### M4. Never split builtin function signatures into a legacy-loose stub and an opt-in stricter delta
+
+Real PHPStan ships two parallel builtin-function stub files for the same
+functions: a loose/legacy one and a strictly more precise one (e.g.
+`php_uname`'s `mode` parameter narrowed from bare `string` to a literal
+union of its six valid values; `array_rand`'s `input` narrowed from
+`array` to `non-empty-array` and `num_req` from `int` to `positive-int`;
+six `DOMDocument` methods' `filename`/`source` parameters narrowed from
+`string` to `non-empty-string`).
+`FunctionSignatureMapProvider::getSignatureMap()` only merges in the
+stricter file when `$this->stricterFunctionMap` is true, and that flag
+(`featureToggles.stricterFunctionMap`) defaults to `false` in
+`conf/config.neon:38`, flipped to `true` only by `conf/bleedingEdge.neon:7`
+- functionally the same opt-in-for-BC gating as `BleedingEdgeToggle::
+isBleedingEdge()` (M1's own mechanism), just expressed as a plain DI
+parameter instead of the static call. It exists because narrowing a stub
+an existing user's code already analyzes cleanly against could surface
+brand-new errors for them - the stricter signatures are demonstrably
+correct (verified in PHPStan's own bleeding-edge files), but PHPStan
+can't ship them as the *only* signature for exactly that BC reason.
+phpstan-rs models builtin signatures directly in Rust (e.g. `array_rand`
+in `checker/expr/builtin_calls.rs:745`) with no stub-file/toggle
+machinery at all - the forward policy is to keep it that way: always
+encode the most precise known signature for a builtin (matching what
+real PHPStan's own bleeding-edge file already proves correct), never add
+a parallel looser variant gated behind a flag, since there is no
+installed userbase whose already-passing analysis a narrower builtin
+stub could suddenly break.
+
+**Effort: small** (a standing policy, same shape as M1-M3).
+
+---
+
+## AM. Two more LSP capabilities: `signatureHelp` and `typeDefinition`
+
+### AM1. `textDocument/signatureHelp`: active-parameter tooltip while typing inside a call's parentheses
+
+Distinct from Y2 (inlayHint's parameter-name hints, which render
+statically before an already-*complete* argument once `resolve_call_args`
+has already resolved it) - this is the first item in the document keyed
+on cursor position relative to argument-list boundaries during *active
+typing*, including the not-yet-typed-argument case none of the
+already-complete-expression mechanisms (F1, Y2, X) ever need to handle.
+At the request position, find the innermost enclosing call node whose
+own span *contains* the cursor - a genuinely different query shape than
+`navigation::resolve_at`'s existing per-child-span match, which only
+fires when the cursor lands exactly on an already-parsed sub-expression's
+own span, since the cursor here is typically in the gap between two
+argument spans, or a trailing empty slot after a comma with no argument
+expression there at all yet. Resolve the callee's `FunctionSig`/
+`ParamSig` list the same way an ordinary call-argument check already
+does, then respond with one `SignatureInformation` per parameter plus an
+`active_parameter` index computed by counting paren-depth-aware commas
+in the argument-list source text preceding the cursor. Two honest scope
+notes: this needs a genuinely new query mode (span-containment/gap
+search, not the exact-span-equality matching `resolve_at`/`probe_span`
+already do); and the parser is single-pass with no error recovery
+(`ParseError` aborts the *whole file's* parse, confirmed no partial/
+error-node AST exists anywhere) and `Project::update_file` skips applying
+an edit entirely when the new text fails to parse (its own comment:
+"momentarily-invalid syntax is the normal state while a file is being
+typed") - so a robust implementation must serve signature help from the
+last-successfully-parsed AST still held, not assume the just-typed
+keystroke's own text parsed at all, which is the common case right when a
+user is mid-way through inserting a new argument after a fresh comma.
+
+**Effort: medium.**
+
+### AM2. `textDocument/typeDefinition`: jump from an expression's inferred type to that type's own declaration
+
+Distinct from plain `textDocument/definition` (which jumps to the thing
+being *referenced* - a variable's assignment site, a called method's own
+declaration) and from F1 (which never navigates anywhere, only renders
+text) - typeDefinition jumps from an already-resolved `Type` to that
+type's *own* declaring symbol. Two genuinely different cost tiers
+depending on what's under the cursor. **(a)** Cursor on a member-access
+receiver (`$x->foo()`/`$x->prop`): `probe_hit` is already populated for
+exactly this case, so `probe_receiver_type` already returns the real
+`Type` with zero checker-side changes - only new LSP-side work is
+feeding that `Type` through the already-defined `type_to_classes` helper
+and looking each resulting class name up in `decl_locations().classes`
+for its own declaration span. **(b)** Cursor on a bare local variable not
+used as a receiver: this needs the exact same fix F1 already names and
+describes as effort:small - `ExprKind::Variable`'s arm currently only
+stashes `probe_var_provenance` (assignment-site spans) and still does not
+set `probe_hit`, confirmed by reading that exact arm in the current
+working tree - so typeDefinition on a bare variable is blocked on
+completing F1's already-identified gap first, not a second independent
+gap (disclosed explicitly, not presented as independent).
+
+**Effort: medium.**
+
+---
+
+## U (continued). A sixth closed-world-inference instance
+
+### U6: Infer an implicit `@phpstan-assert` fact for the structurally obvious guard-clause-only function body
+
+At registry-build time, when a function/method's entire body is exactly
+one `if (!<condition on $param>) { throw ...; }` statement (no other
+statements before or after), phpstan-rs can syntactically read the guard
+condition the same way `narrowing_type_for_predicate` already interprets
+an `if` condition for ordinary flow narrowing, and synthesize an assert
+fact into `FunctionSig::assert` for that declaration - the exact field
+every existing consumer (`check_assert_call`/`check_assert_tag_types`,
+the purity gate) already reads uniformly regardless of whether the tag
+was author-written. When an explicit `@phpstan-assert`-family tag is
+already present, it always wins and the inferred fact is not
+computed/used at all (mirroring U4's own stated fallback order: an
+explicit tag may assert more, e.g. generic widening, than the body alone
+proves). Confirmed directly: `FunctionHandler::processStmt` resolves the
+assertion list purely from `PhpDocsResolver::getPhpDocs()` and passes it
+into `MutatingScope::enterFunction()` *before* the function's own body is
+ever walked - the reflection object callers see is fixed at that point
+with zero fallback when no tag exists. The one rule that touches the
+tag for validation, `AssertRuleHelper::check()`, only checks the tag's
+own syntactic/type validity against the parameter's *declared* type - it
+never inspects the function's own body to confirm or derive the
+assertion, confirming (like U4's own finding) the tag is trusted
+unconditionally in both directions once present, and simply absent with
+no substitute when it is not. Unlike U2/U3's whole-program fixed point,
+this is a single-function, non-recursive syntactic pattern match
+(recognizing exactly one shape) - it doesn't need iteration to a fixed
+point at all, only the condition-to-type extraction the narrowing
+machinery already has, run once per candidate declaration. The result
+slots into the pre-existing `FunctionSig::assert` field every consumer
+already reads uniformly, so no new consumption path is needed - only a
+new producer.
+
+**Effort: medium.**
+
+---
+
+## AN. `composer.platformPhpInconsistentWithRequire`: a seventh composer-hygiene axis
+
+composer.json's `config.platform.php` (a pinned PHP version string that
+overrides Composer's own dependency-resolution assumption about the
+runtime PHP version, distinct from the ordinary `require.php` semver
+*constraint*) checked against that same project's own `require.php` for
+internal consistency. When the pinned platform version doesn't satisfy
+the require constraint (platform says 8.1.0 while require demands
+`^8.3`, or vice versa), Composer resolves every dependency's version *as
+if* running the platform-pinned PHP - potentially installing older,
+less-capable package releases with different type signatures - while the
+project's own `require.php` declares a different minimum the analyzed
+code is written against: a real, silent self-contradiction in one config
+file, invisible to any tool today. Real PHPStan reads `config.platform.php`
+purely as a fallback *source* for its own analysis PHP version (used
+only when no explicit `phpVersion` config key is set, in a priority
+chain of explicit-config > `SOURCE_COMPOSER_PLATFORM_PHP` >
+runtime-`PHP_VERSION_ID`) - it never cross-checks that value against the
+project's own `require.php` constraint in the same file; grepping both
+vendored trees for "platform"/"config.platform" as a `Rules/` concept
+returns nothing beyond that one factory - confirming real PHPStan models
+the field only as an input to itself, never as something to validate for
+internal consistency against the rest of composer.json. Honest scope
+note: phpstan-rs does *not* currently derive its own `php_version` from
+composer.json at all in either direction (it's populated only from the
+`--php-version` CLI flag or config.rs's TOML key, mirroring real
+PHPStan's explicit-config path only, never its composer-platform
+fallback) - so this needs two genuinely new pieces: parsing the
+`config.platform.php` string (trivial, same `serde_json` pattern as
+existing composer.json reads) and evaluating it against the `require.php`
+semver-style constraint string, for which phpstan-rs has no existing
+parser at all - a small hand-rolled evaluator covering Composer's common
+constraint forms (`^X.Y`, `~X.Y`, `>=X.Y`, simple `||` OR-groups) is
+needed, a bounded, well-known finite grammar for a single X.Y.Z PHP
+version, not a general semver-range library.
 
 **Effort: medium.**
