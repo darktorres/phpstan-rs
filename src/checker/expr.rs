@@ -2545,6 +2545,12 @@ impl<'a> Checker<'a> {
                     // says it is - copied across, not fabricated fresh at
                     // this `use (...)` clause.
                     let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
+                    // Phase 17: the `use (...)` clause's own capture token
+                    // is itself a real reference to the outer `$x` - same
+                    // probe hook `ExprKind::Variable` already has.
+                    if self.probe_span == Some(u.span) {
+                        self.probe_var_provenance = Some(provenance.iter().copied().collect());
+                    }
                     closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
                 }
                 if !is_static && let Some(this_ty) = locals.get("this") {
@@ -2661,6 +2667,16 @@ impl<'a> Checker<'a> {
                         // silently gaining a value with no provenance at
                         // all.
                         locals.declare(u.name.clone(), mutated, u.span);
+                        // Phase 17: `locals.declare` above is this
+                        // variable's *only* provenance site in this case
+                        // (it didn't exist in the outer scope before), so
+                        // the probe hook above (fired on the first
+                        // uses-loop, before this variable existed in
+                        // `locals` at all) would have stashed an empty
+                        // set - correct it now that the real site is known.
+                        if self.probe_span == Some(u.span) {
+                            self.probe_var_provenance = Some([u.span].into_iter().collect());
+                        }
                     } else {
                         let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                         locals.insert(u.name.clone(), union_types(original, mutated));

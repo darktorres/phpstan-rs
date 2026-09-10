@@ -146,6 +146,11 @@ impl<'a> Checker<'a> {
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
+                    // Phase 17: see the identical fix's own comment at
+                    // `checker::expr`'s `ExprKind::Closure` arm.
+                    if self.probe_span == Some(u.span) {
+                        self.probe_var_provenance = Some(provenance.iter().copied().collect());
+                    }
                     closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
                 }
                 if !*is_static && let Some(this_ty) = locals.get("this") {
@@ -219,6 +224,9 @@ impl<'a> Checker<'a> {
                         // Phase 17: see the identical fix's own comment at
                         // `checker::expr`'s `ExprKind::Closure` arm.
                         locals.declare(u.name.clone(), mutated, u.span);
+                        if self.probe_span == Some(u.span) {
+                            self.probe_var_provenance = Some([u.span].into_iter().collect());
+                        }
                     } else {
                         let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                         locals.insert(u.name.clone(), union_types(original, mutated));

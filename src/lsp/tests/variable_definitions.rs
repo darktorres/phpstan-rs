@@ -184,6 +184,59 @@ fn definition_on_a_read_after_a_closure_resolves_to_its_own_use_by_ref_capture()
     assert_eq!(result["range"]["start"]["character"], expected["character"]);
 }
 
+// Phase 17: the capture token itself, inside `use (...)`, is now a real,
+// navigable reference to the outer scope's own variable - previously
+// unreachable for both hover and go-to-definition (`Walker::expr`'s own
+// `ExprKind::Closure` arm never visited `uses` at all).
+
+#[test]
+fn definition_on_a_use_capture_by_value_resolves_to_its_outer_assignment() {
+    let dir = TempDir::new("var_closure_use_click_byval");
+    let src = "<?php function g() { $x = 1; $f = function () use ($x) { return $x; }; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x) {");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$x = 1");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn definition_on_a_use_capture_by_ref_resolves_to_its_pre_existing_outer_assignment() {
+    let dir = TempDir::new("var_closure_use_click_byref_existing");
+    let src = "<?php function g() { $x = 1; $f = function () use (&$x) { $x = 2; }; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x) {");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$x = 1");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
+fn definition_on_a_use_capture_by_ref_that_auto_vivifies_resolves_to_itself() {
+    let dir = TempDir::new("var_closure_use_click_byref_new");
+    let src = "<?php function g() { $f = function () use (&$x) { $x = 1; }; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x) {");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    // No pre-existing outer declaration - real PHP auto-vivifies `$x` in
+    // the declaring scope right here, so this capture site is its own
+    // definition.
+    let expected = lsp_pos(src, "$x) {");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
 #[test]
 fn definition_on_a_read_resolves_to_its_own_array_auto_vivification_write() {
     let dir = TempDir::new("var_index_write");

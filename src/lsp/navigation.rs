@@ -531,9 +531,31 @@ impl<'a> Walker<'a> {
                 }
                 return;
             }
-            ExprKind::Closure { params, body, .. } => {
+            ExprKind::Closure {
+                params, uses, body, ..
+            } => {
                 for p in params {
                     self.param(p, ctx, current_class, best);
+                }
+                // Phase 17: a `use (&$x)`/`use ($x)` capture is itself a
+                // real, navigable reference to the outer scope's `$x` -
+                // resolved the same way an ordinary variable read is
+                // (`probe_scope()` called *before* recursing into `body`,
+                // since `current_function` is deliberately never updated
+                // for a closure literal - see this file's own module doc -
+                // so it still correctly points at the enclosing named
+                // function/top-level scope, not the closure itself).
+                for u in uses {
+                    self.record(
+                        best,
+                        u.span,
+                        Resolved::VariableRead {
+                            span: u.span,
+                            scope: self.probe_scope(),
+                            is_static: self.current_is_static,
+                            class: current_class.map(str::to_string),
+                        },
+                    );
                 }
                 self.stmts(body, &mut ctx.clone(), current_class, best);
                 return;
