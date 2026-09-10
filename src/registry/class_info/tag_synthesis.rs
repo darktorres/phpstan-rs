@@ -61,6 +61,7 @@ pub(crate) fn method_tag_sig(
                 by_ref: p.by_ref,
                 has_own_doc: true,
                 explicit_mixed_hint: false,
+                closure_this_type: None,
             }
         })
         .collect();
@@ -73,6 +74,7 @@ pub(crate) fn method_tag_sig(
         no_discard: false,
         visibility: Visibility::Public,
         is_internal: false,
+        is_api: false,
         has_override_attr: false,
         deprecated: None,
         throws: None,

@@ -69,6 +69,7 @@ fn run_check_project(
     check_uninitialized_properties: bool,
     check_internal_usage: bool,
     check_deprecated_usage: bool,
+    check_empty_method_bodies: bool,
     php_version: Option<php_version::PhpVersion>,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
@@ -108,6 +109,7 @@ fn run_check_project(
     project.set_check_uninitialized_properties(check_uninitialized_properties);
     project.set_check_internal_usage(check_internal_usage);
     project.set_check_deprecated_usage(check_deprecated_usage);
+    project.set_check_empty_method_bodies(check_empty_method_bodies);
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
@@ -221,6 +223,7 @@ pub(crate) fn run_check_project_command(
     check_uninitialized_properties: bool,
     check_internal_usage: bool,
     check_deprecated_usage: bool,
+    check_empty_method_bodies: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -280,6 +283,8 @@ pub(crate) fn run_check_project_command(
     let check_internal_usage = check_internal_usage || config.check_internal_usage.unwrap_or(false);
     let check_deprecated_usage =
         check_deprecated_usage || config.check_deprecated_usage.unwrap_or(false);
+    let check_empty_method_bodies =
+        check_empty_method_bodies || config.check_empty_method_bodies.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -331,6 +336,7 @@ pub(crate) fn run_check_project_command(
         check_uninitialized_properties,
         check_internal_usage,
         check_deprecated_usage,
+        check_empty_method_bodies,
         php_version,
         generate_baseline.as_deref(),
         baseline.as_deref(),

@@ -116,6 +116,98 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 48.4: `MethodTagCheck`'s equivalent - a `@method` tag's own
+    /// parameter/return types are already resolved into a real
+    /// `FunctionSig` (`ClassInfo::method_tags`) but never existence-
+    /// checked. Pure reuse of `check_type_class_names_exist` - no new
+    /// existence machinery. `methodTag.trait` (the type resolves but is a
+    /// trait, invalid there) is deliberately not built - no analog exists
+    /// anywhere else in this project for any typehint location, matching
+    /// this phase's own established "existence only" scope.
+    pub(crate) fn check_method_tag_types(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        // `Registry::resolve_method_tags` drains `ClassInfo::method_tags`
+        // into `info.methods` before this checker pass ever runs (a
+        // registry-build-time step, so this class's own `@method` tags
+        // are already merged and indistinguishable there from a real
+        // declared method by name alone) - `FunctionSig::is_magic` is
+        // the one field `method_tag_sig` sets that a real declared
+        // method's own `FunctionSig::from_decl` never does, so it's the
+        // correct filter here instead of the (always-empty, by this
+        // point) `method_tags` field itself. Also matches enum
+        // `cases()`/`from()`/`tryFrom()` (the *other* `is_magic: true`
+        // producer) harmlessly - their own synthesized types never
+        // reference an unresolvable class, so nothing here ever fires
+        // for them.
+        for (name, sig) in info.methods.iter().filter(|(_, sig)| sig.is_magic) {
+            for param in &sig.params {
+                self.check_type_class_names_exist(
+                    &param.ty,
+                    &format!("PHPDoc tag @method for method {fqn}::{name}()"),
+                    span,
+                    fqn,
+                );
+            }
+            self.check_type_class_names_exist(
+                &sig.return_type,
+                &format!("PHPDoc tag @method for method {fqn}::{name}()"),
+                span,
+                fqn,
+            );
+        }
+    }
+
+    /// Phase 48.5: `MixinCheck`'s equivalent - `@mixin Type` is already
+    /// resolved to a bare FQN string (`ClassInfo::mixins`) and consumed
+    /// for its real semantic effect (the mixin's own methods/properties
+    /// become available on the host class), but its own existence was
+    /// never separately checked - an unresolvable `@mixin` target
+    /// silently contributed nothing instead of surfacing a real typo.
+    /// `mixin.nonObject`/`mixin.trait` are deliberately not built, same
+    /// disclosed-but-not-attempted nuance as `check_method_tag_types`.
+    pub(crate) fn check_mixin_types(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        for mixin in &info.mixins {
+            if !self.class_name_exists(mixin) {
+                self.report(
+                    fqn.to_string(),
+                    format!("PHPDoc tag @mixin references unknown class {mixin}."),
+                    span,
+                    0,
+                    "class.notFound",
+                );
+            }
+        }
+    }
+
+    /// Phase 48.6: `LocalTypeAliasesCheck`'s existence half - a
+    /// `@phpstan-type Name TypeExpr` alias's own RHS is already resolved
+    /// (`ClassInfo::type_aliases`) but never existence-checked. Only the
+    /// alias-RHS half is built here, not `@phpstan-import-type`'s own
+    /// `from Class` existence: that class is very commonly only reachable
+    /// via Composer autoloading this project's own registry may
+    /// legitimately have no data for in a partial-analysis run - the same
+    /// leniency this project already accepts for generic bounds
+    /// (`resolve.rs`'s own doc comment), deliberately not re-litigated
+    /// here for a second tag family.
+    pub(crate) fn check_type_alias_types(&mut self, fqn: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        for (name, ty) in &info.type_aliases {
+            self.check_type_class_names_exist(
+                ty,
+                &format!("PHPDoc tag @phpstan-type {name} for class {fqn}"),
+                span,
+                fqn,
+            );
+        }
+    }
+
     /// Finding 58: two traits used by the same class declaring the same
     /// property (with a genuinely different type) or method (with a
     /// genuinely different signature) is a real, unconditional PHP fatal

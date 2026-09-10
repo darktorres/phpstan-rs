@@ -17,6 +17,8 @@ mod resolve;
 pub(crate) use class_info::hook_body_references_property;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
 pub use function_sig::format_signature;
+pub(crate) use function_sig::is_no_discard_attribute_name;
+pub(crate) use function_sig::is_override_attribute_name;
 pub(crate) use function_sig::resolve_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
 pub(crate) use function_sig::{infer_const_type, mark_template_params, substitute_type_aliases};
@@ -107,6 +109,16 @@ pub struct Registry {
     // wiring chain and "real value, but real vendor-corpus noise"
     // rationale.
     pub check_deprecated_usage: bool,
+    // Phase 61: opts into the "genuinely empty concrete method body"
+    // return-completeness check (`Checker::check_function_with_ancestor_hint`'s
+    // own `return.missing`/`return.never` fall-through). Defaults to
+    // `false` - this was previously shipped, then reverted, after a
+    // confirmed real corpus false-positive class (IDE-stub/native-
+    // extension declaration files whose bodies are intentionally `{}`,
+    // see ROADMAP.md's own Reverted section) - opt-in for a project that
+    // scopes its own `paths`/excludes `vendor/` the way a realistic
+    // PHPStan setup does. Same wiring chain as the three flags above.
+    pub check_empty_method_bodies: bool,
     // Phase 38: the project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to

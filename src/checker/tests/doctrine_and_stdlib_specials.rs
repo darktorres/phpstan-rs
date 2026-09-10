@@ -934,3 +934,49 @@ fn curl_getinfo_used_proxy_infers_int_or_false() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 77-A: `SimpleXMLElement`'s magic `__get`-backed undeclared
+// property access - `SimpleXMLElementClassPropertyReflectionExtension`'s
+// equivalent.
+#[test]
+fn simple_xml_element_undeclared_property_resolves_to_element_or_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(\SimpleXMLElement $xml): void {
+                assertType('SimpleXMLElement|null', $xml->foo);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn simple_xml_element_subclass_undeclared_property_uses_subclass_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class MyXml extends \SimpleXMLElement {}
+            function f(MyXml $xml): void {
+                assertType('MyXml|null', $xml->foo);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn simple_xml_element_declared_property_still_wins() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class MyXml extends \SimpleXMLElement {
+                public string $foo;
+            }
+            function f(MyXml $xml): void {
+                assertType('string', $xml->foo);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

@@ -65,6 +65,13 @@ pub struct Config {
     /// `main.rs`, the same place `baseline`/`scan_paths` are resolved
     /// against the config file's own directory.
     pub php_version: Option<String>,
+    /// Phase 61: reinstates the genuinely-empty-concrete-method-body
+    /// completeness check (`return.missing`/`return.never`) as opt-in -
+    /// see `registry::Registry::check_empty_method_bodies`'s own doc
+    /// comment for why this defaults to `false` (unset), the same reason
+    /// `check_uninitialized_properties`/`check_internal_usage`/
+    /// `check_deprecated_usage` above all do.
+    pub check_empty_method_bodies: Option<bool>,
     /// A hand-mirrored subset of real PHPStan's own `ignoreErrors:` -
     /// this project has no NEON parser and one isn't otherwise justified
     /// (see `baseline.rs`'s own identical judgment for a related

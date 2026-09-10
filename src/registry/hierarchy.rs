@@ -186,6 +186,86 @@ impl Registry {
         None
     }
 
+    /// Phase 64 Item 4: faithful port of real PHPStan's own
+    /// `MethodPrototypeFinder::findPrototype` priority order (confirmed by
+    /// reading the full method) - used **only** by `check_one_method_
+    /// override`'s own Liskov-compatibility ancestor lookup, not a
+    /// replacement for `lookup_ancestor_method_with_owner`'s other call
+    /// sites (runtime-dispatch/purity questions, a different question
+    /// than "what governs override compatibility"). Real PHP bug this
+    /// project's own plain `extends.iter().chain(implements.iter())` walk
+    /// above had, confirmed live: an *immediately*-implemented interface's
+    /// own native declaration always wins over an `extends` parent's
+    /// (checked first here, opposite of the old order), and a used
+    /// trait's own **abstract** declaration wins over the `extends`
+    /// parent too when no immediate interface declares the method (the
+    /// old walk never consulted a trait's own abstract declaration for
+    /// this purpose at all - only as a completely separate boolean for
+    /// the `#[Override]`-fatal check, `trait_declares_abstract_method`
+    /// just above).
+    /// Returns `(owner, sig, check_visibility)` - `check_visibility` is
+    /// `false` **only** for a trait-abstract-sourced prototype (step 2
+    /// below), mirroring real `MethodPrototypeFinder::findPrototype`'s
+    /// own three-element-tuple return exactly (confirmed by reading the
+    /// full method, not assumed): its interface branch and its `extends`-
+    /// parent branch both return `true` for this flag, but its trait
+    /// branch explicitly returns `false`. This matters because real PHP
+    /// itself does **not** enforce visibility-widening compatibility
+    /// between a trait's own `abstract` method declaration and the
+    /// concrete method that fulfills it (confirmed live: `trait T {
+    /// abstract protected function f(); } class C { use T; private
+    /// function f() {} }` compiles with no error) - a real, unconditional
+    /// fatal error for the interface/extends cases, but not this one.
+    /// Confirmed real corpus false positive without this distinction:
+    /// Symfony's own `AmpResponse::schedule()` (`private`) fulfilling
+    /// `TransportResponseTrait`'s own `abstract protected static function
+    /// schedule()`.
+    pub fn find_method_signature_prototype(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<(String, &FunctionSig, bool)> {
+        let info = self.classes.get(class)?;
+        // 1. Immediately-implemented interfaces - walks each interface's
+        //    *own* ancestor chain too (`lookup_method_with_owner`, not a
+        //    bare `.methods.get`), not just its own direct declaration:
+        //    confirmed real corpus false positive otherwise (Piwigo's own
+        //    `ExtensionInterface extends SubscriberInterface`, where
+        //    `subscribedEvents()` is declared only on the *grandparent*
+        //    interface - a class `implements ExtensionInterface` alone
+        //    still genuinely overrides it, and real PHPStan doesn't fail
+        //    to see that either).
+        for iface in &info.implements {
+            if let Some((owner, sig)) = self.lookup_method_with_owner(iface, method) {
+                return Some((owner, sig, true));
+            }
+        }
+        // 2. A used trait's own abstract declaration (this project doesn't
+        //    gate override-compatibility checks on a configured PHP
+        //    version elsewhere in this file either, so unconditional here
+        //    too - real PHPStan's own equivalent gate,
+        //    `supportsAbstractTraitMethods`, is PHP 8.0+, a bar every
+        //    realistic target version already clears).
+        for used in &info.uses {
+            if self
+                .classes
+                .get(used)
+                .is_some_and(|trait_info| trait_info.abstract_methods.contains(method))
+                && let Some(sig) = self.classes.get(used).and_then(|i| i.methods.get(method))
+            {
+                return Some((used.clone(), sig, false));
+            }
+        }
+        // 3. Ordinary `extends` chain (existing, already-correct
+        //    recursive walk).
+        for parent in &info.extends {
+            if let Some((owner, sig)) = self.lookup_method_with_owner(parent, method) {
+                return Some((owner, sig, true));
+            }
+        }
+        None
+    }
+
     /// `@phpstan-consistent-constructor`'s own ancestor walk - real
     /// PHPStan's `ConsistentConstructorHelper::findConsistentConstructor`,
     /// transcribed (confirmed directly, `vendor/phpstan-src`): starting at

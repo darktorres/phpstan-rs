@@ -326,12 +326,25 @@ fn array_keys_unions_int_and_string_for_a_genuinely_mixed_shape() {
 // verbatim, surfacing `int|string` for every reader of a key -
 // opcache-preload.php's own `foreach (array_keys($classMap) as
 // $symbol) { str_starts_with($symbol, ...); }` was real corpus code
-// this broke. This project has no key-type tracking at all
-// (a known, tracked limitation) - falls back to its own usual
-// `Mixed` key-type default instead of the stub's own misleadingly
-// precise-sounding answer.
+// this broke. Phase 50 follow-up: `array_key_type` now handles a
+// plain `Type::Array`'s own already-known key type directly (it
+// always could - `array_keys()` just never asked it to), so this
+// fixture's own `array<string, string>` now correctly infers a real
+// `string` key type instead of falling back to `Mixed` - either way
+// still assignable to `str_starts_with`'s own `string` parameter, so
+// this keeps passing while `array_keys_on_a_genuinely_untyped_array_
+// falls_back_to_mixed` below covers the actual remaining fallback
+// case (a bare, native-untyped `array` parameter).
 #[test]
-fn array_keys_on_a_plain_array_falls_back_to_a_mixed_key_type_not_int_or_string() {
+fn array_keys_on_a_plain_typed_array_falls_back_to_a_mixed_key_type_not_int_or_string() {
+    // Phase 50 follow-up, narrowed back after a real corpus false
+    // positive: `array_keys()`'s own key-type propagation only trusts a
+    // literal `Type::ArrayShape`'s key type, not a plain, non-shape
+    // `Type::Array`'s - this project's dynamic-key-write widening
+    // doesn't track a plain array's own key type precisely enough to
+    // propagate safely (see `is_or_wraps_array_shape`'s own doc
+    // comment). A plain `array<string, string>`-typed argument therefore
+    // still degrades to `Mixed`-keyed here, same as before Phase 50.
     let d = diagnostics_for(
         r#"<?php
             /** @param array<string, string> $classMap */
@@ -339,6 +352,19 @@ fn array_keys_on_a_plain_array_falls_back_to_a_mixed_key_type_not_int_or_string(
                 foreach (array_keys($classMap) as $symbol) {
                     str_starts_with($symbol, 'x');
                 }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_keys_on_a_genuinely_untyped_array_falls_back_to_mixed() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsStrings(string ...$xs): void {}
+            function f(array $anything): void {
+                needsStrings(...array_keys($anything));
             }
         "#,
     );
@@ -739,6 +765,23 @@ fn array_key_first_and_last_report_the_key_type_when_provably_non_empty() {
             function f(array $xs): void {
                 assertType('string', array_key_first($xs));
                 assertType('string', array_key_last($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_key_first_reports_a_real_key_type_for_a_literal_array_shape() {
+    // Phase 50 follow-up: `array_key_type` now handles `Type::ArrayShape`
+    // directly - a real union of each field's own key kind, not the
+    // generic `int|string` fallback this used to degrade to.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType('string', array_key_first(['a' => 1, 'b' => 2]));
+                assertType('int', array_key_first([1, 2, 3]));
             }
         "#,
     );

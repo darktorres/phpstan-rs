@@ -259,8 +259,8 @@ fn implicit_string_cast_of_a_deprecated_tostring_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "method.deprecated"
-            && x.message == "Call to deprecated method OldThing::__toString() (do not stringify)."),
+        d.iter().any(|x| x.identifier == "class.toStringDeprecated"
+            && x.message == "Casting class OldThing to string is deprecated:\ndo not stringify"),
         "got: {d:?}"
     );
 }
@@ -279,8 +279,8 @@ fn echoing_a_deprecated_tostring_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "method.deprecated"
-            && x.message == "Call to deprecated method OldThing::__toString() (do not stringify)."),
+        d.iter().any(|x| x.identifier == "class.toStringDeprecated"
+            && x.message == "Casting class OldThing to string is deprecated:\ndo not stringify"),
         "got: {d:?}"
     );
 }
@@ -299,8 +299,8 @@ fn printing_a_deprecated_tostring_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "method.deprecated"
-            && x.message == "Call to deprecated method OldThing::__toString() (do not stringify)."),
+        d.iter().any(|x| x.identifier == "class.toStringDeprecated"
+            && x.message == "Casting class OldThing to string is deprecated:\ndo not stringify"),
         "got: {d:?}"
     );
 }
@@ -319,8 +319,8 @@ fn interpolating_a_deprecated_tostring_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "method.deprecated"
-            && x.message == "Call to deprecated method OldThing::__toString() (do not stringify)."),
+        d.iter().any(|x| x.identifier == "class.toStringDeprecated"
+            && x.message == "Casting class OldThing to string is deprecated:\ndo not stringify"),
         "got: {d:?}"
     );
 }
@@ -415,5 +415,183 @@ fn instantiating_a_plain_non_deprecated_class_is_never_flagged() {
     assert!(
         !d.iter().any(|x| x.identifier == "new.deprecated"),
         "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_level_deprecated_tag_cascades_to_a_method_call() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            class OldFoo {
+                public function bar(): void {}
+            }
+            function f(OldFoo $foo): void {
+                $foo->bar();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.deprecatedClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_level_deprecated_tag_cascades_to_a_property_access() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            class OldFoo {
+                public int $x = 1;
+            }
+            function f(OldFoo $foo): void {
+                echo $foo->x;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.deprecatedClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_level_deprecated_tag_cascades_to_a_class_constant_access() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            class OldFoo {
+                const X = 1;
+            }
+            function f(): int {
+                return OldFoo::X;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "classConstant.deprecatedClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_deprecated_methods_own_tag_still_fires_when_the_class_is_not_deprecated() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @deprecated */
+                public function bar(): void {}
+            }
+            function f(Foo $foo): void {
+                $foo->bar();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.deprecated"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn the_cascade_wins_over_the_members_own_tag_with_no_double_report() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            class OldFoo {
+                /** @deprecated */
+                public function bar(): void {}
+            }
+            function f(OldFoo $foo): void {
+                $foo->bar();
+            }
+        "#,
+    );
+    let count = d
+        .iter()
+        .filter(|x| x.identifier.starts_with("method.deprecated"))
+        .count();
+    assert_eq!(count, 1, "got: {d:?}");
+}
+
+#[test]
+fn a_call_from_inside_a_deprecated_method_is_not_reported() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            function oldFunc(): void {}
+            class Foo {
+                /** @deprecated */
+                public function bar(): void {
+                    oldFunc();
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_from_inside_a_deprecated_classs_method_is_not_reported() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            function oldFunc(): void {}
+            /** @deprecated */
+            class Foo {
+                public function bar(): void {
+                    oldFunc();
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_from_a_non_deprecated_scope_is_still_reported() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @deprecated */
+            function oldFunc(): void {}
+            class Foo {
+                public function bar(): void {
+                    oldFunc();
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.deprecated"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn casting_a_deprecated_classs_instance_to_string_uses_the_special_message() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @deprecated */
+                public function __toString(): string { return "x"; }
+            }
+            function f(Foo $foo): string {
+                return (string) $foo;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.toStringDeprecated"
+            && x.message
+                .contains("Casting class Foo to string is deprecated")),
+        "got: {d:?}"
     );
 }

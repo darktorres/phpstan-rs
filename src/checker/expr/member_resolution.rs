@@ -276,7 +276,20 @@ impl<'a> Checker<'a> {
                     let resolved = types::substitute_template(&p.ty, &bindings);
                     self.resolve_pseudo(&resolved, class)
                 })
-                .unwrap_or(Type::Mixed),
+                .unwrap_or_else(|| {
+                    // Phase 77-A: `SimpleXMLElementClassPropertyReflectionExtension`'s
+                    // real-PHPStan equivalent - every undeclared property
+                    // on `SimpleXMLElement` (or a subclass) is magically
+                    // readable via `__get`, resolving to the *actual*
+                    // concrete class being queried (so a subclass gets
+                    // `MyXml|null`, not a hardcoded `SimpleXMLElement|null`)
+                    // rather than degrading all the way to `Mixed`.
+                    if self.registry.is_subclass_of(class, "SimpleXMLElement") {
+                        union_types(Type::Object(class.clone(), Vec::new()), Type::Null)
+                    } else {
+                        Type::Mixed
+                    }
+                }),
             Type::EnumCase(_, case) if prop == "name" => Type::StringLiteral(case.clone()),
             Type::EnumCase(fqn, case) if prop == "value" => self
                 .registry

@@ -72,6 +72,14 @@ enum Command {
         /// comment for why.
         #[arg(long)]
         check_deprecated_usage: bool,
+        /// Enables the reinstated empty-concrete-method-body completeness
+        /// check (`return.missing`/`return.never` now also firing on a
+        /// literal `{}` body, not just a real fall-through). Off by
+        /// default - see `registry::Registry::check_empty_method_bodies`'s
+        /// own doc comment for the confirmed corpus false-positive class
+        /// (IDE-stub/native-extension declaration files) this avoids.
+        #[arg(long)]
+        check_empty_method_bodies: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -135,6 +143,7 @@ fn main() {
             check_uninitialized_properties,
             check_internal_usage,
             check_deprecated_usage,
+            check_empty_method_bodies,
             php_version,
             generate_baseline,
             baseline,
@@ -149,6 +158,7 @@ fn main() {
             check_uninitialized_properties,
             check_internal_usage,
             check_deprecated_usage,
+            check_empty_method_bodies,
             php_version,
             generate_baseline,
             baseline,

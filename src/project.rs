@@ -14,8 +14,10 @@ use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
 
 mod decl_locations;
+pub(crate) mod duplicate_fn_sites;
 
 use decl_locations::DeclLocations;
+use duplicate_fn_sites::DuplicateFunctionSites;
 
 /// One file's parsed state, kept around so `Project::update_file` can undo
 /// exactly what that file previously contributed - both to the shared
@@ -103,6 +105,12 @@ pub struct Project {
     // name-based lookup after checking, so building this index there
     // would be pure overhead.
     decl_locations: DeclLocations,
+    // Phase 63: every top-level function's own unconditional declaration
+    // site(s) - always populated (no `retain_source` gate, unlike
+    // `decl_locations` above), since `check_duplicate_function_declarations`
+    // needs to run by default for `check-project`. See
+    // `DuplicateFunctionSites`'s own doc comment.
+    duplicate_fn_sites: DuplicateFunctionSites,
 }
 
 impl Project {
@@ -118,6 +126,7 @@ impl Project {
             phpstan_api_check_enabled: false,
             retain_source: false,
             decl_locations: DeclLocations::default(),
+            duplicate_fn_sites: DuplicateFunctionSites::default(),
         }
     }
 
@@ -172,6 +181,15 @@ impl Project {
     /// own doc comment for why this defaults to `false`.
     pub fn set_check_deprecated_usage(&mut self, enabled: bool) {
         self.registry.check_deprecated_usage = enabled;
+    }
+
+    /// Phase 61: opts the whole project's checking into the reinstated
+    /// empty-concrete-method-body completeness check, following
+    /// `set_check_deprecated_usage`'s exact precedent - see
+    /// `registry::Registry::check_empty_method_bodies`'s own doc comment
+    /// for why this defaults to `false`.
+    pub fn set_check_empty_method_bodies(&mut self, enabled: bool) {
+        self.registry.check_empty_method_bodies = enabled;
     }
 
     /// Phase 38: configures the project's target PHP version
@@ -236,6 +254,8 @@ impl Project {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), &path);
         }
+        self.duplicate_fn_sites
+            .index(&ast, &mut NameContext::default(), &path, false);
         register_references(&mut self.dependents, &path, &references);
         self.files.insert(
             path,
@@ -286,6 +306,8 @@ impl Project {
                 self.decl_locations
                     .remove_declarations(&old.functions, &old.classes);
             }
+            self.duplicate_fn_sites
+                .remove_declarations(path, &old.functions);
             changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
             changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
             unregister_references(&mut self.dependents, path, &old.references);
@@ -314,6 +336,8 @@ impl Project {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), path);
         }
+        self.duplicate_fn_sites
+            .index(&ast, &mut NameContext::default(), path, false);
         // A changed class's `use TraitName;` list (added, removed, or a
         // trait's own members changed in this same file) means the whole
         // registry's trait flattening can't be assumed still correct -
@@ -424,6 +448,13 @@ impl Project {
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.check_program(&file.ast);
         let mut diagnostics = checker.into_diagnostics();
+        diagnostics.extend(
+            checker::duplicate_functions::check_duplicate_function_declarations(
+                path,
+                &self.duplicate_fn_sites,
+            ),
+        );
+        diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
         if self.phpstan_api_check_enabled {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
                 &file.ast,

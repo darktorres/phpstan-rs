@@ -399,7 +399,7 @@ impl ClassInfo {
                 let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
-                let set_ty = property_hook_set_type(p, &template_params, ctx);
+                let set_ty = property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
                 let is_virtual = p
                     .hooks
                     .as_ref()
@@ -473,14 +473,24 @@ impl ClassInfo {
                     .as_deref()
                     .map(docblock::parse)
                     .is_some_and(|d| d.readonly);
+                // Phase 43.1: a promoted constructor property can carry
+                // its own inline PHP 8.4 hooks (`Param::hooks`) exactly
+                // like a plain property declaration can - resolved
+                // through the identical generalized helpers, not new
+                // logic.
+                let set_ty = property_hook_set_type(p.hooks.as_deref(), &template_params, ctx);
+                let is_virtual = p
+                    .hooks
+                    .as_deref()
+                    .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 properties.insert(
                     p.name.clone(),
                     PropertySig {
                         ty,
                         is_static: false,
                         is_readonly: p.promoted_readonly || doc_readonly,
-                        set_ty: None,
-                        is_virtual: false,
+                        set_ty,
+                        is_virtual,
                         visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
                         write_visibility: p
                             .promoted_visibility
@@ -821,6 +831,7 @@ impl ClassInfo {
                 no_discard: false,
                 visibility: Visibility::Public,
                 is_internal: false,
+                is_api: false,
                 has_override_attr: false,
                 deprecated: None,
                 throws: None,
@@ -851,6 +862,7 @@ impl ClassInfo {
                 by_ref: false,
                 has_own_doc: true,
                 explicit_mixed_hint: false,
+                closure_this_type: None,
             };
             methods.insert(
                 "from".to_string(),
@@ -863,6 +875,7 @@ impl ClassInfo {
                     no_discard: false,
                     visibility: Visibility::Public,
                     is_internal: false,
+                    is_api: false,
                     has_override_attr: false,
                     deprecated: None,
                     // `from()` throws a real `ValueError` when no case
@@ -890,6 +903,7 @@ impl ClassInfo {
                     no_discard: false,
                     visibility: Visibility::Public,
                     is_internal: false,
+                    is_api: false,
                     has_override_attr: false,
                     deprecated: None,
                     throws: None,

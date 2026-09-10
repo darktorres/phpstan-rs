@@ -939,3 +939,74 @@ fn passing_a_deeply_nested_nullsafe_chain_by_reference_is_still_flagged() {
         "expected a nullsafe-by-ref diagnostic, got: {d:?}"
     );
 }
+
+// Phase 49: a constant-array spread argument (`f(...['a', 'b'])`) whose
+// own inferred type is a literal `Type::ArrayShape` has every eventual
+// argument slot known statically - int-keyed fields resolve positionally,
+// string-keyed fields resolve by parameter name.
+#[test]
+fn spread_of_a_literal_array_checks_each_positional_field_against_its_parameter() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $a, string $b): void {}
+            function test(): void {
+                f(...[1, 2]);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("$b")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn spread_of_a_literal_array_with_matching_types_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $a, string $b): void {}
+            function test(): void {
+                f(...[1, "two"]);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn spread_of_a_literal_array_checks_named_fields_by_parameter_name() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $a, string $b): void {}
+            function test(): void {
+                f(...['a' => 1, 'b' => 2]);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type" && x.message.contains("$b")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn spread_of_a_non_shape_array_stays_silent() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $a, string $b): void {}
+            /** @param array<string> $values */
+            function test(array $values): void {
+                f(...$values);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}

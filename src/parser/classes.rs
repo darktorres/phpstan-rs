@@ -313,6 +313,19 @@ impl Parser {
                 let mut function = self.parse_function_decl()?;
                 function.doc_comment = doc;
                 function.attrs = attrs;
+                // PHP 8.2 `readonly class Foo { function __construct(public
+                // int $x) {} }` - shorthand for every property being
+                // readonly, promoted constructor properties included
+                // (`parse_params`, shared with closures/arrow-fns/plain
+                // functions with no such concept, has no way to know this
+                // on its own - only this call site does).
+                if class_is_readonly {
+                    for param in &mut function.params {
+                        if param.promoted_visibility.is_some() {
+                            param.promoted_readonly = true;
+                        }
+                    }
+                }
                 methods.push(MethodDecl {
                     visibility,
                     is_static,

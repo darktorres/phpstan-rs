@@ -1489,6 +1489,74 @@ fn keeping_the_same_static_ness_on_override_is_never_flagged() {
     );
 }
 
+// Phase 64 Item 5: property `#[Override]` attribute.
+
+#[test]
+fn an_override_attribute_on_a_property_with_no_matching_ancestor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Child extends Base {
+                #[\Override]
+                public int $x = 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.override"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_on_a_property_correctly_overriding_an_ancestor_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 1; }
+            class Child extends Base {
+                #[\Override]
+                public int $x = 2;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.override"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_on_a_promoted_property_is_checked_the_same_way() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Child extends Base {
+                public function __construct(#[\Override] public int $x = 1) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.override"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_override_attribute_on_a_property_with_an_unresolvable_ancestor_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Child extends \TotallyUnknownBaseClass1234 {
+                #[\Override]
+                public int $x = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.override"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn overriding_a_readonly_property_as_readwrite_is_flagged() {
     let d = diagnostics_for(
@@ -1640,6 +1708,62 @@ fn a_trait_supplied_method_matching_an_interface_signature_is_never_flagged() {
                 | "method.visibility"
                 | "parameter.missing"
                 | "parameter.notOptional"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 64 Item 4: `check_one_method_override`'s own ancestor lookup
+// (`find_method_signature_prototype`) now prioritizes an immediately-
+// implemented interface's own native declaration over an `extends`
+// parent's, and a used trait's own abstract declaration over the
+// `extends` parent when no immediate interface declares the method -
+// matching real PHPStan's own `MethodPrototypeFinder::findPrototype`.
+
+#[test]
+fn an_implemented_interfaces_signature_wins_over_an_extended_parents_for_override_checking() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function foo(string $x): void {}
+            }
+            interface Iface {
+                public function foo(int $x): void;
+            }
+            class Child extends Base implements Iface {
+                public function foo(int $x): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "method.childParameterType" | "method.childReturnType"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_used_traits_abstract_declaration_wins_over_the_extends_parent_when_no_interface_declares_it() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function foo(string $x): void {}
+            }
+            trait T {
+                abstract public function foo(int $x): void;
+            }
+            class Child extends Base {
+                use T;
+                public function foo(int $x): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "method.childParameterType" | "method.childReturnType"
         )),
         "unexpected diagnostics: {d:?}"
     );

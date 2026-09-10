@@ -369,7 +369,7 @@ impl Server {
     ) {
         match scope {
             navigation::ProbeScope::Function(function) => {
-                checker.check_function(function, class, is_static);
+                checker.check_function(function, class, is_static, true);
             }
             navigation::ProbeScope::TopLevel(stmts) => {
                 checker.check_program(stmts);

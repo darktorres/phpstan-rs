@@ -707,3 +707,160 @@ fn catching_a_non_throwable_internal_class_still_reports_both_diagnostics_indepe
         "got: {d:?}"
     );
 }
+
+// Phase 67 sub-item A: `extends`/`implements`/trait-use for the
+// `@internal` class-name-usage check.
+
+#[test]
+fn extending_an_internal_class_from_a_different_root_namespace_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Base {}
+
+            namespace Other\App;
+            class Child extends \Vendor\Internal\Base {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "class.extendsInternalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn extending_an_internal_class_from_the_same_root_namespace_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Base {}
+
+            namespace Vendor\App;
+            class Child extends \Vendor\Internal\Base {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "class.extendsInternalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_interface_extending_an_internal_interface_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            interface IBase {}
+
+            namespace Other\App;
+            interface IChild extends \Vendor\Internal\IBase {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "interface.extendsInternalInterface"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn implementing_an_internal_interface_from_a_different_root_namespace_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            interface IBase {}
+
+            namespace Other\App;
+            class Impl implements \Vendor\Internal\IBase {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "class.implementsInternalInterface"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_implementing_an_internal_interface_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            interface IBase {}
+
+            namespace Other\App;
+            enum E implements \Vendor\Internal\IBase {
+                case A;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "enum.implementsInternalInterface"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn using_an_internal_trait_from_a_different_root_namespace_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            trait T {}
+
+            namespace Other\App;
+            class C {
+                use \Vendor\Internal\T;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "traitUse.internalTrait"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn using_an_internal_trait_from_the_same_root_namespace_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            trait T {}
+
+            namespace Vendor\App;
+            class C {
+                use \Vendor\Internal\T;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "traitUse.internalTrait"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn extending_a_non_internal_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            class Base {}
+
+            namespace Other\App;
+            class Child extends \Vendor\Internal\Base {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.contains("Internal")),
+        "got: {d:?}"
+    );
+}

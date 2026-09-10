@@ -1,9 +1,10 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, DiagnosticBuilder, Locals, body_contains_yield, collect_goto_targets,
-    expr_contains_yield,
+    ATTRIBUTE_TARGET_METHOD, Checker, DiagnosticBuilder, Locals, body_contains_yield,
+    collect_goto_targets, expr_contains_yield,
 };
 use crate::registry::{self, PropertySig};
+use crate::token::Span;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -31,7 +32,13 @@ impl<'a> Checker<'a> {
     /// `set_ty`/`is_virtual` for that shape yet either (confirmed:
     /// `property_hook_set_type` takes a `&PropertyDecl`, structurally
     /// unable to accept a `&Param`) - a real, disclosed residual gap, not
-    /// attempted here (see ROADMAP.md's Phase 43 entry).
+    /// Phase 43.1: a promoted constructor property (`Param::hooks`) is
+    /// checked too, via a second loop mirroring `check_property_overrides`'s
+    /// own established precedent for the identical "plain declaration vs.
+    /// promoted constructor parameter" split - reusing the exact same
+    /// `check_get_hook`/`check_set_hook` logic (generalized to take
+    /// scalar `name`/`span`/`type_hint` instead of a whole `&PropertyDecl`
+    /// for exactly this reason).
     pub(crate) fn check_property_hooks(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
@@ -44,35 +51,116 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if let Some(body) = &hooks.get {
-                self.check_get_hook(fqn, p, body, &prop_sig);
+                self.check_get_hook(fqn, &p.name, p.span, body, &prop_sig, &hooks.get_attrs);
             }
             if let Some((param, body)) = &hooks.set {
-                self.check_set_hook(fqn, p, param.as_ref(), body, &prop_sig);
+                self.check_set_hook(
+                    fqn,
+                    &p.name,
+                    p.span,
+                    p.type_hint.as_deref(),
+                    param.as_ref(),
+                    body,
+                    &prop_sig,
+                    &hooks.set_attrs,
+                );
+            }
+        }
+        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+            for param in &ctor.function.params {
+                if param.promoted_visibility.is_none() {
+                    continue;
+                }
+                let Some(hooks) = param.hooks.as_deref() else {
+                    continue;
+                };
+                let Some(prop_sig) = info.properties.get(&param.name).cloned() else {
+                    continue;
+                };
+                if let Some(body) = &hooks.get {
+                    self.check_get_hook(
+                        fqn,
+                        &param.name,
+                        param.span,
+                        body,
+                        &prop_sig,
+                        &hooks.get_attrs,
+                    );
+                }
+                if let Some((set_param, body)) = &hooks.set {
+                    self.check_set_hook(
+                        fqn,
+                        &param.name,
+                        param.span,
+                        param.type_hint.as_deref(),
+                        set_param.as_ref(),
+                        body,
+                        &prop_sig,
+                        &hooks.set_attrs,
+                    );
+                }
             }
         }
     }
 
+    /// Phase 37: `PropertyHookAttributesRule` - a property hook's own
+    /// `#[Attr]` group(s) are checked exactly like a method's (`Attribute
+    /// ::TARGET_METHOD`), plus one hardcoded special case real PHPStan's
+    /// own rule applies regardless of the attribute class's own declared
+    /// target flags: `#[\NoDiscard]` can never be used on a hook at all
+    /// (a hook is narrower than "any method" - it's never itself directly
+    /// callable), reusing the same `attribute.target` identifier rather
+    /// than a new one, matching real PHPStan exactly.
+    fn check_hook_attributes(&mut self, attrs: &[Attribute], label: &str) {
+        self.check_attributes(attrs, label);
+        self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_METHOD, "method", label);
+        if let Some(nodiscard) = attrs
+            .iter()
+            .find(|a| registry::is_no_discard_attribute_name(&a.name))
+        {
+            let fqn = self.name_ctx.resolve(&nodiscard.name);
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    format!("Attribute class {fqn} cannot be used on property hooks."),
+                    nodiscard.span,
+                    0,
+                    "attribute.target",
+                )
+                .non_ignorable(),
+            );
+        }
+    }
+
+    /// `name`/`span`/`type_hint` are the only three `PropertyDecl` fields
+    /// either this or `check_set_hook` actually touch - taken as scalars
+    /// (Phase 43.1) so both a plain property declaration and a promoted
+    /// constructor parameter (`ast::Param` has identically-named/-typed
+    /// fields) can share this same checking logic without either being
+    /// forced into the other's own struct shape.
     fn check_get_hook(
         &mut self,
         fqn: &str,
-        p: &PropertyDecl,
+        name: &str,
+        span: Span,
         body: &PropertyHookBody,
         prop_sig: &PropertySig,
+        attrs: &[Attribute],
     ) {
-        let label = format!("{fqn}::${} (get hook)", p.name);
+        let label = format!("{fqn}::${name} (get hook)");
+        self.check_hook_attributes(attrs, &label);
         // `GetNonVirtualPropertyHookReadRule`: a non-virtual property's
         // `get` hook that never references its own backing storage at
         // all almost certainly forgot to (real PHP still compiles it -
         // it just always returns whatever the hook body itself computes,
         // silently never reading the real stored value).
-        if !prop_sig.is_virtual && !registry::hook_body_references_property(body, &p.name) {
+        if !prop_sig.is_virtual && !registry::hook_body_references_property(body, name) {
             self.report(
                 fqn.to_string(),
                 format!(
-                    "Get hook for non-virtual property {fqn}::${} does not read its value.",
-                    p.name
+                    "Get hook for non-virtual property {fqn}::${name} does not read its value."
                 ),
-                p.span,
+                span,
                 3,
                 "propertyGetHook.noRead",
             );
@@ -100,7 +188,7 @@ impl<'a> Checker<'a> {
                 ))
             }
         };
-        self.check_generator_return_type(declared_return.as_ref(), p.span, &label);
+        self.check_generator_return_type(declared_return.as_ref(), span, &label);
         match body {
             PropertyHookBody::Arrow(e) => {
                 let body_ty = self.check_expr(e, &mut locals, &label);
@@ -137,7 +225,7 @@ impl<'a> Checker<'a> {
                             "should return {} but return statement is missing",
                             prop_sig.ty
                         ),
-                        p.span,
+                        span,
                         3,
                         "return.missing",
                     );
@@ -151,23 +239,27 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn check_set_hook(
         &mut self,
         fqn: &str,
-        p: &PropertyDecl,
+        name: &str,
+        span: Span,
+        type_hint: Option<&str>,
         param: Option<&Param>,
         body: &PropertyHookBody,
         prop_sig: &PropertySig,
+        attrs: &[Attribute],
     ) {
-        let label = format!("{fqn}::${} (set hook)", p.name);
-        if !prop_sig.is_virtual && !registry::hook_body_references_property(body, &p.name) {
+        let label = format!("{fqn}::${name} (set hook)");
+        self.check_hook_attributes(attrs, &label);
+        if !prop_sig.is_virtual && !registry::hook_body_references_property(body, name) {
             self.report(
                 fqn.to_string(),
                 format!(
-                    "Set hook for non-virtual property {fqn}::${} does not assign value to it.",
-                    p.name
+                    "Set hook for non-virtual property {fqn}::${name} does not assign value to it."
                 ),
-                p.span,
+                span,
                 3,
                 "propertySetHook.noAssign",
             );
@@ -184,18 +276,17 @@ impl<'a> Checker<'a> {
         // `FunctionSig::return_type_native`'s own doc comment for the
         // identical reasoning already applied to method overrides).
         let param_has_native = param.is_some_and(|p| p.type_hint.is_some());
-        let prop_has_native = p.type_hint.is_some();
+        let prop_has_native = type_hint.is_some();
         match (prop_has_native, param_has_native) {
             (false, true) => {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         fqn.to_string(),
                         format!(
-                            "Parameter ${} of set hook has a native type but the property {fqn}::${} does not.",
+                            "Parameter ${} of set hook has a native type but the property {fqn}::${name} does not.",
                             param.map(|p| p.name.as_str()).unwrap_or("value"),
-                            p.name
                         ),
-                        p.span,
+                        span,
                         0,
                         "propertySetHook.nativeParameterType",
                     )
@@ -207,11 +298,10 @@ impl<'a> Checker<'a> {
                     DiagnosticBuilder::new(
                         fqn.to_string(),
                         format!(
-                            "Parameter ${} of set hook does not have a native type but the property {fqn}::${} does.",
+                            "Parameter ${} of set hook does not have a native type but the property {fqn}::${name} does.",
                             param.map(|p| p.name.as_str()).unwrap_or("value"),
-                            p.name
                         ),
-                        p.span,
+                        span,
                         0,
                         "propertySetHook.nativeParameterType",
                     )
@@ -220,17 +310,16 @@ impl<'a> Checker<'a> {
             }
             (true, true) => {
                 let param_ty = self.resolve_type_hint(param.and_then(|p| p.type_hint.as_deref()));
-                let prop_native_ty = self.resolve_type_hint(p.type_hint.as_deref());
+                let prop_native_ty = self.resolve_type_hint(type_hint);
                 if !self.registry.is_assignable(&prop_native_ty, &param_ty) {
                     self.report_builder(
                         DiagnosticBuilder::new(
                             fqn.to_string(),
                             format!(
-                                "Native type {param_ty} of set hook parameter ${} is not contravariant with native type {prop_native_ty} of property {fqn}::${}.",
+                                "Native type {param_ty} of set hook parameter ${} is not contravariant with native type {prop_native_ty} of property {fqn}::${name}.",
                                 param.map(|p| p.name.as_str()).unwrap_or("value"),
-                                p.name
                             ),
-                            p.span,
+                            span,
                             0,
                             "propertySetHook.nativeParameterType",
                         )
@@ -249,11 +338,10 @@ impl<'a> Checker<'a> {
             self.check_type_class_names_exist(
                 set_ty,
                 &format!(
-                    "Parameter ${} of set hook for property {fqn}::${}",
+                    "Parameter ${} of set hook for property {fqn}::${name}",
                     param.map(|p| p.name.as_str()).unwrap_or("value"),
-                    p.name
                 ),
-                p.span,
+                span,
                 &label,
             );
         }
@@ -268,7 +356,7 @@ impl<'a> Checker<'a> {
         let param_name = param
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "value".to_string());
-        let param_span = param.map(|p| p.name_span).unwrap_or(p.span);
+        let param_span = param.map(|p| p.name_span).unwrap_or(span);
         let value_ty = prop_sig
             .set_ty
             .clone()
@@ -289,7 +377,7 @@ impl<'a> Checker<'a> {
                 ))
             }
         };
-        self.check_generator_return_type(declared_return.as_ref(), p.span, &label);
+        self.check_generator_return_type(declared_return.as_ref(), span, &label);
         match body {
             PropertyHookBody::Arrow(e) => {
                 self.check_expr(e, &mut locals, &label);

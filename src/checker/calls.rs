@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
+use crate::checker::expr::is_canonical_int_key;
 use crate::checker::{Checker, Locals, purge_stale_narrowing_for, union_types, unwrap_grouping};
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
@@ -429,6 +430,101 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+
+        self.check_constant_array_spread_arguments(
+            callee_label,
+            sig,
+            args,
+            resolved,
+            locals,
+            label,
+            defining_class,
+        );
+    }
+
+    /// Phase 49: `f(...['a', 'b', 'named' => $c])`-style spread arguments
+    /// whose own inferred type is a literal `Type::ArrayShape` have every
+    /// eventual argument slot known statically - real PHP resolves each
+    /// int-keyed shape field positionally (in the order it appears in the
+    /// shape, not by its own literal key value) and each string-keyed
+    /// field by name, exactly like an ordinary named argument. Every other
+    /// check in `check_args` gives up the moment it sees a spread
+    /// (`resolve_call_args`'s own doc comment) because an arbitrary
+    /// spread's contents can't be resolved statically - this recovers real
+    /// type-checking for the one common, fully static shape instead of
+    /// silently skipping every argument the spread might supply.
+    #[allow(clippy::too_many_arguments)]
+    fn check_constant_array_spread_arguments(
+        &mut self,
+        callee_label: &str,
+        sig: &FunctionSig,
+        args: &[Arg],
+        resolved: &[Option<&Expr>],
+        locals: &Locals,
+        label: &str,
+        defining_class: Option<&str>,
+    ) {
+        if args.iter().filter(|a| a.spread).count() != 1 {
+            return;
+        }
+        let spread_index = args.iter().position(|a| a.spread).unwrap();
+        if !args[spread_index + 1..].iter().all(|a| a.name.is_some()) {
+            return;
+        }
+        let spread_arg = &args[spread_index];
+        let spread_ty = self.infer_expr(&spread_arg.value, locals);
+        let Some(fields) = array_shape_fields(&spread_ty) else {
+            return;
+        };
+        if fields.iter().any(|(k, _, _)| k == "...") {
+            return;
+        }
+        let Some(mut positional_counter) = first_spread_positional_index(args) else {
+            return;
+        };
+        for (key, field_ty, optional) in fields {
+            if *optional {
+                continue;
+            }
+            let param = if is_canonical_int_key(key) {
+                let p = sig
+                    .params
+                    .get(positional_counter)
+                    .or_else(|| sig.params.last().filter(|p| p.variadic));
+                positional_counter += 1;
+                p
+            } else {
+                sig.params.iter().find(|p| &p.name == key)
+            };
+            let Some(param) = param else {
+                continue;
+            };
+            let already_filled = sig
+                .params
+                .iter()
+                .position(|p| std::ptr::eq(p, param))
+                .and_then(|pos| resolved.get(pos))
+                .is_some_and(|s| s.is_some());
+            if already_filled || *field_ty == Type::Mixed {
+                continue;
+            }
+            let param_ty = match defining_class {
+                Some(c) => self.resolve_pseudo(&param.ty, c),
+                None => param.ty.clone(),
+            };
+            if !self.registry.is_assignable(field_ty, &param_ty) {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "{callee_label}() argument (${}) expects {}, {} given",
+                        param.name, param_ty, field_ty
+                    ),
+                    spread_arg.value.span,
+                    5,
+                    "argument.type",
+                );
+            }
+        }
     }
 
     /// Phase 49 Item 1: validates a call's own argument list for the
@@ -683,6 +779,30 @@ pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec
 /// resolved statically, so `check_args`'s "too few"/"too many" argument-
 /// count checks must stop trusting a `None` slot (or a raw `args.len()`)
 /// at or past that point to mean what it normally would.
+/// The `Type::ArrayShape` fields underlying `ty`, unwrapping an
+/// `Intersection` of exactly one shape plus any number of accessory
+/// markers (`non-empty-array`, `list`, ...) the same way real PHPStan's
+/// own accessory-typed array shapes are represented here - `None` for
+/// anything else (a plain `Type::Array`, a union, two shapes intersected
+/// together, ...), since none of those have statically-known fields.
+fn array_shape_fields(ty: &Type) -> Option<&[(String, Type, bool)]> {
+    match ty {
+        Type::ArrayShape(fields) => Some(fields),
+        Type::Intersection(members) => {
+            let mut shape = None;
+            for member in members {
+                match member {
+                    Type::ArrayShape(fields) if shape.is_none() => shape = Some(fields.as_slice()),
+                    Type::Accessory(_) => {}
+                    _ => return None,
+                }
+            }
+            shape
+        }
+        _ => None,
+    }
+}
+
 fn first_spread_positional_index(args: &[Arg]) -> Option<usize> {
     let mut positional_index = 0usize;
     for arg in args {

@@ -232,6 +232,7 @@ fn merge_stubs_does_not_override_user_functions() {
             no_discard: false,
             visibility: crate::ast::Visibility::Public,
             is_internal: false,
+            is_api: false,
             has_override_attr: false,
             deprecated: None,
             throws: None,

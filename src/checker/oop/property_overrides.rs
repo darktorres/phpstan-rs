@@ -43,6 +43,7 @@ impl<'a> Checker<'a> {
             let Some(own_sig) = info.properties.get(&p.name) else {
                 continue;
             };
+            self.check_property_override_attribute(fqn, &p.name, &p.attrs, p.span);
             self.check_one_property_override(
                 fqn,
                 &p.name,
@@ -60,6 +61,7 @@ impl<'a> Checker<'a> {
                 let Some(visibility) = &param.promoted_visibility else {
                     continue;
                 };
+                self.check_property_override_attribute(fqn, &param.name, &param.attrs, param.span);
                 self.check_one_property_override(
                     fqn,
                     &param.name,
@@ -69,6 +71,51 @@ impl<'a> Checker<'a> {
                     param.span,
                 );
             }
+        }
+    }
+
+    /// Phase 64 Item 5: `OverridingPropertyRule`'s own `hasOverrideAttribute`/
+    /// `filterOverrideAttribute` half for properties - the method-level
+    /// equivalent already exists (`FunctionSig::has_override_attr`,
+    /// `check_one_method_override`); a property needs no analogous
+    /// registry field, since (unlike a method) it's never hoisted through
+    /// a separate trait-merge lookup path before this check runs - `p.attrs`/
+    /// `param.attrs` on the class's own textual declaration is already
+    /// the complete, real answer. A `private` ancestor property doesn't
+    /// count as a real override target here, mirroring `check_one_
+    /// property_override`'s own identical exemption just below (an
+    /// unrelated declaration, not something `#[Override]` could
+    /// meaningfully claim to override).
+    fn check_property_override_attribute(
+        &mut self,
+        fqn: &str,
+        name: &str,
+        attrs: &[Attribute],
+        span: Span,
+    ) {
+        if !attrs
+            .iter()
+            .any(|a| crate::registry::is_override_attribute_name(&a.name))
+        {
+            return;
+        }
+        if self.registry.has_unresolvable_ancestor(fqn) {
+            return;
+        }
+        let has_real_ancestor = self
+            .registry
+            .lookup_ancestor_property_with_owner(fqn, name)
+            .is_some_and(|(_, sig)| sig.visibility != Visibility::Private);
+        if !has_real_ancestor {
+            self.report(
+                fqn.to_string(),
+                format!(
+                    "Property {fqn}::${name} has #[\\Override] attribute, but no matching parent property exists"
+                ),
+                span,
+                0,
+                "property.override",
+            );
         }
     }
 

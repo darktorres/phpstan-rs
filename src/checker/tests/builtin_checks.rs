@@ -449,3 +449,91 @@ fn random_int_with_a_non_literal_argument_is_never_flagged() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 71: `filter_var()`'s `FILTER_NULL_ON_FAILURE`/`FILTER_THROW_ON_FAILURE`
+// flag conflict, PHP 8.5+.
+#[test]
+fn filter_var_null_and_throw_on_failure_bitwise_or_reports() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(string $x) {
+                filter_var($x, FILTER_VALIDATE_INT, FILTER_NULL_ON_FAILURE | FILTER_THROW_ON_FAILURE);
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "filterVar.nullOnFailureAndThrowOnFailure"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn filter_var_null_and_throw_on_failure_options_array_flags_reports() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(string $x) {
+                filter_var($x, FILTER_VALIDATE_INT, [
+                    'flags' => FILTER_NULL_ON_FAILURE | FILTER_THROW_ON_FAILURE,
+                ]);
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "filterVar.nullOnFailureAndThrowOnFailure"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn filter_var_only_null_on_failure_no_report() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(string $x) {
+                filter_var($x, FILTER_VALIDATE_INT, FILTER_NULL_ON_FAILURE);
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "filterVar.nullOnFailureAndThrowOnFailure"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn filter_var_conflict_silent_below_php85() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(string $x) {
+                filter_var($x, FILTER_VALIDATE_INT, FILTER_NULL_ON_FAILURE | FILTER_THROW_ON_FAILURE);
+            }
+        "#,
+        |r| r.php_version = Some((8, 3)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "filterVar.nullOnFailureAndThrowOnFailure"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn filter_var_conflict_silent_with_no_configured_version() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $x) {
+                filter_var($x, FILTER_VALIDATE_INT, FILTER_NULL_ON_FAILURE | FILTER_THROW_ON_FAILURE);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "filterVar.nullOnFailureAndThrowOnFailure"),
+        "got: {d:?}"
+    );
+}

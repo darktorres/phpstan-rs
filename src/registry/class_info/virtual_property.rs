@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{Expr, ExprKind, PropertyDecl, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::registry::function_sig::{mark_template_params, resolve_type};
 use crate::registry::name_context::{NameContext, resolve_names_in_type};
@@ -20,11 +20,11 @@ use crate::types::{TemplateParam, Type};
 /// parameter list, returns `None` - the property's own type stays the
 /// write sink, unchanged.
 pub(crate) fn property_hook_set_type(
-    p: &PropertyDecl,
+    hooks: Option<&PropertyHooks>,
     template_params: &HashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> Option<Type> {
-    let (param, _) = p.hooks.as_ref()?.set.as_ref()?;
+    let (param, _) = hooks?.set.as_ref()?;
     let param = param.as_ref()?;
     let ty = resolve_type(None, param.type_hint.as_deref());
     let ty = mark_template_params(ty, template_params);

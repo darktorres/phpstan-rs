@@ -240,3 +240,109 @@ fn vsprintf_with_a_non_literal_array_argument_is_never_flagged() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 69: `*` width/precision sub-placeholders each consume their own
+// argument, in order, before the specifier's own value argument.
+#[test]
+fn sprintf_width_star_consumes_int_argument() {
+    let d = diagnostics_for(r#"<?php sprintf("%*d", 5, 42);"#);
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sprintf_width_star_rejects_non_int_argument() {
+    let d = diagnostics_for(r#"<?php sprintf("%*d", "five", 42);"#);
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("width"), "got: {d:?}");
+}
+
+#[test]
+fn sprintf_precision_star_consumes_int_argument() {
+    let d = diagnostics_for(r#"<?php sprintf("%.*f", 2, 3.14159);"#);
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sprintf_width_and_precision_star_combined() {
+    let d = diagnostics_for(r#"<?php sprintf("%*.*f", 10, 2, 3.14159);"#);
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sprintf_positional_with_star_stays_unchecked() {
+    // Deliberately not supported - see `parse_positional_format_specifiers`'s
+    // own doc comment on real PHP's quirky positional/dynamic interaction.
+    let d = diagnostics_for(r#"<?php sprintf('%1$*d', "not an int at all");"#);
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 69: `sscanf`/`fscanf`'s 3+-arg by-ref-output-variable form.
+#[test]
+fn sscanf_byref_count_matches_placeholders_no_report() {
+    let d = diagnostics_for(
+        r#"<?php
+            $a = 0; $b = '';
+            sscanf("1 x", "%d %s", $a, $b);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sscanf_byref_count_mismatch_reports_argument_sscanf() {
+    let d = diagnostics_for(
+        r#"<?php
+            $a = 0;
+            sscanf("1 x", "%d %s", $a);
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "argument.sscanf");
+}
+
+#[test]
+fn fscanf_byref_count_mismatch_reports_argument_fscanf() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param resource $stream */
+            function f($stream) {
+                $a = 0; $b = ''; $c = 0;
+                fscanf($stream, "%d %s", $a, $b, $c);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "argument.fscanf");
+}
+
+#[test]
+fn sscanf_two_arg_form_not_affected() {
+    let d = diagnostics_for(r#"<?php sscanf("1 x", "%d %s");"#);
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sscanf_non_literal_format_stays_silent() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $fmt) {
+                $a = 0;
+                sscanf("1 x", $fmt, $a);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sscanf_spread_argument_stays_silent() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<mixed> $vars */
+            function f(array $vars) {
+                sscanf("1 x", "%d %s", ...$vars);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

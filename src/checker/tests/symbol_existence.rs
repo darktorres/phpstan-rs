@@ -724,3 +724,128 @@ fn a_self_referencing_type_before_a_later_namespace_switch_in_the_same_file_is_n
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Phase 48.3-48.6: existence-checking for @property/@method/@mixin/
+// @phpstan-type docblock tags - previously parsed/resolved and
+// semantically consumed, but never existence-checked.
+
+#[test]
+fn a_property_tag_referencing_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @property NoSuchClass $x
+             */
+            class Foo {}
+        "#,
+    );
+    assert!(d.iter().any(|x| x.identifier == "class.notFound"));
+}
+
+#[test]
+fn a_property_tag_referencing_a_known_class_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Bar {}
+            /**
+             * @property Bar $x
+             */
+            class Foo {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_method_tag_return_type_referencing_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @method NoSuchClass bar()
+             */
+            class Foo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_method_tag_parameter_type_referencing_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @method void bar(NoSuchClass $x)
+             */
+            class Foo {}
+        "#,
+    );
+    assert!(d.iter().any(|x| x.identifier == "class.notFound"));
+}
+
+#[test]
+fn a_mixin_tag_referencing_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @mixin NoSuchClass
+             */
+            class Foo {}
+        "#,
+    );
+    assert!(d.iter().any(|x| x.identifier == "class.notFound"));
+}
+
+#[test]
+fn a_mixin_tag_referencing_a_known_class_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Bar {}
+            /**
+             * @mixin Bar
+             */
+            class Foo {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_phpstan_type_alias_referencing_an_unknown_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @phpstan-type MyAlias NoSuchClass
+             */
+            class Foo {}
+        "#,
+    );
+    assert!(d.iter().any(|x| x.identifier == "class.notFound"));
+}
+
+#[test]
+fn a_phpstan_import_type_from_an_unknown_class_is_not_flagged_by_default() {
+    // Deliberate leniency (Phase 48.6): the `from Class` target is very
+    // commonly only reachable via Composer autoloading this project's
+    // own registry may legitimately have no data for.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @phpstan-import-type MyAlias from SomeVendorClassNotIndexedHere
+             */
+            class Foo {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

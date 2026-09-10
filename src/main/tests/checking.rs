@@ -34,6 +34,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
                 by_ref: false,
                 has_own_doc: true,
                 explicit_mixed_hint: false,
+                closure_this_type: None,
             },
             registry::ParamSig {
                 name: "rest".to_string(),
@@ -44,6 +45,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
                 by_ref: false,
                 has_own_doc: true,
                 explicit_mixed_hint: false,
+                closure_this_type: None,
             },
         ],
         return_type: types::Type::Bool,
@@ -53,6 +55,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         no_discard: false,
         visibility: phpstan_rs::ast::Visibility::Public,
         is_internal: false,
+        is_api: false,
         has_override_attr: false,
         deprecated: None,
         throws: None,

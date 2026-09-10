@@ -1,5 +1,8 @@
 use crate::ast::*;
-use crate::checker::{CheckArgsCall, Checker, Locals, class_type_word, resolve_call_args};
+use crate::checker::{
+    CheckArgsCall, Checker, DiagnosticBuilder, Locals, class_type_word, resolve_call_args,
+};
+use crate::token::Span;
 
 /// PHP's own `Attribute::TARGET_*` values (confirmed directly via
 /// `php -r`, see `registry::class_info::attribute_target_constant_value`'s
@@ -11,6 +14,7 @@ pub(crate) const ATTRIBUTE_TARGET_METHOD: u32 = 4;
 pub(crate) const ATTRIBUTE_TARGET_PROPERTY: u32 = 8;
 pub(crate) const ATTRIBUTE_TARGET_CLASS_CONSTANT: u32 = 16;
 pub(crate) const ATTRIBUTE_TARGET_PARAMETER: u32 = 32;
+pub(crate) const ATTRIBUTE_TARGET_CONSTANT: u32 = 64;
 
 impl<'a> Checker<'a> {
     /// Phase 37: real PHPStan's own `AttributesCheck`
@@ -165,6 +169,59 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+    }
+
+    /// Phase 37: real PHPStan's own `ConstantAttributesRule`
+    /// (`vendor/phpstan-src/src/Rules/Constants/ConstantAttributesRule.php`),
+    /// checking a top-level (or nested, conditionally-declared) `const A =
+    /// 1, B = 2;` statement's own `#[Attr]` group(s), gated on PHP 8.5's
+    /// `supportsAttributesOnGlobalConstants()` first (an unsupported
+    /// version reports exactly one `constant.attributesNotSupported` and
+    /// skips the rest entirely - matching real PHPStan's own early
+    /// return). `consts.first()` only, deliberately: the parser clones
+    /// one shared attribute group onto every `ClassConst` in the
+    /// statement (same pattern as a class body's own multi-const
+    /// declarator list), so looping over every entry would report the
+    /// identical finding once per declared name instead of once per
+    /// statement, the way real PHPStan's own whole-statement node type
+    /// does. With no configured `php_version` at all, the version gate is
+    /// silently skipped (this project's own "unset means unconfigured"
+    /// convention - see `check_class_constant_modifiers`) but the
+    /// existence/target checks below still run unconditionally, unlike
+    /// real PHPStan's own early return - this project never has "no
+    /// version" as a real state the way real PHPStan's runtime does, so
+    /// silently skipping the always-valid checks too would just be a
+    /// false-negative with no matching real-PHPStan behavior to mirror.
+    pub(crate) fn check_global_const_attributes(
+        &mut self,
+        consts: &[ClassConst],
+        stmt_span: Span,
+        label: &str,
+    ) {
+        let Some(first) = consts.first() else {
+            return;
+        };
+        if first.attrs.is_empty() {
+            return;
+        }
+        if let Some(version) = self.registry.php_version
+            && !crate::php_version::PhpFeature::AttributesOnGlobalConstants.is_available(version)
+        {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    "Attributes on global constants are supported only on PHP 8.5 and later."
+                        .to_string(),
+                    stmt_span,
+                    0,
+                    "constant.attributesNotSupported",
+                )
+                .non_ignorable(),
+            );
+            return;
+        }
+        self.check_attributes(&first.attrs, label);
+        self.check_attribute_targets(&first.attrs, ATTRIBUTE_TARGET_CONSTANT, "constant", label);
     }
 
     /// Real PHPStan's `TraitAttributeClassRule` (`attribute.trait`,

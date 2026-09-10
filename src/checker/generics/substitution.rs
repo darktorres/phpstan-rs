@@ -81,6 +81,7 @@ impl<'a> Checker<'a> {
             no_discard: sig.no_discard,
             visibility: sig.visibility.clone(),
             is_internal: sig.is_internal,
+            is_api: sig.is_api,
             has_override_attr: sig.has_override_attr,
             deprecated: sig.deprecated.clone(),
             throws: sig.throws.as_ref().map(subst),

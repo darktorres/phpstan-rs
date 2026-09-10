@@ -139,6 +139,42 @@ impl<'a> Checker<'a> {
                 self.report(fqn.to_string(), message, p.span, 6, "generics.variance");
             }
         }
+        // Phase 43.2: a promoted constructor property (readonly or
+        // hooked or neither) is never variance-checked without this -
+        // real PHPStan's own `PropertyVarianceRule` runs over a
+        // `ClassPropertyNode` built uniformly for plain and promoted
+        // shapes, so this project's own variance walk should too.
+        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+            for param in &ctor.function.params {
+                if param.promoted_visibility.is_none() {
+                    continue;
+                }
+                let Some(prop_sig) = info.properties.get(&param.name) else {
+                    continue;
+                };
+                if prop_sig.visibility == Visibility::Private {
+                    continue;
+                }
+                let has_restricted_write_access = prop_sig.is_readonly
+                    || prop_sig.write_visibility == Visibility::Private
+                    || param
+                        .hooks
+                        .as_deref()
+                        .is_some_and(|h| h.set.is_none() && h.get.is_some());
+                let pos = if has_restricted_write_access {
+                    Position::Out
+                } else {
+                    Position::Inv
+                };
+                let mut violations: Vec<String> = Vec::new();
+                self.walk_variance(&prop_sig.ty.clone(), pos, fqn, &mut violations);
+                violations.sort();
+                violations.dedup();
+                for message in violations {
+                    self.report(fqn.to_string(), message, param.span, 6, "generics.variance");
+                }
+            }
+        }
     }
 
     /// Walks `ty` composing `pos` through every nested generic argument

@@ -250,6 +250,29 @@ pub struct DocBlock {
     // be indexed yet at `ClassInfo::from_decl` time, the identical
     // ordering problem `type_imports` already has).
     pub mixins: Vec<String>,
+    // Phase 36: `@param-immediately-invoked-callable $name`/
+    // `@param-later-invoked-callable $name` (also the `@phpstan-`-prefixed
+    // spellings, for free via this module's own "second pass strips
+    // `phpstan-`" normalization) - merged into one map keyed by parameter
+    // name, `true` for the immediately-invoked spelling, `false` for the
+    // later-invoked one; a repeated/conflicting tag for the same
+    // parameter has the last one win, matching every other single-valued-
+    // per-key tag in this struct. Declaration-time validity is checked by
+    // `checker::noop::check_declared_param_callable_tags`; the runtime
+    // scope-threading effect these two tags also drive in real PHPStan is
+    // a confirmed, disclosed architectural mismatch this project doesn't
+    // model (see that function's own doc comment).
+    pub param_immediately_invoked_callable: HashMap<String, bool>,
+    // Phase 36: `@param-closure-this Type $name` - the type `$this`
+    // becomes inside a `Closure`-typed parameter's own literal argument,
+    // when one is passed. Declaration-time validity (does `$name` exist,
+    // is its native type actually `Closure`-compatible) and the runtime
+    // effect (seeding `$this` via
+    // `checker::calls::check_closure_literal_with_this_and_scope`, the
+    // same mechanism `Closure::bind`/`->bindTo()` already use) are both
+    // built - see `checker::noop::check_declared_param_callable_tags` and
+    // `registry::function_sig::ParamSig::closure_this_type`.
+    pub param_closure_this: HashMap<String, String>,
 }
 
 /// One parsed `@phpstan-import-type` tag - see `DocBlock::type_imports`'s
@@ -487,6 +510,35 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                         .and_then(|t| t.strip_prefix('$'))
                     {
                         block.var_name = Some(name.to_string());
+                    }
+                }
+            }
+            "param-immediately-invoked-callable" | "param-later-invoked-callable" => {
+                // Grammar is just `$paramName [description]` - no type
+                // token, unlike `@param`.
+                if let Some(name) = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|t| t.strip_prefix('$'))
+                {
+                    block.param_immediately_invoked_callable.insert(
+                        name.to_string(),
+                        tag == "param-immediately-invoked-callable",
+                    );
+                }
+            }
+            "param-closure-this" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    let remainder = rest[ty.len()..].trim_start();
+                    if let Some(name) = remainder
+                        .split_whitespace()
+                        .next()
+                        .and_then(|t| t.strip_prefix('$'))
+                    {
+                        block
+                            .param_closure_this
+                            .insert(name.to_string(), ty.to_string());
                     }
                 }
             }

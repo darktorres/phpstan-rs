@@ -74,7 +74,7 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::checker::Diagnostic;
+use crate::checker::{Diagnostic, class_type_word};
 use crate::registry::{NameContext, Registry};
 use crate::token::Span;
 
@@ -212,7 +212,13 @@ impl<'a> Walker<'a> {
         });
     }
 
-    fn report_inheritance(
+    /// Phase 40.2/40.4: an unconditional report with no `@api` short-
+    /// circuit at all - real PHPStan's own `ApiInstantiationRule` (once
+    /// the constructor-own-`@api` exemption has already been checked by
+    /// the caller) and `ApiTraitUseRule` (no exemption of any kind) both
+    /// need this shape, unlike `report_not_covered`'s own class-level-
+    /// `@api`-checks-out early return.
+    fn report_always(
         &mut self,
         fqn: &str,
         action: &str,
@@ -220,10 +226,42 @@ impl<'a> Walker<'a> {
         label: &str,
         identifier: &str,
     ) {
+        self.diagnostics.push(Diagnostic {
+            location: label.to_string(),
+            message: format!(
+                "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
+            ),
+            span,
+            level: 0,
+            identifier: identifier.to_string(),
+            tip: None,
+            non_ignorable: false,
+            metadata: HashMap::new(),
+            fix: None,
+        });
+    }
+
+    /// `check_do_not_implement`: real PHPStan's own `@api-do-not-implement`
+    /// short-circuit is semantically interface-only ("don't implement/
+    /// extend me" - `@api-do-not-implement` is meaningless for the
+    /// "extending a class" relationship real `ApiClassExtendsRule` checks,
+    /// confirmed: that rule reads only `isApi()`, never
+    /// `isApiDoNotImplement()`). `false` for a class's own `extends`
+    /// call site (Phase 40.4); `true` everywhere else (interface
+    /// `extends`, `implements`, and this function's own general shape).
+    fn report_inheritance(
+        &mut self,
+        fqn: &str,
+        action: &str,
+        span: Span,
+        label: &str,
+        identifier: &str,
+        check_do_not_implement: bool,
+    ) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        if info.is_api_do_not_implement {
+        if check_do_not_implement && info.is_api_do_not_implement {
             self.diagnostics.push(Diagnostic {
                 location: label.to_string(),
                 message: format!(
@@ -273,19 +311,34 @@ impl<'a> Walker<'a> {
         for parent in &c.extends {
             if let Some(pfqn) = self.resolve_if_phpstan(parent, ctx) {
                 let action = format!("extending {pfqn}");
-                self.report_inheritance(&pfqn, &action, c.span, &fqn, "phpstanApi.class");
+                // Phase 40.4: `@api-do-not-implement` is semantically
+                // interface-only - real `ApiClassExtendsRule` checks only
+                // `@api`, never it, for a real class's own `extends`.
+                self.report_inheritance(
+                    &pfqn,
+                    &action,
+                    c.span,
+                    &fqn,
+                    "phpstanApi.class",
+                    c.kind != ClassKind::Class,
+                );
             }
         }
         for iface in &c.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(&ifqn, &action, c.span, &fqn, "phpstanApi.interface");
+                self.report_inheritance(&ifqn, &action, c.span, &fqn, "phpstanApi.interface", true);
             }
         }
         for used in &c.uses {
-            if let Some(ufqn) = self.resolve_if_phpstan(used, ctx) {
+            if let Some(ufqn) = self.resolve_if_phpstan(used, ctx)
+                && self.registry.classes.contains_key(&ufqn)
+            {
+                // Phase 40.4: real `ApiTraitUseRule` flags trait use
+                // unconditionally - no `@api`/`@api-do-not-implement`
+                // exemption of any kind, unlike extends/implements.
                 let action = format!("using trait {ufqn}");
-                self.report_inheritance(&ufqn, &action, c.span, &fqn, "phpstanApi.trait");
+                self.report_always(&ufqn, &action, c.span, &fqn, "phpstanApi.trait");
             }
         }
         let empty = ParamTypes::new();
@@ -308,13 +361,15 @@ impl<'a> Walker<'a> {
         for iface in &e.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(&ifqn, &action, e.span, &fqn, "phpstanApi.interface");
+                self.report_inheritance(&ifqn, &action, e.span, &fqn, "phpstanApi.interface", true);
             }
         }
         for used in &e.uses {
-            if let Some(ufqn) = self.resolve_if_phpstan(used, ctx) {
+            if let Some(ufqn) = self.resolve_if_phpstan(used, ctx)
+                && self.registry.classes.contains_key(&ufqn)
+            {
                 let action = format!("using trait {ufqn}");
-                self.report_inheritance(&ufqn, &action, e.span, &fqn, "phpstanApi.trait");
+                self.report_always(&ufqn, &action, e.span, &fqn, "phpstanApi.trait");
             }
         }
         let empty = ParamTypes::new();
@@ -434,15 +489,30 @@ impl<'a> Walker<'a> {
         match &e.kind {
             ExprKind::New(callee, args) => {
                 if let ExprKind::Name(n) = &callee.kind {
-                    if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
-                        let action = format!("instantiating {fqn}");
-                        self.report_not_covered(
-                            &fqn,
-                            &action,
-                            e.span,
-                            label,
-                            "phpstanApi.constructor",
-                        );
+                    if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
+                        && let Some(info) = self.registry.classes.get(&fqn)
+                    {
+                        // Phase 40.2: real PHPStan's own `ApiInstantiationRule`
+                        // flags instantiation unconditionally by default - a
+                        // class-level `@api` does NOT exempt it at all. The
+                        // only exemption: the class's own, non-inherited
+                        // constructor (a direct `info.methods.get` lookup,
+                        // not `lookup_method`, since an inherited
+                        // constructor doesn't count) itself carries `@api`.
+                        let has_own_api_constructor = info
+                            .methods
+                            .get("__construct")
+                            .is_some_and(|ctor| ctor.is_api);
+                        if !has_own_api_constructor {
+                            let action = format!("instantiating {fqn}");
+                            self.report_always(
+                                &fqn,
+                                &action,
+                                e.span,
+                                label,
+                                "phpstanApi.constructor",
+                            );
+                        }
                     }
                 } else {
                     self.check_expr(callee, ctx, param_types, label);
@@ -488,15 +558,46 @@ impl<'a> Walker<'a> {
                 }
             }
             ExprKind::Instanceof(inner, InstanceofTarget::Name(n, _)) => {
-                if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
-                    let action = format!("instanceof {fqn}");
-                    self.report_not_covered(
-                        &fqn,
-                        &action,
-                        e.span,
-                        label,
-                        "phpstanApi.instanceofAssumption",
-                    );
+                // Phase 40.3: real PHPStan's own `ApiInstanceofRule` - two
+                // genuinely different diagnostics depending on whether the
+                // class is `@api` at all, not one identifier reused for
+                // both. A non-`@api` class is flagged with a kind-specific
+                // identifier and the ordinary "not covered" message; an
+                // `@api` class is *still* flagged (unless it's `PHPStan\
+                // Type\Type` itself or an interface) with a different
+                // identifier/message warning that the instanceof
+                // assumption itself might break in a minor version. This
+                // project has no live type-narrowing pass available to
+                // this separate walker, so the "already provably true/
+                // false"/"static type already narrows" suppressions real
+                // PHPStan also applies aren't replicated here - a
+                // disclosed, safe-direction (false-positive-favoring in
+                // real PHPStan's own terms, but false-negative-favoring
+                // from this project's usual convention) narrowing until/
+                // unless this walker folds into the main `Checker` pass.
+                if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
+                    && let Some(info) = self.registry.classes.get(&fqn)
+                {
+                    if !info.is_api {
+                        let action = format!("instanceof {fqn}");
+                        let identifier =
+                            format!("phpstanApi.{}", class_type_word(info.kind).to_lowercase());
+                        self.report_always(&fqn, &action, e.span, label, &identifier);
+                    } else if fqn != "PHPStan\\Type\\Type" && info.kind != ClassKind::Interface {
+                        self.diagnostics.push(Diagnostic {
+                            location: label.to_string(),
+                            message: format!(
+                                "Although {fqn} is covered by backward compatibility promise, this instanceof assumption might break in a minor PHPStan version."
+                            ),
+                            span: e.span,
+                            level: 0,
+                            identifier: "phpstanApi.instanceofAssumption".to_string(),
+                            tip: None,
+                            non_ignorable: false,
+                            metadata: HashMap::new(),
+                            fix: None,
+                        });
+                    }
                 }
                 self.check_expr(inner, ctx, param_types, label);
             }

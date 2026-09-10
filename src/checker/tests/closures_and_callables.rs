@@ -216,6 +216,72 @@ fn closure_bind_still_flags_a_real_bug_inside_the_bound_closure() {
 }
 
 #[test]
+fn this_is_available_inside_a_closure_literal_passed_to_a_param_closure_this_tagged_parameter() {
+    // A public property, not private: a closure literal written outside
+    // any class still has no *scope* of its own for visibility purposes
+    // (matching real PHP - `@param-closure-this` injects `$this`'s
+    // *type*, not a different declaring scope), so a private member
+    // would correctly still be flagged as inaccessible even once `$this`
+    // resolves - this test's own purpose is confirming the injected type
+    // resolves at all (no spurious "undefined property"/`$this` misuse),
+    // not that visibility is bypassed.
+    let d = diagnostics_for(
+        r#"<?php
+            class Secret5 { public int $value = 7; }
+            /**
+             * @param-closure-this Secret5 $cb
+             */
+            function withSecret5(Closure $cb) { return $cb(); }
+            function test(): int {
+                return withSecret5(function () { return $this->value; });
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn param_closure_this_still_flags_a_real_bug_inside_the_injected_closure() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Empty5841 {}
+            /**
+             * @param-closure-this Empty5841 $cb
+             */
+            function withEmpty5841(Closure $cb) { return $cb(); }
+            function test(): void {
+                withEmpty5841(function () { return $this->totallyUndefinedVar; });
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("undefined property")),
+        "expected the real bug inside the injected closure to still be caught, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_param_closure_this_tag_has_no_effect_on_a_closure_passed_by_variable_instead_of_a_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Secret6 { private int $value = 1; }
+            /**
+             * @param-closure-this Secret6 $cb
+             */
+            function withSecret6(Closure $cb) { return $cb(); }
+            function test(): int {
+                $cb = function () { return $this->value; };
+                return withSecret6($cb);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("undefined variable")),
+        "expected $this to stay unresolved for a by-variable closure, got: {d:?}"
+    );
+}
+
+#[test]
 fn this_is_available_inside_an_inline_closure_bound_via_bind_to() {
     let d = diagnostics_for(
         r#"<?php

@@ -302,4 +302,110 @@ impl<'a> Checker<'a> {
             identifier,
         );
     }
+
+    /// Phase 36: declaration-time validation for `@param-immediately-
+    /// invoked-callable`/`@param-later-invoked-callable`
+    /// (`IncompatibleParamImmediatelyInvokedCallableRule`) and
+    /// `@param-closure-this` (`IncompatiblePhpDocTypeCheck`'s own
+    /// closure-this half) - does the tag reference a real parameter, and
+    /// is that parameter's own *native* type (not the phpdoc-merged one -
+    /// a self-contradicting docblock like `@param int $x` +
+    /// `@param-immediately-invoked-callable $x` must not silently pass)
+    /// structurally compatible with what the tag claims. The runtime
+    /// effects these tags separately drive (scope-threading for the
+    /// former, `$this`-injection for the latter) are unrelated to this
+    /// function - see `registry::function_sig::ParamSig::
+    /// closure_this_type` for the latter's own runtime half.
+    pub(crate) fn check_declared_param_callable_tags(&mut self, f: &FunctionDecl, label: &str) {
+        let Some(doc) = f.doc_comment.as_deref() else {
+            return;
+        };
+        if !doc.contains("param-immediately-invoked-callable")
+            && !doc.contains("param-later-invoked-callable")
+            && !doc.contains("param-closure-this")
+        {
+            return;
+        }
+        let block = docblock::parse(doc);
+        for (name, immediately) in &block.param_immediately_invoked_callable {
+            let tag = if *immediately { "immediately" } else { "later" };
+            let Some(param) = f.params.iter().find(|p| &p.name == name) else {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "PHPDoc tag @param-{tag}-invoked-callable references unknown parameter: ${name}"
+                    ),
+                    f.name_span,
+                    2,
+                    "parameter.notFound",
+                );
+                continue;
+            };
+            let native_ty = self.resolve_type_hint(param.type_hint.as_deref());
+            if !self.param_type_could_satisfy(&native_ty, &Type::Callable) {
+                let identifier = if *immediately {
+                    "paramImmediatelyInvokedCallable.nonCallable"
+                } else {
+                    "paramLaterInvokedCallable.nonCallable"
+                };
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "PHPDoc tag @param-{tag}-invoked-callable is for parameter ${name} with non-callable type {native_ty}."
+                    ),
+                    f.name_span,
+                    2,
+                    identifier,
+                );
+            }
+        }
+        for name in block.param_closure_this.keys() {
+            let Some(param) = f.params.iter().find(|p| &p.name == name) else {
+                self.report(
+                    label.to_string(),
+                    format!("PHPDoc tag @param-closure-this references unknown parameter: ${name}"),
+                    f.name_span,
+                    2,
+                    "parameter.notFound",
+                );
+                continue;
+            };
+            let native_ty = self.resolve_type_hint(param.type_hint.as_deref());
+            let closure_ty = Type::Object("Closure".to_string(), Vec::new());
+            if !self.param_type_could_satisfy(&native_ty, &closure_ty) {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "PHPDoc tag @param-closure-this is for parameter ${name} with non-Closure type {native_ty}."
+                    ),
+                    f.name_span,
+                    2,
+                    "paramClosureThis.nonClosure",
+                );
+            }
+        }
+    }
+
+    /// Whether `ty` could ever satisfy `target` - deliberately not a
+    /// direct `self.registry.is_assignable(ty, target)` call. `Type::Mixed`
+    /// (an untyped parameter) must satisfy anything (real PHPStan's own
+    /// `mixed.isCallable()`/`isSuperTypeOf()` is always `maybe`, never
+    /// `no`) - `is_subtype(Mixed, _)` has no such arm and would wrongly
+    /// flag every untyped parameter. A `Union` (e.g. `callable|null`) must
+    /// satisfy when *any* member does, not when *all* do -
+    /// `is_subtype(Union, _)` requires all members, the right rule for
+    /// soundly narrowing a type but the wrong one for this "could this
+    /// ever be `target`" query; without this, a real, legal `?callable`
+    /// parameter would be wrongly flagged since `Null` alone isn't a
+    /// callable/Closure. Both guards are real, corpus-shaped false-
+    /// positive classes, not hypothetical.
+    pub(crate) fn param_type_could_satisfy(&self, ty: &Type, target: &Type) -> bool {
+        match ty {
+            Type::Mixed => true,
+            Type::Union(members) => members
+                .iter()
+                .any(|m| self.param_type_could_satisfy(m, target)),
+            _ => self.registry.is_assignable(ty, target),
+        }
+    }
 }

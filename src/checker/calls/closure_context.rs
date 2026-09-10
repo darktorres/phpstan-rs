@@ -197,9 +197,15 @@ impl<'a> Checker<'a> {
                     if !u.by_ref {
                         continue;
                     }
-                    let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     let mutated = closure_locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
-                    locals.insert(u.name.clone(), union_types(original, mutated));
+                    if !locals.contains_key(&u.name) {
+                        // Phase 17: see the identical fix's own comment at
+                        // `checker::expr`'s `ExprKind::Closure` arm.
+                        locals.declare(u.name.clone(), mutated, u.span);
+                    } else {
+                        let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                        locals.insert(u.name.clone(), union_types(original, mutated));
+                    }
                 }
                 true
             }

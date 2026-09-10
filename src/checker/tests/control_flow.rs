@@ -2389,3 +2389,101 @@ fn dead_code_after_a_return_does_not_also_trigger_a_spurious_return_missing() {
         "got: {d:?}"
     );
 }
+
+// Phase 61: reinstated empty-concrete-method-body completeness check,
+// opt-in via `Registry::check_empty_method_bodies`.
+#[test]
+fn check_empty_method_bodies_flag_off_by_default_does_not_flag_empty_body() {
+    let d = diagnostics_for(
+        r#"<?php
+            class C {
+                public function f(): int {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.missing"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn check_empty_method_bodies_flags_a_concrete_method_with_an_empty_body_and_non_void_return_type() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class C {
+                public function f(): int {}
+            }
+        "#,
+        |r| r.check_empty_method_bodies = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.missing"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn check_empty_method_bodies_flags_never_typed_concrete_empty_body_as_return_never() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class C {
+                public function f(): never {}
+            }
+        "#,
+        |r| r.check_empty_method_bodies = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.never"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn check_empty_method_bodies_does_not_flag_an_abstract_method_declaration() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            abstract class C {
+                abstract public function f(): int;
+            }
+        "#,
+        |r| r.check_empty_method_bodies = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.missing"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn check_empty_method_bodies_does_not_flag_an_interface_method_declaration() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            interface I {
+                public function f(): int;
+            }
+        "#,
+        |r| r.check_empty_method_bodies = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.missing"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn check_empty_method_bodies_does_not_flag_a_void_or_nullable_return_type() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class C {
+                public function f(): void {}
+                public function g(): ?int {}
+            }
+        "#,
+        |r| r.check_empty_method_bodies = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.missing"),
+        "got: {d:?}"
+    );
+}

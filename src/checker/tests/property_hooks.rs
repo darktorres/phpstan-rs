@@ -356,3 +356,146 @@ fn a_get_only_hooked_property_is_treated_as_restricted_write_access_for_variance
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn a_promoted_property_get_hook_that_never_reads_backing_storage_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class BadGetPromoted {
+                public function __construct(
+                    public string $y {
+                        get => "constant";
+                        set(string $value) { $this->y = $value; }
+                    }
+                ) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "propertyGetHook.noRead"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_property_set_hook_that_never_assigns_backing_storage_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class BadSetPromoted {
+                public function __construct(
+                    public string $z {
+                        get => $this->z;
+                        set(string $value) { echo $value; }
+                    }
+                ) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "propertySetHook.noAssign"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_property_fully_virtual_hooks_are_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class FullyVirtualPromoted {
+                public function __construct(
+                    public string $name {
+                        get => "constant";
+                        set(string $value) { echo $value; }
+                    }
+                ) {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "propertyGetHook.noRead"
+            || x.identifier == "propertySetHook.noAssign"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_property_set_hook_parameter_missing_native_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class PromotedNativeMismatch {
+                public function __construct(
+                    public string $w {
+                        set($value) { $this->w = $value; }
+                    }
+                ) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "propertySetHook.nativeParameterType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_property_get_hook_body_is_checked_as_a_real_function_scope() {
+    let d = diagnostics_for(
+        r#"<?php
+            class PromotedBodyChecked {
+                public function __construct(
+                    public string $v {
+                        get => $undefinedVar;
+                    }
+                ) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("undefined variable")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_readonly_property_with_a_covariant_template_type_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template-covariant T
+             */
+            class BoxPromoted {
+                /**
+                 * @param T $value
+                 */
+                public function __construct(
+                    public readonly mixed $value,
+                ) {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "generics.variance"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_promoted_plain_readwrite_property_with_a_covariant_template_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template-covariant T
+             */
+            class BoxPromotedMutable {
+                /**
+                 * @param T $value
+                 */
+                public function __construct(
+                    public mixed $value,
+                ) {}
+            }
+        "#,
+    );
+    assert!(d.iter().any(|x| x.identifier == "generics.variance"));
+}

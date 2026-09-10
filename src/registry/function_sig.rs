@@ -79,6 +79,16 @@ pub struct ParamSig {
     // doubles that correctly omit their own docblock in favor of the
     // interface's.
     pub explicit_mixed_hint: bool,
+    // Phase 36: `@param-closure-this Type $name`'s own resolved `Type` -
+    // what `$this` becomes inside a `Closure`/`ArrowFn` literal argument
+    // passed at this parameter's position, resolved through the same
+    // template-marking + name-resolution pipeline `@param`'s own `ty`
+    // merge already uses (see `from_decl` below). `None` when no such tag
+    // targets this parameter - the overwhelming majority. Consumed at
+    // each call-argument-checking site via `checker::calls::
+    // check_closure_literal_with_this_and_scope`, the same mechanism
+    // `Closure::bind`/`->bindTo()` already use.
+    pub closure_this_type: Option<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +142,13 @@ pub struct FunctionSig {
     // has the declaring class in hand - this field only ever reflects
     // the member's own tag.
     pub is_internal: bool,
+    // Phase 40: `@api` on this function/method's own doc comment -
+    // real PHPStan's `ApiMethodCallRule`/`ApiInstantiationRule` check
+    // both the declaring class's own `@api` AND the member's own -
+    // `ClassInfo::is_api` only ever covered the former. `DocBlock::api`
+    // already exists and is parsed; this is a direct reuse, not new
+    // parsing.
+    pub is_api: bool,
     // Phase 64 follow-up: PHP 8.3's `#[\Override]` marker - `true` when
     // this declaration carries one. Stored here (mirroring `no_discard`
     // exactly, including its "short-name-only, no namespace resolution"
@@ -418,6 +435,20 @@ impl FunctionSig {
                     || doc
                         .as_ref()
                         .is_some_and(|d| d.optional_params.contains(&p.name));
+                // Phase 36: `@param-closure-this Type $name` - resolved
+                // through the identical mark-then-resolve-then-substitute
+                // pipeline `ty` above already uses for the same reason
+                // (a generic class/function's own `@template` name, or a
+                // local `@phpstan-type` alias, can appear here too).
+                let closure_this_type = doc
+                    .as_ref()
+                    .and_then(|d| d.param_closure_this.get(&p.name))
+                    .map(|raw| {
+                        let ty = types::parse_type_string(raw);
+                        let ty = mark_template_params(ty, &template_params);
+                        let ty = resolve_names_in_type(ty, ctx);
+                        substitute_type_aliases(ty, class_type_aliases)
+                    });
                 ParamSig {
                     name: p.name.clone(),
                     ty,
@@ -430,6 +461,7 @@ impl FunctionSig {
                         p.type_hint.as_deref(),
                         doc_ty.as_deref(),
                     ),
+                    closure_this_type,
                 }
             })
             .collect();
@@ -452,6 +484,7 @@ impl FunctionSig {
         let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
+        let is_api = doc.as_ref().is_some_and(|d| d.api);
         let deprecated = doc.as_ref().and_then(|d| d.deprecated.clone());
 
         let throws =
@@ -492,6 +525,7 @@ impl FunctionSig {
             no_discard,
             visibility,
             is_internal,
+            is_api,
             has_override_attr,
             deprecated,
             throws,
@@ -561,6 +595,10 @@ impl FunctionSig {
                     // Same permissive either-overload-wins rule as
                     // `has_own_doc` just above, for the identical reason.
                     explicit_mixed_hint: a.explicit_mixed_hint || b.explicit_mixed_hint,
+                    // Later declaration wins on conflict, matching `name`
+                    // above - falls back to the earlier one when only it
+                    // declared the tag.
+                    closure_this_type: b.closure_this_type.or(a.closure_this_type),
                 },
                 // A position present in only one real overload can't be
                 // required in the merged callable either.
@@ -590,6 +628,9 @@ impl FunctionSig {
             // Same permissive "either overload's own marker wins" as
             // `no_discard` just above.
             is_internal: self.is_internal || other.is_internal,
+            // Same permissive "either overload's own marker wins" as
+            // `no_discard`/`is_internal` above.
+            is_api: self.is_api || other.is_api,
             has_override_attr,
             // Same permissive "either overload's own marker wins" as
             // `no_discard`/`is_internal` above.

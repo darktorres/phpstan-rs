@@ -631,3 +631,225 @@ fn a_non_promoted_parameter_rejects_a_property_only_attribute() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_global_const_attribute_naming_an_unknown_class_is_flagged_not_found() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            #[NoSuchAttr]
+            const X = 1;
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_global_const_attribute_with_wrong_target_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_CLASS)]
+            class OnlyClass {}
+
+            #[OnlyClass]
+            const X = 1;
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"
+            && x.message == "Attribute class OnlyClass does not have the constant target."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_global_const_attribute_with_constant_target_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_CONSTANT)]
+            class MyAttr {}
+
+            #[MyAttr]
+            const X = 1;
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "attribute.target" || x.identifier == "attribute.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn attributes_on_global_constants_below_php_8_5_are_flagged_unsupported() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            #[NoSuchAttr]
+            const X = 1;
+        "#,
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "constant.attributesNotSupported"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "attribute.notFound" || x.identifier == "attribute.target"),
+        "expected the early return to skip the rest, got: {d:?}"
+    );
+}
+
+#[test]
+fn attributes_on_global_constants_on_php_8_5_or_later_are_never_flagged_for_version_support() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_CONSTANT)]
+            class MyAttr {}
+
+            #[MyAttr]
+            const X = 1;
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "constant.attributesNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_global_const_with_no_configured_php_version_is_never_flagged_for_version_support() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[NoSuchAttr]
+            const X = 1;
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "constant.attributesNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.notFound"),
+        "expected the existence check to still run, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_multi_const_statement_with_a_shared_attribute_reports_the_finding_only_once() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            #[NoSuchAttr]
+            const A = 1, B = 2;
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    let count = d
+        .iter()
+        .filter(|x| x.identifier == "attribute.notFound")
+        .count();
+    assert_eq!(count, 1, "got: {d:?}");
+}
+
+#[test]
+fn an_attribute_on_a_get_hook_with_wrong_target_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            #[\Attribute(\Attribute::TARGET_CLASS)]
+            class OnlyClass {}
+
+            class C {
+                public int $x {
+                    #[OnlyClass]
+                    get => 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"
+            && x.message == "Attribute class OnlyClass does not have the method target."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_on_a_set_hook_naming_an_unknown_class_is_flagged_not_found() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                public int $x {
+                    #[NoSuchAttr]
+                    set(int $v) { $this->x = $v; }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_attribute_on_a_property_hook_with_matching_target_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                public int $x {
+                    #[Override]
+                    get => 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "attribute.target"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_nodiscard_attribute_on_a_property_hook_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                public int $x {
+                    #[\NoDiscard]
+                    get => 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "attribute.target"
+            && x.message == "Attribute class NoDiscard cannot be used on property hooks."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_nodiscard_attribute_on_an_ordinary_method_is_never_flagged_via_the_hook_special_case() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                #[\NoDiscard]
+                function f(): int { return 1; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.message.contains("cannot be used on property hooks")),
+        "unexpected diagnostics: {d:?}"
+    );
+}

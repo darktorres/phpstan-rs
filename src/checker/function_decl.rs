@@ -31,12 +31,15 @@ impl<'a> Checker<'a> {
         } else {
             hosts
         };
+        let previous_trait = self.current_trait.take();
+        self.current_trait = Some(fqn.to_string());
         let start = self.diagnostics.len();
         for host in contexts {
             for m in &c.methods {
-                self.check_function(&m.function, Some(&host), m.is_static);
+                self.check_function(&m.function, Some(&host), m.is_static, !m.is_abstract);
             }
         }
+        self.current_trait = previous_trait;
         // A trait used by 2+ classes gets checked 2+ times - a
         // genuinely host-independent bug in the trait's own body (no
         // `$this->...` involved at all) would otherwise be reported
@@ -142,8 +145,9 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         class_name: Option<&str>,
         is_static: bool,
+        is_concrete: bool,
     ) {
-        self.check_function_with_ancestor_hint(f, class_name, is_static, None);
+        self.check_function_with_ancestor_hint(f, class_name, is_static, is_concrete, None);
     }
 
     /// `check_function`'s real body - `ancestor_sig_hint` (Phase 90) is
@@ -170,6 +174,7 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         class_name: Option<&str>,
         is_static: bool,
+        is_concrete: bool,
         ancestor_sig_hint: Option<&FunctionSig>,
     ) {
         let sig = self.lookup_own_signature(f, class_name);
@@ -191,6 +196,7 @@ impl<'a> Checker<'a> {
             self.check_unknown_phpstan_tags_on(&label, f.doc_comment.as_deref(), f.name_span);
         }
         self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
+        self.check_declared_param_callable_tags(f, &label);
 
         // Phase 58: `(name, resolved type, AST span)` per parameter,
         // collected below in lockstep with `locals`'s own per-branch
@@ -596,6 +602,23 @@ impl<'a> Checker<'a> {
         self.current_class = class_name.map(|s| s.to_string());
         let previous_method = self.current_method.take();
         self.current_method = Some(f.name.clone());
+        // Phase 39.2: real PHPStan's own `DeprecatedScopeHelper` -
+        // suppresses every deprecated-usage diagnostic from within a
+        // deprecated function/method, class, or trait's own body.
+        let previous_scope_deprecated = self.current_scope_deprecated;
+        self.current_scope_deprecated = sig.is_some_and(|s| s.deprecated.is_some())
+            || self.current_class.as_deref().is_some_and(|c| {
+                self.registry
+                    .classes
+                    .get(c)
+                    .is_some_and(|i| i.deprecated.is_some())
+            })
+            || self.current_trait.as_deref().is_some_and(|t| {
+                self.registry
+                    .classes
+                    .get(t)
+                    .is_some_and(|i| i.deprecated.is_some())
+            });
 
         let diagnostics_before = self.diagnostics.len();
         let previous_dynamic_flag = self.saw_dynamic_var_construct;
@@ -634,7 +657,7 @@ impl<'a> Checker<'a> {
         // uses for a nested `{ ... }` - `f.body` just isn't itself one
         // `Stmt`, so it needs the same check spelled out here directly.
         if let Some(expected) = &declared_return
-            && !f.body.is_empty()
+            && (!f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete))
             && !f.body.iter().any(|s| self.always_terminates(s, &locals))
             && !self.current_function_is_generator
         {
@@ -688,5 +711,6 @@ impl<'a> Checker<'a> {
 
         self.current_class = previous_class;
         self.current_method = previous_method;
+        self.current_scope_deprecated = previous_scope_deprecated;
     }
 }

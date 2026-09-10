@@ -203,8 +203,13 @@ pub(crate) fn class_kind_identifier(kind: &ClassKind) -> &'static str {
 /// second, independent bug to also report - conservative, matching this
 /// project's own "don't guess, don't double up" precedent elsewhere.
 fn method_signatures_differ(a: &MethodDecl, b: &MethodDecl) -> bool {
-    let af = &a.function;
-    let bf = &b.function;
+    function_decl_signatures_differ(&a.function, &b.function)
+}
+
+/// `pub(crate)`: also reused by `checker::duplicate_functions` for the
+/// identical top-level-function shape of this same "is this a real bug or
+/// a version-gated split" question.
+pub(crate) fn function_decl_signatures_differ(af: &FunctionDecl, bf: &FunctionDecl) -> bool {
     if af.params.len() != bf.params.len() {
         return true;
     }

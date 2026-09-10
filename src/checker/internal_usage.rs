@@ -344,4 +344,113 @@ impl<'a> Checker<'a> {
             &format!("{identifier_prefix}.internal{type_word}"),
         );
     }
+
+    /// Phase 67 sub-item A: `RestrictedInternalClassNameUsageExtension`'s
+    /// `extends`/`implements`/trait-use half - the whole engine's own
+    /// ROADMAP-named "still open" gap, narrower in one direction
+    /// (first-class-callables already covered, see `checker/expr.rs`'s
+    /// `ExprKind::FirstClassCallable` arm) and wider in another
+    /// (`use SomeTrait;` is covered by the identical real-PHPStan
+    /// mechanism - `ExistingClassInTraitUseRule` feeding the same shared
+    /// `ClassNameCheck` - but wasn't named in the roadmap text at all).
+    /// Mirrors `check_class_references_exist`'s own shape exactly: same
+    /// already-resolved `ClassInfo::extends`/`implements`/`uses` fields,
+    /// same whole-class-declaration span, same two call sites
+    /// (`check_class_references_exist` doesn't run for a nested/
+    /// conditionally-declared class either, so neither does this).
+    pub(crate) fn check_internal_inheritance(&mut self, fqn: &str, kind: ClassKind, span: Span) {
+        if !self.registry.check_internal_usage {
+            return;
+        }
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        let (extends, implements, uses) = (
+            info.extends.clone(),
+            info.implements.clone(),
+            info.uses.clone(),
+        );
+        let subject = class_type_word(kind);
+        let extends_prefix = if kind == ClassKind::Interface {
+            "interface.extends"
+        } else {
+            "class.extends"
+        };
+        for parent in &extends {
+            self.report_internal_extends_or_implements(
+                fqn,
+                subject,
+                parent,
+                "extends",
+                extends_prefix,
+                span,
+            );
+        }
+        let implements_prefix = if kind == ClassKind::Enum {
+            "enum.implements"
+        } else {
+            "class.implements"
+        };
+        for iface in &implements {
+            self.report_internal_extends_or_implements(
+                fqn,
+                subject,
+                iface,
+                "implements",
+                implements_prefix,
+                span,
+            );
+        }
+        for used_trait in &uses {
+            self.report_internal_trait_use(fqn, used_trait, span);
+        }
+    }
+
+    fn report_internal_extends_or_implements(
+        &mut self,
+        fqn: &str,
+        subject: &str,
+        target: &str,
+        verb: &str,
+        id_prefix: &str,
+        span: Span,
+    ) {
+        let Some(info) = self.registry.classes.get(target) else {
+            return;
+        };
+        if !info.is_internal || !self.should_report_internal_usage(target) {
+            return;
+        }
+        let type_word = class_type_word(info.kind);
+        self.report(
+            fqn.to_string(),
+            format!(
+                "{subject} {fqn} {verb} internal {} {target}.",
+                type_word.to_lowercase()
+            ),
+            span,
+            0,
+            &format!("{id_prefix}Internal{type_word}"),
+        );
+    }
+
+    fn report_internal_trait_use(&mut self, fqn: &str, target: &str, span: Span) {
+        let Some(info) = self.registry.classes.get(target) else {
+            return;
+        };
+        if !info.is_internal || !self.should_report_internal_usage(target) {
+            return;
+        }
+        let type_word = class_type_word(info.kind);
+        self.report(
+            fqn.to_string(),
+            format!(
+                "Usage of internal {} {target} in class {fqn}.",
+                type_word.to_lowercase()
+            ),
+            span,
+            0,
+            &format!("traitUse.internal{type_word}"),
+        );
+    }
 }

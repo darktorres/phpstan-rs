@@ -482,6 +482,30 @@ impl<'a> Checker<'a> {
                         // Same as the `array_map` arm just above, for
                         // one of the other four contextually-checked
                         // functions.
+                    } else if let Some(this_ty) = sig
+                        .and_then(|s| s.params.get(i))
+                        .and_then(|p| p.closure_this_type.clone())
+                        && matches!(
+                            unwrap_grouping(&a.value).kind,
+                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                        )
+                    {
+                        // Phase 36: `@param-closure-this` - a Closure/
+                        // arrow-fn literal argument at this parameter's
+                        // position gets `$this` seeded to the tag's own
+                        // declared type, the same mechanism `Closure::
+                        // bind`/`->bindTo()` already use. Only fires for a
+                        // literal (matching real PHPStan's own
+                        // `resolveClosureThisType` restriction) - a
+                        // closure passed by variable falls through to the
+                        // plain `check_expr` below, unchanged.
+                        self.check_closure_literal_with_this_and_scope(
+                            unwrap_grouping(&a.value),
+                            locals,
+                            label,
+                            this_ty,
+                            None,
+                        );
                     } else {
                         self.check_expr(&a.value, locals, label);
                     }
@@ -555,6 +579,23 @@ impl<'a> Checker<'a> {
                             .eq_ignore_ascii_case("random_int")
                         {
                             self.check_random_int_call(args, locals, label);
+                        }
+                        if name
+                            .rsplit('\\')
+                            .next()
+                            .unwrap_or(name)
+                            .eq_ignore_ascii_case("filter_var")
+                            && args.len() >= 3
+                        {
+                            self.check_filter_var_flag_conflict(args, e.span, label);
+                        }
+                        {
+                            let bare = name.rsplit('\\').next().unwrap_or(name);
+                            if bare.eq_ignore_ascii_case("sscanf")
+                                || bare.eq_ignore_ascii_case("fscanf")
+                            {
+                                self.check_scanf_argument_count(bare, args, label, e.span);
+                            }
                         }
                         if !is_bare_statement {
                             self.check_useless_return_value_call(name, args, locals, e.span, label);
@@ -847,8 +888,29 @@ impl<'a> Checker<'a> {
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
                 self.predefine_byref_or_unknown_args(None, sig.as_ref(), args, &resolved, locals);
-                for a in args {
-                    self.check_expr(&a.value, locals, label);
+                for (i, a) in args.iter().enumerate() {
+                    let closure_this = sig
+                        .as_ref()
+                        .and_then(|s| s.params.get(i))
+                        .and_then(|p| p.closure_this_type.clone());
+                    if let Some(this_ty) = closure_this
+                        && matches!(
+                            unwrap_grouping(&a.value).kind,
+                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                        )
+                    {
+                        // Phase 36: `@param-closure-this` - see
+                        // `ExprKind::Call`'s own identical branch.
+                        self.check_closure_literal_with_this_and_scope(
+                            unwrap_grouping(&a.value),
+                            locals,
+                            label,
+                            this_ty,
+                            None,
+                        );
+                    } else {
+                        self.check_expr(&a.value, locals, label);
+                    }
                 }
                 if let Some((class, _)) = &recv_class {
                     // Checked *before* falling back to whether the
@@ -1549,8 +1611,28 @@ impl<'a> Checker<'a> {
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
                 self.predefine_byref_or_unknown_args(None, ctor_sig, args, &resolved, locals);
-                for a in args {
-                    self.check_expr(&a.value, locals, label);
+                for (i, a) in args.iter().enumerate() {
+                    let closure_this = ctor_sig
+                        .and_then(|s| s.params.get(i))
+                        .and_then(|p| p.closure_this_type.clone());
+                    if let Some(this_ty) = closure_this
+                        && matches!(
+                            unwrap_grouping(&a.value).kind,
+                            ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                        )
+                    {
+                        // Phase 36: `@param-closure-this` - see
+                        // `ExprKind::Call`'s own identical branch.
+                        self.check_closure_literal_with_this_and_scope(
+                            unwrap_grouping(&a.value),
+                            locals,
+                            label,
+                            this_ty,
+                            None,
+                        );
+                    } else {
+                        self.check_expr(&a.value, locals, label);
+                    }
                 }
                 if let Some(class) = &resolved_class {
                     // `resolved_class` is already the fully-qualified name
@@ -1662,6 +1744,7 @@ impl<'a> Checker<'a> {
                         &m.function,
                         Some(&decl.name),
                         m.is_static,
+                        true,
                         ancestor_sig,
                     );
                 }
@@ -1743,8 +1826,28 @@ impl<'a> Checker<'a> {
                         self.check_expr(&a.value, locals, label);
                     }
                 } else {
-                    for a in args {
-                        self.check_expr(&a.value, locals, label);
+                    for (i, a) in args.iter().enumerate() {
+                        let closure_this = sig
+                            .and_then(|s| s.params.get(i))
+                            .and_then(|p| p.closure_this_type.clone());
+                        if let Some(this_ty) = closure_this
+                            && matches!(
+                                unwrap_grouping(&a.value).kind,
+                                ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
+                            )
+                        {
+                            // Phase 36: `@param-closure-this` - see
+                            // `ExprKind::Call`'s own identical branch.
+                            self.check_closure_literal_with_this_and_scope(
+                                unwrap_grouping(&a.value),
+                                locals,
+                                label,
+                                this_ty,
+                                None,
+                            );
+                        } else {
+                            self.check_expr(&a.value, locals, label);
+                        }
                     }
                 }
                 if let Some(class) = &resolved_class {
@@ -2346,9 +2449,22 @@ impl<'a> Checker<'a> {
                     if !u.by_ref {
                         continue;
                     }
-                    let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     let mutated = closure_locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
-                    locals.insert(u.name.clone(), union_types(original, mutated));
+                    if !locals.contains_key(&u.name) {
+                        // Phase 17: real PHP auto-vivifies `$x` in the
+                        // outer/declaring scope the moment `use (&$x)`
+                        // captures an as-yet-undefined variable - the same
+                        // by-ref-argument auto-vivification this project
+                        // already models in
+                        // `predefine_byref_or_unknown_args`, now given a
+                        // real, navigable declaration site instead of
+                        // silently gaining a value with no provenance at
+                        // all.
+                        locals.declare(u.name.clone(), mutated, u.span);
+                    } else {
+                        let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                        locals.insert(u.name.clone(), union_types(original, mutated));
+                    }
                 }
                 Type::Object("Closure".to_string(), Vec::new())
             }

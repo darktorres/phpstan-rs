@@ -497,6 +497,24 @@ pub struct Checker<'a> {
     // 47's pragmatic first cut: any write outside that exact spot is
     // flagged).
     pub(crate) current_method: Option<String>,
+    // Phase 39.2: the trait whose method bodies are currently being
+    // checked, if any - `check_trait_methods` re-checks a trait's own
+    // methods once per using host, with `current_class` set to the
+    // *host* (see that function's own doc comment), so a trait's own
+    // `@deprecated` tag is otherwise unreachable through `current_class`
+    // in the common (used) case. Set/restored around `check_trait_
+    // methods`'s own host loop, independent of `current_class`.
+    pub(crate) current_trait: Option<String>,
+    // Phase 39.2: whether the function/method/trait/class body currently
+    // being checked is itself inside a deprecated scope (its own
+    // enclosing function/method, class, or trait carries `@deprecated`) -
+    // real PHPStan's own `DeprecatedScopeHelper` suppresses every
+    // deprecated-usage diagnostic entirely from within such a scope
+    // (using one deprecated thing from another is not itself worth
+    // warning about). Computed once per function-like body in
+    // `check_function_with_ancestor_hint`, the single choke point where
+    // `current_class`/`current_method` are also set.
+    pub(crate) current_scope_deprecated: bool,
     // Set for the duration of one function/method (or the top-level script)
     // body when it calls extract()/eval() - both can define variables this
     // checker has no way to see, so undefined-variable detection would be
@@ -716,6 +734,7 @@ mod coercion;
 mod control_flow;
 mod date_interval;
 mod deprecated_usage;
+pub(crate) mod duplicate_functions;
 mod duplicates;
 mod expr;
 mod function_decl;
@@ -781,6 +800,8 @@ impl<'a> Checker<'a> {
             name_ctx: NameContext::default(),
             current_class: None,
             current_method: None,
+            current_trait: None,
+            current_scope_deprecated: false,
             saw_dynamic_var_construct: false,
             current_function_is_generator: false,
             current_function_goto_targets: std::collections::HashSet::new(),
@@ -972,7 +993,7 @@ impl<'a> Checker<'a> {
             match &stmt.kind {
                 StmtKind::Namespace(name) => self.name_ctx.set_namespace(name),
                 StmtKind::Use(imports) => self.name_ctx.add_uses(imports),
-                StmtKind::FunctionDecl(f) => self.check_function(f, None, false),
+                StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
                 StmtKind::ClassDecl(c) => {
                     // `current_class` must be the fully-qualified name -
                     // it's looked up directly against
@@ -985,6 +1006,10 @@ impl<'a> Checker<'a> {
                     self.check_class_completeness(&fqn, c.span);
                     self.check_final_class_extension(&fqn, c.span);
                     self.check_class_references_exist(&fqn, c.span);
+                    self.check_internal_inheritance(&fqn, c.kind, c.span);
+                    self.check_method_tag_types(&fqn, c.span);
+                    self.check_mixin_types(&fqn, c.span);
+                    self.check_type_alias_types(&fqn, c.span);
                     self.check_method_overrides(&fqn, c);
                     self.check_property_overrides(&fqn, c);
                     self.check_require_tags(&fqn, c.span);
@@ -1045,7 +1070,12 @@ impl<'a> Checker<'a> {
                         self.check_trait_methods(&fqn, c);
                     } else {
                         for m in &c.methods {
-                            self.check_function(&m.function, Some(&fqn), m.is_static);
+                            self.check_function(
+                                &m.function,
+                                Some(&fqn),
+                                m.is_static,
+                                !m.is_abstract && c.kind != ClassKind::Interface,
+                            );
                         }
                         // Phase 59: a class's own private consts/methods/
                         // properties, checked once per class (not per
@@ -1066,6 +1096,7 @@ impl<'a> Checker<'a> {
                     let fqn = self.name_ctx.declared_name(&e.name);
                     self.check_class_completeness(&fqn, e.span);
                     self.check_class_references_exist(&fqn, e.span);
+                    self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
                     self.check_ancestor_generic_bounds(&fqn, e.span);
                     self.check_enum_template_tag(&fqn, e);
                     self.check_enum_case_values(&fqn, e);
@@ -1102,7 +1133,7 @@ impl<'a> Checker<'a> {
                     // missing-typehint candidate as a class's.
                     self.check_missing_class_constant_typehints(&fqn, &e.consts);
                     for m in &e.methods {
-                        self.check_function(&m.function, Some(&fqn), m.is_static);
+                        self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
                     }
                     // An enum can't declare instance properties at all
                     // (see `ast::EnumDecl`'s own doc comment) - only its

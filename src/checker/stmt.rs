@@ -437,7 +437,7 @@ impl<'a> Checker<'a> {
             // indexed into the registry (so calls to it resolve), but
             // silently exempt from every diagnostic, undefined-variable
             // detection included. Mirrors check_program's handling.
-            StmtKind::FunctionDecl(f) => self.check_function(f, None, false),
+            StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 self.check_attributes(&c.attrs, &fqn);
@@ -483,7 +483,12 @@ impl<'a> Checker<'a> {
                     self.check_trait_methods(&fqn, c);
                 } else {
                     for m in &c.methods {
-                        self.check_function(&m.function, Some(&fqn), m.is_static);
+                        self.check_function(
+                            &m.function,
+                            Some(&fqn),
+                            m.is_static,
+                            !m.is_abstract && c.kind != ClassKind::Interface,
+                        );
                     }
                 }
             }
@@ -510,7 +515,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 for m in &e.methods {
-                    self.check_function(&m.function, Some(&fqn), m.is_static);
+                    self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
                 }
             }
             // Phase 29: a bare `break;` (`None`, level 1) or an explicit
@@ -536,6 +541,16 @@ impl<'a> Checker<'a> {
                 if let Some(idx) = self.loop_continue_states.len().checked_sub(depth) {
                     self.loop_continue_states[idx].push(locals.clone());
                 }
+            }
+            // Phase 37: `ConstantAttributesRule` - a top-level (or nested,
+            // conditionally-declared) `const` statement's own `#[Attr]`
+            // group(s). Covers both the top-level program walk (which
+            // already falls through to this same `check_stmt` catch-all
+            // for anything it doesn't special-case) and any nested
+            // occurrence - `GlobalConst` needs no class/FQN context the
+            // way `ClassDecl`/`EnumDecl` do, so one arm here is enough.
+            StmtKind::GlobalConst(consts) => {
+                self.check_global_const_attributes(consts, stmt.span, label);
             }
             _ => {}
         }

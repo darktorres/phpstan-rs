@@ -5,11 +5,11 @@ use crate::checker::{
     narrow_type_excluding_falsy, narrow_type_to, resolve_call_args, to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
+use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
 
 use super::{
-    int_range_bounds, is_canonical_int_key, is_false_literal, is_non_falsy_string, is_true_literal,
-    normalize_int_range,
+    int_range_bounds, is_false_literal, is_non_falsy_string, is_true_literal, normalize_int_range,
 };
 
 impl<'a> Checker<'a> {
@@ -925,18 +925,23 @@ impl<'a> Checker<'a> {
             // array_values() already gets above.
             "array_keys" if args.len() == 1 => {
                 let arg_ty = self.infer_expr(&args[0].value, locals);
-                if let Type::ArrayShape(fields) = &arg_ty {
-                    let key_ty = fields
-                        .iter()
-                        .map(|(k, _, _)| {
-                            if is_canonical_int_key(k) {
-                                Type::Int
-                            } else {
-                                Type::String
-                            }
-                        })
-                        .reduce(union_types)
-                        .unwrap_or(Type::String);
+                // Phase 50 follow-up: `array_key_type` now handles
+                // `ArrayShape` directly (a real union of each field's own
+                // key kind) - reused here for a *literal-shaped* argument
+                // only, not for a plain, non-shape `Type::Array`'s own key
+                // type. Real corpus false positive from trusting the
+                // latter too: this project's dynamic-key-write widening
+                // (`checker/assignment.rs`, a `$arr[$dynamicKey] = $v;`
+                // loop body) doesn't track the real key expression's own
+                // type precisely, so a plain `Type::Array`'s key type can
+                // already be a too-wide `unknown_array_key()` even when
+                // every real key written is always an `int` - the same
+                // disclosed, general gap the Phase 68 investigation found
+                // (not fixed here, out of scope). Only an `ArrayShape`'s
+                // own key type is trustworthy enough to propagate.
+                if is_or_wraps_array_shape(&arg_ty)
+                    && let Some(key_ty) = Self::array_key_type(&arg_ty)
+                {
                     return Type::Intersection(vec![
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(key_ty)),
                         Type::Accessory(AccessoryKind::ArrayList),
@@ -944,14 +949,10 @@ impl<'a> Checker<'a> {
                 }
                 // The native stub's own `@return int[]|string[]` is real
                 // but useless without this project's own key-type
-                // tracking (`Type::Array` has no key-type parameter at
-                // all, a known limitation) - falling through to it
-                // verbatim surfaced `int|string` for every reader of the
-                // result, a real regression once `array_element_type`
-                // gained its own `Union` arm (below) and started actually
-                // resolving it instead of silently giving up at `Mixed`.
-                // Matches this project's own usual "don't know, don't
-                // guess beyond Mixed" default for an unprovable key type.
+                // tracking - falling through to it verbatim surfaced
+                // `int|string` for every reader of the result. Matches
+                // this project's own usual "don't know, don't guess
+                // beyond Mixed" default for an unprovable key type.
                 if Self::is_array_like(&arg_ty) {
                     return Type::Intersection(vec![
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
@@ -1562,10 +1563,96 @@ impl<'a> Checker<'a> {
         }
         union_types(result_ty, empty_marker)
     }
+
+    /// Phase 69: `PrintfParametersRule`'s own by-ref-output-variable-count
+    /// half, ported for `sscanf`/`fscanf`'s 3+-arg form (`sscanf($s, $fmt,
+    /// &$a, &$b, ...)`) - distinct from the already-shipped 2-arg
+    /// return-array form (`sscanf_result_fields`, used by
+    /// `infer_builtin_call_return_type`), which this deliberately never
+    /// touches (`args.len() >= 3` here vs. `== 2` there). Reuses
+    /// `parse_sscanf_format` (already hand-ported from real PHPStan's own
+    /// `SscanfFunctionDynamicReturnTypeExtension` regex for the 2-arg
+    /// form) as a faithful placeholder-count source, rather than
+    /// reimplementing real PHPStan's own live-`sscanf()`-shell-out
+    /// counting technique this project has no PHP runtime for.
+    pub(crate) fn check_scanf_argument_count(
+        &mut self,
+        name: &str,
+        args: &[Arg],
+        label: &str,
+        span: Span,
+    ) {
+        if args.len() < 3 || args.iter().any(|a| a.spread) {
+            return;
+        }
+        let Some(fmt) = literal_string_value(&args[1].value) else {
+            return;
+        };
+        let Some(specs) = parse_sscanf_format(&fmt) else {
+            return;
+        };
+        let given = args.len() - 2;
+        if specs.len() != given {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Call to {name}() contains {} placeholder(s), {given} value(s) given.",
+                    specs.len()
+                ),
+                span,
+                0,
+                &format!("argument.{}", name.to_ascii_lowercase()),
+            );
+        }
+    }
+
+    /// Phase 71: `FilterVarRule`'s own `filterVar.nullOnFailureAndThrowOnFailure`
+    /// check - `FILTER_NULL_ON_FAILURE` and `FILTER_THROW_ON_FAILURE`
+    /// (PHP 8.5+) are mutually exclusive `filter_var()`/`filter_input()`
+    /// flags; real PHP itself doesn't error, but the combination is
+    /// nonsensical (the failure can't simultaneously become `null` and
+    /// throw), so real PHPStan flags it unconditionally. Gated on a
+    /// configured `php_version` the same way `check_declared_purity_tag`'s
+    /// sibling version-gated checks already are - with no version
+    /// configured, this stays silent rather than assume PHP 8.5 is
+    /// intended.
+    pub(crate) fn check_filter_var_flag_conflict(&mut self, args: &[Arg], span: Span, label: &str) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if !crate::php_version::PhpFeature::FilterThrowOnFailureConstant.is_available(version) {
+            return;
+        }
+        let Some(flags_arg) = args.get(2) else {
+            return;
+        };
+        if contains_flag_name_with_options(&flags_arg.value, "FILTER_NULL_ON_FAILURE")
+            && contains_flag_name_with_options(&flags_arg.value, "FILTER_THROW_ON_FAILURE")
+        {
+            self.report(
+                label.to_string(),
+                "Cannot use both FILTER_NULL_ON_FAILURE and FILTER_THROW_ON_FAILURE.".to_string(),
+                span,
+                0,
+                "filterVar.nullOnFailureAndThrowOnFailure",
+            );
+        }
+    }
 }
 
 fn is_var_named(e: &Expr, name: &str) -> bool {
     matches!(&e.kind, ExprKind::Variable(n) if n == name)
+}
+
+/// Whether `ty` is a literal `Type::ArrayShape`, or an `Intersection`
+/// wrapping one (the accessory-marker-plus-shape combination `array_ops.rs`'s
+/// own `infer_array_literal_type` produces) - `array_keys()`'s own key-type
+/// propagation trusts `array_key_type`'s result only for this shape, not
+/// for a plain `Type::Array` (see that call site's own doc comment for
+/// why).
+fn is_or_wraps_array_shape(ty: &Type) -> bool {
+    matches!(ty, Type::ArrayShape(_))
+        || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::ArrayShape(_))))
 }
 
 fn is_null_literal(e: &Expr) -> bool {
@@ -1720,6 +1807,33 @@ fn contains_flag_name(e: &Expr, target: &str) -> bool {
         ExprKind::Grouping(inner) => contains_flag_name(inner, target),
         _ => false,
     }
+}
+
+/// `contains_flag_name`, additionally looking inside an options-array
+/// literal's own `'flags'` key (`filter_var($x, F, ['flags' => FILTER_X,
+/// 'options' => [...]])`) - the canonical spelling real PHPStan's own
+/// PHP 8.5 test fixture uses for `FILTER_THROW_ON_FAILURE`. Used by
+/// `check_filter_var_flag_conflict`; deliberately not folded into
+/// `contains_flag_name` itself, which stays a narrow bitwise-or-chain
+/// scan for its own, unrelated call sites (min/max_range and friends
+/// never appear inside a `BitOr` chain the way a flag constant does).
+fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
+    if contains_flag_name(e, target) {
+        return true;
+    }
+    if let ExprKind::ArrayLiteral(items) = &e.kind {
+        for item in items {
+            if item
+                .key
+                .as_ref()
+                .is_some_and(|k| literal_string_value(k).as_deref() == Some("flags"))
+                && contains_flag_name_with_options(&item.value, target)
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// `array_filter`'s own `instanceof`-filter callback (recognized by
@@ -2266,7 +2380,7 @@ fn parse_url_component_type(name: &str) -> Option<Type> {
     })
 }
 
-/// One `sscanf()` conversion specifier - either a single `[cdeEfosux]`
+/// One `sscanf()` conversion specifier - either a single `[cdeEfiosux]`
 /// character, or a `[...]` bracket character-class (real `sscanf()`
 /// treats every bracket class the same as `%s` for typing purposes: it
 /// always captures a substring, never a number).
@@ -2358,6 +2472,17 @@ fn sprintf_literal_remainder(fmt: &str) -> Option<String> {
 /// stays unchanged) - an unterminated `%[...` bracket at the very end of
 /// the string stops the scan there (matching the regex's own behavior:
 /// it simply doesn't match past the point it can't close the bracket).
+/// Recognizes one specifier real PHPStan's own regex above doesn't -
+/// `%i` (base-auto-detected integer, confirmed live via `php -r` to be a
+/// real, working sscanf specifier real PHPStan's own regex simply
+/// misses) - a real corpus false positive otherwise for `check_scanf_
+/// argument_count` (Phase 69), which - unlike this function's other,
+/// pre-existing caller, the 2-arg return-shape inference, where an
+/// under-counted specifier only ever *loses precision* - treats
+/// `specs.len()` as an authoritative count compared exactly against the
+/// number of by-ref arguments given, so silently skipping a real `%i`
+/// specifier there produced an active, wrong "count mismatch" report,
+/// not just an imprecise shape.
 fn parse_sscanf_format(format: &str) -> Option<Vec<(Option<u32>, SscanfSpecifier)>> {
     let chars: Vec<char> = format.chars().collect();
     let mut i = 0;
@@ -2395,7 +2520,7 @@ fn parse_sscanf_format(format: &str) -> Option<Vec<(Option<u32>, SscanfSpecifier
             }
             specs.push((length, SscanfSpecifier::Bracket));
             i = j + 1;
-        } else if "cdeEfosux".contains(chars[i]) {
+        } else if "cdeEfiosux".contains(chars[i]) {
             specs.push((length, SscanfSpecifier::Char(chars[i])));
             i += 1;
         }
@@ -2413,7 +2538,7 @@ fn parse_sscanf_format(format: &str) -> Option<Vec<(Option<u32>, SscanfSpecifier
 /// own `TypeCombinator::addNull` on each field.
 fn sscanf_field_type(length: Option<u32>, specifier: &SscanfSpecifier) -> Type {
     let base = match specifier {
-        SscanfSpecifier::Char('d' | 'o' | 'u' | 'x') => Type::Int,
+        SscanfSpecifier::Char('d' | 'o' | 'u' | 'x' | 'i') => Type::Int,
         SscanfSpecifier::Char('e' | 'E' | 'f') => Type::Float,
         SscanfSpecifier::Char(_) | SscanfSpecifier::Bracket => match length {
             Some(n) if n > 1 => Type::Intersection(vec![

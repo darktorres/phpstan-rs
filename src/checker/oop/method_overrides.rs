@@ -85,9 +85,15 @@ impl<'a> Checker<'a> {
         let Some(own_sig) = info.methods.get(method_name) else {
             return;
         };
+        // Phase 64 Item 4: real PHPStan's own `MethodPrototypeFinder`
+        // priority order (immediately-implemented interface, then a used
+        // trait's own abstract declaration, then the plain `extends`
+        // chain) - not the old, wrong `extends`-before-`implements` order
+        // `lookup_ancestor_method_with_owner` still uses for its other,
+        // non-override-compatibility callers.
         let ancestor = self
             .registry
-            .lookup_ancestor_method_with_owner(fqn, method_name);
+            .find_method_signature_prototype(fqn, method_name);
         // Phase 64 follow-up: the unconditional-fatal-error half of PHP
         // 8.3's `#[\Override]` attribute (confirmed directly via
         // `php -r`: `Child::foo() has #[\Override] attribute, but no
@@ -126,7 +132,7 @@ impl<'a> Checker<'a> {
         // the same way elsewhere in this project.
         let has_real_ancestor = ancestor
             .as_ref()
-            .is_some_and(|(_, sig)| sig.visibility != Visibility::Private)
+            .is_some_and(|(_, sig, _)| sig.visibility != Visibility::Private)
             || self
                 .registry
                 .trait_declares_abstract_method(fqn, method_name);
@@ -160,11 +166,13 @@ impl<'a> Checker<'a> {
         // ancestor than `ancestor` above (which the `#[\Override]` check
         // needs to keep using regardless of any tag).
         let compatibility_ancestor = if method_name == "__construct" {
-            self.registry.find_consistent_constructor_ancestor(fqn)
+            self.registry
+                .find_consistent_constructor_ancestor(fqn)
+                .map(|(owner, sig)| (owner, sig, true))
         } else {
             ancestor
         };
-        let Some((ancestor_owner, ancestor_sig)) = compatibility_ancestor else {
+        let Some((ancestor_owner, ancestor_sig, check_visibility)) = compatibility_ancestor else {
             return;
         };
         // A `private` ancestor method isn't a real override target at
@@ -187,12 +195,18 @@ impl<'a> Checker<'a> {
         // `MethodVisibilityComparisonHelper` exactly (same identifier,
         // same two-way split: an ancestor's `public` demands `public`;
         // an ancestor's `protected` only forbids narrowing all the way
-        // to `private`).
-        let narrows_visibility = match ancestor_sig.visibility {
-            Visibility::Public => *own_visibility != Visibility::Public,
-            Visibility::Protected => *own_visibility == Visibility::Private,
-            Visibility::Private => false,
-        };
+        // to `private`). Skipped entirely when `!check_visibility`
+        // (Phase 64 Item 4 follow-up: a trait-abstract-sourced prototype
+        // only, per real `MethodPrototypeFinder::findPrototype`'s own
+        // third tuple element) - confirmed live that real PHP itself
+        // doesn't enforce this for a trait's own `abstract` declaration
+        // the way it does for an interface/`extends` ancestor.
+        let narrows_visibility = check_visibility
+            && match ancestor_sig.visibility {
+                Visibility::Public => *own_visibility != Visibility::Public,
+                Visibility::Protected => *own_visibility == Visibility::Private,
+                Visibility::Private => false,
+            };
         if narrows_visibility {
             self.report(
                 fqn.to_string(),
@@ -356,8 +370,28 @@ impl<'a> Checker<'a> {
             // actually the exact same type. Resolving both sides first,
             // same as any other pseudo-type use, fixes this without
             // weakening the check for a genuine narrowing.
+            //
+            // Exception: a trait-sourced ancestor's own `self` means
+            // "whatever class ends up using this trait" - never the
+            // trait itself, which can't be instantiated at all - so it's
+            // resolved against `fqn` (the using class actually being
+            // checked) too, not `ancestor_owner` (the trait's own name).
+            // Confirmed directly against real PHPStan's own source:
+            // `MethodPrototypeFinder::findPrototype`'s trait branch
+            // builds its returned prototype via `createUserlandMethodReflection
+            // ($trait, $classReflection, ...)`, passing the *using*
+            // `$classReflection` as context, not the trait. Real corpus
+            // false positive otherwise: Symfony's own `TransportResponseTrait
+            // ::schedule(self $response, ...)`, implemented identically
+            // by every one of its 4 users, each narrowing "the trait" to
+            // their own concrete class - not a real narrowing at all.
             let own_ty = self.resolve_pseudo(&own_param.ty_native, fqn);
-            let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty_native, &ancestor_owner);
+            let ancestor_pseudo_owner = if check_visibility {
+                &ancestor_owner
+            } else {
+                fqn
+            };
+            let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty_native, ancestor_pseudo_owner);
             if !self.registry.is_assignable(&ancestor_ty, &own_ty) {
                 self.report(fqn.to_string(), format!(
                         "{fqn}::{method_name}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",

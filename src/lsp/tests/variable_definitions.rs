@@ -170,6 +170,21 @@ fn definition_on_a_read_resolves_to_a_byref_call_argument_that_first_defined_it(
 }
 
 #[test]
+fn definition_on_a_read_after_a_closure_resolves_to_its_own_use_by_ref_capture() {
+    let dir = TempDir::new("var_closure_use_byref");
+    let src = "<?php function g() { $f = function () use (&$x) { $x = 1; }; $f(); return $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x; }");
+
+    let messages = run(&dir, &[definition_request(2, &uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(result["uri"], uri);
+    let expected = lsp_pos(src, "$x) {");
+    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+}
+
+#[test]
 fn definition_on_a_read_resolves_to_its_own_array_auto_vivification_write() {
     let dir = TempDir::new("var_index_write");
     let src = "<?php function f() { $x['key'] = 1; return $x; }";

@@ -11,7 +11,18 @@ impl Parser {
         self.expect(&Token::LBrace)?;
         let mut get = None;
         let mut set = None;
+        let mut get_attrs = Vec::new();
+        let mut set_attrs = Vec::new();
         while !self.check(&Token::RBrace) && !self.at_eof() {
+            // Phase 37: `#[Attr]` group(s) directly preceding this hook's
+            // own `get`/`set` keyword - must be parsed before anything
+            // else here (the `final`/visibility-modifier loop and the
+            // by-ref `&` just below), matching real PHP's own convention
+            // of attributes preceding all modifiers. `parse_attributes`
+            // is already safe to call unconditionally - it returns an
+            // empty `Vec` without consuming anything when the next token
+            // isn't an attribute start.
+            let hook_attrs = self.parse_attributes()?;
             // A hook can itself carry `final`/visibility modifiers ahead
             // of `get`/`set` - not modeled, just consumed.
             while matches!(
@@ -83,11 +94,18 @@ impl Parser {
 
             if is_set {
                 set = body.map(|b| (param, b));
+                set_attrs = hook_attrs;
             } else {
                 get = body;
+                get_attrs = hook_attrs;
             }
         }
         self.expect(&Token::RBrace)?;
-        Ok(PropertyHooks { get, set })
+        Ok(PropertyHooks {
+            get,
+            set,
+            get_attrs,
+            set_attrs,
+        })
     }
 }

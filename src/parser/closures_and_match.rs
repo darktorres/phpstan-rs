@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, Span, Token};
 
 impl Parser {
     pub(crate) fn parse_closure_like(&mut self, is_static: bool) -> Result<Expr, ParseError> {
@@ -22,10 +22,16 @@ impl Parser {
             self.expect(&Token::LParen)?;
             while !self.check(&Token::RParen) {
                 let use_by_ref = self.eat(&Token::Amp);
+                let name_start = self.current_pos();
                 let name = self.expect_variable()?;
+                let span = Span {
+                    start: name_start,
+                    end: self.previous_end(),
+                };
                 uses.push(ClosureUse {
                     name,
                     by_ref: use_by_ref,
+                    span,
                 });
                 if !self.eat(&Token::Comma) {
                     break;

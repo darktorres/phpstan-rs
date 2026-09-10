@@ -354,6 +354,30 @@ fn property_hooks_parse() {
 }
 
 #[test]
+fn an_attribute_on_a_property_hook_parses() {
+    let program = parse(
+        r#"<?php
+            class C {
+                public int $x {
+                    #[Foo]
+                    get => 1;
+                    #[Bar]
+                    set(int $v) { $this->x = $v; }
+                }
+            }
+        "#,
+    );
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
+    assert_eq!(hooks.get_attrs.len(), 1);
+    assert_eq!(hooks.get_attrs[0].name, "Foo");
+    assert_eq!(hooks.set_attrs.len(), 1);
+    assert_eq!(hooks.set_attrs[0].name, "Bar");
+}
+
+#[test]
 fn dnf_type_hint_parses() {
     let program = parse(
         r#"<?php

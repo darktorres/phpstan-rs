@@ -61,7 +61,12 @@ fn instantiating_a_non_api_phpstan_class_is_flagged() {
 }
 
 #[test]
-fn instantiating_an_api_tagged_phpstan_class_is_not_flagged() {
+fn instantiating_an_api_tagged_phpstan_class_is_still_flagged_by_default() {
+    // Phase 40.2: real `ApiInstantiationRule` flags instantiation
+    // unconditionally by default - a class-level `@api` does NOT exempt
+    // it (extensions should use dependency injection, not direct
+    // instantiation) unless the class's own, non-inherited constructor
+    // is itself `@api`-tagged (see the next test).
     let diags = diagnostics_for(
         r#"<?php
         namespace PHPStan\Rules;
@@ -75,7 +80,60 @@ fn instantiating_an_api_tagged_phpstan_class_is_not_flagged() {
         }
         "#,
     );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.identifier == "phpstanApi.constructor"),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn instantiating_a_class_with_its_own_api_tagged_constructor_is_not_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        /** @api */
+        class Rule {
+            /** @api */
+            public function __construct() {}
+        }
+        "#,
+        r#"<?php
+        namespace App;
+        function f() {
+            $r = new \PHPStan\Rules\Rule();
+        }
+        "#,
+    );
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+#[test]
+fn instantiating_a_class_with_only_an_inherited_api_constructor_is_still_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        class BaseRule {
+            /** @api */
+            public function __construct() {}
+        }
+        /** @api */
+        class Rule extends BaseRule {}
+        "#,
+        r#"<?php
+        namespace App;
+        function f() {
+            $r = new \PHPStan\Rules\Rule();
+        }
+        "#,
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.identifier == "phpstanApi.constructor"),
+        "got: {diags:?}"
+    );
 }
 
 #[test]
@@ -196,6 +254,53 @@ fn an_instanceof_check_against_a_non_api_class_is_flagged() {
     );
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("instanceof PHPStan\\Rules\\Rule"));
+    assert_eq!(diags[0].identifier, "phpstanApi.class");
+}
+
+#[test]
+fn an_instanceof_check_against_an_api_class_is_still_flagged_as_an_assumption() {
+    // Phase 40.3: real `ApiInstanceofRule` still flags an `@api`-tagged
+    // class's instanceof - just with a different identifier/message
+    // warning the assumption itself might break in a minor version.
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        /** @api */
+        class Rule {}
+        "#,
+        r#"<?php
+        namespace App;
+        function f($x) {
+            if ($x instanceof \PHPStan\Rules\Rule) {
+            }
+        }
+        "#,
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.identifier == "phpstanApi.instanceofAssumption"),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn an_instanceof_check_against_an_api_interface_is_never_flagged() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        /** @api */
+        interface Rule {}
+        "#,
+        r#"<?php
+        namespace App;
+        function f($x) {
+            if ($x instanceof \PHPStan\Rules\Rule) {
+            }
+        }
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
 #[test]
@@ -304,6 +409,29 @@ fn using_a_non_api_phpstan_trait_is_flagged() {
         diags[0]
             .message
             .contains("using trait PHPStan\\Rules\\RuleHelperTrait")
+    );
+}
+
+#[test]
+fn using_an_api_tagged_phpstan_trait_is_still_flagged_unconditionally() {
+    // Phase 40.4: real `ApiTraitUseRule` grants no `@api` escape hatch at
+    // all, unlike extends/implements.
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        /** @api */
+        trait RuleHelperTrait {}
+        "#,
+        r#"<?php
+        namespace App;
+        class MyRule {
+            use \PHPStan\Rules\RuleHelperTrait;
+        }
+        "#,
+    );
+    assert!(
+        diags.iter().any(|d| d.identifier == "phpstanApi.trait"),
+        "got: {diags:?}"
     );
 }
 

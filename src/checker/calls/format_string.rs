@@ -80,13 +80,13 @@ impl<'a> Checker<'a> {
         provided: &[(Type, Span)],
         label: &str,
     ) {
-        if let Some(specs) = parse_format_specifiers(fmt) {
-            if specs.len() > provided.len() {
+        if let Some(slots) = parse_format_specifiers(fmt) {
+            if slots.len() > provided.len() {
                 self.report(
                     label.to_string(),
                     format!(
                         "{name}() format string expects {} argument(s), {} given",
-                        specs.len(),
+                        slots.len(),
                         provided.len()
                     ),
                     fmt_span,
@@ -95,15 +95,39 @@ impl<'a> Checker<'a> {
                 );
                 return;
             }
-            for (spec, (arg_ty, span)) in specs.iter().zip(provided) {
-                if !format_specifier_accepts(*spec, arg_ty) {
-                    self.report(
-                        label.to_string(),
-                        format!("{name}() format specifier %{spec} does not accept {arg_ty}"),
-                        *span,
-                        5,
-                        "argument.type",
-                    );
+            for (slot, (arg_ty, span)) in slots.iter().zip(provided) {
+                match slot {
+                    FormatSlot::Width | FormatSlot::Precision => {
+                        if !is_strict_int(arg_ty) {
+                            let which = if matches!(slot, FormatSlot::Width) {
+                                "width"
+                            } else {
+                                "precision"
+                            };
+                            self.report(
+                                label.to_string(),
+                                format!(
+                                    "{name}() format specifier's {which} (\"*\") expects int, {arg_ty} given"
+                                ),
+                                *span,
+                                5,
+                                "argument.type",
+                            );
+                        }
+                    }
+                    FormatSlot::Value(spec) => {
+                        if !format_specifier_accepts(*spec, arg_ty) {
+                            self.report(
+                                label.to_string(),
+                                format!(
+                                    "{name}() format specifier %{spec} does not accept {arg_ty}"
+                                ),
+                                *span,
+                                5,
+                                "argument.type",
+                            );
+                        }
+                    }
                 }
             }
             return;
@@ -152,7 +176,21 @@ impl<'a> Checker<'a> {
 /// `%E`/`%f`/`%F`/`%g`/`%G`/`%o`/`%s`/`%u`/`%x`/`%X` are real PHP
 /// specifier characters (confirmed against the language's own
 /// documented format).
-pub(crate) fn parse_format_specifiers(fmt: &str) -> Option<Vec<char>> {
+/// One slot `parse_format_specifiers` consumes an argument for, in the
+/// order it appears in the format string. `Width`/`Precision` come from
+/// a literal `*` sub-placeholder (Phase 69) - real, if undocumented, PHP:
+/// `sprintf("%*d", 5, 42)` pads to width 5, consuming its own argument
+/// *before* the specifier's own value argument; `sprintf("%.*f", 2, pi)`
+/// does the same for precision. Verified directly against a live `php`
+/// binary (both forms, and `%*.*f` combining both).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormatSlot {
+    Width,
+    Precision,
+    Value(char),
+}
+
+pub(crate) fn parse_format_specifiers(fmt: &str) -> Option<Vec<FormatSlot>> {
     let bytes = fmt.as_bytes();
     let mut specs = Vec::new();
     let mut i = 0;
@@ -187,23 +225,41 @@ pub(crate) fn parse_format_specifiers(fmt: &str) -> Option<Vec<char>> {
         if bytes.get(i) == Some(&b'\'') {
             i += 2; // custom padding char: the quote plus the pad character itself
         }
-        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+        if bytes.get(i) == Some(&b'*') {
+            specs.push(FormatSlot::Width);
             i += 1;
+        } else {
+            while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+                i += 1;
+            }
         }
         if bytes.get(i) == Some(&b'.') {
             i += 1;
-            while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            if bytes.get(i) == Some(&b'*') {
+                specs.push(FormatSlot::Precision);
                 i += 1;
+            } else {
+                while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+                    i += 1;
+                }
             }
         }
         let &spec = bytes.get(i)?;
         if !b"bcdeEfFgGosuxX".contains(&spec) {
             return None;
         }
-        specs.push(spec as char);
+        specs.push(FormatSlot::Value(spec as char));
         i += 1;
     }
     Some(specs)
+}
+
+/// Whether `ty` is genuinely an `int` - used for a `*` width/precision
+/// sub-placeholder, which real PHP always requires a real int for
+/// (`PrintfPlaceholder`'s own `'strict-int'` acceptance, unconditional
+/// regardless of the castable-vs-strict placeholder-type mode).
+fn is_strict_int(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::IntLiteral(_))
 }
 
 /// Phase 69: same job as `parse_format_specifiers` just above, but for a

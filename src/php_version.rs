@@ -133,6 +133,13 @@ pub enum PhpFeature {
     /// supportsReadonlyPropertyReinitializationOnClone`
     /// (`ReadOnlyPropertyAssignRule`'s own `$inClone` gate).
     ReadonlyPropertyReinitializationOnClone,
+    /// The `FILTER_THROW_ON_FAILURE` constant/flag for `filter_var()`/
+    /// `filter_input()`. `PhpVersion::hasFilterThrowOnFailureConstant`
+    /// (`FilterVarRule`'s own `filterVar.nullOnFailureAndThrowOnFailure`
+    /// conflict check) - PHP 8.5, not 8.4 as an earlier ROADMAP draft
+    /// stated (confirmed against `vendor/phpstan-src/src/Php/PhpVersion.php`
+    /// and the real `filter-var-php85.php` test fixture name).
+    FilterThrowOnFailureConstant,
 }
 
 impl PhpFeature {
@@ -157,7 +164,8 @@ impl PhpFeature {
             | VoidCast
             | DeprecatedNonStandardCasts
             | DeprecatedBacktickOperator
-            | AttributesOnGlobalConstants => (8, 5),
+            | AttributesOnGlobalConstants
+            | FilterThrowOnFailureConstant => (8, 5),
         }
     }
 

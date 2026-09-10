@@ -248,6 +248,12 @@ pub struct PropertyHooks {
     // PHP allows there; None when the hook omits it (`set { ... }` uses an
     // implicit $value).
     pub set: Option<(Option<Param>, PropertyHookBody)>,
+    // Phase 37: the `#[Attr]` group(s) immediately preceding this hook's
+    // own `get`/`set` keyword - see `PropertyHookAttributesRule`. Empty
+    // (not `None`) when the hook has no attributes, matching every other
+    // `attrs: Vec<Attribute>` field in this file.
+    pub get_attrs: Vec<Attribute>,
+    pub set_attrs: Vec<Attribute>,
 }
 
 #[derive(Debug, Clone)]
@@ -550,6 +556,12 @@ pub enum UnaryOp {
 pub struct ClosureUse {
     pub name: String,
     pub by_ref: bool,
+    // Phase 17: the captured variable's own name span - lets a `use (&$x)`
+    // capture that auto-vivifies `$x` in the outer scope (see
+    // `checker::calls::check_closure_literal_with_this_and_scope`'s sibling
+    // write-back logic) declare a real, navigable definition site for it,
+    // the same way `Param::name_span` already does for a parameter.
+    pub span: Span,
 }
 
 // The right-hand side of `instanceof`: almost always a static class name,
