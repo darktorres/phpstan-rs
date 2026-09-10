@@ -17,10 +17,10 @@ survived; the twelfth is salvaged in corrected, narrower form rather than
 discarded, since its underlying premise held even though its original
 citation didn't. Round 4: 12 of 14 survived; both kills are noted at the
 top of that round's own section, one because it turned out to already be
-shipped. Total: 57 confirmed findings across sections A-T plus one
-corrected finding. Nothing here is scheduled; it's a grounded idea
-backlog, same status as ROADMAP's own "Newly identified gaps" until
-triaged into a numbered phase.
+shipped. Round 5: 11 of 11 survived. Total: 68 confirmed findings across
+sections A-Y plus one corrected finding. Nothing here is scheduled; it's
+a grounded idea backlog, same status as ROADMAP's own "Newly identified
+gaps" until triaged into a numbered phase.
 
 Two structural facts most items below trace back to, repeatedly:
 
@@ -1709,5 +1709,359 @@ already fully materialized in memory immediately before being thrown away
 purely to keep iteration bounded, so capturing a before/after diff there
 is retaining data that already exists for one more statement's worth of
 scope, not computing anything new.
+
+**Effort: medium.**
+
+---
+
+# Round 5
+
+Six more lenses: continuing the "Known but not yet scheduled" and
+"Pending / partial" reaudits into territory rounds 1 and 4 didn't reach,
+a new whole-program structural-duplication category, `phpstan-strict-
+rules`' config-flag "stricter defaults" (a different axis from its Rule
+classes in section E), whole-program parameter-type narrowing from
+concrete object types, and passive LSP rendering (`semanticTokens`/
+`inlayHint`). 11 of 11 raw proposals survived verification.
+
+---
+
+## U. Closed-world whole-program inference replacing three of PHPStan's per-hop, doc-tag-only gaps
+
+Three cases with an identical shape: real PHPStan resolves a fact purely
+from an author-written PHPDoc tag on the *immediate* declaration, with no
+fallback when the tag is missing, because its per-file reflection is
+fixed before the body is even walked (no persisted whole-program inferred
+summary can feed a caller). phpstan-rs already proves this exact
+fixed-point shape works for a different fact (Phase 41's transitive
+purity) and could apply it to all three.
+
+### U1. Resolve `method_exists()`/`property_exists()` narrowing to real closed-world signatures, not PHPStan's open-world dummy stub
+
+Real PHPStan's `method_exists`/`property_exists` narrowing
+(`Type/Php/MethodExistsTypeSpecifyingExtension.php:45-102`) attaches a
+`HasMethodType`/`HasPropertyType` accessory marker carrying only the
+member *name* (`Type/Accessory/HasMethodType.php:47-65`) - its
+`getMethod()` resolves to a `DummyMethodReflection`
+(`Reflection/Dummy/DummyMethodReflection.php:19-30`, even faking
+`getDeclaringClass()` as `stdClass`) backed by a
+`TrivialParametersAcceptor` (`Reflection/TrivialParametersAcceptor.php:
+40-56`): zero declared parameters, variadic, every type `Mixed`. This is
+architecturally forced, not a missed optimization - PHPStan stays sound
+for arbitrary downstream classes it never sees, so after
+`method_exists($x,'foo')` succeeds it genuinely cannot know which
+concrete class `$x` is, only that *some* class somewhere has a callable
+named `foo`. phpstan-rs's `narrowing_type_for_predicate` table
+deliberately excludes `method_exists`/`property_exists` today
+(`checker/narrowing/predicates.rs:300-390`, `checker/tests/narrowing.rs:
+190-203` documents the exclusion) - but it already keeps one frozen,
+whole-program `Registry.classes: FxHashMap<String, ClassInfo>`
+(`src/registry.rs:38`) where every `ClassInfo` carries real, typed
+`methods`/`properties` (`registry/class_info.rs:151-152`), not reflection
+stand-ins. Inverting that into a member-name -> declaring-classes reverse
+index (the same additive move A5/B1/P1 already make from structures
+built for other reasons) lets a literal-string `method_exists($x, 'foo')`
+guard narrow `$x` to the union of every real class anywhere in the closed
+project+vendor universe declaring `foo` - a sound, computable, finite
+answer no open-world tool can give - so a following `$x->foo(...)`
+resolves against real parameter/return types instead of a signature-blind
+placeholder.
+
+**Effort: large.**
+
+### U2. Registry-level transitive `@throws` inference, replacing PHPStan's docblock-only per-hop requirement
+
+Real PHPStan's `getThrowType()` is populated purely from the parsed
+`@throws` tag, resolved *before* the function's own body is ever walked
+(`Analyser/StmtHandler/FunctionHandler.php:58-90`,
+`Reflection/Php/PhpFunctionFromParserNodeReflection.php:256-258`).
+`MissingCheckedExceptionInThrowsCheck::check`
+(`Rules/Exceptions/MissingCheckedExceptionInThrowsCheck.php:32-65`) only
+ever looks at the current function's own body plus each callee's already-
+fixed, doc-sourced throw type - nothing feeds a callee's *real*
+per-body-walk throw points back into its own reflection for a caller to
+consult (compounded by PHPStan's parallel-worker analysis model). This
+directly explains why phpstan-rs's own `MethodThrowTypeCovarianceRule`
+port was declined per ROADMAP.md:540-541 ("an implicit void-when-untagged
+default would false-positive heavily given how inconsistently this
+corpus tags @throws") - both projects currently have no real inferred
+fallback, so "untagged" is indistinguishable from "throws nothing."
+Extend the already-built `registry/purity.rs::resolve_transitive_purity`
+fixed point with a sibling that computes each function/method's *real*
+union of thrown checked-exception types from its own body (explicit
+`throw`s plus resolved callees' computed throw sets) independent of
+whether an `@throws` tag exists at all, and use that computed value -
+not the raw tag - as what `checker/throws/missing.rs`'s
+`check_missing_checked_exceptions` consults for a caller's coverage. This
+also directly unblocks the declined covariance rule: with a real computed
+throw type available even for untagged functions, the false-positive
+risk that killed it no longer applies.
+
+**Effort: large.**
+
+### U3. Registry-level by-ref parameter out-type inference, closing the same doc-tag-only gap
+
+Real PHPStan's `ParameterOutExecutionEndTypeRule` - the rule that would
+catch a by-ref parameter ending up incompatible with its declared type
+after execution - literally short-circuits on
+`$outType = $parameter->getOutType(); if ($outType === null) { return
+[]; }` with an inline comment that it "only runs when `@param-out` is
+present" (`Rules/Variables/ParameterOutExecutionEndTypeRule.php:80-83,
+97`); `getOutType()` is sourced purely from the `@param-out` tag
+(`Analyser/PhpDocsResolver.php:186`) through the same doc-parsed-before-
+body-walk pipeline U2 uses. The sibling `ParameterOutAssignedTypeRule`
+only checks direct, syntactic `$x = ...` assignments inside the *current*
+function against the plain declared type (`Rules/Variables/
+ParameterOutAssignedTypeRule.php:63-69`) - it never follows a value
+through a nested by-ref call either. ROADMAP's own Phase 45 already marks
+the by-ref half PLANNED, describing it as needing "no new tag concept,
+just per-function reassignment-site tracking" (ROADMAP.md:562-566). The
+extension beyond a purely local walk: when the tracked variable is itself
+passed by-ref into *another* function inside the same closed-world
+registry, resolve that callee's own real computed out-type (from the same
+fixed point, recursively) instead of requiring a hand-written tag on it -
+the same whole-program, single-process property U1/U2 already exploit,
+with no per-file/parallel-worker reflection-before-walk ordering forcing
+a fallback to "no info" the moment a tag is missing.
+
+**Effort: large.**
+
+---
+
+## V. Whole-program structural duplication, continued
+
+Extends D3 (duplicate branch bodies within one function) and D7
+(structurally-identical operands within one expression) to duplication
+*across* declarations project-wide - a different AST scope neither
+existing item touches.
+
+### V1. Whole-program duplicate function/method body detection
+
+For every top-level function and class/trait method body project-wide,
+build a canonical structural fingerprint (a postorder hash over
+`stmt_children`/`expr_children`, each local/parameter alpha-renamed to a
+positional slot, `Span` already excluded by those walkers) and bucket
+declarations by it; within a bucket, confirm an exact alpha-equivalent
+match with a `Stmt`-list equality helper (the same recursive
+shape-matching technique `is_switch_break_equivalent` already uses,
+generalized from one statement to a statement list). For a matching pair
+with no `is_subclass_of`/`classes_using_trait` relationship (skip
+legitimately related pairs) and a body exceeding a minimum statement
+count (skip trivial getters/setters), emit an opt-in
+`method.duplicateBody`/`function.duplicateBody` diagnostic - a DRY/
+extract-trait candidate the author likely doesn't know exists. PHPStan's
+`Rules/` has no body-content comparator anywhere - grepping both vendored
+trees for "identical"/"duplicate" turns up only name-collision rules
+(`DuplicateFunctionDeclarationRule.php`, `DuplicateDeclarationHelper.php:
+26-60`) and array-literal keys, never two differently-named declarations'
+bodies - architecturally awkward for PHPStan's own `Rule::processNode`
+interface, which visits one node per call with no project-wide sibling
+corpus to pair against without separate collector infrastructure.
+phpstan-rs is single-process with every file's full parsed body already
+resident project-wide (`FileState.ast: Vec<Stmt>`, `project.rs:28`), and
+the generic `stmt_children`/`expr_children` walkers already thread
+through every node kind - a ready-made traversal for both hashing and
+equality with no new AST plumbing; `Registry::is_subclass_of`/
+`classes_using_trait` (`registry/hierarchy.rs:12,76`) already answer the
+false-positive gate.
+
+**Effort: medium.**
+
+### V2. Whole-program divergent-clone detection: near-duplicate bodies differing by exactly one leaf
+
+Extends V1's fingerprint pass with a second, coarser pre-filter hash
+keeping only statement-kind/operator-kind shape (ignoring literal values
+and identifier names) to bucket "shape-identical" bodies; within a
+bucket, walk two alpha-canonicalized ASTs together and count leaf-level
+divergences (a differing literal, a differing operator, an identifier
+reference breaking the alpha-mapping). Exactly one (or a small,
+config-bounded number of) divergence in an otherwise-identical pair of
+unrelated declarations is flagged as `function.divergentClone`/
+`method.divergentClone` - a correctness signal, not style: a maintainer
+fixed a bug or corrected a threshold in one copy and forgot the sibling
+exists. Same absence in PHPStan as V1, plus this specifically needs a
+bounded near-miss/tree-distance comparison, which nothing in its rule set
+attempts for any purpose - `Rules/Comparison/` reasons purely from each
+expression's inferred type, never a structural distance between two
+trees. Reuses V1's canonicalization and hash-bucket machinery directly;
+only the final comparison step (count divergences instead of requiring
+zero) is new.
+
+**Effort: large.**
+
+---
+
+## W. More `phpstan-strict-rules` "stricter defaults" config flags
+
+Continues the config-flag axis (distinct from section E's custom Rule
+classes) into three more gaps where the flag's stricter behavior has no
+phpstan-rs equivalent at all, opt-in or otherwise - each confirmed
+against the real gating mechanism, not assumed.
+
+### W1. Opt-in strict `checkDynamicProperties` behavior inside `isset()`/`empty()`/`??`
+
+Real PHPStan's `AccessPropertiesCheck::processSingleProperty` only
+reaches its undefined-property leniency branch when `hasInstanceProperty`
+answers "maybe" (the common case for any non-final class without the
+property declared, `Type/ObjectType.php:212-231`); when the access is an
+`isset()`/`empty()`/`??`/`??=` root, the check returns `[]` outright
+unless `checkDynamicProperties` is true - default `false`
+(`Rules/Properties/AccessPropertiesCheck.php:135-151`,
+`phpstan-strict-rules/rules.neon:6`). phpstan-rs's
+`check_expr_quiet_root` (`checker/expr/probe_checks.rs:79-115`) and the
+isset/empty existence-probe handling (`checker/expr.rs:319-348`) already
+unconditionally suppress this check for every such root, matching
+PHPStan's *default* leniency - but there is no config flag or code path
+that ever runs the check in that context, so phpstan-rs cannot currently
+reproduce strict-rules' stricter behavior at all, even opt-in. A project
+toggle routing an isset-root `PropertyAccess` through the normal
+`member_confirmed_missing` check (`checker/expr.rs:2295-2308`) instead of
+the blanket skip is small and additive, reusing machinery that already
+exists.
+
+**Effort: small.**
+
+### W2. Opt-in strict printf/sprintf placeholder-type checking
+
+phpstan-rs's `format_specifier_accepts` (`checker/calls/format_string.rs:
+364-376`) is explicitly documented as "deliberately lenient," flagging
+only an array or object argument - matching real PHPStan's own
+non-strict default (`checkStrictPrintfPlaceholderTypes = false`;
+`StringType::toInteger()`/`toFloat()` never return `ErrorType`,
+`Type/StringType.php:161-169`). The gap is the *strict* alternative
+(default `false` in core, `true` in strict-rules,
+`phpstan-strict-rules/rules.neon:14`) - rejecting `null`/`bool` for
+`%s` (only string/Stringable/float allowed), requiring `%d` to be int or
+a decimal-int-string and `%f` to be float or numeric-string
+(`Rules/Functions/PrintfPlaceholder.php:31-70`) - has no phpstan-rs
+equivalent at all. The same call site already has full access to the
+resolved argument `Type` (including whether a string is a decimal-int-
+string/numeric-string literal, since `Type::IntLiteral`/`StringLiteral`
+are already modeled) needed to implement the strict variant additively
+alongside the existing lenient one.
+
+**Effort: medium.**
+
+### W3. Opt-in call-site function/method name-case checking
+
+phpstan-rs's own comment (`checker/imports.rs:66-70`) already traces
+`checkFunctionNameCase`'s upstream default (`false`) to
+`conf/*.neon`, so building nothing by default already matches - but
+strict-rules flips it on (`rules.neon:8`) across five rule files
+(`CallToNonExistentFunctionRule.php:63-79`, `MethodCallCheck.php:168`,
+`StaticMethodCallCheck.php:336`, `FunctionCallableRule.php:61`,
+`ExistingNamesInUseRule.php:110`/`ExistingNamesInGroupUseRule.php:109`),
+flagging a *call* whose written name-casing differs from the resolved
+declaration - distinct from E4's `WrongCaseOfInheritedMethodRule` (which
+flags a *declaration* whose casing mismatches its ancestor's declaration;
+E4's own text confirms "no inherited-method-name-casing check exists
+anywhere," leaving the call-site family entirely untouched). phpstan-rs's
+function/class lookups are already deliberately case-insensitive with a
+documented rationale (`Registry::lookup_function`,
+`registry/hierarchy.rs:623-630`) - exactly the precondition a
+case-mismatch diagnostic needs (resolve first, compare resolved canonical
+name against as-written name), the identical pattern the existing
+`class.nameCase` check already implements end-to-end
+(`checker/resolve.rs:323-352`, `registry/name_context.rs:117-124`).
+Extending that same mechanism to function calls, method calls, static
+calls, and `use function` imports is additive.
+
+**Effort: medium.**
+
+---
+
+## X. Whole-program parameter-type narrowing from the set of concrete object types actually passed
+
+Distinct from H1 (literal *value* constancy - never fires on an object
+argument, since a value differs on every call by construction) and H3
+(property assignment sites, a different AST location entirely). A
+project-wide pass extends the exact per-call-site data `check_args`
+already computes: for a call's resolved argument (from
+`resolve_call_args`, `checker/calls.rs:1040-1071`), the checker already
+infers `arg_ty = self.infer_expr(arg, locals)` (`calls.rs:411`) before
+comparing it to the parameter's declared type in the ordinary check.
+Instead of discarding `arg_ty`, when it resolves to a concrete,
+non-generic `Type::Object(class_name, [])`, push `class_name` into a
+project-wide `HashMap<(callee_key, param_index), HashSet<String>>` -
+after all files are checked, for every declared parameter whose own type
+is "wide" by construction (a single interface or non-final abstract
+class, `ClassInfo.kind`/`is_abstract`, `registry/class_info.rs:146-148`,
+or a `Union` of 2+ named classes) with 2+ real call sites and exactly one
+distinct concrete class seen, flag the declaration suggesting the type
+could be narrowed to that one class - or, for the interface/abstract
+case, that the wider type is never actually exercised project-wide. Real
+PHPStan's cross-call-site aggregation surface is its 14 real `Collector`
+implementations (enumerated via `find ... -iname '*Collector*'`), none of
+which collects per-call argument *types* - the closest,
+`NamedArgumentParameterMethodCallsCollector.php`, only aggregates
+named-argument *parameter names* (already H1's own citation). Its only
+parameter-adjacent "too wide" rule family, `Rules/TooWideTypehints/`
+(read `TooWideTypeCheck.php:294-349` in full to confirm), reasons only
+about a by-ref/`@param-out` parameter's own value *after* the function
+body assigns to it - single-function-local reasoning, never a
+caller-supplied argument type aggregated across real call sites. No
+PHPStan rule anywhere narrows an ordinary (non-out) parameter's declared
+type from what callers actually pass. phpstan-rs needs no new inference
+machinery here, only retaining and aggregating a value already computed
+and then thrown away, threaded across the same single shared `Registry`
+every other section-H/B finding already grounds - no cross-process
+reconciliation problem PHPStan's Collector architecture exists to solve.
+
+**Effort: large.**
+
+---
+
+## Y. Passive LSP rendering, continued: `semanticTokens` and `inlayHint`
+
+Two more capabilities in the passive-rendering family the LSP-readiness
+audit's own lens first identified - request/response-free, editor-painted
+continuously rather than triggered by user action.
+
+### Y1. `textDocument/semanticTokens` push-highlighting for deprecated/internal symbol usage
+
+Advertise `semanticTokensProvider` and, at every call/property/const-
+access/instantiation site, emit a token modifier (LSP's standard
+"deprecated" modifier, plus a custom "internal" one) whenever the
+resolved target's `FunctionSig`/`PropertySig`/`ConstSig.deprecated` is
+`Some(_)` or `is_internal` is true - computed *unconditionally*, not
+gated behind `Registry::check_deprecated_usage`/`check_internal_usage`
+(both default `false`, `src/registry.rs:102-111`): the checker already
+looks up the callee's sig at every such site for ordinary type-checking
+regardless of those flags, so the deprecated/internal *fact* is a free
+byproduct of resolution already happening; only the diagnostic-emission
+call is gated. This gives continuous strike-through/coloring in the
+editor even for a project that (like most real ones, per `registry.rs`'s
+own comment) never turns the corresponding diagnostic on. Real PHPStan
+has no LSP and no push-rendering channel at all - deprecation warnings
+surface only via `phpstan/phpstan-deprecation-rules`, "a separate,
+opt-in Composer package, not even part of core phpstan/phpstan"
+(`registry.rs:102-106`), and even then only as a batch CLI diagnostic on
+the next full run, never a live per-keystroke visual cue.
+
+**Effort: medium.**
+
+### Y2. `textDocument/inlayHint`: parameter-name hints (near-free) vs. inferred-type hints on unannotated locals (materially new work)
+
+Two sub-features, honestly different costs. **(a) Parameter-name hints**
+before each call argument: `resolve_call_args` already resolves every
+argument (positional/named/spread/variadic) to its exact declaring
+`ParamSig` - including `ParamSig.name` (`registry/function_sig.rs:24-25`)
+- as part of ordinary call-argument checking; exposing that already-
+computed name/span pairing as an `inlayHint` response is close to free,
+no new inference. **(b) Inferred-type hints** after an unannotated
+`$x = ...`: this is *not* a small extension of F1's `probe_hit`
+mechanism - `probe_hit`/`probe_var_provenance` are single-target
+(`Checker::probe_span: Option<Span>`, an exact equality check at a
+handful of call sites, `checker.rs:775-776`), built for one throwaway
+re-check per user click. `inlayHint` needs every relevant span's type
+across the whole open file, continuously (re-rendered on every
+`didChange`, not once per click) - a genuinely new collection mode (an
+unconditional `Vec<(Span, Type)>` populated at every assignment during
+one ordinary pass), paying a full-file cost on every edit rather than the
+probe's near-zero per-site cost. Real PHPStan's only way to inspect an
+inferred type at all is editing the source to insert `PHPStan\dumpType()`
+and re-running the whole CLI - no channel, on-demand or continuous, for
+rendering a type or resolved parameter name without modifying source,
+since it has no LSP and no editor-facing rendering concept at all.
 
 **Effort: medium.**
