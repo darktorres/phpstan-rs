@@ -51,11 +51,13 @@ pub struct Parser {
 }
 
 mod classes;
+mod closures_and_match;
 mod enums;
 mod expr;
 mod functions;
 mod interpolation;
 mod postfix;
+mod primary;
 mod property_hooks;
 mod stmt;
 mod tokens;
