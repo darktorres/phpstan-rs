@@ -162,7 +162,17 @@ Foo>`/`<contravariant Foo>`/`<*>`); generic-reference arity/
 well-formedness checking, scoped to the `extends`/`implements`
 ancestor-declaration site (matching real PHPStan's equally narrow
 `ClassAncestorsRule`/`InterfaceAncestorsRule`, not its general-purpose
-`GenericObjectTypeCheck`).
+`GenericObjectTypeCheck`). `bind_template_param`'s call-site binding
+recurses into a `Union` param type now (`class-string<T>|null`,
+phpstorm-stubs' pervasive nullable-templated-parameter idiom, previously
+silently unbound); `substitute_class_templates`'s own class-vs-method
+template scoping compares `TemplateParam::scope`'s real declaration-site
+identity rather than a same-named `HashSet` (a real bug: a method's own
+`@template T` sharing its enclosing class's own class-level `@template T`
+name - e.g. `ReflectionClass`'s class-level `T` and `getAttributes()`'s
+own, unrelated method-level `T` - used to get eagerly captured and wiped
+to `Mixed` by the class-level substitution before the method's own
+call-site binding ever ran).
 
 ## Narrowing engine
 
@@ -806,7 +816,14 @@ independently observable behavior this project's single-variant-plus-
 sentinel representation doesn't already produce); `generics.notGeneric`
 (indistinguishable, in this project's own `@template`-tag model, from a
 legitimate stub-granted-generics case on a real zero-`@template`
-built-in).
+built-in). Newly identified, real, still-open gap: no constructor-
+argument-driven class-level generic-type inference for `new X(...)`
+exists at all, so `new ReflectionClass($view)` never binds `ReflectionClass<T>`'s
+own class-level `T` from `$view`'s type the way real PHPStan's own
+`ReflectionClassDynamicReturnTypeExtension` does - confirmed directly
+(`(new ReflectionClass($view))`'s own inferred type stays plain
+`ReflectionClass`, no type argument). Not built - a genuinely missing
+general capability, not a narrow bug; would need its own design.
 
 **56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
 a lenient, hand-rolled ad-hoc string tokenizer (not built on the

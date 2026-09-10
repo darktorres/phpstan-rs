@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::checker::{Checker, TemplateBindings};
 use crate::registry::{AssertInfo, FunctionSig, ParamSig};
 use crate::types::Type;
@@ -31,24 +29,40 @@ impl<'a> Checker<'a> {
     /// `lookup_property_with_owner`) - `class` itself when it's not
     /// inherited.
     ///
-    /// Scoped to only the names `owner`'s own class docblock actually
-    /// declares as templates. `types::substitute_template`'s own fallback
-    /// for a name absent from `bindings` is `Type::Mixed`, correct for a
-    /// genuinely class-level template referenced with no or fewer type
-    /// arguments than it declares (e.g. a bare `Collection` with no `<T>`
-    /// at all), but a real Piwigo-corpus round found this wiping out every
-    /// method's own separate template too the moment it was called on a
-    /// non-generic class (a method's own generic identity-style function,
-    /// declared entirely on its own docblock, on a class with zero
-    /// templates of its own). That class has zero class-level templates,
-    /// so `bindings` was always empty, and this substitution runs first
-    /// (per this function's own doc comment above), replacing the
-    /// method's own bare template name with `Mixed` before
-    /// `infer_call_return_type`'s later, correct per-call-argument pass
-    /// ever got a chance to bind it for real. `class_scope` restricts
-    /// substitution to names genuinely in `owner`'s own template list,
-    /// leaving any other name (a method's own, unrelated to the class)
-    /// completely untouched for that later pass to resolve.
+    /// Scoped to only `TemplateParam`s whose own `scope` field is
+    /// genuinely `owner` itself - not merely same-*named* as one of
+    /// `owner`'s declared templates. `types::substitute_template`'s own
+    /// fallback for a name absent from `bindings` is `Type::Mixed`,
+    /// correct for a genuinely class-level template referenced with no or
+    /// fewer type arguments than it declares (e.g. a bare `Collection`
+    /// with no `<T>` at all), but a real Piwigo-corpus round found this
+    /// wiping out every method's own separate template too the moment it
+    /// was called on a non-generic class (a method's own generic
+    /// identity-style function, declared entirely on its own docblock, on
+    /// a class with zero templates of its own). That class has zero
+    /// class-level templates, so `bindings` was always empty, and this
+    /// substitution runs first (per this function's own doc comment
+    /// above), replacing the method's own bare template name with `Mixed`
+    /// before `infer_call_return_type`'s later, correct per-call-argument
+    /// pass ever got a chance to bind it for real.
+    ///
+    /// Real bug found and fixed this session: the original fix here
+    /// scoped by bare *name* (a `HashSet<String>` built from `owner`'s own
+    /// `ClassInfo::templates` name list), not by real declaration-site
+    /// identity - so a method whose own `@template` happens to share its
+    /// enclosing class's own template *name* (real, common: PHPStorm's
+    /// own `ReflectionClass`'s class-level `@template T of object` and its
+    /// `getAttributes()` method's own, entirely unrelated `@template T`)
+    /// still got eagerly captured and replaced with `Mixed` here, before
+    /// the method's own call-site binding ever ran - confirmed via a real
+    /// `(new ReflectionClass($x))->getAttributes(Foo::class)` isolation.
+    /// `TemplateParam::scope` already carries exactly the right identity
+    /// to distinguish the two (`build_template_params`'s callers pass the
+    /// declaring class's own name for a class-level template, the
+    /// declaring function/method's own name for one of its own - see that
+    /// field's own doc comment) - comparing against it directly, instead
+    /// of a same-named `HashSet`, is strictly more correct and requires no
+    /// new data.
     pub(crate) fn substitute_class_templates(
         &self,
         sig: &FunctionSig,
@@ -57,13 +71,7 @@ impl<'a> Checker<'a> {
         owner: &str,
     ) -> FunctionSig {
         let bindings = self.class_template_bindings(class, type_args, owner);
-        let class_scope: HashSet<String> = self
-            .registry
-            .classes
-            .get(owner)
-            .map(|info| info.templates.iter().cloned().collect())
-            .unwrap_or_default();
-        let subst = |ty: &Type| substitute_scoped(ty, &bindings, &class_scope);
+        let subst = |ty: &Type| substitute_scoped(ty, &bindings, owner);
         FunctionSig {
             params: sig
                 .params
@@ -117,13 +125,15 @@ fn substitute_assert_infos(
 }
 
 /// Same structural walk as `types::substitute_template`, except a
-/// `TemplateParam` name outside `scope` is left completely untouched
-/// instead of defaulting to `Mixed` - see `substitute_class_templates`'s
-/// own doc comment for why that distinction matters.
-fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &HashSet<String>) -> Type {
+/// `TemplateParam` whose own `scope` field isn't `scope` (`owner`'s own
+/// name) is left completely untouched instead of defaulting to `Mixed` -
+/// see `substitute_class_templates`'s own doc comment for why that
+/// distinction (and comparing by declaration-site identity, not bare
+/// name) matters.
+fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Type {
     match ty {
         Type::TemplateParam(tp) => {
-            if scope.contains(&tp.name) {
+            if tp.scope.as_deref() == Some(scope) {
                 // Phase 54: mirrors `types::substitute_template`'s own
                 // `@template T = Default` fallback - an "erased" class
                 // reference (fewer type arguments than declared,

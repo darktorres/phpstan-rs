@@ -154,6 +154,43 @@ fn class_string_template_binds_the_concrete_subclass_from_a_static_factory_call(
 }
 
 #[test]
+fn class_string_template_binds_through_a_nullable_union_parameter() {
+    // Phase 77: `bind_template_param` used to silently no-op on a
+    // `Union` param type - `class-string<T>|null` (phpstorm-stubs'
+    // pervasive idiom, e.g. `ReflectionClass::getAttributes()`'s own
+    // `?string $name` overload once templated) never bound `T` at all,
+    // even when the real argument was a non-null `class-string<Derived>`.
+    // Otherwise identical to `class_string_template_binds_the_concrete_
+    // subclass_from_a_static_factory_call` above, just with the added
+    // `|null` on the parameter - confirmed this exact addition is what
+    // used to suppress the binding.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Derived extends Base {}
+            class TypedRepository {
+                /**
+                 * @template R of Base
+                 * @param class-string<R>|null $repositoryClass
+                 * @return R
+                 */
+                public static function narrow(?string $repositoryClass) {
+                    return new $repositoryClass();
+                }
+            }
+            function f(): int {
+                return TypedRepository::narrow(Derived::class);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("return type mismatch") && x.message.contains("Derived")),
+        "expected a return-type mismatch naming Derived, got: {d:?}"
+    );
+}
+
+#[test]
 fn a_class_literal_still_satisfies_an_ordinary_string_parameter() {
     // Backward compatibility: `Foo::class` used to infer plain
     // `String`; now it's `ClassString(Object("Foo"))`, which must stay

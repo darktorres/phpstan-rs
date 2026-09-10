@@ -30,6 +30,22 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMa
                 bind_template_param(inner, arg_inner, bindings);
             }
         }
+        // Phase 77: the missing arm blocking phpstorm-stubs' pervasive
+        // `@param class-string<T>|null $name` idiom (and any other
+        // nullable/union-wrapped templated parameter) - a real, already-
+        // latent bug confirmed via an isolated repro (removing only the
+        // `|null` let an otherwise-identical chain correctly flag a type
+        // mismatch). Each member is tried against the *same*, whole
+        // `arg_ty` (not a decomposed one) - a member that isn't itself
+        // `TemplateParam`/`Array`/`ClassString`/`Union` (e.g. the `Null`
+        // half of `class-string<T>|null`) is simply a no-op here, exactly
+        // as it already is at the top level for any other type that
+        // isn't one of those shapes.
+        Type::Union(members) => {
+            for m in members {
+                bind_template_param(m, arg_ty, bindings);
+            }
+        }
         _ => {}
     }
 }

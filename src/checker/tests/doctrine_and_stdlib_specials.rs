@@ -965,6 +965,71 @@ fn simple_xml_element_subclass_undeclared_property_uses_subclass_type() {
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
+// Phase 77: the shape real PHPStorm stubs use pervasively - a bare,
+// unbound method-level `@template T`, with `@param class-string<T>|null
+// $name` and `@return T`, and a stray plain-text description line
+// between the `@template` tag and the `@param`/`@return` tags (real
+// phpstorm-stubs docblocks routinely interleave prose like this -
+// confirmed this doesn't itself break tag parsing).
+#[test]
+fn a_bare_unbound_method_template_binds_through_a_nullable_class_string_param() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo {}
+            class Holder {
+                /**
+                 * Gets a typed value.
+                 *
+                 * @template T
+                 *
+                 * Returns the requested value.
+                 *
+                 * @param class-string<T>|null $name
+                 * @return T
+                 */
+                public function get(?string $name = null) {}
+            }
+            function f(Holder $h): void {
+                assertType('Foo', $h->get(Foo::class));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Real corpus repro shape (`Renderer.php:96-101`'s `(new ReflectionClass
+// ($view))->getAttributes(TemplateAttr::class)[0]->newInstance()->file`).
+// This also exercises a second, genuinely distinct real bug found and
+// fixed while testing this phase's own item: `ReflectionClass`'s
+// *class-level* `@template T of object` and `getAttributes()`'s own
+// unrelated *method-level* `@template T` happen to share the exact same
+// letter - `substitute_class_templates` used to scope its substitution by
+// bare template *name* (any `T` on the class, regardless of which
+// declaration actually owns it), so with `ReflectionClass`'s own `T` left
+// unbound (`new ReflectionClass(...)` doesn't itself infer a class-level
+// binding - a separate, still-open, already-declined gap), every `T`
+// throughout `getAttributes()`'s *own* signature - including its
+// unrelated method-level one - got eagerly replaced with `Mixed` before
+// this phase's own call-site binding ever ran. Fixed by scoping
+// `substitute_scoped` off `TemplateParam::scope`'s own real
+// declaration-site identity instead of a same-named `HashSet`.
+#[test]
+fn reflectionclass_getattributes_binds_the_named_attribute_class_through_newinstance() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            #[Attribute]
+            class TemplateAttr {}
+            function f(object $view): void {
+                $attr = (new ReflectionClass($view))->getAttributes(TemplateAttr::class)[0]->newInstance();
+                assertType('TemplateAttr', $attr);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
 #[test]
 fn simple_xml_element_declared_property_still_wins() {
     let d = diagnostics_for(
