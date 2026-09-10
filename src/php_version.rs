@@ -140,6 +140,15 @@ pub enum PhpFeature {
     /// stated (confirmed against `vendor/phpstan-src/src/Php/PhpVersion.php`
     /// and the real `filter-var-php85.php` test fixture name).
     FilterThrowOnFailureConstant,
+    /// A `float` array key implicitly truncating to `int` - deprecated as
+    /// of this version. `PhpVersion::deprecatesImplicitlyFloatConversionToInt`
+    /// (`InvalidKeyInArrayItemRule`'s own `AllowedArrayKeysTypes`).
+    DeprecatesFloatArrayKey,
+    /// A `null` array key implicitly coercing to the empty string.
+    /// Deprecated as of this version.
+    /// `PhpVersion::deprecatesNullArrayOffset` (`InvalidKeyInArrayItemRule`'s
+    /// own `AllowedArrayKeysTypes`).
+    DeprecatesNullArrayOffset,
 }
 
 impl PhpFeature {
@@ -155,7 +164,7 @@ impl PhpFeature {
             | PromotedProperties
             | UnsetCastRemoved
             | CaseInsensitiveConstantsRemoved => (8, 0),
-            FinalClassConstants | ArrayUnpackingWithStringKeys => (8, 1),
+            FinalClassConstants | ArrayUnpackingWithStringKeys | DeprecatesFloatArrayKey => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants
             | ReadOnlyAnonymousClasses
@@ -165,7 +174,8 @@ impl PhpFeature {
             | DeprecatedNonStandardCasts
             | DeprecatedBacktickOperator
             | AttributesOnGlobalConstants
-            | FilterThrowOnFailureConstant => (8, 5),
+            | FilterThrowOnFailureConstant
+            | DeprecatesNullArrayOffset => (8, 5),
         }
     }
 

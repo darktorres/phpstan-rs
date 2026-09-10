@@ -4055,10 +4055,35 @@ pub(crate) fn is_confidently_array(ty: &Type) -> bool {
 /// `Closure`-as-object representations - none of which PHP ever accepts
 /// as a key either, even one with a real `__toString()` (array-key
 /// coercion has no string-cast fallback the way string CONTEXT does).
-pub(crate) fn invalid_array_key_description(ty: &Type) -> Option<String> {
+/// Phase 50: `php_version` is `None` (this project's own "no target
+/// configured, don't check" convention every other `PhpFeature`-gated
+/// rule already uses) unless the caller has a real, configured
+/// `Registry::php_version` to check against - matching real PHPStan's own
+/// `AllowedArrayKeysTypes::getType`, whose `float`/`null` legality
+/// literally depends on the target `PhpVersion` (`null` unconditionally
+/// allowed with none configured, matching real PHPStan's own `$phpVersion
+/// === null` branch there too).
+pub(crate) fn invalid_array_key_description(
+    ty: &Type,
+    php_version: Option<crate::php_version::PhpVersion>,
+) -> Option<String> {
     match ty {
         Type::Array(..) | Type::ArrayShape(_) => Some("array".to_string()),
         Type::Object(name, _) => Some(name.clone()),
+        Type::Float
+            if php_version.is_some_and(|v| {
+                crate::php_version::PhpFeature::DeprecatesFloatArrayKey.is_available(v)
+            }) =>
+        {
+            Some("float".to_string())
+        }
+        Type::Null
+            if php_version.is_some_and(|v| {
+                crate::php_version::PhpFeature::DeprecatesNullArrayOffset.is_available(v)
+            }) =>
+        {
+            Some("null".to_string())
+        }
         Type::Union(members) => {
             let mut descs = Vec::new();
             for m in members {
@@ -4067,7 +4092,7 @@ pub(crate) fn invalid_array_key_description(ty: &Type) -> Option<String> {
                 // invalid" here (its own tri-state `isSuperTypeOf`),
                 // which this project has no equivalent for; skipping
                 // rather than guessing matches its usual leniency.
-                descs.push(invalid_array_key_description(m)?);
+                descs.push(invalid_array_key_description(m, php_version)?);
             }
             if descs.is_empty() {
                 None

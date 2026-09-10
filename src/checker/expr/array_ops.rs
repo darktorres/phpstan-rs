@@ -576,7 +576,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         let key_ty = self.infer_expr(key_expr, locals);
-        if let Some(desc) = invalid_array_key_description(&key_ty) {
+        if let Some(desc) = invalid_array_key_description(&key_ty, self.registry.php_version) {
             self.report(
                 label.to_string(),
                 format!("Invalid array key type {desc}."),
@@ -659,7 +659,7 @@ impl<'a> Checker<'a> {
         if !self.is_type_fully_known(&idx_ty) {
             return;
         }
-        if let Some(desc) = invalid_array_key_description(&idx_ty) {
+        if let Some(desc) = invalid_array_key_description(&idx_ty, self.registry.php_version) {
             self.report(
                 label.to_string(),
                 format!("Invalid array key type {desc}."),

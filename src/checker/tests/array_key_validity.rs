@@ -54,13 +54,86 @@ fn ordinary_int_and_string_array_literal_keys_are_never_flagged() {
 fn bool_float_and_null_array_literal_keys_are_not_flagged_php_coerces_them() {
     // PHP silently coerces these at runtime (matches real PHPStan's own
     // default, non-strict AllowedArrayKeysTypes) - not a hard TypeError
-    // the way an array/object key is.
+    // the way an array/object key is. No php_version configured here, so
+    // the float/null deprecation checks below (Phase 50) stay silent too,
+    // matching this project's own "unconfigured means don't check"
+    // convention for every other PhpFeature-gated rule.
     let d = diagnostics_for(
         r#"<?php
             function test(bool $b, float $f, ?string $n): array {
                 return [$b => 1, $f => 2, $n => 3];
             }
         "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 50: with a real target php_version configured, real PHPStan
+// additionally excludes a float key on PHP >= 8.1 and a null key on
+// PHP >= 8.5 (confirmed against `PhpVersion::deprecatesImplicitlyFloat
+// ConversionToInt`/`deprecatesNullArrayOffset` directly).
+
+#[test]
+fn a_float_array_literal_key_is_flagged_on_php_8_1_or_later() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test(float $f): array {
+                return [$f => 1];
+            }
+        "#,
+        |r| r.php_version = Some((8, 1)),
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.invalidKey"
+            && x.message.contains("Invalid array key type float")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_float_array_literal_key_is_never_flagged_below_php_8_1() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test(float $f): array {
+                return [$f => 1];
+            }
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_null_array_literal_key_is_flagged_on_php_8_5_or_later() {
+    // A bare `null` literal, not `?string` - a *union* including a legal
+    // member (`string`) would bail out of the whole check entirely (this
+    // project's own "at least one member legal, stay silent" leniency),
+    // so this needs a definite, non-union `Type::Null` to exercise the
+    // new arm at all.
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test(): array {
+                return [null => 1];
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.invalidKey"
+            && x.message.contains("Invalid array key type null")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_null_array_literal_key_is_never_flagged_below_php_8_5() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test(): array {
+                return [null => 1];
+            }
+        "#,
+        |r| r.php_version = Some((8, 4)),
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
