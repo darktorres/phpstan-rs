@@ -929,15 +929,20 @@ feature shape, needing its own new phase if ever wanted.
 **68 - Array no-op diagnostics, remaining (PARTIAL).** Duplicate-key
 detection and the two no-op `array_values`/`array_filter`-empty checks
 are done (see Done). `arrayFilter.same`/`arrayFilter.alwaysEmpty` are
-done too, but opt-in (`check_array_filter_falsy_noop`, default `false`)
-rather than shipped on by default - an earlier attempt at them was
-dropped entirely after corpus verification caught two live false
-positives, both since root-caused to independent variable-type-tracking
-imprecision unrelated to this check's own logic - both now fixed (see
-Done, "Narrowing engine" and "Type system"). Flip the
-`check_array_filter_falsy_noop` default to `true` now that both are
-resolved (not attempted in the same pass as the fix itself, to keep
-the corpus diff attributable to one change at a time).
+done too, currently opt-in (`check_array_filter_falsy_noop`, default
+`false`) - an earlier attempt at them was dropped entirely after
+corpus verification caught two live false positives, both since
+root-caused to independent variable-type-tracking imprecision
+unrelated to this check's own logic. Both are now fixed (see Done,
+"Narrowing engine" and "Type system"), and a fresh corpus diff with
+the flag on confirms both original false positives (`ProxyHelper.php`,
+`GroupServiceTest.php`) now stay silent, both scoped and unscoped -
+the flag is ready to flip on by default (matching real PHPStan's own
+unconditional level-5 default for this exact check), left as an
+explicit, deliberate opt-in for now rather than flipped unilaterally,
+since - unlike every other fix in this whole batch - that specific
+change is a real, externally-visible default-behavior change for
+every existing user of this tool, not an internal correctness fix.
 
 **75 - String accessory case-tracking (PLANNED).** No `Lowercase`/
 `Uppercase`/`DecimalIntegerString` accessory kinds; `strtolower()`/
