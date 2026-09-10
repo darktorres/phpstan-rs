@@ -28,3 +28,30 @@
 [submodule "vendor/wordpress"]
 	path = vendor/wordpress
 	url = https://github.com/WordPress/WordPress.git
+[submodule "vendor/laravel"]
+	path = vendor/laravel
+	url = https://github.com/laravel/framework.git
+[submodule "vendor/psalm"]
+	path = vendor/psalm
+	url = https://github.com/vimeo/psalm.git
+[submodule "vendor/drupal-core"]
+	path = vendor/drupal-core
+	url = https://github.com/drupal/core.git
+[submodule "vendor/reactphp-http"]
+	path = vendor/reactphp-http
+	url = https://github.com/reactphp/http.git
+[submodule "vendor/amphp"]
+	path = vendor/amphp
+	url = https://github.com/amphp/amp.git
+[submodule "vendor/composer"]
+	path = vendor/composer
+	url = https://github.com/composer/composer.git
+[submodule "vendor/league-flysystem"]
+	path = vendor/league-flysystem
+	url = https://github.com/thephpleague/flysystem.git
+[submodule "vendor/league-commonmark"]
+	path = vendor/league-commonmark
+	url = https://github.com/thephpleague/commonmark.git
+[submodule "vendor/rector"]
+	path = vendor/rector
+	url = https://github.com/rectorphp/rector.git
