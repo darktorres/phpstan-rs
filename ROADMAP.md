@@ -373,7 +373,12 @@ falling back to the interface's own declared generics when that return
 type doesn't resolve any further.
 
 Format-string checking for `sprintf`/`printf`/`fprintf`/`vsprintf`,
-including positional (`%N$`) specifiers. Regex capture-group inference
+including positional (`%N$`) specifiers, exact placeholder/argument-count
+matching for `sprintf`/`printf`/`vsprintf`/`vprintf` (`fprintf` stays
+"too few only" - it has no backing real-PHPStan rule at all), PHP 8.0's
+`%h`/`%H` specifiers, and an opt-in strict-vs-castable placeholder-type
+matching mode (`check_strict_printf_placeholder_types`, off by default).
+Regex capture-group inference
 (literal enumeration, tagged unions for one optional group/one
 top-level alternation, numeric/non-empty-string fallback typing).
 A Piwigo-corpus-driven batch of small builtin checks: function-name
@@ -854,12 +859,6 @@ are done (see Done). `arrayFilter.same`/`arrayFilter.alwaysEmpty` were
 built and dropped after corpus verification caught two live false
 positives traced to a variable-type-tracking gap unrelated to this
 phase itself.
-
-**69 - printf/sprintf/scanf family, remaining (PARTIAL).** Positional
-specifiers, `fprintf`/`vsprintf`/`vprintf`, `%*`/`%.*` width/precision
-sub-placeholders, and `sscanf`/`fscanf`'s own by-ref-output-variable
-count are all done (see Done). A strict-vs-castable matching mode
-remains unbuilt.
 
 **75 - String accessory case-tracking (PLANNED).** No `Lowercase`/
 `Uppercase`/`DecimalIntegerString` accessory kinds; `strtolower()`/

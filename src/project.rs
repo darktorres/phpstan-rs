@@ -201,6 +201,15 @@ impl Project {
         self.registry.check_empty_method_bodies = enabled;
     }
 
+    /// Phase 69: opts the whole project's checking into the strict (vs.
+    /// the default, castable) printf placeholder-type matching mode,
+    /// following `set_check_empty_method_bodies`'s exact precedent - see
+    /// `registry::Registry::check_strict_printf_placeholder_types`'s own
+    /// doc comment for why this defaults to `false`.
+    pub fn set_check_strict_printf_placeholder_types(&mut self, enabled: bool) {
+        self.registry.check_strict_printf_placeholder_types = enabled;
+    }
+
     /// Phase 38: configures the project's target PHP version
     /// (`registry::Registry::php_version`), following
     /// `set_strict_mixed_arrays`'s exact precedent - a narrow setter

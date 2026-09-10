@@ -71,6 +71,7 @@ fn run_check_project(
     check_deprecated_usage: bool,
     check_empty_method_bodies: bool,
     check_missing_checked_exceptions: bool,
+    check_strict_printf_placeholder_types: bool,
     php_version: Option<php_version::PhpVersion>,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
@@ -112,6 +113,7 @@ fn run_check_project(
     project.set_check_deprecated_usage(check_deprecated_usage);
     project.set_check_empty_method_bodies(check_empty_method_bodies);
     project.set_check_missing_checked_exceptions(check_missing_checked_exceptions);
+    project.set_check_strict_printf_placeholder_types(check_strict_printf_placeholder_types);
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
@@ -227,6 +229,7 @@ pub(crate) fn run_check_project_command(
     check_deprecated_usage: bool,
     check_empty_method_bodies: bool,
     check_missing_checked_exceptions: bool,
+    check_strict_printf_placeholder_types: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -290,6 +293,10 @@ pub(crate) fn run_check_project_command(
         check_empty_method_bodies || config.check_empty_method_bodies.unwrap_or(false);
     let check_missing_checked_exceptions = check_missing_checked_exceptions
         || config.check_missing_checked_exceptions.unwrap_or(false);
+    let check_strict_printf_placeholder_types = check_strict_printf_placeholder_types
+        || config
+            .check_strict_printf_placeholder_types
+            .unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -343,6 +350,7 @@ pub(crate) fn run_check_project_command(
         check_deprecated_usage,
         check_empty_method_bodies,
         check_missing_checked_exceptions,
+        check_strict_printf_placeholder_types,
         php_version,
         generate_baseline.as_deref(),
         baseline.as_deref(),

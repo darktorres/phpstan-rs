@@ -45,9 +45,46 @@ fn sprintf_still_skips_a_concatenation_with_a_real_variable_operand() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Phase 69: real PHPStan's `PrintfParametersRule` flags `sprintf`/
+// `printf` unconditionally at level 0 for an exact placeholder/argument
+// count mismatch - "too many" is a real, reachable bug (e.g. a stray
+// extra argument left over from a refactor), not something real PHP's
+// runtime leniency should suppress in static analysis.
 #[test]
-fn sprintf_does_not_flag_extra_arguments_real_php_just_ignores() {
+fn sprintf_flags_too_many_arguments_for_its_own_placeholders() {
     let d = diagnostics_for(r#"<?php sprintf("%s", "a", "b", "c");"#);
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(
+        d[0].message.contains("expects 1 argument(s), 3 given"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn printf_flags_too_many_arguments_for_its_own_placeholders() {
+    let d = diagnostics_for(r#"<?php printf("%s", "a", "b");"#);
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(
+        d[0].message.contains("expects 1 argument(s), 2 given"),
+        "got: {d:?}"
+    );
+}
+
+// `fprintf` has no backing real-PHPStan rule at all (absent from both
+// `PrintfParametersRule::FORMAT_ARGUMENT_POSITIONS` and
+// `PrintfArrayParametersRule`'s name list) - this project's own support
+// for it is a disclosed extension, kept deliberately conservative at
+// "too few only" so it never goes stricter than anything real PHPStan
+// actually verified.
+#[test]
+fn fprintf_still_does_not_flag_extra_arguments() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($stream) {
+                fprintf($stream, "%s", "a", "b", "c");
+            }
+        "#,
+    );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
@@ -250,6 +287,67 @@ fn vprintf_checks_a_literal_array_argument_s_element_types() {
     );
 }
 
+// Phase 69: vsprintf/vprintf now require an exact count match too,
+// mirroring real PHPStan's own `PrintfArrayParametersRule` (which
+// compares the placeholder count against the literal array's own size
+// with `===`, not just a "too few" lower bound).
+#[test]
+fn vsprintf_flags_too_many_array_elements_for_its_own_placeholders() {
+    let d = diagnostics_for(r#"<?php vsprintf('%s', ["a", "b"]);"#);
+    assert!(
+        d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
+// Phase 69: `%h`/`%H` (locale-independent decimal-point float formatting)
+// are real PHP 8.0+ specifiers. With no target version configured, they're
+// accepted (this project's "no target configured, don't restrict"
+// convention) - and, like the other float-bucket specifiers, flagged
+// against an array/object argument.
+#[test]
+fn sprintf_accepts_h_specifier_with_no_target_version_configured() {
+    let d = diagnostics_for(r#"<?php sprintf("%h", 3.5);"#);
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sprintf_flags_an_array_for_the_h_specifier() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $arr) {
+                sprintf("%H", $arr);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn sprintf_rejects_h_specifier_below_php_8_0() {
+    // Below the real threshold, `%h` isn't a recognized PHP specifier at
+    // all - the whole format string parse bails ("don't guess"), so no
+    // diagnostic at all rather than a wrong one.
+    let d = diagnostics_for_with(r#"<?php sprintf("%h and %s", 3.5, "only one");"#, |r| {
+        r.php_version = Some((7, 4))
+    });
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn sprintf_flags_h_specifier_count_mismatch_on_php_8_0_or_later() {
+    let d = diagnostics_for_with(r#"<?php sprintf("%h and %h", 3.5);"#, |r| {
+        r.php_version = Some((8, 0))
+    });
+    assert!(
+        d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn vsprintf_with_a_non_literal_array_argument_is_never_flagged() {
     // Don't guess - a plain `array<T>`-typed variable (not a real,
@@ -368,6 +466,114 @@ fn sscanf_spread_argument_stays_silent() {
                 sscanf("1 x", "%d %s", ...$vars);
             }
         "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 69: opt-in strict printf placeholder-type matching
+// (`check_strict_printf_placeholder_types`) - off by default, so none of
+// these are flagged without the flag explicitly enabled.
+
+#[test]
+fn a_float_for_d_specifier_is_never_flagged_in_default_castable_mode() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(float $x) {
+                sprintf("%d", $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_float_for_d_specifier_is_flagged_in_strict_mode() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(float $x) {
+                sprintf("%d", $x);
+            }
+        "#,
+        |r| r.check_strict_printf_placeholder_types = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_int_for_f_specifier_is_still_accepted_in_strict_mode() {
+    // Real PHPStan's own `FloatType::accepts` treats int as acceptable
+    // (PHP implicitly widens int to float) - strict mode must not flag
+    // this, only the genuinely wrong cases.
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(int $x) {
+                sprintf("%f", $x);
+            }
+        "#,
+        |r| r.check_strict_printf_placeholder_types = true,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_decimal_int_string_literal_is_accepted_for_d_in_strict_mode() {
+    let d = diagnostics_for_with(r#"<?php sprintf("%d", "123");"#, |r| {
+        r.check_strict_printf_placeholder_types = true
+    });
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_non_numeric_string_literal_is_flagged_for_d_in_strict_mode() {
+    let d = diagnostics_for_with(r#"<?php sprintf("%d", "abc");"#, |r| {
+        r.check_strict_printf_placeholder_types = true
+    });
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_bool_for_s_specifier_is_flagged_in_strict_mode_but_not_by_default() {
+    let default_mode = diagnostics_for(
+        r#"<?php
+            function f(bool $x) {
+                sprintf("%s", $x);
+            }
+        "#,
+    );
+    assert!(default_mode.is_empty(), "unexpected: {default_mode:?}");
+
+    let strict_mode = diagnostics_for_with(
+        r#"<?php
+            function f(bool $x) {
+                sprintf("%s", $x);
+            }
+        "#,
+        |r| r.check_strict_printf_placeholder_types = true,
+    );
+    assert!(
+        strict_mode.iter().any(|x| x.identifier == "argument.type"),
+        "got: {strict_mode:?}"
+    );
+}
+
+#[test]
+fn a_null_for_s_specifier_is_still_accepted_in_strict_mode() {
+    // Real PHPStan's own strict-mode union explicitly includes `null`
+    // ("consistency with phpstan-strict-rules") despite the surrounding
+    // "don't accept null or bool" comment applying only to bool.
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(?string $x) {
+                sprintf("%s", null);
+            }
+        "#,
+        |r| r.check_strict_printf_placeholder_types = true,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }

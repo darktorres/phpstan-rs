@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::checker::{Checker, Locals, literal_string_value};
+use crate::php_version::{PhpFeature, PhpVersion};
 use crate::token::Span;
 use crate::types::Type;
 
@@ -17,7 +18,12 @@ impl<'a> Checker<'a> {
     /// `ArrayShape` with sequential canonical-int keys - a plain list
     /// literal in every way that matters here), the same "don't guess
     /// past what's statically known" restriction the format string
-    /// itself already has.
+    /// itself already has. `sprintf`/`printf`/`vsprintf`/`vprintf`
+    /// require an *exact* placeholder/argument count match (real
+    /// PHPStan's own `PrintfParametersRule`/`PrintfArrayParametersRule`,
+    /// both unconditional at level 0); `fprintf` has no real-PHPStan
+    /// rule at all backing it - its support here is this project's own
+    /// extension, kept deliberately conservative at "too few only".
     pub(crate) fn check_format_string_call(
         &mut self,
         name: &str,
@@ -76,8 +82,16 @@ impl<'a> Checker<'a> {
         provided: &[(Type, Span)],
         label: &str,
     ) {
-        if let Some(slots) = parse_format_specifiers(fmt) {
-            if slots.len() > provided.len() {
+        let exact_match_required = name != "fprintf";
+        let php_version = self.registry.php_version;
+        let strict = self.registry.check_strict_printf_placeholder_types;
+        if let Some(slots) = parse_format_specifiers(fmt, php_version) {
+            let mismatched = if exact_match_required {
+                slots.len() != provided.len()
+            } else {
+                slots.len() > provided.len()
+            };
+            if mismatched {
                 self.report(
                     label.to_string(),
                     format!(
@@ -112,7 +126,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     FormatSlot::Value(spec) => {
-                        if !format_specifier_accepts(*spec, arg_ty) {
+                        if !format_specifier_accepts(*spec, arg_ty, strict) {
                             self.report(
                                 label.to_string(),
                                 format!(
@@ -128,10 +142,15 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        let Some(by_position) = parse_positional_format_specifiers(fmt) else {
+        let Some(by_position) = parse_positional_format_specifiers(fmt, php_version) else {
             return;
         };
-        if by_position.len() > provided.len() {
+        let mismatched = if exact_match_required {
+            by_position.len() != provided.len()
+        } else {
+            by_position.len() > provided.len()
+        };
+        if mismatched {
             self.report(
                 label.to_string(),
                 format!(
@@ -147,7 +166,7 @@ impl<'a> Checker<'a> {
         }
         for (specs, (arg_ty, span)) in by_position.iter().zip(provided) {
             for spec in specs {
-                if !format_specifier_accepts(*spec, arg_ty) {
+                if !format_specifier_accepts(*spec, arg_ty, strict) {
                     self.report(
                         label.to_string(),
                         format!("{name}() format specifier %{spec} does not accept {arg_ty}"),
@@ -171,7 +190,11 @@ impl<'a> Checker<'a> {
 /// character, or a malformed/truncated `%` sequence. `%b`/`%c`/`%d`/`%e`/
 /// `%E`/`%f`/`%F`/`%g`/`%G`/`%o`/`%s`/`%u`/`%x`/`%X` are real PHP
 /// specifier characters (confirmed against the language's own
-/// documented format).
+/// documented format). `%h`/`%H` (locale-independent decimal-point float
+/// formatting) are real too, but only from PHP 8.0 on (`PhpFeature::
+/// PrintfHhSpecifier`) - accepted unless a configured target version is
+/// confidently older, matching this project's "no target configured,
+/// don't restrict" convention.
 /// One slot `parse_format_specifiers` consumes an argument for, in the
 /// order it appears in the format string. `Width`/`Precision` come from
 /// a literal `*` sub-placeholder (Phase 69) - real, if undocumented, PHP:
@@ -186,7 +209,11 @@ pub(crate) enum FormatSlot {
     Value(char),
 }
 
-pub(crate) fn parse_format_specifiers(fmt: &str) -> Option<Vec<FormatSlot>> {
+pub(crate) fn parse_format_specifiers(
+    fmt: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<Vec<FormatSlot>> {
+    let hh_allowed = php_version.is_none_or(|v| PhpFeature::PrintfHhSpecifier.is_available(v));
     let bytes = fmt.as_bytes();
     let mut specs = Vec::new();
     let mut i = 0;
@@ -241,7 +268,7 @@ pub(crate) fn parse_format_specifiers(fmt: &str) -> Option<Vec<FormatSlot>> {
             }
         }
         let &spec = bytes.get(i)?;
-        if !b"bcdeEfFgGosuxX".contains(&spec) {
+        if !b"bcdeEfFgGosuxX".contains(&spec) && !(hh_allowed && matches!(spec, b'h' | b'H')) {
             return None;
         }
         specs.push(FormatSlot::Value(spec as char));
@@ -280,7 +307,11 @@ fn is_strict_int(ty: &Type) -> bool {
 /// specifier (`%1$d %1$s`, a real if unusual idiom) collects every
 /// specifier that references it - the argument there must satisfy all
 /// of them.
-pub(crate) fn parse_positional_format_specifiers(fmt: &str) -> Option<Vec<Vec<char>>> {
+pub(crate) fn parse_positional_format_specifiers(
+    fmt: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<Vec<Vec<char>>> {
+    let hh_allowed = php_version.is_none_or(|v| PhpFeature::PrintfHhSpecifier.is_available(v));
     let bytes = fmt.as_bytes();
     let mut by_position: Vec<Vec<char>> = Vec::new();
     let mut i = 0;
@@ -328,7 +359,7 @@ pub(crate) fn parse_positional_format_specifiers(fmt: &str) -> Option<Vec<Vec<ch
             }
         }
         let &spec = bytes.get(i)?;
-        if !b"bcdeEfFgGosuxX".contains(&spec) {
+        if !b"bcdeEfFgGosuxX".contains(&spec) && !(hh_allowed && matches!(spec, b'h' | b'H')) {
             return None;
         }
         i += 1;
@@ -351,22 +382,74 @@ pub(crate) fn parse_positional_format_specifiers(fmt: &str) -> Option<Vec<Vec<ch
 }
 
 /// Whether a real PHP conversion specifier could plausibly accept
-/// `arg_ty` - deliberately lenient (PHP casts numeric strings and floats
-/// for `%d`, and almost anything with a `__toString` for `%s`), so this
-/// only flags the unambiguous cases: an array (or a known array shape)
-/// for any specifier, or an object for a numeric one - both produce
-/// either a fatal error or the literal, useless string `"Array"` in real
-/// PHP, never a legitimate value.
-pub(crate) fn format_specifier_accepts(spec: char, arg_ty: &Type) -> bool {
+/// `arg_ty`, under either of real PHPStan's own two `PrintfPlaceholder::
+/// doesArgumentTypeMatchPlaceholder` matching modes (`strict` - real
+/// PHPStan's own `checkStrictPrintfPlaceholderTypes`, opt-in and default
+/// `false` here too, matching real PHPStan's own stock config).
+///
+/// Non-strict ("castable") mode is deliberately lenient (PHP casts
+/// numeric strings and floats for `%d`, and almost anything with a
+/// `__toString` for `%s`), so this only flags the unambiguous cases: an
+/// array (or a known array shape) for any specifier, or an object for a
+/// numeric one - both produce either a fatal error or the literal,
+/// useless string `"Array"` in real PHP, never a legitimate value.
+///
+/// Strict mode requires the int/float bucket's own real target type (or,
+/// for the float bucket, an int - PHP implicitly widens int to float, and
+/// real PHPStan's own `FloatType::accepts` agrees), plus a numeric-string
+/// *literal* carve-out mirroring real PHPStan's `AccessoryDecimalInteger
+/// StringType`/`AccessoryNumericStringType` - a non-literal `string`-typed
+/// argument doesn't carry that accessory type in this project's own
+/// (coarser) type system, so it's rejected here the same "don't guess"
+/// way an unresolved template is. The string/mixed bucket only tightens
+/// by rejecting `bool` outright (real PHPStan's own "likely a mistake"
+/// carve-out) - `null` stays accepted even in strict mode, matching real
+/// PHPStan's own explicit "consistency with phpstan-strict-rules" carve-out
+/// there.
+pub(crate) fn format_specifier_accepts(spec: char, arg_ty: &Type, strict: bool) -> bool {
     // Phase 14: `Checker::is_array_like` also recognizes a `list<T>`/
     // `non-empty-array<T>`-typed argument (a real `Intersection` now) -
     // without it, this silently stopped catching the exact real bug it
     // exists to catch for any refined-array argument.
     match spec {
-        'b' | 'c' | 'd' | 'e' | 'E' | 'f' | 'F' | 'g' | 'G' | 'o' | 'u' | 'x' | 'X' => {
-            !Checker::is_array_like(arg_ty) && !matches!(arg_ty, Type::Object(_, _))
+        'b' | 'c' | 'd' | 'o' | 'u' | 'x' | 'X' => {
+            if strict {
+                is_strict_int(arg_ty) || is_decimal_int_string_literal(arg_ty)
+            } else {
+                !Checker::is_array_like(arg_ty) && !matches!(arg_ty, Type::Object(_, _))
+            }
         }
-        's' => !Checker::is_array_like(arg_ty),
+        'e' | 'E' | 'f' | 'F' | 'g' | 'G' | 'h' | 'H' => {
+            if strict {
+                matches!(arg_ty, Type::Float)
+                    || is_strict_int(arg_ty)
+                    || is_numeric_string_type(arg_ty)
+            } else {
+                !Checker::is_array_like(arg_ty) && !matches!(arg_ty, Type::Object(_, _))
+            }
+        }
+        's' => {
+            if strict {
+                !matches!(arg_ty, Type::Bool | Type::True | Type::False)
+                    && !Checker::is_array_like(arg_ty)
+            } else {
+                !Checker::is_array_like(arg_ty)
+            }
+        }
         _ => true,
     }
+}
+
+/// Strict-mode `%d`-bucket carve-out: a string *literal* whose value is
+/// itself a plain base-10 integer (real PHPStan's `AccessoryDecimalInteger
+/// StringType`) - reuses `canonical_int_key`'s own "no leading zero except
+/// bare `0`, no `-0`" rules, which already encode exactly this shape.
+fn is_decimal_int_string_literal(ty: &Type) -> bool {
+    matches!(ty, Type::StringLiteral(s) if crate::types::canonical_int_key(s).is_some())
+}
+
+/// Strict-mode `%f`-bucket carve-out: a string literal that parses as any
+/// real PHP numeric string (real PHPStan's `AccessoryNumericStringType`).
+fn is_numeric_string_type(ty: &Type) -> bool {
+    matches!(ty, Type::StringLiteral(s) if crate::types::is_numeric_string_literal(s))
 }

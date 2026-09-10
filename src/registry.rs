@@ -131,6 +131,13 @@ pub struct Registry {
     // scopes its own `paths`/excludes `vendor/` the way a realistic
     // PHPStan setup does. Same wiring chain as the three flags above.
     pub check_empty_method_bodies: bool,
+    // Phase 69: opts into the strict (vs. the default, castable)
+    // `PrintfPlaceholder::doesArgumentTypeMatchPlaceholder` matching mode
+    // for `sprintf`/`printf`/`vsprintf`/`vprintf`/`fprintf` argument-type
+    // checks (`checker/calls/format_string.rs`). Defaults to `false`,
+    // matching real PHPStan's own stock config exactly (castable is its
+    // default too) - same wiring chain as the flags above.
+    pub check_strict_printf_placeholder_types: bool,
     // Phase 38: the project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to

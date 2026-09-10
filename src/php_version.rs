@@ -149,6 +149,10 @@ pub enum PhpFeature {
     /// `PhpVersion::deprecatesNullArrayOffset` (`InvalidKeyInArrayItemRule`'s
     /// own `AllowedArrayKeysTypes`).
     DeprecatesNullArrayOffset,
+    /// The `%h`/`%H` printf conversion specifiers (locale-independent
+    /// decimal-point float formatting). `PhpVersion::
+    /// supportsHhPrintfSpecifier` (`PrintfHelper::parsePlaceholders`).
+    PrintfHhSpecifier,
 }
 
 impl PhpFeature {
@@ -163,7 +167,8 @@ impl PhpFeature {
             | ThrowExpression
             | PromotedProperties
             | UnsetCastRemoved
-            | CaseInsensitiveConstantsRemoved => (8, 0),
+            | CaseInsensitiveConstantsRemoved
+            | PrintfHhSpecifier => (8, 0),
             FinalClassConstants | ArrayUnpackingWithStringKeys | DeprecatesFloatArrayKey => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants

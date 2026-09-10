@@ -89,6 +89,14 @@ enum Command {
         /// doc comment for why.
         #[arg(long)]
         check_missing_checked_exceptions: bool,
+        /// Enables the strict (vs. the default, castable) printf
+        /// placeholder-type matching mode for `sprintf`/`printf`/
+        /// `vsprintf`/`vprintf`/`fprintf` argument-type checks. Off by
+        /// default - matches real PHPStan's own stock config exactly, see
+        /// `registry::Registry::check_strict_printf_placeholder_types`'s
+        /// own doc comment for why.
+        #[arg(long)]
+        check_strict_printf_placeholder_types: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -154,6 +162,7 @@ fn main() {
             check_deprecated_usage,
             check_empty_method_bodies,
             check_missing_checked_exceptions,
+            check_strict_printf_placeholder_types,
             php_version,
             generate_baseline,
             baseline,
@@ -170,6 +179,7 @@ fn main() {
             check_deprecated_usage,
             check_empty_method_bodies,
             check_missing_checked_exceptions,
+            check_strict_printf_placeholder_types,
             php_version,
             generate_baseline,
             baseline,
