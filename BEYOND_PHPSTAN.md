@@ -21,10 +21,12 @@ shipped. Round 5: 11 of 11 survived. Round 6: 7 of 8 survived - a real
 signal of diminishing returns after six rounds, not a weaker pass; the
 one kill (detailed at the top of section Z) turned out to already be
 shipped in real PHPStan's mainline, just under a different file than the
-one first cited. Total: 75 confirmed findings across sections A-AD plus
-one corrected finding. Nothing here is scheduled; it's a grounded idea
-backlog, same status as ROADMAP's own "Newly identified gaps" until
-triaged into a numbered phase.
+one first cited. Round 7: 6 of 7 survived; the kill (detailed at the top
+of that round's section) collided with H3 in a way the survey agent's own
+duplicate-check missed but the verify pass caught. Total: 81 confirmed
+findings across sections A-AI plus one corrected finding. Nothing here is
+scheduled; it's a grounded idea backlog, same status as ROADMAP's own
+"Newly identified gaps" until triaged into a numbered phase.
 
 Two structural facts most items below trace back to, repeatedly:
 
@@ -2357,3 +2359,231 @@ iterating `::cases()` is a legitimate, common way to use every case
 without ever spelling one out by name.
 
 **Effort: medium.**
+
+---
+
+# Round 7
+
+Six lenses deliberately reaching further from prior rounds' territory,
+per round 6's diminishing-returns signal: test-method quality, an
+algorithmic-complexity heuristic, a third (explicitly scoped-down) pass
+over "Pending / partial," composer `provide` claim verification, two more
+LSP capabilities, and V1's mirror image. 6 of 7 survived - the one kill
+is a clean example of the verify pass catching real overlap the survey
+agent's own `not_duplicate_of_beyond_doc` field missed (it compared
+itself against four other sections but never against H3, the one it
+actually collided with).
+
+---
+
+## AE. Assertion-less test method detection ("risky test," as a static check)
+
+A new checker module flags any PHPUnit-style test method (a public method
+on a class where `is_subclass_of(class, "PHPUnit\Framework\TestCase")`,
+named `test*` or carrying a `#[Test]` attribute) or Pest test closure (an
+`it(...)`/`test(...)` call, detected the same way `pest_config.rs::
+is_this_binding_call` already recognizes Pest's hook functions) whose
+body contains zero assertion-shaped calls anywhere, recursively - no
+`assert*` MethodCall/StaticCall, no explicit `Assert::assert*`, and for
+Pest no `expect(...)` call. A disclosed narrowing to ship first: exclude
+a body that calls `expectException*`/`markTestSkipped`/
+`markTestIncomplete`/`addToAssertionCount`, matching real PHPUnit's own
+runtime notion that these also count toward "not risky." Grepping every
+rule file under both vendored trees case-insensitively for "risky",
+"EmptyTest", or "assertion" returns zero hits - the concept doesn't exist
+anywhere in either ruleset (PHPStan's own `PhpDoc/{Method,Function}
+AssertRule.php` is about unrelated `@phpstan-assert` PHPDoc narrowing
+tags, not test-runner assertion-call auditing). This is normally caught
+only by PHPUnit's own `--fail-on-risky`/`beStrictAboutTestsThatDoNotTest
+Anything` *runtime* flag - PHPStan itself has no static rule for it.
+phpstan-rs already has every piece this needs, built for unrelated
+features: `is_subclass_of` already answers the TestCase question (the
+same call `pest_config.rs`'s default-`$this`-type fallback already
+relies on, backed by a real vendored `PHPUnit\Framework\TestCase` stub);
+`checker/narrowing/assertions.rs::apply_phpunit_assertion_narrowing`
+already maintains and matches against the full real PHPUnit `assert*`
+method-name set, directly reusable as the "is this call assertion-shaped"
+predicate; the recursive whole-body scan pattern already exists twice
+over (`checker/uninitialized_dataflow.rs`'s `walk_stmts`/`walk_expr`,
+`checker/noop.rs`'s conservative subtree scan). A composition of four
+already-proven, already-vendored-and-grounded mechanisms, no new
+architecture needed.
+
+**Effort: medium.**
+
+---
+
+## AF. Opt-in algorithmic-complexity heuristic: linear lookup into a pre-built array from inside an unrelated loop
+
+Explicitly heuristic, like D6/D7 before it. Inside a loop body (`self.
+loop_depth > 0`, already-live infrastructure - `checker.rs:728`, already
+consulted directly by other heuristic checks at
+`checker/expr/probe_checks.rs:154,209,379,454`), when the checker sees a
+call to `in_array()`/`array_search()`/`array_key_exists()` whose haystack
+is a plain variable (not an inline literal) with an unbounded `Type::
+Array(k, v)` shape rather than a small fixed `ArrayShape`, that variable
+is never appended to anywhere in the enclosing loop body (so it isn't
+being progressively built - a legitimate incremental-lookup pattern), and
+it isn't the loop's own iteration subject (so it isn't a self-scan/dedup
+pattern), emit a low-confidence `loop.quadraticLookup` diagnostic:
+"linear lookup into an already-built array repeated once per outer-loop
+iteration - O(n*m); consider `array_flip()`/`isset()` or building an
+index before the loop." Ships strictly opt-in with an explicit
+false-positive caveat that a small-but-unbounded-at-runtime haystack
+makes this a non-issue the check can't resolve - the same acknowledged
+low-confidence framing D6/D7 already establish as acceptable for this
+category. PHPStan's entire `Rules/` catalog reasons about types,
+existence, and soundness, never runtime execution cost - grepping both
+vendored trees for "complexity"/"quadratic"/"performance" as a rule
+concept returns nothing; there is no rule keyed on a lookup's placement
+relative to a loop, or on an array's role as a repeatedly-scanned lookup
+table. Distinct from D1 (which reasons about a function's own
+control-flow shape, never a variable's role as a collection) and D6/D7
+(single-call-site/single-expression checks with no loop-context or
+collection-role reasoning at all) - the first entry in this document
+keyed on a loop's own iteration relationship to a separate collection's
+construction site.
+
+**Effort: medium.**
+
+---
+
+## AG. `provide.unimplemented`: verify a composer.json `provide` claim against a real registry-wide interface implementation
+
+A fourth composer-hygiene axis, distinct from K (package require/
+require-dev declaration hygiene), R (PSR-4 path/case consistency), and
+AC (autoload-dev vs. autoload production reachability). For every entry
+in the project's own root `composer.json` `"provide"` map, resolve the
+small set of formally-specified, stable 1:1 PHP-FIG virtual packages
+(`psr/log-implementation` -> `Psr\Log\LoggerInterface`,
+`psr/container-implementation` -> `Psr\Container\ContainerInterface`, and
+five siblings - each a single, PHP-FIG-published package-to-interface
+mapping, not a heuristic) to its target interface FQN via a small
+hardcoded table, then check via `Registry::is_subclass_of` (already
+transitive over `extends`+`implements`) whether *any* project-declared
+class implements it. Flag `provide.unimplemented` when a project claims
+e.g. `"provide": {"psr/log-implementation": "1.0"}` but zero class in the
+closed-world registry implements `Psr\Log\LoggerInterface` - a false
+claim any other package `require`-ing that virtual package would
+silently trust, a real library-authoring bug (an implementation
+refactored/renamed away without updating or removing a stale `provide`
+entry copied from a template). Deliberately excludes
+`psr/http-message-implementation`/`psr/http-factory-implementation`
+(each maps to several interfaces at once - a class-per-interface
+ambiguity needing a stricter all-N-satisfied rule to avoid false
+positives, kept out of v1 rather than shipped speculative). PHPStan's
+`Rules/` catalog has no package-declaration-aware check of any kind - a
+case-insensitive grep for "provide"/"replace" as a composer-schema
+concept across both vendored trees returns zero hits. phpstan-rs already
+has every piece except the hardcoded PSR-virtual-package table:
+`composer::detect_phpstan_dependency`'s existing `serde_json`-parsing
+pattern extends directly to also read `provide`; `Registry::
+is_subclass_of` needs no new type-system machinery; `decl_locations`
+(gated behind `retain_source`, the same shared prerequisite R1/AC already
+document needing open for batch runs) already maps every declared FQN to
+its real location.
+
+**Effort: medium.**
+
+---
+
+## AH. Two more LSP capabilities: `documentSymbol` outline and `workspace/symbol` search
+
+Distinct from section F (single-cursor-position request/response) and
+section Y (per-token passive painting) - these operate over whole-file/
+whole-project symbol *lists*, keyed by no cursor position at all.
+
+### AH1. `textDocument/documentSymbol`: per-file hierarchical outline
+
+Advertise `document_symbol_provider` and add a `"textDocument/
+documentSymbol"` arm to `handle_request`. Resolve the file's `&[Stmt]`
+via `Project::ast(path)` - already used by `lsp::navigation`, and
+notably *not* gated behind `retain_source` unlike `decl_locations`/
+`source` - then walk its top-level `ClassDecl`/`EnumDecl`/`FunctionDecl`
+variants, emitting one `DocumentSymbol` per declaration using fields
+every declaration node already carries: `name_span` (for
+`selectionRange`) and the whole-declaration `span` (for `range`), both
+present on `FunctionDecl`, `ClassDecl`, `PropertyDecl`, `EnumDecl`/
+`EnumCase`. A class's own `methods`/`properties`/`consts`/`cases` fields
+become nested `children`. This is exactly the declaration set
+`DeclLocations::index` already extracts per-file into two flat global
+maps - the same walk, restructured into one file's hierarchical response
+instead of a project-wide flat index. Real PHPStan ships no LSP, outline,
+or resident symbol-list capability of any kind - `FileAnalyser::
+analyseFile` is its sole entry point, always a fresh whole-file CLI
+invocation with no persisted per-file symbol list to query interactively.
+`lsp-types = "0.97.0"` (already a dependency) already exposes
+`DocumentSymbol`/`document_symbol_provider`.
+
+**Effort: small.**
+
+### AH2. `workspace/symbol`: project-wide fuzzy symbol search
+
+Advertise `workspace_symbol_provider` and add a `"workspace/symbol"` arm,
+reading the query string and matching it (case-insensitive substring, or
+a light fuzzy/subsequence match) against every entry in `Project::
+decl_locations()` - its `classes`/`functions`/`members` maps already
+cover every declared class/function/method/property/const project-wide,
+each already carrying a real `(PathBuf, Span)`. Two genuinely new pieces:
+(a) the query/filter mechanism itself - no substring/fuzzy-match helper
+exists anywhere in the codebase today; (b) each match's `SymbolKind`,
+since `DeclLocations` stores only `(path, span)`, never a kind - resolved
+via `registry.classes.get(fqn).kind` for a class entry, or the same
+three-way `lookup_method_with_owner`/`lookup_property_with_owner`/
+`lookup_const_with_owner` probe `format_member_hover` already performs
+for a member entry. Unlike `documentSymbol`'s `FileState.ast`,
+`DeclLocations` *is* gated behind `retain_source` - but `lsp::Server::
+new()` unconditionally turns that gate on before any request can arrive,
+so by the time a `workspace/symbol` request is possible the index is
+already in the right mode, with no separate prerequisite gap to close
+(worth stating explicitly: this relies on a gate that happens to already
+be unconditionally on for this server, not on ungated-by-construction
+data the way `documentSymbol` is). Distinct from F3 (find-references/
+rename, which needs a brand-new use-site span index `DeclLocations`
+doesn't have and never will for that purpose) - `workspace/symbol` only
+ever needs declaration-site spans, which already exist, plus a
+name-matching query layer, which doesn't.
+
+**Effort: medium.**
+
+---
+
+## AI. Whole-program redundant-override detection (V1's mirror image)
+
+Reuses V1's alpha-equivalence body-canonicalization/hashing machinery,
+but inverts the relationship gate: instead of excluding pairs where
+`is_subclass_of`/`classes_using_trait` holds (V1's false-positive guard
+against flagging a legitimate override as an accidental duplicate), fire
+*only* when that relationship holds and the specific overriding method
+resolved via `lookup_ancestor_method_with_owner` has a body alpha-
+equivalent to the ancestor method it overrides. Such an override changes
+nothing behaviorally - plain inheritance already produces the identical
+effect - so it's either dead code (safe to delete, rely on inheritance)
+or a copy-paste mistake where a divergent edit was intended but never
+made. Emits an opt-in `method.redundantOverride` diagnostic pointing at
+the overriding declaration, with the ancestor location as a tip, skipping
+trivial 0-1 statement bodies (bare `parent::foo()` forwarders, a common
+deliberate idiom for documentation/covariance/attribute purposes) using
+the same minimum-statement-count guard V1 already uses for its own
+triviality filter. Real PHPStan's `OverridingMethodRule` (408 lines)
+implements the entire override-checking family - parent-final checks,
+parameter/visibility comparison helpers, signature rules, `#[Override]`
+validation - but never once reads `getBody()`/statement content from
+either the overriding or ancestor method; every check operates on
+signature reflection data only. Grepping both vendored `Rules/Methods/`
+directories for any body-content comparator returns zero hits - the only
+"duplicate"-adjacent rules anywhere are name-collision detectors, never a
+comparison between two differently-scoped method bodies. phpstan-rs is
+single-process with every file's full parsed AST already resident
+project-wide, so pairing an overriding method's body against its
+resolved ancestor's needs no new traversal infrastructure - V1's own
+canonical fingerprint and statement-list equality comparator apply
+unchanged to this inverted case. The only new wiring: for each class's
+declared methods (already iterated by `check_method_overrides`), resolve
+the ancestor via `lookup_ancestor_method_with_owner` (already used by
+`method_overrides.rs`'s own compatibility checking) and run V1's equality
+helper directly against the two bodies - no relationship-exclusion filter
+needed at all, since here the relationship is required rather than
+disqualifying.
+
+**Effort: small.**
