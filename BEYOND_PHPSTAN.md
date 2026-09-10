@@ -26,10 +26,13 @@ of that round's section) collided with H3 in a way the survey agent's own
 duplicate-check missed but the verify pass caught. Round 8: 6 of 6
 survived - a real signal that targeted, specific lenses still find
 genuine ground even this deep into the survey, unlike rounds 6-7's
-broader re-audit lenses. Total: 87 confirmed findings across sections
-A-AK plus one corrected finding. Nothing here is scheduled; it's a
-grounded idea backlog, same status as ROADMAP's own "Newly identified
-gaps" until triaged into a numbered phase.
+broader re-audit lenses. Round 9: 4 of 5 survived; the fifth lens (a
+second pass over ROADMAP's "Reverted" section) genuinely found nothing
+after real investigation and correctly returned zero rather than padding.
+Total: 91 confirmed findings across sections A-AL plus one corrected
+finding. Nothing here is scheduled; it's a grounded idea backlog, same
+status as ROADMAP's own "Newly identified gaps" until triaged into a
+numbered phase.
 
 Two structural facts most items below trace back to, repeatedly:
 
@@ -2819,3 +2822,196 @@ package exists to require - the mapping only becomes actionable for
 genuinely optional extensions.
 
 **Effort: large.**
+
+---
+
+# Round 9
+
+Five precisely-targeted lenses, following round 8's demonstrated lesson
+that narrow, specifically-named mechanisms outperform broad re-audits.
+4 of 5 lenses found real, confirmed ground; the fifth (a second pass over
+ROADMAP's "Reverted" section, beyond O1/O2) genuinely came up empty after
+real investigation and correctly returned zero findings rather than
+padding - exactly the discipline this round was designed to test.
+
+## U (continued). A fifth closed-world-inference instance, with a genuine twist
+
+### U5. Cross-check `@phpstan-require-implements`/`@phpstan-require-extends` against actual trait usage, and use it to widen `$this` in phpstan-rs's own orphan-trait fallback
+
+Two paired closed-world checks real PHPStan's architecture cannot
+perform, not just one. **(1)** For every trait carrying a require tag,
+collect the set of member names the trait's own method bodies actually
+access via `$this->` that aren't already satisfied by the trait's own
+declared members/ancestors, and compare that set against the required
+type's real (registry-known) member set. When the required type declares
+members the trait body never references anywhere, report the requirement
+as broader than the trait's own body demonstrably needs - a stale or
+copy-pasted `@phpstan-require-implements`/`-extends`. **(2)** Use the
+required type's real member set to widen `$this` in the exact fallback
+path phpstan-rs already added *beyond* real PHPStan: checking a trait
+with zero using classes in the closed project standalone
+(`checker/function_decl.rs::check_trait_methods`, its own doc comment
+explicitly framing this as real behavior beyond doing nothing) - so a
+legitimate `$this->requiredInterfaceMethod()` call in a library trait
+with no in-repo consumer stops false-positiving as undefined, while a
+call to a member the tag does *not* cover still correctly flags (a
+diagnostic real PHPStan structurally can never produce, since it never
+walks that trait body in this scenario at all). `RequireImplementsRule`/
+`RequireExtendsRule` only ever check whether a concrete *using* class
+satisfies the tag's claim - never whether the trait's own body needs that
+much; `RequireExtendsCheck` only validates the tag's own syntax/target
+validity, also never usage-based. More fundamentally, real PHPStan's
+trait method bodies are only ever walked through a real using class's
+`InTraitNode` - a bare `Stmt\Trait_` node is used only for ignore-comment
+bookkeeping, never body-walked directly, and `ScopeContext::enterClass`
+throws if given a trait at all (confirmed: grepping the whole of
+`NodeScopeResolver.php` for `Trait_` returns zero hits). So a trait with
+no using class anywhere in the analyzed file set has its body never
+walked by real PHPStan at all - it structurally cannot ever compare a
+require-tag's claim to actual usage in that case, and in the has-consumer
+case it never needs to since `$this` resolves against the real
+consumer's real interface directly. phpstan-rs's registry already keeps
+`require_extends`/`require_implements` as separately-resolved, real
+class-name lists on `ClassInfo`, fully independent of `flatten_traits`'s
+method/property merge - `current_trait` is consulted today only for
+deprecation-suppression, never member resolution, confirming the tag's
+real member set is present in the registry but simply unconsulted in the
+standalone fallback. `checker::oop::check_require_tags` already proves
+the consumer-compliance half is ported; this is the usage-based half
+neither project has, made newly computable because phpstan-rs's
+single-process registry can look up the required type's real, typed
+member set at any point - unlike PHPStan's per-file reflection-before-
+walk pipeline U1-U4 already document as the systemic blocker for this
+whole tag family.
+
+**Effort: large.**
+
+---
+
+## AL. `composerScript.notFound`/`notPublicStatic`: composer.json `scripts` `Class::method` callable-string validation, a sixth composer-hygiene axis
+
+Distinct from K, R, AC, AG, and AK (each keys off a different
+composer.json section and a different failure mode - none mentions
+"scripts" at all). Parse the project's root composer.json `"scripts"`
+map (a direct extension of the same `serde_json::Value`-reading pattern
+`detect_phpstan_dependency` already uses, just a different top-level
+key) and, for every string value matching the documented `Class::method`
+callable-string convention (a bare FQN, `::`, a bare identifier - no
+`$`, `(`, spaces, or shell metacharacters, disambiguating it from a
+plain shell-command string; the check is deliberately scoped to exactly
+this unambiguous form, never the shell-command or array-of-commands
+forms that carry no static contract), split and resolve against the
+closed-world registry: report `composerScript.notFound` when the class
+or method doesn't exist (mirroring the exact undefined-static-method-call
+precedent already in the checker, `__callStatic` suppression included,
+since Composer's own invocation is a plain `call_user_func` that magic
+method would legitimately intercept), and `composerScript.notPublicStatic`
+when the method resolves but isn't public (reusing `FunctionSig::
+visibility`, already threaded through since Phase 57) or isn't static -
+Composer instantiates nothing and calls the callable via reflection-free
+`call_user_func`, so a private/protected or non-static target throws or
+silently no-ops when Composer actually runs the script, with zero static
+warning today. PHPStan's own `Rules/` catalog has no composer.json-
+schema-reading code for the "scripts" section at all - a case-insensitive
+grep across both vendored trees returns exactly one hit, an unrelated
+code comment about CLI-invocation scripts in `Turbo/
+TurboExtensionEnabler.php`, confirming zero rule ever reads this key.
+phpstan-rs already has three of the four pieces this needs, each proven
+at a real call site: generic composer.json section-reading via
+`serde_json`; closed-world class-and-method existence plus visibility
+resolution via `Registry::lookup_method`; and a direct precedent for
+splitting a `Class::method`-shaped string and resolving it against the
+registry, already built for `call_user_func('Class::method')`-equivalent
+callables. The one honest gap: `FunctionSig` carries no `is_static` field
+at all today (every `sig.is_static` reference found elsewhere in the
+checker actually reads `PropertySig::is_static`, a different struct) -
+but the raw `MethodDecl::is_static` bool needed to fill it is already
+sitting unused in the exact iterator that discards it today (the same
+loop that reads `m.visibility` into `FunctionSig::from_decl` also reads
+`m.is_abstract` off the same `m` three lines later, just never
+`m.is_static`) - threading it through mirrors the already-completed
+Phase 57 visibility rollout exactly, not new machinery.
+
+**Effort: medium.**
+
+---
+
+## AA (continued). A fifth design-pattern suggestion: `never` return type
+
+### AA5. Suggest declaring `never` when a body provably never returns normally
+
+Real PHPStan has this exact suggest-direction rule already *built* -
+`NeverRuleHelper::shouldReturnNever()` walks a function's execution ends
+and classifies each always-terminating one as a throw vs. "terminates
+script execution" (an infinite loop, or a call to an already-`never`
+function/method) - but the rules that consume it,
+`FunctionNeverRule`/`MethodNeverRule`, are registered only in
+`vendor/phpstan-src/issue-bot/playground.neon`, phpstan.org's own private
+issue-reproduction bot config (confirmed: grepping every `conf/*.neon`
+for "Playground" returns zero rule-registration hits, no installable
+package/level config/strict-rules extension ever turns them on). Every
+*other* `never`-related identifier in real PHPStan - `return.never` in
+`FunctionReturnTypeCheck.php` and `MissingReturnRule.php` - is
+exclusively the *validate* direction (a body that already declares
+`never` but returns/falls through), confirming the same directional
+asymmetry AA1/AA3/AA4 already established for readonly/promotion:
+PHPStan never proposes adding `never` to a project shipping to real
+users, only checks it once present. phpstan-rs already computes the
+exact "this call never returns" fact generically, unconnected to any
+suggestion: `always_terminates` treats any call whose callee registry
+signature declares `never` as a terminating statement - already reused
+today for guard-clause narrowing, `deadCode.unreachable`, and Phase 61's
+own `return.never`/`return.missing` validation. Add a new opt-in
+suggestion pass right next to that existing validation block: for a
+declared function/method whose return type isn't already `never` (or
+generator), contains zero `return` statements anywhere in its body (a
+distinct, stricter gate than `always_terminates`'s own broader notion,
+which also treats a plain `return;`/`return $x;` as terminating - that
+must NOT count here), where every real execution end is either a `throw`
+or a statement inferred as `Type::Never`, suggest the stricter type -
+distinguishing "always throws" from "always terminates script execution"
+the same way real PHPStan's own message text does. Since phpstan-rs
+ships one binary/config surface to every user rather than gating a
+working rule behind a private internal-only demo tier, this is additive
+wiring onto an already-built, already-tested primitive, not new analysis
+machinery.
+
+**Effort: medium.**
+
+---
+
+## X (continued). A second target dimension: array non-emptiness, not object identity
+
+### X2. Whole-program `array` -> `non-empty-array` parameter narrowing
+
+Extends section X's project-wide call-site aggregation pass to a second
+dimension: for every declared parameter typed plain `array` (no
+`non-empty-array`/shape refinement already present), track at every real
+call site (via the same `resolve_call_args` resolution and the same
+already-inferred `arg_ty` X's own citations establish) whether the passed
+argument is provably non-empty - reusing the array-non-emptiness test
+that already exists for exactly this purpose, `Self::
+is_known_non_empty_array` (`checker/expr/array_ops.rs:315-327`), which
+already handles a non-empty `ArrayShape` literal, an intersection
+carrying the `NonEmptyArray` accessory, and a union where every branch is
+non-empty - precisely the "non-empty literal, or an already-narrowed
+non-empty-array-typed variable/expression" disjunction this needs, with
+zero new logic for the per-call-site test itself. After all files are
+checked, for every plain-`array`-typed parameter with 2+ real call sites
+where non-emptiness held at every one, flag the declaration suggesting
+`array` be narrowed to `non-empty-array`. Real PHPStan's cross-call-site
+aggregation surface is its concrete `Collector` implementations (14
+found, enumerated directly); none collects per-call argument
+emptiness/type data at all - the only parameter-narrowing-adjacent rule,
+`TooWideTypehints/TooWideTypeCheck.php`'s `checkParameterOutType`, reads
+only a by-ref/`@param-out` parameter's own value *after* the function
+body assigns to it, single-function-local, never a caller-supplied
+argument's shape aggregated across real call sites project-wide.
+phpstan-rs already threads every file's checking through one shared
+`Registry` in a single process (the same closed-world precondition X's
+own citations establish), so this variant's project-wide aggregation
+needs no cross-process reconciliation - uniquely for this dimension, the
+per-call-site test itself isn't new inference at all, only the
+project-wide retain-and-aggregate step (mirroring X's own design) is.
+
+**Effort: medium.**
