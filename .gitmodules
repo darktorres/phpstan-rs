@@ -4,3 +4,27 @@
 [submodule "vendor/phpstan-strict-rules"]
 	path = vendor/phpstan-strict-rules
 	url = https://github.com/phpstan/phpstan-strict-rules.git
+[submodule "vendor/doctrine-orm"]
+	path = vendor/doctrine-orm
+	url = https://github.com/doctrine/orm.git
+[submodule "vendor/doctrine-collections"]
+	path = vendor/doctrine-collections
+	url = https://github.com/doctrine/collections.git
+[submodule "vendor/monolog"]
+	path = vendor/monolog
+	url = https://github.com/Seldaek/monolog.git
+[submodule "vendor/guzzle"]
+	path = vendor/guzzle
+	url = https://github.com/guzzle/guzzle.git
+[submodule "vendor/symfony-console"]
+	path = vendor/symfony-console
+	url = https://github.com/symfony/console.git
+[submodule "vendor/symfony-dependency-injection"]
+	path = vendor/symfony-dependency-injection
+	url = https://github.com/symfony/dependency-injection.git
+[submodule "vendor/symfony-http-foundation"]
+	path = vendor/symfony-http-foundation
+	url = https://github.com/symfony/http-foundation.git
+[submodule "vendor/wordpress"]
+	path = vendor/wordpress
+	url = https://github.com/WordPress/WordPress.git
