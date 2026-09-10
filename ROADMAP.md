@@ -705,39 +705,57 @@ to want to extend.
 **19 - Fuzz testing (NOT STARTED).** `arbitrary`+`cargo-fuzz` for the
 lexer/parser, `proptest` for `types.rs`'s subtyping logic. Dev-only.
 
-**40 - PHPStan-API-usage checks (PARTIAL).** Done for instantiation,
-static calls, class-const fetches, `instanceof`, `extends`/`implements`/
-trait-use, a syntactically-typed slice of method calls (a directly-
-typed parameter/closure-capture receiver, *and* now a `$this->prop->
-method()` chain through a constructor-promoted/injected or ordinary
-typed property - `Walker::class_prop_types`, a minimal, class-scoped
-local type tracker, not general receiver-type inference), and three
-general-purpose `Rules/Api/*` rules ROADMAP never separately tracked:
-`RuntimeReflectionFunctionRule`/`RuntimeReflectionInstantiationRule`
-(`phpstanApi.runtimeReflection` - `is_a()`/`class_parents()`/etc. and
-`Reflection*` instantiation inside a class implementing a `PHPStan\*`
-interface) and `OldPhpParser4ClassRule` (`phpParser.classRenamed` - a
-bare reference to one of ten renamed nikic/php-parser v4 class names),
-plus `PhpStanNamespaceIn3rdPartyPackageRule` (`phpstanApi.
-phpstanNamespace`, a `namespace PHPStan\...;` declaration whose nearest
-`composer.json` isn't named `phpstan/*` - the one rule of the four that
-needed a real file path on disk, via a new `composer::find_composer_
-package_name` upward walk). The `extends` mirror now derives
+**40 - PHPStan-API-usage checks (PARTIAL, one gap left, low priority).**
+Done for instantiation, static calls, class-const fetches, `instanceof`,
+`extends`/`implements`/trait-use, and three general-purpose `Rules/Api/*`
+rules ROADMAP never separately tracked: `RuntimeReflectionFunctionRule`/
+`RuntimeReflectionInstantiationRule` (`phpstanApi.runtimeReflection` -
+`is_a()`/`class_parents()`/etc. and `Reflection*` instantiation inside a
+class implementing a `PHPStan\*` interface) and `OldPhpParser4ClassRule`
+(`phpParser.classRenamed` - a bare reference to one of ten renamed
+nikic/php-parser v4 class names), plus `PhpStanNamespaceIn3rdPartyPackageRule`
+(`phpstanApi.phpstanNamespace`, a `namespace PHPStan\...;` declaration
+whose nearest `composer.json` isn't named `phpstan/*` - the one rule of
+the four that needed a real file path on disk, via a new `composer::
+find_composer_package_name` upward walk). The `extends` mirror derives
 `phpstanApi.interface` (vs. `phpstanApi.class`) for an interface's own
 multi-parent `extends` list, matching real PHPStan's own
 `ApiInterfaceExtendsRule`/`ApiClassExtendsRule` split by declaring-node
 kind, including the class-only `PHPStan\Analyser\MutatingScope`
 extends-exemption; `instanceof`'s own class/interface/trait identifier
 distinction (`phpstanApi.{class,interface,trait}`) was already correct
-before this batch, confirmed by an existing passing test - ROADMAP's own
-prior text calling both a fidelity gap was accurate for `extends` only.
-Full, general receiver-type inference for an arbitrary method-call chain
-(folding
-this whole separate `Walker` into the main `Checker` pass, the way the
-design doc's own recommendation described) remains a deliberate,
-disclosed scope trim - the `$this->prop->method()` slice above covers
-the single most common real shape without that larger architectural
-change.
+before this batch, confirmed by an existing passing test.
+
+Phase 40.C: `ApiMethodCallRule`'s general receiver-type inference (method
+calls) and `NodeConnectingVisitorAttributesRule` are done too, folded
+into the *main* `Checker` pass (`checker/expr.rs`'s own `MethodCall` arm)
+instead of `phpstan_api.rs`'s own previously-separate `Walker` - that
+pass's own existing `find_method_receiver` already computes a call's
+real declaring class via full general inference for an unrelated purpose
+(member resolution), recognizing every receiver shape (an arbitrary
+chained call, `$this->ownMethod()`, ...), not just a directly-typed
+parameter or `$this->prop->method()`. `Registry::phpstan_api_check_enabled`
+mirrors `Project`'s own identically-named field (set once from
+`composer::detect_phpstan_dependency`) so the main `Checker`, which only
+ever has `&Registry` in hand, can read it too. The old walker's own
+narrower version of both checks (`ParamTypes`/`class_prop_types`'s only
+real consumers) was retired.
+
+One real, pre-existing, already-disclosed limitation (not introduced by
+this fold-in, just newly *reachable* through it): `is_phpstan_namespace`
+is a namespace-prefix check only, unlike real PHPStan's own
+`ApiRuleHelper::isPhpStanCode`, which also confirms the declaring class's
+file actually lives under a `vendor/` directory - a third-party PHPStan
+*extension* package that (by convention, not uncommon) names its own
+rule classes under the literal `PHPStan\Rules\...` prefix will see its
+own internal `$this->ownMethod()` calls flagged as if they were real
+PHPStan core code, confirmed directly analyzing `vendor/phpstan-strict-
+rules` as a standalone target. Not a corpus regression for this
+project's own actual target (Piwigo has no `PHPStan\*`-namespaced code
+of its own, so `phpstan_api_check_enabled` never engages for it at all) -
+this project's registry still doesn't track a per-class declaring file
+path, the same reason this gap was already accepted, not built around,
+for every other check in this family.
 
 **41 - Purity / side-effect model, remaining (PARTIAL).** The
 transitive slice and `NoopRule`'s own bare-statement family are done

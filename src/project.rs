@@ -236,8 +236,16 @@ impl Project {
     /// `composer::detect_phpstan_dependency` against the project's own
     /// `composer.json`, the same way it already decides whether to load
     /// `composer::discover_vendor_context`'s own `vendor/` context.
+    /// Phase 40.C: also mirrored into `self.registry.phpstan_api_check_
+    /// enabled`, following every other opt-in check's exact precedent -
+    /// the main `Checker` pass's own `MethodCall` arm needs to read this
+    /// too now (`phpstanApi.method`/`phpParser.nodeConnectingAttribute`,
+    /// folded in from this module's own previously-separate `Walker`
+    /// pass), and `Checker` only ever has `&Registry` in hand, not
+    /// `Project` itself.
     pub fn set_phpstan_api_check_enabled(&mut self, enabled: bool) {
         self.phpstan_api_check_enabled = enabled;
+        self.registry.phpstan_api_check_enabled = enabled;
     }
 
     /// See `retain_source`'s own doc comment.

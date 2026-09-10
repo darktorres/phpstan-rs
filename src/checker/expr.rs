@@ -966,6 +966,17 @@ impl<'a> Checker<'a> {
                 let sig = receiver.as_ref().map(|(class, type_args, owner, sig)| {
                     self.substitute_class_templates(sig, class, type_args, owner)
                 });
+                // Phase 40.C: folded in from `phpstan_api.rs`'s own
+                // previously-separate `Walker` pass - see each check's
+                // own doc comment.
+                if let Some((_, _, owner, _)) = &receiver
+                    && let Some(s) = &sig
+                {
+                    self.check_phpstan_api_method_call(owner, method, s, e.span, label);
+                }
+                if let Some((class, _)) = &recv_class {
+                    self.check_node_connecting_attribute(class, method, args, e.span, label);
+                }
                 // Phase 42 Sub-item A/D: this method call's own throw
                 // contribution.
                 if let Some((class, _, _, _)) = &receiver {

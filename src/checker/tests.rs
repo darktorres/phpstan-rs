@@ -43,6 +43,7 @@ mod oop_overrides_and_inheritance;
 mod operator_overloading;
 mod operator_validity;
 mod param_callable_tags;
+mod phpstan_api_method_calls;
 mod phpstan_assert_tags;
 mod phpstan_tag_typos;
 mod preg_and_regex;

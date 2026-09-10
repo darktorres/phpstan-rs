@@ -149,6 +149,20 @@ pub struct Registry {
     // until a fresh corpus diff re-confirms both stay silent. Same wiring
     // chain as the flags above.
     pub check_array_filter_falsy_noop: bool,
+    // Phase 40.C: whether this project consumes real PHPStan as a
+    // dependency at all (mirrors `Project::phpstan_api_check_enabled`,
+    // set once from `composer::detect_phpstan_dependency` before any
+    // file is checked - not a CLI-configurable flag of its own the way
+    // every other flag in this group is). Gates the main `MethodCall`
+    // arm's own `phpstanApi.method`/`phpParser.nodeConnectingAttribute`
+    // checks (`checker/expr.rs`, `checker/phpstan_api.rs`), folded in
+    // from `phpstan_api.rs`'s own previously-separate `Walker` pass,
+    // which still runs separately for every *other* PHPStan-API-usage
+    // check (instantiation, static calls, class-const fetches,
+    // `instanceof`, `extends`/`implements`/trait-use). Defaults to
+    // `false`, so every existing call site untouched by this is
+    // completely unaffected.
+    pub phpstan_api_check_enabled: bool,
     // Phase 38: the project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to

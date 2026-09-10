@@ -8,8 +8,9 @@
 //! Mirrors real PHPStan's own `Rules\Api\*` rule family
 //! (`ApiInstantiationRule`, `ApiStaticCallRule`, `ApiClassConstFetchRule`,
 //! `ApiInstanceofRule`, `ApiClassExtendsRule`, `ApiClassImplementsRule`,
-//! `ApiInterfaceExtendsRule`, `ApiTraitUseRule`, plus a syntactically-typed
-//! subset of `ApiMethodCallRule` - see below) - this is the mirror-image
+//! `ApiInterfaceExtendsRule`, `ApiTraitUseRule`, `ApiMethodCallRule`,
+//! `NodeConnectingVisitorAttributesRule` - the last two checked from the
+//! *main* `Checker` pass instead, see below) - this is the mirror-image
 //! feature to Phase 18's future extension-API surface (phpstan-rs
 //! protecting *its own* API), not that feature itself: this checks code
 //! that *consumes* real PHPStan as a Composer library.
@@ -48,16 +49,17 @@
 //! own, more meaningful undefined-class diagnostic elsewhere, and isn't
 //! double-reported here): `new X(...)`, `X::staticMethod()`, `X::CONST`
 //! (but not `X::class` - see below), `$x instanceof X`, `extends X`,
-//! `implements X`, `use X;` (trait), plus one syntactically-typed slice of
-//! instance method calls: `$scope->getType(...)` where `$scope` is a
-//! directly-typed parameter (or closure/arrow-fn `use`-captured variable)
-//! of the enclosing function - not general receiver-type inference (this
-//! project's full `Checker` does that, but only mid-traversal, with no
-//! per-node type retained afterward for a second, separate pass to reuse
-//! cheaply). A call through a constructor-promoted/injected property
-//! (`$this->apiRuleHelper->isPhpStanCode(...)`, a real, common shape in
-//! extension code doing its own internal delegation) is a known,
-//! disclosed gap this first pass doesn't cover.
+//! `implements X`, `use X;` (trait). Instance method calls
+//! (`$scope->getType(...)`, `phpstanApi.method`) and
+//! `$node->getAttribute('parent'|'previous'|'next')`
+//! (`phpParser.nodeConnectingAttribute`) are checked separately, in the
+//! *main* `Checker` pass instead (Phase 40.C - `checker/expr.rs`'s own
+//! `MethodCall` arm, via `Checker::check_phpstan_api_method_call`/
+//! `check_node_connecting_attribute`), which already computes a method
+//! call's real receiver class via full general type inference
+//! (`find_method_receiver`) for an unrelated purpose (member resolution) -
+//! reusing it recognizes every receiver shape, not just a directly-typed
+//! parameter or `$this->prop`.
 //!
 //! `X::class` is deliberately never flagged: real PHPStan's own
 //! `ApiClassConstFetchRule` does flag it, but only after also checking
@@ -75,9 +77,9 @@ use std::path::Path;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::checker::{Diagnostic, class_type_word, literal_string_value};
+use crate::checker::{Checker, Diagnostic, class_type_word, literal_string_value};
 use crate::composer;
-use crate::registry::{NameContext, Registry};
+use crate::registry::{FunctionSig, NameContext, Registry};
 use crate::token::Span;
 
 /// `$variable-name -> resolved fully-qualified class name` for whichever
@@ -253,7 +255,7 @@ const INSTANCEOF_DEPRECATED_CLASSES: &[(&str, Option<&str>)] = &[
     ),
 ];
 
-fn is_phpstan_namespace(fqn: &str) -> bool {
+pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
     fqn.len() >= 8
         && fqn.as_bytes()[..8].eq_ignore_ascii_case(b"PHPStan\\")
         && !fqn.starts_with("PHPStan\\PhpDocParser\\")
@@ -274,7 +276,7 @@ fn is_phpstan_namespace(fqn: &str) -> bool {
 /// favoring-in-real-PHPStan's-terms (but this project's own usual false-
 /// negative-averse direction) simplification not worth new registry
 /// plumbing for.
-fn class_implements_phpstan_interface(fqn: &str, registry: &Registry) -> bool {
+pub(crate) fn class_implements_phpstan_interface(fqn: &str, registry: &Registry) -> bool {
     registry
         .all_ancestor_names(fqn)
         .iter()
@@ -440,6 +442,102 @@ fn param_types_with(base: &ParamTypes, params: &[Param], ctx: &NameContext) -> P
         }
     }
     out
+}
+
+impl<'a> Checker<'a> {
+    /// Phase 40.C: `ApiMethodCallRule`'s general receiver-type-inference
+    /// half, folded into the main checker pass - `check_expr`'s own
+    /// `MethodCall` arm already computes `owner`/`sig` via full general
+    /// inference (`find_method_receiver`) for an unrelated purpose
+    /// (member resolution), so this only needs to reuse them, not
+    /// recompute anything. Supersedes `Walker::check_expr`'s own
+    /// previous, syntactically-typed-only `phpstanApi.method` reporting
+    /// (a directly-typed parameter, or `$this->prop`, receiver only) -
+    /// this recognizes *every* receiver shape the main checker's own
+    /// type inference does. Mirrors `Walker::report_static_method_not_
+    /// covered`'s own identical declaring-class + method-level `@api`
+    /// resolution (the `__construct` class-level-`@api` exemption
+    /// included) - real PHPStan's `isCovered()`, confirmed by reading it
+    /// directly.
+    pub(crate) fn check_phpstan_api_method_call(
+        &mut self,
+        owner: &str,
+        method: &str,
+        sig: &FunctionSig,
+        span: Span,
+        label: &str,
+    ) {
+        if !self.registry.phpstan_api_check_enabled || sig.is_api || !is_phpstan_namespace(owner) {
+            return;
+        }
+        let Some(owner_info) = self.registry.classes.get(owner) else {
+            return;
+        };
+        if owner_info.is_api && method != "__construct" {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!(
+                "calling {owner}::{method}() is not covered by PHPStan's backward compatibility promise (missing @api on {owner})"
+            ),
+            span,
+            0,
+            "phpstanApi.method",
+        );
+    }
+
+    /// Phase 40.C: `NodeConnectingVisitorAttributesRule`, folded in
+    /// alongside `check_phpstan_api_method_call` above for the identical
+    /// reason - `check_expr`'s own `MethodCall` arm already has the real
+    /// receiver class in hand. Unlike that check, gated on the *calling*
+    /// class implementing a `PHPStan\*` interface
+    /// (`class_implements_phpstan_interface`), not the receiver's own
+    /// namespace - `$node` is typically a plain `PhpParser\Node` subtype,
+    /// not itself `PHPStan\*`-namespaced, so `is_phpstan_namespace`
+    /// would never fire here at all.
+    pub(crate) fn check_node_connecting_attribute(
+        &mut self,
+        recv_class: &str,
+        method: &str,
+        args: &[Arg],
+        span: Span,
+        label: &str,
+    ) {
+        if !self.registry.phpstan_api_check_enabled {
+            return;
+        }
+        if !self
+            .current_class
+            .as_deref()
+            .is_some_and(|c| class_implements_phpstan_interface(c, self.registry))
+        {
+            return;
+        }
+        if !method.eq_ignore_ascii_case("getAttribute") {
+            return;
+        }
+        if !self.registry.is_subclass_of(recv_class, "PhpParser\\Node") {
+            return;
+        }
+        let Some(first) = args.first() else { return };
+        let Some(name) = literal_string_value(&first.value) else {
+            return;
+        };
+        if !matches!(name.as_ref(), "parent" | "previous" | "next") {
+            return;
+        }
+        self.report_builder(
+            crate::checker::DiagnosticBuilder::new(
+                label.to_string(),
+                format!("Node attribute '{name}' is no longer available."),
+                span,
+                0,
+                "phpParser.nodeConnectingAttribute",
+            )
+            .tip("See: https://phpstan.org/blog/preprocessing-ast-for-custom-rules"),
+        );
+    }
 }
 
 struct Walker<'a> {
@@ -927,56 +1025,6 @@ impl<'a> Walker<'a> {
         });
     }
 
-    /// Phase 40.F: `NodeConnectingVisitorAttributesRule`, direct port.
-    /// `$node->getAttribute('parent'|'previous'|'next')` used to work
-    /// when `$node` came through PHPStan's own `NodeConnectingVisitor`
-    /// (no longer the case - real PHPStan flags it as a stale idiom).
-    /// Gated on the identical `current_class_implements_phpstan_interface`
-    /// condition the sibling `RuntimeReflection*`/`OldPhpParser4ClassRule`
-    /// checks already use, plus `recv_fqn` (whatever the syntactically-
-    /// typed receiver slice above already resolved) being `PhpParser\Node`
-    /// or one of its own real subtypes (`Registry::is_subclass_of` is
-    /// self-inclusive, matching real `ObjectType::isSuperTypeOf`'s
-    /// identical semantics for an exact-type receiver).
-    fn check_node_connecting_attribute(
-        &mut self,
-        recv_fqn: &str,
-        method: &str,
-        args: &[Arg],
-        span: Span,
-        label: &str,
-    ) {
-        if !self.current_class_implements_phpstan_interface {
-            return;
-        }
-        if !method.eq_ignore_ascii_case("getAttribute") {
-            return;
-        }
-        if !self.registry.is_subclass_of(recv_fqn, "PhpParser\\Node") {
-            return;
-        }
-        let Some(first) = args.first() else { return };
-        let Some(name) = literal_string_value(&first.value) else {
-            return;
-        };
-        if !matches!(name.as_ref(), "parent" | "previous" | "next") {
-            return;
-        }
-        self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
-            message: format!("Node attribute '{name}' is no longer available."),
-            span,
-            level: 0,
-            identifier: "phpParser.nodeConnectingAttribute".to_string(),
-            tip: Some(
-                "See: https://phpstan.org/blog/preprocessing-ast-for-custom-rules".to_string(),
-            ),
-            non_ignorable: false,
-            metadata: HashMap::new(),
-            fix: None,
-        });
-    }
-
     /// Phase 40.6: `RuntimeReflectionFunctionRule`'s own reporting half.
     fn check_runtime_reflection_function(&mut self, name: &str, span: Span, label: &str) {
         if !self.current_class_implements_phpstan_interface {
@@ -1210,39 +1258,18 @@ impl<'a> Walker<'a> {
                     );
                 }
             }
-            ExprKind::MethodCall(recv, method, args, _) => {
-                if let ExprKind::Variable(name) = &recv.kind
-                    && let Some(fqn) = param_types.get(name)
-                {
-                    // Phase 40.F: independent of `is_phpstan_namespace` -
-                    // `$node` is typically a plain `PhpParser\Node`
-                    // subtype, not itself `PHPStan\*`-namespaced.
-                    self.check_node_connecting_attribute(fqn, method, args, e.span, label);
-                }
-                if let ExprKind::Variable(name) = &recv.kind
-                    && let Some(fqn) = param_types.get(name)
-                    && is_phpstan_namespace(fqn)
-                {
-                    let action = format!("calling {fqn}::{method}()");
-                    self.report_not_covered(fqn, &action, e.span, label, "phpstanApi.method");
-                } else if let ExprKind::PropertyAccess(inner, prop_name, _) = &recv.kind
-                    && matches!(&inner.kind, ExprKind::Variable(v) if v == "this")
-                    && let Some(fqn) = self.current_prop_types.get(prop_name).cloned()
-                    && is_phpstan_namespace(&fqn)
-                {
-                    // Phase 40.1: the one extra receiver shape this
-                    // otherwise syntactically-typed-only walker now
-                    // recognizes - `$this->prop->method()` through a
-                    // constructor-promoted/injected or ordinary typed
-                    // property, resolved via `current_prop_types`
-                    // (`class_prop_types`, set once per `check_class`).
-                    // Cloned (not borrowed) so `report_not_covered`'s own
-                    // `&mut self` doesn't conflict with the still-live
-                    // borrow of `self.current_prop_types` a plain `&`
-                    // reference here would hold.
-                    let action = format!("calling {fqn}::{method}()");
-                    self.report_not_covered(&fqn, &action, e.span, label, "phpstanApi.method");
-                }
+            // Phase 40.C: `phpstanApi.method`/`phpParser.
+            // nodeConnectingAttribute` reporting for a method call moved
+            // to the main `Checker` pass (`checker/expr.rs`'s own
+            // `MethodCall` arm, via `Checker::check_phpstan_api_method_
+            // call`/`check_node_connecting_attribute`) - general receiver-
+            // type inference there now fully subsumes this walker's own
+            // previous syntactically-typed-only recognition (a directly-
+            // typed parameter, or `$this->prop`). Still recurses into the
+            // receiver/args, since other reference kinds this walker
+            // covers (`new X()`, `X::staticMethod()`, ...) can appear
+            // nested inside either.
+            ExprKind::MethodCall(recv, _method, args, _) => {
                 self.check_expr(recv, ctx, param_types, label);
                 for a in args {
                     self.check_expr(&a.value, ctx, param_types, label);
