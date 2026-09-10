@@ -52,6 +52,7 @@ pub struct Parser {
 
 mod classes;
 mod closures_and_match;
+mod control_flow;
 mod enums;
 mod expr;
 mod functions;
