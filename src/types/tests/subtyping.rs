@@ -273,6 +273,35 @@ fn array_accessory_subtype_rules() {
 }
 
 #[test]
+fn a_shape_with_a_non_trailing_optional_field_is_not_a_definite_list() {
+    // Phase 50: `array{0: int, 1?: string, 2: int}` is only `Maybe`-a-list
+    // in real PHPStan (if the optional field 1 is genuinely absent, keys
+    // {0, 2} aren't sequential) - `is_list_like`/`shape_fields_are_list_
+    // like` used to ignore each field's own `optional` flag entirely and
+    // answer `true` unconditionally here.
+    let list_ty = Type::Intersection(vec![
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ]);
+    let non_trailing_optional = Type::ArrayShape(vec![
+        ("0".to_string(), Type::Int, false),
+        ("1".to_string(), Type::String, true),
+        ("2".to_string(), Type::Int, false),
+    ]);
+    assert!(!is_subtype(&non_trailing_optional, &list_ty));
+
+    // A *trailing* run of optional fields is fine - the shape is still a
+    // definite list either way (whether the optional suffix is present or
+    // not, the present keys are always sequential from zero).
+    let trailing_optional = Type::ArrayShape(vec![
+        ("0".to_string(), Type::Int, false),
+        ("1".to_string(), Type::String, true),
+        ("2".to_string(), Type::Int, true),
+    ]);
+    assert!(is_subtype(&trailing_optional, &list_ty));
+}
+
+#[test]
 fn nullable_string_accepts_null_and_string() {
     let nullable_string = parse_type_string("?string");
     assert!(is_subtype(&Type::Null, &nullable_string));

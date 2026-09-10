@@ -311,10 +311,7 @@ impl<'a> Checker<'a> {
             Type::Intersection(members) => {
                 members.contains(&Type::Accessory(AccessoryKind::ArrayList))
             }
-            Type::ArrayShape(fields) => fields
-                .iter()
-                .enumerate()
-                .all(|(i, (k, _, _))| k == &i.to_string()),
+            Type::ArrayShape(fields) => crate::types::shape_fields_are_list_like(fields),
             // Every branch of a control-flow-merged `Union` must itself
             // be list-like - an `ArrayShape([])` branch (the common
             // "0 iterations" case) already satisfies this vacuously via

@@ -1,5 +1,37 @@
 use crate::types::{AccessoryKind, Type};
 
+/// Phase 50: whether `fields` (an `ArrayShape`'s own field list) is a
+/// *definite* list - canonical-int-key-sequential from zero *and* no
+/// optional field followed by a later, non-optional one. Three call sites
+/// (this file, `checker/expr/array_ops.rs`'s `is_list_like`,
+/// `checker/calls/format_string.rs`'s `vsprintf`/`vprintf` arg-count
+/// check) used to hand-duplicate only the first half of this check,
+/// ignoring each field's own `optional` flag entirely - a real, unsound
+/// gap confirmed by hand-tracing real PHPStan's own
+/// `ConstantArrayTypeBuilder` algorithm: `array{0: int, 1?: string, 2:
+/// int}` is genuinely `Maybe`-a-list in real PHPStan (if the optional
+/// field 1 is truly absent at runtime, the remaining keys `{0, 2}` aren't
+/// list-sequential at all), but all three call sites answered `true`
+/// unconditionally. Staying on this project's own established false-
+/// negative-favoring side (a `Maybe` counts as "not a definite list"
+/// here, not "close enough") - once an optional field is seen, every
+/// field after it must also be optional (a trailing run of optional
+/// fields is fine; an optional field immediately followed by a required
+/// one is exactly the case that makes the "list" claim unsound).
+pub(crate) fn shape_fields_are_list_like(fields: &[(String, Type, bool)]) -> bool {
+    let mut seen_optional = false;
+    for (i, (k, _, optional)) in fields.iter().enumerate() {
+        if k != &i.to_string() {
+            return false;
+        }
+        if seen_optional && !optional {
+            return false;
+        }
+        seen_optional |= optional;
+    }
+    true
+}
+
 /// Is every value described by `sub` also described by `sup`? This is the
 /// same relation PHPStan calls `isSuperTypeOf` (inverted) - the thing every
 /// "does this assignment/return/argument type-check" question reduces to.
@@ -118,10 +150,9 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::NonEmptyArray)) => {
             fields.iter().any(|(name, _, _)| name != "...")
         }
-        (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::ArrayList)) => fields
-            .iter()
-            .enumerate()
-            .all(|(i, (k, _, _))| k == &i.to_string()),
+        (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::ArrayList)) => {
+            shape_fields_are_list_like(fields)
+        }
 
         // An unbound template parameter is a placeholder, not a real type.
         // Call sites should have already substituted it away

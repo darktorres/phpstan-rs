@@ -40,11 +40,7 @@ impl<'a> Checker<'a> {
             let Type::ArrayShape(fields) = &values_ty else {
                 return;
             };
-            if !fields
-                .iter()
-                .enumerate()
-                .all(|(i, (k, _, _))| k == &i.to_string())
-            {
+            if !crate::types::shape_fields_are_list_like(fields) {
                 return;
             }
             let provided: Vec<(Type, Span)> = fields

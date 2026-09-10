@@ -210,6 +210,31 @@ fn vsprintf_checks_a_literal_array_argument() {
     );
 }
 
+// Phase 50: a non-trailing optional field means the shape is only
+// `Maybe`-a-list (real PHPStan's own `ConstantArrayTypeBuilder`
+// semantics) - if the optional field is genuinely absent, the remaining
+// keys aren't sequential from zero at all. vsprintf/vprintf's own
+// arg-count check must stay silent here (favoring a false negative over
+// a false positive), not assume the shape is list-like the way it used
+// to (key-index matching alone, ignoring each field's own `optional`
+// flag).
+
+#[test]
+fn vsprintf_with_a_non_trailing_optional_shape_field_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array{0: string, 1?: int, 2: string} $args */
+            function f(array $args) {
+                vsprintf('%s %d %s', $args);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "arguments.count"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn vprintf_checks_a_literal_array_argument_s_element_types() {
     let d = diagnostics_for(
