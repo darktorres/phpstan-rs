@@ -849,9 +849,23 @@ plus `property.notReadable`/`.notWritable`/`.abstractOverridingNonAbstractHook`
 property modifiers are done too - including on a promoted constructor
 property (`public final int $x` in a constructor parameter list is
 real, valid PHP, confirmed live; only `abstract` is genuinely
-impossible there) - reporting `property.parentPropertyFinal`. Still
-open: native-type property variance, blocked on giving `PropertySig` a
-`ty`/`ty_native` split the way `FunctionSig` already has.
+impossible there) - reporting `property.parentPropertyFinal`.
+`method.nonStatic`/`method.static` (an override must match its
+ancestor's own static-ness exactly, either direction) and the general,
+non-`__construct` case of `method.abstractOverridingNonAbstract` are
+done too, both `nonIgnorable` matching real PHPStan's own
+`OverridingMethodRule` exactly - a new `ClassInfo::static_methods`
+mirroring `abstract_methods`/`final_methods`, with the same trait-
+flattening propagation `abstract_methods` already had (a real bug
+found and fixed along the way: `static_methods` wasn't trait-
+flattening-aware at all, a real corpus false positive on `Symfony\
+Component\Cache\Adapter\RedisAdapter`'s trait-supplied `createConnection()`).
+The `__construct`-specific branch of `abstractOverridingNonAbstract`
+(triggered only when no normal prototype resolves at all) stays
+unbuilt - a distinct code path, not a narrowing of the general case.
+Still open: native-type property variance, blocked on giving
+`PropertySig` a `ty`/`ty_native` split the way `FunctionSig` already
+has.
 
 **67 - `@internal` restricted-usage engine, remaining (PARTIAL).**
 Calls, property/constant access, instantiation, `instanceof`, `catch`,

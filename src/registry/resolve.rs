@@ -111,6 +111,7 @@ impl Registry {
             Vec<(String, FunctionSig)>,
             Vec<(String, PropertySig)>,
             HashSet<String>,
+            HashSet<String>,
         );
 
         let class_names: Vec<String> = self.classes.keys().cloned().collect();
@@ -133,6 +134,19 @@ impl Registry {
             let mut methods = Vec::new();
             let mut properties = Vec::new();
             let mut abstract_from_traits: HashSet<String> = HashSet::new();
+            // Phase 64: `static_methods` needs the identical trait-
+            // flattening treatment `abstract_from_traits` already gets
+            // just below - without it, a using class's own `static_
+            // methods` set silently never learns about a trait-supplied
+            // static method it doesn't also redeclare itself, even though
+            // that method's own (correctly flattened-in) `FunctionSig` is
+            // right there in `info.methods`. A real corpus false positive
+            // this fixes: `Symfony\Component\Cache\Adapter\RedisAdapter`
+            // (`use RedisTrait;`) was flagged as overriding
+            // `AbstractAdapter::createConnection()` non-statically, since
+            // `RedisTrait::createConnection()`'s own real static-ness
+            // never made it into `RedisAdapter.static_methods` at all.
+            let mut static_from_traits: HashSet<String> = HashSet::new();
             for trait_name in &uses {
                 if let Some(trait_info) = self.classes.get(trait_name) {
                     for (name, sig) in &trait_info.methods {
@@ -141,6 +155,11 @@ impl Registry {
                             && !own_method_names.contains(name)
                         {
                             abstract_from_traits.insert(name.clone());
+                        }
+                        if trait_info.static_methods.contains(name)
+                            && !own_method_names.contains(name)
+                        {
+                            static_from_traits.insert(name.clone());
                         }
                     }
                     properties.extend(
@@ -180,11 +199,13 @@ impl Registry {
                 methods,
                 properties,
                 abstract_from_traits,
+                static_from_traits,
             ));
         }
 
         let mut changed = false;
-        for (class_name, methods, properties, abstract_from_traits) in additions {
+        for (class_name, methods, properties, abstract_from_traits, static_from_traits) in additions
+        {
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (name, sig) in methods {
                     if let std::collections::hash_map::Entry::Vacant(slot) =
@@ -205,6 +226,11 @@ impl Registry {
                 let before = info.abstract_methods.len();
                 info.abstract_methods.extend(abstract_from_traits);
                 if info.abstract_methods.len() != before {
+                    changed = true;
+                }
+                let before = info.static_methods.len();
+                info.static_methods.extend(static_from_traits);
+                if info.static_methods.len() != before {
                     changed = true;
                 }
             }

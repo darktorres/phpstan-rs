@@ -1,6 +1,6 @@
 use crate::ast::*;
-use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
+use crate::checker::{Checker, DiagnosticBuilder};
 use crate::token::Span;
 use crate::types::Type;
 
@@ -150,6 +150,82 @@ impl<'a> Checker<'a> {
                 0,
                 "method.override",
             );
+        }
+        // Phase 64: `method.nonStatic`/`method.static` - real PHPStan's
+        // `OverridingMethodRule` requires an override to match its
+        // ancestor's own static-ness exactly, either direction
+        // (nonIgnorable, a real unconditional PHP fatal error either
+        // way). Uses `ancestor` (the plain, non-`__construct`-adjusted
+        // prototype), not `compatibility_ancestor` below - static-ness
+        // isn't part of the parameter-signature exemption constructors
+        // get, so a constructor still needs checking against its own
+        // real prototype like any other method.
+        if let Some((ancestor_owner, ancestor_sig, _)) = &ancestor
+            && ancestor_sig.visibility != Visibility::Private
+        {
+            let own_is_static = info.static_methods.contains(method_name);
+            let ancestor_is_static = self
+                .registry
+                .classes
+                .get(ancestor_owner)
+                .is_some_and(|i| i.static_methods.contains(method_name));
+            if ancestor_is_static && !own_is_static {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "Non-static method {fqn}::{method_name}() overrides static method {ancestor_owner}::{method_name}()"
+                        ),
+                        span,
+                        0,
+                        "method.nonStatic",
+                    )
+                    .non_ignorable(),
+                );
+            } else if !ancestor_is_static && own_is_static {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "Static method {fqn}::{method_name}() overrides non-static method {ancestor_owner}::{method_name}()"
+                        ),
+                        span,
+                        0,
+                        "method.static",
+                    )
+                    .non_ignorable(),
+                );
+            }
+            // Phase 64: the general-case (non-`__construct`-special-path)
+            // half of `method.abstractOverridingNonAbstract` - making a
+            // non-abstract ancestor method abstract in the override. Real
+            // PHPStan's own rule has a second, `__construct`-specific
+            // branch too (triggered only when no *normal* prototype
+            // resolves via the usual interface/trait/`extends` walk at
+            // all) - a distinct, deliberately unbuilt code path, not a
+            // narrowing of this one. An interface's own method is always
+            // implicitly abstract (PHP never requires - or even allows -
+            // the literal `abstract` keyword there), unlike
+            // `static_methods` above, where interface methods use the
+            // same explicit-keyword convention as any other class.
+            let own_is_abstract = info.abstract_methods.contains(method_name);
+            let ancestor_is_abstract = self.registry.classes.get(ancestor_owner).is_some_and(|i| {
+                i.kind == ClassKind::Interface || i.abstract_methods.contains(method_name)
+            });
+            if own_is_abstract && !ancestor_is_abstract {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "Cannot make non-abstract method {ancestor_owner}::{method_name}() abstract in class {fqn}"
+                        ),
+                        span,
+                        0,
+                        "method.abstractOverridingNonAbstract",
+                    )
+                    .non_ignorable(),
+                );
+            }
         }
         // Real PHP deliberately exempts constructors from the
         // *signature-compatibility* checking below - a subclass's own

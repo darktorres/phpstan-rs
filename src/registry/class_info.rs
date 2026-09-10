@@ -158,6 +158,13 @@ pub struct ClassInfo {
     pub abstract_methods: HashSet<String>,
     // Method names declared `final` in this class's own body.
     pub final_methods: HashSet<String>,
+    // Phase 64: method names declared `static` in this class's own body -
+    // same "not walked up the hierarchy" shape as `abstract_methods`/
+    // `final_methods` above, used by `check_one_method_override`'s own
+    // `method.nonStatic`/`method.static` check (real PHPStan's
+    // `OverridingMethodRule`: an override must match its ancestor's own
+    // static-ness exactly, either direction).
+    pub static_methods: HashSet<String>,
     // Phase 64 Item 3: property names declared `final` in this class's
     // own body (PHP 8.4) - same "not walked up the hierarchy" shape as
     // `final_methods` above; `Registry::find_final_ancestor_property`
@@ -405,6 +412,12 @@ impl ClassInfo {
             .methods
             .iter()
             .filter(|m| m.is_final && m.visibility != Visibility::Private)
+            .map(|m| m.function.name.clone())
+            .collect();
+        let static_methods: HashSet<String> = c
+            .methods
+            .iter()
+            .filter(|m| m.is_static)
             .map(|m| m.function.name.clone())
             .collect();
         // Phase 64 Item 3: same private-is-not-overridable exemption
@@ -794,6 +807,7 @@ impl ClassInfo {
             consts,
             uses: c.uses.iter().map(|s| ctx.resolve(s)).collect(),
             abstract_methods,
+            static_methods,
             final_methods,
             final_properties,
             trait_aliases,
@@ -1151,6 +1165,12 @@ impl ClassInfo {
             .filter(|m| m.is_final && m.visibility != Visibility::Private)
             .map(|m| m.function.name.clone())
             .collect();
+        let static_methods: HashSet<String> = e
+            .methods
+            .iter()
+            .filter(|m| m.is_static)
+            .map(|m| m.function.name.clone())
+            .collect();
         let trait_aliases: Vec<TraitAlias> = e
             .trait_aliases
             .iter()
@@ -1173,6 +1193,7 @@ impl ClassInfo {
             uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
             abstract_methods,
             final_methods,
+            static_methods,
             // An enum can't declare instance properties at all (see
             // `ast::EnumDecl`'s own doc comment) - never a `final`-
             // property candidate either.
@@ -1267,6 +1288,7 @@ impl ClassInfo {
         self.type_imports.extend(other.type_imports);
         self.abstract_methods.extend(other.abstract_methods);
         self.final_methods.extend(other.final_methods);
+        self.static_methods.extend(other.static_methods);
         self.final_properties.extend(other.final_properties);
         self.resolved_trait_conflicts
             .extend(other.resolved_trait_conflicts);

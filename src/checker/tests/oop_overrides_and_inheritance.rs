@@ -1280,6 +1280,159 @@ fn overriding_a_private_ancestor_method_is_never_flagged_as_narrowing() {
     );
 }
 
+// Phase 64: `method.nonStatic`/`method.static` - real PHPStan's own
+// `OverridingMethodRule` requires an override to match its ancestor's
+// own static-ness exactly, either direction.
+
+#[test]
+fn a_non_static_override_of_a_static_ancestor_method_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public static function foo(): void {} }
+            class Child extends Base { public function foo(): void {} }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.nonStatic"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_static_override_of_a_non_static_ancestor_method_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(): void {} }
+            class Child extends Base { public static function foo(): void {} }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.static"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn matching_static_ness_on_override_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class BaseA { public static function foo(): void {} }
+            class ChildA extends BaseA { public static function foo(): void {} }
+            class BaseB { public function bar(): void {} }
+            class ChildB extends BaseB { public function bar(): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.nonStatic" || x.identifier == "method.static"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn implementing_a_static_interface_method_non_statically_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface HasFoo { public static function foo(): void; }
+            class Impl implements HasFoo { public function foo(): void {} }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.nonStatic"),
+        "got: {d:?}"
+    );
+}
+
+// Real bug found and fixed while building the check above: a static
+// method supplied only via a used trait (never redeclared by the using
+// class itself) wasn't recognized as static at all when checking whether
+// it correctly overrides a static ancestor method - `static_methods`
+// wasn't trait-flattening-aware the way `abstract_methods` already was.
+// Real corpus false positive this fixes: `Symfony\Component\Cache\
+// Adapter\RedisAdapter` (`use RedisTrait;`, whose own `createConnection()`
+// is `static`) was flagged as a non-static override of `AbstractAdapter::
+// createConnection()`.
+#[test]
+fn a_static_method_supplied_only_via_a_used_trait_is_never_flagged_as_a_non_static_override() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public static function foo(): void {} }
+            trait Provider { public static function foo(): void {} }
+            class Child extends Base { use Provider; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.nonStatic"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 64: the general (non-`__construct`) case of
+// `method.abstractOverridingNonAbstract` - making a non-abstract
+// ancestor method abstract in the override.
+
+#[test]
+fn making_a_non_abstract_ancestor_method_abstract_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class Base { public function foo(): void {} }
+            abstract class Child extends Base { abstract public function foo(): void; }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.abstractOverridingNonAbstract"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_an_already_abstract_ancestor_method_as_abstract_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class Base { abstract public function foo(): void; }
+            abstract class Child extends Base { abstract public function foo(): void; }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.abstractOverridingNonAbstract"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn implementing_an_interface_method_concretely_is_never_flagged_as_abstract_overriding() {
+    // An interface's own method is always implicitly abstract - a real,
+    // ordinary concrete implementation must never trip this.
+    let d = diagnostics_for(
+        r#"<?php
+            interface HasFoo { public function foo(): void; }
+            class Impl implements HasFoo { public function foo(): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.abstractOverridingNonAbstract"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_non_abstract_method_non_abstractly_is_never_flagged_as_abstract_overriding() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public function foo(): void {} }
+            class Child extends Base { public function foo(): void {} }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.abstractOverridingNonAbstract"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // Phase 64: an override with fewer parameters than its ancestor is a
 // real, unconditional PHP fatal error (confirmed directly: "Declaration
 // of Child::foo(int $a): void must be compatible with Base::foo(int $a,
