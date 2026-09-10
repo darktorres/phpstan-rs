@@ -1,0 +1,683 @@
+use rustc_hash::FxHashMap;
+
+use crate::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
+use crate::registry::Registry;
+use crate::registry::{ClassInfo, FunctionSig, NameContext, infer_const_type};
+use crate::types::Type;
+
+impl Registry {
+    /// `pub(crate)` for the same reason as `flatten_traits` - lets
+    /// `Project` index one file's statements into an already-built
+    /// registry (initial load, or after a re-parse) without re-running
+    /// `build`'s from-scratch pass over every other file.
+    /// Indexes a file's declarations, tracking the current
+    /// `NameContext` *positionally* as it walks - a `namespace` statement
+    /// changes it for everything from that point on, exactly like real
+    /// PHP, rather than computing one static context up front for the
+    /// whole file. This matters concretely: the parser has no real model
+    /// of brace-delimited `namespace X { ... }` (see `StmtKind::Namespace`'s
+    /// own parsing comment), so it falls out as a `StmtKind::Namespace(name)`
+    /// immediately followed by a sibling `StmtKind::Block` holding what was
+    /// inside the braces - and real vendored stub files (phpstorm-stubs'
+    /// own `PDO/PDO.php`) really do have *two* such blocks in one file
+    /// (`namespace { ... }` for the global `PDO` class, then a later
+    /// `namespace Pdo { ... }` for PHP 8.4's `Pdo\*` subclasses) - a
+    /// single whole-file context would apply whichever one it saw last to
+    /// both blocks, silently mis-qualifying the first one's classes.
+    #[hotpath::measure]
+    pub(crate) fn index(&mut self, stmts: &[Stmt]) {
+        let mut ctx = NameContext::default();
+        self.index_with_context(stmts, &mut ctx, false);
+    }
+
+    /// `conditional` is `true` once inside any `if`/`else` branch (see the
+    /// `StmtKind::If` arm below) - a declaration found there only fills a
+    /// name in if nothing unconditional has already claimed it
+    /// (`or_insert_with`), while a top-level, unconditional declaration
+    /// always wins outright (`insert`), regardless of which is indexed
+    /// first. Without this distinction, two files declaring the same
+    /// fully-qualified name - one for real, one as a defensive `if (!
+    /// class_exists('X')) { class X {...} }`/`if (!function_exists('foo'))
+    /// { function foo() {} }` fallback guarding against a dependency that
+    /// might not be loaded - would resolve to whichever happened to be
+    /// indexed *last* (a plain `HashMap::insert` is order-dependent), not
+    /// whichever is actually real. Confirmed real, not hypothetical: `main.rs::run_check_project`'s own
+    /// `analyze_files.sort()` already anticipates "a real corpus can
+    /// genuinely declare the same fully-qualified class name twice" and
+    /// sorts for *determinism* - but a deterministic wrong answer is still
+    /// wrong, and sorting alone doesn't decide which of the two should
+    /// win. `PHPUnit\Framework\TestCase` is a real, observed instance
+    /// (`vendor/rector/rector/stubs-rector/PHPUnit/Framework/TestCase.php`
+    /// ships a guarded fallback with no `extends Assert`, alphabetically
+    /// after the real `vendor/phpunit/phpunit/.../TestCase.php`, so it
+    /// silently won the registry slot and dropped `assertEquals` from
+    /// every real subclass).
+    fn index_with_context(&mut self, stmts: &[Stmt], ctx: &mut NameContext, conditional: bool) {
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::ClassDecl(c) => {
+                    let name = ctx.declared_name(&c.name);
+                    let new_info = ClassInfo::from_decl(c, ctx);
+                    if conditional && self.built_in_stub_classes.contains(&name) {
+                        // A plain `or_insert_with` no-op (the shape every
+                        // other conditional case below still uses) fully
+                        // discards a conditional declaration's *own*
+                        // members the moment its name already exists -
+                        // correct when the existing entry is a *real*,
+                        // already-known vendor/first-party class (a
+                        // `class_exists`-guarded defensive fallback's own
+                        // members genuinely must never leak onto it, see
+                        // `unconditional_class_wins_over_a_later_
+                        // conditional_stub`), but too conservative when
+                        // the existing entry is only `built_in_stub_
+                        // classes`' own type-checking fiction (jetbrains/
+                        // phpstorm-stubs, never really instantiated) and
+                        // the conditional declaration is instead a real,
+                        // version-gated polyfill implementation whose own
+                        // method bodies still get checked against
+                        // whatever won the name: real corpus shape,
+                        // `symfony/polyfill-php84`'s own conditionally-
+                        // declared `ReflectionConstant` (`if
+                        // (PHP_VERSION_ID < 80400) { final class
+                        // ReflectionConstant { private $value; ... } }`)
+                        // collides with jetbrains/phpstorm-stubs' own
+                        // native-class stub for the *real* PHP 8.4+
+                        // `ReflectionConstant`. The polyfill's own
+                        // `getValue()`/`__toString()`/etc. bodies were
+                        // then checked against the stub's much narrower
+                        // shape (just `$name`), not the polyfill's real
+                        // one - a corpus-verified false positive on every
+                        // `$this->value`/`$this->deprecated`/`self::
+                        // $persistentConstants` access inside that one
+                        // file. Merging (existing wins any real conflict,
+                        // same "first/more-authoritative wins" contract
+                        // `merge`'s own doc comment establishes) fills in
+                        // exactly the members the winning declaration
+                        // doesn't have, without touching anything it
+                        // already provides.
+                        //
+                        // `extends`/`implements`/`uses`/`templates`/
+                        // `extends_args`/`trait_aliases`/`implements_args`
+                        // are the one part of `merge` deliberately
+                        // *excluded* here, restored to the winning
+                        // declaration's own values right after - unlike a
+                        // member map (additive, never wrong to have more
+                        // of), a fictitious inheritance edge is actively
+                        // dangerous: real corpus regression caught before
+                        // shipping, `nikic/php-parser`'s own conditional
+                        // `class PhpToken extends
+                        // Symfony\Polyfill\Php80\PhpToken {}` (guarding
+                        // PHP <8.0, itself colliding with the exact same
+                        // stub-vs-conditional pattern this fix targets)
+                        // merged that never-taken `extends` onto the real
+                        // `\PhpToken` stub, which a wholly unrelated
+                        // third file's own `TokenPolyfill extends
+                        // \PhpToken {}` then inherited transitively -
+                        // wrongly flagging `TokenPolyfill::__construct()`
+                        // as overriding a `final` method it doesn't, in
+                        // real PHP, have any relation to at all.
+                        if let Some(existing) = self.classes.remove(&name) {
+                            let (
+                                extends,
+                                implements,
+                                uses,
+                                templates,
+                                extends_args,
+                                trait_aliases,
+                                implements_args,
+                            ) = (
+                                existing.extends.clone(),
+                                existing.implements.clone(),
+                                existing.uses.clone(),
+                                existing.templates.clone(),
+                                existing.extends_args.clone(),
+                                existing.trait_aliases.clone(),
+                                existing.implements_args.clone(),
+                            );
+                            let mut merged = new_info.merge(existing);
+                            merged.extends = extends;
+                            merged.implements = implements;
+                            merged.uses = uses;
+                            merged.templates = templates;
+                            merged.extends_args = extends_args;
+                            merged.trait_aliases = trait_aliases;
+                            merged.implements_args = implements_args;
+                            self.classes.insert(name, merged);
+                        } else {
+                            self.classes.insert(name, new_info);
+                        }
+                    } else if conditional {
+                        self.classes.entry(name).or_insert_with(|| new_info);
+                    } else if self.unconditionally_declared_classes.contains(&name) {
+                        // Phase 25: a *second* unconditional declaration
+                        // of the same name - real, not always a mistake -
+                        // PHPStan's own `stubFiles` mechanism (Piwigo's own
+                        // `phpstan-stubs/Imagick.stub.php`, wired into its
+                        // `phpstan.neon`) exists specifically to let a
+                        // project redeclare *one* method of a real,
+                        // already-known class as a targeted override,
+                        // relying on PHPStan to merge it onto everything
+                        // else the real declaration already provides. A
+                        // plain overwrite here discarded the *entire* real
+                        // vendored `imagick.php` class - every other
+                        // method/constant - the moment this override's own
+                        // bare `class Imagick { public function
+                        // convolveImage(...) {} }` was indexed, regardless
+                        // of which file happened to load first.
+                        let existing = self
+                            .classes
+                            .remove(&name)
+                            .expect("name is in unconditionally_declared_classes, so it must already be indexed");
+                        self.classes.insert(name, existing.merge(new_info));
+                    } else {
+                        // The *first* unconditional declaration of this
+                        // name always wins outright over any earlier
+                        // conditional stub (`PHPUnit\Framework\TestCase`'s
+                        // own real-world shape) - merging here would wrongly
+                        // keep a guarded fallback's own members alongside
+                        // the real class's.
+                        self.unconditionally_declared_classes.insert(name.clone());
+                        self.classes.insert(name, new_info);
+                    }
+                }
+                StmtKind::EnumDecl(e) => {
+                    let name = ctx.declared_name(&e.name);
+                    if conditional {
+                        self.classes
+                            .entry(name)
+                            .or_insert_with(|| ClassInfo::from_enum_decl(e, ctx));
+                    } else {
+                        self.classes.insert(name, ClassInfo::from_enum_decl(e, ctx));
+                    }
+                }
+                StmtKind::FunctionDecl(f) => {
+                    let name = ctx.declared_name(&f.name);
+                    let new_sig = FunctionSig::from_decl(
+                        f,
+                        ctx,
+                        &std::collections::HashMap::new(),
+                        &std::collections::HashMap::new(),
+                        Visibility::Public,
+                    );
+                    if conditional {
+                        // Gated on arity *and* not losing any type
+                        // precision the existing slot already had (see
+                        // `conditional_declaration_may_replace_stub`'s own
+                        // doc comment for both real corpus shapes this
+                        // guards against) - keeps the door open for
+                        // whichever real conditional declaration actually
+                        // matches best, wherever in the corpus that turns
+                        // out to be, rather than committing to the first
+                        // one seen regardless of quality. Runs the
+                        // identical comparison whether the existing slot
+                        // came from a built-in stub *or* an earlier
+                        // ordinary conditional declaration of the same
+                        // global function - a plain `self.stub_provided_
+                        // functions.remove(&name)` gate here used to
+                        // decide *when this comparison even runs at all*,
+                        // so two real, non-stub conditional declarations
+                        // of the same name (two separate `if (!function_
+                        // exists(...)) { function foo(...) {...} }`
+                        // guards in two unrelated vendor files) fell
+                        // straight to a plain first-wins `or_insert_with`
+                        // below, never tiebroken at all - real corpus
+                        // find: an alphabetically-earlier, `func_get_args(
+                        // )`-forwarding 0-param shim (`scoper-autoload.
+                        // php`) won registry-wide over the real,
+                        // correctly-typed 3-required-plus-variadic
+                        // `symfony/deprecation-contracts` declaration,
+                        // producing phantom `arguments.count` false
+                        // positives at every real call site matching the
+                        // real signature. `.remove(&name)` on a name that
+                        // was never stub-provided in the first place is a
+                        // harmless no-op (`HashSet::remove` returns
+                        // `false`, nothing else), so unconditionally
+                        // clearing the marker whenever the new
+                        // declaration wins is correct either way. Uses
+                        // `better_conditional_function_declaration`
+                        // (which also lets a real, non-zero-parameter
+                        // declaration replace an entirely parameter-less
+                        // `existing` one, on top of the exact-arity-match
+                        // rule `conditional_declaration_may_replace_stub`
+                        // alone still enforces the rest of the time) -
+                        // safe to use uniformly for both origins: a stub
+                        // is realistically never itself zero-parameter,
+                        // so this never weakens the existing stub-
+                        // protection tests.
+                        match self.functions.get(&name) {
+                            Some(existing)
+                                if !better_conditional_function_declaration(&new_sig, existing) =>
+                            {
+                                // `existing` already wins this comparison
+                                // - leave it in place, matching `or_insert_
+                                // with`'s own "first one seen (that's good
+                                // enough) wins" behavior for the case this
+                                // fix doesn't change.
+                            }
+                            _ => {
+                                self.stub_provided_functions.remove(&name);
+                                self.functions.insert(name, new_sig);
+                            }
+                        }
+                    } else if self.unconditionally_declared_functions.contains(&name) {
+                        // Phase 32 Finding C: a *second* unconditional
+                        // declaration of the same name - the real-overload
+                        // shape described on this registry's own
+                        // `unconditionally_declared_functions` field -
+                        // merges onto the first rather than replacing it.
+                        //
+                        // Deliberately does *not* also clear
+                        // `stub_provided_functions` here, unlike the
+                        // "first real declaration, replaces outright"
+                        // branch below - real corpus shape: Piwigo itself
+                        // vendors `jetbrains/phpstorm-stubs` as a real
+                        // dependency, so its own unconditional (bare,
+                        // guard-free) `function str_contains(string
+                        // $haystack, string $needle): bool {}` gets
+                        // indexed as if it were ordinary project source,
+                        // merging harmlessly onto the identical signature
+                        // `merge_stubs` already put there - clearing the
+                        // marker here would wrongly tell a *later*,
+                        // better-typed conditional polyfill declaration
+                        // (`?string`-typed, from the real
+                        // symfony/polyfill-php80 package) that the slot
+                        // is no longer stub-equivalent and off limits,
+                        // right back to this phase's own original bug.
+                        let existing = self.functions.remove(&name).expect(
+                            "name is in unconditionally_declared_functions, so it must already be indexed",
+                        );
+                        self.functions.insert(name, existing.merge(new_sig));
+                    } else {
+                        self.stub_provided_functions.remove(&name);
+                        self.unconditionally_declared_functions.insert(name.clone());
+                        self.functions.insert(name, new_sig);
+                    }
+                }
+                // The real, common `if (!function_exists('foo')) { function
+                // foo() {} }` polyfill idiom (used throughout the PHP
+                // ecosystem, e.g. symfony/deprecation-contracts and every
+                // symfony/polyfill-* package) declares a genuinely global
+                // function/class from inside a conditional - recursing
+                // here is what makes those visible at all. Cloning `ctx`
+                // for each branch means a `use`/`namespace` change inside
+                // one doesn't leak into the other or past the `if` -
+                // conservative, and irrelevant in practice (real code
+                // doesn't declare namespaces inside an `if`). Both
+                // branches are marked `conditional = true` regardless of
+                // the `if`'s own condition text - this registry has no
+                // notion of *which* conditions are actually guards, only
+                // "was this declaration reached unconditionally or not,"
+                // which is exactly the distinction the doc comment above
+                // needs.
+                StmtKind::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    self.index_with_context(
+                        std::slice::from_ref(then_branch),
+                        &mut ctx.clone(),
+                        true,
+                    );
+                    if let Some(else_branch) = else_branch {
+                        self.index_with_context(
+                            std::slice::from_ref(else_branch),
+                            &mut ctx.clone(),
+                            true,
+                        );
+                    }
+                }
+                // Unlike `If`, deliberately *not* cloned: this is the
+                // brace-namespace body itself (see this method's doc
+                // comment), so a `use` statement inside it must be
+                // visible to the declarations that follow it in the very
+                // same block - it's the statement *after* the block ends
+                // that must not see it, which cloning at the point the
+                // *next* `StmtKind::Namespace` resets `ctx.use_map` already
+                // ensures (see `set_namespace`). Inherits whatever
+                // `conditional` its enclosing context already has.
+                StmtKind::Block(inner) => self.index_with_context(inner, ctx, conditional),
+                StmtKind::GlobalConst(consts) => {
+                    for c in consts {
+                        let name = ctx.declared_name(&c.name);
+                        let ty = infer_const_type(&c.value);
+                        register_global_constant(&mut self.global_constants, name, ty);
+                    }
+                }
+                StmtKind::Expression(e) => {
+                    if let Some((name, ty)) = define_call_constant(e) {
+                        register_global_constant(&mut self.global_constants, name, ty);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Surgically removes one file's prior contributions before
+    /// re-indexing its new parse - `Project::update_file`'s whole reason
+    /// for existing. `functions`/`classes` must already be the
+    /// fully-qualified names `Registry::index` actually keyed its entries
+    /// under (Phase 9.5 - see `NameContext`) - `project.rs`'s
+    /// `declared_names` mirrors `index`'s own namespace-tracking exactly
+    /// so the two agree. Two files legitimately declaring the exact same
+    /// fully-qualified name (verified at real scale: unrelated packages
+    /// bundling their own non-scoped copy of a third dependency) still
+    /// collide here, the same way real PHP's own class-name uniqueness
+    /// requirement would refuse to load both - a real limit on how many
+    /// "same file, different builds" scenarios this can represent, not a
+    /// namespace-modeling gap.
+    pub(crate) fn remove_declarations(&mut self, functions: &[String], classes: &[String]) {
+        for name in functions {
+            self.functions.remove(name);
+            // Phase 32 Finding C: stay in lockstep with `functions`, for
+            // the identical reason the class side does below - otherwise
+            // a later re-index of the same name would find a stale
+            // "already unconditionally declared" marker with nothing left
+            // in `functions` for it to point at.
+            self.unconditionally_declared_functions.remove(name);
+        }
+        for name in classes {
+            self.classes.remove(name);
+            // Phase 25: must stay in lockstep with `classes` - otherwise a
+            // later re-index of the same name (incremental re-checking's
+            // whole reason for calling this) would find a stale "already
+            // unconditionally declared" marker with nothing left in
+            // `classes` for it to point at, wrongly taking the merge path
+            // (`index_with_context`'s `ClassDecl` arm) against a
+            // now-nonexistent entry instead of a clean first insertion.
+            self.unconditionally_declared_classes.remove(name);
+        }
+    }
+
+    /// User-defined symbols always win: a stub only fills in a name that
+    /// isn't already declared in the indexed source (verified directly by
+    /// `merge_stubs_does_not_override_user_functions` - unlike
+    /// `merge_stub_classes` below, this one is *not* a merge, on purpose:
+    /// a user-declared function sharing a builtin's name is a distinct
+    /// definition the user's own code should win outright, not a second
+    /// "overload" of the same conceptual function the way phpstorm-stubs'
+    /// own `strtr`-style split declarations are).
+    ///
+    /// Phase 32 Finding C: every merged-in name is also recorded in
+    /// `unconditionally_declared_functions` regardless - not for this call
+    /// itself (which never merges), but so a *later* real project file
+    /// legitimately declaring a function with the same name as a builtin
+    /// correctly takes `index_with_context`'s own merge path (the `strtr`
+    /// case) instead of blindly overwriting.
+    pub fn merge_stubs<S: Into<String>>(&mut self, stubs: Vec<(S, FunctionSig)>) {
+        for (name, sig) in stubs {
+            let name: String = name.into();
+            self.unconditionally_declared_functions.insert(name.clone());
+            self.stub_provided_functions.insert(name.clone());
+            self.functions.entry(name).or_insert(sig);
+        }
+    }
+
+    /// Same "user-defined wins" rule as `merge_stubs`, for classes -
+    /// without this, built-in classes (`Exception`, `ArrayObject`, ...)
+    /// would never be known to the registry at all, since stub sources
+    /// were previously only mined for function signatures.
+    ///
+    /// Phase 25: every merged-in name is also recorded in
+    /// `unconditionally_declared_classes` - this runs once, in
+    /// `Project::new`, *before* any real project file is indexed, so a
+    /// built-in class like `Imagick` is already present by the time
+    /// `index_with_context` later processes a project's own
+    /// `#[stubFiles]`-style override (Piwigo's own real shape:
+    /// `phpstan-stubs/Imagick.stub.php`, a bare `class Imagick { public
+    /// function convolveImage(...) {} }` meaning to patch one method).
+    /// Without this, `index_with_context`'s own merge logic (added
+    /// alongside this) would only ever see "no unconditional declaration
+    /// recorded for this name yet" and wholesale-replace the entire
+    /// built-in class with the override's bare one-method version -
+    /// exactly the bug this fix exists to close. The merge itself keeps
+    /// this function's own "user-defined always wins" contract robust
+    /// even in the (today, never-hit in practice, since this always runs
+    /// first) case where user code was somehow indexed before this runs -
+    /// existing user info is `other` in `ClassInfo::merge`, so it still
+    /// wins any member-name conflict.
+    pub fn merge_stub_classes<S: Into<String>>(&mut self, stubs: Vec<(S, ClassInfo)>) {
+        for (name, info) in stubs {
+            let name: String = name.into();
+            self.unconditionally_declared_classes.insert(name.clone());
+            self.built_in_stub_classes.insert(name.clone());
+            match self.classes.remove(&name) {
+                Some(existing) => {
+                    self.classes.insert(name, info.merge(existing));
+                }
+                None => {
+                    self.classes.insert(name, info);
+                }
+            }
+        }
+    }
+}
+
+/// Whether a conditional declaration (`new_sig`) is trustworthy enough to
+/// replace `existing` (a stub-provided signature still sitting in its
+/// slot, per `stub_provided_functions`) - real corpus find: this needs
+/// *two* separate gates, not just one.
+///
+/// Arity: `scoper-autoload.php`-style `func_get_args()`-forwarding shims
+/// (`function grapheme_strrev() { return \Prefix\grapheme_strrev(
+/// ...func_get_args()); }`, zero declared params) compete with the real,
+/// correctly-typed polyfill declaration for the same name - letting the
+/// shim win left the real declaration's own body-check zipping its one
+/// real parameter against the shim's zero-param signature, silently
+/// losing it (read as undefined inside its own body).
+///
+/// Type precision: even at matching arity, a polyfill package can bundle
+/// *several* PHP-version-gated variants of the same function behind
+/// separate `function_exists()` guards, of visibly different quality -
+/// real shape: symfony/polyfill-ctype's own `bootstrap.php` (`function
+/// ctype_punct($text) {...}`, no native types at all) alongside
+/// `bootstrap80.php` (`function ctype_punct(mixed $text): bool {...}`,
+/// fully typed) for the exact same name. Letting the untyped one win
+/// (whichever file the corpus scan happens to reach first) silently
+/// discarded real, already-known type information the stub itself
+/// carried - and since every OTHER real file's own `ctype_punct` call
+/// sites, including `jetbrains/phpstorm-stubs/ctype/ctype.php`'s own
+/// (fully-typed) declaration, all resolve through this one shared
+/// registry entry, the damage wasn't confined to whichever file lost the
+/// race. Never letting a replacement *downgrade* a parameter or return
+/// position that the stub already had typed down to `Mixed` closes this
+/// without needing to fully rank two arbitrary types against each other.
+/// Recognizes a top-level `define('NAME', value)` (or `\define(...)`)
+/// call statement, returning the constant's own literal name plus its
+/// inferred value type (`infer_const_type`, the same literal-only scope
+/// a `const` declaration's own value already gets). `None` for anything
+/// else a bare `StmtKind::Expression` could be, a call to some other
+/// function, a spread/named argument (real `define()` never takes
+/// either), a non-literal first argument (a dynamic constant name this
+/// project has no way to know without evaluating it), or - critically -
+/// a name that's really the case-insensitive language keyword `true`/
+/// `false`/`null` rather than an ordinary constant: real corpus shape,
+/// `jetbrains/phpstorm-stubs/Core/Core_d.php`'s own `define('true',
+/// (bool)1, true); define('false', (bool)0, true); define('null', null,
+/// true);` - legitimate reflection-level documentation of PHP's own
+/// pseudo-constants, present in essentially every real corpus. On a real
+/// PHP runtime these three names are parser-level keywords resolved
+/// before `define()` could ever apply to them - the call itself is
+/// syntactically valid but semantically inert, never actually
+/// redefining what the bare token `true`/`false`/`null` means anywhere.
+/// Registering them anyway - with whatever `infer_const_type` makes of
+/// a `(bool)1` cast expression it doesn't recognize, plain `Mixed` -
+/// would let a *global* lookup miss (`Checker::global_constant_type`
+/// returning `Some(Mixed)`) silently pre-empt `bare_name_literal_type`'s
+/// own already-correct handling of a fully-qualified `\false`/`\true`/
+/// `\null` reference (see that function's own doc comment) for every
+/// file in the corpus, not just this stub's own - a real, corpus-wide
+/// regression caught before shipping: every `!== \false`-style
+/// narrowing idiom (extremely common, e.g. `squizlabs/php_codesniffer`'s
+/// own `while (($x = $file->findNext(...)) !== \false)`) silently
+/// stopped narrowing away `false` at all once this stub was indexed.
+fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
+    let ExprKind::Call(callee, args) = &e.kind else {
+        return None;
+    };
+    let ExprKind::Name(name) = &callee.kind else {
+        return None;
+    };
+    if !name
+        .rsplit('\\')
+        .next()
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("define")
+    {
+        return None;
+    }
+    if args.len() < 2 || args.iter().any(|a| a.spread || a.name.is_some()) {
+        return None;
+    }
+    let ExprKind::Literal(Literal::String(const_name)) = &args[0].value.kind else {
+        return None;
+    };
+    if ["true", "false", "null"]
+        .iter()
+        .any(|kw| const_name.eq_ignore_ascii_case(kw))
+    {
+        return None;
+    }
+    // `jetbrains/phpstorm-stubs/standard/basic.php`'s own `define('__DIR__',
+    // '', true); define('__LINE__', 0, true); ...` (and identically for
+    // `__FILE__`/`__CLASS__`/`__FUNCTION__`/`__METHOD__`/`__TRAIT__`/
+    // `__NAMESPACE__`/`__PROPERTY__`) - the exact same class of problem
+    // the `true`/`false`/`null` exclusion above closes, for a different
+    // reason: these nine names are real PHP *magic constants*, resolved
+    // by the parser itself from the surrounding source location, never
+    // actually backed by a real `define()`-registered value at all - the
+    // stub's own placeholder value (an empty string, or `0` for
+    // `__LINE__`) exists purely so the declaration type-checks, and was
+    // never meant to be read literally. Registering `__DIR__` as
+    // `StringLiteral("")` broke every real call passing it onward (real
+    // corpus regression caught before shipping: `ExcludeList::
+    // addDirectory(__DIR__)`, `@param non-empty-string` on the receiving
+    // end, flagged as `''` given). This project has no dedicated magic-
+    // constant `Expr` kind of its own (a bare `__DIR__`/`__LINE__`/...
+    // reference parses as an ordinary `ExprKind::Name`, already
+    // `Type::Mixed` via `bare_name_literal_type`'s own default arm) -
+    // excluding them here just protects that existing, already-correct
+    // "don't know" behavior from being overwritten by this stub's own
+    // placeholder.
+    if [
+        "__DIR__",
+        "__FILE__",
+        "__LINE__",
+        "__CLASS__",
+        "__FUNCTION__",
+        "__METHOD__",
+        "__TRAIT__",
+        "__NAMESPACE__",
+        "__PROPERTY__",
+    ]
+    .contains(&const_name.as_str())
+    {
+        return None;
+    }
+    // `jetbrains/phpstorm-stubs/Core/Core_d.php`'s own `define('PHP_INT_MIN',
+    // -9223372036854775808);` - real PHPStan never evaluates this source
+    // text at all (it reads `PHP_INT_MIN`/`PHP_INT_MAX` via reflection
+    // against the real, already-running PHP interpreter it needs anyway),
+    // but this project has no such interpreter and would otherwise take
+    // this literal at face value - and `9223372036854775808` (the
+    // positive magnitude *before* the unary minus applies) is exactly
+    // one past `i64::MAX`, so the lexer correctly represents it as a
+    // `Literal::Float` the same way real PHP's own literal-overflow rule
+    // would for this exact source text (confirmed: `var_dump(-9223372036854775808)`
+    // truly does print a float, not `PHP_INT_MIN`'s real int value - PHP's
+    // own C-level constant is never round-tripped through this decimal
+    // text at runtime). `infer_const_type`'s `Neg` arm then correctly
+    // types the whole expression `Type::Float`, silently breaking every
+    // real `random_int(PHP_INT_MIN, PHP_INT_MAX)`-shaped call (a common,
+    // real corpus idiom) the moment this table stopped being uniformly
+    // `Mixed`. `PHP_INT_MAX` itself needs no equivalent exclusion -
+    // `9223372036854775807` fits exactly, no `Neg`/overflow involved.
+    if const_name == "PHP_INT_MIN" {
+        return None;
+    }
+    Some((const_name.clone(), infer_const_type(&args[1].value)))
+}
+
+/// Records one `const`/`define()` declaration site for `name`, reconciling
+/// it against anything already recorded for the same name rather than
+/// letting whichever site happened to index first win unconditionally.
+/// Real corpus shape this closes (`squizlabs/php_codesniffer`):
+/// `Runner.php` does `define('PHP_CODESNIFFER_VERBOSITY',
+/// $this->config->verbosity)` (a genuinely dynamic, config-driven value -
+/// `infer_const_type` returns `Mixed`, this project's own "don't know"
+/// signal) while a separate `tests/bootstrap.php` does `define(
+/// 'PHP_CODESNIFFER_VERBOSITY', 0)` for test isolation - an entirely
+/// unrelated, narrower value that has nothing to do with the constant's
+/// real production meaning. A plain first-wins insert let file-indexing
+/// order alone decide which of the two `Registry` believed - if the
+/// literal `0` won, every real `PHP_CODESNIFFER_VERBOSITY > 1` comparison
+/// elsewhere in the corpus collapsed to a compile-time-false constant
+/// once this feature existed, marking an otherwise-live `if` branch
+/// unreachable and corrupting that branch's own local-variable merge for
+/// everything after it (found via a real corpus regression: `Ruleset::
+/// expandRulesetReference`'s own `$ref` reassignment losing its narrowed
+/// type this way, several call sites downstream). Any two declarations
+/// that don't perfectly agree - including a *first* declaration that's
+/// itself unknowable (`Mixed`) - poison the entry to `Mixed` instead,
+/// the same "don't guess wrong" leniency every other real ambiguity in
+/// this registry already resolves in favor of no information over wrong
+/// information. Once poisoned, a later, more literal-looking declaration
+/// can never un-poison it back to a specific type - the true value is
+/// still just as undetermined regardless of which site happens to run at
+/// this constant's real, load-order-dependent definition time.
+fn register_global_constant(map: &mut FxHashMap<String, Type>, name: String, ty: Type) {
+    match map.get(&name) {
+        None => {
+            map.insert(name, ty);
+        }
+        Some(existing) if *existing == ty && ty != Type::Mixed => {}
+        Some(_) => {
+            map.insert(name, Type::Mixed);
+        }
+    }
+}
+
+fn conditional_declaration_may_replace_stub(new_sig: &FunctionSig, existing: &FunctionSig) -> bool {
+    if new_sig.params.len() != existing.params.len() {
+        return false;
+    }
+    if existing.return_type != Type::Mixed && new_sig.return_type == Type::Mixed {
+        return false;
+    }
+    existing
+        .params
+        .iter()
+        .zip(&new_sig.params)
+        .all(|(old, new)| !(old.ty != Type::Mixed && new.ty == Type::Mixed))
+}
+
+/// The identical question as `conditional_declaration_may_replace_stub`
+/// just above, but for two *ordinary* conditional declarations of the
+/// same global function name - neither one an already-known-good stub
+/// worth being this conservative about protecting. Reuses that same
+/// exact-arity-match comparison when arities agree (the "don't downgrade
+/// an already-known type" reasoning applies identically either way), but
+/// additionally lets a real, non-zero-parameter declaration replace an
+/// `existing` one that's *entirely* parameter-less - a real corpus find:
+/// `scoper-autoload.php`-style `func_get_args()`-forwarding shims
+/// (`function trigger_deprecation() { return \Prefix\trigger_
+/// deprecation(...func_get_args()); }`) are recognizable by exactly this
+/// shape, and compete with the real, correctly-typed declaration
+/// (`symfony/deprecation-contracts`' own 3-required-plus-variadic
+/// `trigger_deprecation()`) for the same name - the strict arity-match
+/// rule above would refuse the swap in *either* direction, permanently
+/// freezing in whichever one happened to be indexed first. The reverse
+/// (a real declaration already won the slot, a later 0-param shim trying
+/// to displace it) stays correctly refused: a 0-param `new_sig` against
+/// a non-zero-param `existing` still fails the ordinary arity-match
+/// check below, and `existing.params.is_empty()` is false, so neither
+/// branch here fires for it.
+fn better_conditional_function_declaration(new_sig: &FunctionSig, existing: &FunctionSig) -> bool {
+    if existing.params.is_empty() && !new_sig.params.is_empty() {
+        return true;
+    }
+    conditional_declaration_may_replace_stub(new_sig, existing)
+}

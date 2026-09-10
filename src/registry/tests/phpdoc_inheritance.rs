@@ -4,6 +4,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::types::AccessoryKind;
 
 /// `list<T>` parses to `Type::Intersection([Array(int, T), Accessory
 /// (ArrayList)])` (Phase 14) - pulls `T` back out for a plain equality
@@ -22,7 +23,7 @@ fn list_item_type(ty: &Type) -> &Type {
 }
 
 fn is_list_type(ty: &Type) -> bool {
-    matches!(ty, Type::Intersection(members) if members.contains(&Type::Accessory(types::AccessoryKind::ArrayList)))
+    matches!(ty, Type::Intersection(members) if members.contains(&Type::Accessory(AccessoryKind::ArrayList)))
 }
 
 #[test]

@@ -1,0 +1,180 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::registry::Registry;
+use crate::types::{self, Type, Variance};
+
+impl Registry {
+    /// This class's own declared variance for the `index`-th `@template`
+    /// of `class` (`Covariant`/`Contravariant`/`Invariant` - the same
+    /// three-way classification `TemplateParam::variance` itself carries,
+    /// just looked up by position rather than read off an already-marked
+    /// node) - `None` when `class` isn't a registered class at all, or
+    /// declares fewer templates than `index` needs, either of which means
+    /// this project has no real basis to say whether subtyping flows
+    /// through that slot at all, let alone which direction. Callers treat
+    /// `None` as "don't know, don't guess" - matching this project's
+    /// general leniency elsewhere - rather than defaulting to `Invariant`
+    /// and risking a false positive on a real but unregistered
+    /// (uninstalled dependency, PHAR-bundled `phpstan/phpstan` itself, ...)
+    /// generic class. Phase 54: hoisted from `checker::generics` (pure
+    /// `self.classes` data, no checker-specific state) alongside
+    /// `class_template_bindings`/`is_assignable`, its two real consumers.
+    fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
+        let info = self.classes.get(class)?;
+        let name = info.templates.get(index)?;
+        Some(if info.covariant_templates.contains(name) {
+            Variance::Covariant
+        } else if info.contravariant_templates.contains(name) {
+            Variance::Contravariant
+        } else {
+            Variance::Invariant
+        })
+    }
+
+    /// Phase 54: the variance that actually governs one generic argument
+    /// slot - a call-site variance marker written directly on `arg`
+    /// (`types::strip_call_site_variance`'s own sentinels,
+    /// `"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`) always wins
+    /// when present; otherwise falls back to `class`'s own declared
+    /// variance for that slot (`slot_variance`, `Invariant` by default
+    /// when the class declares no variance for it, `None`/"don't know"
+    /// when `class` or the slot itself isn't registered at all). Read
+    /// directly off real PHPStan's own `GenericObjectType::
+    /// isSuperTypeOf`/`getReferencedTemplateTypes`, both of which resolve
+    /// a slot's variance with this exact same two-step rule - confirmed
+    /// this is genuinely the same concept both assignability
+    /// (`is_assignable` below) and declaration-soundness composition
+    /// (`checker::generics::walk_variance`) need, not something specific
+    /// to one or the other. `None` here (as opposed to `Invariant`) means
+    /// "no real basis to say anything about this slot at all," the same
+    /// "don't know, don't guess" case `slot_variance` itself already
+    /// returns `None` for.
+    pub(crate) fn effective_slot_variance(
+        &self,
+        class: &str,
+        index: usize,
+        arg: &Type,
+    ) -> Option<Variance> {
+        match arg {
+            Type::Object(name, _) if name == "$$covariant" => Some(Variance::Covariant),
+            Type::Object(name, _) if name == "$$contravariant" => Some(Variance::Contravariant),
+            // Real PHPStan has no separate "bivariant" `Variance` value
+            // reachable through ordinary composition (`Bivariant` only
+            // ever comes from a call-site `*`, never a class's own
+            // declared variance) - this project doesn't need one either,
+            // since every consumer already treats "always compatible,
+            // don't recurse further" as its own terminal case rather
+            // than a fourth composable variance kind. `is_assignable`
+            // checks for the `"$$bivariant"` sentinel directly for this
+            // reason; `walk_variance` recursing into a bivariant slot's
+            // own (never meaningfully variance-checkable) argument is
+            // harmless - there's no real type there to find a
+            // `TemplateParam` inside in the first place.
+            Type::Object(name, _) if name == "$$bivariant" => None,
+            _ => self.slot_variance(class, index),
+        }
+    }
+
+    /// Binds a generic-typed receiver's own carried type arguments
+    /// (`Collection<User>` -> `{"T": Object("User", [])}`) against
+    /// `target`'s own declared `@template` parameter names, walking up
+    /// `class`'s `extends`/`implements` chain to reach it if `target`
+    /// isn't `class` itself (Phase 10.5) - so a concrete subclass that
+    /// fixes its parent's template param (`class IntCollection extends
+    /// Collection<int> {}`) resolves `Collection`'s own `T` to `int` even
+    /// though `IntCollection` isn't generic itself, and a generic
+    /// subclass that passes its own template through (`class Box<T>
+    /// extends Collection<T> {}`) resolves it to whatever `Box`'s own `T`
+    /// is bound to at each use, not a fixed value.
+    ///
+    /// `target` matters because template names are scoped to the class
+    /// that declares them, not globally unique - two unrelated classes in
+    /// the same chain commonly both use `T` (confirmed the hard way on a
+    /// real corpus: `symfony/type-info`'s `NullableType<T of Type>
+    /// extends UnionType<T|BuiltinType<...>>`, where `UnionType` has its
+    /// *own*, unrelated `T`). Returning bindings scoped to exactly
+    /// `target`'s own level - not a single flat map merged across the
+    /// whole chain - is what keeps those two `T`s from colliding into
+    /// whichever one happened to be computed last.
+    ///
+    /// A non-generic class (empty `templates`), a bare unspecified-generic
+    /// reference (empty `type_args`), or a chain with no matching
+    /// `@extends`/`@implements` tag along the way to `target` all just
+    /// leave that level's names unbound - `substitute_template` already
+    /// treats an unbound `TemplateParam` as `Mixed`, the right
+    /// conservative fallback for an "erased" generic. Phase 54: hoisted
+    /// from `checker::generics` alongside `slot_variance`/`is_assignable`.
+    pub(crate) fn class_template_bindings(
+        &self,
+        class: &str,
+        type_args: &[Type],
+        target: &str,
+    ) -> HashMap<String, Type> {
+        let mut seen = HashSet::new();
+        self.class_template_bindings_rec(class, type_args, target, &mut seen)
+            .unwrap_or_default()
+    }
+
+    /// `None` means `target` isn't reachable along this path at all (so
+    /// the caller should treat every one of its templates as unbound,
+    /// same as `Some` with an empty map) - the distinction only matters
+    /// internally, to know when to keep searching sibling branches below.
+    /// `seen` guards against a cyclic `extends`/`implements` graph
+    /// (invalid PHP, but a malformed/partially-loaded real corpus could
+    /// still produce one) - cloned per branch, not threaded through by
+    /// mutable reference, so two independent ancestors (e.g. two
+    /// interfaces that both eventually reach a common shared parent, a
+    /// real "diamond" shape) can each still be searched.
+    fn class_template_bindings_rec(
+        &self,
+        class: &str,
+        type_args: &[Type],
+        target: &str,
+        seen: &mut HashSet<String>,
+    ) -> Option<HashMap<String, Type>> {
+        if !seen.insert(class.to_string()) {
+            return None;
+        }
+        let info = self.classes.get(class)?;
+        let own_bindings: HashMap<String, Type> = info
+            .templates
+            .iter()
+            .cloned()
+            .zip(type_args.iter().cloned())
+            .collect();
+
+        if class == target {
+            return Some(own_bindings);
+        }
+
+        if let Some(parent) = info.extends.first() {
+            let parent_args: Vec<Type> = info
+                .extends_args
+                .iter()
+                .map(|t| types::substitute_template(t, &own_bindings))
+                .collect();
+            if let Some(found) =
+                self.class_template_bindings_rec(parent, &parent_args, target, &mut seen.clone())
+            {
+                return Some(found);
+            }
+        }
+        for iface in &info.implements {
+            let iface_args: Vec<Type> = info
+                .implements_args
+                .get(iface)
+                .map(|args| {
+                    args.iter()
+                        .map(|t| types::substitute_template(t, &own_bindings))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Some(found) =
+                self.class_template_bindings_rec(iface, &iface_args, target, &mut seen.clone())
+            {
+                return Some(found);
+            }
+        }
+        None
+    }
+}
