@@ -23,10 +23,13 @@ one kill (detailed at the top of section Z) turned out to already be
 shipped in real PHPStan's mainline, just under a different file than the
 one first cited. Round 7: 6 of 7 survived; the kill (detailed at the top
 of that round's section) collided with H3 in a way the survey agent's own
-duplicate-check missed but the verify pass caught. Total: 81 confirmed
-findings across sections A-AI plus one corrected finding. Nothing here is
-scheduled; it's a grounded idea backlog, same status as ROADMAP's own
-"Newly identified gaps" until triaged into a numbered phase.
+duplicate-check missed but the verify pass caught. Round 8: 6 of 6
+survived - a real signal that targeted, specific lenses still find
+genuine ground even this deep into the survey, unlike rounds 6-7's
+broader re-audit lenses. Total: 87 confirmed findings across sections
+A-AK plus one corrected finding. Nothing here is scheduled; it's a
+grounded idea backlog, same status as ROADMAP's own "Newly identified
+gaps" until triaged into a numbered phase.
 
 Two structural facts most items below trace back to, repeatedly:
 
@@ -2587,3 +2590,232 @@ needed at all, since here the relationship is required rather than
 disqualifying.
 
 **Effort: small.**
+
+---
+
+# Round 8
+
+Six lenses reaching even further from prior rounds' ground, per rounds
+6-7's diminishing-returns signal. Unlike those two rounds, this one hit
+6 of 6 - a real signal that targeted, specific lenses (rather than
+broad re-audits of already-mined ROADMAP sections) still find genuine
+ground even this deep into the survey. One highlight: the explicit hunt
+for a fourth instance of section U's pattern paid off.
+
+## U (continued). A fourth closed-world-inference instance
+
+### U4. Closed-world inference of `@phpstan-self-out` for the straight-line case
+
+Real PHPStan resolves a fluent method's narrowed return type (`$this->
+foo()->bar()` chains) purely from the parsed `@phpstan-self-out` tag on
+the immediate declaration (`Analyser/PhpDocsResolver.php:205`, the same
+doc-parsed-before-body-walk pipeline U1-U3 already cite) - when the tag
+is absent, `MethodCallHandler.php:180-200` does nothing at all, no
+fallback inference from the callee's own body is ever attempted even
+though the body is fully visible to PHPStan at that same moment.
+`MissingMethodSelfOutTypeRule.php:35-42` confirms the tooling never even
+tries: it short-circuits the instant `$selfOutType` is null instead of
+asking whether one could be inferred. Worth noting in both directions:
+its own `IncompatibleSelfOutTypeRuleTest` data file shows PHPStan never
+cross-checks a self-out tag's *claim* against what the body actually does
+either - the tag is trusted unconditionally either way. phpstan-rs can
+compute a registry-level self-out fact for the tractable subset PHPStan
+never even validates: a void/self/static-returning method body consisting
+of direct, unconditional `$this->prop = <expr>;` assignments with no
+intervening branch/loop (the same straight-line bar U3 already applies
+to by-ref tracking). Reusing `registry/purity.rs`'s fixed-point shape
+(already the shared mechanism U1-U3 cite) to walk every such method
+project-wide, computing the resulting property type through the same
+assignment-target inference `checker/assignment.rs` already runs for any
+ordinary `$this->prop = expr`, and exporting it as a per-method inferred
+fact that call-site handling can consult to narrow the receiver exactly
+the way a real tag would - falling back to an author-written tag when
+both exist, since a tag may assert more (e.g. generic widening) than the
+body alone proves. (`@phpstan-self-out` itself is currently entirely
+unparsed in phpstan-rs, listed only in a typo-detection tag whitelist per
+ROADMAP.md:1043 - this finding is about the inference half once tag
+support exists, not a claim that support already does.)
+
+**Effort: large.**
+
+---
+
+## AJ. Whole-program dead abstract-class detection
+
+For every class with `is_abstract == true`, walk the reverse (parent-to-
+children) subclass index A5/P1/U1 already propose building and confirm
+no path from it reaches any *concrete* class anywhere in the closed
+project+vendor universe - a plain reachability walk over the same graph
+(a direct subclass can itself be abstract, so this needs to walk to the
+first concrete descendant, not just one hop). Zero such reachable
+concrete descendant means the class can provably never be instantiated
+as an object anywhere this analysis can see, ever - not "currently
+unused," a permanent structural fact. PHPStan's own dead-code family
+gates on `isPrivate()`; there is no `isAbstract`-plus-descendant-
+enumeration rule anywhere (grepped `Rules/DeadCode/` and `Rules/Classes/`
+for "abstract" - only `InstantiationRule.php`, which flags a *syntactic*
+`new AbstractClass()` attempt, not a whole-program zero-subclass fact).
+More fundamentally, PHPStan's `Reflection/` layer has no descendant-
+enumeration API of any kind (grepped the whole vendored tree for
+`getSubclasses`/`descendantClasses`/`getKnownSubclasses` - zero hits) -
+because PHPStan must stay sound for a library's downstream consumers who
+can add real subclasses it never sees, the identical open-world
+constraint A5 already documents. phpstan-rs's `is_abstract` is already a
+plain struct field on every registered class, and it already flags
+direct syntactic instantiation of an abstract class - confirming the
+registry already fully distinguishes abstract from concrete; only a
+project-wide reachability walk over the (not-yet-built) reverse index is
+new. Distinct from A5 (whose reverse index only ever drives instanceof/
+class-string narrowing, never a dead-code diagnostic) and from B2 (whose
+`dependents` graph is built from bare *name* references - an abstract
+class referenced only via a parameter/property type hint for polymorphic
+dispatch, or via `static::`/`self::` calls to its own static methods,
+accumulates non-zero dependents and so is invisible to B2's "referenced
+nowhere" test even with zero real subclasses anywhere - verified directly
+against `deps.rs`'s `collect_class` implementation, which unconditionally
+inserts every `extends`/`implements`/type-hint name it sees).
+
+**Effort: medium.**
+
+---
+
+## AA (continued). Two more single-declaration design-pattern suggestions
+
+Both architecturally simpler than AA1/AA2 - decidable entirely from one
+already-parsed declaration during ordinary per-file checking, no registry
+pass or cross-file aggregation needed.
+
+### AA3. Suggest constructor property promotion for a trivially-forwarding constructor
+
+For a class's `__construct()`, when every statement is exactly
+`$this->prop = $param;` where `prop_name == param_name`, each such param
+is non-variadic/non-by-ref and matches a sibling `PropertyDecl` with an
+identical declared type and no conflicting default, the property isn't
+itself already promoted/static/hooked, and every constructor param is
+consumed by exactly one such assignment (no leftover statement, no unmatched
+param) - suggest rewriting the whole constructor to use PHP 8.0
+constructor property promotion, using each property's visibility/
+`is_readonly` as the promoted modifiers. Real PHPStan's promoted-property
+machinery is entirely about *validating* declarations already promoted
+(`isPromoted()`/`isPromotedFromTrait()` reflection flags,
+`Node/ClassPropertyNode.php:29-65`) - it never reasons in the reverse
+direction; grepping both vendored trees for "promot" turns up ~30 hits in
+phpstan-src, all reflection/scope-flag machinery for already-promoted
+code, and zero in phpstan-strict-rules - the closest ecosystem tool for
+this codemod, Rector, is a separate non-PHPStan project. phpstan-rs's
+`Param` already fully represents promoted-parameter syntax
+(`promoted_visibility`/`promoted_readonly`/`promoted_final`, since it
+already supports parsing/checking promoted constructors elsewhere) - this
+only proposes a new detector recognizing the unpromoted mirror-image
+shape and reusing the same `Param`/`PropertyDecl` fields to build the
+suggested rewrite, no new AST or parser plumbing.
+
+**Effort: small.**
+
+### AA4. Class-level `readonly class` shorthand when every property independently qualifies under AA1
+
+Once AA1's per-property pass has run, add one class-level aggregation
+step: if a class declares at least one non-static property, has zero
+promoted constructor parameters and zero static properties, and *every*
+declared property independently passed AA1's single-constructor-site
+test, emit one class-level suggestion pointing at PHP 8.2's whole-class
+`readonly class Foo { ... }` shorthand instead of N separate per-property
+suggestions (suppressing AA1's own diagnostic for that class once the
+aggregate fires, to avoid redundant noise). Real PHPStan's readonly
+machinery only ever validates a property already declared readonly
+against illegal reassignment, or validates *consistency* of an
+already-declared `readonly class` modifier against a subclass - neither
+direction ever proposes *adding* the modifier, matching AA1's own
+confirmed absence of any "suggest readonly" rule concept; no PHPStan
+collector aggregates per-property assignment counts across an entire
+class's property set either. A genuine, useful implementation detail
+surfaced during grounding: phpstan-rs's parser already fully discards the
+fact that a class body was introduced with the `readonly` keyword -
+`parse_class_decl` tracks `class_is_readonly` as a local variable used
+only to desugar into each member's own `is_readonly` flag, never stored
+on the returned `ClassDecl` itself - so AA1's own per-property scan
+already naturally self-excludes an already-`readonly class`-declared
+class (every property already has `is_readonly=true` and is filtered out
+before this aggregation would even run); the only genuinely new piece is
+the positive aggregation - iterating a class's plain (non-promoted)
+declared properties and checking all of them qualified.
+
+**Effort: small.**
+
+---
+
+## AH (continued). A third LSP capability: `codeLens` reference counts
+
+### AH3. `textDocument/codeLens` reference-count annotations above declarations
+
+Advertise `code_lens_provider` and add a `"textDocument/codeLens"` arm to
+`handle_request`. For each declaration in the requested file (walked the
+same way AH1's `documentSymbol` proposal walks `Project::ast(path)`),
+emit one `CodeLens` whose title is a use-site count (e.g. "3 references")
+sourced by aggregating F3's *proposed* use-site span index - grouping its
+per-symbol spans by declaration and taking the count. This legitimately
+depends on F3 (not yet built), the same disclosed-dependency pattern I4
+already uses elsewhere in this document. Two pieces are new work beyond
+what F3 itself builds: per-declaration count aggregation (F3's own
+description only frames its index as enumeration for `references`/
+`rename`, never as a rollup count), and the `CodeLens` response
+serialization/wiring itself, which touches none of F3's existing code
+paths. Real PHPStan ships no LSP or resident analysis server of any kind
+- `FileAnalyser::analyseFile` is its sole entry point, always a fresh
+whole-file CLI invocation with no persisted cross-file use-site index and
+no channel to push editor-rendered annotations without modifying the
+analyzed source. Distinct from F1-F3 (single-cursor request/response,
+none of which render anything above a declaration without a cursor
+action), AH1/AH2 (whole-file/whole-project symbol *lists* returned as a
+flat/hierarchical response, never an inline per-declaration annotation),
+and Y1/Y2 (per-token/per-argument decorations painted continuously during
+editing, not a per-declaration summary line above it) - `codeLens` is a
+fourth, structurally separate LSP request type none of them address.
+
+**Effort: medium.**
+
+---
+
+## AK. `ext.notRequired`: PHP-extension requirement verification, a fifth composer-hygiene axis
+
+Distinct from K (whole-package require/require-dev), R (PSR-4
+consistency), AC (autoload-dev reachability), and AG (`provide` claim
+verification) - a completely different kind of dependency (a compiled PHP
+extension the runtime must have loaded), checked via a completely
+different data source (the phpstorm-stubs per-extension directory
+layout, never touched by any of the other four). For every call to a
+built-in function (or reference to a built-in class/constant) that
+phpstan-rs's stub pipeline sourced from a specific `vendor/phpstorm-
+stubs/<extension>/` directory (`curl_*`, `mb_*`, `gd_*`, Redis, Imagick,
+etc.), resolve the project's own root `composer.json` `require` section
+and flag when it declares neither `ext-<extension>` nor a covering
+polyfill - the classic "works on the author's machine because the
+extension happens to be installed" bug, dying with a raw PHP fatal and
+zero warning from any tool today. Real PHPStan's `Rules/` catalog has
+zero rule keyed on composer.json `require` vs. extension-function usage -
+grepping both vendored trees for "ext-" as a rule concept returns
+nothing; the one `ext-` string that does appear anywhere in PHPStan's own
+conf is its *own* bundled stub-naming convention (`ext-ds.stub`), not a
+rule checking an analyzed project's composer.json. The real ecosystem
+tool for this, `composer-require-checker`, is (like K's own precedent) a
+separate non-PHPStan tool entirely. phpstan-rs already parses
+composer.json generically via `serde_json` (`detect_phpstan_dependency`)
+- extending that same parse to also collect `ext-*`-prefixed keys is
+direct, proven extension of existing code. The honest gap: the
+per-function "which extension does this belong to" mapping does *not*
+already exist anywhere in phpstan-rs today (no `extension` field on
+`FunctionSig`/`ClassInfo`) - but the raw material sits one step upstream
+of where it's currently thrown away: `build.rs`'s `collect_php_files`
+already recursively walks `vendor/phpstorm-stubs/<extension>/*.php` and
+holds each file's real, extension-named parent directory in scope at
+exactly the point it decides what to write into the generated stub-source
+array, then discards that path entirely, writing only raw file contents.
+Threading the extension name through alongside each source string (or a
+standalone generated table keyed by file) is additive to a pipeline whose
+per-file path is already known and already discarded on purpose today. A
+handful of always-compiled-in extensions (`Core`, `SPL`, `Reflection`,
+etc.) must be excluded, since no `ext-core`-style Composer platform
+package exists to require - the mapping only becomes actionable for
+genuinely optional extensions.
+
+**Effort: large.**
