@@ -1,3 +1,6 @@
 [submodule "vendor/phpstan-src"]
 	path = vendor/phpstan-src
 	url = https://github.com/phpstan/phpstan-src.git
+[submodule "vendor/phpstan-strict-rules"]
+	path = vendor/phpstan-strict-rules
+	url = https://github.com/phpstan/phpstan-strict-rules.git
