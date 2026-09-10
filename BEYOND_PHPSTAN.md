@@ -1031,34 +1031,47 @@ even with a compiled extension in hand.
 
 **Effort: medium.**
 
-### C4. Port real PHPStan's sort-by-size + round-robin job striping into `check_project`'s thread scheduling
+### C4. Use a work-stealing thread pool for `check_project`'s per-file loop, not a static size-sorted partition
 
-Unlike most items in this document, this isn't PHPStan being limited and
-phpstan-rs being able to exceed it - real PHPStan's own `Scheduler`
-already solves the straggler problem correctly, and this is about
-porting the technique it got right, not working around a limitation.
-When C2's proposed `std::thread::scope` parallelization of
-`check_project` gets built, divide `analyze_files` across worker threads
-the way real PHPStan's `Scheduler::scheduleWork` divides files across
-worker *processes*: compute each file's size, sort files descending by
-size, then deal them round-robin into N job buckets so every bucket mixes
-large and small files, re-sorting each bucket back into original file
-order afterward only to keep per-job analysis order stable (PHPStan's
-own comment: "only the job composition should change, not the order in
-which files of a job get analysed - analysis results can be sensitive to
-it"). This replaces a plain `chunks(chunk_size)`-style contiguous split
-with a striped, size-sorted distribution, so no single thread ends up
-owning a run of the project's largest files while sibling threads finish
-early and idle. This matters concretely because building C2 exactly as
-literally described - which cites the sibling parse-only `check`
-command's own `chunks()`-based `std::thread::scope` pattern as its
-proof-of-pattern - would reintroduce the exact imbalance PHPStan's own
-team found worth solving in `Scheduler.php`; `check_project` currently
-has no file-partitioning-across-workers logic at all (`analyze_files.
-iter().map(...)` is strictly sequential today), so there's no existing
-phpstan-rs behavior to regress from, only a chance to get it right from
-the start. Costs nothing extra in phpstan-rs (no process-spawn overhead,
-no IPC - same `std::thread::scope` call site C2 already needs).
+Real PHPStan's `Scheduler::scheduleWork` solves the straggler problem
+(one worker stuck with a run of the project's largest files while
+siblings finish early and idle) by computing each file's size, sorting
+files descending by size, then dealing them round-robin into N job
+buckets so every bucket mixes large and small files - a static partition
+computed once, upfront, before any worker starts. This is the right
+technique for PHPStan's own constraint: its workers are separate OS
+*processes* with no shared memory, so real work-stealing (a worker
+asking a coordinator "give me the next file" every time it goes idle)
+means an IPC round-trip per request - expensive enough that precomputing
+a size-based heuristic partition is cheaper than measuring real
+imbalance live. C2 proposes native threads sharing one process and one
+`Registry`, where that constraint doesn't hold: a work-stealing queue's
+per-item cost there is a plain pop (an atomic op or an uncontended
+lock), so there's no reason to pay for a *heuristic proxy* for balance
+(file size) when real, measured imbalance can be resolved for free as it
+happens - a `Vec<PathBuf>` behind a work-stealing deque (`crossbeam-
+deque`, or `analyze_files.par_iter()` via `rayon` for the same effect
+with far less code) load-balances any actual file-to-file cost variance,
+not just the size-correlated portion of it. It also sidesteps a
+complication PHPStan's own technique has to solve for: PHPStan re-sorts
+each bucket back into original file order after striping specifically
+because "analysis results can be sensitive to" per-job file order in its
+own model - but C2's own premise is that `Project::check_file` needs
+only `&self`, no shared mutable state carried across files within a
+thread, so phpstan-rs's per-file checks are already order-independent;
+there is nothing to preserve in the first place, and no reordering step
+to write. `check_project` currently has no file-partitioning-across-
+workers logic at all (`analyze_files.iter().map(...)` is strictly
+sequential today), so there's no existing behavior to regress from
+either way - but building C2 via the sibling parse-only `check`
+command's own `chunks()`-based `std::thread::scope` pattern (its cited
+proof-of-pattern) would reintroduce the exact static-partition imbalance
+this item exists to avoid; a work-stealing pool is the smaller, not just
+different, fix. Neither `rayon` nor `crossbeam-deque` is a dependency
+today (`grep -n 'rayon\|crossbeam' Cargo.toml` - nothing), so this adds
+one new dependency either way, same as PHPStan's own `Scheduler` needed
+no new dependency for its process-based equivalent - the honest tradeoff
+of doing this with threads instead of processes.
 
 **Effort: small.**
 
