@@ -1016,3 +1016,102 @@ fn a_docblock_only_param_tag_referencing_an_internal_class_is_never_flagged() {
         "got: {d:?}"
     );
 }
+
+// Phase 67 Item B: a closure/arrow-fn literal's own native param/return
+// type-hints only ever got the existence check before, never this one -
+// `function (InternalClass $f): InternalClass {}` silently passed
+// --check-internal-usage where the identical named-function signature
+// already correctly flagged it.
+
+#[test]
+fn a_closure_parameter_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            $f = function (\Vendor\Internal\Foo $x): void {};
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_closure_return_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            $f = function (): \Vendor\Internal\Foo {
+                throw new \Exception();
+            };
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_arrow_fn_parameter_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            $f = fn(\Vendor\Internal\Foo $x) => null;
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_arrow_fn_return_typehint_referencing_an_internal_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Other\App;
+            $f = fn(\Vendor\Internal\Foo $x): \Vendor\Internal\Foo => $x;
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_closure_parameter_typehint_referencing_an_internal_class_from_the_same_root_namespace_is_never_flagged()
+ {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Foo {}
+
+            namespace Vendor\App;
+            $f = function (\Vendor\Internal\Foo $x): void {};
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.internalClass"),
+        "got: {d:?}"
+    );
+}

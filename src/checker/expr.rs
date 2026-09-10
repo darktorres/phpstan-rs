@@ -2586,6 +2586,19 @@ impl<'a> Checker<'a> {
                     e.span,
                     &closure_label,
                 );
+                // Phase 67 Item B: the identical `@internal` type-hint
+                // check a named function/method's own param/return list
+                // already gets - previously only ever run the existence
+                // check just above, never this one.
+                let current_class_for_internal_check = self.current_class.clone();
+                self.check_internal_param_and_return_types_raw(
+                    params,
+                    return_type.as_deref(),
+                    e.span,
+                    false,
+                    current_class_for_internal_check.as_deref(),
+                    &closure_label,
+                );
                 // Finding 3: a generator-returning closure (`function ():
                 // Generator { if ($done) { return; } yield $x; }`, a
                 // plausible callback shape) needs the same
@@ -2777,6 +2790,17 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
+                // Phase 67 Item B: see the `Closure` arm's own identical
+                // comment above.
+                let current_class_for_internal_check = self.current_class.clone();
+                self.check_internal_param_and_return_types_raw(
+                    params,
+                    return_type.as_deref(),
+                    e.span,
+                    false,
+                    current_class_for_internal_check.as_deref(),
+                    label,
+                );
                 Type::Object("Closure".to_string(), Vec::new())
             }
             // Finding 28: `foo(...)`/`$obj->method(...)`/`Class::method(...)`

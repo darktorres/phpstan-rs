@@ -21,7 +21,7 @@
 //! `__toString()` call - neither is implemented here (see ROADMAP.md's
 //! own Phase 67 entry for the full list of what's still open).
 
-use crate::ast::{ClassKind, FunctionDecl};
+use crate::ast::{ClassKind, FunctionDecl, Param};
 use crate::checker::Checker;
 use crate::registry::{ConstSig, FunctionSig, PropertySig};
 use crate::token::Span;
@@ -462,26 +462,59 @@ impl<'a> Checker<'a> {
     /// matching real PHPStan's own `FunctionDefinitionCheck` exactly
     /// (there is no `ClassNameUsageLocation` for a `@param`/`@return`
     /// PHPDoc tag's own type at all - confirmed by reading the full
-    /// constant list). Named functions/methods only - a closure/arrow-fn
-    /// literal's own native param/return hints have their own, separate
-    /// inline checking in `checker/expr.rs` this doesn't touch (a
-    /// disclosed, narrower residual matching real PHPStan's own
-    /// `checkFunction`/`checkClassMethod` vs. `checkAnonymousFunction`
-    /// architectural split).
+    /// constant list). Named functions/methods only - see
+    /// `check_internal_param_and_return_types_raw` for the shared core
+    /// this and the closure/arrow-fn call sites both delegate to.
     pub(crate) fn check_internal_param_and_return_types(
         &mut self,
         f: &FunctionDecl,
         class_name: Option<&str>,
         label: &str,
     ) {
+        self.check_internal_param_and_return_types_raw(
+            &f.params,
+            f.return_type.as_deref(),
+            f.return_type_span.unwrap_or(f.span),
+            class_name.is_some(),
+            class_name,
+            label,
+        );
+    }
+
+    /// The real body of `check_internal_param_and_return_types` above,
+    /// generalized to take a bare `params`/`return_type` pair instead of a
+    /// whole `&FunctionDecl` - `ExprKind::Closure`/`ArrowFn` (`checker/
+    /// expr.rs`) share this exact shape but aren't `FunctionDecl`s (no
+    /// `FunctionDecl` wrapper exists for a closure literal at all), and
+    /// previously fell through to only ever running the existence check,
+    /// never this one (a real, previously-undetected gap: `function
+    /// (InternalClass $f): InternalClass {}` silently passed
+    /// `--check-internal-usage` where the identical named-function
+    /// signature correctly flagged it). `is_method` only picks the
+    /// message's own "method"/"function" word - a closure/arrow-fn uses
+    /// neither (real PHPStan has no separate rule for this shape at all
+    /// to match wording against), so callers outside a class-scoped named
+    /// declaration pass `false` and get "function" wording, matching this
+    /// project's own existing closure-label convention elsewhere
+    /// (`"{label} (closure)"`, already folded into `label` by the caller).
+    pub(crate) fn check_internal_param_and_return_types_raw(
+        &mut self,
+        params: &[Param],
+        return_type: Option<&str>,
+        return_type_fallback_span: Span,
+        is_method: bool,
+        class_name: Option<&str>,
+        label: &str,
+    ) {
         if !self.registry.check_internal_usage {
             return;
         }
-        let context = match class_name {
-            Some(_) => format!("method {label}()"),
-            None => format!("function {label}()"),
+        let context = if is_method {
+            format!("method {label}()")
+        } else {
+            format!("function {label}()")
         };
-        for p in &f.params {
+        for p in params {
             let ty = self.resolve_type_hint(p.type_hint.as_deref());
             let ty = match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
@@ -500,8 +533,8 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if f.return_type.is_some() {
-            let ty = self.resolve_type_hint(f.return_type.as_deref());
+        if return_type.is_some() {
+            let ty = self.resolve_type_hint(return_type);
             let ty = match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
                 None => ty,
@@ -514,7 +547,7 @@ impl<'a> Checker<'a> {
                     "Return type",
                     &context,
                     "return",
-                    f.return_type_span.unwrap_or(f.span),
+                    return_type_fallback_span,
                     label,
                 );
             }
