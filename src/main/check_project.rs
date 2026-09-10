@@ -158,6 +158,7 @@ fn run_check_project(
     // already parallelized, sequential lexing+parsing became the
     // dominant remaining cost - ~63% of total wall time - which is what
     // this loop exists to close.
+    let _t0 = std::time::Instant::now();
     let context_parsed: Vec<Option<(String, project::ParsedFile)>> = pool.install(|| {
         context_files
             .par_iter()
@@ -171,6 +172,8 @@ fn run_check_project(
             .collect()
     });
     std::panic::set_hook(default_hook);
+    eprintln!("TIMING: parse phase: {:?}", _t0.elapsed());
+    let _t1 = std::time::Instant::now();
 
     // Context files insert first: `Registry::index` resolves a
     // fully-qualified-name collision with plain last-write-wins (a bare
@@ -210,6 +213,8 @@ fn run_check_project(
         }
     }
     project.finish_loading();
+    eprintln!("TIMING: insert+finish_loading phase: {:?}", _t1.elapsed());
+    let _t2 = std::time::Instant::now();
 
     // Mirrors `check.rs`'s own catch_unwind-with-silenced-hook pattern: a
     // panic while checking one file is reported and skipped rather than
@@ -242,6 +247,7 @@ fn run_check_project(
                 .collect()
         });
     std::panic::set_hook(default_hook);
+    eprintln!("TIMING: check phase: {:?}", _t2.elapsed());
 
     let mut results: HashMap<PathBuf, Vec<checker::Diagnostic>> = HashMap::new();
     let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
