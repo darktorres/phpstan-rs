@@ -1017,6 +1017,57 @@ fn a_docblock_only_param_tag_referencing_an_internal_class_is_never_flagged() {
     );
 }
 
+// ROADMAP correction: first-class-callable syntax (`$foo->bar(...)`/
+// `Foo::bar(...)`) already runs the same `@internal` checks an ordinary
+// call gets - `d4efb41` wired `check_internal_method_call` into
+// ExprKind::FirstClassCallable's MethodCall/StaticCall arms. ROADMAP's own
+// "still open" note was stale; these two shapes were simply untested.
+
+#[test]
+fn a_first_class_callable_of_an_internal_method_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+                public function doStuff(): void {}
+            }
+
+            namespace Other\App;
+            function f(\Vendor\Internal\Thing $t) {
+                $g = $t->doStuff(...);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.internalClass"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_first_class_callable_of_an_internal_static_method_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Vendor\Internal;
+            /** @internal */
+            class Thing {
+                public static function make(): void {}
+            }
+
+            namespace Other\App;
+            function f() {
+                $g = \Vendor\Internal\Thing::make(...);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "staticMethod.internalClass"),
+        "got: {d:?}"
+    );
+}
+
 // Phase 67 Item B: a closure/arrow-fn literal's own native param/return
 // type-hints only ever got the existence check before, never this one -
 // `function (InternalClass $f): InternalClass {}` silently passed

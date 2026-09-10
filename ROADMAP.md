@@ -286,7 +286,9 @@ declarations.
 
 `@internal` restricted-usage engine (function/method/static-method
 calls, property/constant reads and writes, instantiation, `instanceof`,
-`catch`, implicit `__toString()`), off by default. `@deprecated` usage
+`catch`, implicit `__toString()`, first-class-callables, and a named
+function/method's *and* a closure/arrow-fn literal's own native
+param/return type-hints), off by default. `@deprecated` usage
 warnings across the identical access-shape set, off by default - a
 class/interface/trait/enum-level `@deprecated` tag cascades down to
 member usage, a deprecated-usage warning is suppressed from within an
@@ -819,25 +821,28 @@ open: native-type property variance, blocked on giving `PropertySig` a
 
 **67 - `@internal` restricted-usage engine, remaining (PARTIAL).**
 Calls, property/constant access, instantiation, `instanceof`, `catch`,
-`extends`/`implements`/trait-use, and a named function/method's own
-native param/return type-hints (`parameter.internal{Type}`/
-`return.internal{Type}` - closures/arrow-fns have their own separate
-inline param/return checking this doesn't touch, a disclosed narrower
-residual matching real PHPStan's own `checkFunction`/`checkClassMethod`
-vs. `checkAnonymousFunction` architectural split) are all covered (see
-Done). Still open: first-class-callables for the same engine. Declined,
-a verified genuine architectural mismatch rather than a scope trim: the
-separate, user-configured restricted-usage mechanism
-(`RestrictedClassConstantUsageRule` and nine siblings, including
-`RestrictedUsageOfDeprecatedStringCastRule` (a built-in deprecated-
-`__toString()` check reusing the same extension point)) - real
-PHPStan's own family are bare extension-point interfaces with *zero*
-built-in implementation; every real instance is a hand-written
-third-party class registered via `services.neon`, and this project has
-no plugin-loading mechanism at all (Phase 18, deliberately last). A
-purely declarative alternative (a static `restricted_symbols: Vec<{kind,
-name, message}>` config list) would be a materially different feature
-shape, needing its own new phase if ever wanted.
+`extends`/`implements`/trait-use, both a named function/method's own
+*and* a closure/arrow-fn literal's own native param/return type-hints
+(`parameter.internal{Type}`/`return.internal{Type}`), first-class-
+callables (`$obj->method(...)`/`Foo::method(...)`, wired via `d4efb41`
+into the same `check_internal_method_call` an ordinary call already
+runs), and the implicit `__toString()` call an echo/print/string-cast/
+interpolation triggers (`Checker::check_implicit_tostring_usage`, real
+PHPStan's own `RestrictedUsageOfDeprecatedStringCastRule` - previously,
+incorrectly, bundled into this phase's own Declined list below as if it
+were unbuilt) are all covered (see Done). Declined, a verified genuine
+architectural mismatch rather than a scope trim: the separate, user-
+configured restricted-usage mechanism (`RestrictedClassConstantUsageRule`
+and eight further siblings - confirmed via exhaustive grep across
+`vendor/phpstan-src/src`, exactly five real implementations exist at all,
+all under `Rules/InternalTag/`, i.e. the `@internal` engine already built
+above) - real PHPStan's own family are bare extension-point interfaces
+with *zero* built-in implementation; every real instance is a hand-
+written third-party class registered via `services.neon`, and this
+project has no plugin-loading mechanism at all (Phase 18, deliberately
+last). A purely declarative alternative (a static `restricted_symbols:
+Vec<{kind, name, message}>` config list) would be a materially different
+feature shape, needing its own new phase if ever wanted.
 
 **68 - Array no-op diagnostics, remaining (PARTIAL).** Duplicate-key
 detection and the two no-op `array_values`/`array_filter`-empty checks
