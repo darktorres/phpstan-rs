@@ -1,0 +1,118 @@
+use std::collections::HashMap;
+
+use crate::types::Type;
+
+/// Unifies a template-bearing param type against an actual argument type,
+/// recording the binding it implies. Only the two shapes that come up in
+/// practice are handled: a bare `T` param, and `T[]`/`array<T>` unifying
+/// against an array argument's element type. Anything else (a template
+/// buried in a union, an array shape, etc) just isn't bound, which is safe
+/// since `substitute_template` falls back to `Mixed` for anything left
+/// unbound. First binding for a given name wins; conflicting uses of the
+/// same `T` across multiple params aren't reconciled (no union-widening).
+pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMap<String, Type>) {
+    match param_ty {
+        Type::TemplateParam(tp) => {
+            if *arg_ty != Type::Mixed {
+                bindings
+                    .entry(tp.name.clone())
+                    .or_insert_with(|| arg_ty.clone());
+            }
+        }
+        Type::Array(_, inner) => {
+            if let Type::Array(_, arg_inner) = arg_ty {
+                bind_template_param(inner, arg_inner, bindings);
+            }
+        }
+        Type::ClassString(inner) => {
+            if let Type::ClassString(arg_inner) = arg_ty {
+                bind_template_param(inner, arg_inner, bindings);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Applies a set of template bindings through a type tree, replacing every
+/// `TemplateParam` with its bound type. Phase 54: a name left unbound now
+/// falls back to that template's own declared `@template T = Default`
+/// when it has one, rather than unconditionally `Mixed` - e.g. a
+/// function-own `@template T = int` whose `T` never actually gets bound
+/// from any real call-site argument (used only in the return type, say)
+/// now resolves to `int` instead of `Mixed`. `checker::generics::
+/// substitute_scoped` mirrors this same fallback for the separate
+/// class-level substitution path (an "erased" - too-few-arguments, or
+/// bare - generic class reference).
+pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
+    match ty {
+        Type::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
+            tp.default
+                .as_ref()
+                .map(|d| substitute_template(d, bindings))
+                .unwrap_or(Type::Mixed)
+        }),
+        // Phase 50: substitutes through the key type too (not just reset
+        // to "unknown" every time) - a real, if rare, `array<TKey,
+        // TValue>` bound key shouldn't be lost on every substitution
+        // pass.
+        Type::Array(key, inner) => Type::Array(
+            Box::new(substitute_template(key, bindings)),
+            Box::new(substitute_template(inner, bindings)),
+        ),
+        Type::ClassString(inner) => {
+            Type::ClassString(Box::new(substitute_template(inner, bindings)))
+        }
+        Type::Union(members) => Type::Union(
+            members
+                .iter()
+                .map(|m| substitute_template(m, bindings))
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .iter()
+                .map(|m| substitute_template(m, bindings))
+                .collect(),
+        ),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .iter()
+                .map(|(k, t, opt)| (k.clone(), substitute_template(t, bindings), *opt))
+                .collect(),
+        ),
+        // A real, previously-missing case (found the same way as the
+        // `Object` fix just below - this session's own corpus diff):
+        // `object{...}`'s own field types were never substituted either.
+        Type::ObjectShape(fields) => Type::ObjectShape(
+            fields
+                .iter()
+                .map(|(k, t, opt)| (k.clone(), substitute_template(t, bindings), *opt))
+                .collect(),
+        ),
+        // Phase 54: a real, previously-missing case - every other
+        // structural wrapper above recurses into its own nested type(s);
+        // `Object`'s own generic argument list didn't, so substituting
+        // `T -> int` through e.g. `Box<T>` silently left it as `Box<T>`
+        // completely unchanged instead of `Box<int>`. Also what carries
+        // a call-site variance sentinel's own wrapped inner type through
+        // substitution correctly (`"$$covariant"`/`"$$contravariant"`/
+        // `"$$bivariant"` are all just `Object`s with this same shape -
+        // no separate arm needed for them).
+        // Phase 54: a real, previously-missing case - every other
+        // structural wrapper above recurses into its own nested type(s);
+        // `Object`'s own generic argument list didn't, so substituting
+        // `T -> int` through e.g. `Box<T>` silently left it as `Box<T>`
+        // completely unchanged instead of `Box<int>`. Also what carries
+        // a call-site variance sentinel's own wrapped inner type through
+        // substitution correctly (`"$$covariant"`/`"$$contravariant"`/
+        // `"$$bivariant"` are all just `Object`s with this same shape -
+        // no separate arm needed for them).
+        Type::Object(name, args) => Type::Object(
+            name.clone(),
+            args.iter()
+                .map(|a| substitute_template(a, bindings))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}

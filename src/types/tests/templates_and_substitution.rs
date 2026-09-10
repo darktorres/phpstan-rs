@@ -1,5 +1,6 @@
 //! Template type substitution.
 use super::super::*;
+use std::collections::HashMap;
 
 #[test]
 fn substitute_template_recurses_into_array_and_intersection_types() {
