@@ -340,6 +340,59 @@ fn extending_a_plain_api_phpstan_class_is_not_flagged() {
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
+// Phase 40.A: an interface's own `extends` gets `phpstanApi.interface`
+// (real `ApiInterfaceExtendsRule`), not the class-side `phpstanApi.class`
+// a plain class's own `extends` reports (real `ApiClassExtendsRule`).
+
+#[test]
+fn an_interface_extending_a_non_api_phpstan_interface_is_flagged_as_phpstan_api_interface() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        interface BaseRule {}
+        "#,
+        r#"<?php
+        namespace App;
+        interface MyRule extends \PHPStan\Rules\BaseRule {}
+        "#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert_eq!(diags[0].identifier, "phpstanApi.interface");
+}
+
+#[test]
+fn a_class_extending_a_non_api_phpstan_class_still_uses_phpstan_api_class() {
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Rules;
+        class BaseRule {}
+        "#,
+        r#"<?php
+        namespace App;
+        class MyRule extends \PHPStan\Rules\BaseRule {}
+        "#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert_eq!(diags[0].identifier, "phpstanApi.class");
+}
+
+#[test]
+fn extending_phpstans_own_mutating_scope_is_never_flagged() {
+    // Phase 40.A: real `ApiClassExtendsRule`'s own narrow, explicit
+    // carve-out (`processNode`'s early return on `MutatingScope::class`).
+    let diags = diagnostics_for(
+        r#"<?php
+        namespace PHPStan\Analyser;
+        class MutatingScope {}
+        "#,
+        r#"<?php
+        namespace App;
+        class MyScope extends \PHPStan\Analyser\MutatingScope {}
+        "#,
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
 #[test]
 fn implementing_an_api_do_not_implement_interface_is_flagged_distinctly() {
     let diags = diagnostics_for(

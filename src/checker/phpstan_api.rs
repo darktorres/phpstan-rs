@@ -486,16 +486,37 @@ impl<'a> Walker<'a> {
         let fqn = ctx.declared_name(&c.name);
         for parent in &c.extends {
             if let Some(pfqn) = self.resolve_if_phpstan(parent, ctx) {
+                // Phase 40.A: real `ApiClassExtendsRule`'s own narrow
+                // carve-out - extending `PHPStan\Analyser\MutatingScope`
+                // itself is exempt (`processNode`'s own explicit early
+                // return), a `Class_`-only concept (an interface's
+                // `extends` list is never checked against this, and
+                // couldn't target `MutatingScope` meaningfully anyway -
+                // it isn't an interface).
+                if c.kind == ClassKind::Class && pfqn == "PHPStan\\Analyser\\MutatingScope" {
+                    continue;
+                }
                 let action = format!("extending {pfqn}");
+                // Phase 40.A: real PHPStan splits this into two separate
+                // rules by the *declaring* node's own kind -
+                // `ApiClassExtendsRule` (`phpstanApi.class`, `Class_`-only,
+                // single parent) vs `ApiInterfaceExtendsRule`
+                // (`phpstanApi.interface`, `Interface_`-only, a real
+                // multi-parent list) - `c.kind` already tells us which.
                 // Phase 40.4: `@api-do-not-implement` is semantically
                 // interface-only - real `ApiClassExtendsRule` checks only
                 // `@api`, never it, for a real class's own `extends`.
+                let identifier = if c.kind == ClassKind::Class {
+                    "phpstanApi.class"
+                } else {
+                    "phpstanApi.interface"
+                };
                 self.report_inheritance(
                     &pfqn,
                     &action,
                     c.span,
                     &fqn,
-                    "phpstanApi.class",
+                    identifier,
                     c.kind != ClassKind::Class,
                 );
             }

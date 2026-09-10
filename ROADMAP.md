@@ -665,13 +665,17 @@ plus `PhpStanNamespaceIn3rdPartyPackageRule` (`phpstanApi.
 phpstanNamespace`, a `namespace PHPStan\...;` declaration whose nearest
 `composer.json` isn't named `phpstan/*` - the one rule of the four that
 needed a real file path on disk, via a new `composer::find_composer_
-package_name` upward walk). Known identifier-fidelity gap: the
-`extends` mirror always reports `phpstanApi.class` rather than deriving
-`phpstanApi.interface` for an interface's own multi-`extends` list
-(this project's `ClassDecl` shares one `extends` field for both kinds),
-and similarly for `instanceof`'s own class/interface/trait distinction -
-a message-precision gap, not a missed diagnostic. Full, general
-receiver-type inference for an arbitrary method-call chain (folding
+package_name` upward walk). The `extends` mirror now derives
+`phpstanApi.interface` (vs. `phpstanApi.class`) for an interface's own
+multi-parent `extends` list, matching real PHPStan's own
+`ApiInterfaceExtendsRule`/`ApiClassExtendsRule` split by declaring-node
+kind, including the class-only `PHPStan\Analyser\MutatingScope`
+extends-exemption; `instanceof`'s own class/interface/trait identifier
+distinction (`phpstanApi.{class,interface,trait}`) was already correct
+before this batch, confirmed by an existing passing test - ROADMAP's own
+prior text calling both a fidelity gap was accurate for `extends` only.
+Full, general receiver-type inference for an arbitrary method-call chain
+(folding
 this whole separate `Walker` into the main `Checker` pass, the way the
 design doc's own recommendation described) remains a deliberate,
 disclosed scope trim - the `$this->prop->method()` slice above covers
