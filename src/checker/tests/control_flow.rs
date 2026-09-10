@@ -687,6 +687,111 @@ fn a_finally_block_unconditionally_returning_overwrites_the_try_bodys_return() {
     );
 }
 
+// Phase 68.2: `finally`'s own real entry scope isn't just the try body's
+// full-completion state - real PHP can jump into `finally` the moment an
+// exception is thrown anywhere inside the try body, including before a
+// variable it conditionally reassigns ever runs. Real corpus false
+// positive this fixes: Piwigo's own `tests/Integration/
+// GroupServiceTest.php`, `$copyId = null;` reassigned only conditionally
+// inside `try`, `finally` wrongly seeing only the reassigned state.
+
+#[test]
+fn finally_sees_the_pre_try_state_too_when_an_earlier_statement_could_throw() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo {}
+            function mightThrow(): void {}
+            function f(): void {
+                $x = null;
+                try {
+                    mightThrow();
+                    $x = new Foo();
+                } finally {
+                    assertType('null|Foo', $x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn finally_widens_even_when_the_reassignment_is_the_trys_own_first_statement() {
+    // A real, disclosed trade-off of this "materially cheaper
+    // approximation": it has no real per-statement throw-point model at
+    // all (out of reach at reasonable size - see this function's own
+    // doc comment), so it merges the *whole* pre-try snapshot with the
+    // post-try state unconditionally, even here, where `$x` is
+    // reassigned as the *very first* statement in the try body and real
+    // PHP genuinely cannot throw between entering the try and completing
+    // a plain assignment. A real per-throw-point model could narrow this
+    // back down to plain `Foo`; this approximation deliberately doesn't
+    // attempt to.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo {}
+            function f(): void {
+                $x = null;
+                try {
+                    $x = new Foo();
+                } finally {
+                    assertType('null|Foo', $x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn finally_sees_a_catch_clauses_own_binding_merged_with_the_pre_try_state() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo {}
+            function f(): void {
+                $x = null;
+                try {
+                    mightThrowOrReturn();
+                    $x = new Foo();
+                } catch (\Exception $e) {
+                } finally {
+                    assertType('null|Foo', $x);
+                }
+            }
+            function mightThrowOrReturn(): void {}
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn code_after_the_whole_try_statement_is_unaffected_by_the_finally_widening() {
+    // The widened, pre-try-merged scope is only ever fed to `finally`'s
+    // own body - normal code after the whole try/finally statement still
+    // sees the real, narrower post-try/catch completion state (unless
+    // `finally` itself further widens it, which this simple case
+    // doesn't).
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo {}
+            function f(): void {
+                $x = null;
+                try {
+                    $x = new Foo();
+                } finally {
+                    echo "cleanup";
+                }
+                assertType('Foo', $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
 #[test]
 fn a_finally_block_with_no_exit_point_is_not_flagged() {
     let d = diagnostics_for(

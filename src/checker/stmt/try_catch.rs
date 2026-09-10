@@ -15,6 +15,27 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
+        // Phase 68.2: `finally`'s own real entry scope is never just the
+        // try body's full-completion state (merged with each non-
+        // terminating catch's own end state, computed below into
+        // `locals` before `finally`'s own `check_block` runs) - real PHP
+        // can jump into `finally` from *any* point inside the try body,
+        // the moment an exception is thrown, including one thrown before
+        // the try body's first assignment ever ran. `check_try` has no
+        // real per-statement throw-point model (out of reach at
+        // reasonable size, the same reason `check_missing_checked_
+        // exceptions` stays a disclosed, narrower opt-in elsewhere) - a
+        // materially cheaper, still-sound approximation instead: merge
+        // this snapshot (the state genuinely true the instant the try
+        // body starts, before anything in it could have run at all) with
+        // the try/catch's own normal-completion state right before
+        // `finally` runs, rather than trusting only the latter. Real
+        // corpus false positive this fixes: Piwigo's own `tests/
+        // Integration/GroupServiceTest.php`, `$copyId = null;` reassigned
+        // only conditionally inside `try`, `finally` (via `array_filter`)
+        // seeing only the reassigned-non-null state and wrongly treating
+        // the array's own element type as unconditionally truthy.
+        let pre_try_locals = locals.clone();
         self.check_block(body, locals, declared_return, label);
         let try_end_locals = locals.clone();
         let try_terminates = body
@@ -195,7 +216,34 @@ impl<'a> Checker<'a> {
                 .fold(first, |acc, s| merge_scopes(&acc, &s));
         }
         if let Some(f) = finally {
-            self.check_block(f, locals, declared_return, label);
+            // Phase 68.2: `finally`'s own body is checked against the
+            // widened entry scope (see this function's own doc comment
+            // above), in its own clone - not against `*locals` directly,
+            // which stays the real, narrower post-try/catch completion
+            // state real code reaching *after* the whole try/finally
+            // statement should see (the widening only exists to make
+            // `finally`'s *own* body type-check soundly against every
+            // point it could really be entered from, not to leak
+            // imprecision past it). Only a key `finally`'s own body
+            // actually reassigns to something different than its own
+            // widened entry carries forward onto the narrower state -
+            // everything it never touches keeps its narrower, more
+            // precise value. (A real, disclosed edge case this doesn't
+            // handle: `unset()`-ing a variable inside `finally` won't
+            // remove it from the narrower state afterward - accepted as
+            // part of this same "materially cheaper approximation.")
+            let finally_entry = merge_scopes(&pre_try_locals, locals);
+            let mut finally_locals = finally_entry.clone();
+            self.check_block(f, &mut finally_locals, declared_return, label);
+            for (key, ty) in finally_locals.iter() {
+                if finally_entry.get(key) != Some(ty) {
+                    let provenance = finally_locals
+                        .get_provenance(key)
+                        .cloned()
+                        .unwrap_or_default();
+                    locals.insert_with_provenance(key.clone(), ty.clone(), provenance);
+                }
+            }
             // Phase 42(4): only worth naming the finally block's
             // own exit point(s) if there's actually something
             // real on the try/catch side for them to overwrite -

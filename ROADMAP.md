@@ -188,6 +188,17 @@ offset getting its own distinct diagnostic, mirroring real PHPStan's
 through a closure's own `use (&$x)` by-ref write-back). `break`-reached
 loop state merges into the post-loop scope; a `finally` block's own
 unconditional exit point correctly overwrites the try/catch side's.
+`finally`'s own entry scope (Phase 68.2) is no longer just the try
+body's full-completion state - real PHP can jump into `finally` the
+moment an exception is thrown anywhere inside the try body, including
+before a variable it conditionally reassigns ever runs, so `finally`'s
+own body is now checked against that pre-try state merged with the
+normal completion state (a materially cheaper, still-sound
+approximation of a real per-throw-point model, which stays out of
+reach at reasonable size); only the net effect `finally`'s own body
+actually produces carries forward to code after the whole
+try/catch/finally statement, which still sees the narrower, unwidened
+completion state.
 `count()`/`array_is_list`/`str_contains`-family truthiness narrowing,
 including the mirrored/negated `count($x) < 1` shape. Comparison-outcome
 narrowing for `<`/`>`/`<=`/`>=` between known-numeric operands, and a
@@ -905,13 +916,17 @@ done too, but opt-in (`check_array_filter_falsy_noop`, default `false`)
 rather than shipped on by default - an earlier attempt at them was
 dropped entirely after corpus verification caught two live false
 positives, both since root-caused to independent variable-type-tracking
-imprecision unrelated to this check's own logic (one, Piwigo's own
-`tests/Integration/GroupServiceTest.php:363`, is still confirmed live -
-a `try`/`finally` not accounting for an assignment inside `try`
-possibly never running). Flip the default to `true` only once that
-gap (and the sibling `ProxyHelper.php` one, not currently reproducing
-against this corpus but not independently fixed either) is actually
-fixed, not just no longer reproducing.
+imprecision unrelated to this check's own logic. One - `finally` not
+accounting for an assignment inside `try` possibly never running - is
+now fixed (see Done, "Narrowing engine"), confirmed via a full corpus
+diff to fix 8 more unrelated false positives project-wide the same
+way, plus surface 4 new, plausible true positives (a variable used in
+`finally` that a real exception path inside `try` could leave
+genuinely undefined). The sibling `ProxyHelper.php` gap (`union_types`
+never merging two structurally different `Array(key, val)` values
+into one `Array(key, val1|val2)`) is still open. Flip the
+`check_array_filter_falsy_noop` default to `true` only once that one
+is fixed too.
 
 **75 - String accessory case-tracking (PLANNED).** No `Lowercase`/
 `Uppercase`/`DecimalIntegerString` accessory kinds; `strtolower()`/
@@ -1261,6 +1276,20 @@ Pending entry instead).
   intersect/remove or generic recursive type-tree traverse/map
   combinator) - none block a specific missing rule, revisit only if a
   future corpus round traces a real false positive/negative to one.
+- `array_filter()`'s own return-type inference never narrows away a
+  provably-null/falsy *field* of a fixed-position `ArrayShape` input the
+  way it does for a homogeneous `Array(K, V)`'s own value type - real
+  PHP's own no-callback filtering can remove a specific shape field
+  entirely (`array_filter([$a, $b])` with `$b` possibly `null` really
+  can return a 1-element array missing key `1`, not a 2-element one
+  with a narrower field 1 type), a data-flow-sensitive computation this
+  project doesn't attempt. Found via Phase 68.2's own corpus
+  verification (Piwigo's own `tests/Integration/GroupServiceTest.php:363`,
+  `array_filter([$sourceId, $copyId])` passed to a `list<GroupId>`-typed
+  parameter) - a real false positive from this separate, pre-existing
+  gap, not from Phase 68.2's own try/finally fix (which correctly made
+  `$copyId`'s own type visible as `null|GroupId` for the first time,
+  simply surfacing this adjacent gap rather than causing it).
 
 ## Permanent design boundaries (not planned, by choice)
 
