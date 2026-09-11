@@ -384,7 +384,10 @@ impl<'a> Checker<'a> {
                             let arr_ty = self.infer_expr(&args[0].value, locals);
                             Self::array_element_type(&arr_ty).map(|t| (1, vec![t.clone(), t]))
                         }
-                        "array_walk" if args.len() == 2 => {
+                        "array_walk" | "array_find" | "array_find_key" | "array_any"
+                        | "array_all"
+                            if args.len() == 2 =>
+                        {
                             let arr_ty = self.infer_expr(&args[0].value, locals);
                             match (
                                 Self::array_element_type(&arr_ty),
@@ -1300,43 +1303,62 @@ impl<'a> Checker<'a> {
                 // precisely enough to distinguish numeric from
                 // alphanumeric-increment behavior, so it conservatively
                 // stays a string either way.
-                if let ExprKind::Variable(name) = &inner.kind {
-                    let current = locals.get(name).cloned().unwrap_or(Type::Mixed);
-                    let is_increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
-                    let updated = match &current {
-                        Type::Null if is_increment => Type::Int,
-                        // Real corpus find: a literal/range-typed operand
-                        // used to pass straight through unchanged here -
-                        // `++$x`/`--$x` on `IntLiteral(0)` stayed exactly
-                        // `IntLiteral(0)` forever, never actually
-                        // advancing - the identical "value never applied"
-                        // bug class `negate_numeric_literal`'s own doc
-                        // comment already found for unary `-`. A counter
-                        // incremented inside a loop then checked
-                        // afterward (`$n = 0; foreach (...) { ...; $n++;
-                        // } if ($n > 0)`, a real, extremely common idiom)
-                        // looked "always false" against a check that only
-                        // fires once anything actually consumes the
-                        // literal's own exact value.
-                        Type::IntLiteral(n) => {
-                            Type::IntLiteral(if is_increment { n + 1 } else { n - 1 })
-                        }
-                        Type::FloatLiteral(f) => {
-                            Type::FloatLiteral(if is_increment { f + 1.0 } else { f - 1.0 })
-                        }
-                        Type::IntRange(min, max) => {
-                            let shift = |b: Option<i64>| {
-                                b.map(|v| if is_increment { v + 1 } else { v - 1 })
-                            };
-                            Type::IntRange(shift(*min), shift(*max))
-                        }
-                        other => other.clone(),
-                    };
-                    purge_stale_narrowing_for(locals, name);
-                    // Phase 17 follow-up: `$x++`/`$x--` is real, visible
-                    // rebinding syntax, the same category as `$x += 1`.
-                    locals.declare(name.clone(), updated, inner.span);
-                }
+                //
+                // Computed against `inner_ty` (whatever `inner` itself
+                // just inferred as, any shape) rather than only a bare
+                // `locals.get(name)` lookup, and rebound via the same
+                // `bind_assignment_target` the `Assign`/`CompoundAssign`
+                // arms already use - a real corpus false positive this
+                // fixes: `++$arr[$k]` used to be gated behind `if let
+                // ExprKind::Variable(name) = &inner.kind`, so incrementing
+                // an array element never widened the array's own tracked
+                // shape at all (`CategoryService::saveCategoriesOrder`'s
+                // own `++$currentRankForIdUppercat[$idUppercat]` left that
+                // array's own element type frozen at whatever it was
+                // before, contributing to a real `mixed`-leak false
+                // positive downstream). `bind_assignment_target` is a
+                // strict superset of the old `locals.declare` call for the
+                // `Variable` case (identical rebind, plus the general
+                // `narrowing_key` purge every other assignment already
+                // gets) and a safe no-op for any `inner` shape it doesn't
+                // specially handle (including `PropertyAccess` - a
+                // property's own read type is always its declared type,
+                // never a locally-tracked literal default the way a bare
+                // variable's is, so `$obj->prop++` has no equivalent
+                // observable gap to fix here regardless), exactly like
+                // before.
+                let is_increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
+                let updated = match &inner_ty {
+                    Type::Null if is_increment => Type::Int,
+                    // Real corpus find: a literal/range-typed operand
+                    // used to pass straight through unchanged here -
+                    // `++$x`/`--$x` on `IntLiteral(0)` stayed exactly
+                    // `IntLiteral(0)` forever, never actually
+                    // advancing - the identical "value never applied"
+                    // bug class `negate_numeric_literal`'s own doc
+                    // comment already found for unary `-`. A counter
+                    // incremented inside a loop then checked
+                    // afterward (`$n = 0; foreach (...) { ...; $n++;
+                    // } if ($n > 0)`, a real, extremely common idiom)
+                    // looked "always false" against a check that only
+                    // fires once anything actually consumes the
+                    // literal's own exact value.
+                    Type::IntLiteral(n) => {
+                        Type::IntLiteral(if is_increment { n + 1 } else { n - 1 })
+                    }
+                    Type::FloatLiteral(f) => {
+                        Type::FloatLiteral(if is_increment { f + 1.0 } else { f - 1.0 })
+                    }
+                    Type::IntRange(min, max) => {
+                        let shift =
+                            |b: Option<i64>| b.map(|v| if is_increment { v + 1 } else { v - 1 });
+                        Type::IntRange(shift(*min), shift(*max))
+                    }
+                    other => other.clone(),
+                };
+                // Phase 17 follow-up: `$x++`/`$x--` is real, visible
+                // rebinding syntax, the same category as `$x += 1`.
+                self.bind_assignment_target(inner, updated, locals);
                 self.infer_expr(inner, locals)
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {

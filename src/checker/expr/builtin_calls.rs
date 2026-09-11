@@ -386,6 +386,60 @@ impl<'a> Checker<'a> {
                     return union_types(result, Type::False);
                 }
             }
+            // Real PHPStan's own `MinMaxFunctionReturnTypeExtension`
+            // constant-folds a comparison when every argument is a known
+            // literal, falling back to `TypeCombinator::union(...$types)`
+            // otherwise (`vendor/phpstan-src`) - this project has no
+            // constant-value tracking as elaborate as real PHPStan's own
+            // `ConstantScalarType`/`ConstantArrayType`, so only that
+            // fallback path is ported: the union of every argument's own
+            // type, when none of them could be an array (real PHP's
+            // `min(array $value)`/`min(mixed $value, mixed ...$values)`
+            // overload split gives a single array argument entirely
+            // different, unmodeled comparison semantics this project
+            // doesn't attempt - `args.len() == 1` always means that form,
+            // so it's excluded here rather than guessed at). Without this,
+            // both functions' own vendored stub (`mixed` params, `mixed`
+            // return - matching real PHP's own native signature, with no
+            // template/generic typing at all) left every call `Mixed`,
+            // even the extremely common `min(int, int)`/`max(int, int)`
+            // shape - a real Piwigo corpus false positive this fixes
+            // (`PaginationService::createNavigationBar`'s own
+            // `min(intdiv($start, $nbElementPage) + 1, $maximum)`).
+            "min" | "max" if args.len() >= 2 && !args.iter().any(|a| a.spread) => {
+                let arg_types: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.infer_expr(&a.value, locals))
+                    .collect();
+                if !arg_types.iter().any(Self::is_array_like) {
+                    return arg_types
+                        .into_iter()
+                        .reduce(union_types)
+                        .unwrap_or(Type::Mixed);
+                }
+            }
+            // PHP 8.4's `array_find`/`array_find_key` - real PHPStan's own
+            // `ArrayFind{,Key}FunctionReturnTypeExtension` resolves these
+            // to the array's own value/key type unioned with `null` (a
+            // "not found" outcome is always real); the vendored stub
+            // declares both `mixed`, with no template typing, matching
+            // `min`/`max` above - both had zero handling anywhere in this
+            // project, a real Piwigo corpus false positive
+            // (`HistoryService::logVisit`'s own `array_find($cachedSections,
+            // fn ($knownSection) => ...)`, cascading into `'section' =>
+            // $section` losing its own `?string` precision).
+            "array_find" if args.len() == 2 => {
+                let input_ty = self.infer_expr(&args[0].value, locals);
+                if let Some(elem_ty) = Self::array_element_type(&input_ty) {
+                    return union_types(elem_ty, Type::Null);
+                }
+            }
+            "array_find_key" if args.len() == 2 => {
+                let input_ty = self.infer_expr(&args[0].value, locals);
+                if let Some(key_ty) = Self::array_key_type(&input_ty) {
+                    return union_types(key_ty, Type::Null);
+                }
+            }
             // Scoped to the common 2-arg single-array form - the real
             // function is variadic (multiple arrays); a 3+-arg call falls
             // through to the generic path below, unchanged.

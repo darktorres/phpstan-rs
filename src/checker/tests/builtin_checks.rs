@@ -109,6 +109,73 @@ fn random_int_with_equal_min_and_max_is_never_flagged() {
     );
 }
 
+// `min`/`max` - a Piwigo corpus false positive found both functions had
+// zero return-type handling at all (the vendored stub declares `mixed`
+// params/return, matching real PHP's own native signature - real
+// PHPStan's own precision here comes entirely from a bundled
+// `MinMaxFunctionReturnTypeExtension` this project has no equivalent of).
+// Scoped to the fallback path that extension itself uses whenever it
+// can't constant-fold (this project has no constant-value tracking as
+// elaborate as real PHPStan's own): the union of every argument's own
+// type, only when none of them could be an array (a single array
+// argument is real PHP's *other*, differently-behaved `min`/`max`
+// overload, deliberately not modeled here).
+
+#[test]
+fn min_of_two_ints_infers_int() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param string $x */
+            function needsString($x): void {}
+            function f(int $a, int $b): void {
+                needsString(min($a, $b));
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn max_of_an_int_and_a_string_infers_their_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int $x */
+            function needsInt($x): void {}
+            function f(int $a, string $b): void {
+                needsInt(max($a, $b));
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"
+            && x.message.contains("expects int, int|string given")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn min_with_a_possible_array_argument_stays_mixed() {
+    // Deliberately not modeled (real `min(array $value)` is a distinct,
+    // differently-behaved overload) - must not be over-widened into a
+    // false claim about what a possibly-array argument's own min could be.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param string $x */
+            function needsString($x): void {}
+            function f(array $a, int $b): void {
+                needsString(min($a, $b));
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "argument.type"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // `function.uselessReturnValue` - var_export()/print_r()/
 // highlight_string() all print directly and return a useless null/true
 // unless their own `$return` flag is passed `true` - only a problem

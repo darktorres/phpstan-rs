@@ -161,6 +161,54 @@ fn array_map_resolves_a_first_class_callable_to_an_instance_method_on_a_union_ty
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// PHP 8.4's `array_find`/`array_find_key`/`array_any`/`array_all` had no
+// handling anywhere in this project - the vendored stub declares
+// `array_find`/`array_find_key` `mixed`, matching real PHPStan's own
+// dedicated `ArrayFind{,Key}FunctionReturnTypeExtension` fallback absence.
+// A Piwigo corpus false positive: `HistoryService::logVisit`'s own
+// `array_find($cachedSections, fn ($knownSection) => ...)` cascaded into
+// a `?string` shape value losing its own precision down to `mixed`.
+// `array_any`/`array_all` already declare `bool` correctly in the stub -
+// their own gap was the callback's own parameter type, not the return.
+
+#[test]
+fn array_find_infers_the_element_type_or_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param string $x */
+            function needsString($x): void {}
+            /** @param int[] $xs */
+            function f(array $xs): void {
+                needsString(array_find($xs, fn($x) => $x > 0));
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"
+            && x.message.contains("expects string, int|null given")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn array_find_key_infers_the_key_type_or_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param string $x */
+            function needsString($x): void {}
+            /** @param list<int> $xs */
+            function f(array $xs): void {
+                needsString(array_find_key($xs, fn($x, $k) => $x > 0));
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"
+            && x.message.contains("expects string, int|null given")),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn array_filter_preserves_the_input_array_s_element_type() {
     let d = diagnostics_for(

@@ -542,6 +542,33 @@ fn decrementing_an_int_literal_reduces_its_own_value() {
     );
 }
 
+// Real corpus find, one level deeper than the bare-variable case just
+// above: `++`/`--` on an `Index`/`PropertyAccess` target used to be a
+// silent no-op for the *container's own* tracked type - only a bare
+// `ExprKind::Variable` operand ever got rebound, so `++$arr['k']`/
+// `$this->prop++` never taught the array/property's own shape about the
+// value the increment just wrote (`CategoryService::saveCategoriesOrder`'s
+// own `++$currentRankForIdUppercat[$idUppercat]`, contributing to a real
+// `mixed`-leak false positive downstream). Same discriminating technique
+// as the bare-variable tests above: only a real, applied increment lets
+// the follow-up `== 1` constant-fold.
+#[test]
+fn incrementing_an_array_index_advances_its_own_tracked_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): bool {
+                $arr = ['k' => 0];
+                $arr['k']++;
+                return $arr['k'] == 1;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "equal.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
 // Phase 52 follow-up: division/modulo by a literal zero.
 
 #[test]
