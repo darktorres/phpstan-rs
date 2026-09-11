@@ -709,8 +709,15 @@ pub fn parse_file(path: &Path, source: &str) -> Result<ParsedFile, ParseError> {
 
 /// Recursively collects every `.php` file under `path` - shared by the CLI
 /// (`main.rs`'s own subcommands) and the LSP's own workspace-loading path
-/// (`lsp.rs`'s `load_workspace`), which is why this lives in the library
-/// rather than as CLI-only glue in `main.rs`.
+/// (`lsp.rs`'s `load_workspace`). Deliberately NOT `#[hotpath::measure]`d
+/// itself - it's self-recursive (one call per directory in the tree), and
+/// hotpath's per-call "Total" sums every call's own measured span, so a
+/// recursive function's aggregate massively over-counts its true unique
+/// wall-clock contribution (a parent directory's own span already
+/// contains every descendant's separately-measured span too). `check_
+/// project.rs`'s `collect_analyze_and_context_files` wraps the *whole*
+/// top-level scan in one non-recursive, correctly-measured call instead -
+/// see that function's own doc comment for the real number this found.
 pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
     if path.is_dir() {
         let Ok(entries) = fs::read_dir(path) else {

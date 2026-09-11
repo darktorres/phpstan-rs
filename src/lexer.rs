@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::token::{Keyword, Position, Span, Token};
 
 mod strings;
@@ -374,10 +376,11 @@ impl<'a> Lexer<'a> {
         }
 
         if is_ident_start(c) {
-            let s = self.lex_ident_raw();
-            if let Some(kw) = Keyword::try_from_str(&s) {
+            let span = self.lex_ident_span();
+            if let Some(kw) = Keyword::try_from_bytes(&self.src[span.clone()]) {
                 return Token::Keyword(kw);
             }
+            let s = String::from_utf8_lossy(&self.src[span]).into_owned();
             return Token::Identifier(s);
         }
 
@@ -532,12 +535,43 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_ident_raw(&mut self) -> String {
+    /// A numeric literal's own digit-run, with PHP's `_` digit separator
+    /// (`1_000_000`) stripped - `raw` is always plain ASCII (digits/hex-
+    /// digits/`e`/`E`/`+`/`-`/`.`, the only bytes `lex_number`'s own scan
+    /// loops ever advance `self.pos` over), so a direct `str::from_utf8`
+    /// borrow (no allocation at all) is sound whenever there's nothing to
+    /// strip - the overwhelmingly common case, real digit separators being
+    /// rare in most real-world source. Only allocates (via `.replace`) for
+    /// the literals that actually use one. Found and fixed via a perf-
+    /// optimization investigation workflow.
+    fn strip_digit_separators(raw: &[u8]) -> Cow<'_, str> {
+        let s = std::str::from_utf8(raw).unwrap_or_default();
+        if raw.contains(&b'_') {
+            Cow::Owned(s.replace('_', ""))
+        } else {
+            Cow::Borrowed(s)
+        }
+    }
+
+    /// Scans an identifier-shaped run without allocating - returns its
+    /// raw byte span. Split out from the owned-`String`-returning `lex_
+    /// ident_raw` below so `next_token`'s identifier branch can check
+    /// `Keyword::try_from_bytes` against the raw bytes first, only
+    /// allocating a `String` once the token is confirmed to be a plain
+    /// `Token::Identifier`, not a keyword - the identifier text is
+    /// otherwise thrown away immediately whenever it does match a
+    /// keyword, wasting that allocation entirely.
+    fn lex_ident_span(&mut self) -> std::ops::Range<usize> {
         let start = self.pos;
         while is_ident_continue(self.peek()) {
             self.pos += 1;
         }
-        String::from_utf8_lossy(&self.src[start..self.pos]).into_owned()
+        start..self.pos
+    }
+
+    fn lex_ident_raw(&mut self) -> String {
+        let span = self.lex_ident_span();
+        String::from_utf8_lossy(&self.src[span]).into_owned()
     }
 
     fn lex_number(&mut self) -> Token {
@@ -549,8 +583,7 @@ impl<'a> Lexer<'a> {
             while self.peek().is_ascii_hexdigit() || self.peek() == b'_' {
                 self.pos += 1;
             }
-            let text: String =
-                String::from_utf8_lossy(&self.src[start + 2..self.pos]).replace('_', "");
+            let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
             let value = i64::from_str_radix(&text, 16).unwrap_or(0);
             return Token::Integer(value);
         }
@@ -560,8 +593,7 @@ impl<'a> Lexer<'a> {
             while self.peek() == b'0' || self.peek() == b'1' || self.peek() == b'_' {
                 self.pos += 1;
             }
-            let text: String =
-                String::from_utf8_lossy(&self.src[start + 2..self.pos]).replace('_', "");
+            let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
             let value = i64::from_str_radix(&text, 2).unwrap_or(0);
             return Token::Integer(value);
         }
@@ -577,8 +609,7 @@ impl<'a> Lexer<'a> {
             while (b'0'..=b'7').contains(&self.peek()) || self.peek() == b'_' {
                 self.pos += 1;
             }
-            let text: String =
-                String::from_utf8_lossy(&self.src[start + 2..self.pos]).replace('_', "");
+            let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
             let value = i64::from_str_radix(&text, 8).unwrap_or(0);
             return Token::Integer(value);
         }
@@ -610,7 +641,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let text: String = String::from_utf8_lossy(&self.src[start..self.pos]).replace('_', "");
+        let text = Self::strip_digit_separators(&self.src[start..self.pos]);
         if is_float {
             Token::Float(text.parse().unwrap_or(0.0))
         } else {

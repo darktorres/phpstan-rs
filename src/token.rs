@@ -90,9 +90,46 @@ pub enum Keyword {
 }
 
 impl Keyword {
+    /// No real PHP keyword this table recognizes is longer than this
+    /// (the longest, "require_once"/"include_once", is 12 bytes) - an
+    /// identifier longer than this bound can never match, so `try_from_
+    /// bytes` bails out before ever touching it, and every identifier
+    /// short enough to possibly match gets lowercased into a stack
+    /// buffer instead of a heap allocation - found and fixed via a
+    /// perf-optimization investigation workflow, since this runs on
+    /// every identifier-shaped token the lexer produces, keyword or not.
+    /// Operates on raw bytes (not `&str`) specifically so `Lexer::
+    /// next_token`'s identifier branch can check "is this a keyword"
+    /// *before* ever allocating the owned `String` an ordinary
+    /// `Token::Identifier` needs - a real second, wasted allocation
+    /// otherwise, since a matched keyword never keeps that string at all.
+    const MAX_KEYWORD_LEN: usize = 16;
+
     pub fn try_from_str(s: &str) -> Option<Keyword> {
+        Self::try_from_bytes(s.as_bytes())
+    }
+
+    pub fn try_from_bytes(bytes: &[u8]) -> Option<Keyword> {
         use Keyword::*;
-        Some(match s.to_ascii_lowercase().as_str() {
+        if bytes.len() > Self::MAX_KEYWORD_LEN {
+            return None;
+        }
+        let mut buf = [0u8; Self::MAX_KEYWORD_LEN];
+        for (dst, src) in buf.iter_mut().zip(bytes) {
+            *dst = src.to_ascii_lowercase();
+        }
+        // `bytes` is a raw identifier-shaped byte span - `is_ident_
+        // continue` accepts any byte `>= 0x80` without tracking UTF-8
+        // sequence boundaries (the same reason `Lexer::lex_ident_raw`
+        // uses `from_utf8_lossy`, not `from_utf8`, to build the owned
+        // `Identifier` string), so a boundary-split multi-byte character
+        // could make this slice invalid UTF-8. ASCII-lowercasing never
+        // changes that either way - a real keyword is always pure ASCII,
+        // so any such slice was never going to match one regardless;
+        // `None` here is exactly the right answer, not a fallback for an
+        // impossible case.
+        let lowered = std::str::from_utf8(&buf[..bytes.len()]).ok()?;
+        Some(match lowered {
             "function" => Function,
             "class" => Class,
             "interface" => Interface,

@@ -57,6 +57,42 @@ fn read_and_parse_file(path: &Path) -> Option<(String, project::ParsedFile)> {
     Some((source, parsed))
 }
 
+/// Collects both file lists (`analyze_files`, sorted; `context_files`,
+/// sorted+deduped, seeded with `scan_files`) in one measured call, so the
+/// real cost of the whole single-threaded directory walk - entirely
+/// before this module's own rayon pool is built - shows up as a single,
+/// correctly-attributed number in the hotpath report (`collect_php_files`
+/// itself is deliberately left unmeasured - see its own doc comment for
+/// why a self-recursive function's own aggregate would be misleading).
+/// Measured on the Symfony monorepo (a perf-optimization investigation
+/// workflow's own follow-up): 386.72ms of a 23.89s run, 1.62% - small
+/// enough that parallelizing isn't worth it next to the already-parallel
+/// parse/check phases, though collection order is discarded immediately
+/// by the `sort()`/`dedup()` calls right here, so it would be safe to if
+/// this ever became the dominant cost on a corpus with far more
+/// directories than files.
+#[hotpath::measure]
+fn collect_analyze_and_context_files(
+    dirs: &[PathBuf],
+    scan_dirs: &[PathBuf],
+    scan_files: &[PathBuf],
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut analyze_files = Vec::new();
+    for dir in dirs {
+        project::collect_php_files(dir, &mut analyze_files);
+    }
+    analyze_files.sort();
+
+    let mut context_files: Vec<PathBuf> = scan_files.to_vec();
+    for dir in scan_dirs {
+        project::collect_php_files(dir, &mut context_files);
+    }
+    context_files.sort();
+    context_files.dedup();
+
+    (analyze_files, context_files)
+}
+
 // Phase 40's own new `phpstan_api_check_enabled` gate pushed this past
 // clippy's default 7-argument threshold - every argument here is already
 // its own independently-meaningful CLI-level setting (not a group crying
@@ -88,15 +124,6 @@ fn run_check_project(
     phpstan_api_check_enabled: bool,
     format: OutputFormat,
 ) {
-    let mut analyze_files = Vec::new();
-    for dir in dirs {
-        project::collect_php_files(dir, &mut analyze_files);
-    }
-    if analyze_files.is_empty() {
-        let dirs: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
-        eprintln!("no .php files found under {}", dirs.join(", "));
-        return;
-    }
     // Deterministic load order matters now in a way it didn't for
     // --check (parse-only): a real corpus can genuinely declare the same
     // fully-qualified class name twice (verified: multiple vendored
@@ -105,15 +132,15 @@ fn run_check_project(
     // is filesystem-dependent, so without sorting, which declaration
     // "wins" the registry slot (and therefore which one's real methods
     // are visible) could silently vary between runs on different
-    // machines or filesystems.
-    analyze_files.sort();
-
-    let mut context_files: Vec<PathBuf> = scan_files.to_vec();
-    for dir in scan_dirs {
-        project::collect_php_files(dir, &mut context_files);
+    // machines or filesystems - `collect_analyze_and_context_files`'s own
+    // sort()/dedup() calls handle this.
+    let (analyze_files, context_files) =
+        collect_analyze_and_context_files(dirs, scan_dirs, scan_files);
+    if analyze_files.is_empty() {
+        let dirs: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+        eprintln!("no .php files found under {}", dirs.join(", "));
+        return;
     }
-    context_files.sort();
-    context_files.dedup();
 
     let mut project = project::Project::new();
     project.set_strict_mixed_arrays(strict_mixed_arrays);
@@ -158,18 +185,30 @@ fn run_check_project(
     // already parallelized, sequential lexing+parsing became the
     // dominant remaining cost - ~63% of total wall time - which is what
     // this loop exists to close.
-    let context_parsed: Vec<Option<(String, project::ParsedFile)>> = pool.install(|| {
-        context_files
+    //
+    // `context_files` and `analyze_files` are parsed in one combined
+    // `par_iter()` call, not two separate ones - each `pool.install(||
+    // ...collect())` is a full synchronization barrier (every worker must
+    // finish its share of one list before any worker starts the other),
+    // and the two lists are rarely balanced (a real corpus's own vendor/
+    // context tree is typically a different size than its first-party
+    // analyzed tree), so threads that drain their share of the smaller
+    // list early sit idle instead of picking up the other list's work.
+    // `par_iter().collect()` on an indexed slice preserves original
+    // order, so `combined_parsed.split_off(context_files.len())` cleanly
+    // recovers each list's own results in their own original order - the
+    // downstream `zip(context_files.iter(), ...)`/`zip(analyze_files.
+    // iter(), ...)` insert loops below are unchanged either way. Found
+    // via a perf-optimization investigation workflow.
+    let combined_files: Vec<&PathBuf> = context_files.iter().chain(analyze_files.iter()).collect();
+    let mut combined_parsed: Vec<Option<(String, project::ParsedFile)>> = pool.install(|| {
+        combined_files
             .par_iter()
             .map(|p| read_and_parse_file(p))
             .collect()
     });
-    let analyze_parsed: Vec<Option<(String, project::ParsedFile)>> = pool.install(|| {
-        analyze_files
-            .par_iter()
-            .map(|p| read_and_parse_file(p))
-            .collect()
-    });
+    let analyze_parsed = combined_parsed.split_off(context_files.len());
+    let context_parsed = combined_parsed;
     std::panic::set_hook(default_hook);
 
     // Context files insert first: `Registry::index` resolves a
@@ -200,16 +239,32 @@ fn run_check_project(
             None => skipped_context += 1,
         }
     }
+    // Source length, captured here (before `source` is moved into
+    // `insert_parsed_file`) rather than re-read from disk afterward -
+    // used only to order the check phase's own `par_iter()` below by
+    // descending size, so a handful of unusually large files (a real
+    // corpus's own long tail) get scheduled onto the pool first instead
+    // of last, shrinking the straggler tail rayon's work-stealing alone
+    // can't fully avoid when the default alphabetical order happens to
+    // put them late. A rough proxy for real check cost (AST complexity
+    // matters more than byte count), not a precise one - good enough to
+    // shrink the tail without needing real per-file timing data.
+    let mut analyze_sizes: HashMap<PathBuf, usize> = HashMap::with_capacity(analyze_files.len());
     let mut skipped_analyze = 0usize;
     for (path, parsed) in analyze_files.iter().zip(analyze_parsed) {
         match parsed {
             Some((source, parsed)) => {
+                analyze_sizes.insert(path.clone(), source.len());
                 project.insert_parsed_file(path.clone(), parsed, source, true)
             }
             None => skipped_analyze += 1,
         }
     }
     project.finish_loading();
+
+    let mut analyze_files_by_size = analyze_files.clone();
+    analyze_files_by_size
+        .sort_by_key(|path| std::cmp::Reverse(analyze_sizes.get(path).copied().unwrap_or(0)));
 
     // Mirrors `check.rs`'s own catch_unwind-with-silenced-hook pattern: a
     // panic while checking one file is reported and skipped rather than
@@ -226,7 +281,7 @@ fn run_check_project(
     std::panic::set_hook(Box::new(|_| {}));
     let checked_results: Vec<(PathBuf, Result<Vec<checker::Diagnostic>, String>)> =
         pool.install(|| {
-            analyze_files
+            analyze_files_by_size
                 .par_iter()
                 .map(|path| {
                     let outcome = std::panic::catch_unwind(|| project.check_file(path));
