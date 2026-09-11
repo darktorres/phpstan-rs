@@ -339,14 +339,52 @@ false-positive risk). The same-family bare-statement `NoopRule` family
 whose result is unused (`logicalXor.resultUnused`/`booleanAnd.
 resultUnused`/`booleanOr.resultUnused`/`ternary.resultUnused`), gated
 on the whole expression being side-effect-free - predates the
-transitive slice above. Unbuilt: the fuller ~20-kind impure-point
-classification with `certain`-vs-`maybe` grading, and
-`@phpstan-immutable` tag validation. One disclosed limitation inherited
-from real PHPStan's own actual algorithm, not a bug of this project's
-making: neither project counts constructor-promoted-property
-initialization as an impure point, so a `parent::__construct(...)`
-call chaining into a promoted-only ancestor constructor can look like
-a discarded no-op even though it genuinely initializes state.
+transitive slice above. One disclosed limitation inherited from real
+PHPStan's own actual algorithm, not a bug of this project's making:
+neither project counts constructor-promoted-property initialization as
+an impure point, so a `parent::__construct(...)` call chaining into a
+promoted-only ancestor constructor can look like a discarded no-op even
+though it genuinely initializes state.
+
+Phase 41 follow-up: for a declaration real PHPStan considers pure
+(`@phpstan-pure`/`@pure`-tagged), `check_purity_impure_points`
+(`checker/noop.rs`) reports every real occurrence its body actually
+contains - `impure.<id>`/`possiblyImpure.<id>` (`certain`-vs-`maybe`,
+`registry::purity::collect_impure_points`, a second, non-short-
+circuiting walk mirroring `stmt_disqualifies`/`expr_disqualifies`'s own
+match arms one call site at a time, deliberately not touching those two
+functions themselves - regression risk to the already-working fixed
+point), plus `pure{Function,Method}.parameterByRef` and `pure{Function,
+Method}.void`. The gate is tag-only (`tagged_pure`), not "tagged OR
+classifier-proven" - gating on `is_transitively_pure` too made
+`pure{Function,Method}.void` fire for every ordinary, untagged,
+provably-pure void declaration (extremely common), confirmed by 287
+broken tests before landing the narrower gate. A corpus-confirmed
+precision gap, left as a disclosed follow-up rather than fixed here:
+`possiblyImpure.functionCall`/`.methodCall`/`.new` fire for any call
+target this walk's own `resolved` check can't prove - which, reusing
+`resolve_static_call`/`resolve_this_method_call`/`resolve_new` above
+as-is, only recognizes `self::`/`static::`/`parent::` and `$this->`
+receivers, never a literal class name (`Color::ansi256(...)`) or an
+arbitrary object receiver, confirmed against real PHPStan's own
+`StaticCallHandler.php`/`SimpleImpurePoint::createFromVariant` (which
+resolves a literal-class-name static call, and any receiver's method
+call, the same way, only emitting an `ImpurePoint` when the *resolved*
+target's own reflection says it has side effects). Not a regression -
+the same resolution narrowness already silently capped
+`is_transitively_pure` before this diagnostic existed; corpus-confirmed
+via `vendor/php-standard-library` (heavy `@pure` tag usage - 335 files
+flagged out of 467 using the tag, most from this exact gap plus a
+separate, unrelated `namespace\foo()`-relative call-name-resolution
+bug also confirmed in the corpus). `@phpstan-immutable` (`docblock.rs`)
+is recognized (previously in `KNOWN_PHPSTAN_TAGS` but silently
+discarded, no `apply_tag` arm at all) and treated identically to
+`@phpstan-readonly` (`ClassReflection::isImmutable()`'s own OR),
+`Registry::class_is_immutable` walking `extends` only at query time
+(not baked into `is_readonly`/`is_immutable` at index time, avoiding an
+ancestor-not-yet-indexed ordering hazard) - `property_assignment.rs`'s
+existing readonly-outside-constructor gate now also fires for a
+property of an immutable class (or subclass).
 
 Property-hook checker validation (PHP 8.4): virtual-property detection
 via an empirically-confirmed rule (a hooked property is virtual iff no
@@ -830,12 +868,6 @@ this project's registry still doesn't track a per-class declaring file
 path, the same reason this gap was already accepted, not built around,
 for every other check in this family.
 
-**41 - Purity / side-effect model, remaining (PARTIAL).** The
-transitive slice and `NoopRule`'s own bare-statement family are done
-(see Done). Unbuilt: the fuller ~20-kind impure-point classification
-with `certain`-vs-`maybe` grading, and `@phpstan-immutable` tag
-validation.
-
 **45 - Declared-vs-actual-narrowest-type inference (PLANNED).** No
 mechanism compares a declared type against the narrowest type a body
 could actually produce. Splits into a return/property variant (unions
@@ -1199,7 +1231,6 @@ more than the one-line summary here.
 ## Generators+Pure
 
 - **`Rules/Generators/YieldFromTypeRule.php`**: Real YieldFromTypeRule reports `generator.nonIterable` when the expression after `yield from` is definitely (or, with reportMaybes, possibly) not iterable — a standalone check that only needs `exprType.isIterable()`, independent of the Generator<K,V,TSend,TReturn> generic-shape work.
-- **`Rules/Pure/FunctionPurityCheck.php`**: FunctionPurityCheck reports several declaration-level diagnostics beyond the one pair phpstan-rs implements (`impureFunction.pure`/`impureMethod.pure`, correctly documented in Phase 41): `pureFunction.void`/`pureMethod.void` (a function proven/tagged pure but declared void, excluding constructors), `pureFunction.parameterByRef`/`pureMethod.parameterByRef` (pure but has a...
 
 ## EnumCases+Namespaces+Regexp+Ignore+Missing+Names+Types+Whitespace
 
