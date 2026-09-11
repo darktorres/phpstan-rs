@@ -857,7 +857,7 @@ pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
     ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER, ATTRIBUTE_TARGET_PROPERTY,
 };
-pub(crate) use throws::body_contains_explicit_throw;
+pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
 pub(crate) use type_union::union_types;
 // Only ever called by `union_types` itself in real code (`checker/expr.rs`) -
 // this crate-level re-export exists solely so this module's own test

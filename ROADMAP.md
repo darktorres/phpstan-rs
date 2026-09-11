@@ -778,15 +778,28 @@ extension cluster (`checker/throws/dynamic.rs` - `intdiv`,
 `version_compare()` and the DOM/SimpleXML/DateTime-relative-string
 extensions excluded, each for its own disclosed reason);
 `TooWideFunctionThrowTypeRule`/`TooWideMethodThrowTypeRule`
-(`throws.unusedType`, `checker/throws/too_wide.rs`); and an opt-in
-"missing checked exception" family (`throws.missing`, gated on
-`Registry::check_missing_checked_exceptions`, default off given the
-real corpus's documented inconsistent `@throws` tagging - consumes only
-a declaration's own *explicit* throw points, never a called function's).
-Still declined: `MethodThrowTypeCovarianceRule` (no call-graph-wide
-implicit-throw model exists to build it on - an implicit "void when
-untagged" default would false-positive heavily given how inconsistently
-this corpus tags `@throws`).
+(`throws.unusedType`, `checker/throws/too_wide.rs`), the latter now
+correctly gated on visibility/finality/first-declaration (`Registry::
+check_too_wide_throw_type_in_protected_and_public_methods`, mirroring
+real PHPStan's own default-off `checkTooWideThrowTypesInProtectedAndPublicMethods`
+- an ordinary overridable method's unused `@throws` tag stays silent
+by default, a real corpus-confirmed false-positive class the earlier,
+unconditional port produced); an opt-in "missing checked exception"
+family (`throws.missing`, gated on `Registry::check_missing_checked_
+exceptions`, default off given the real corpus's documented
+inconsistent `@throws` tagging - consumes only a declaration's own
+*explicit* throw points, never a called function's); and the full
+property-hook sibling family (`InvalidThrowsPhpDocValueRule`/`ThrowsVoid
+PropertyHookWithExplicitThrowPointRule`/`TooWidePropertyHookThrowTypeRule`/
+`MissingCheckedExceptionInPropertyHookThrowsRule`, `checker/oop/
+property_hooks.rs` - needed threading a hook's own `@throws` doc comment
+through the parser at all, `ast::PropertyHooks::get_doc`/`set_doc`, plus
+a new `get_final`/`set_final` bit for the hook-level `final` modifier the
+parser previously only consumed without recording). Still declined:
+`MethodThrowTypeCovarianceRule` (no call-graph-wide implicit-throw model
+exists to build it on - an implicit "void when untagged" default would
+false-positive heavily given how inconsistently this corpus tags
+`@throws`).
 
 **45 - Declared-vs-actual-narrowest-type inference (PLANNED).** No
 mechanism compares a declared type against the narrowest type a body
@@ -1113,11 +1126,6 @@ more than the one-line summary here.
 - **`Rules/Generics/VarianceCheck.php's own-declaration half (used by FunctionSignatureVarianceRule.php, MethodSignatureVarianceRule.php)`**: VarianceCheck::checkParametersAcceptor does two things: (1) walks parameter/return types for template-position violations (this half IS built in phpstan-rs as check_variance/walk_variance, generics.variance, and is correctly documented in ROADMAP), and (2) flags a function's or method's own @template tag declaring non-invariant variance at all...
 - **`Rules/Generics/UsedTraitsRule.php`**: UsedTraitsRule validates a trait-use statement's own @use tag exactly the way ClassAncestorsRule validates @extends/@implements: incompatible/unresolvable type, missing @use despite using a generic trait, wrong trait named, bound/arity/variance checking on the trait's own template arguments, and call-site-variance-not-allowed.
 - **`Rules/Generics/CrossCheckInterfacesHelper.php (wired into ClassAncestorsRule.php, InterfaceAncestorsRule.php, EnumAncestorsRule.php)`**: Real PHPStan cross-checks every path (own @implements/@extends plus every ancestor's own) by which a class/interface/enum reaches the same generic interface, flagging it (generics.interfaceConflict) if two different paths pin that interface's same template parameter to two different concrete types (e.g.
-
-## Exceptions
-
-- **`Rules/Exceptions/MissingCheckedExceptionInFunctionThrowsRule.php (+ MissingCheckedExceptionInMethodThrowsRule.php, MissingCheckedExceptionInPropertyHookThrowsRule.php)`**: Phase 42's own bonus item now covers the function/method half, opt-in (`throws.missing`, `Registry::check_missing_checked_exceptions`) - but deliberately simpler than real PHPStan's own version: it flags *any* explicit `throw` not covered by an `@throws` tag, not specifically one classified as a "checked exception" (real PHPStan's own `DefaultExceptionTypeResolver`-driven `exceptions.uncheckedException{Classes,Regexes}` classification isn't modeled). `MissingCheckedExceptionInPropertyHookThrowsRule`'s own property-hook coverage remains unbuilt (property hooks get no `@throws`-related checking at all - see the sibling `TooWidePropertyHookThrowTypeRule` bullet below for the same gap on the other rule family).
-- **`Rules/Exceptions/TooWidePropertyHookThrowTypeRule.php + Rules/Exceptions/ThrowsVoidPropertyHookWithExplicitThrowPointRule.php`**: Property hooks get no @throws-related checking at all in phpstan-rs: check_get_hook/check_set_hook (src/checker/oop.rs) run undefined-variable, generator-return, and return-type/return.missing checks for hook bodies but never call check_throws_tag_validity or the body_contains_explicit_throw-based throws.void check that check_function runs for ordinary functions/methods...
 
 ## Arrays
 

@@ -272,6 +272,17 @@ pub struct PropertyHooks {
     // `attrs: Vec<Attribute>` field in this file.
     pub get_attrs: Vec<Attribute>,
     pub set_attrs: Vec<Attribute>,
+    // Phase 42: the `/** ... */` doc comment immediately preceding this
+    // hook's own `get`/`set` keyword (after any `#[Attr]` group(s)) -
+    // mirrors `FunctionDecl::doc_comment` exactly, needed so a hook can
+    // carry its own `@throws` tag the same way an ordinary method does.
+    pub get_doc: Option<String>,
+    pub set_doc: Option<String>,
+    // Phase 42: whether this hook itself carries its own `final` modifier
+    // (independent of the property's own/declaring class's finality) -
+    // see `TooWideMethodThrowTypeRule`'s property-hook sibling's own gate.
+    pub get_final: bool,
+    pub set_final: bool,
 }
 
 #[derive(Debug, Clone)]

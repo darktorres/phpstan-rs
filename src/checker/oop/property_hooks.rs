@@ -1,11 +1,13 @@
 use crate::ast::*;
+use crate::checker::type_union::union_types;
 use crate::checker::{
-    ATTRIBUTE_TARGET_METHOD, Checker, DiagnosticBuilder, Locals, body_contains_yield,
-    collect_goto_targets, expr_contains_yield,
+    ATTRIBUTE_TARGET_METHOD, Checker, DiagnosticBuilder, Locals, body_contains_explicit_throw,
+    body_contains_yield, collect_goto_targets, expr_contains_explicit_throw, expr_contains_yield,
 };
-use crate::registry::{self, PropertySig};
+use crate::docblock;
+use crate::registry::{self, PropertySig, resolve_names_in_type};
 use crate::token::Span;
-use crate::types::Type;
+use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
     /// Phase 43: PHP 8.4 property hooks - real PHPStan's
@@ -51,7 +53,16 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if let Some(body) = &hooks.get {
-                self.check_get_hook(fqn, &p.name, p.span, body, &prop_sig, &hooks.get_attrs);
+                self.check_get_hook(
+                    fqn,
+                    &p.name,
+                    p.span,
+                    body,
+                    &prop_sig,
+                    &hooks.get_attrs,
+                    hooks.get_doc.as_deref(),
+                    hooks.get_final,
+                );
             }
             if let Some((param, body)) = &hooks.set {
                 self.check_set_hook(
@@ -63,6 +74,8 @@ impl<'a> Checker<'a> {
                     body,
                     &prop_sig,
                     &hooks.set_attrs,
+                    hooks.set_doc.as_deref(),
+                    hooks.set_final,
                 );
             }
         }
@@ -85,6 +98,8 @@ impl<'a> Checker<'a> {
                         body,
                         &prop_sig,
                         &hooks.get_attrs,
+                        hooks.get_doc.as_deref(),
+                        hooks.get_final,
                     );
                 }
                 if let Some((set_param, body)) = &hooks.set {
@@ -97,6 +112,8 @@ impl<'a> Checker<'a> {
                         body,
                         &prop_sig,
                         &hooks.set_attrs,
+                        hooks.set_doc.as_deref(),
+                        hooks.set_final,
                     );
                 }
             }
@@ -132,12 +149,63 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 42 property-hook family: resolves a hook's own `@throws` tag
+    /// (`get_doc`/`set_doc`, Phase 42's own parser addition) into a real
+    /// `Type`, mirroring `FunctionSig::from_decl`'s own `throws` field
+    /// resolution - but computed directly at check time rather than
+    /// cached on a registry-side signature, since a property hook has no
+    /// `FunctionSig` of its own at all (`check_property_hooks` reads
+    /// straight from the AST, not the registry, for hook bodies).
+    fn resolve_hook_throws(&self, doc: Option<&str>) -> Option<Type> {
+        let block = docblock::parse(doc?);
+        block.throws.iter().fold(None::<Type>, |acc, raw| {
+            let ty = types::parse_type_string(raw);
+            let ty = resolve_names_in_type(ty, &self.name_ctx);
+            Some(match acc {
+                Some(prev) => union_types(prev, ty),
+                None => ty,
+            })
+        })
+    }
+
+    /// Phase 42: `TooWideMethodThrowTypeRule`'s property-hook sibling,
+    /// `TooWidePropertyHookThrowTypeRule` (`vendor/phpstan-src/src/Rules/
+    /// Exceptions/TooWidePropertyHookThrowTypeRule.php`, confirmed by
+    /// direct read) - simpler than the method version's own gate (no
+    /// `isFirstDeclaration` exemption at all): skip unless the property
+    /// is private, the declaring class is final, the property itself is
+    /// declared final, the hook itself is declared final, or the same
+    /// opt-in `Registry::check_too_wide_throw_type_in_protected_and_
+    /// public_methods` flag the method version uses (real PHPStan reuses
+    /// its own identical `checkProtectedAndPublicMethods` constructor
+    /// parameter for both rules) is on.
+    fn should_check_too_wide_property_hook_throw_type(
+        &self,
+        class: &str,
+        property: &str,
+        visibility: Visibility,
+        hook_final: bool,
+    ) -> bool {
+        if visibility == Visibility::Private || hook_final {
+            return true;
+        }
+        let Some(info) = self.registry.classes.get(class) else {
+            return true;
+        };
+        if info.is_final || info.final_properties.contains(property) {
+            return true;
+        }
+        self.registry
+            .check_too_wide_throw_type_in_protected_and_public_methods
+    }
+
     /// `name`/`span`/`type_hint` are the only three `PropertyDecl` fields
     /// either this or `check_set_hook` actually touch - taken as scalars
     /// (Phase 43.1) so both a plain property declaration and a promoted
     /// constructor parameter (`ast::Param` has identically-named/-typed
     /// fields) can share this same checking logic without either being
     /// forced into the other's own struct shape.
+    #[allow(clippy::too_many_arguments)]
     fn check_get_hook(
         &mut self,
         fqn: &str,
@@ -146,9 +214,45 @@ impl<'a> Checker<'a> {
         body: &PropertyHookBody,
         prop_sig: &PropertySig,
         attrs: &[Attribute],
+        doc: Option<&str>,
+        hook_final: bool,
     ) {
         let label = format!("{fqn}::${name} (get hook)");
         self.check_hook_attributes(attrs, &label);
+        // Phase 42 property-hook family: `InvalidThrowsPhpDocValueRule`'s
+        // own `@throws`-validity check runs against `InPropertyHookNode`
+        // regardless of whether the hook has a real body (confirmed
+        // directly, `vendor/phpstan-src`) - unlike the too-wide/missing
+        // checks further below, which need a real statement result to
+        // compare against and so run only once this whole function's own
+        // "does this hook have a body at all" gate has already passed.
+        let throws = self.resolve_hook_throws(doc);
+        if let Some(throws) = &throws {
+            self.check_throws_tag_validity(throws, span, &label);
+            // `ThrowsVoidPropertyHookWithExplicitThrowPointRule` - same
+            // simplified, single-span wording this project's own function/
+            // method version already uses (`check_function_with_ancestor_
+            // hint`'s own identical check) rather than the real rule's
+            // fuller per-throw-point loop.
+            if *throws == Type::Void {
+                let throw_span = match body {
+                    PropertyHookBody::Arrow(e) => expr_contains_explicit_throw(e),
+                    PropertyHookBody::Block(stmts) => body_contains_explicit_throw(stmts),
+                    PropertyHookBody::Abstract => None,
+                };
+                if let Some(throw_span) = throw_span {
+                    self.report(
+                        label.clone(),
+                        format!(
+                            "Get hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
+                        ),
+                        throw_span,
+                        3,
+                        "throws.void",
+                    );
+                }
+            }
+        }
         // Phase 64 Item 1: an abstract hook has no body at all - "does
         // the body read the property" is meaningless for it, and
         // `notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`
@@ -261,6 +365,25 @@ impl<'a> Checker<'a> {
             // No real statement/expression to type-check at all.
             PropertyHookBody::Abstract => {}
         }
+        // Phase 42 property-hook family: `TooWideMethodThrowTypeRule`'s
+        // property-hook sibling plus the same opt-in "missing checked
+        // exception" bonus item the function/method path already runs -
+        // both need the whole body's own throw points fully collected
+        // first, so they run here, at the very end, right before that
+        // state is reset for whatever gets checked next (mirrors
+        // `check_function_with_ancestor_hint`'s own identical placement).
+        let subject = format!("Get hook for property {fqn}::${name}");
+        if let Some(throws) = &throws
+            && self.should_check_too_wide_property_hook_throw_type(
+                fqn,
+                name,
+                prop_sig.visibility.clone(),
+                hook_final,
+            )
+        {
+            self.check_too_wide_throw_type(throws, &subject, span, &label);
+        }
+        self.check_missing_checked_exceptions(throws.as_ref(), &subject, &label);
         self.current_function_is_generator = previous_generator_flag;
         self.current_declared_return_type = previous_declared_return_type;
         self.current_function_throw_points = previous_throw_points;
@@ -283,9 +406,36 @@ impl<'a> Checker<'a> {
         body: &PropertyHookBody,
         prop_sig: &PropertySig,
         attrs: &[Attribute],
+        doc: Option<&str>,
+        hook_final: bool,
     ) {
         let label = format!("{fqn}::${name} (set hook)");
         self.check_hook_attributes(attrs, &label);
+        // Phase 42 property-hook family: see `check_get_hook`'s own
+        // identical comment - this validity check runs regardless of
+        // whether the hook has a real body.
+        let throws = self.resolve_hook_throws(doc);
+        if let Some(throws) = &throws {
+            self.check_throws_tag_validity(throws, span, &label);
+            if *throws == Type::Void {
+                let throw_span = match body {
+                    PropertyHookBody::Arrow(e) => expr_contains_explicit_throw(e),
+                    PropertyHookBody::Block(stmts) => body_contains_explicit_throw(stmts),
+                    PropertyHookBody::Abstract => None,
+                };
+                if let Some(throw_span) = throw_span {
+                    self.report(
+                        label.clone(),
+                        format!(
+                            "Set hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
+                        ),
+                        throw_span,
+                        3,
+                        "throws.void",
+                    );
+                }
+            }
+        }
         // Phase 64 Item 1: an abstract hook has no body - "does it
         // assign the property" is meaningless for it (unlike `check_get_
         // hook`, the rest of this function - native-type contravariance,
@@ -443,6 +593,27 @@ impl<'a> Checker<'a> {
                 self.check_block(stmts, &mut locals, declared_return.as_ref(), &label);
             }
             PropertyHookBody::Abstract => {}
+        }
+        // Phase 42 property-hook family: see `check_get_hook`'s own
+        // identical comment - unlike that function, `check_set_hook` never
+        // returns early for an abstract body, so the "nothing thrown at
+        // all" false-positive flood `TooWideMethodThrowTypeRule` already
+        // discloses (`checker/throws/too_wide.rs`'s own module doc
+        // comment) needs an explicit guard here instead.
+        let subject = format!("Set hook for property {fqn}::${name}");
+        if let Some(throws) = &throws
+            && !matches!(body, PropertyHookBody::Abstract)
+            && self.should_check_too_wide_property_hook_throw_type(
+                fqn,
+                name,
+                prop_sig.visibility.clone(),
+                hook_final,
+            )
+        {
+            self.check_too_wide_throw_type(throws, &subject, span, &label);
+        }
+        if !matches!(body, PropertyHookBody::Abstract) {
+            self.check_missing_checked_exceptions(throws.as_ref(), &subject, &label);
         }
         self.current_function_is_generator = previous_generator_flag;
         self.current_declared_return_type = previous_declared_return_type;

@@ -98,7 +98,11 @@ fn stmt_contains_explicit_throw(stmt: &Stmt) -> Option<Span> {
     })
 }
 
-fn expr_contains_explicit_throw(e: &Expr) -> Option<Span> {
+// Phase 42 property-hook family: `check_get_hook`/`check_set_hook`'s own
+// `throws.void` check needs this for an arrow-form hook body, which is a
+// single `Expr`, not a `Vec<Stmt>` - `body_contains_explicit_throw` only
+// ever takes the latter.
+pub(crate) fn expr_contains_explicit_throw(e: &Expr) -> Option<Span> {
     if let ExprKind::Throw(_) = &e.kind {
         return Some(e.span);
     }

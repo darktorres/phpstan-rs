@@ -641,3 +641,261 @@ fn a_plain_non_hooked_property_override_is_never_checked_for_hook_readability() 
         "got: {d:?}"
     );
 }
+
+// Phase 42 property-hook family: `InvalidThrowsPhpDocValueRule`/
+// `ThrowsVoidPropertyHookWithExplicitThrowPointRule`/
+// `TooWidePropertyHookThrowTypeRule`/`MissingCheckedExceptionInPropertyHookThrowsRule`
+// ported onto `get`/`set` hooks.
+
+#[test]
+fn a_get_hooks_throws_tag_naming_a_non_throwable_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class NotAThrowable {}
+            class Widget {
+                public int $x {
+                    /** @throws NotAThrowable */
+                    get {
+                        return 1;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.notThrowable"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_get_hooks_explicit_throws_void_contradicted_by_a_real_throw_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Widget {
+                public int $x {
+                    /** @throws void */
+                    get {
+                        throw new \RuntimeException('surprise');
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.void"
+            && x.message.contains(
+                "Get hook for property Widget::$x throws exception but the PHPDoc contains @throws void."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_set_hooks_explicit_throws_void_contradicted_by_a_real_throw_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Widget {
+                public int $x {
+                    /** @throws void */
+                    set(int $value) {
+                        throw new \RuntimeException('surprise');
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.void"
+            && x.message.contains(
+                "Set hook for property Widget::$x throws exception but the PHPDoc contains @throws void."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_overridable_public_get_hooks_unused_throws_tag_stays_silent() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Widget {
+                public int $x {
+                    /** @throws \RuntimeException */
+                    get {
+                        return 1;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_private_propertys_get_hook_with_an_unused_throws_tag_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Widget {
+                private int $x {
+                    /** @throws \RuntimeException */
+                    get {
+                        return 1;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"
+            && x.message.contains(
+                "Get hook for property Widget::$x has RuntimeException in PHPDoc @throws tag but it's not thrown."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_hook_with_an_unused_throws_tag_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Widget {
+                public int $x {
+                    /** @throws \RuntimeException */
+                    final get {
+                        return 1;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_hook_on_a_final_class_with_an_unused_throws_tag_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            final class Widget {
+                public int $x {
+                    /** @throws \RuntimeException */
+                    get {
+                        return 1;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_propertys_get_hook_with_an_unused_throws_tag_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Widget {
+                final public int $x {
+                    /** @throws \RuntimeException */
+                    get {
+                        return 1;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_overridable_hook_is_flagged_with_the_opt_in_flag_on() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Widget {
+                public int $x {
+                    /** @throws \RuntimeException */
+                    get {
+                        return 1;
+                    }
+                }
+            }
+        "#,
+        |r| r.check_too_wide_throw_type_in_protected_and_public_methods = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_abstract_hooks_own_throws_tag_is_never_flagged_too_wide() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class Widget {
+                abstract public int $x {
+                    /** @throws \RuntimeException */
+                    get;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_set_hooks_explicit_throw_not_covered_by_any_throws_tag_is_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Widget {
+                public int $x {
+                    set(int $value) {
+                        throw new \RuntimeException('undocumented');
+                    }
+                }
+            }
+        "#,
+        |r| r.check_missing_checked_exceptions = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.missing"
+            && x.message.contains(
+                "Set hook for property Widget::$x throws RuntimeException but it's not covered by any @throws tag."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_get_hooks_explicit_throw_covered_by_its_own_throws_tag_is_not_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Widget {
+                public int $x {
+                    /** @throws \RuntimeException */
+                    get {
+                        throw new \RuntimeException('documented');
+                    }
+                }
+            }
+        "#,
+        |r| r.check_missing_checked_exceptions = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.missing"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

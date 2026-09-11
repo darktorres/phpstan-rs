@@ -13,18 +13,29 @@ impl Parser {
         let mut set = None;
         let mut get_attrs = Vec::new();
         let mut set_attrs = Vec::new();
+        let mut get_doc = None;
+        let mut set_doc = None;
+        let mut get_final = false;
+        let mut set_final = false;
         while !self.check(&Token::RBrace) && !self.at_eof() {
             // Phase 37: `#[Attr]` group(s) directly preceding this hook's
             // own `get`/`set` keyword - must be parsed before anything
             // else here (the `final`/visibility-modifier loop and the
             // by-ref `&` just below), matching real PHP's own convention
-            // of attributes preceding all modifiers. `parse_attributes`
-            // is already safe to call unconditionally - it returns an
-            // empty `Vec` without consuming anything when the next token
-            // isn't an attribute start.
-            let hook_attrs = self.parse_attributes()?;
+            // of attributes preceding all modifiers. `parse_leading_
+            // attributes` (rather than a bare `parse_attributes`) re-keys
+            // a preceding doc comment so `take_doc_comment` just below
+            // still finds it (Phase 42: a hook's own `@throws` tag).
+            let hook_attrs = self.parse_leading_attributes()?;
+            let hook_doc = self.take_doc_comment();
             // A hook can itself carry `final`/visibility modifiers ahead
-            // of `get`/`set` - not modeled, just consumed.
+            // of `get`/`set` - visibility isn't modeled (real PHP itself
+            // restricts a hook's own visibility to be no wider than the
+            // property's, so nothing this checker would need to separately
+            // enforce), but `final` is (Phase 42: `TooWideMethodThrowType
+            // Rule`'s property-hook sibling gates on it, mirroring real
+            // PHPStan's own `$hookReflection->isFinal()`).
+            let mut hook_final = false;
             while matches!(
                 self.peek(),
                 Token::Keyword(Keyword::Final)
@@ -32,6 +43,9 @@ impl Parser {
                     | Token::Keyword(Keyword::Private)
                     | Token::Keyword(Keyword::Protected)
             ) {
+                if matches!(self.peek(), Token::Keyword(Keyword::Final)) {
+                    hook_final = true;
+                }
                 self.advance();
             }
             // `&get => ...` - the hook returns its value by reference.
@@ -101,9 +115,13 @@ impl Parser {
             if is_set {
                 set = body.map(|b| (param, b));
                 set_attrs = hook_attrs;
+                set_doc = hook_doc;
+                set_final = hook_final;
             } else {
                 get = body;
                 get_attrs = hook_attrs;
+                get_doc = hook_doc;
+                get_final = hook_final;
             }
         }
         self.expect(&Token::RBrace)?;
@@ -112,6 +130,10 @@ impl Parser {
             set,
             get_attrs,
             set_attrs,
+            get_doc,
+            set_doc,
+            get_final,
+            set_final,
         })
     }
 }
