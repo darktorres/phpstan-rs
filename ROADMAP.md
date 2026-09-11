@@ -1108,15 +1108,20 @@ stub's own generic ones - remains unbuilt: needs genuinely new
 infrastructure this project doesn't have, with no corpus evidence of
 heavy usage to justify building it speculatively.
 
-**78 - DateTime/DOM/SimpleXML, remaining (PARTIAL).** `DateInterval`'s
-own duration-string grammar, `DateTimeInterface::format()`/`DateInterval::
-format()` return-type wiring, `DateTimeInterface::diff()`'s `days: int`
-narrowing, and `SimpleXMLElement::asXML()`'s arity-dependent overload
-split are all done (see Done). `DOMDocument`/`SimpleXMLElement` XML-content
-validation and `DateTime`'s relative-date-string parsing both need real
-PHP-runtime/XML-parser simulation this project has no way to do -
-low-priority, possibly a permanent boundary rather than concretely
-scheduled.
+**78 - DateTime/DOM/SimpleXML, remaining (PARTIAL, both items
+declined).** `DateInterval`'s own duration-string grammar,
+`DateTimeInterface::format()`/`DateInterval::format()` return-type
+wiring, `DateTimeInterface::diff()`'s `days: int` narrowing, and
+`SimpleXMLElement::asXML()`'s arity-dependent overload split are all
+done (see Done). The two remaining named items are both declined, not
+merely unscheduled - `DOMDocument`/`SimpleXMLElement` XML-content
+validation and `DateTime`'s relative-date-string parsing each need real
+PHP-runtime/XML-parser simulation this project has no way to do, and
+each decision is already made and recorded elsewhere: `checker/throws/
+dynamic.rs`'s own doc comment explicitly excludes the DOM/SimpleXML/
+DateTime-relative-string dynamic-throw-type extensions from its curated
+subset "already, separately declined under Phase 78 - this phase
+doesn't re-litigate that." No buildable code gap remains here.
 
 **82 - Collector / cross-file aggregation architecture (RETIRED - real
 architecture built as a registry fixed point instead; see Phase 41,
