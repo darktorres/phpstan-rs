@@ -827,9 +827,8 @@ fn overriding_a_final_method_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x
-            .message
-            .contains("cannot override final method Base4::locked")),
+        d.iter()
+            .any(|x| x.message.contains("overrides final method Base4::locked")),
         "expected a final-override diagnostic, got: {d:?}"
     );
 }
@@ -844,9 +843,8 @@ fn overriding_a_final_method_two_hops_up_the_extends_chain_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x
-            .message
-            .contains("cannot override final method Base6::locked")),
+        d.iter()
+            .any(|x| x.message.contains("overrides final method Base6::locked")),
         "expected a final-override diagnostic, got: {d:?}"
     );
 }
@@ -871,7 +869,7 @@ fn redeclaring_a_final_private_method_is_not_flagged() {
     // is otherwise real PHP's own `method.finalPrivate` warning (Phase
     // 65) - deliberately kept in the fixture and filtered out below
     // rather than dropped, since it's what originally made this shape
-    // exercise `method.overrideFinal` at all.
+    // exercise `method.parentMethodFinal` at all.
     let d = diagnostics_for(
         r#"<?php
             class Base13 { final private function __clone() {} }
@@ -879,7 +877,7 @@ fn redeclaring_a_final_private_method_is_not_flagged() {
         "#,
     );
     assert!(
-        !d.iter().any(|x| x.identifier == "method.overrideFinal"),
+        !d.iter().any(|x| x.identifier == "method.parentMethodFinal"),
         "unexpected diagnostics: {d:?}"
     );
 }
@@ -1028,7 +1026,7 @@ fn phpstan_overriding_method_flags_a_final_method_override() {
     );
     assert!(d.iter().any(|x| {
         x.message
-            .contains("cannot override final method Foo::doFoo")
+            .contains("Method Bar::doFoo() overrides final method Foo::doFoo().")
     }));
 }
 
@@ -1750,6 +1748,172 @@ fn a_final_private_promoted_property_does_not_restrict_a_subclass_redeclaring_th
     );
 }
 
+// Phase 64: `@final`'s own docblock-only sibling to the native-keyword
+// `final` checks above, for both methods and properties.
+
+#[test]
+fn overriding_a_phpdoc_final_method_is_flagged_with_its_own_identifier_and_wording() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                /** @final */
+                public function locked(): int { return 1; }
+            }
+            class Sub extends Base {
+                public function locked(): int { return 2; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.parentMethodFinalByPhpDoc"
+                && x.message == "Method Sub::locked() overrides @final method Base::locked()."),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.parentMethodFinal"),
+        "unexpected keyword-final diagnostic too: {d:?}"
+    );
+}
+
+#[test]
+fn phpstan_final_alias_also_triggers_the_docblock_final_method_check() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                /** @phpstan-final */
+                public function locked(): int { return 1; }
+            }
+            class Sub extends Base {
+                public function locked(): int { return 2; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.parentMethodFinalByPhpDoc"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_keyword_final_ancestor_wins_over_a_more_distant_phpdoc_final_one() {
+    // The nearer ancestor's own real keyword `final` is what actually
+    // matters here (real PHP itself enforces it at any depth) - the
+    // farther, `@final`-only ancestor never even gets consulted for
+    // *this* override once a nearer real blocker is found. (`Base`'s own
+    // redeclaration of `Grandparent`'s `@final` method is itself a
+    // separate, correctly-flagged violation - not what this test is
+    // about, so it's only excluded by filtering on `Sub`'s own location,
+    // not asserted away entirely.)
+    let d = diagnostics_for(
+        r#"<?php
+            class Grandparent {
+                /** @final */
+                public function locked(): int { return 1; }
+            }
+            class Base extends Grandparent {
+                final public function locked(): int { return 1; }
+            }
+            class Sub extends Base {
+                public function locked(): int { return 2; }
+            }
+        "#,
+    );
+    let subs_own: Vec<_> = d.iter().filter(|x| x.location == "Sub").collect();
+    assert!(
+        subs_own
+            .iter()
+            .any(|x| x.identifier == "method.parentMethodFinal"
+                && x.message.contains("Base::locked")),
+        "got: {subs_own:?}"
+    );
+    assert!(
+        !subs_own
+            .iter()
+            .any(|x| x.identifier == "method.parentMethodFinalByPhpDoc"),
+        "unexpected diagnostics attributed to Sub: {subs_own:?}"
+    );
+}
+
+#[test]
+fn a_phpdoc_final_method_does_not_also_trigger_the_keyword_final_identifier() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                /** @final */
+                public function locked(): int { return 1; }
+            }
+            class Sub extends Base {
+                public function locked(): int { return 2; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.parentMethodFinal"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_phpdoc_final_property_is_flagged_with_its_own_identifier_and_wording() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                /** @final */
+                public int $x = 1;
+            }
+            class Child extends Base { public int $x = 2; }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinalByPhpDoc"
+                && x.message == "Property Child::$x overrides @final property Base::$x."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_phpdoc_final_private_property_does_not_restrict_a_subclass_redeclaring_the_same_name() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                /** @final */
+                private int $x = 1;
+            }
+            class Child extends Base { public int $x = 2; }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinalByPhpDoc"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_phpdoc_final_promoted_constructor_property_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function __construct(
+                    /** @final */
+                    public int $x = 1,
+                ) {}
+            }
+            class Child extends Base {
+                public function __construct(public int $x = 2) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.parentPropertyFinalByPhpDoc"),
+        "got: {d:?}"
+    );
+}
+
 // Phase 64 Item 5: property `#[Override]` attribute.
 
 #[test]
@@ -2069,7 +2233,7 @@ fn overriding_a_final_ancestor_method_via_a_used_trait_is_flagged() {
     );
     assert!(
         d.iter()
-            .any(|x| x.identifier == "method.overrideFinal" && x.message.contains("Impl")),
+            .any(|x| x.identifier == "method.parentMethodFinal" && x.message.contains("Impl")),
         "got: {d:?}"
     );
 }

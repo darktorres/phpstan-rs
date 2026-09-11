@@ -130,6 +130,16 @@ pub struct DocBlock {
     // just the constructor) isn't modeled - a real, disclosed precision
     // gap, low corpus value for a rare tag variant.
     pub readonly: bool,
+    // Phase 64: `@final` (also `@phpstan-final`, recognized for free via
+    // the same "second pass strips `phpstan-`, same arm" mechanism
+    // `readonly` above already uses) - a bare marker (no value, same
+    // shape as `@internal`) declaring a method/property `final` without
+    // real PHP's own native keyword, a purely static-analysis convention
+    // real PHP itself never enforces. Consumed by `ClassInfo::final_
+    // methods_by_phpdoc`/`final_properties_by_phpdoc`, checked alongside
+    // (real-keyword-final taking priority, matching real PHPStan's own
+    // if/elseif order) the already-built native-keyword override check.
+    pub is_final: bool,
     // `@phpstan-pure`/`@phpstan-impure` - bare markers declaring a
     // function/method's own intended purity, checked against this
     // project's own computed classification
@@ -725,6 +735,9 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             }
             "readonly" => {
                 block.readonly = true;
+            }
+            "final" => {
+                block.is_final = true;
             }
             "pure" => {
                 block.pure = true;

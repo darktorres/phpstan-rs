@@ -191,6 +191,15 @@ pub struct ClassInfo {
     // does that walk. Real PHP fatals overriding a `final` property in a
     // subclass exactly like a `final` method.
     pub final_properties: HashSet<String>,
+    // Phase 64: `@final`'s own docblock-only siblings to `final_methods`/
+    // `final_properties` above - real PHP never enforces this convention
+    // (no engine-level guarantee backs it, unlike the native keyword), so
+    // it needs its own explicit ancestor-walk consultation
+    // (`Registry::find_final_ancestor_method`/`find_final_ancestor_property`,
+    // real keyword taking priority when both somehow apply on the same
+    // ancestor, matching real PHPStan's own if/elseif order).
+    pub final_methods_by_phpdoc: HashSet<String>,
+    pub final_properties_by_phpdoc: HashSet<String>,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
@@ -440,6 +449,25 @@ impl ClassInfo {
             .filter(|m| m.is_static)
             .map(|m| m.function.name.clone())
             .collect();
+        // Phase 64: `@final`'s own docblock-only sibling to `final_methods`
+        // just above - same private-is-not-overridable exemption, same
+        // reasoning (a purely static-analysis convention real PHP itself
+        // never enforces, so it needs its own explicit ancestor walk
+        // rather than piggybacking on native keyword's own compile-time
+        // guarantee).
+        let final_methods_by_phpdoc: HashSet<String> = c
+            .methods
+            .iter()
+            .filter(|m| {
+                m.visibility != Visibility::Private
+                    && m.function
+                        .doc_comment
+                        .as_deref()
+                        .map(docblock::parse)
+                        .is_some_and(|d| d.is_final)
+            })
+            .map(|m| m.function.name.clone())
+            .collect();
         // Phase 64 Item 3: same private-is-not-overridable exemption
         // `final_methods` above already applies, one member kind over -
         // a `private` property (final or not) is never part of a
@@ -466,6 +494,36 @@ impl ClassInfo {
                     .filter(|p| {
                         p.promoted_final
                             && p.promoted_visibility.as_ref() != Some(&Visibility::Private)
+                    })
+                    .map(|p| p.name.clone()),
+            );
+        }
+
+        // Phase 64: `@final`'s own docblock-only sibling to `final_properties`
+        // above - same private-is-not-overridable exemption.
+        let mut final_properties_by_phpdoc: HashSet<String> = c
+            .properties
+            .iter()
+            .filter(|p| {
+                p.visibility != Visibility::Private
+                    && p.doc_comment
+                        .as_deref()
+                        .map(docblock::parse)
+                        .is_some_and(|d| d.is_final)
+            })
+            .map(|p| p.name.clone())
+            .collect();
+        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+            final_properties_by_phpdoc.extend(
+                ctor.function
+                    .params
+                    .iter()
+                    .filter(|p| {
+                        p.promoted_visibility.as_ref() != Some(&Visibility::Private)
+                            && p.doc_comment
+                                .as_deref()
+                                .map(docblock::parse)
+                                .is_some_and(|d| d.is_final)
                     })
                     .map(|p| p.name.clone()),
             );
@@ -848,6 +906,8 @@ impl ClassInfo {
             static_methods,
             final_methods,
             final_properties,
+            final_methods_by_phpdoc,
+            final_properties_by_phpdoc,
             trait_aliases,
             resolved_trait_conflicts: c.resolved_trait_conflicts.iter().cloned().collect(),
             templates,
@@ -1256,6 +1316,12 @@ impl ClassInfo {
             // `ast::EnumDecl`'s own doc comment) - never a `final`-
             // property candidate either.
             final_properties: HashSet::new(),
+            // An enum can never be `extends`-subclassed by anything at
+            // all (`is_final: true` above already reflects this) - no
+            // ancestor walk could ever reach these sets, so there's
+            // nothing real to compute here.
+            final_methods_by_phpdoc: HashSet::new(),
+            final_properties_by_phpdoc: HashSet::new(),
             trait_aliases,
             resolved_trait_conflicts: e.resolved_trait_conflicts.iter().cloned().collect(),
             templates: Vec::new(),
@@ -1348,6 +1414,10 @@ impl ClassInfo {
         self.final_methods.extend(other.final_methods);
         self.static_methods.extend(other.static_methods);
         self.final_properties.extend(other.final_properties);
+        self.final_methods_by_phpdoc
+            .extend(other.final_methods_by_phpdoc);
+        self.final_properties_by_phpdoc
+            .extend(other.final_properties_by_phpdoc);
         self.resolved_trait_conflicts
             .extend(other.resolved_trait_conflicts);
         self.covariant_templates.extend(other.covariant_templates);

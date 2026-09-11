@@ -419,9 +419,15 @@ impl Registry {
     /// interface's own methods have no bodies to protect, and this
     /// project doesn't yet propagate a trait's own `final_methods` the
     /// way it does `abstract_methods` (Finding 46 as reported is scoped
-    /// to class inheritance, matching its own repro). Returns the name
-    /// of the ancestor that declared it final, for the diagnostic.
-    pub fn find_final_ancestor_method(&self, class: &str, method: &str) -> Option<String> {
+    /// to class inheritance, matching its own repro). Returns the name of
+    /// the ancestor that declared it final, plus whether that was via
+    /// `@final` (docblock, PHPStan-only convention, real PHP doesn't
+    /// enforce it) rather than the real keyword - checked together, one
+    /// ancestor at a time nearest-first, real keyword winning over
+    /// `@final` when a single ancestor somehow has both (mirrors real
+    /// PHPStan's own `OverridingMethodRule` if/elseif order exactly,
+    /// `method.parentMethodFinal` vs. `method.parentMethodFinalByPhpDoc`).
+    pub fn find_final_ancestor_method(&self, class: &str, method: &str) -> Option<(String, bool)> {
         let info = self.classes.get(class)?;
         let mut seen = HashSet::new();
         let mut stack: Vec<String> = info.extends.clone();
@@ -433,7 +439,10 @@ impl Registry {
                 continue;
             };
             if current_info.final_methods.contains(method) {
-                return Some(current);
+                return Some((current, false));
+            }
+            if current_info.final_methods_by_phpdoc.contains(method) {
+                return Some((current, true));
             }
             stack.extend(current_info.extends.iter().cloned());
         }
@@ -445,8 +454,13 @@ impl Registry {
     /// `extends`, same reasoning as the method version (properties have
     /// no `implements`/interface side at all, and this project doesn't
     /// propagate a trait's own `final_properties` the way it does
-    /// `abstract_methods` either).
-    pub fn find_final_ancestor_property(&self, class: &str, property: &str) -> Option<String> {
+    /// `abstract_methods` either). See that function's own doc comment
+    /// for the `@final`/keyword priority the returned `bool` encodes.
+    pub fn find_final_ancestor_property(
+        &self,
+        class: &str,
+        property: &str,
+    ) -> Option<(String, bool)> {
         let info = self.classes.get(class)?;
         let mut seen = HashSet::new();
         let mut stack: Vec<String> = info.extends.clone();
@@ -458,7 +472,10 @@ impl Registry {
                 continue;
             };
             if current_info.final_properties.contains(property) {
-                return Some(current);
+                return Some((current, false));
+            }
+            if current_info.final_properties_by_phpdoc.contains(property) {
+                return Some((current, true));
             }
             stack.extend(current_info.extends.iter().cloned());
         }

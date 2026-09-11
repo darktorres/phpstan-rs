@@ -178,17 +178,33 @@ impl<'a> Checker<'a> {
         // Finding 46: overriding a `final` method is a real,
         // unconditional fatal error in PHP - including for __construct,
         // unlike the signature-compatibility checks below, so this runs
-        // before that exemption.
-        if let Some(ancestor) = self.registry.find_final_ancestor_method(fqn, method_name) {
-            self.report(
-                fqn.to_string(),
-                format!(
-                    "{fqn}::{method_name}() cannot override final method {ancestor}::{method_name}()"
-                ),
-                span,
-                0,
-                "method.overrideFinal",
+        // before that exemption. `is_by_phpdoc` is `@final`'s own
+        // docblock-only sibling (a purely static-analysis convention real
+        // PHP itself never enforces) - real PHPStan's own message
+        // wording/identifier/`nonIgnorable()`-ness genuinely differ
+        // between the two (`method.parentMethodFinal`, unconditionally
+        // non-ignorable, vs. `method.parentMethodFinalByPhpDoc`,
+        // ordinarily suppressible), confirmed by direct read of
+        // `OverridingMethodRule.php`.
+        if let Some((ancestor, is_by_phpdoc)) =
+            self.registry.find_final_ancestor_method(fqn, method_name)
+        {
+            let (verb, identifier) = if is_by_phpdoc {
+                ("@final", "method.parentMethodFinalByPhpDoc")
+            } else {
+                ("final", "method.parentMethodFinal")
+            };
+            let message = format!(
+                "Method {fqn}::{method_name}() overrides {verb} method {ancestor}::{method_name}()."
             );
+            if is_by_phpdoc {
+                self.report(fqn.to_string(), message, span, 0, identifier);
+            } else {
+                self.report_builder(
+                    DiagnosticBuilder::new(fqn.to_string(), message, span, 0, identifier)
+                        .non_ignorable(),
+                );
+            }
         }
         let Some(info) = self.registry.classes.get(fqn) else {
             return;

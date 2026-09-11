@@ -271,9 +271,48 @@ conflicting with it). Override-
 compatibility (visibility narrowing, missing/extra/optional/by-ref/
 variadic parameter mismatches, `#[Override]`'s unconditional-fatal-error
 half, running uniformly for a class's own methods and a trait-supplied
-one). Nine declaration-site modifier-consistency checks plus the
-class-constant `final`/native-type-modifier trio. Enum sanity and
-generic-bound checking wired to enums.
+one), including the interface-vs-trait-vs-extends ancestor-lookup
+priority fix (matching real PHPStan's `MethodPrototypeFinder` exactly,
+including its own visibility-check-skip and self-type-resolution
+nuances for a trait-sourced prototype) and property `#[Override]`
+attribute checking. Property hooks are covered too:
+`PropertyHookBody::Abstract` (an AST variant distinguishing "no hook"
+from "an abstract hook with no body") plus `property.notReadable`/
+`.notWritable`/`.abstractOverridingNonAbstractHook`. PHP 8.4 `final`/
+`abstract` property modifiers, including on a promoted constructor
+property (`public final int $x` in a constructor parameter list is
+real, valid PHP, confirmed live; only `abstract` is genuinely impossible
+there) - `property.parentPropertyFinal`. `method.nonStatic`/
+`method.static` (an override must match its ancestor's own static-ness
+exactly, either direction) and the general, non-`__construct` case of
+`method.abstractOverridingNonAbstract`, both `nonIgnorable` matching
+real PHPStan's own `OverridingMethodRule` exactly - `ClassInfo::
+static_methods` mirrors `abstract_methods`/`final_methods`, with the
+same trait-flattening propagation `abstract_methods` already has (a real
+bug found and fixed along the way: `static_methods` wasn't trait-
+flattening-aware at all, a real corpus false positive on `Symfony\
+Component\Cache\Adapter\RedisAdapter`'s trait-supplied
+`createConnection()`). Both
+the real-keyword and docblock-only (`@final`/`@phpstan-final`, a purely
+static-analysis convention real PHP itself never enforces) `final`-
+ancestor checks are done, for both methods and properties
+(`method.parentMethodFinal`/`.parentMethodFinalByPhpDoc`,
+`property.parentPropertyFinal`/`.parentPropertyFinalByPhpDoc` -
+`ClassInfo::final_methods_by_phpdoc`/`final_properties_by_phpdoc`,
+consulted alongside the native-keyword sets one ancestor at a time
+nearest-first, real keyword winning when a single ancestor somehow has
+both, matching real PHPStan's own if/elseif order). Native-type
+property-override variance is done too (`property.nativeType`/
+`.missingNativeType`/`.extraNativeType`, `PropertySig::ty_native`/
+`has_native_type` mirroring `ParamSig`'s identical split, checked via
+`resolve_pseudo` for `self`/`static`-typed properties and bidirectional
+`is_assignable` rather than raw `Type` `PartialEq`, which is union-
+order-sensitive). The `__construct`-specific branch of
+`abstractOverridingNonAbstract` (triggered only when no normal prototype
+resolves at all) stays unbuilt - a distinct code path, not a narrowing
+of the general case. Nine declaration-site modifier-consistency checks
+plus the class-constant `final`/native-type-modifier trio. Enum sanity
+and generic-bound checking wired to enums.
 
 Invalid-operand-combination detection (`ErrorType`): the
 operand-validity matrix across binary/comparison/unary/inc-dec
@@ -892,37 +931,6 @@ motivation is narrower: robustness of the general type-expression
 grammar itself (deeply nested generics/conditional types/complex
 intersections), not corpus-evidenced as a live gap today. Size: XL.
 
-**64 - Override-compatibility rewrite, remaining (PARTIAL, one sub-item
-left).** Method- and property-override halves are done (see Done),
-including the interface-vs-trait-vs-extends ancestor-lookup priority
-fix (matching real PHPStan's `MethodPrototypeFinder` exactly, including
-its own visibility-check-skip and self-type-resolution nuances for a
-trait-sourced prototype) and property `#[Override]` attribute checking.
-Property hooks are done too: `PropertyHookBody::Abstract` (a new AST
-variant distinguishing "no hook" from "an abstract hook with no body")
-plus `property.notReadable`/`.notWritable`/`.abstractOverridingNonAbstractHook`
-(`checker/oop/property_overrides.rs`). PHP 8.4 `final`/`abstract`
-property modifiers are done too - including on a promoted constructor
-property (`public final int $x` in a constructor parameter list is
-real, valid PHP, confirmed live; only `abstract` is genuinely
-impossible there) - reporting `property.parentPropertyFinal`.
-`method.nonStatic`/`method.static` (an override must match its
-ancestor's own static-ness exactly, either direction) and the general,
-non-`__construct` case of `method.abstractOverridingNonAbstract` are
-done too, both `nonIgnorable` matching real PHPStan's own
-`OverridingMethodRule` exactly - a new `ClassInfo::static_methods`
-mirroring `abstract_methods`/`final_methods`, with the same trait-
-flattening propagation `abstract_methods` already had (a real bug
-found and fixed along the way: `static_methods` wasn't trait-
-flattening-aware at all, a real corpus false positive on `Symfony\
-Component\Cache\Adapter\RedisAdapter`'s trait-supplied `createConnection()`).
-The `__construct`-specific branch of `abstractOverridingNonAbstract`
-(triggered only when no normal prototype resolves at all) stays
-unbuilt - a distinct code path, not a narrowing of the general case.
-Still open: native-type property variance, blocked on giving
-`PropertySig` a `ty`/`ty_native` split the way `FunctionSig` already
-has.
-
 **67 - `@internal` restricted-usage engine, remaining (PARTIAL).**
 Calls, property/constant access, instantiation, `instanceof`, `catch`,
 `extends`/`implements`/trait-use, both a named function/method's own
@@ -1082,8 +1090,6 @@ more than the one-line summary here.
 - **`Rules/Methods/IncompatibleDefaultParameterTypeRule.php`**: Real PHPStan (level 2) checks that a method parameter's default value type is assignable to its declared parameter type, reporting identifier 'parameter.defaultValue'. phpstan-rs has no equivalent check anywhere - grepping the whole checker for default-value/parameter-type-compatibility logic finds nothing beyond override-compatibility's unrelated 'ancestor made it optional'...
 - **`Rules/Methods/MissingMagicSerializationMethodsRule.php`**: Real PHPStan flags a non-abstract class implementing Serializable that lacks __serialize()/__unserialize() (identifier 'class.serializable', PHP-version-gated via serializableRequiresMagicMethods()). phpstan-rs's only Serializable-related logic is the unrelated 'enum cannot implement Serializable' check in oop.rs; the magic-method-presence check itself doesn't exist, and...
 - **`Rules/Methods/AbstractMethodInNonAbstractClassRule.php`**: Real PHPStan's second half of this rule flags a non-abstract, non-interface method with no body at all (identifier 'method.nonAbstract') - real PHP's parser accepts this syntax even though it's semantically invalid, so PHPStan itself must catch it.
-- **`Rules/Methods/OverridingMethodRule.php`**: Real PHPStan's OverridingMethodRule also reports (all unconditional PHP fatal errors, all 'nonIgnorable'): a non-static method overriding a static one and vice versa (method.nonStatic/method.static), and making a non-abstract *ordinary* method abstract on override (method.abstractOverridingNonAbstract, the general case - not just the constructor's own special no-prototype...
-- **`Rules/Methods/OverridingMethodRule.php`**: Real PHPStan distinguishes a real `final` keyword ancestor (method.parentMethodFinal) from an ancestor only tagged `@final`/`@phpstan-final` in its docblock (method.parentMethodFinalByPhpDoc) - both unconditional-vs-convention-level overriding-final-method errors.
 - **`Rules/Methods/MethodCallableRule.php`**: Real PHPStan gates first-class-callable syntax (`$obj->method(...)`) behind a PHP-8.1 version check, reporting 'callable.notSupported' when the configured target is older. phpstan-rs built an extensive PhpFeature/php_version.rs framework covering roughly a dozen similarly narrow PHP-version-gated syntax checks (noncapturing catch, throw-expression, promoted properties,...
 
 ## Properties

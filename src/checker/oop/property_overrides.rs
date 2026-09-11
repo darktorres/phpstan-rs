@@ -140,15 +140,28 @@ impl<'a> Checker<'a> {
         // Phase 64 Item 3: overriding a `final` property is a real,
         // unconditional PHP fatal error (PHP 8.4+) - same "runs before
         // every other exemption below" ordering `check_one_method_
-        // override`'s own final-ancestor check already uses.
-        if let Some(ancestor) = self.registry.find_final_ancestor_property(fqn, name) {
-            self.report(
-                fqn.to_string(),
-                format!("Property {fqn}::${name} overrides final property {ancestor}::${name}"),
-                span,
-                0,
-                "property.parentPropertyFinal",
-            );
+        // override`'s own final-ancestor check already uses. `is_by_phpdoc`
+        // is `@final`'s own docblock-only sibling - see `check_one_method_
+        // override`'s own identical comment for why the two need
+        // different wording/identifier/`nonIgnorable()`-ness.
+        if let Some((ancestor, is_by_phpdoc)) =
+            self.registry.find_final_ancestor_property(fqn, name)
+        {
+            let (verb, identifier) = if is_by_phpdoc {
+                ("@final", "property.parentPropertyFinalByPhpDoc")
+            } else {
+                ("final", "property.parentPropertyFinal")
+            };
+            let message =
+                format!("Property {fqn}::${name} overrides {verb} property {ancestor}::${name}.");
+            if is_by_phpdoc {
+                self.report(fqn.to_string(), message, span, 0, identifier);
+            } else {
+                self.report_builder(
+                    DiagnosticBuilder::new(fqn.to_string(), message, span, 0, identifier)
+                        .non_ignorable(),
+                );
+            }
         }
         let Some((ancestor_owner, ancestor_sig)) =
             self.registry.lookup_ancestor_property_with_owner(fqn, name)
