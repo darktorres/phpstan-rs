@@ -55,6 +55,7 @@
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::registry::{ClassInfo, FunctionSig, Registry};
+use crate::types::{TemplateParam, Type};
 
 include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 
@@ -184,6 +185,82 @@ pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
         .collect()
 }
 
+/// Phase 54/77 follow-up: real phpstorm-stubs' own `ReflectionClass::
+/// __construct` (confirmed directly, `vendor/phpstorm-stubs/Reflection/
+/// ReflectionClass.php`) declares its single parameter's own `@param` tag
+/// as `class-string<T>|T $objectOrClass`, referencing the class's own
+/// `@template T of object` - but that doc type never reaches `ParamSig::ty`
+/// (confirmed directly: `new ReflectionClass($x)` binds nothing, and a
+/// deliberately-mistyped call still only reports the native `object|string`
+/// hint in its error message, not the union with `class-string<T>`) - a
+/// real, disclosed gap in this project's own doc-merge pipeline for a
+/// parameter whose native hint additionally carries phpstorm-stubs' own
+/// `#[LanguageLevelTypeAware(...)]` attribute, not chased down further
+/// here since item 4a's own general constructor-binding mechanism already
+/// verified correct for the identical `class-string<T>|T` shape on a
+/// project-local class with no such attribute. Reuses the exact template
+/// metadata `ReflectionClass`'s own already-correctly-parsed `ClassInfo`
+/// carries for `T` (`templates`/`template_bounds`/`covariant_templates`/
+/// `contravariant_templates`/`template_defaults` - all four already
+/// correctly populated, confirmed via `ReflectionClass<Foo>` parsing and
+/// resolving fine as an explicit type reference) rather than hand-guessing
+/// a fresh bound/variance/default - `TemplateParam` is a plain value type,
+/// not identity-sensitive, so building one from those exact field values
+/// is equivalent to "reusing" any other node that would carry them.
+///
+/// Union member order matters: `ClassString<T>` must come first, since
+/// `bind_template_param`'s own `Union` handling is first-`or_insert`-wins -
+/// `new ReflectionClass(Foo::class)` needs the `ClassString` arm to bind
+/// `T=Foo` before the bare `T` arm would otherwise wrongly bind `T` to the
+/// `ClassString<Foo>` value itself.
+///
+/// Disclosed residual limitation, not attempted here: `new
+/// ReflectionClass('Foo')` - a bare string literal, not `Foo::class` -
+/// still won't bind `T` correctly (`bind_template_param` has no arm
+/// treating a string literal's own *value* as a class-name reference, only
+/// a real `Type::ClassString` construction via `::class`/`get_class()`
+/// triggers that arm) - the `Foo::class`/object-instance shapes this fixes
+/// are the idiomatic PHP 8+ styles anyway.
+fn patch_reflection_class_constructor_template(classes: &mut [(String, ClassInfo)]) {
+    let Some((_, info)) = classes
+        .iter_mut()
+        .find(|(name, _)| name == "ReflectionClass")
+    else {
+        return;
+    };
+    if !info.templates.iter().any(|t| t == "T") {
+        return;
+    }
+    let tp = TemplateParam {
+        name: "T".to_string(),
+        bound: Box::new(
+            info.template_bounds
+                .get("T")
+                .cloned()
+                .unwrap_or(Type::Mixed),
+        ),
+        variance: if info.covariant_templates.contains("T") {
+            crate::types::Variance::Covariant
+        } else if info.contravariant_templates.contains("T") {
+            crate::types::Variance::Contravariant
+        } else {
+            crate::types::Variance::Invariant
+        },
+        scope: Some("ReflectionClass".to_string()),
+        default: info.template_defaults.get("T").cloned().map(Box::new),
+    };
+    let Some(ctor) = info.methods.get_mut("__construct") else {
+        return;
+    };
+    let Some(param) = ctor.params.first_mut() else {
+        return;
+    };
+    param.ty = Type::Union(vec![
+        Type::ClassString(Box::new(Type::TemplateParam(tp.clone()))),
+        Type::TemplateParam(tp),
+    ]);
+}
+
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
 pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
@@ -202,6 +279,7 @@ pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
                 }
             }
         }
+        patch_reflection_class_constructor_template(&mut result);
         result
     });
     CACHE.clone()

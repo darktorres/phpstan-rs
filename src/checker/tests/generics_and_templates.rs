@@ -2631,3 +2631,22 @@ fn new_on_a_non_generic_class_is_unaffected_by_constructor_argument_binding() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn reflection_class_binds_its_own_template_from_a_class_string_argument() {
+    // `php_stubs::patch_reflection_class_constructor_template` - real
+    // phpstorm-stubs' own `@param class-string<T>|T $objectOrClass` never
+    // reaches `ParamSig::ty` for this specific parameter (a real, disclosed
+    // gap in the doc-merge pipeline for a `#[LanguageLevelTypeAware(...)]`-
+    // attributed native hint), so this is patched in directly, reusing
+    // `ReflectionClass`'s own already-correct class-level `@template T of
+    // object` metadata.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            assertType('ReflectionClass<Foo>', new ReflectionClass(Foo::class));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
