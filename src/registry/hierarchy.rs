@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::ClassKind;
 use crate::registry::Registry;
@@ -32,10 +32,10 @@ impl Registry {
     /// relationship `instanceof`/`is_subclass_of` never recognizes, see
     /// that function's own doc comment). `class` itself is never included
     /// (matching `is_subclass_of`'s own separate `class == of` check).
-    fn class_extends_implements_closure(&self, class: &str) -> HashSet<String> {
-        let mut seen = HashSet::new();
+    fn class_extends_implements_closure(&self, class: &str) -> FxHashSet<String> {
+        let mut seen = FxHashSet::default();
         let mut stack = vec![class.to_string()];
-        let mut result = HashSet::new();
+        let mut result = FxHashSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -188,8 +188,8 @@ impl Registry {
         &'r self,
         class: &str,
         names_of: impl Fn(&'r ClassInfo) -> Vec<&'r str>,
-    ) -> HashMap<String, String> {
-        let mut owner_by_name = HashMap::new();
+    ) -> FxHashMap<String, String> {
+        let mut owner_by_name = FxHashMap::default();
         let mut seen = HashSet::new();
         let mut queue = VecDeque::new();
         queue.push_back(class.to_string());
@@ -226,9 +226,9 @@ impl Registry {
     /// fully" priority without re-walking anything.
     fn merge_ancestor_owner_names(
         parents: impl Iterator<Item = String>,
-        own_owner_by_class: &FxHashMap<String, HashMap<String, String>>,
-    ) -> HashMap<String, String> {
-        let mut merged = HashMap::new();
+        own_owner_by_class: &FxHashMap<String, FxHashMap<String, String>>,
+    ) -> FxHashMap<String, String> {
+        let mut merged = FxHashMap::default();
         for parent in parents {
             if let Some(parent_map) = own_owner_by_class.get(&parent) {
                 for (name, owner) in parent_map {
@@ -280,7 +280,7 @@ impl Registry {
         // below, including the two `ancestor_*` ones that read `method_
         // owner_by_class`/`property_owner_by_class` back as locals, not
         // as `self` fields, for the same reason).
-        let method_owner_by_class: FxHashMap<String, HashMap<String, String>> = class_names
+        let method_owner_by_class: FxHashMap<String, FxHashMap<String, String>> = class_names
             .par_iter()
             .map(|name| {
                 (
@@ -291,7 +291,7 @@ impl Registry {
                 )
             })
             .collect();
-        let property_owner_by_class: FxHashMap<String, HashMap<String, String>> = class_names
+        let property_owner_by_class: FxHashMap<String, FxHashMap<String, String>> = class_names
             .par_iter()
             .map(|name| {
                 (
@@ -302,7 +302,7 @@ impl Registry {
                 )
             })
             .collect();
-        let const_owner_by_class: FxHashMap<String, HashMap<String, String>> = class_names
+        let const_owner_by_class: FxHashMap<String, FxHashMap<String, String>> = class_names
             .par_iter()
             .map(|name| {
                 (
@@ -314,7 +314,7 @@ impl Registry {
             })
             .collect();
 
-        let ancestor_method_owner_by_class: FxHashMap<String, HashMap<String, String>> =
+        let ancestor_method_owner_by_class: FxHashMap<String, FxHashMap<String, String>> =
             class_names
                 .par_iter()
                 .map(|name| {
@@ -343,7 +343,7 @@ impl Registry {
         // `lookup_ancestor_property_with_owner`'s own walk (unlike the
         // method version) only ever considers `extends`, never
         // `implements` - mirrored here.
-        let ancestor_property_owner_by_class: FxHashMap<String, HashMap<String, String>> =
+        let ancestor_property_owner_by_class: FxHashMap<String, FxHashMap<String, String>> =
             class_names
                 .par_iter()
                 .map(|name| {

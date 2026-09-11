@@ -1,5 +1,5 @@
-use rustc_hash::FxHashMap;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::HashSet;
 
 use crate::ast::Stmt;
 use crate::types::Type;
@@ -282,7 +282,7 @@ pub struct Registry {
     // index_and_flatten`, `Project::finish_loading`/`update_file`) -
     // empty until the first such call, same "not yet built" precondition
     // every other post-load pass's own output already has.
-    pub(crate) ancestor_names: FxHashMap<String, HashSet<String>>,
+    pub(crate) ancestor_names: FxHashMap<String, FxHashSet<String>>,
     // Every currently-registered class's own lowercased name -> canonical
     // key - see `lookup_class`'s own doc comment. A byproduct of
     // `canonicalize_class_name_case`'s own already-built `canonical_by_
@@ -297,11 +297,11 @@ pub struct Registry {
     // (`registry/hierarchy.rs`) for what these replace and why. Rebuilt
     // from scratch at exactly the same settle points `ancestor_names`/
     // `classes_lowercase` already are.
-    pub(crate) method_owner_by_class: FxHashMap<String, HashMap<String, String>>,
-    pub(crate) ancestor_method_owner_by_class: FxHashMap<String, HashMap<String, String>>,
-    pub(crate) property_owner_by_class: FxHashMap<String, HashMap<String, String>>,
-    pub(crate) ancestor_property_owner_by_class: FxHashMap<String, HashMap<String, String>>,
-    pub(crate) const_owner_by_class: FxHashMap<String, HashMap<String, String>>,
+    pub(crate) method_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
+    pub(crate) ancestor_method_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
+    pub(crate) property_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
+    pub(crate) ancestor_property_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
+    pub(crate) const_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
 }
 
 impl Registry {
