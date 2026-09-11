@@ -414,3 +414,86 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         other => other,
     }
 }
+
+/// Phase 48 follow-up (item 7a): the read-only, `(raw, resolved)`-
+/// collecting sibling of `resolve_names_in_type` just above - same
+/// recursive shape, same sentinel skip-list, but pushes into `out`
+/// instead of rewriting `ty` in place. `class.nameCase` for a PHPDoc-typed
+/// position needs the pre-resolution *spelling* (`ctx.is_use_imported`'s
+/// own input) alongside the resolved FQN, which `resolve_names_in_type`
+/// itself destroys the moment it overwrites `Object`'s own name field -
+/// this is a parallel traversal run one step earlier (right after
+/// `mark_template_params`, right before `resolve_names_in_type`) rather
+/// than a new field threaded through `Type` itself (`Type` derives
+/// `PartialEq`, used for union dedup/narrowing/subtype tests throughout;
+/// a raw-text field would need a hand-written exclusion, and even then
+/// wouldn't carry the pre-resolution string this specifically needs).
+///
+/// Must be kept in sync with `resolve_names_in_type`'s own arms by hand -
+/// a case missed in one silently misses a nested reference the other
+/// still resolves (or, conversely, collects a case-ref for a sentinel
+/// `resolve_names_in_type` itself never treats as a real class
+/// reference).
+pub(crate) fn collect_class_name_case_refs(
+    ty: &Type,
+    ctx: &NameContext,
+    out: &mut Vec<(String, String)>,
+) {
+    match ty {
+        // Mirrors `resolve_names_in_type`'s own three sentinel arms
+        // exactly: `object`/`Traversable`/`resource` are never a real
+        // class reference to check the case of, and (unlike the `$$...`
+        // sentinels just below) their own argument list isn't recursed
+        // into there either, so this doesn't either.
+        Type::Object(name, _) if matches!(name.as_str(), "object" | "Traversable" | "resource") => {
+        }
+        Type::Object(name, args)
+            if matches!(
+                name.as_str(),
+                "$$valueof" | "$$covariant" | "$$contravariant" | "$$bivariant"
+            ) =>
+        {
+            for a in args {
+                collect_class_name_case_refs(a, ctx, out);
+            }
+        }
+        Type::Object(name, args) => {
+            out.push((name.clone(), ctx.resolve(name)));
+            for a in args {
+                collect_class_name_case_refs(a, ctx, out);
+            }
+        }
+        Type::Array(key, inner) => {
+            collect_class_name_case_refs(key, ctx, out);
+            collect_class_name_case_refs(inner, ctx, out);
+        }
+        Type::ClassString(inner) => collect_class_name_case_refs(inner, ctx, out),
+        Type::Union(members) | Type::Intersection(members) => {
+            for m in members {
+                collect_class_name_case_refs(m, ctx, out);
+            }
+        }
+        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
+            for (_, t, _) in fields {
+                collect_class_name_case_refs(t, ctx, out);
+            }
+        }
+        Type::Callable(Some(sig)) => {
+            for p in &sig.params {
+                collect_class_name_case_refs(&p.ty, ctx, out);
+            }
+            collect_class_name_case_refs(&sig.return_type, ctx, out);
+        }
+        Type::Conditional {
+            target,
+            if_true,
+            if_false,
+            ..
+        } => {
+            collect_class_name_case_refs(target, ctx, out);
+            collect_class_name_case_refs(if_true, ctx, out);
+            collect_class_name_case_refs(if_false, ctx, out);
+        }
+        _ => {}
+    }
+}
