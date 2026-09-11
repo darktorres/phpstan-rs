@@ -1295,14 +1295,8 @@ impl<'a> Checker<'a> {
             ) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_incdec_validity(op, inner, &inner_ty, e.span, label);
-                // Real PHP: incrementing `null` produces `int(1)`;
-                // decrementing `null`, and either direction on a `bool`,
-                // is a no-op (the value is unchanged) - only the
-                // null-to-int case actually changes the tracked type.
-                // A string operand's own exact value isn't modeled
-                // precisely enough to distinguish numeric from
-                // alphanumeric-increment behavior, so it conservatively
-                // stays a string either way.
+                // See `advance_incdec_type`'s own doc comment for the
+                // real PHP null/bool/string semantics this computes.
                 //
                 // Computed against `inner_ty` (whatever `inner` itself
                 // just inferred as, any shape) rather than only a bare
@@ -1328,34 +1322,7 @@ impl<'a> Checker<'a> {
                 // observable gap to fix here regardless), exactly like
                 // before.
                 let is_increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
-                let updated = match &inner_ty {
-                    Type::Null if is_increment => Type::Int,
-                    // Real corpus find: a literal/range-typed operand
-                    // used to pass straight through unchanged here -
-                    // `++$x`/`--$x` on `IntLiteral(0)` stayed exactly
-                    // `IntLiteral(0)` forever, never actually
-                    // advancing - the identical "value never applied"
-                    // bug class `negate_numeric_literal`'s own doc
-                    // comment already found for unary `-`. A counter
-                    // incremented inside a loop then checked
-                    // afterward (`$n = 0; foreach (...) { ...; $n++;
-                    // } if ($n > 0)`, a real, extremely common idiom)
-                    // looked "always false" against a check that only
-                    // fires once anything actually consumes the
-                    // literal's own exact value.
-                    Type::IntLiteral(n) => {
-                        Type::IntLiteral(if is_increment { n + 1 } else { n - 1 })
-                    }
-                    Type::FloatLiteral(f) => {
-                        Type::FloatLiteral(if is_increment { f + 1.0 } else { f - 1.0 })
-                    }
-                    Type::IntRange(min, max) => {
-                        let shift =
-                            |b: Option<i64>| b.map(|v| if is_increment { v + 1 } else { v - 1 });
-                        Type::IntRange(shift(*min), shift(*max))
-                    }
-                    other => other.clone(),
-                };
+                let updated = advance_incdec_type(&inner_ty, is_increment);
                 // Phase 17 follow-up: `$x++`/`$x--` is real, visible
                 // rebinding syntax, the same category as `$x += 1`.
                 self.bind_assignment_target(inner, updated, locals);
@@ -1750,16 +1717,23 @@ impl<'a> Checker<'a> {
                         {
                             return narrowed.clone();
                         }
-                        match base_ty {
-                            Type::Array(_, inner) => *inner,
-                            Type::ArrayShape(fields) => literal_string_key(i)
-                                .and_then(|key| {
-                                    fields.into_iter().find(|(name, _, _)| *name == key)
-                                })
-                                .map(|(_, ty, _)| ty)
-                                .unwrap_or(Type::Mixed),
-                            _ => Type::Mixed,
-                        }
+                        // Real bug found and fixed this session: this used
+                        // to be its own hand-maintained inline copy of
+                        // `index_result_type` (the exact duplication this
+                        // module's own Phase 32 Finding F comment above
+                        // already flagged once, for the narrowing-key
+                        // fast path) - missing that function's own
+                        // `Type::Union`/`Type::Intersection` arms
+                        // entirely, so a container widened to a `Union`
+                        // across a loop's own multi-pass fixed-point
+                        // convergence (`converge_loop_body`) silently
+                        // fell to `Mixed` here even on a pass where
+                        // `infer_expr`'s identical read, going through
+                        // the real `index_result_type`, already resolved
+                        // it precisely. Calling the shared function
+                        // directly removes the whole duplicate-drift
+                        // class of bug, not just this one instance of it.
+                        index_result_type(base_ty, literal_string_key(i).as_deref())
                     }
                     None => Type::Mixed,
                 }
@@ -4243,9 +4217,80 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
 /// `Union` whose members *agree* on a key's type, not what recovers
 /// precision for `preg_match`'s own common case (that's `apply_narrowing`'s
 /// own new `preg_match_condition` recognizer, `checker/narrowing.rs`).
+/// Real PHP: incrementing `null` produces `int(1)`; decrementing `null`,
+/// and either direction on a `bool`, is a no-op (the value is unchanged) -
+/// only the null-to-int case actually changes the tracked type. A string
+/// operand's own exact value isn't modeled precisely enough to
+/// distinguish numeric from alphanumeric-increment behavior, so it
+/// conservatively stays a string either way.
+///
+/// Recurses through a `Union` the same established way `write_index_into`/
+/// `index_result_type` already do (advance each member independently,
+/// `reduce(union_types)` back into one type) - a real corpus false
+/// positive found while tracing a *different* fix
+/// (`CategoryService::saveCategoriesOrder`'s own dynamically-keyed
+/// counter): a container widened to `Null|Int` across a loop's own
+/// multi-pass fixed-point convergence (the counter's very first touch
+/// contributing the `Null` branch, an already-incremented later pass
+/// contributing `Int`) stayed frozen at that same `Null|Int` forever once
+/// this whole match had no `Union` case at all - even though incrementing
+/// *either* member alone always produces a real number regardless.
+fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
+    match ty {
+        Type::Null if is_increment => Type::Int,
+        // Real corpus find: a literal/range-typed operand used to pass
+        // straight through unchanged here - `++$x`/`--$x` on
+        // `IntLiteral(0)` stayed exactly `IntLiteral(0)` forever, never
+        // actually advancing - the identical "value never applied" bug
+        // class `negate_numeric_literal`'s own doc comment already found
+        // for unary `-`. A counter incremented inside a loop then checked
+        // afterward (`$n = 0; foreach (...) { ...; $n++; } if ($n > 0)`,
+        // a real, extremely common idiom) looked "always false" against a
+        // check that only fires once anything actually consumes the
+        // literal's own exact value.
+        Type::IntLiteral(n) => Type::IntLiteral(if is_increment { n + 1 } else { n - 1 }),
+        Type::FloatLiteral(f) => Type::FloatLiteral(if is_increment { f + 1.0 } else { f - 1.0 }),
+        Type::IntRange(min, max) => {
+            let shift = |b: Option<i64>| b.map(|v| if is_increment { v + 1 } else { v - 1 });
+            Type::IntRange(shift(*min), shift(*max))
+        }
+        Type::Union(members) => members
+            .iter()
+            .map(|m| advance_incdec_type(m, is_increment))
+            .reduce(union_types)
+            .unwrap_or(Type::Mixed),
+        other => other.clone(),
+    }
+}
+
 fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
     match container_ty {
         Type::Array(_, inner) => *inner,
+        // A genuinely empty shape has zero possible keys, so a *dynamic*
+        // key read is unconditionally real PHP's own "undefined array
+        // key" warning, returning `null` - a real corpus false positive
+        // this fixes: `$counts = []; ... = ++$counts[$c];` (auto-
+        // vivifying a fresh dynamic key) used to read back bare `Mixed`
+        // instead of `Null`, so the increment arm's own `Null -> Int`
+        // transition (`advance_incdec_type`) never engaged, leaving the
+        // whole counter frozen at `Mixed` from its very first touch
+        // onward.
+        //
+        // Deliberately scoped to a *dynamic* key only (`key.is_none()`),
+        // not a literal one too - `preg_match`'s own by-ref `$matches`
+        // shape (`tests/preg_and_regex.rs`'s own `preg_match_required_
+        // group_is_accepted_as_a_string_parameter`) is a `Union` whose
+        // "no match" branch is exactly this same empty shape, and a
+        // *literal*-keyed read there (`$matches[1]`, unconditionally,
+        // with no narrowing) is this project's own deliberate, disclosed
+        // leniency: absorbing into `Mixed` rather than sharpening to
+        // `|null` and forcing every unnarrowed `$matches[N]` access to
+        // handle a null case most real callers never bother to. A
+        // literal key miss already has its own separate "key not found"
+        // diagnostic path (`check_shape_key_access`) regardless of what
+        // this function returns, so leaving that case as `Mixed` costs
+        // nothing.
+        Type::ArrayShape(fields) if fields.is_empty() && key.is_none() => Type::Null,
         Type::ArrayShape(fields) => key
             .and_then(|k| fields.into_iter().find(|(name, _, _)| name == k))
             .map(|(_, ty, _)| ty)

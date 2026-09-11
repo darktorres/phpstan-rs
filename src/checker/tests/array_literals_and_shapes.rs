@@ -153,6 +153,35 @@ fn building_an_array_progressively_via_index_assignment_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus find, traced while tracing a different bug
+// (`CategoryService::saveCategoriesOrder`'s own dynamically-keyed
+// counter): a genuinely empty shape has zero possible keys, so a
+// *dynamic*-key read is unconditionally real PHP's own "undefined array
+// key" warning, returning `null` - `index_result_type` used to answer
+// bare `Mixed` here regardless, discarding real, certain information.
+// Deliberately not extended to a *literal* key too (`preg_match`'s own
+// `$matches` shape relies on that case staying lenient - see
+// `index_result_type`'s own doc comment for why).
+#[test]
+fn reading_a_dynamic_key_from_a_freshly_empty_array_infers_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int $x */
+            function needsInt($x): void {}
+            function f(string $k): void {
+                $x = [];
+                needsInt($x[$k]);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type"
+                && x.message.contains("expects int, null given")),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn reading_a_key_never_assigned_after_building_an_array_progressively_is_still_flagged() {
     let d = diagnostics_for(

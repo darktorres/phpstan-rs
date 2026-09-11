@@ -569,6 +569,43 @@ fn incrementing_an_array_index_advances_its_own_tracked_value() {
     );
 }
 
+// Real corpus find, traced while tracing a *different* fix
+// (`CategoryService::saveCategoriesOrder`): `++$arr[$dynamicKey]` inside
+// a loop, feeding a `$datas[] = ['rank' => $rank]` array literal, kept
+// `rank` at `mixed` even after the fix above - two further, more subtle
+// gaps in the exact same neighborhood, both needed together:
+//
+// 1. Reading a fresh dynamic key from a still-empty `ArrayShape` (the
+//    counter's very first touch) resolved to bare `Mixed`, not `Null` -
+//    so the increment's own `Null -> Int` transition (see
+//    `advance_incdec_type`) never engaged in the first place.
+// 2. `checker::expr`'s own `ExprKind::Index` read arm in `check_expr`
+//    (used here via `self.check_expr(inner, ...)`) was a hand-maintained
+//    duplicate of the shared `index_result_type` with no `Type::Union`
+//    arm at all - so a container widened to `Null|Int` across a loop's
+//    own multi-pass fixed-point convergence (`converge_loop_body`) still
+//    fell to `Mixed` on every pass after the first.
+#[test]
+fn incrementing_a_dynamic_array_key_inside_a_loop_advances_precisely() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<int, array{rank: int}> $datas */
+            function needsRankedList(array $datas): void {}
+            /** @param int[] $items */
+            function f(array $items): void {
+                $counts = [];
+                $datas = [];
+                foreach ($items as $c) {
+                    $rank = ++$counts[$c];
+                    $datas[] = ['rank' => $rank];
+                }
+                needsRankedList($datas);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Phase 52 follow-up: division/modulo by a literal zero.
 
 #[test]
