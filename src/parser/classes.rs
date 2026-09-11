@@ -7,7 +7,13 @@ impl Parser {
 
     /// True when, starting right after `new`, the upcoming tokens are
     /// `[readonly|final|abstract]* class` - an anonymous class, as opposed
-    /// to `new SomeExistingClass(...)`.
+    /// to `new SomeExistingClass(...)`. Doesn't itself look past a leading
+    /// `#[Attr]` group - the call site in `primary.rs` checks for
+    /// `Token::AttributeStart` separately before falling back to this,
+    /// since a bracket-aware lookahead here (attribute arguments can
+    /// contain their own `[`/`]`, e.g. an array literal) would need real
+    /// nesting-depth tracking this function's simple linear scan doesn't
+    /// have.
     pub(crate) fn at_anonymous_class_start(&self) -> bool {
         let mut offset = 0;
         loop {
@@ -21,14 +27,21 @@ impl Parser {
         }
     }
 
-    /// `new [readonly] class(args) [extends X] [implements Y, ...] { ... }`.
-    /// Reuses parse_class_body for the `{ ... }` part, the same as a named
+    /// `new [#[Attr]...] [readonly] class(args) [extends X] [implements Y,
+    /// ...] { ... }`. Real PHP does allow an attribute group here (confirmed
+    /// directly against the PHP manual's own `new #[ExampleAttribute] class
+    /// () {}` example, and against a real corpus file that uses exactly this
+    /// shape) - attributes precede any `readonly`/`final`/`abstract`
+    /// modifier, the same order `parse_statement`'s own leading-attributes
+    /// handling already establishes for every other declaration. Reuses
+    /// parse_class_body for the `{ ... }` part, the same as a named
     /// class/interface/trait declaration.
     pub(crate) fn parse_anonymous_class_new(
         &mut self,
         start: Position,
     ) -> Result<Expr, ParseError> {
         let decl_start = self.current_pos();
+        let attrs = self.parse_attributes()?;
         let mut class_is_readonly = false;
         loop {
             match self.peek() {
@@ -115,11 +128,7 @@ impl Parser {
             trait_aliases,
             resolved_trait_conflicts,
             doc_comment: None,
-            // An anonymous class expression has no declaration position of
-            // its own for a `#[Attr]` group to precede - not valid PHP
-            // syntax at all (`new #[Attr] class {}` doesn't parse in real
-            // PHP either).
-            attrs: Vec::new(),
+            attrs,
             span: decl_span,
         };
 

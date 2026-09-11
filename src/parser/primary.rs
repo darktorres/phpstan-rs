@@ -134,7 +134,13 @@ impl Parser {
             }
             Token::Keyword(Keyword::New) => {
                 self.skip();
-                if self.at_anonymous_class_start() {
+                // A `#[Attr]` group can only start a `new` expression for
+                // an anonymous class (`new #[Attr] class {}`) - no other
+                // `new` shape (`new Foo(...)`, `new $var(...)`, `new
+                // (expr)(...)`) allows one here, so seeing one is
+                // unambiguous even before `at_anonymous_class_start`'s own
+                // (attribute-unaware) modifiers/`class` lookahead applies.
+                if self.check(&Token::AttributeStart) || self.at_anonymous_class_start() {
                     return self.parse_anonymous_class_new(start);
                 }
                 let class_expr = match self.peek() {

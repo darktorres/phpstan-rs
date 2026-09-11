@@ -300,6 +300,35 @@ fn anonymous_class_parses_with_interface_and_constructor_args() {
 }
 
 #[test]
+fn anonymous_class_with_a_leading_attribute_group_parses() {
+    // Regression test: real PHP allows `#[Attr]` between `new` and `class`
+    // for an anonymous class (confirmed against the PHP manual's own
+    // `new #[ExampleAttribute] class () {}` example, and against a real
+    // corpus file - Piwigo's tests/Unit/Template/RendererTest.php - that
+    // uses exactly this shape and used to fail to parse entirely).
+    let program = parse(
+        r#"<?php
+            $x = new #[TemplateAttr('a.latte')] class implements Countable {
+                public function count(): int { return 0; }
+            };
+        "#,
+    );
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected an assignment");
+    };
+    let ExprKind::NewAnonymousClass(decl, _args) = &rhs.kind else {
+        panic!("expected NewAnonymousClass");
+    };
+    assert_eq!(decl.attrs.len(), 1);
+    assert_eq!(decl.attrs[0].name, "TemplateAttr");
+    assert_eq!(decl.implements, vec!["Countable".to_string()]);
+}
+
+#[test]
 fn asymmetric_visibility_property_parses() {
     let program = parse(
         r#"<?php
