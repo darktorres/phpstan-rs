@@ -122,6 +122,17 @@ impl fmt::Display for Type {
             ),
             Type::FloatLiteral(n) => write!(f, "{n}"),
             Type::Accessory(kind) => write!(f, "{}", accessory_kind_name(*kind)),
+            Type::Conditional {
+                subject,
+                target,
+                if_true,
+                if_false,
+                negated,
+            } => write!(
+                f,
+                "(${subject} is {}{target} ? {if_true} : {if_false})",
+                if *negated { "not " } else { "" },
+            ),
         }
     }
 }

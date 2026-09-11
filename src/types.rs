@@ -138,6 +138,33 @@ pub enum Type {
     // `Accessory(_)` outside an `Intersection` never appears by
     // construction.
     Accessory(AccessoryKind),
+    // Phase 80 follow-up: `($subject is $target ? $if_true : $if_false)` -
+    // PHPDoc's own conditional-return-type syntax, real PHPStan's
+    // `ConditionalTypeNode` (`subjectType`/`targetType`/`if`/`else`/
+    // `negated`), lazily resolved once a real call site's own bound
+    // argument type for `subject` is known (`types::conditional::
+    // resolve_conditional`, wired into `Checker::infer_call_return_type`)
+    // rather than eagerly collapsed to `if_true|if_false` at parse time
+    // the way this project's own parser used to (discarding the
+    // condition entirely). `subject` is the raw parameter name with no
+    // leading `$` - only a bare `$param` subject is modeled (real
+    // PHPStan also allows a non-parameter type-expression subject, e.g.
+    // a template name, which this project doesn't represent); every
+    // consumer that can't resolve this variant (an unbound/`Mixed`
+    // subject, or one that leaks into a position `resolve_conditional`
+    // never runs against, e.g. a `@param`/`@var` tag) falls back to the
+    // same eager `Union([if_true, if_false])` this project's parser
+    // always produced before this variant existed - never `_ => false`/
+    // an unconditional non-match, which would be a false-positive-
+    // producing direction this project's own conventions avoid
+    // throughout.
+    Conditional {
+        subject: String,
+        target: Box<Type>,
+        if_true: Box<Type>,
+        if_false: Box<Type>,
+        negated: bool,
+    },
 }
 
 // Phase 54: mirrors real PHPStan's own `TemplateTypeVariance` - whether a

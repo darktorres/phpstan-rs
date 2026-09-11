@@ -479,23 +479,55 @@ fn dnf_type_group_resolves_to_a_real_intersection_inside_the_union() {
 // list<string> : list<UserMailNotification>)`,
 // NotificationByMailSender's own real shape) fell into the DNF-group
 // unwrap right above and got mangled into a nonsense, namespace-
-// qualified "class name" - this project can't evaluate the
-// condition per call site, so it takes the union of both branches
-// instead, matching this project's usual "can't evaluate, don't
-// guess which one" leniency.
+// qualified "class name". Phase 80 follow-up: a bare `$param` subject
+// now parses into a real, lazily-resolved `Type::Conditional` instead of
+// eagerly unioning both branches at parse time - `resolve_conditional`
+// (wired into `Checker::infer_call_return_type`) picks the real branch
+// per call site once the bound argument type is known.
 #[test]
-fn conditional_return_type_syntax_unions_both_branches() {
+fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
     let ty = parse_type_string("($action is 'send' ? list<string> : list<int>)");
+    let Type::Conditional {
+        subject,
+        target,
+        if_true,
+        if_false,
+        negated,
+    } = ty
+    else {
+        panic!("expected a real Conditional type, got {ty:?}");
+    };
+    assert_eq!(subject, "action");
+    assert_eq!(*target, Type::StringLiteral("send".to_string()));
+    assert_eq!(*if_true, parse_type_string("list<string>"));
+    assert_eq!(*if_false, parse_type_string("list<int>"));
+    assert!(!negated);
+}
+
+#[test]
+fn conditional_return_type_syntax_with_is_not_sets_negated() {
+    let ty = parse_type_string("($action is not 'send' ? list<string> : list<int>)");
+    let Type::Conditional {
+        subject, negated, ..
+    } = ty
+    else {
+        panic!("expected a real Conditional type, got {ty:?}");
+    };
+    assert_eq!(subject, "action");
+    assert!(negated);
+}
+
+// Real PHPStan also allows a non-parameter type-expression subject (e.g.
+// a template name) - not modeled here, so this project falls back to the
+// same eager "union both branches" leniency it always used, rather than
+// guessing at a shape it can't represent.
+#[test]
+fn conditional_return_type_syntax_with_a_non_parameter_subject_falls_back_to_a_union() {
+    let ty = parse_type_string("(T is 'send' ? list<string> : list<int>)");
     let Type::Union(members) = ty else {
         panic!("expected a union of both branches, got {ty:?}");
     };
     assert_eq!(members.len(), 2);
-}
-
-#[test]
-fn conditional_return_type_syntax_collapses_identical_branches() {
-    let ty = parse_type_string("($action is 'send' ? list<string> : list<string>)");
-    assert_eq!(ty, parse_type_string("list<string>"));
 }
 
 // A docblock-parsed `list<int>` builds its key as a literal `Type::Int`

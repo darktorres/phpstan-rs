@@ -206,19 +206,41 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     let [cond, branches] = q_parts.as_slice() else {
         return None;
     };
-    if !cond.contains(" is ") {
-        return None;
-    }
+    // `" is not "` must be tried before `" is "` - it's a strict superset
+    // textually (every `" is not "` occurrence also contains `" is "`),
+    // so checking the shorter needle first would always win and silently
+    // drop the negation.
+    let (subject_raw, target_raw, negated) = if let Some(idx) = cond.find(" is not ") {
+        (&cond[..idx], &cond[idx + " is not ".len()..], true)
+    } else {
+        let idx = cond.find(" is ")?;
+        (&cond[..idx], &cond[idx + " is ".len()..], false)
+    };
     let c_parts = split_top_level(branches, ':');
     let [true_branch, false_branch] = c_parts.as_slice() else {
         return None;
     };
-    let true_ty = parse_type_string(true_branch);
-    let false_ty = parse_type_string(false_branch);
-    Some(if true_ty == false_ty {
-        true_ty
-    } else {
-        Type::Union(vec![true_ty, false_ty])
+    let if_true = parse_type_string(true_branch);
+    let if_false = parse_type_string(false_branch);
+    // Only a bare `$param` subject is modeled (real PHPStan also allows a
+    // non-parameter type-expression subject, e.g. a template name, which
+    // this project doesn't represent) - fall back to the same eager
+    // union this parser always produced before `Type::Conditional`
+    // existed, the correct "can't resolve, don't guess" default for that
+    // unmodeled shape.
+    let Some(subject) = subject_raw.trim().strip_prefix('$') else {
+        return Some(if if_true == if_false {
+            if_true
+        } else {
+            Type::Union(vec![if_true, if_false])
+        });
+    };
+    Some(Type::Conditional {
+        subject: subject.to_string(),
+        target: Box::new(parse_type_string(target_raw)),
+        if_true: Box::new(if_true),
+        if_false: Box::new(if_false),
+        negated,
     })
 }
 
