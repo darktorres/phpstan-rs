@@ -127,4 +127,21 @@ impl DuplicateFunctionSites {
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Vec<FnDeclSite>)> {
         self.sites.iter()
     }
+
+    /// Absorbs `other`'s own sites into `self` - correct regardless of
+    /// which file's own per-file `DuplicateFunctionSites` `self`/`other`
+    /// each hold, since every site already carries its own `path` and
+    /// `record`'s own append-only `Vec` per name never depends on
+    /// insertion order (unlike `Registry::insert_built_decl`'s FQN-
+    /// collision resolution - there is no such collision here, every
+    /// unconditional declaration is kept, not just a winner). Lets
+    /// `check_project.rs`'s parallel parse stage build one
+    /// `DuplicateFunctionSites` per file concurrently and merge them all
+    /// sequentially afterward, instead of calling `index` once per file
+    /// inside the sequential insert loop.
+    pub(crate) fn merge(&mut self, other: DuplicateFunctionSites) {
+        for (name, sites) in other.sites {
+            self.sites.entry(name).or_default().extend(sites);
+        }
+    }
 }

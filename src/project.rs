@@ -308,7 +308,7 @@ impl Project {
         source: &str,
         analyzed: bool,
     ) -> Result<(), ParseError> {
-        let parsed = parse_file(source)?;
+        let parsed = parse_file(&path, source)?;
         self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
         Ok(())
     }
@@ -339,6 +339,7 @@ impl Project {
             ignore_lines,
             ignore_identifiers,
             built_decls,
+            duplicate_fn_sites,
         } = parsed;
         for decl in built_decls {
             self.registry.insert_built_decl(decl, analyzed);
@@ -347,8 +348,7 @@ impl Project {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), &path);
         }
-        self.duplicate_fn_sites
-            .index(&ast, &mut NameContext::default(), &path, false);
+        self.duplicate_fn_sites.merge(duplicate_fn_sites);
         register_references(&mut self.dependents, &path, &references);
         self.files.insert(
             path,
@@ -660,6 +660,15 @@ pub struct ParsedFile {
     // work (confirmed the majority of `Registry::index`'s own cost) runs
     // here, in parallel, rather than in the sequential insert loop.
     built_decls: Vec<crate::registry::BuiltDecl>,
+    // Phase (parallelize insert+finish_loading): this file's own
+    // top-level function declaration sites, already built (see
+    // `DuplicateFunctionSites::merge`'s own doc comment) - `insert_
+    // parsed_file` merges these into the project-wide table instead of
+    // re-walking `ast` via `DuplicateFunctionSites::index`, moving the
+    // per-function type-hint cloning `record` does into this already-
+    // parallel step. Unlike `built_decls`, this needs `path` (baked into
+    // every `FnDeclSite`), which is why `parse_file` below takes one now.
+    duplicate_fn_sites: DuplicateFunctionSites,
 }
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
@@ -669,20 +678,27 @@ pub struct ParsedFile {
 /// panics on ordinary malformed syntax - see `main/check.rs`'s identical
 /// note), so a caller parsing many files in parallel should still wrap
 /// each call in `catch_unwind`, the same precaution `check.rs`'s own
-/// lex+parse worker threads already take.
-pub fn parse_file(source: &str) -> Result<ParsedFile, ParseError> {
+/// lex+parse worker threads already take. `path` is used only to tag
+/// `duplicate_fn_sites`'s own records (see `ParsedFile`'s doc comment on
+/// that field) - never read to make any decision, so it's fine that a
+/// caller building many `ParsedFile`s concurrently passes a different
+/// `path` to each call with no coordination needed between them.
+pub fn parse_file(path: &Path, source: &str) -> Result<ParsedFile, ParseError> {
     let ast = parse(source)?;
     let (functions, classes) = declared_names(&ast);
     let references = deps::referenced_names(&ast);
     let ignore_lines = ignore_comments::ignored_lines(source);
     let ignore_identifiers = ignore_comments::ignored_identifiers(source);
     let built_decls = crate::registry::build_declarations(&ast);
+    let mut duplicate_fn_sites = DuplicateFunctionSites::default();
+    duplicate_fn_sites.index(&ast, &mut NameContext::default(), path, false);
     Ok(ParsedFile {
         ast,
         functions,
         classes,
         references,
         built_decls,
+        duplicate_fn_sites,
         ignore_lines,
         ignore_identifiers,
     })

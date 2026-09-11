@@ -51,7 +51,7 @@ fn apply_level_filter(
 fn read_and_parse_file(path: &Path) -> Option<(String, project::ParsedFile)> {
     let bytes = fs::read(path).ok()?;
     let source = String::from_utf8_lossy(&bytes).into_owned();
-    let parsed = std::panic::catch_unwind(|| project::parse_file(&source))
+    let parsed = std::panic::catch_unwind(|| project::parse_file(path, &source))
         .ok()?
         .ok()?;
     Some((source, parsed))
