@@ -1727,10 +1727,10 @@ impl<'a> Checker<'a> {
             ExprKind::New(class_expr, args) => {
                 // `new Foo()` never carries known type arguments itself -
                 // real PHP's constructor syntax has no way to write
-                // `new Foo<Bar>()` at all, and inferring them from the
-                // constructor's own arguments (the way real PHPStan often
-                // does) isn't attempted here, so this is always `Object`
-                // with an empty arg list.
+                // `new Foo<Bar>()` at all - but `infer_expr`'s own `New` arm
+                // (Phase 54/77 follow-up) binds them from the constructor's
+                // own arguments instead, the way real PHPStan does, when
+                // `Foo` is itself generic (`@template` on the class).
                 let new_ty = self.infer_expr(e, locals);
                 let resolved_class = match &new_ty {
                     Type::Object(class, _) => Some(class.clone()),
@@ -3256,7 +3256,7 @@ impl<'a> Checker<'a> {
             // parser: they're indistinguishable from any other identifier),
             // so a literal `ExprKind::Name("self")` has to be special-cased
             // here rather than showing up as an Object of that name.
-            ExprKind::New(class_expr, _) => match &class_expr.kind {
+            ExprKind::New(class_expr, args) => match &class_expr.kind {
                 ExprKind::Name(name) => match name.as_str() {
                     "self" | "parent" | "static" => {
                         let raw = match name.as_str() {
@@ -3269,7 +3269,81 @@ impl<'a> Checker<'a> {
                             None => raw,
                         }
                     }
-                    _ => Type::Object(self.name_ctx.resolve(name), Vec::new()),
+                    // Phase 54/77 follow-up: `new ReflectionClass($view)`-
+                    // shaped constructor-argument-driven class-level
+                    // generic inference - the same `bind_template_param`/
+                    // `TemplateBindings` primitive `infer_call_return_type`
+                    // already uses for ordinary call-site inference, just
+                    // binding against a constructor's own params instead of
+                    // a function's. Rebind to the registry's own canonical-
+                    // case spelling first (mirroring `check_expr`'s own
+                    // Phase 48.1 fix just below in this file) since `lookup_
+                    // method`'s ancestor walk needs exact case.
+                    _ => {
+                        let resolved_name = self.name_ctx.resolve(name);
+                        let canonical = self
+                            .registry
+                            .lookup_class(&resolved_name)
+                            .map(|(canonical, _)| canonical.to_string())
+                            .unwrap_or(resolved_name);
+                        let templates = self
+                            .registry
+                            .classes
+                            .get(&canonical)
+                            .map(|info| info.templates.as_slice())
+                            .unwrap_or(&[]);
+                        if templates.is_empty() {
+                            Type::Object(canonical, Vec::new())
+                        } else {
+                            let mut bindings: TemplateBindings = TemplateBindings::default();
+                            if let Some(sig) =
+                                self.registry.lookup_method(&canonical, "__construct")
+                            {
+                                let resolved_args = resolve_call_args(args, &sig.params);
+                                for (param, slot) in sig.params.iter().zip(resolved_args.iter()) {
+                                    let Some(arg) = slot else { continue };
+                                    let arg_ty = self.infer_expr(arg, locals);
+                                    types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
+                                }
+                            }
+                            // A template the constructor's own arguments
+                            // never bound is left *erased* (trimmed off the
+                            // trailing end, same as a real bare `new Box()`
+                            // reference with fewer type arguments than
+                            // declared) rather than eagerly filled with
+                            // `Mixed` - `class_template_bindings_rec` (Phase
+                            // 54) zips `templates` against this very args
+                            // list, and `substitute_scoped`'s own `@template
+                            // T = Default` fallback only ever triggers for a
+                            // name genuinely *absent* from that zip, not one
+                            // explicitly bound to `Mixed`. Regression found
+                            // via this project's own existing defaulting
+                            // test (`an_erased_generic_with_a_declared_
+                            // default_resolves_to_it_instead_of_mixed`): a
+                            // no-arg constructor was filling `[Mixed]`
+                            // in - defeating that class's own declared
+                            // default entirely. A template bound in the
+                            // *middle* with a later one still unbound has no
+                            // such "erase the tail" option (PHP's own
+                            // type-argument syntax can't skip a middle
+                            // position either), so it does still fall back
+                            // to `Mixed` there - a real, smaller-scope cut
+                            // (`ClassInfo` only persists template *names*
+                            // here, not the full `TemplateParam` metadata
+                            // `substitute_template`'s own richer fallback
+                            // needs), not an oversight.
+                            let last_bound = templates
+                                .iter()
+                                .rposition(|t| bindings.contains_key(t))
+                                .map(|i| i + 1)
+                                .unwrap_or(0);
+                            let bound_args = templates[..last_bound]
+                                .iter()
+                                .map(|t| bindings.get(t).cloned().unwrap_or(Type::Mixed))
+                                .collect();
+                            Type::Object(canonical, bound_args)
+                        }
+                    }
                 },
                 _ => Type::Mixed,
             },

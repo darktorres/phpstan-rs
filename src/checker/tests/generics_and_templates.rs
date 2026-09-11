@@ -2574,3 +2574,60 @@ fn two_independent_root_templates_forwarded_to_the_same_ancestor_slot_are_flagge
         "got: {d:?}"
     );
 }
+
+// Phase 54/77 follow-up: constructor-argument-driven class-level generic
+// inference - `new Box(5)` binds `Box`'s own `@template T` from the
+// constructor argument's inferred type, the way real PHPStan's own
+// NewHandler/ConstructorClassTemplateTraverser does.
+
+#[test]
+fn new_binds_a_generic_class_s_own_template_from_a_constructor_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @template T */
+            class Box {
+                /** @param T $value */
+                public function __construct(public $value) {}
+            }
+            assertType('Box<5>', new Box(5));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn new_leaves_a_wholly_unbound_template_erased_rather_than_forcing_mixed() {
+    // A no-arg constructor binds nothing at all - the result must stay a
+    // bare, erased `Box` (matching a real `new Box()` reference with no
+    // type arguments), not an explicit `Box<mixed>`: `class_template_
+    // bindings_rec`/`substitute_scoped`'s own `@template T = Default`
+    // fallback only triggers for a template genuinely *absent* from the
+    // bindings map, not one bound to `Mixed` outright - see the sibling
+    // test just below for the regression this guards.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @template T */
+            class Box {
+                public function __construct() {}
+            }
+            assertType('Box', new Box());
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn new_on_a_non_generic_class_is_unaffected_by_constructor_argument_binding() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Plain {
+                public function __construct(public int $x) {}
+            }
+            assertType('Plain', new Plain(5));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
