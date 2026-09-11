@@ -81,6 +81,7 @@ impl Parser {
             consts,
             uses,
             uses_spans,
+            uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
         ) = self.parse_class_body(class_is_readonly)?;
@@ -110,6 +111,7 @@ impl Parser {
             consts,
             uses,
             uses_spans,
+            uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
             doc_comment: None,
@@ -138,6 +140,7 @@ impl Parser {
             Vec<ClassConst>,
             Vec<String>,
             Vec<Span>,
+            Vec<Option<String>>,
             Vec<TraitAlias>,
             Vec<String>,
         ),
@@ -149,6 +152,7 @@ impl Parser {
         let mut consts = Vec::new();
         let mut uses = Vec::new();
         let mut uses_spans = Vec::new();
+        let mut uses_doc_comments = Vec::new();
         let mut trait_aliases = Vec::new();
         let mut resolved_trait_conflicts = Vec::new();
 
@@ -166,10 +170,12 @@ impl Parser {
                 let (name, span) = self.parse_qualified_name_spanned();
                 uses.push(name);
                 uses_spans.push(span);
+                uses_doc_comments.push(doc.clone());
                 while self.eat(&Token::Comma) {
                     let (name, span) = self.parse_qualified_name_spanned();
                     uses.push(name);
                     uses_spans.push(span);
+                    uses_doc_comments.push(doc.clone());
                 }
                 if self.check(&Token::LBrace) {
                     let (aliases, resolved) = self.parse_trait_adaptations()?;
@@ -424,6 +430,7 @@ impl Parser {
             consts,
             uses,
             uses_spans,
+            uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
         ))
@@ -586,6 +593,7 @@ impl Parser {
             consts,
             uses,
             uses_spans,
+            uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
         ) = self.parse_class_body(class_is_readonly)?;
@@ -606,6 +614,7 @@ impl Parser {
             consts,
             uses,
             uses_spans,
+            uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
             doc_comment,

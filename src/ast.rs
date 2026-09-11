@@ -418,6 +418,18 @@ pub struct ClassDecl {
     // `use TraitA, TraitB;` inside the class body.
     pub uses: Vec<String>,
     pub uses_spans: Vec<Span>,
+    // The doc comment of the `use` *statement* each `uses` entry came from
+    // (not the class's own, separate `doc_comment` below) - same index,
+    // same shape as `uses_spans`. All names from one `use A, B;` statement
+    // share the same entry (real PHP allows only one doc comment per
+    // statement, however many trait names it lists). Needed for `@use
+    // Trait<Args>` (Phase 54): real PHPStan resolves that tag from the
+    // `TraitUse` statement's own doc comment specifically, confirmed
+    // directly against real corpus usage (`vendor/phpstan-src`'s own
+    // `TemplateObjectType`: `/** @use TemplateTypeTrait<ObjectType> */`
+    // sits directly above `use TemplateTypeTrait;`, not on the class's own
+    // separate top-of-class docblock).
+    pub uses_doc_comments: Vec<Option<String>>,
     // `use A, B { B::hello as helloB; }` - each `as`-clause that
     // introduces a new name for an existing trait method (a
     // visibility-only `as public;` with no new name isn't captured, since
@@ -471,6 +483,8 @@ pub struct EnumDecl {
     pub consts: Vec<ClassConst>,
     pub uses: Vec<String>,
     pub uses_spans: Vec<Span>,
+    // See `ClassDecl::uses_doc_comments`'s own doc comment.
+    pub uses_doc_comments: Vec<Option<String>>,
     pub trait_aliases: Vec<TraitAlias>,
     pub resolved_trait_conflicts: Vec<String>,
     // The enum's own `/** ... */` doc comment, if any (Phase 66) - needed

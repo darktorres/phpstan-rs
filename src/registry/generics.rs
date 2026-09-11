@@ -19,7 +19,7 @@ impl Registry {
     /// generic class. Phase 54: hoisted from `checker::generics` (pure
     /// `self.classes` data, no checker-specific state) alongside
     /// `class_template_bindings`/`is_assignable`, its two real consumers.
-    fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
+    pub(crate) fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
         let info = self.classes.get(class)?;
         let name = info.templates.get(index)?;
         Some(if info.covariant_templates.contains(name) {

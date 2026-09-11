@@ -25,6 +25,27 @@ fn parses_multiple_implements_tags() {
 }
 
 #[test]
+fn parses_a_use_tag_with_generic_args() {
+    let block = parse("/** @use TemplateTypeTrait<ObjectType> */");
+    assert_eq!(
+        block.uses,
+        vec!["TemplateTypeTrait<ObjectType>".to_string()]
+    );
+}
+
+#[test]
+fn parses_a_template_use_tag_as_a_synonym_for_use() {
+    let block = parse("/** @template-use Repo<int> */");
+    assert_eq!(block.uses, vec!["Repo<int>".to_string()]);
+}
+
+#[test]
+fn parses_a_phpstan_use_tag_as_a_synonym_for_use() {
+    let block = parse("/** @phpstan-use Repo<int> */");
+    assert_eq!(block.uses, vec!["Repo<int>".to_string()]);
+}
+
+#[test]
 fn generic_type_with_comma_and_space_is_not_truncated() {
     let block = parse("/** @param array<int, User> $users */");
     assert_eq!(

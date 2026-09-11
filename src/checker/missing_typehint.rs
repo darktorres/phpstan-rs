@@ -70,7 +70,7 @@ const MISSING_ITERABLE_VALUE_TYPE_TIP: &str =
 /// extremely common real-code shape would *also* get flagged as a
 /// non-generic use of a generic class, doubling up on the exact same
 /// underlying "no element type given" finding under a different message.
-const ITERABLE_GENERIC_CLASS_NAMES: [&str; 4] =
+pub(crate) const ITERABLE_GENERIC_CLASS_NAMES: [&str; 4] =
     ["Traversable", "Iterator", "IteratorAggregate", "Generator"];
 
 /// Method names PHP (and real PHPStan's own `PhpMethodReflection::

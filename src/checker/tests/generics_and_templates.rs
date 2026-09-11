@@ -1623,6 +1623,126 @@ fn a_call_site_variance_marker_prints_legibly_in_a_diagnostic_message() {
     );
 }
 
+// Phase 54 follow-up: `generics.callSiteVarianceConflict`/
+// `.callSiteVarianceRedundant` - `check_call_site_variance`'s own port of
+// `GenericObjectTypeCheck`'s call-site-variance half.
+
+#[test]
+fn a_call_site_covariant_marker_matching_the_class_s_own_covariant_template_is_redundant() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template-covariant T */
+            class Collection {}
+            class Animal {}
+            /** @param Collection<covariant Animal> $c */
+            function f($c) {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "generics.callSiteVarianceRedundant"
+                && x.message.contains("Collection<covariant Animal>")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_site_contravariant_marker_matching_the_class_s_own_contravariant_template_is_redundant() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template-contravariant T */
+            class Collection {}
+            class Animal {}
+            /** @param Collection<contravariant Animal> $c */
+            function f($c) {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "generics.callSiteVarianceRedundant"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_site_contravariant_marker_on_a_covariant_declared_template_conflicts() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template-covariant T */
+            class Collection {}
+            class Animal {}
+            /** @param Collection<contravariant Animal> $c */
+            function f($c) {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "generics.callSiteVarianceConflict"
+                && x.message.contains("Collection<contravariant Animal>")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_site_covariant_marker_on_a_contravariant_declared_template_conflicts() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template-contravariant T */
+            class Collection {}
+            class Animal {}
+            /** @param Collection<covariant Animal> $c */
+            function f($c) {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "generics.callSiteVarianceConflict"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_site_variance_marker_on_a_plain_invariant_template_is_never_flagged_as_conflicting_or_redundant()
+ {
+    // The intended call-site-variance escape hatch: overriding a plain
+    // invariant `@template` is exactly what this feature exists for.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            class Collection {}
+            class Animal {}
+            /** @param Collection<covariant Animal> $c */
+            function f($c) {}
+            /** @param Collection<contravariant Animal> $g */
+            function g($g) {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.callSiteVarianceConflict"
+                || x.identifier == "generics.callSiteVarianceRedundant"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_call_site_bivariant_marker_is_never_flagged_as_conflicting_or_redundant() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template-covariant T */
+            class Collection {}
+            /** @param Collection<*> $c */
+            function f($c) {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.callSiteVarianceConflict"
+                || x.identifier == "generics.callSiteVarianceRedundant"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_call_site_variance_marker_inside_a_declared_parameter_overrides_declaration_soundness_checking()
  {
@@ -1889,6 +2009,70 @@ fn an_interface_extending_two_generic_parents_at_once_is_never_flagged_for_arity
     );
 }
 
+// Phase 54 follow-up: `check_generic_reference_arity` is now called
+// pervasively from `check_generic_bounds_and_arity` itself, not just
+// `check_ancestor_generic_bounds`'s own dedicated `extends`/`implements`
+// call site - matching real PHPStan's own `GenericObjectTypeCheck`, run
+// from `IncompatiblePhpDocTypeCheck` at every declared generic-type
+// position (a property type, a param/return hint, ...).
+
+#[test]
+fn a_property_type_with_too_many_generic_arguments_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            class Collection {}
+            class Holder {
+                /** @var Collection<int, string> */
+                public $c;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.moreTypes"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_param_type_with_too_few_generic_arguments_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template K
+             *   @template V
+             */
+            class Map {}
+            /** @param Map<string> $m */
+            function f($m) {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.lessTypes"),
+        "got: {d:?}"
+    );
+}
+
+// The exact-count param case must stay quiet - this is the same
+// "extra false-positive risk from making the check pervasive" concern
+// `extending_with_the_exact_declared_arity_is_never_flagged` already
+// covers for `extends`, applied to an ordinary param position instead.
+#[test]
+fn a_param_type_with_the_exact_declared_arity_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            class Collection {}
+            /** @param Collection<int> $c */
+            function f($c) {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // Phase 48.D: `method.templateTypeNotInParameter` - a function/method's
 // own `@template` referenced only in its return type (or nowhere at all)
 // can never be inferred at a call site, since inference only ever reads
@@ -1998,6 +2182,225 @@ fn a_class_level_template_is_never_flagged_by_the_method_level_check() {
     assert!(
         !d.iter()
             .any(|x| x.identifier == "method.templateTypeNotInParameter"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 54: `@use Trait<Arg, ...>` - real PHPStan resolves this tag from
+// the `use` *statement*'s own doc comment (confirmed directly,
+// `vendor/phpstan-src`'s own `TemplateObjectType`: `/** @use
+// TemplateTypeTrait<ObjectType> */` sits right above `use
+// TemplateTypeTrait;`, not the class's own separate top-level docblock) -
+// `ClassInfo::uses_args` mirrors `implements_args`, feeding the identical
+// `check_generic_bounds`/`check_generic_reference_arity` pervasive
+// machinery `check_ancestor_generic_bounds` already runs for `extends`/
+// `implements`.
+
+#[test]
+fn a_use_tag_with_too_many_generic_arguments_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            trait Repo {}
+            class UserRepo {
+                /** @use Repo<int, string> */
+                use Repo;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.moreTypes"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_use_tag_with_too_few_generic_arguments_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template K
+             *   @template V
+             */
+            trait Repo {}
+            class UserRepo {
+                /** @use Repo<int> */
+                use Repo;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.lessTypes"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_use_tag_with_the_exact_declared_arity_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            trait Repo {}
+            class UserRepo {
+                /** @use Repo<int> */
+                use Repo;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_use_tag_violating_its_trait_s_own_template_bound_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Shape {}
+            class Square implements Shape {}
+            class NotAShape {}
+            /** @template T of Shape */
+            trait Repo {}
+            class UserRepo {
+                /** @use Repo<NotAShape> */
+                use Repo;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.templateBound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_use_tag_on_the_class_s_own_docblock_instead_of_the_use_statement_is_never_applied() {
+    // Real PHPStan resolves `@use` from the `use` statement's own doc
+    // comment specifically, not the class's separate top-level one - a
+    // tag misplaced on the class docblock names a trait this class
+    // doesn't otherwise use at all, so nothing should be checked against
+    // it.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            trait Repo {}
+            /** @use Repo<int, string, bool> */
+            class UserRepo {
+                use Repo;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn two_separate_use_statements_each_keep_their_own_use_tag_s_arguments() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            trait First {}
+            /** @template K
+             *   @template V
+             */
+            trait Second {}
+            class Combined {
+                /** @use First<int, string> */
+                use First;
+                /** @use Second<string> */
+                use Second;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.moreTypes"),
+        "expected First<int, string> (1 template, 2 args) to be flagged, got: {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.lessTypes"),
+        "expected Second<string> (2 templates, 1 arg) to be flagged, got: {d:?}"
+    );
+}
+
+// Phase 54 follow-up regression: `Traversable`/`Iterator`/
+// `IteratorAggregate`/`Generator` are the one real, hardcoded exception to
+// pervasive arity checking - `PhpDoc\TypeNodeResolver::
+// resolveGenericTypeNode` (`vendor/phpstan-src`) pads a short-form
+// reference to these four names with `mixed` before any arity check ever
+// sees it. Verified directly against a real, installed `phpstan/phpstan`
+// (see this test module's own history) - `Generator<int, string>` (2 of
+// its real 4 templates) must never be flagged, but `Generator<int, string,
+// bool>` (3 of 4 - not one of the two real padded shapes) still is.
+
+#[test]
+fn a_single_argument_generator_reference_is_never_flagged_for_arity() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return \Generator<string> */
+            function f(): \Generator {
+                yield 'x';
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_two_argument_generator_reference_is_never_flagged_for_arity() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return \Generator<int, string> */
+            function f(): \Generator {
+                yield 'x';
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_three_argument_generator_reference_is_still_flagged_for_arity() {
+    // Not one of the two hardcoded padded shapes (1 or 2 given args) -
+    // falls through to ordinary arity checking against Generator's real 4
+    // templates, same as a real, installed `phpstan/phpstan` (confirmed
+    // directly).
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return \Generator<int, string, bool> */
+            function f(): \Generator {
+                yield 'x';
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.lessTypes"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_single_argument_traversable_reference_is_never_flagged_for_arity() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param \Traversable<int> $t */
+            function f($t): void {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.moreTypes" || x.identifier == "generics.lessTypes"),
         "unexpected diagnostics: {d:?}"
     );
 }

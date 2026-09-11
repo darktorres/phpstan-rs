@@ -64,6 +64,10 @@ pub struct DocBlock {
     // kept (each one names which interface it applies to via its own
     // leading type name).
     pub implements: Vec<String>,
+    // `@use Trait<Arg, ...>` (Phase 54) - same idea as `implements`, but
+    // for a generic trait named in this class's own `use` statement(s). A
+    // class can `use` more than one trait at once, so every tag is kept.
+    pub uses: Vec<String>,
     // `@property`/`@property-read`/`@property-write Type $name` (Phase
     // 13 Finding D) - magic properties, typically backed by `__get`/
     // `__set`, declared on a class's own docblock rather than a real
@@ -684,6 +688,20 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
                     block.implements.push(ty.to_string());
+                }
+            }
+            // Real PHPStan-recognized synonym for `@use`, mirroring
+            // `@extends`/`@template-extends` and `@implements`/
+            // `@template-implements` just above (`PhpDocNodeResolver::
+            // resolveUsesTags`, confirmed directly, checks the identical
+            // `['@use', '@template-use', '@phpstan-use']` trio - the third,
+            // `@phpstan-use`, needs no separate arm here: `parse`'s own
+            // two-pass loop above already strips a leading `phpstan-` off
+            // every tag before this match ever sees it).
+            "use" | "template-use" => {
+                let ty = take_type_token(rest);
+                if !ty.is_empty() {
+                    block.uses.push(ty.to_string());
                 }
             }
             "require-extends" => {

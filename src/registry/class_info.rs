@@ -234,6 +234,17 @@ pub struct ClassInfo {
     // more than one at once) - the key is resolved to the same
     // fully-qualified name `implements` itself uses, so the two agree.
     pub implements_args: HashMap<String, Vec<Type>>,
+    // Same idea again, but for a generic trait named in an `@use
+    // Trait<Arg, ...>` tag (Phase 54) - keyed the same way as
+    // `implements_args`. Unlike `extends`/`implements`, which are both
+    // written on the class's own top-level docblock, real PHPStan
+    // resolves `@use` from the `use` *statement*'s own doc comment
+    // (confirmed directly, `vendor/phpstan-src`'s own `TemplateObjectType`:
+    // `/** @use TemplateTypeTrait<ObjectType> */` sits right above `use
+    // TemplateTypeTrait;`, not the class's separate `/** @api */` docblock
+    // above it) - see `ClassDecl::uses_doc_comments`'s own doc comment for
+    // where this project captures that.
+    pub uses_args: HashMap<String, Vec<Type>>,
     // `@template T of Bound` (Phase 10.5's bound-enforcement half) - the
     // resolved bound for whichever of `templates` above declared one.
     // Checked by `checker::check_generic_bounds` wherever this class is
@@ -807,6 +818,26 @@ impl ClassInfo {
                 _ => None,
             })
             .collect();
+        // `@use Trait<Arg, ...>` - unlike `extends`/`implements`, lives on
+        // the `use` *statement*'s own doc comment, not `c.doc_comment`
+        // (`class_doc` above) - see `ClassInfo::uses_args`'s own doc
+        // comment. `uses_doc_comments` repeats the identical string once
+        // per trait name in a multi-name `use A, B;` statement, so
+        // dedup(collect into a `HashSet` first) before re-parsing each
+        // distinct doc comment only once.
+        let uses_args: HashMap<String, Vec<Type>> = c
+            .uses_doc_comments
+            .iter()
+            .filter_map(|d| d.as_deref())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .map(docblock::parse)
+            .flat_map(|d| d.uses)
+            .filter_map(|raw| match resolve_generic_tag(&raw) {
+                Type::Object(name, args) => Some((name, args)),
+                _ => None,
+            })
+            .collect();
         let template_bounds: HashMap<String, Type> = class_doc
             .as_ref()
             .map(|d| {
@@ -914,6 +945,7 @@ impl ClassInfo {
             templates,
             extends_args,
             implements_args,
+            uses_args,
             template_bounds,
             template_defaults,
             covariant_templates,
@@ -958,6 +990,25 @@ impl ClassInfo {
             .flat_map(|d| &d.implements)
             .filter_map(
                 |raw| match resolve_names_in_type(types::parse_type_string(raw), ctx) {
+                    Type::Object(name, args) => Some((name, args)),
+                    _ => None,
+                },
+            )
+            .collect();
+        // See `ClassInfo::from_decl`'s own identical `uses_args`
+        // construction - the reasoning (`@use` lives on the `use`
+        // statement's own doc comment) is unrelated to whether the
+        // enclosing declaration is a class or an enum.
+        let uses_args: HashMap<String, Vec<Type>> = e
+            .uses_doc_comments
+            .iter()
+            .filter_map(|d| d.as_deref())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .map(docblock::parse)
+            .flat_map(|d| d.uses)
+            .filter_map(
+                |raw| match resolve_names_in_type(types::parse_type_string(&raw), ctx) {
                     Type::Object(name, args) => Some((name, args)),
                     _ => None,
                 },
@@ -1328,6 +1379,7 @@ impl ClassInfo {
             templates: Vec::new(),
             extends_args: Vec::new(),
             implements_args,
+            uses_args,
             template_bounds: HashMap::new(),
             template_defaults: HashMap::new(),
             covariant_templates: HashSet::new(),
@@ -1427,6 +1479,7 @@ impl ClassInfo {
         self.template_bounds.extend(other.template_bounds);
         self.template_defaults.extend(other.template_defaults);
         self.implements_args.extend(other.implements_args);
+        self.uses_args.extend(other.uses_args);
         // Same "a tag present on either declaration sticks" reasoning as
         // the `HashSet::extend` calls above - a stub override that
         // doesn't repeat `@api` on its own docblock must not un-mark a

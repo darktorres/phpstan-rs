@@ -853,7 +853,9 @@ pub(crate) use expr::{
     build_matched_shape, int_range_bounds, normalize_int_range, unwrap_grouping,
 };
 pub(crate) use internal_usage::class_type_word;
-pub(crate) use missing_typehint::has_explicit_mixed_nested_somewhere;
+pub(crate) use missing_typehint::{
+    ITERABLE_GENERIC_CLASS_NAMES, has_explicit_mixed_nested_somewhere,
+};
 pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
     ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER, ATTRIBUTE_TARGET_PROPERTY,
