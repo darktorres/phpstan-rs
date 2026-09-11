@@ -46,14 +46,14 @@ impl Parser {
                 if matches!(self.peek(), Token::Keyword(Keyword::Final)) {
                     hook_final = true;
                 }
-                self.advance();
+                self.skip();
             }
             // `&get => ...` - the hook returns its value by reference.
             // Aliasing isn't modeled anywhere in this checker, so it's
             // just consumed.
             self.eat(&Token::Amp);
             let is_set = matches!(self.peek(), Token::Identifier(s) if s == "set");
-            self.advance(); // `get` or `set`
+            self.skip(); // `get` or `set`
 
             let param = if is_set && self.eat(&Token::LParen) {
                 let param_start = self.previous_end();

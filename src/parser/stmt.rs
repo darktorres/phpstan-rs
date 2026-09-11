@@ -23,18 +23,20 @@ impl Parser {
         // doc comment for its own `@param`/`@return` tags further down is
         // unaffected, since the peek doesn't remove the map entry.
         let leading_doc_comment = self.doc_comments.get(&self.pos).cloned();
-        let mut stmt = match self.peek().clone() {
-            Token::InlineHtml(s) => {
-                self.advance();
+        let mut stmt = match self.peek() {
+            Token::InlineHtml(_) => {
+                let Token::InlineHtml(s) = self.take_token() else {
+                    unreachable!()
+                };
                 self.stmt(StmtKind::InlineHtml(s), start)
             }
             Token::Semicolon => {
-                self.advance();
+                self.skip();
                 self.stmt(StmtKind::Block(Vec::new()), start)
             }
             Token::LBrace => self.parse_block()?,
             Token::Keyword(Keyword::Echo) => {
-                self.advance();
+                self.skip();
                 let mut exprs = vec![self.parse_expression()?];
                 while self.eat(&Token::Comma) {
                     exprs.push(self.parse_expression()?);
@@ -43,9 +45,9 @@ impl Parser {
                 self.stmt(StmtKind::Echo(exprs), start)
             }
             Token::Keyword(Keyword::Return) => {
-                self.advance();
+                self.skip();
                 if self.check(&Token::Semicolon) {
-                    self.advance();
+                    self.skip();
                     self.stmt(StmtKind::Return(None), start)
                 } else {
                     let e = self.parse_expression()?;
@@ -59,19 +61,19 @@ impl Parser {
             Token::Keyword(Keyword::For) => self.parse_for()?,
             Token::Keyword(Keyword::Foreach) => self.parse_foreach()?,
             Token::Keyword(Keyword::Break) => {
-                self.advance();
+                self.skip();
                 let level = self.parse_optional_level();
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Break(level), start)
             }
             Token::Keyword(Keyword::Continue) => {
-                self.advance();
+                self.skip();
                 let level = self.parse_optional_level();
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Continue(level), start)
             }
             Token::Keyword(Keyword::Global) => {
-                self.advance();
+                self.skip();
                 let mut names = vec![self.parse_global_target()?];
                 while self.eat(&Token::Comma) {
                     names.push(self.parse_global_target()?);
@@ -84,7 +86,7 @@ impl Parser {
             // `static fn`, all of which are expressions, not statements,
             // and stay handled in parse_primary.
             Token::Keyword(Keyword::Static) if matches!(self.peek_at(1), Token::Variable(_)) => {
-                self.advance();
+                self.skip();
                 let mut vars = Vec::new();
                 loop {
                     let name = self.expect_variable()?;
@@ -159,13 +161,13 @@ impl Parser {
             // generic expression-statement path below, which already
             // parses `namespace\foo` as a name expression.
             Token::Keyword(Keyword::Namespace) if !matches!(self.peek_at(1), Token::Backslash) => {
-                self.advance();
+                self.skip();
                 let name = self.parse_qualified_name();
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Namespace(name), start)
             }
             Token::Keyword(Keyword::Use) => {
-                self.advance();
+                self.skip();
                 // `use function foo;` / `use const BAR;` - Phase 48 needs
                 // to tell these apart from a plain class-shaped `use Foo;`
                 // (only a function/class import is ever existence-
@@ -258,7 +260,7 @@ impl Parser {
                 self.stmt(StmtKind::Use(imports), start)
             }
             Token::Keyword(Keyword::Const) => {
-                self.advance();
+                self.skip();
                 let mut consts = Vec::new();
                 loop {
                     let const_start = self.current_pos();
@@ -301,7 +303,7 @@ impl Parser {
             }
             Token::Keyword(Keyword::Try) => self.parse_try()?,
             Token::Keyword(Keyword::Throw) => {
-                self.advance();
+                self.skip();
                 let e = self.parse_expression()?;
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Throw(e), start)
@@ -317,7 +319,7 @@ impl Parser {
             // `namespace { ... }`, since declare directives don't carry
             // any declarations that a registry needs to see spliced out.
             Token::Identifier(s) if s == "declare" && matches!(self.peek_at(1), Token::LParen) => {
-                self.advance();
+                self.skip();
                 self.expect(&Token::LParen)?;
                 while !self.check(&Token::RParen) {
                     self.parse_expression()?;
@@ -347,7 +349,7 @@ impl Parser {
                 self.stmt(StmtKind::Block(Vec::new()), start)
             }
             Token::Keyword(Keyword::Goto) => {
-                self.advance();
+                self.skip();
                 let name = self.expect_ident()?;
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Goto(name), start)
@@ -356,9 +358,11 @@ impl Parser {
             // nothing else in PHP's grammar puts a bare `identifier:` here
             // (ternary's `:` always follows a `?`, and array/match arms
             // use `=>`, not `:`).
-            Token::Identifier(name) if matches!(self.peek_at(1), Token::Colon) => {
-                self.advance();
-                self.advance();
+            Token::Identifier(_) if matches!(self.peek_at(1), Token::Colon) => {
+                let Token::Identifier(name) = self.take_token() else {
+                    unreachable!()
+                };
+                self.skip();
                 self.stmt(StmtKind::Label(name), start)
             }
             _ => {
@@ -374,7 +378,7 @@ impl Parser {
     pub(crate) fn parse_optional_level(&mut self) -> Option<i64> {
         if let Token::Integer(n) = self.peek() {
             let n = *n;
-            self.advance();
+            self.skip();
             Some(n)
         } else {
             None

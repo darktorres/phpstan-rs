@@ -22,7 +22,7 @@ impl Parser {
                     value: self.expr(ExprKind::Literal(Literal::Null), pos),
                     spread: false,
                 });
-                self.advance();
+                self.skip();
                 continue;
             }
             let spread = self.eat(&Token::Ellipsis);
@@ -53,37 +53,50 @@ impl Parser {
 
     pub(crate) fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
-        Ok(match self.peek().clone() {
+        // Matches on `self.peek()` by reference rather than `self.peek()
+        // .clone()` - most arms below need no payload at all (delegating
+        // or just checking which variant), and the few that do
+        // (`StringLit`/`Variable`/`InterpString`/`ShellExec`, all
+        // heap-owning) use `take_token()` (a move) inside their own arm
+        // instead of a whole-`Token` clone up front. Found and fixed via
+        // a perf-optimization investigation workflow.
+        Ok(match self.peek() {
             Token::Integer(n) => {
-                self.advance();
+                let n = *n;
+                self.skip();
                 self.expr(ExprKind::Literal(Literal::Int(n)), start)
             }
             Token::Float(f) => {
-                self.advance();
+                let f = *f;
+                self.skip();
                 self.expr(ExprKind::Literal(Literal::Float(f)), start)
             }
-            Token::StringLit(s) => {
-                self.advance();
+            Token::StringLit(_) => {
+                let Token::StringLit(s) = self.take_token() else {
+                    unreachable!()
+                };
                 self.expr(ExprKind::Literal(Literal::String(s)), start)
             }
             Token::Keyword(Keyword::True) => {
-                self.advance();
+                self.skip();
                 self.expr(ExprKind::Literal(Literal::Bool(true)), start)
             }
             Token::Keyword(Keyword::False) => {
-                self.advance();
+                self.skip();
                 self.expr(ExprKind::Literal(Literal::Bool(false)), start)
             }
             Token::Keyword(Keyword::Null) => {
-                self.advance();
+                self.skip();
                 self.expr(ExprKind::Literal(Literal::Null), start)
             }
-            Token::Variable(name) => {
-                self.advance();
+            Token::Variable(_) => {
+                let Token::Variable(name) = self.take_token() else {
+                    unreachable!()
+                };
                 self.expr(ExprKind::Variable(name), start)
             }
             Token::DollarBrace => {
-                self.advance();
+                self.skip();
                 let name_expr = self.parse_expression()?;
                 self.expect(&Token::RBrace)?;
                 self.expr(ExprKind::DynamicVariable(Box::new(name_expr)), start)
@@ -92,42 +105,44 @@ impl Parser {
             // `$$$name` chains, though that's vanishingly rare in
             // practice.
             Token::Dollar => {
-                self.advance();
+                self.skip();
                 let name_expr = self.parse_primary()?;
                 self.expr(ExprKind::DynamicVariable(Box::new(name_expr)), start)
             }
             Token::LParen => {
-                self.advance();
+                self.skip();
                 let inner = self.parse_expression()?;
                 self.expect(&Token::RParen)?;
                 self.expr(ExprKind::Grouping(Box::new(inner)), start)
             }
             Token::LBracket => {
-                self.advance();
+                self.skip();
                 let items = self.parse_array_items(&Token::RBracket)?;
                 self.expr(ExprKind::ArrayLiteral(items), start)
             }
             Token::Keyword(Keyword::Array) => {
-                self.advance();
+                self.skip();
                 self.expect(&Token::LParen)?;
                 let items = self.parse_array_items(&Token::RParen)?;
                 self.expr(ExprKind::ArrayLiteral(items), start)
             }
             Token::Keyword(Keyword::List) => {
-                self.advance();
+                self.skip();
                 self.expect(&Token::LParen)?;
                 let items = self.parse_array_items(&Token::RParen)?;
                 self.expr(ExprKind::ArrayLiteral(items), start)
             }
             Token::Keyword(Keyword::New) => {
-                self.advance();
+                self.skip();
                 if self.at_anonymous_class_start() {
                     return self.parse_anonymous_class_new(start);
                 }
-                let class_expr = match self.peek().clone() {
-                    Token::Variable(name) => {
+                let class_expr = match self.peek() {
+                    Token::Variable(_) => {
                         let s = self.current_pos();
-                        self.advance();
+                        let Token::Variable(name) = self.take_token() else {
+                            unreachable!()
+                        };
                         self.expr(ExprKind::Variable(name), s)
                     }
                     // `new ('std' . $class)` - a fully dynamic class
@@ -139,7 +154,7 @@ impl Parser {
                     // chain.
                     Token::LParen => {
                         let s = self.current_pos();
-                        self.advance();
+                        self.skip();
                         let e = self.parse_expression()?;
                         self.expect(&Token::RParen)?;
                         self.expr(ExprKind::Grouping(Box::new(e)), s)
@@ -161,7 +176,7 @@ impl Parser {
                 self.expr(ExprKind::New(Box::new(class_expr), args), start)
             }
             Token::Keyword(Keyword::Clone) => {
-                self.advance();
+                self.skip();
                 // `clone(...)` - the PHP 8.1 first-class-callable syntax
                 // applies to `clone` too (`$f = clone(...); $f($obj);`),
                 // even though it isn't parsed via the general call/args
@@ -170,9 +185,9 @@ impl Parser {
                     && matches!(self.peek_at(1), Token::Ellipsis)
                     && matches!(self.peek_at(2), Token::RParen)
                 {
-                    self.advance();
-                    self.advance();
-                    self.advance();
+                    self.skip();
+                    self.skip();
+                    self.skip();
                     let name = self.expr(ExprKind::Name("clone".to_string()), start);
                     return Ok(self.expr(ExprKind::FirstClassCallable(Box::new(name)), start));
                 }
@@ -208,7 +223,7 @@ impl Parser {
                 self.expr(ExprKind::Clone(Box::new(e), None), start)
             }
             Token::Keyword(Keyword::Print) => {
-                self.advance();
+                self.skip();
                 let e = self.parse_assignment()?;
                 let name = self.expr(ExprKind::Name("print".to_string()), start);
                 self.expr(
@@ -232,7 +247,7 @@ impl Parser {
             // RHS (and others) recurse directly into a tighter tier and
             // never pass back through parse_assignment on the way down.
             Token::Keyword(Keyword::Throw) => {
-                self.advance();
+                self.skip();
                 let inner = self.parse_assignment()?;
                 self.expr(ExprKind::Throw(Box::new(inner)), start)
             }
@@ -240,11 +255,10 @@ impl Parser {
             // generator, which isn't modeled, but the yielded key/value
             // expression(s) are still worth parsing and checking.
             Token::Keyword(Keyword::Yield) => {
-                self.advance();
-                if let Token::Identifier(name) = self.peek().clone()
-                    && name.eq_ignore_ascii_case("from")
+                self.skip();
+                if matches!(self.peek(), Token::Identifier(name) if name.eq_ignore_ascii_case("from"))
                 {
-                    self.advance();
+                    self.skip();
                     let inner = self.parse_assignment()?;
                     return Ok(self.expr(ExprKind::YieldFrom(Box::new(inner)), start));
                 }
@@ -291,7 +305,8 @@ impl Parser {
                 | Keyword::Require
                 | Keyword::RequireOnce),
             ) => {
-                self.advance();
+                let kw = kw.clone();
+                self.skip();
                 let e = self.parse_assignment()?;
                 let name = self.expr(ExprKind::Name(kw.as_str().to_string()), start);
                 self.expr(
@@ -312,7 +327,7 @@ impl Parser {
                     Token::Keyword(Keyword::Function) | Token::Keyword(Keyword::Fn)
                 ) =>
             {
-                self.advance();
+                self.skip();
                 // Note: the resulting closure's own span starts at
                 // `function`/`fn`, not this `static` - a small, accepted
                 // precision gap (same category as other narrow, honestly-
@@ -341,7 +356,7 @@ impl Parser {
                 e
             }
             Token::Keyword(Keyword::Static) => {
-                self.advance();
+                self.skip();
                 self.expr(ExprKind::Name("static".to_string()), start)
             }
             Token::Keyword(Keyword::Function) => self.parse_closure_like(false)?,
@@ -363,16 +378,20 @@ impl Parser {
                 self.expr(ExprKind::Name(name), start)
             }
             Token::Keyword(Keyword::Match) => self.parse_match_expr()?,
-            Token::InterpString(parts) => {
-                self.advance();
+            Token::InterpString(_) => {
+                let Token::InterpString(parts) = self.take_token() else {
+                    unreachable!()
+                };
                 self.build_interpolated(parts, start)?
             }
             // `` `cmd $interpolated` `` - shell-exec shorthand. Modeled as
             // a call to shell_exec() on the same interpolated-string value
             // a double-quoted string with identical content would build,
             // rather than adding a dedicated AST node for it.
-            Token::ShellExec(parts) => {
-                self.advance();
+            Token::ShellExec(_) => {
+                let Token::ShellExec(parts) = self.take_token() else {
+                    unreachable!()
+                };
                 let cmd = self.build_interpolated(parts, start)?;
                 let name = self.expr(ExprKind::Name("shell_exec".to_string()), start);
                 self.expr(

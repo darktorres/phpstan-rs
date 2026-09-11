@@ -34,10 +34,10 @@ impl Parser {
             match self.peek() {
                 Token::Keyword(Keyword::Readonly) => {
                     class_is_readonly = true;
-                    self.advance();
+                    self.skip();
                 }
                 Token::Keyword(Keyword::Final) | Token::Keyword(Keyword::Abstract) => {
-                    self.advance();
+                    self.skip();
                 }
                 _ => break,
             }
@@ -204,15 +204,15 @@ impl Parser {
                     // read-side `visibility` above.
                     Token::Keyword(Keyword::Private) if self.peek_is_set_visibility_marker() => {
                         write_visibility = Some(Visibility::Private);
-                        self.advance();
-                        self.advance();
+                        self.skip();
+                        self.skip();
                         self.expect_ident()?;
                         self.expect(&Token::RParen)?;
                     }
                     Token::Keyword(Keyword::Protected) if self.peek_is_set_visibility_marker() => {
                         write_visibility = Some(Visibility::Protected);
-                        self.advance();
-                        self.advance();
+                        self.skip();
+                        self.skip();
                         self.expect_ident()?;
                         self.expect(&Token::RParen)?;
                     }
@@ -221,38 +221,38 @@ impl Parser {
                     // public(set) string $x`).
                     Token::Keyword(Keyword::Public) if self.peek_is_set_visibility_marker() => {
                         write_visibility = Some(Visibility::Public);
-                        self.advance();
-                        self.advance();
+                        self.skip();
+                        self.skip();
                         self.expect_ident()?;
                         self.expect(&Token::RParen)?;
                     }
                     Token::Keyword(Keyword::Public) => {
                         visibility = Visibility::Public;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Private) => {
                         visibility = Visibility::Private;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Protected) => {
                         visibility = Visibility::Protected;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Static) => {
                         is_static = true;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Abstract) => {
                         is_abstract_member = true;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Final) => {
                         is_final_member = true;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Readonly) => {
                         is_readonly_member = true;
-                        self.advance();
+                        self.skip();
                     }
                     // The legacy PHP 4 `var $x;` property declaration -
                     // equivalent to `public $x;`. `var` isn't a reserved
@@ -260,7 +260,7 @@ impl Parser {
                     // arrives as a plain Identifier.
                     Token::Identifier(s) if s == "var" => {
                         visibility = Visibility::Public;
-                        self.advance();
+                        self.skip();
                     }
                     _ => break,
                 }
@@ -469,7 +469,7 @@ impl Parser {
                 (None, first)
             };
             if matches!(self.peek(), Token::Identifier(s) if s == "insteadof") {
-                self.advance();
+                self.skip();
                 self.parse_qualified_name();
                 while self.eat(&Token::Comma) {
                     self.parse_qualified_name();
@@ -480,7 +480,7 @@ impl Parser {
                     self.peek(),
                     Token::Keyword(Keyword::Public | Keyword::Private | Keyword::Protected)
                 ) {
-                    self.advance();
+                    self.skip();
                 }
                 if !self.check(&Token::Semicolon) {
                     let alias = self.expect_ident()?;
@@ -515,23 +515,23 @@ impl Parser {
             match self.peek() {
                 Token::Keyword(Keyword::Abstract) => {
                     is_abstract = true;
-                    self.advance();
+                    self.skip();
                 }
                 Token::Keyword(Keyword::Final) => {
                     is_final = true;
-                    self.advance();
+                    self.skip();
                 }
                 // PHP 8.2 `readonly class Foo {}` - shorthand for every
                 // property being readonly, applied to each property parsed
                 // in parse_class_body below.
                 Token::Keyword(Keyword::Readonly) => {
                     class_is_readonly = true;
-                    self.advance();
+                    self.skip();
                 }
                 _ => break,
             }
         }
-        let kind = match self.advance() {
+        let kind = match self.take_token() {
             Token::Keyword(Keyword::Class) => ClassKind::Class,
             Token::Keyword(Keyword::Interface) => ClassKind::Interface,
             Token::Keyword(Keyword::Trait) => ClassKind::Trait,

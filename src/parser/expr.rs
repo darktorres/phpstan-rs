@@ -135,7 +135,7 @@ impl Parser {
             Token::GtGtEquals => Some(BinOp::Shr),
             _ => return Ok(lhs),
         };
-        self.advance();
+        self.skip();
         // Reference assignment (`$a = &$b;`) - only valid on a plain `=`,
         // never a compound one. Aliasing itself isn't modeled (nothing
         // here tracks that two variables now share storage), so this is
@@ -297,7 +297,7 @@ impl Parser {
                 Token::Spaceship => BinOp::Spaceship,
                 _ => break,
             };
-            self.advance();
+            self.skip();
             let rhs_start = self.current_pos();
             let rhs = self.parse_relational()?;
             // Phase 85: `false === $x = fn()` - see `parse_assignment_
@@ -319,7 +319,7 @@ impl Parser {
                 Token::GtEquals => BinOp::GtEq,
                 _ => break,
             };
-            self.advance();
+            self.skip();
             let rhs_start = self.current_pos();
             let rhs = self.parse_pipe()?;
             // Phase 85: `0 > $x = fn()` - see `parse_assignment_tail`'s
@@ -358,7 +358,7 @@ impl Parser {
                 Token::GtGt => BinOp::Shr,
                 _ => break,
             };
-            self.advance();
+            self.skip();
             let rhs = self.parse_additive()?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
@@ -375,7 +375,7 @@ impl Parser {
                 Token::Dot => BinOp::Concat,
                 _ => break,
             };
-            self.advance();
+            self.skip();
             let rhs_start = self.current_pos();
             let rhs = self.parse_multiplicative()?;
             // See `parse_logical_or`'s own identical fix (and `parse_
@@ -401,7 +401,7 @@ impl Parser {
                 Token::Percent => BinOp::Mod,
                 _ => break,
             };
-            self.advance();
+            self.skip();
             let rhs = self.parse_not()?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
@@ -495,7 +495,7 @@ impl Parser {
             _ => None,
         };
         if let Some(op) = op {
-            self.advance();
+            self.skip();
             let operand = self.parse_unary()?;
             return Ok(self.expr(ExprKind::Unary(op, Box::new(operand)), start));
         }
@@ -539,9 +539,9 @@ impl Parser {
         if !matches!(self.peek_at(2), Token::RParen) {
             return None;
         }
-        self.advance(); // (
-        self.advance(); // type identifier
-        self.advance(); // )
+        self.skip(); // (
+        self.skip(); // type identifier
+        self.skip(); // )
         Some(normalized.to_string())
     }
 

@@ -59,7 +59,7 @@ pub(crate) fn split_identifier_spans(
             }
             spans.push(offset_span(span.start, relative_span));
         } else {
-            parser.advance();
+            parser.skip();
         }
     }
     if spans.len() == expected.len() {

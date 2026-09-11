@@ -55,27 +55,27 @@ impl Parser {
         // rather than looping on to swallow whatever bare identifier
         // happens to follow (e.g. `array $items`'s `$items`, or
         // `const array NAME`'s own `NAME`).
-        match self.peek().clone() {
+        match self.peek() {
             Token::Keyword(Keyword::Array) => {
-                self.advance();
+                self.skip();
                 return Ok("array".to_string());
             }
             Token::Keyword(Keyword::Static) => {
-                self.advance();
+                self.skip();
                 return Ok("static".to_string());
             }
             Token::Keyword(Keyword::Null) => {
-                self.advance();
+                self.skip();
                 return Ok("null".to_string());
             }
             // PHP 8.2+ stand-alone `true`/`false` types, e.g.
             // `function f(): string|false {}`.
             Token::Keyword(Keyword::True) => {
-                self.advance();
+                self.skip();
                 return Ok("true".to_string());
             }
             Token::Keyword(Keyword::False) => {
-                self.advance();
+                self.skip();
                 return Ok("false".to_string());
             }
             _ => {}
@@ -97,7 +97,7 @@ impl Parser {
         s.push_str(&self.parse_type_atom()?);
         loop {
             if self.check(&Token::Pipe) {
-                self.advance();
+                self.skip();
                 s.push('|');
                 s.push_str(&self.parse_type_atom()?);
                 continue;
@@ -106,7 +106,7 @@ impl Parser {
             // by-ref marker before a param's `$name` - only treat it as part
             // of the type when another type atom actually follows.
             if self.check(&Token::Amp) && self.is_type_start_at(1) {
-                self.advance();
+                self.skip();
                 s.push('&');
                 s.push_str(&self.parse_type_atom()?);
                 continue;

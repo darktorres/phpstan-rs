@@ -4,15 +4,28 @@ use crate::token::{StringPart, Token};
 impl<'a> Lexer<'a> {
     pub(crate) fn lex_single_quoted(&mut self) -> Token {
         self.pos += 1; // opening '
-        let mut s = String::new();
+        // Batches contiguous non-escape byte runs via `push_str` +
+        // `from_utf8_lossy` instead of pushing one byte at a time (which
+        // also silently corrupted any multi-byte UTF-8 character in the
+        // literal - `b as char` reinterprets each raw byte as its own
+        // Latin-1 codepoint - a real, independently-confirmed bug, not
+        // just a perf issue). `from_utf8_lossy`, not `.unwrap()`: real
+        // PHP source can contain non-UTF-8 bytes, matching every other
+        // byte-range conversion already in this file. Found and fixed
+        // via a perf-optimization investigation workflow.
+        let mut s = String::with_capacity(self.src.len().saturating_sub(self.pos));
+        let mut run_start = self.pos;
         while self.pos < self.src.len() && self.peek() != b'\'' {
             if self.peek() == b'\\' && (self.peek_at(1) == b'\'' || self.peek_at(1) == b'\\') {
+                s.push_str(&String::from_utf8_lossy(&self.src[run_start..self.pos]));
                 s.push(self.peek_at(1) as char);
                 self.pos += 2;
+                run_start = self.pos;
             } else {
-                s.push(self.bump() as char);
+                self.pos += 1;
             }
         }
+        s.push_str(&String::from_utf8_lossy(&self.src[run_start..self.pos]));
         self.pos += 1; // closing '
         Token::StringLit(s)
     }
@@ -187,7 +200,10 @@ impl<'a> Lexer<'a> {
     /// `parser::build_interpolated` re-lexes in isolation.
     fn scan_interpolated(&mut self, bytes: &[u8], abs_base: usize) -> Vec<StringPart> {
         let mut parts = Vec::new();
-        let mut literal = String::new();
+        // Upper-bound capacity hint - avoids repeated reallocation while
+        // pushing long plain-text runs (SQL, translation strings, HTML in
+        // a heredoc, ...).
+        let mut literal = String::with_capacity(bytes.len());
         let mut i = 0;
 
         macro_rules! flush {
@@ -382,8 +398,27 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            literal.push(b as char);
-            i += 1;
+            // Batches the contiguous run of plain (non-escape, non-`{$`,
+            // non-`$ident`) bytes via `push_str` + `from_utf8_lossy`
+            // instead of pushing one byte at a time (which also silently
+            // corrupted any multi-byte UTF-8 character in the run -
+            // `b as char` reinterprets each raw byte as its own Latin-1
+            // codepoint - a real, independently-confirmed bug, not just a
+            // perf issue). `from_utf8_lossy`, not `.unwrap()`: real PHP
+            // source can contain non-UTF-8 bytes, matching every other
+            // byte-range conversion already in this function (`inner`/
+            // `name`/`prop`/`key` above, `label` in `lex_heredoc`).
+            // Found and fixed via a perf-optimization investigation
+            // workflow.
+            let run_start = i;
+            while i < bytes.len()
+                && !(bytes[i] == b'\\' && i + 1 < bytes.len())
+                && !(bytes[i] == b'{' && bytes.get(i + 1) == Some(&b'$'))
+                && !(bytes[i] == b'$' && bytes.get(i + 1).is_some_and(|&c| is_ident_start(c)))
+            {
+                i += 1;
+            }
+            literal.push_str(&String::from_utf8_lossy(&bytes[run_start..i]));
         }
         flush!();
 

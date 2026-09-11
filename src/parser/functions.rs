@@ -41,8 +41,8 @@ impl Parser {
                     Token::Keyword(Keyword::Public | Keyword::Private | Keyword::Protected)
                 ) && self.peek_is_set_visibility_marker()
                 {
-                    self.advance();
-                    self.advance();
+                    self.skip();
+                    self.skip();
                     self.expect_ident()?;
                     self.expect(&Token::RParen)?;
                     continue;
@@ -65,7 +65,7 @@ impl Parser {
                     }
                     _ => break,
                 }
-                self.advance();
+                self.skip();
             }
 
             let type_hint_start = self.current_pos();

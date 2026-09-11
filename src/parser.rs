@@ -194,7 +194,7 @@ impl Parser {
     /// to Registry::index, which only scans the top-level Vec<Stmt>.
     pub(crate) fn parse_namespace_stmt(&mut self) -> Result<Vec<Stmt>, ParseError> {
         let start = self.current_pos();
-        self.advance(); // `namespace`
+        self.skip(); // `namespace`
         let name = self.parse_qualified_name();
         if self.check(&Token::LBrace) {
             let mut stmts = vec![self.stmt(StmtKind::Namespace(name), start)];

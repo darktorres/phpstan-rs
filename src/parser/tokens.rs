@@ -100,12 +100,38 @@ impl Parser {
         matches!(self.peek(), Token::Eof)
     }
 
-    pub(crate) fn advance(&mut self) -> Token {
-        let t = self.tokens.get(self.pos).cloned().unwrap_or(Token::Eof);
+    /// Advances past the current token without materializing it - the
+    /// large majority (126 of 128) of real call sites across the parser
+    /// discard `advance()`'s own return value entirely, paying a wasted
+    /// `Token::clone()` (a real heap allocation for 7 of `Token`'s
+    /// variants: `Identifier`/`Variable`/`StringLit`/`InterpString`/
+    /// `ShellExec`/`DocComment`/`InlineHtml`) for nothing. Found and
+    /// fixed via a perf-optimization investigation workflow; the 2 real
+    /// consumers (`expect_variable` just below, `classes.rs`'s own
+    /// `parse_class_like_decl`) use `take_token()` instead.
+    pub(crate) fn skip(&mut self) {
         if self.pos < self.tokens.len() {
             self.pos += 1;
         }
-        t
+    }
+
+    /// `advance()`'s own real-consumer counterpart - moves the current
+    /// token out via `mem::replace` (leaving an inert `Token::Eof`
+    /// placeholder behind) instead of cloning it. Bounds-guarded the same
+    /// way `advance()`/`skip()` always were, to preserve the identical
+    /// graceful-EOF fallback rather than panicking on an out-of-range
+    /// index. Sound to leave a placeholder behind: the only place
+    /// `self.tokens` is ever indexed by something other than `self.pos`
+    /// (`control_flow.rs`'s `elseif`-rewrite backtrack) unconditionally
+    /// overwrites that slot before it's ever read again.
+    pub(crate) fn take_token(&mut self) -> Token {
+        if self.pos < self.tokens.len() {
+            let t = std::mem::replace(&mut self.tokens[self.pos], Token::Eof);
+            self.pos += 1;
+            t
+        } else {
+            Token::Eof
+        }
     }
 
     pub(crate) fn check(&self, t: &Token) -> bool {
@@ -114,7 +140,7 @@ impl Parser {
 
     pub(crate) fn eat(&mut self, t: &Token) -> bool {
         if self.check(t) {
-            self.advance();
+            self.skip();
             true
         } else {
             false
@@ -151,18 +177,21 @@ impl Parser {
     /// declaration positions, not universally - `const DEFAULT = 1;` is
     /// valid PHP even though `default` is a keyword.
     pub(crate) fn expect_ident(&mut self) -> Result<String, ParseError> {
-        match self.peek().clone() {
+        match self.peek() {
             Token::Identifier(_) | Token::Keyword(_) => Ok(self.take_name_segment().unwrap()),
-            other => Err(ParseError {
-                message: format!("parse error: expected identifier, found {:?}", other),
-                span: self.spans.get(self.pos).copied().unwrap_or_default(),
-            }),
+            other => {
+                let message = format!("parse error: expected identifier, found {:?}", other);
+                Err(ParseError {
+                    message,
+                    span: self.spans.get(self.pos).copied().unwrap_or_default(),
+                })
+            }
         }
     }
 
     pub(crate) fn expect_variable(&mut self) -> Result<String, ParseError> {
         let span = self.spans.get(self.pos).copied().unwrap_or_default();
-        match self.advance() {
+        match self.take_token() {
             Token::Variable(s) => Ok(s),
             other => Err(ParseError {
                 message: format!("parse error: expected variable, found {:?}", other),
@@ -182,13 +211,17 @@ impl Parser {
     /// ("semi-reserved words"), so `Enum`/`Match`/`New`/... are all valid
     /// namespace segments (`Piwigo\Common\Enum\Foo`).
     pub(crate) fn take_name_segment(&mut self) -> Option<String> {
-        match self.peek().clone() {
-            Token::Identifier(part) => {
-                self.advance();
+        match self.peek() {
+            Token::Identifier(_) => {
+                let Token::Identifier(part) = self.take_token() else {
+                    unreachable!()
+                };
                 Some(part)
             }
-            Token::Keyword(kw) => {
-                self.advance();
+            Token::Keyword(_) => {
+                let Token::Keyword(kw) = self.take_token() else {
+                    unreachable!()
+                };
                 Some(kw.as_str().to_string())
             }
             _ => None,
@@ -205,7 +238,7 @@ impl Parser {
             None => return s,
         }
         while matches!(self.peek(), Token::Backslash) {
-            self.advance();
+            self.skip();
             s.push('\\');
             match self.take_name_segment() {
                 Some(part) => s.push_str(&part),
@@ -242,7 +275,7 @@ impl Parser {
     pub(crate) fn parse_attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
         let mut attrs = Vec::new();
         while self.check(&Token::AttributeStart) {
-            self.advance();
+            self.skip();
             loop {
                 let attr_start = self.current_pos();
                 let name = self.parse_qualified_name();

@@ -48,7 +48,7 @@ impl Parser {
 
     pub(crate) fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
-        self.advance(); // if
+        self.skip(); // if
         self.expect(&Token::LParen)?;
         let cond = self.parse_expression()?;
         self.expect(&Token::RParen)?;
@@ -170,7 +170,7 @@ impl Parser {
 
     pub(crate) fn parse_while(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
-        self.advance();
+        self.skip();
         self.expect(&Token::LParen)?;
         let cond = self.parse_expression()?;
         self.expect(&Token::RParen)?;
@@ -180,7 +180,7 @@ impl Parser {
 
     pub(crate) fn parse_do_while(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
-        self.advance();
+        self.skip();
         let body = Box::new(self.parse_braced_or_single()?);
         self.expect(&Token::Keyword(Keyword::While))?;
         self.expect(&Token::LParen)?;
@@ -192,7 +192,7 @@ impl Parser {
 
     pub(crate) fn parse_for(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
-        self.advance();
+        self.skip();
         self.expect(&Token::LParen)?;
         let init = self.parse_expr_list_until(&Token::Semicolon)?;
         self.expect(&Token::Semicolon)?;
@@ -226,7 +226,7 @@ impl Parser {
 
     pub(crate) fn parse_foreach(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
-        self.advance();
+        self.skip();
         self.expect(&Token::LParen)?;
         let subject = self.parse_expression()?;
         self.expect(&Token::Keyword(Keyword::As))?;
@@ -257,7 +257,7 @@ impl Parser {
 
     pub(crate) fn parse_try(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
-        self.advance(); // try
+        self.skip(); // try
         let body = self.parse_stmt_list_block()?;
 
         let mut catches = Vec::new();
@@ -325,14 +325,14 @@ impl Parser {
 
     pub(crate) fn parse_switch(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
-        self.advance(); // switch
+        self.skip(); // switch
         self.expect(&Token::LParen)?;
         let subject = self.parse_expression()?;
         self.expect(&Token::RParen)?;
 
         let alt = self.check(&Token::Colon);
         if alt {
-            self.advance();
+            self.skip();
         } else {
             self.expect(&Token::LBrace)?;
         }

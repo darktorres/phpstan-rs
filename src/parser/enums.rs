@@ -113,30 +113,30 @@ impl Parser {
                 match self.peek() {
                     Token::Keyword(Keyword::Public) => {
                         visibility = Visibility::Public;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Private) => {
                         visibility = Visibility::Private;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Protected) => {
                         visibility = Visibility::Protected;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Static) => {
                         is_static = true;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Abstract) => {
                         is_abstract_member = true;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Final) => {
                         is_final_member = true;
-                        self.advance();
+                        self.skip();
                     }
                     Token::Keyword(Keyword::Readonly) => {
-                        self.advance();
+                        self.skip();
                     }
                     _ => break,
                 }
@@ -213,7 +213,7 @@ impl Parser {
             // Not valid PHP (enums can't have properties), but consume one
             // token and keep going rather than loop forever or panic on
             // whatever unexpected thing is here.
-            self.advance();
+            self.skip();
         }
         self.expect(&Token::RBrace)?;
 

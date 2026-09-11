@@ -17,6 +17,31 @@ fn hex_escape_decodes_to_the_real_byte() {
 }
 
 #[test]
+fn a_multi_byte_utf8_character_in_a_double_quoted_literal_run_survives_intact() {
+    // Regression test for a perf-optimization fix: scan_interpolated's
+    // literal-run handling used to push plain bytes one at a time via
+    // `b as char`, which reinterprets each raw UTF-8 continuation byte
+    // as its own Latin-1 codepoint - silently corrupting any multi-byte
+    // character. Now batched via `String::from_utf8_lossy` over the
+    // whole run instead.
+    let src = "<?php \"caf\u{e9} \u{2764}\";";
+    let toks = Lexer::new(src).tokenize();
+    assert_eq!(
+        toks[0],
+        Token::InterpString(vec![StringPart::Literal("caf\u{e9} \u{2764}".to_string())])
+    );
+}
+
+#[test]
+fn a_multi_byte_utf8_character_in_a_single_quoted_string_survives_intact() {
+    // Same fix, single-quoted twin (lex_single_quoted has its own
+    // separate byte-by-byte-turned-batched literal path).
+    let src = "<?php 'caf\u{e9} \u{2764}';";
+    let toks = Lexer::new(src).tokenize();
+    assert_eq!(toks[0], Token::StringLit("caf\u{e9} \u{2764}".to_string()));
+}
+
+#[test]
 fn octal_escape_decodes_to_the_real_byte() {
     let src = r#"<?php "\101BC";"#;
     let toks = Lexer::new(src).tokenize();

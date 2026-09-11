@@ -14,7 +14,7 @@ impl Parser {
             match self.peek() {
                 Token::Arrow | Token::NullsafeArrow => {
                     let nullsafe = matches!(self.peek(), Token::NullsafeArrow);
-                    self.advance();
+                    self.skip();
                     // `$obj->{expr}` - a fully dynamic property/method
                     // name, computed from an arbitrary expression rather
                     // than a fixed identifier or `$var`. `$obj->${expr}`
@@ -26,12 +26,12 @@ impl Parser {
                     // rather than its value.
                     let dynamic_name =
                         if self.check(&Token::LBrace) || self.check(&Token::DollarBrace) {
-                            self.advance();
+                            self.skip();
                             let e = self.parse_expression()?;
                             self.expect(&Token::RBrace)?;
                             Some(e)
                         } else if self.check(&Token::Dollar) {
-                            self.advance();
+                            self.skip();
                             Some(self.parse_primary()?)
                         } else {
                             None
@@ -66,13 +66,16 @@ impl Parser {
                     // A method/property name accepts any keyword too
                     // (`$obj->match()`, `$obj->new`) - PHP only reserves
                     // these in declaration position, not here.
-                    let name = match self.peek().clone() {
+                    let name = match self.peek() {
                         Token::Identifier(_) | Token::Keyword(_) => {
                             self.take_name_segment().unwrap()
                         }
-                        Token::Variable(s) => {
-                            self.advance();
-                            s // $obj->$prop dynamic access, best-effort
+                        Token::Variable(_) => {
+                            // $obj->$prop dynamic access, best-effort.
+                            let Token::Variable(s) = self.take_token() else {
+                                unreachable!()
+                            };
+                            s
                         }
                         other => {
                             return Err(ParseError {
@@ -103,7 +106,7 @@ impl Parser {
                     }
                 }
                 Token::DoubleColon => {
-                    self.advance();
+                    self.skip();
                     let class_name = match &expr.kind {
                         ExprKind::Name(n) => n.clone(),
                         _ => "?".to_string(),
@@ -111,12 +114,14 @@ impl Parser {
                     // `class` (`Foo::class`) already worked as a special
                     // case; any other keyword is just as valid here
                     // (`Foo::new()`, `Foo::default()`, `Foo::list()`).
-                    let member = match self.peek().clone() {
+                    let member = match self.peek() {
                         Token::Identifier(_) | Token::Keyword(_) => {
                             self.take_name_segment().unwrap()
                         }
-                        Token::Variable(s) => {
-                            self.advance();
+                        Token::Variable(_) => {
+                            let Token::Variable(s) = self.take_token() else {
+                                unreachable!()
+                            };
                             format!("${s}")
                         }
                         // `Foo::{$name}` / `Foo::${$name}` / `Foo::$$name`
@@ -127,13 +132,13 @@ impl Parser {
                         // parsed (consuming the name expression correctly)
                         // rather than threading a real Expr through here.
                         Token::LBrace | Token::DollarBrace => {
-                            self.advance();
+                            self.skip();
                             self.parse_expression()?;
                             self.expect(&Token::RBrace)?;
                             "{dynamic}".to_string()
                         }
                         Token::Dollar => {
-                            self.advance();
+                            self.skip();
                             self.parse_primary()?;
                             "{dynamic}".to_string()
                         }
@@ -160,7 +165,7 @@ impl Parser {
                     }
                 }
                 Token::LBracket => {
-                    self.advance();
+                    self.skip();
                     let index = if self.check(&Token::RBracket) {
                         None
                     } else {
@@ -179,11 +184,11 @@ impl Parser {
                     };
                 }
                 Token::Increment => {
-                    self.advance();
+                    self.skip();
                     expr = self.expr(ExprKind::Unary(UnaryOp::PostInc, Box::new(expr)), start);
                 }
                 Token::Decrement => {
-                    self.advance();
+                    self.skip();
                     expr = self.expr(ExprKind::Unary(UnaryOp::PostDec, Box::new(expr)), start);
                 }
                 _ => break,
@@ -205,8 +210,8 @@ impl Parser {
     pub(crate) fn parse_args(&mut self) -> Result<(Vec<Arg>, bool), ParseError> {
         self.expect(&Token::LParen)?;
         if matches!(self.peek(), Token::Ellipsis) && matches!(self.peek_at(1), Token::RParen) {
-            self.advance();
-            self.advance();
+            self.skip();
+            self.skip();
             return Ok((Vec::new(), true));
         }
 
@@ -220,7 +225,7 @@ impl Parser {
                 && self.peek_at(1) == &Token::Colon
             {
                 let name = self.take_name_segment().unwrap();
-                self.advance();
+                self.skip();
                 Some(name)
             } else {
                 None
