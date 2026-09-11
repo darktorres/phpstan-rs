@@ -219,6 +219,16 @@ impl Project {
         self.registry.check_array_filter_falsy_noop = enabled;
     }
 
+    /// Phase 42 gating fix: opts the whole project's checking into
+    /// `TooWideMethodThrowTypeRule`'s wider, re-declaration-only mode,
+    /// following `set_check_empty_method_bodies`'s exact precedent - see
+    /// `registry::Registry::check_too_wide_throw_type_in_protected_and_public_methods`'s
+    /// own doc comment for why this defaults to `false`.
+    pub fn set_check_too_wide_throw_type_in_protected_and_public_methods(&mut self, enabled: bool) {
+        self.registry
+            .check_too_wide_throw_type_in_protected_and_public_methods = enabled;
+    }
+
     /// Phase 38: configures the project's target PHP version
     /// (`registry::Registry::php_version`), following
     /// `set_strict_mixed_arrays`'s exact precedent - a narrow setter

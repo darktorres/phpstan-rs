@@ -23,6 +23,7 @@
 //! whole comparison for the declaration - see that field's own doc
 //! comment for why.
 
+use crate::ast::Visibility;
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
 use crate::token::Span;
@@ -36,6 +37,61 @@ fn flatten_union(ty: &Type) -> Vec<&Type> {
 }
 
 impl<'a> Checker<'a> {
+    /// Phase 42 gating fix: real PHPStan's own `TooWideMethodThrowTypeRule`
+    /// nested gate (`vendor/phpstan-src/src/Rules/Exceptions/
+    /// TooWideMethodThrowTypeRule.php::processNode`, confirmed by direct
+    /// read): a `private` method, a method on a `final` class, or a method
+    /// itself declared `final` always gets checked; everything else is
+    /// silent by default (a real, corpus-confirmed false-positive flood
+    /// otherwise - a subclass overriding this method might genuinely need
+    /// the wider declared type) unless `Registry::check_too_wide_throw_
+    /// type_in_protected_and_public_methods` is on, in which case an
+    /// overridable method still gets a pass the *first* time it's
+    /// declared (`isFirstDeclaration` in the real rule) - only a
+    /// re-declaration narrowing an ancestor's own wider `@throws` is
+    /// checked. `TooWideFunctionThrowTypeRule` (a plain top-level
+    /// function) has no such gate at all - this is only ever called for a
+    /// method (`class_name` is a real, already-resolved declaring class).
+    ///
+    /// Deliberately doesn't model the real rule's separate `isThrowType
+    /// Explicit`/`tooWideImplicitThrows` gate: that gate only ever matters
+    /// when a `@throws` tag can be *inherited* rather than written on this
+    /// exact declaration's own docblock, a distinction real PHPStan draws
+    /// via `FileTypeMapper`'s own per-declaration doc resolution - this
+    /// project's `FunctionSig::throws` has no such "borrowed from an
+    /// ancestor" provenance bit at all (unlike `return_has_own_doc`), so
+    /// every `throws` this function ever sees is already this
+    /// declaration's own, explicit tag - the real gate's `true` branch,
+    /// unconditionally.
+    pub(crate) fn should_check_too_wide_method_throw_type(
+        &self,
+        class_name: &str,
+        method_name: &str,
+        visibility: Visibility,
+    ) -> bool {
+        if visibility == Visibility::Private {
+            return true;
+        }
+        let Some(info) = self.registry.classes.get(class_name) else {
+            return true;
+        };
+        if info.is_final || info.final_methods.contains(method_name) {
+            return true;
+        }
+        if !self
+            .registry
+            .check_too_wide_throw_type_in_protected_and_public_methods
+        {
+            return false;
+        }
+        // Not the first declaration - some ancestor interface/class/trait-
+        // abstract already declares this method, so this is a real
+        // override narrowing an inherited (possibly wider) throw type.
+        self.registry
+            .find_method_signature_prototype(class_name, method_name)
+            .is_some()
+    }
+
     /// `throws` is this declaration's own already-resolved `@throws` tag
     /// (the same `Some(t)` `check_throws_tag_validity`'s own caller
     /// already has in hand) - called once, after the declaration's whole

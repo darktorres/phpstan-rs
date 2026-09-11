@@ -771,7 +771,22 @@ impl<'a> Checker<'a> {
             };
             let throws_tag = sig.and_then(|s| s.throws.as_ref());
             if let Some(throws) = throws_tag {
-                self.check_too_wide_throw_type(throws, &subject, f.span, &label);
+                let should_check = match (class_name, sig) {
+                    (Some(c), Some(s)) => self.should_check_too_wide_method_throw_type(
+                        c,
+                        &f.name,
+                        s.visibility.clone(),
+                    ),
+                    // `TooWideFunctionThrowTypeRule` (a plain top-level
+                    // function, or a method whose own signature somehow
+                    // isn't indexed) has no visibility/finality gate at
+                    // all - see `should_check_too_wide_method_throw_type`'s
+                    // own doc comment.
+                    _ => true,
+                };
+                if should_check {
+                    self.check_too_wide_throw_type(throws, &subject, f.span, &label);
+                }
             }
             self.check_missing_checked_exceptions(throws_tag, &subject, &label);
         }

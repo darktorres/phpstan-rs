@@ -104,6 +104,14 @@ enum Command {
         /// avoids.
         #[arg(long)]
         check_array_filter_falsy_noop: bool,
+        /// Enables `TooWideMethodThrowTypeRule`'s wider, re-declaration-
+        /// only mode for a protected/public method that isn't final (and
+        /// isn't on a final class). Off by default - matches real
+        /// PHPStan's own stock config exactly, see `registry::Registry::
+        /// check_too_wide_throw_type_in_protected_and_public_methods`'s
+        /// own doc comment for why.
+        #[arg(long)]
+        check_too_wide_throw_type_in_protected_and_public_methods: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -171,6 +179,7 @@ fn main() {
             check_missing_checked_exceptions,
             check_strict_printf_placeholder_types,
             check_array_filter_falsy_noop,
+            check_too_wide_throw_type_in_protected_and_public_methods,
             php_version,
             generate_baseline,
             baseline,
@@ -189,6 +198,7 @@ fn main() {
             check_missing_checked_exceptions,
             check_strict_printf_placeholder_types,
             check_array_filter_falsy_noop,
+            check_too_wide_throw_type_in_protected_and_public_methods,
             php_version,
             generate_baseline,
             baseline,

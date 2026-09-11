@@ -324,9 +324,13 @@ fn a_declared_throws_type_thrown_by_a_called_functions_own_throws_tag_is_not_fla
 
 #[test]
 fn a_declared_throws_type_on_a_method_never_thrown_is_flagged_with_method_wording() {
+    // `final` (rather than an ordinary overridable method) so this test
+    // stays unaffected by the visibility/finality gate added later in this
+    // file (`TooWideMethodThrowTypeRule`'s own gate) - see that gate's
+    // dedicated test group below for the gate's own behavior.
     let d = diagnostics_for(
         r#"<?php
-            class Repo {
+            final class Repo {
                 /** @throws \RuntimeException */
                 public function find(): void {
                     echo 'never throws';
@@ -685,6 +689,129 @@ fn a_throw_inside_a_method_uses_method_wording_when_flagged() {
         d.iter().any(|x| x.identifier == "throws.missing"
             && x.message
                 .contains("Method Repo::find() throws RuntimeException but it's not covered by any @throws tag.")),
+        "got: {d:?}"
+    );
+}
+
+// Phase 42 gating fix: `TooWideMethodThrowTypeRule`'s own visibility/
+// finality/first-declaration gate - an ordinary overridable method with an
+// unused `@throws` tag is a real, corpus-confirmed false-positive flood
+// (real PHPStan itself defaults `checkTooWideThrowTypesInProtectedAndPublicMethods`
+// to `false` for exactly this reason) and must stay silent unless the
+// method is private, final, or on a final class.
+
+#[test]
+fn an_ordinary_overridable_public_method_with_an_unused_throws_tag_stays_silent() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Repo {
+                /** @throws \RuntimeException */
+                public function find(): void {
+                    echo 'never actually throws';
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_private_method_with_an_unused_throws_tag_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Repo {
+                /** @throws \RuntimeException */
+                private function find(): void {
+                    echo 'never actually throws';
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_final_method_with_an_unused_throws_tag_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Repo {
+                /** @throws \RuntimeException */
+                final public function find(): void {
+                    echo 'never actually throws';
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_method_on_a_final_class_with_an_unused_throws_tag_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            final class Repo {
+                /** @throws \RuntimeException */
+                public function find(): void {
+                    echo 'never actually throws';
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_overridable_method_stays_silent_even_with_the_opt_in_flag_on_its_first_declaration()
+{
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Repo {
+                /** @throws \RuntimeException */
+                public function find(): void {
+                    echo 'never actually throws, and nothing overrides this yet';
+                }
+            }
+        "#,
+        |r| r.check_too_wide_throw_type_in_protected_and_public_methods = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_redeclaration_narrowing_an_interfaces_wider_throws_tag_is_flagged_with_the_opt_in_flag_on() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            interface Finder {
+                /** @throws \RuntimeException */
+                public function find(): void;
+            }
+            class Repo implements Finder {
+                /** @throws \RuntimeException */
+                public function find(): void {
+                    echo 'never actually throws, and this overrides Finder::find()';
+                }
+            }
+        "#,
+        |r| r.check_too_wide_throw_type_in_protected_and_public_methods = true,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "throws.unusedType" && x.location == "Repo::find"),
         "got: {d:?}"
     );
 }

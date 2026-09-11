@@ -149,6 +149,19 @@ pub struct Registry {
     // until a fresh corpus diff re-confirms both stay silent. Same wiring
     // chain as the flags above.
     pub check_array_filter_falsy_noop: bool,
+    // Phase 42 gating fix: mirrors real PHPStan's own `checkTooWideThrowTypesInProtectedAndPublicMethods`
+    // (`vendor/phpstan-src/conf/config.neon`, default `false`) - without
+    // it, `TooWideMethodThrowTypeRule` only ever runs for a `private`
+    // method, a method on a `final` class, or a method itself marked
+    // `final`, exactly matching real PHPStan's own default-off gate (a
+    // real, corpus-confirmed false-positive flood otherwise: any ordinary
+    // overridable method with an unused `@throws` tag is flagged even
+    // though a subclass override might genuinely need the wider type).
+    // When this flag is on, an overridable method still gets a pass the
+    // first time it's declared (`is_first_declaration` below) - only a
+    // *re-declaration* narrowing an ancestor's own wider `@throws` gets
+    // checked. Same wiring chain as the flags above.
+    pub check_too_wide_throw_type_in_protected_and_public_methods: bool,
     // Phase 40.C: whether this project consumes real PHPStan as a
     // dependency at all (mirrors `Project::phpstan_api_check_enabled`,
     // set once from `composer::detect_phpstan_dependency` before any
