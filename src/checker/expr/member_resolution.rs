@@ -214,9 +214,20 @@ impl<'a> Checker<'a> {
     /// query special case, and the final return type - all of which need
     /// a member that actually declares the method, in the correct
     /// (`Intersection` reversed) order, exactly like `find_method_owner`/
-    /// `method_call_return_type` already get right. Returns an owned
-    /// `FunctionSig` (unlike `find_method_owner`'s borrowed one) so the
-    /// caller can freely call further `&mut self` methods afterward.
+    /// `method_call_return_type` already get right. Returns an owned,
+    /// already-class-template-substituted `FunctionSig` (unlike
+    /// `find_method_owner`'s borrowed one) so the caller can freely call
+    /// further `&mut self` methods afterward.
+    ///
+    /// Substitution happens right here, inline in the leaf arms, rather
+    /// than as a separate step the caller applies afterward - the caller
+    /// used to clone `sig` here and then have `substitute_class_
+    /// templates`'s own non-generic fast path clone it *again*, fully
+    /// discarding the first clone. Mirrors `method_call_return_type`'s
+    /// own already-correct "substitute once, right after the lookup"
+    /// shape. Found and fixed via a perf-optimization investigation
+    /// workflow; `substitute_class_templates` alone measured at 6.07s/
+    /// 596K calls (Symfony), 6.55s/742K calls (Drupal).
     pub(crate) fn find_method_receiver(
         &self,
         base_ty: &Type,
@@ -226,11 +237,18 @@ impl<'a> Checker<'a> {
             Type::Object(class, type_args) => self
                 .registry
                 .lookup_method_with_owner(class, method)
-                .map(|(owner, sig)| (class.clone(), type_args.clone(), owner, sig.clone())),
-            Type::EnumCase(fqn, _) => self
-                .registry
-                .lookup_method_with_owner(fqn, method)
-                .map(|(owner, sig)| (fqn.clone(), Vec::new(), owner, sig.clone())),
+                .map(|(owner, sig)| {
+                    let sig = self.substitute_class_templates(sig, class, type_args, &owner);
+                    (class.clone(), type_args.clone(), owner, sig)
+                }),
+            Type::EnumCase(fqn, _) => {
+                self.registry
+                    .lookup_method_with_owner(fqn, method)
+                    .map(|(owner, sig)| {
+                        let sig = self.substitute_class_templates(sig, fqn, &[], &owner);
+                        (fqn.clone(), Vec::new(), owner, sig)
+                    })
+            }
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.find_method_receiver(m, method)),

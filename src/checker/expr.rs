@@ -963,15 +963,18 @@ impl<'a> Checker<'a> {
                 // inherited from `Collection` by a concrete
                 // `IntCollection extends Collection<int>`, gets checked
                 // against `User`/`int`, not an unbound `T`/`Mixed`.
+                // `find_method_receiver` already applies class-template
+                // substitution inline (see its own doc comment) - `sig`
+                // just borrows the already-owned, already-substituted
+                // signature straight out of `receiver`'s tuple, no second
+                // clone/substitution here.
                 let receiver = self.find_method_receiver(&recv_ty, method);
-                let sig = receiver.as_ref().map(|(class, type_args, owner, sig)| {
-                    self.substitute_class_templates(sig, class, type_args, owner)
-                });
+                let sig = receiver.as_ref().map(|(_, _, _, sig)| sig);
                 // Phase 40.C: folded in from `phpstan_api.rs`'s own
                 // previously-separate `Walker` pass - see each check's
                 // own doc comment.
                 if let Some((_, _, owner, _)) = &receiver
-                    && let Some(s) = &sig
+                    && let Some(s) = sig
                 {
                     self.check_phpstan_api_method_call(owner, method, s, e.span, label);
                 }
@@ -982,20 +985,18 @@ impl<'a> Checker<'a> {
                 // contribution.
                 if let Some((class, _, _, _)) = &receiver {
                     let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
-                    self.record_call_throw_point(dynamic_throw, sig.as_ref());
+                    self.record_call_throw_point(dynamic_throw, sig);
                 } else {
                     // No resolved receiver class at all - genuinely
                     // unbounded, same reasoning as a dynamic callee.
                     self.current_function_has_unannotated_call = true;
                 }
                 let resolved = sig
-                    .as_ref()
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
-                self.predefine_byref_or_unknown_args(None, sig.as_ref(), args, &resolved, locals);
+                self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
                 for (i, a) in args.iter().enumerate() {
                     let closure_this = sig
-                        .as_ref()
                         .and_then(|s| s.params.get(i))
                         .and_then(|p| p.closure_this_type.clone());
                     if let Some(this_ty) = closure_this
@@ -1049,7 +1050,7 @@ impl<'a> Checker<'a> {
                             "method.notFound",
                         );
                     } else if let Some((class, _, owner, _)) = &receiver
-                        && let Some(sig) = &sig
+                        && let Some(sig) = sig
                     {
                         // Phase 57: visibility. `owner`/`sig` both come
                         // from the same `find_method_receiver` lookup
