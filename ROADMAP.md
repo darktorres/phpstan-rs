@@ -101,7 +101,47 @@ conditional-declaration tiebreaking (arity/type-precision based) for the
 many real "two declarations of one name, gated by PHP version" shapes
 both corpora use. Composer-aware `vendor/` autoload-based symbol
 resolution. A `define()`/`const`-based global-constant registry
-resolves literal-shaped constant values project-wide.
+resolves literal-shaped constant values project-wide, now including
+every real built-in/extension constant the vendored phpstorm-stubs
+corpus itself declares (`php_stubs::generated_stub_constants`, merged
+the same way `generated_stubs`/`generated_stub_classes` already are) -
+`use const`'s own existence check (`constant.notFound`) is unconditional
+(constants are case-sensitive in PHP, so there's no name-case
+equivalent to build); a `define()` nested inside a function/method body
+stays a disclosed, pinned residual (invisible to this registry either
+way, not a regression). `PHP_INT_MIN` - `define_call_constant`'s own
+pre-existing, deliberate exclusion for its overflowing raw literal -
+used to mean it was never registered at all (safe for ordinary
+constant-value inference, which already falls back to `Mixed` on a
+miss, but indistinguishable from "doesn't exist" for the new existence
+check); now registered with `Type::Int` directly instead. Corpus-
+verified: the scoped Piwigo run is clean (one genuine false positive
+fixed, `DIRECTORY_SEPARATOR` now resolving to its real value); the
+unscoped vendor-included run surfaces a disclosed, narrow residual -
+~250 new `argument.type`/`return.type` findings concentrated entirely
+in php-cs-fixer's own bundled `Token`-array-literal handling (never in
+Piwigo's own code), reproducible only at full ~20k-file corpus scale
+and not root-caused further past confirming the underlying constants
+themselves resolve correctly in isolation - a real, if imprecise,
+downstream interaction with this project's own array-shape/control-flow
+analysis at that scale, not a wrong constant value.
+
+A class/interface/trait declaring the same method name twice in one
+body (phpstorm-stubs' own version-split/overload idiom, e.g. real
+`DatePeriod::__construct`'s three distinct forms) now merges into one
+positional-union signature the same way two top-level free-function
+declarations already did (Phase 32 Finding C) - `ClassInfo::from_decl`/
+`from_enum_decl` previously built the method table with a bare
+`.collect()`, silently keeping only the textually-last declaration and
+discarding every earlier alternate parameter list. A trait declared
+twice under a conditional with genuinely different method signatures
+(real corpus shape: doctrine-orm's own
+`PersistentCollectionImplementation`) now checks each branch's own body
+against its own literal signature (`check_trait_methods` builds it
+directly via `ClassInfo::from_decl` and passes it down), not whichever
+declaration happened to win the registry's single per-name slot -
+`registry/index.rs`'s own tiebreaking policy is unchanged, the fix is
+confined to the checker's own signature-selection step.
 
 ## Type system
 
@@ -125,7 +165,18 @@ deferred-resolution registry pass; other cases stay `Mixed`, matching
 real PHPStan's own lack of a special case there), `OffsetAccessType`
 (`SomeShape['key']`), and conditional PHPDoc return types (`@return
 ($x is T ? A : B)`) are all parsed and resolved instead of mangling
-into bogus class names. Enum
+into bogus class names. `enum-string`/`enum-string<T>` route through
+the existing `Type::ClassString` bound to `UnitEnum`, mirroring real
+PHPStan's own `GenericClassStringType(UnitEnum)` resolution for free
+(every enum already synthesizes `implements UnitEnum`); `callable-
+string` is `Intersection([String, Callable])`, mirroring real PHPStan's
+own resolution and this project's existing `literal-string`/`numeric-
+string` pattern. `interface-string`/`trait-string` get real content
+verification too (checked against `ClassInfo::kind` via two internal
+`$$interface`/`$$trait` sentinel markers) even though real PHPStan
+itself draws no distinction between these and bare `class-string` -
+this project is allowed to check more strictly than real PHPStan does.
+Enum
 cases have their own singleton `Type::EnumCase` identity, with
 `::from()`/`::tryFrom()` narrowing to the exact matching case on a
 literal argument. GMP/`BcMath\Number` operator-overload dispatch.
@@ -180,7 +231,21 @@ with real explicit-vs-implicit `mixed` provenance surviving the
 inheritance hop and the backfilled type reconciled against the child's
 own native type hint the same way an *own* docblock already is (not
 cloned in verbatim, which would let an ancestor's broader doc type
-override a child's own correct, narrower native signature).
+override a child's own correct, narrower native signature). This
+backfill now also fires for an ancestor type mentioning a `@template`
+declared directly on the ancestor *method itself* (as opposed to its
+enclosing class) - `TemplateParam::scope` already distinguishes the two
+cases structurally, and a method-scoped template is safe to clone
+verbatim since call-site binding is purely name-keyed and blind to
+which class's `FunctionSig` it came from (verified against real
+PHPStan's own inheritance-merge source: it draws the identical line,
+via `getActiveTemplateTypeMap()` holding only class-level bindings).
+Real corpus shape this fixes: Doctrine's `EntityManagerInterface::
+getReference()` (`@template T of object`) backfilling onto
+`EntityManager::getReference()`'s own wholly undocumented native
+signature. The class-scoped half (real cross-inheritance `@extends
+Base<Concrete>` template binding) stays exactly as declined as before -
+see `an_ancestors_template_parameterized_type_is_never_inherited`.
 
 Generic template richness: real bound/variance/scope/default per
 `TemplateParam`; bound-aware subtype/assignability; substitution
@@ -265,6 +330,45 @@ occurrences) - investigated in depth, by all available static
 reasoning it should already resolve correctly, but couldn't be
 conclusively confirmed either way without an isolated corpus run.
 
+Five narrowing precision gaps, all corpus-verified: `count()`'s own
+comparison narrowing now recognizes the reversed operand order too
+(`0 < count($x)`, not just `count($x) > 0`); `!empty($x)` now upgrades
+an already-refined `non-empty-string` to the strictly narrower
+`non-falsy-string`, not just a bare `string`; a dynamic-key array
+write's own key type is now narrowed by a preceding `is_int()`/
+`is_string()`-family guard on the key expression itself (real corpus
+find: Piwigo's own `CategoryAvailableListController.php`); `array_filter()`'s
+no-callback default filtering now narrows a provably-null/falsy *field*
+of an `ArrayShape` input the same way it already narrows a homogeneous
+`Array(K, V)`'s value type (real corpus false positive fixed:
+`tests/Integration/GroupServiceTest.php`); `array_merge($shape,
+$plainStringKeyedArray)` stays field-aware (keeps known field names)
+instead of degrading to a generic array, scoped to the no-canonical-
+int-key case (full `HasOffsetType`-equivalent fidelity stays a
+separate, larger prerequisite - see "Known limitations").
+
+A narrow, corpus-justified slice of real PHPStan's own
+`ConditionalExpressionHolder`: `$ok = $x instanceof Foo; if ($ok) { ...
+}` (or the plain-alias form `$y = $x; if ($y) { ... }`) now correlates
+`$x`'s own narrowing to `$ok`'s truthiness, by storing the boolean's own
+RHS condition (`Locals::condition_aliases`, the same O(1)-clone/
+intersect-on-merge/purge-on-rebind design `guarded_functions` already
+established) and replaying it through the existing `apply_narrowing`
+recursion at the point of use - no new type-narrowing logic, only
+replay. The general mechanism (compound `&&`/`||` decomposition,
+`isset()`/array-dim correlation, `match`-arm correlation) stays
+declined - see "Known limitations".
+
+`method_exists($recv, 'name')`/`property_exists($recv, 'name')` true
+branches now guard `method.notFound`/`property.notFound` the same way
+`function_exists()` already guards `function.notFound` (mirroring real
+PHPStan's own `MethodExistsTypeSpecifyingExtension`/
+`PropertyExistsTypeSpecifyingExtension`, `Locals::guarded_methods`/
+`guarded_properties`) - real corpus false positive fixed: Piwigo's own
+`ImageBackend::destroy()`, guarded by `method_exists($image,
+'destroy')` where `$image`'s declared `ImageInterface` type never
+declares `destroy()` itself.
+
 Fixed-point loop-body convergence (`Checker::converge_loop_body`,
 mirroring real PHPStan's own bounded `LOOP_SCOPE_ITERATIONS`): a
 `While`/`DoWhile`/`For`/`Foreach` body is checked against a candidate
@@ -280,6 +384,9 @@ that entry and **Reverted** for the real soundness bug this fixed.
 Symbol existence (classes/functions/use-imports/typehints, catch
 clauses, `extends`/`implements`/`instanceof`/trait-use targets), plus a
 `use`-imported build-tool-mangled-prefix check (`class.prefixed`).
+`use function`'s own `function.nameCase` check is done too, opt-in
+(`Registry::check_function_name_case`, mirroring real PHPStan's own
+opt-in `checkFunctionNameCase` parameter, off at every level).
 Call-argument binding (named args, spread/unpack, by-ref legality,
 constant-array-spread expansion - `f(...['a', 'b', 'named' => $c])`'s
 own individually-unpacked elements type-checked against their real
@@ -1395,82 +1502,40 @@ Pending entry instead).
 
 ## Known but not yet scheduled
 
-- `use function ...`'s own existence check (`check_use_function_imports`)
-  covers only `UseKind::Function` - a `use const Foo\BAR;` import's own
-  existence (`constant.notFound`) isn't checked at all (no project-wide
-  global-constant-existence registry exists reliable enough to avoid
-  false positives, only project `define()`/`const` declarations), and
-  neither `use` kind's own function/constant-name-case mismatch
-  (`function.nameCase`) is checked.
-- `callable-string`/`trait-string`/`interface-string`/`enum-string`
-  stay aliased to plain `string` - no literal- or narrowing-based way
-  to verify their content.
-- `array_merge`'s key-aware shape-merging only applies when arguments
-  are uniformly known-shaped or uniformly list-like, not a mix of a
-  known shape and an unproven plain array. Every stdlib array function
-  beyond the couple dozen this project special-cases remains untouched.
-  Two narrow, low-value narrowing gaps: reversed `0 < count($x)` (only
-  `count($x) > 0`/`>= 1` narrow), and `!empty($x)` not upgrading an
-  already-`non-empty-string` value to `non-falsy-string` on a redundant
-  nested guard.
-- An overriding method's own parameter doesn't inherit a stricter
-  ancestor/interface docblock refinement it doesn't redeclare itself
-  when there's no *own* docblock inheritance case to trigger the
-  already-shipped PHPDoc-inheritance backfill. Needs real interface-to-
-  implementation PHPDoc inheritance for method signatures generally,
-  params and returns, generic or not - a sizable feature on its own.
-- No mechanism for narrowing correlated across two *separate* variables/
-  statements (real PHPStan's `ConditionalExpressionHolder`) - genuinely
-  hard to thread through `Locals`'s own O(1)-clone, structurally-shared
-  design without a parallel mutable side-channel duplicating its
-  branch-merge/invalidation semantics from scratch.
+Every item formerly listed here (the `use const`/`function.nameCase`
+gap, the four string pseudo-types, five narrowing precision gaps, the
+method-scoped `@template` backfill, correlated boolean-alias narrowing,
+the phpstorm-stubs interleaved-parameter-list shape, and the
+conditionally-declared-trait signature bug) has been built - see Done,
+the areas above. What remains, each with a sharper, corpus-checked
+reason to stay deferred rather than the generic placeholder this
+section used to carry:
+
 - `strtotime()`'s real accuracy and a raw SQL/DQL query's own result
   shape are both structurally infeasible without embedding a PHP
   runtime or a SQL parser respectively - confirmed real PHPStan needs
   exactly that.
-- phpstorm-stubs' interleaved-multiple-parameter-list shape (two full
-  parameter lists under the same names across PHP-version eras) isn't
-  recognized - a residual tail of "expects at least N arguments"
-  diagnostics, not fixed.
-- A trait declared twice with genuinely different method signatures per
-  conditional branch checks both bodies against whichever declaration
-  won the registry slot, not the specific branch being checked - fixing
-  it means a change to a heavily-used core path not attempted for this
-  narrow an incidence.
-- A long tail of smaller precision gaps (no per-location type-inference
-  caching architecture; `IntersectionType` doesn't delegate a general
-  `object&object`/`callable&array` combination; `static`/`$this` late
-  binding has no attached class; no `BenevolentUnionType`; no
-  `HasMethodType`/`HasPropertyType`-style structural capability
-  assertion outside `ArrayShape`; `class-string<T>`'s own `instanceof`/
-  sealed-hierarchy narrowing is unmodeled; no general `TypeCombinator`
+- A long tail of smaller type-system precision gaps, triaged individually
+  rather than as one bucket: no per-location type-inference caching
+  architecture (a real PHPStan performance mechanism, not a correctness
+  one - revisit only if profiling, not a missing diagnostic, calls for
+  it); `IntersectionType`'s own `object&object` combination from
+  sequential `instanceof` checks is already built and corpus-verified -
+  only cosmetic nested-`Intersection` flattening remains, with zero
+  confirmed false positive/negative; `static`/`$this` late binding has
+  no attached calling class (a real architectural gap - no concrete
+  corpus false positive/negative traced yet; watch for a fluent
+  base-class builder method chained through a subclass instance); no
+  `BenevolentUnionType` (structurally not needed today - this project's
+  own loose-comparison rule only fires on genuinely literal/constant
+  types, never an imprecise inferred `Union`, so there's no surface for
+  it to protect); `class-string<T>`'s own `instanceof`/sealed-hierarchy
+  narrowing is unmodeled (no `is_a()`-with-narrowing or sealed-hierarchy
+  pattern found in the corpus this round); no general `TypeCombinator`
   intersect/remove or generic recursive type-tree traverse/map
-  combinator) - none block a specific missing rule, revisit only if a
-  future corpus round traces a real false positive/negative to one.
-- A dynamic-key array write's own key type isn't narrowed by a
-  preceding `is_int()`/`is_string()`-family guard on the key expression
-  itself, unlike an ordinary variable - `$arr[$row['id']] = ...;`
-  inside `if (is_int($row['id'])) { ... }` still infers the array's own
-  key type from `$row['id']`'s *unnarrowed* type, not `int`. Found via
-  Phase 68.3's own corpus verification (Piwigo's own
-  `CategoryAvailableListController.php:311`, real, if disclosed as
-  correct-per-current-modeling rather than a regression from that fix)
-  once `union_types`'s new `Array` merge (see "Type system") stopped
-  silently hiding it.
-- `array_filter()`'s own return-type inference never narrows away a
-  provably-null/falsy *field* of a fixed-position `ArrayShape` input the
-  way it does for a homogeneous `Array(K, V)`'s own value type - real
-  PHP's own no-callback filtering can remove a specific shape field
-  entirely (`array_filter([$a, $b])` with `$b` possibly `null` really
-  can return a 1-element array missing key `1`, not a 2-element one
-  with a narrower field 1 type), a data-flow-sensitive computation this
-  project doesn't attempt. Found via Phase 68.2's own corpus
-  verification (Piwigo's own `tests/Integration/GroupServiceTest.php:363`,
-  `array_filter([$sourceId, $copyId])` passed to a `list<GroupId>`-typed
-  parameter) - a real false positive from this separate, pre-existing
-  gap, not from Phase 68.2's own try/finally fix (which correctly made
-  `$copyId`'s own type visible as `null|GroupId` for the first time,
-  simply surfacing this adjacent gap rather than causing it).
+  combinator (a refactor-timing call, not a missing-diagnostic gap -
+  revisit once several more bespoke traverse/map functions accumulate
+  and start visibly duplicating structural-recursion boilerplate).
 
 ## Permanent design boundaries (not planned, by choice)
 
