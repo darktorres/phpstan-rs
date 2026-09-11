@@ -2617,6 +2617,12 @@ impl<'a> Checker<'a> {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
                     }
+                    // Phase 17 follow-up: hovering the capture token
+                    // itself must show its type too, not just resolve
+                    // go-to-definition - the two probes are independent
+                    // (`probe_hit`/`probe_var_provenance`), and this loop
+                    // used to only ever feed the latter.
+                    self.probe_hit_at(u.span, &ty);
                     closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
                 }
                 if !is_static && let Some(this_ty) = locals.get("this") {

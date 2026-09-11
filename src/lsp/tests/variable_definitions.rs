@@ -167,6 +167,23 @@ fn hover_on_a_variable_read_shows_its_inferred_type() {
 }
 
 #[test]
+fn hover_on_a_closure_use_capture_shows_its_inferred_type() {
+    // The capture token itself, inside `use (...)`, is a real reference
+    // to the outer scope's own `$x` - previously only wired for go-to-
+    // definition's own separate `probe_var_provenance` probe, never for
+    // `probe_hit`/hover (`ExprKind::Closure`'s own `uses` loop never
+    // called `probe_hit_at` at all).
+    let dir = TempDir::new("hover_var_closure_use");
+    let src = "<?php function g(int $x) { $f = function () use ($x) { return $x; }; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x) {");
+
+    let messages = run(&dir, &[hover_request(2, &uri, pos)]);
+    assert_eq!(response_result(&messages, 2)["contents"], "int");
+}
+
+#[test]
 fn hover_on_a_parameter_declaration_shows_its_own_type() {
     let dir = TempDir::new("hover_var_param_self");
     let src = "<?php function f(int $x) { echo $x; }";
