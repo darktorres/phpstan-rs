@@ -217,6 +217,48 @@ pub(crate) fn walk_expr_for_members(
                 usage.methods.insert(name.clone());
             }
         }
+        // `expr_children` deliberately returns no children for these
+        // three (see `ast_walk`'s own module doc comment - each consumer
+        // needs its own explicit handling since they don't fit the
+        // generic `Vec<&Expr>` shape). Without these arms, a private
+        // member referenced only from inside a closure/arrow function
+        // (`array_map`/`usort`/`preg_replace_callback`/
+        // `register_shutdown_function`/a transactional closure, ...) was
+        // invisible to this walker and wrongly reported unused - confirmed
+        // against 8 independent Piwigo corpus instances.
+        ExprKind::Closure { params, body, .. } => {
+            for p in params {
+                if let Some(d) = &p.default {
+                    walk_expr_for_members(d, fqn, ctx, usage);
+                }
+            }
+            walk_stmt_body_for_members(body, fqn, ctx, usage);
+            return;
+        }
+        ExprKind::ArrowFn { params, body, .. } => {
+            for p in params {
+                if let Some(d) = &p.default {
+                    walk_expr_for_members(d, fqn, ctx, usage);
+                }
+            }
+            walk_expr_for_members(body, fqn, ctx, usage);
+            return;
+        }
+        // The anonymous class's own constructor `args` genuinely run in
+        // the *enclosing* scope (so `$this->x`/`self::CONST` there really
+        // is outer-class usage) and are walked. Its own class body is a
+        // deliberate exclusion: that body has its own, different
+        // `$this`/`self` binding, and this per-class syntactic walker has
+        // no scope-threading to keep the two apart safely - walking it
+        // would risk the wrong-direction bug (marking an outer member
+        // "used" because of an unrelated same-named member access inside
+        // the anonymous class).
+        ExprKind::NewAnonymousClass(_, args) => {
+            for a in args {
+                walk_expr_for_members(&a.value, fqn, ctx, usage);
+            }
+            return;
+        }
         _ => {}
     }
     for child in expr_children(expr) {

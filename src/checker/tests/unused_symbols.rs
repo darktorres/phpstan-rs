@@ -344,6 +344,107 @@ fn private_method_used_only_as_an_array_callable_is_not_flagged() {
 }
 
 #[test]
+fn private_method_referenced_only_inside_a_closure_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Mapper {
+                public function mapAll(array $xs): array {
+                    return array_map(function ($x) {
+                        return self::helper($x);
+                    }, $xs);
+                }
+                private static function helper(int $x): int { return $x * 2; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("is unused")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn private_method_referenced_only_inside_an_arrow_fn_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Mapper {
+                public function mapAll(array $xs): array {
+                    return array_map(fn ($x) => self::helper($x), $xs);
+                }
+                private static function helper(int $x): int { return $x * 2; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("is unused")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn private_property_read_only_inside_a_closure_is_not_write_only() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Widget {
+                private int $count;
+                public function __construct(int $count) {
+                    $this->count = $count;
+                }
+                public function describe(): \Closure {
+                    return function (): int {
+                        return $this->count;
+                    };
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("Widget::$count")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn private_constant_referenced_only_inside_a_closure_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Config {
+                private const LIMIT = 10;
+                public function makeChecker(): \Closure {
+                    return function (int $x): bool {
+                        return $x < self::LIMIT;
+                    };
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("is unused")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn private_const_referenced_only_in_an_anonymous_class_constructor_arg_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Config {
+                private const LIMIT = 10;
+                public function make(): object {
+                    return new class(self::LIMIT) {
+                        public function __construct(public int $limit) {}
+                    };
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("is unused")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
 fn constructor_and_clone_are_never_flagged_as_unused_private_methods() {
     let d = diagnostics_for(
         r#"<?php
