@@ -37,12 +37,28 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
 
     diff .corpus-runs/scoped/<old-hash>.txt .corpus-runs/scoped/<new-hash>.txt
 
-## Known snapshots (as of 2026-09-10)
+## Known snapshots (as of 2026-09-11)
 
 - `264d910` - last snapshot before the 0247b04/d1d1d61 phase-design batch
   (355 scoped diagnostics) - no unscoped run exists for this one.
 - `d1d1d61` - post-batch, **before** the use_map/throws regressions were
   fixed (5012 scoped diagnostics) - kept deliberately as the historical
   record of that regression, not a state to build against.
-- `c522416` - post-fix (359 scoped / 40503 unscoped) - current baseline
-  for future diffs.
+- `c522416` - post-fix (359 scoped / 40503 unscoped).
+- `1a3f3e4` - master2 branch tip before its rebase onto master (358
+  scoped, 0 skipped) - the bucketed-findings baseline the 3 false-
+  positive fixes below were diffed against; produced/stored in the
+  `phpstan-rs-master2` worktree, not the canonical one.
+- `b33d307` - master2 rebased onto master, **before** the 3 false-
+  positive fixes (353 scoped) - the clean "pre-fix" comparison point
+  isolating just those 3 commits' effect from the unrelated commits the
+  rebase itself pulled in; produced in a throwaway worktree at this
+  commit, stored under `phpstan-rs-master2`.
+- `299e5c5` - post-fix (341 scoped) - current baseline for future diffs.
+  Removed exactly the 12 confirmed false positives (2
+  `staticMethod.resultUnused` on a bare `parent::__construct()`, 8
+  `method.unused`/`property.onlyWritten`/`classConstant.unused` from
+  private-member usage inside a closure/arrow-fn, 2 more of the same
+  from usage through a non-`$this` same-class-instance local variable)
+  and nothing else in the diff moved - produced/stored in the
+  `phpstan-rs-master2` worktree.
