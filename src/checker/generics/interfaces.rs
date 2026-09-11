@@ -141,18 +141,27 @@ impl<'a> Checker<'a> {
             self.visit_ancestor(iface, &concrete_args, found, diagnostics, &visited);
         }
 
-        // A class has at most one real `extends` target, whose own
-        // `extends_args` is always trustworthy; an interface can `extends`
-        // several at once, conflating them into one flat, un-keyed list
-        // (`ClassInfo::extends_args`'s own doc comment) - the same real
-        // corpus false positive already fixed once for
-        // `check_ancestor_generic_bounds`'s own arity checking. Only
-        // trusted here when there's exactly one `extends` target to begin
-        // with; otherwise every named parent is still walked (for its own
-        // further ancestors), just with no argument substitution at all
-        // (every one of its own templates reads as unbound/`Mixed`
-        // downstream - a real precision loss, never a false conflict).
-        if info.extends.len() == 1 {
+        // Real corpus false positive (`friendsofphp/php-cs-fixer`'s own
+        // `AbstractFixer` subclasses - confirmed by direct read): a class
+        // extending a genuinely *non-generic* parent has no `@extends`
+        // tag to write at all (nothing generic to pass through), so
+        // `extends_args` is empty not because this project failed to
+        // parse one but because there is none - walking into that parent
+        // anyway would compare *its own*, entirely independent
+        // declaration of some shared interface against this class's own,
+        // as if the two were bound through a real generic relationship
+        // when they aren't related that way at all. Real PHPStan's own
+        // `CrossCheckInterfacesHelper::check` has the identical gate
+        // (`$checkParents`, `getExtendsTags()`) for exactly this reason -
+        // only cross-check into a parent when there's a real `@extends`
+        // tag linking the two. `extends.len() == 1` is required in
+        // addition, for the same multi-extends-conflation reason
+        // `check_ancestor_generic_bounds`'s own arity checking already
+        // established (`ClassInfo::extends_args`'s own doc comment) - an
+        // interface `extends`-ing more than one parent at once conflates
+        // their argument lists into one flat, un-keyed list, unsafe to
+        // attribute to either.
+        if info.extends.len() == 1 && !info.extends_args.is_empty() {
             let parent = &info.extends[0];
             let concrete_args: Vec<Type> = info
                 .extends_args
@@ -160,10 +169,6 @@ impl<'a> Checker<'a> {
                 .map(|t| types::substitute_template(t, own_bindings))
                 .collect();
             self.visit_ancestor(parent, &concrete_args, found, diagnostics, &visited);
-        } else {
-            for parent in &info.extends {
-                self.visit_ancestor(parent, &[], found, diagnostics, &visited);
-            }
         }
     }
 
