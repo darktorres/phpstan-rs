@@ -228,6 +228,7 @@ fn merge_stubs_does_not_override_user_functions() {
             return_type: Type::Bool,
             return_type_native: Type::Bool,
             return_has_own_doc: true,
+            return_case_refs: Vec::new(),
             return_explicit_mixed_hint: false,
             no_discard: false,
             visibility: crate::ast::Visibility::Public,

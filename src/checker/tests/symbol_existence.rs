@@ -928,6 +928,113 @@ fn an_exact_case_reference_is_never_flagged_name_case() {
     );
 }
 
+// Phase 48 follow-up (item 7b): `class.nameCase` for a PHPDoc-typed
+// param/return position - `collect_class_name_case_refs`/
+// `check_type_class_name_case`.
+
+#[test]
+fn a_differently_cased_native_param_type_hint_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            function f(foo $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_param_doc_type_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @param foo $x */
+            function f($x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_native_return_type_hint_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            function f(): foo { return new Foo(); }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_correctly_cased_param_and_return_doc_type_is_never_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /**
+             * @param Foo $x
+             * @return Foo
+             */
+            function f($x) { return $x; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_use_imported_param_doc_type_is_never_flagged_name_case_regardless_of_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            class Foo {}
+
+            namespace Other;
+            use App\Foo;
+            /** @param foo $x */
+            function f($x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_template_name_sharing_a_lowercase_class_s_own_spelling_is_never_flagged_name_case() {
+    // Guards the `mark_template_params`-before-collection ordering:
+    // `collect_class_name_case_refs` must run *after* `mark_template_
+    // params` marks `t` as a real template, or it would be mistaken for
+    // a stray, differently-cased reference to the real `T` class below.
+    let d = diagnostics_for(
+        r#"<?php
+            class T {}
+            /**
+             * @template t
+             * @param t $x
+             * @return t
+             */
+            function f($x) { return $x; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_differently_cased_call_to_a_builtin_function_is_never_flagged() {
     let d = diagnostics_for(

@@ -61,6 +61,12 @@ pub(crate) fn method_tag_sig(
                 by_ref: p.by_ref,
                 has_own_doc: true,
                 explicit_mixed_hint: false,
+                // Phase 48 item 7d wires this for real (`@method`'s own
+                // case-ref population) - left empty for now, matching
+                // this session's own "enum-synthesis/test-fixture
+                // literals get an empty Vec::new()" convention for every
+                // site this commit (item 7b) doesn't itself touch.
+                case_refs: Vec::new(),
                 closure_this_type: None,
             }
         })
@@ -70,6 +76,9 @@ pub(crate) fn method_tag_sig(
         return_type: return_type.clone(),
         return_type_native: return_type,
         return_has_own_doc: true,
+        // Phase 48 item 7d wires this for real - see the sibling
+        // `case_refs: Vec::new()` just above for the same reasoning.
+        return_case_refs: Vec::new(),
         return_explicit_mixed_hint: false,
         no_discard: false,
         visibility: Visibility::Public,

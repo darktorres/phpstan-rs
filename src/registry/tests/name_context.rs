@@ -1,7 +1,6 @@
 //! `collect_class_name_case_refs` (Phase 48 follow-up, item 7a) - the
 //! read-only, pair-collecting sibling of `resolve_names_in_type`.
 
-use super::super::name_context::collect_class_name_case_refs;
 use super::super::*;
 use crate::ast::Stmt;
 use crate::types::{self, Type};

@@ -4,7 +4,9 @@ use std::sync::Arc;
 use crate::ast::{ExprKind, FunctionDecl, Stmt, Visibility};
 use crate::checker::{has_explicit_mixed_nested_somewhere, union_types};
 use crate::docblock::{self, DocBlock};
-use crate::registry::name_context::{NameContext, resolve_names_in_type};
+use crate::registry::name_context::{
+    NameContext, collect_class_name_case_refs, resolve_names_in_type,
+};
 use crate::types::{self, TemplateParam, Type};
 
 mod asserts;
@@ -79,6 +81,18 @@ pub struct ParamSig {
     // doubles that correctly omit their own docblock in favor of the
     // interface's.
     pub explicit_mixed_hint: bool,
+    // Phase 48 follow-up (item 7b): every class-name reference `ty`
+    // carries, as `(raw-as-written, resolved-FQN)` pairs - collected via
+    // `collect_class_name_case_refs` right after `mark_template_params`
+    // (so a real `@template` name is never mistaken for a stray class
+    // reference) and right before `resolve_names_in_type` destroys the
+    // pre-resolution spelling this specifically needs. Deliberately
+    // empty for a *backfilled* (`flatten_phpdoc_inheritance`) position -
+    // see that pass's own doc comment on why copying `case_refs`
+    // alongside a backfilled `ty` would be a real cross-file-context
+    // correctness hazard (the raw text was written under an *ancestor*
+    // file's own `use` imports, not this checker's own `name_ctx`).
+    pub case_refs: Vec<(String, String)>,
     // Phase 36: `@param-closure-this Type $name`'s own resolved `Type` -
     // what `$this` becomes inside a `Closure`/`ArrowFn` literal argument
     // passed at this parameter's position, resolved through the same
@@ -114,6 +128,9 @@ pub struct FunctionSig {
     // comment for why `flatten_phpdoc_inheritance` also sets this to
     // `true` once it backfills `return_type` from an ancestor.
     pub return_has_own_doc: bool,
+    // Phase 48 follow-up (item 7b): `ParamSig::case_refs`'s own return-
+    // position equivalent - see that field's own doc comment.
+    pub return_case_refs: Vec<(String, String)>,
     // Phase 88: the `ParamSig::explicit_mixed_hint` equivalent for the
     // return position - see that field's own doc comment.
     pub return_explicit_mixed_hint: bool,
@@ -441,6 +458,8 @@ impl FunctionSig {
                     });
                 let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_params);
+                let mut case_refs = Vec::new();
+                collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, class_type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
@@ -495,6 +514,7 @@ impl FunctionSig {
                         p.type_hint.as_deref(),
                         doc_ty.as_deref(),
                     ),
+                    case_refs,
                     closure_this_type,
                 }
             })
@@ -504,6 +524,8 @@ impl FunctionSig {
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
         let return_type = resolve_type(doc_return, f.return_type.as_deref());
         let return_type = mark_template_params(return_type, &template_params);
+        let mut return_case_refs = Vec::new();
+        collect_class_name_case_refs(&return_type, ctx, &mut return_case_refs);
         let return_type = resolve_names_in_type(return_type, ctx);
         let return_type = substitute_type_aliases(return_type, class_type_aliases);
 
@@ -552,6 +574,7 @@ impl FunctionSig {
             return_type,
             return_type_native,
             return_has_own_doc: doc_return.is_some(),
+            return_case_refs,
             return_explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
                 f.return_type.as_deref(),
                 doc_return,
@@ -629,6 +652,12 @@ impl FunctionSig {
                     // Same permissive either-overload-wins rule as
                     // `has_own_doc` just above, for the identical reason.
                     explicit_mixed_hint: a.explicit_mixed_hint || b.explicit_mixed_hint,
+                    // Both real overloads' own case refs are real,
+                    // independent class-name references worth checking -
+                    // concatenated, not chosen between, matching this
+                    // function's own permissive "either side contributes"
+                    // convention throughout.
+                    case_refs: a.case_refs.into_iter().chain(b.case_refs).collect(),
                     // Later declaration wins on conflict, matching `name`
                     // above - falls back to the earlier one when only it
                     // declared the tag.
@@ -651,6 +680,11 @@ impl FunctionSig {
             // Same permissive "either overload's own marker wins" as
             // `no_discard`/`is_internal` below.
             return_has_own_doc: self.return_has_own_doc || other.return_has_own_doc,
+            return_case_refs: self
+                .return_case_refs
+                .into_iter()
+                .chain(other.return_case_refs)
+                .collect(),
             return_explicit_mixed_hint: self.return_explicit_mixed_hint
                 || other.return_explicit_mixed_hint,
             no_discard,

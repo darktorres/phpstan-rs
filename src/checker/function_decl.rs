@@ -7,7 +7,8 @@ use crate::checker::{
 use crate::docblock;
 use crate::php_version::PhpFeature;
 use crate::registry::{
-    FunctionSig, Registry, mark_template_params, resolve_names_in_type, resolve_type,
+    FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
+    resolve_names_in_type, resolve_type,
 };
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -363,6 +364,9 @@ impl<'a> Checker<'a> {
                         &label,
                         "parameter.noParent",
                     );
+                    // Phase 48 follow-up (item 7b): `class.nameCase` for
+                    // this PHPDoc-typed parameter position.
+                    self.check_type_class_name_case(&param.case_refs, &label, ast_param.span);
                     resolved_params.push((param.name.clone(), ty.clone(), ast_param.span));
                     // `ParamSig::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
@@ -431,6 +435,21 @@ impl<'a> Checker<'a> {
                                 .and_then(|d| d.var_type)
                         });
                     let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
+                    // Phase 48 follow-up (item 7b): this anonymous-class
+                    // fallback path builds `ty` straight from raw text,
+                    // bypassing `FunctionSig::from_decl`'s own `ParamSig::
+                    // case_refs` population entirely (see `Checker::
+                    // resolve_type_hint`'s own doc comment on this same
+                    // "checker builds a Type independently" pattern) - so
+                    // this needs the collection call done inline, a local
+                    // `Vec` rather than a stored field, right before
+                    // `resolve_names_in_type` destroys the pre-resolution
+                    // spelling. No `mark_template_params` step exists on
+                    // this path at all, so nothing to run the collection
+                    // after - unlike `FunctionSig::from_decl`'s own
+                    // adjacent-lines shape.
+                    let mut case_refs = Vec::new();
+                    collect_class_name_case_refs(&ty, &self.name_ctx, &mut case_refs);
                     let ty = resolve_names_in_type(ty, &self.name_ctx);
                     // Phase 80 follow-up: see `Checker::resolve_type_hint`'s
                     // own doc comment - this anonymous-class param
@@ -508,6 +527,7 @@ impl<'a> Checker<'a> {
                         &label,
                         "parameter.noParent",
                     );
+                    self.check_type_class_name_case(&case_refs, &label, p.span);
                     resolved_params.push((p.name.clone(), ty.clone(), p.span));
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
@@ -537,6 +557,11 @@ impl<'a> Checker<'a> {
         // never flags anything - so this doesn't need to distinguish "no
         // return type" from "declared mixed" the way the fallback below
         // does with an Option.
+        // Phase 48 follow-up (item 7b): captured (moved into) by the
+        // `.or_else` closure just below when `sig` is `None` - see that
+        // closure's own inline comment. Stays empty (and unused) when
+        // `sig` is `Some`, since the closure never runs in that case.
+        let mut declared_return_case_refs_none_path: Vec<(String, String)> = Vec::new();
         let declared_return = sig.map(|s| s.return_type.clone()).or_else(|| {
             // Phase 91: same "the registry-side merge this branch
             // otherwise skips" fix as the param loop above, for the
@@ -549,6 +574,16 @@ impl<'a> Checker<'a> {
                 .map(docblock::parse)
                 .and_then(|d| d.return_type);
             let ty = resolve_type(doc_return.as_deref(), f.return_type.as_deref());
+            // Phase 48 follow-up (item 7b): same "checker builds a Type
+            // straight from raw text, bypassing FunctionSig::from_decl"
+            // pattern as the param loop's own identical fix above - see
+            // its doc comment for why this needs the collection call
+            // done inline rather than reusing a stored field.
+            collect_class_name_case_refs(
+                &ty,
+                &self.name_ctx,
+                &mut declared_return_case_refs_none_path,
+            );
             let ty = resolve_names_in_type(ty, &self.name_ctx);
             // Phase 80 follow-up: see `Checker::resolve_type_hint`'s own
             // doc comment - the return-position sibling of the param
@@ -603,6 +638,14 @@ impl<'a> Checker<'a> {
                 None => ty,
             })
         });
+        // Phase 48 follow-up (item 7b): whichever path actually produced
+        // `declared_return` above - `sig`'s own stored field when
+        // present, otherwise whatever the `.or_else` closure collected
+        // inline into `declared_return_case_refs_none_path` (empty and
+        // unused when `sig` was `Some`, since that closure never ran).
+        let declared_return_case_refs = sig
+            .map(|s| s.return_case_refs.clone())
+            .unwrap_or(declared_return_case_refs_none_path);
         // Phase 48: `ExistingClassesInTypehintsRule`'s own return-type
         // check - the un-widened, exactly-as-declared type (not the
         // `?`-and-`resolve_pseudo`-adjusted `expected` the falls-off-the-
@@ -614,6 +657,7 @@ impl<'a> Checker<'a> {
             f.span,
             &label,
         );
+        self.check_type_class_name_case(&declared_return_case_refs, &label, f.span);
         self.check_type_trait_refs(
             declared_return.as_ref().unwrap_or(&Type::Mixed),
             &format!("return type of {label}()"),

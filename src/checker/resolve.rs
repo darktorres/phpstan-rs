@@ -387,10 +387,12 @@ impl<'a> Checker<'a> {
     /// position (a param/return/property type hint, `@method`/`@mixin`/
     /// `@phpstan-type` tag target), where this project's own type-parsing
     /// pipeline collapses every reference straight into a resolved `Type`
-    /// with no per-reference raw spelling retained anywhere: extending
-    /// case-checking there would need real, broader plumbing through
-    /// `types.rs`/`registry/function_sig.rs` to preserve it, a
-    /// genuinely bigger, still-open undertaking left for a future pass.
+    /// with no per-reference raw spelling retained anywhere by the time
+    /// any checker call site sees it - this needed a parallel traversal
+    /// run one step earlier in the parse pipeline instead
+    /// (`registry::collect_class_name_case_refs`, Phase 48 item 7a) to
+    /// preserve it; see `check_type_class_name_case` just below, this
+    /// function's own fan-out consumer for that PHPDoc-typed case.
     /// Skips a `use`-imported reference (real PHPStan's own default
     /// `checkImportedClassNameCase: false`) and a built-in stub class
     /// (`checkInternalClassCaseSensitivity: false`) - both
@@ -422,6 +424,32 @@ impl<'a> Checker<'a> {
                 0,
                 &format!("{}.nameCase", type_word.to_lowercase()),
             );
+        }
+    }
+
+    /// Phase 48 follow-up (item 7b): `class.nameCase` for a PHPDoc-typed
+    /// position (a param/return/property type hint, `@method`/`@mixin`/
+    /// `@phpstan-type` tag target) - the gap `check_class_name_case`'s
+    /// own doc comment above names as "a genuinely bigger, still-open
+    /// undertaking." Pure fan-out over `case_refs` (`(raw, resolved)`
+    /// pairs from `collect_class_name_case_refs`, populated once at
+    /// registry-build time) - re-runs the *unchanged* `check_class_name_
+    /// case` per pair rather than duplicating its own `is_use_imported`/
+    /// built-in-stub-skip/`lookup_class` logic. Every reference nested
+    /// inside one param/return/property's own type (e.g. both class names
+    /// in `array<Foo, Bar>`) is reported at the *same* `span` - this
+    /// project's PHPDoc parsing keeps no per-reference span within a
+    /// docblock's own type text, only the position of the type token as a
+    /// whole, a real, disclosed imprecision shared with every other
+    /// PHPDoc-typed diagnostic this project reports.
+    pub(crate) fn check_type_class_name_case(
+        &mut self,
+        case_refs: &[(String, String)],
+        label: &str,
+        span: Span,
+    ) {
+        for (raw, _resolved) in case_refs {
+            self.check_class_name_case(label, raw, span);
         }
     }
 

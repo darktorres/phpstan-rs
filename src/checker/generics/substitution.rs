@@ -85,6 +85,7 @@ impl<'a> Checker<'a> {
             return_type: subst(&sig.return_type),
             return_type_native: subst(&sig.return_type_native),
             return_has_own_doc: sig.return_has_own_doc,
+            return_case_refs: sig.return_case_refs.clone(),
             return_explicit_mixed_hint: sig.return_explicit_mixed_hint,
             no_discard: sig.no_discard,
             visibility: sig.visibility.clone(),

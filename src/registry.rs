@@ -25,7 +25,7 @@ pub(crate) use function_sig::is_override_attribute_name;
 pub(crate) use function_sig::resolve_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
 pub(crate) use function_sig::{infer_const_type, mark_template_params, substitute_type_aliases};
-pub(crate) use name_context::{NameContext, resolve_names_in_type};
+pub(crate) use name_context::{NameContext, collect_class_name_case_refs, resolve_names_in_type};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
 
