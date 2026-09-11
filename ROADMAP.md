@@ -937,14 +937,49 @@ declaration's own `extends`/`implements`/trait-`use` to every native-
 syntax class-name reference: `new`, `instanceof`, a static method/
 property/constant access (`Foo::...`), and a `catch` clause - none of
 which needed new parser/registry plumbing (the raw, as-written text
-was already a bare AST string at each position). Still open, and
-genuinely bigger: every *PHPDoc-typed* position (a param/return/
-property hint, `@method`/`@mixin`/`@phpstan-type` tag target) - this
-project's own type-parsing pipeline collapses each reference straight
-into a resolved `Type` with no per-reference raw spelling retained
-anywhere, so extending case-checking there needs real plumbing through
-`types.rs`/`registry/function_sig.rs`, not just a new checker call
-site. `ExistingClassesInPropertyHookTypehintsRule`'s
+was already a bare AST string at each position). Every *PHPDoc-typed*
+position is done too now (a param/return/property hint, `@method`/
+`@mixin`/`@phpstan-type` tag target) - this project's own type-parsing
+pipeline collapses each reference straight into a resolved `Type` with
+no per-reference raw spelling retained anywhere by the time any
+checker call site sees it, so this needed a parallel traversal run one
+step earlier in the parse pipeline instead: `registry::name_context::
+collect_class_name_case_refs`, structurally identical to `resolve_
+names_in_type` but collecting `(raw, resolved)` pairs into a side list
+rather than rewriting the `Type` in place, run right after `mark_
+template_params` (so a real `@template` is never mistaken for a stray
+reference) and right before `resolve_names_in_type` destroys the
+pre-resolution spelling. `ParamSig::case_refs`/`FunctionSig::
+return_case_refs`/`PropertySig::case_refs`/`ClassInfo::mixin_case_refs`/
+`type_alias_case_refs` populate it at every real construction site;
+`Checker::check_type_class_name_case` is the pure fan-out consumer,
+re-running the unchanged `check_class_name_case` per pair. Deliberately
+excluded, disclosed: a *backfilled* (inherited-docblock) position never
+gets `case_refs` propagated (the raw text was written under an
+ancestor file's own `use` imports, not this file's `name_ctx` - a real
+cross-file-context hazard, not just noise); `@phpstan-assert`-family
+tags and a property hook's own `set()` parameter type would need the
+identical mechanism on a third/fourth struct, not attempted; a
+closure/arrow-fn literal's own param/return type hints use a simpler,
+separate mechanism (`resolve_type_hint`, no registry-field lifecycle
+needed) and aren't wired either. A real, corpus-confirmed pre-existing
+bug this wave's own corpus round surfaced for the first time (`vendor/
+marc-mabe/php-enum`'s own `MabeEnum\Enum` class - a real, valid, class
+literally named the same as the `enum` keyword): `Parser::
+take_name_segment`'s own keyword-as-identifier recovery
+(`Token::Keyword(kw) => kw.as_str().to_string()`) reconstructs a
+keyword-shaped identifier from the keyword's own canonical (always
+lowercase) spelling, not the original as-written source text - so
+`class Enum { ... }` parses with its own declared name silently
+corrupted to `enum`, well before any registry/case-checking logic ever
+runs. Not fixed here - `Token::Keyword` carries no raw source text at
+all today, so a proper fix means threading it through the lexer's own
+token representation, a foundational change with a much wider blast
+radius (symbol lookup, type resolution, hover, go-to-definition, not
+just case-checking) than this item's own scope; narrow real-world
+incidence (one file, one vendor package, across this project's entire
+verification corpus) don't justify attempting it opportunistically here.
+`ExistingClassesInPropertyHookTypehintsRule`'s
 existence-checking half is done (Phase 43 unblocked it); its other
 sub-checks (a template type not referenced in a parameter, an
 unresolvable native type, a native union type pre-PHP-8.0) turned out
