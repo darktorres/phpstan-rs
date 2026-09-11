@@ -7,7 +7,7 @@ use crate::checker::{
 use crate::docblock;
 use crate::php_version::PhpFeature;
 use crate::registry::{
-    FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
+    ClassInfo, FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
     resolve_names_in_type, resolve_type,
 };
 use crate::token::Span;
@@ -38,9 +38,35 @@ impl<'a> Checker<'a> {
         let previous_trait = self.current_trait.take();
         self.current_trait = Some(fqn.to_string());
         let start = self.diagnostics.len();
+        // This exact literal declaration's own signature table - not
+        // `self.registry.classes.get(fqn)`, which is whichever
+        // conditional declaration of `fqn` won the registry's single
+        // slot (`registry/index.rs`'s own `or_insert_with`, first-wins,
+        // no tiebreak for classes/traits at all) and may be a
+        // *different* branch's own signatures when a trait is declared
+        // twice under a version guard with genuinely different method
+        // shapes (real corpus shape: doctrine-orm's own
+        // `PersistentCollectionImplementation`, `add(): bool` vs.
+        // `add(): void` across an `if (defined(...))`/`else`).
+        // Reproduces exactly what the registry would hold for `c` had
+        // it won the slot - `ClassInfo::from_decl` is a pure function of
+        // `(c, ctx)`, and no later pass ever mutates a trait's own
+        // registry entry after indexing (`flatten_traits_one_pass` only
+        // ever copies a trait's methods *into* a using class, never back
+        // into the trait's own `ClassInfo`), so this is a no-op
+        // reconstruction, not a divergent one, for the overwhelmingly
+        // common non-duplicated-trait case.
+        let own_info = ClassInfo::from_decl(c, &self.name_ctx);
         for host in contexts {
             for m in &c.methods {
-                self.check_function(&m.function, Some(&host), m.is_static, !m.is_abstract);
+                let own_sig = own_info.methods.get(&m.function.name);
+                self.check_function_with_own_sig(
+                    &m.function,
+                    Some(&host),
+                    m.is_static,
+                    !m.is_abstract,
+                    own_sig,
+                );
             }
         }
         self.current_trait = previous_trait;
@@ -181,7 +207,53 @@ impl<'a> Checker<'a> {
         is_concrete: bool,
         ancestor_sig_hint: Option<&FunctionSig>,
     ) {
-        let sig = self.lookup_own_signature(f, class_name);
+        self.check_function_impl(
+            f,
+            class_name,
+            is_static,
+            is_concrete,
+            ancestor_sig_hint,
+            None,
+        );
+    }
+
+    /// ROADMAP "Known but not yet scheduled" follow-up: for a trait
+    /// method body whose own literal declaration (not the registry's
+    /// single winning slot for this trait's name - see `check_trait_
+    /// methods`'s own doc comment) is already known. `own_sig` is a full
+    /// substitute for the ordinary registry-derived `sig`, not a hint -
+    /// a trait's own literal declaration genuinely *is* this method's
+    /// real signature, unlike `ancestor_sig_hint`'s narrower, single-
+    /// call-site-only role (see `check_function_impl`'s own doc comment
+    /// for that distinction).
+    pub(crate) fn check_function_with_own_sig(
+        &mut self,
+        f: &FunctionDecl,
+        class_name: Option<&str>,
+        is_static: bool,
+        is_concrete: bool,
+        own_sig: Option<&FunctionSig>,
+    ) {
+        self.check_function_impl(f, class_name, is_static, is_concrete, None, own_sig);
+    }
+
+    /// The real body shared by `check_function`/`check_function_with_
+    /// ancestor_hint`/`check_function_with_own_sig` - `ancestor_sig_hint`
+    /// (Phase 90) is `Some` only for an anonymous class's own method (see
+    /// this function's own doc comment further down for the full
+    /// reasoning); `own_sig_override`, when `Some`, replaces the
+    /// ordinary registry lookup for `sig` entirely (used only by
+    /// `check_trait_methods`, for the reason its own doc comment gives).
+    fn check_function_impl(
+        &mut self,
+        f: &FunctionDecl,
+        class_name: Option<&str>,
+        is_static: bool,
+        is_concrete: bool,
+        ancestor_sig_hint: Option<&FunctionSig>,
+        own_sig_override: Option<&FunctionSig>,
+    ) {
+        let sig = own_sig_override.or_else(|| self.lookup_own_signature(f, class_name));
         // Moved up from its original position right before the bound-
         // enforcement block below - Phase 48's own per-parameter/return
         // existence check (right below, inside both match arms) needs a

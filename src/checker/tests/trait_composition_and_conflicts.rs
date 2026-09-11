@@ -132,6 +132,38 @@ fn a_conditionally_declared_trait_still_checks_against_its_real_host() {
     );
 }
 
+// ROADMAP "Known but not yet scheduled" follow-up: real corpus shape,
+// doctrine-orm's own `PersistentCollectionImplementation` (`if
+// (defined(Criteria::class . '::ASC')) { trait ... { public function
+// add(mixed $value): bool {...} } } else { trait ... { public function
+// add(mixed $value): void {...} } }`) - before this fix, `check_function`'s
+// own `lookup_own_signature` always re-fetched whichever branch won the
+// registry's single slot for the trait's name (`registry/index.rs`'s own
+// `or_insert_with`, first-indexed-wins, no tiebreak for classes/traits
+// at all), so the losing (here, `void`) branch's own body was wrongly
+// checked against the winning (`bool`) branch's return type.
+#[test]
+fn a_trait_declared_twice_under_a_guard_checks_each_branch_against_its_own_signature() {
+    let d = diagnostics_for(
+        r#"<?php
+            if (true) {
+                trait Adder {
+                    public function add(): bool { return true; }
+                }
+            } else {
+                trait Adder {
+                    public function add(): void {}
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .all(|x| x.identifier == "if.alwaysTrue" || !x.message.contains("return statement")),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_host_independent_trait_bug_is_reported_once_not_once_per_host() {
     let d = diagnostics_for(
