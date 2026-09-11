@@ -232,6 +232,9 @@ impl<'a> Checker<'a> {
                     fqn,
                     "property.trait",
                 );
+                // Phase 48 follow-up (item 7c): `class.nameCase` for this
+                // PHPDoc-typed property position.
+                self.check_type_class_name_case(&prop_sig.case_refs, fqn, p.span);
             }
         }
         self.check_property_tag_types(fqn, c);
@@ -316,6 +319,9 @@ impl<'a> Checker<'a> {
                 c.span,
                 fqn,
             );
+            // Phase 48 follow-up (item 7c): `class.nameCase` for this
+            // `@property`-tag target.
+            self.check_type_class_name_case(&prop_sig.case_refs, fqn, c.span);
         }
     }
 

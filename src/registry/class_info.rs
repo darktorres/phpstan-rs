@@ -7,7 +7,9 @@ use crate::registry::function_sig::{
     build_type_aliases, infer_const_type, mark_template_params, resolve_type,
     substitute_type_aliases,
 };
-use crate::registry::name_context::{NameContext, resolve_names_in_type};
+use crate::registry::name_context::{
+    NameContext, collect_class_name_case_refs, resolve_names_in_type,
+};
 use crate::types::{self, TemplateParam, Type};
 
 mod attributes;
@@ -125,6 +127,13 @@ pub struct PropertySig {
     // testing this field against `Type::Mixed`.
     pub ty_native: Type,
     pub has_native_type: bool,
+    // Phase 48 follow-up (item 7c): `ParamSig::case_refs`'s own property-
+    // position equivalent - see that field's own doc comment. Populated
+    // identically at all three real construction sites (plain declared
+    // property, promoted constructor property, `@property`/`-read`/
+    // `-write` tag) - the tag site rides along for free, since it's the
+    // exact same `PropertySig` the real-property sites already populate.
+    pub case_refs: Vec<(String, String)>,
 }
 
 // Phase 57's own still-open item: a class constant's own `public`/
@@ -559,6 +568,8 @@ impl ClassInfo {
                     p.type_hint.as_deref(),
                 );
                 let ty = mark_template_params(ty, &template_params);
+                let mut case_refs = Vec::new();
+                collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let ty_native = resolve_type(None, p.type_hint.as_deref());
@@ -594,6 +605,7 @@ impl ClassInfo {
                         is_abstract: p.is_abstract,
                         has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
+                        case_refs,
                     },
                 )
             })
@@ -630,6 +642,8 @@ impl ClassInfo {
                     });
                 let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
                 let ty = mark_template_params(ty, &template_params);
+                let mut case_refs = Vec::new();
+                collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
@@ -682,6 +696,7 @@ impl ClassInfo {
                         // genuinely can carry inline hooks (Phase 43.1).
                         has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
+                        case_refs,
                     },
                 );
             }
@@ -701,6 +716,8 @@ impl ClassInfo {
                 properties.entry(tag.name.clone()).or_insert_with(|| {
                     let ty = types::parse_type_string(&tag.ty);
                     let ty = mark_template_params(ty, &template_params);
+                    let mut case_refs = Vec::new();
+                    collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                     let ty = resolve_names_in_type(ty, ctx);
                     PropertySig {
                         ty,
@@ -728,6 +745,7 @@ impl ClassInfo {
                         is_abstract: false,
                         has_get_hook: false,
                         has_set_hook: false,
+                        case_refs,
                     }
                 });
             }
@@ -1294,6 +1312,9 @@ impl ClassInfo {
                 is_abstract: false,
                 has_get_hook: false,
                 has_set_hook: false,
+                // A language built-in, not textual - nothing to check
+                // the case of.
+                case_refs: Vec::new(),
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -1347,6 +1368,7 @@ impl ClassInfo {
                     is_abstract: false,
                     has_get_hook: false,
                     has_set_hook: false,
+                    case_refs: Vec::new(),
                 },
             );
         }

@@ -1035,6 +1035,75 @@ fn a_template_name_sharing_a_lowercase_class_s_own_spelling_is_never_flagged_nam
     );
 }
 
+// Phase 48 follow-up (item 7c): `class.nameCase` for a property position -
+// a plain declared property's native type hint, a `@var`-tag property
+// type, and a `@property` tag target.
+
+#[test]
+fn a_differently_cased_native_property_type_hint_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            class Bar {
+                public foo $x;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_var_tag_property_type_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            class Bar {
+                /** @var foo */
+                public $x;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_property_tag_target_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @property foo $x */
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_correctly_cased_property_position_is_never_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @property Foo $y */
+            class Bar {
+                public Foo $x;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_differently_cased_call_to_a_builtin_function_is_never_flagged() {
     let d = diagnostics_for(
