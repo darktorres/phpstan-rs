@@ -965,15 +965,46 @@ representation doesn't already produce); `generics.notGeneric`
 legitimate stub-granted-generics case on a real zero-`@template`
 built-in); a `@method` tag's own inline generic template syntax (zero
 corpus value, and this project's `@method`-tag parser has no
-template-syntax support to build on at all). Newly identified, real,
-still-open gap: no constructor-argument-driven class-level generic-type
-inference for `new X(...)` exists at all, so `new ReflectionClass($view)`
-never binds `ReflectionClass<T>`'s own class-level `T` from `$view`'s
-type the way real PHPStan's own `ReflectionClassDynamicReturnTypeExtension`
-does - confirmed directly (`(new ReflectionClass($view))`'s own
-inferred type stays plain `ReflectionClass`, no type argument). Not
-built - a genuinely missing general capability, not a narrow bug;
-would need its own design (Phase-54-scale, not a small addition).
+template-syntax support to build on at all).
+
+Phase 54/77 follow-up: `new X(...)` now binds a generic class's own
+class-level `@template`s from the constructor's declared param types
+against the actual argument types (`infer_expr`'s `ExprKind::New` arm,
+`checker/expr.rs`) - the same `bind_template_param`/`TemplateBindings`
+primitive ordinary call-site inference already uses, just against a
+constructor instead of a function. `ReflectionClass<T>` itself needed a
+narrow, disclosed patch on top (`php_stubs::patch_reflection_class_
+constructor_template`): real phpstorm-stubs' own `@param
+class-string<T>|T $objectOrClass` never reaches `ParamSig::ty` for this
+one parameter (a real gap in the doc-merge pipeline for a native hint
+also carrying a `#[LanguageLevelTypeAware(...)]` attribute - confirmed
+not a problem with the general mechanism itself, which works correctly
+for the identical type shape on a project-local class with no such
+attribute). A template the constructor never binds stays erased
+(trimmed off the trailing end) rather than filled with `Mixed`, so the
+class's own `@template T = Default` fallback still applies -
+`bind_template_param` itself also gained a bound check rejecting a bare
+`T` (`@template T of object`) binding to a definite scalar argument
+(`new ReflectionClass($className)` from a plain `string` variable, not
+`Foo::class`), a real corpus find caught before landing. Disclosed
+residual: `new ReflectionClass('Foo')` - a bare string literal, not
+`Foo::class` - still won't bind `T` (`bind_template_param` has no arm
+treating a string literal's own *value* as a class-name reference). A
+second, separate, pre-existing gap this same corpus round exposed for
+the first time (since `new SortEntry(...)`-shaped code never produced a
+non-erased generic type argument to compare before): comparing a
+covariant generic object nested inside a `list<...>`/`non-empty-list<...>`
+type (both sides `Intersection([Array(...), Accessory(ArrayList)])`)
+against a differently-argued declared type incorrectly fails even when
+the object's own `@template-covariant` slot would make it a valid
+subtype at the bare (non-array-wrapped) level - confirmed via an
+isolated repro with zero `new`/inference involved (a plain `@var
+list<...>`-annotated local reproduces it identically), so this is a
+real, standalone `Intersection`-vs-`Intersection` assignability gap
+(`registry/assignability.rs`'s own `(Intersection(members), _) => .any`
+arm decomposing `sub` before `sup` ever gets a chance to be decomposed
+member-wise against it), not something constructor-argument binding
+itself got wrong - left as its own, separately-scoped follow-up.
 
 **56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
 a lenient, hand-rolled ad-hoc string tokenizer (not built on the
@@ -1037,8 +1068,12 @@ main real-world use (SQL-injection-safety checking). Size: M.
 
 **77 - Runtime-capability modeling, remaining (PARTIAL).** Most of the
 originally-scoped functions, plus `SimpleXMLElement`'s own magic-
-property type resolution, are done (see Done). Reflection-class
-modeling in the registry remains unbuilt - needs genuinely new
+property type resolution, are done (see Done). `ReflectionClass<T>`'s
+own constructor-argument-driven binding is now built too (see Done,
+Phase 54/77 follow-up). Deeper reflection-class modeling beyond that -
+e.g. `getMethods()`/`getProperties()` returning real, class-specific
+`ReflectionMethod`/`ReflectionProperty` collections rather than the
+stub's own generic ones - remains unbuilt: needs genuinely new
 infrastructure this project doesn't have, with no corpus evidence of
 heavy usage to justify building it speculatively.
 
