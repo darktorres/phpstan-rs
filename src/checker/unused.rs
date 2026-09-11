@@ -34,8 +34,8 @@ mod rebind;
 mod var_usage;
 
 use member_usage::{
-    MemberUsage, hook_read_write_shape, walk_expr_for_members, walk_property_hooks_for_members,
-    walk_stmt_body_for_members,
+    MemberUsage, hook_read_write_shape, seed_self_typed_param_aliases, walk_expr_for_members,
+    walk_property_hooks_for_members, walk_stmt_body_for_members,
 };
 pub(crate) use rebind::scan_program_for_rebind_targets;
 use var_usage::collect_var_usage;
@@ -146,27 +146,55 @@ impl<'a> Checker<'a> {
         let mut usage = MemberUsage::default();
         let ctor = methods.iter().find(|m| m.function.name == "__construct");
         for m in methods {
+            usage.aliases.clear();
+            seed_self_typed_param_aliases(&m.function.params, fqn, &self.name_ctx, &mut usage);
+            // Two passes over the same body, same accumulator: pass 1
+            // fully populates `usage.aliases` (detecting a same-class
+            // `new self()` assignment or `instanceof self` check doesn't
+            // depend on any alias already being known, so one top-to-
+            // bottom pass finds all of them regardless of order); pass 2
+            // (now with complete alias knowledge from the start)
+            // correctly attributes every aliased-variable read/write/call
+            // even when it textually precedes the statement that
+            // established the alias. HashSet inserts are idempotent, so
+            // the redundant work in pass 1's own read/write/method
+            // accounting is harmless, not a correctness risk. See
+            // `MemberUsage::aliases`'s own doc comment.
+            walk_stmt_body_for_members(&m.function.body, fqn, &self.name_ctx, &mut usage);
             walk_stmt_body_for_members(&m.function.body, fqn, &self.name_ctx, &mut usage);
         }
         if let Some(ctor) = ctor {
             for p in &ctor.function.params {
                 if let Some(d) = &p.default {
+                    // A property/constructor-param default must be a
+                    // PHP constant expression - no assignment or
+                    // `instanceof` can appear in one, so `usage.aliases`
+                    // can never be populated here; cleared anyway rather
+                    // than relying on that argument to justify skipping
+                    // it.
+                    usage.aliases.clear();
                     walk_expr_for_members(d, fqn, &self.name_ctx, &mut usage);
                 }
                 if let Some(hooks) = &p.hooks {
+                    usage.aliases.clear();
+                    walk_property_hooks_for_members(hooks, fqn, &self.name_ctx, &mut usage);
                     walk_property_hooks_for_members(hooks, fqn, &self.name_ctx, &mut usage);
                 }
             }
         }
         for p in properties {
             if let Some(d) = &p.default {
+                usage.aliases.clear();
                 walk_expr_for_members(d, fqn, &self.name_ctx, &mut usage);
             }
             if let Some(hooks) = &p.hooks {
+                usage.aliases.clear();
+                walk_property_hooks_for_members(hooks, fqn, &self.name_ctx, &mut usage);
                 walk_property_hooks_for_members(hooks, fqn, &self.name_ctx, &mut usage);
             }
         }
         for c in consts {
+            usage.aliases.clear();
             walk_expr_for_members(&c.value, fqn, &self.name_ctx, &mut usage);
         }
 

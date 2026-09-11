@@ -25,6 +25,18 @@ pub(crate) struct MemberUsage {
     pub(crate) reads: HashSet<String>,
     pub(crate) writes: HashSet<String>,
     pub(crate) escaped: bool,
+    /// Local variable names, scoped to the one function/hook body
+    /// currently being scanned, syntactically proven (never via real type
+    /// inference - this stays a flat, flow-insensitive "was this name
+    /// ever established as self-typed anywhere in this body" set, at the
+    /// same precision level the rest of this file already uses) to hold
+    /// an instance of the class being scanned - see
+    /// `is_this_or_aliased`/`is_new_self_instance`/
+    /// `seed_self_typed_param_aliases`. Variable names are per-scope, not
+    /// class-wide, so the caller (`check_unused_private_members`) clears
+    /// this before each function/hook body's own scan rather than letting
+    /// it accumulate across bodies.
+    pub(crate) aliases: HashSet<String>,
 }
 
 /// Whether `class_ref` (the class name half of a `Foo::bar`/`self::bar`/
@@ -45,6 +57,23 @@ fn is_this(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Variable(name) if name == "this")
 }
 
+/// `$this`, or a local variable syntactically proven (`usage.aliases`) to
+/// hold an instance of the class currently being scanned - e.g.
+/// `$sub = new self(); ...; $sub->privateMethod();`, or
+/// `if ($x instanceof self) { ...; $x->privateProp; }`. See
+/// `MemberUsage::aliases`'s own doc comment for how that set is built.
+fn is_this_or_aliased(e: &Expr, usage: &MemberUsage) -> bool {
+    is_this(e) || matches!(&e.kind, ExprKind::Variable(name) if usage.aliases.contains(name))
+}
+
+/// `new self(...)`/`new static(...)`/`new <SameClass>(...)` - the
+/// declaration-based half of `MemberUsage::aliases`'s detection, paired
+/// with the `Assign` arm below.
+fn is_new_self_instance(e: &Expr, fqn: &str, ctx: &NameContext) -> bool {
+    matches!(&e.kind, ExprKind::New(callee, _)
+        if matches!(&callee.kind, ExprKind::Name(class_ref) if class_ref_is_self(class_ref, fqn, ctx)))
+}
+
 /// Marks `l` - the left-hand side of an `Assign`/`CompoundAssign` - as a
 /// write (and, for a compound assignment, also a read) when it's exactly
 /// `$this->prop` or `self::$prop`/`static::$prop`; returns `false` for
@@ -62,7 +91,7 @@ fn mark_write_target(
     also_read: bool,
 ) -> bool {
     match &l.kind {
-        ExprKind::PropertyAccess(base, name, _) if is_this(base) => {
+        ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
             usage.writes.insert(name.clone());
             if also_read {
                 usage.reads.insert(name.clone());
@@ -158,6 +187,13 @@ pub(crate) fn walk_expr_for_members(
         // further down would.
         ExprKind::Assign(l, r) => {
             walk_expr_for_members(r, fqn, ctx, usage);
+            // `$var = new self()`/`new static()`/`new <SameClass>()` -
+            // see `MemberUsage::aliases`'s own doc comment.
+            if let ExprKind::Variable(name) = &l.kind
+                && is_new_self_instance(r, fqn, ctx)
+            {
+                usage.aliases.insert(name.clone());
+            }
             if !mark_write_target(l, fqn, ctx, usage, false) {
                 walk_expr_for_members(l, fqn, ctx, usage);
             }
@@ -170,8 +206,23 @@ pub(crate) fn walk_expr_for_members(
             }
             return;
         }
-        ExprKind::PropertyAccess(base, name, _) if is_this(base) => {
+        ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
             usage.reads.insert(name.clone());
+        }
+        // `$var instanceof self`/`static`/`<SameClass>`, either polarity,
+        // anywhere in the body - see `MemberUsage::aliases`'s own doc
+        // comment. Deliberately not narrowed to "only inside the branch
+        // this proves true in" (this whole walker is flow-insensitive by
+        // design already, e.g. `usage.reads`/`usage.writes` are plain,
+        // unconditional sets too) - the safe direction here, matching
+        // this project's "favor false negatives [on `unused`] over false
+        // positives" default.
+        ExprKind::Instanceof(inner, InstanceofTarget::Name(class_ref, _)) => {
+            if let ExprKind::Variable(name) = &inner.kind
+                && class_ref_is_self(class_ref, fqn, ctx)
+            {
+                usage.aliases.insert(name.clone());
+            }
         }
         ExprKind::StaticAccess(class_ref, member) => {
             // `Foo::{$expr}` / `Foo::$$name` - the parser's own sentinel
@@ -189,7 +240,7 @@ pub(crate) fn walk_expr_for_members(
                 usage.consts.insert(member.clone());
             }
         }
-        ExprKind::MethodCall(recv, name, ..) if is_this(recv) => {
+        ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
             usage.methods.insert(name.clone());
         }
         ExprKind::StaticCall(class_ref, name, _) if class_ref_is_self(class_ref, fqn, ctx) => {
@@ -211,7 +262,7 @@ pub(crate) fn walk_expr_for_members(
                 && b.key.is_none()
                 && !a.spread
                 && !b.spread
-                && is_this(&a.value)
+                && is_this_or_aliased(&a.value, usage)
                 && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
             {
                 usage.methods.insert(name.clone());
@@ -321,5 +372,29 @@ pub(crate) fn walk_stmt_body_for_members(
 ) {
     for stmt in body {
         walk_stmt_for_members(stmt, fqn, ctx, usage);
+    }
+}
+
+/// The declaration-based half of `MemberUsage::aliases`'s detection: a
+/// parameter explicitly typed `self`/`static`/the declaring class itself
+/// (e.g. a comparison/merge/copy method taking a same-typed argument) is
+/// as much a same-class instance as one proven via `new self()`/
+/// `instanceof self`. Deliberately only the exact-name case - a nullable
+/// (`?self`) or union (`self|null`) type hint is skipped, matching this
+/// project's existing "conservative when the shape gets more complex"
+/// direction elsewhere in this same file.
+pub(crate) fn seed_self_typed_param_aliases(
+    params: &[Param],
+    fqn: &str,
+    ctx: &NameContext,
+    usage: &mut MemberUsage,
+) {
+    for p in params {
+        if p.type_hint
+            .as_deref()
+            .is_some_and(|t| class_ref_is_self(t, fqn, ctx))
+        {
+            usage.aliases.insert(p.name.clone());
+        }
     }
 }

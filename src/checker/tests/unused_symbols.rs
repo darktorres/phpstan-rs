@@ -445,6 +445,99 @@ fn private_const_referenced_only_in_an_anonymous_class_constructor_arg_is_not_fl
 }
 
 #[test]
+fn private_method_reached_through_a_new_self_assigned_local_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Node {
+                public function withSibling(): self {
+                    $other = new self();
+                    $other->helper();
+                    return $other;
+                }
+                private function helper(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("is unused")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn private_property_reached_through_an_instanceof_self_narrowed_local_is_not_flagged() {
+    // `$other` is deliberately typed `object`, not `Backend` (unlike the
+    // sibling `private_method_reached_through_a_self_typed_parameter_is_
+    // not_flagged` test) - a same-class parameter type would already
+    // establish the alias via `seed_self_typed_param_aliases` (rule 3),
+    // which would defeat the point of this test: isolating the
+    // `instanceof self` narrowing rule (rule 2) on its own, the same
+    // shape as the real `ImageImagick::compose` corpus instance this
+    // mirrors (`$overlay_backend = $overlay->image;`, an unknown/
+    // interface-typed value only narrowed by the `instanceof` check).
+    let d = diagnostics_for(
+        r#"<?php
+            class Backend {
+                private bool $flag = false;
+                public function compose(object $other): void {
+                    if (! $other instanceof self) {
+                        throw new \LogicException("nope");
+                    }
+                    if (! $other->flag) {
+                        $other->flag = true;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("Backend::$flag")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn private_method_reached_through_a_self_typed_parameter_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Money {
+                public function add(self $other): void {
+                    $other->helper();
+                }
+                private function helper(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("is unused")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_local_variable_assigned_an_unrelated_class_is_not_treated_as_self() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Other {
+                public function helper(): void {}
+            }
+            class Foo {
+                public function run(): void {
+                    $x = new Other();
+                    $x->helper();
+                }
+                private function helper(): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message.contains("private method Foo::helper() is unused")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
 fn constructor_and_clone_are_never_flagged_as_unused_private_methods() {
     let d = diagnostics_for(
         r#"<?php
