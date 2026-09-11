@@ -255,6 +255,26 @@ pub struct Registry {
     // `entry(...).or_insert_with(...)` is a no-op once the stub already
     // occupies the slot, which `merge_stubs` guarantees happens first.
     stub_provided_functions: HashSet<String>,
+    // Every bare function/method name that at least one indexed
+    // `FunctionSig` anywhere in the registry has a non-empty `assert`
+    // list for. `@phpstan-assert` is a rare docblock tag in real corpora
+    // (confirmed: zero occurrences across the full Symfony monorepo plus
+    // every vendored PHP stub) - `checker::stmt`'s own bare-statement
+    // narrowing pass used to pay a full receiver-type inference plus
+    // registry hierarchy walk on *every* bare `$x->method();`/
+    // `Class::method();`/`func();` statement just to find out `sig.assert`
+    // is empty; this lets it check simple set membership by name first
+    // and skip straight past the expensive lookup for every name that
+    // provably can't match. Populated once per `insert_built_decl` call
+    // (see that method's own doc comment) - a name is only ever added,
+    // never removed on `remove_declarations`, which just means an edited-
+    // away assert tag leaves its old name in the set as a harmless,
+    // rare false positive (still fully correct: this is a "may still do
+    // the real check" set, not a "known good" one) rather than a
+    // dangerous false negative - kept correct on every mutation path
+    // this way (both the parallel batch build and the single-file LSP
+    // `update_file` path route through the same `insert_built_decl`).
+    pub(crate) names_with_assert_tags: HashSet<String>,
 }
 
 impl Registry {

@@ -139,46 +139,7 @@ impl<'a> Checker<'a> {
                 // assertions get just above, generalized via a real
                 // `FunctionSig` lookup instead of a hardcoded name table
                 // (see `FunctionSig::assert_if_true`'s own doc comment).
-                match &e.kind {
-                    ExprKind::MethodCall(recv, method, args, _) => {
-                        // Real bug found and fixed this session: this used
-                        // to require the receiver's own type to be
-                        // literally `Type::Object`, silently skipping a
-                        // `@phpstan-assert` narrowing opportunity for a
-                        // `Union`/`Intersection` receiver.
-                        let recv_ty = self.infer_expr(recv, locals);
-                        if let Some((_, sig)) = self.find_method_owner(&recv_ty, method)
-                            && !sig.assert.is_empty()
-                        {
-                            self.apply_assert_infos(&sig.assert, sig, Some(recv), args, locals);
-                        }
-                    }
-                    ExprKind::StaticCall(class_name, method, args) => {
-                        if let Some(class) = self.resolve_static_class_name(class_name)
-                            && let Some(sig) = self.registry.lookup_method(&class, method)
-                            && !sig.assert.is_empty()
-                        {
-                            self.apply_assert_infos(&sig.assert, sig, None, args, locals);
-                        }
-                    }
-                    ExprKind::Call(callee, args) => {
-                        if let ExprKind::Name(name) = &callee.kind {
-                            let (primary, fallback) =
-                                self.name_ctx.resolve_function_candidates(name);
-                            if let Some(sig) =
-                                self.registry.lookup_function(&primary).or_else(|| {
-                                    fallback
-                                        .as_deref()
-                                        .and_then(|g| self.registry.lookup_function(g))
-                                })
-                                && !sig.assert.is_empty()
-                            {
-                                self.apply_assert_infos(&sig.assert, sig, None, args, locals);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                self.apply_bare_statement_assert_narrowing(e, locals);
                 // Phase 32 Finding K: a bare `$cond || neverReturningCall();`
                 // statement - PHP's classic "guard or die" idiom
                 // (`$pos !== false || $this->ierror('Missing .', 400);`).
@@ -637,6 +598,86 @@ impl<'a> Checker<'a> {
         {
             purge_stale_narrowing_for(locals, &name);
             locals.insert(name, ty);
+        }
+    }
+
+    /// A bare `@phpstan-assert Type $target` on this call's own
+    /// declaration - the same "narrows unconditionally, no branch needed"
+    /// shape `assert($cond)`/PHPUnit's own assertions get, generalized via
+    /// a real `FunctionSig` lookup instead of a hardcoded name table (see
+    /// `FunctionSig::assert_if_true`'s own doc comment).
+    ///
+    /// Investigated as a "needs more work" finding from a perf-optimization
+    /// workflow: hotpath-instrumented probing (temporarily splitting this
+    /// block's three arms into their own measured functions) found every
+    /// one of them - the `infer_expr` receiver-type recompute and
+    /// `find_method_owner`'s hierarchy walk for `MethodCall`, `StaticCall`'s
+    /// own `lookup_method` walk, `Call`'s `resolve_function_candidates` +
+    /// `lookup_function` - is *entirely* wasted work on the two corpora
+    /// tested (Symfony's monorepo, Drupal core+modules): `@phpstan-assert`
+    /// appears in zero files across either corpus plus every vendored PHP
+    /// stub, so `sig.assert.is_empty()` was true on all 256K+ calls this
+    /// block made per Symfony run alone. `registry.names_with_assert_tags`
+    /// (populated once, see its own doc comment) turns that into a single
+    /// cheap set-membership check by the call's own bare name *before*
+    /// paying for any receiver-type inference or hierarchy walk - safe
+    /// because the set is a superset of "names that could possibly match"
+    /// (see that field's own doc comment for why it never under-approximates).
+    fn apply_bare_statement_assert_narrowing(&mut self, e: &Expr, locals: &mut Locals) {
+        match &e.kind {
+            ExprKind::MethodCall(recv, method, args, _) => {
+                if !self
+                    .registry
+                    .names_with_assert_tags
+                    .contains(method.as_str())
+                {
+                    return;
+                }
+                // Real bug found and fixed this session: this used
+                // to require the receiver's own type to be
+                // literally `Type::Object`, silently skipping a
+                // `@phpstan-assert` narrowing opportunity for a
+                // `Union`/`Intersection` receiver.
+                let recv_ty = self.infer_expr(recv, locals);
+                if let Some((_, sig)) = self.find_method_owner(&recv_ty, method)
+                    && !sig.assert.is_empty()
+                {
+                    self.apply_assert_infos(&sig.assert, sig, Some(recv), args, locals);
+                }
+            }
+            ExprKind::StaticCall(class_name, method, args) => {
+                if !self
+                    .registry
+                    .names_with_assert_tags
+                    .contains(method.as_str())
+                {
+                    return;
+                }
+                if let Some(class) = self.resolve_static_class_name(class_name)
+                    && let Some(sig) = self.registry.lookup_method(&class, method)
+                    && !sig.assert.is_empty()
+                {
+                    self.apply_assert_infos(&sig.assert, sig, None, args, locals);
+                }
+            }
+            ExprKind::Call(callee, args) => {
+                if let ExprKind::Name(name) = &callee.kind {
+                    let bare = name.rsplit('\\').next().unwrap_or(name);
+                    if !self.registry.names_with_assert_tags.contains(bare) {
+                        return;
+                    }
+                    let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+                    if let Some(sig) = self.registry.lookup_function(&primary).or_else(|| {
+                        fallback
+                            .as_deref()
+                            .and_then(|g| self.registry.lookup_function(g))
+                    }) && !sig.assert.is_empty()
+                    {
+                        self.apply_assert_infos(&sig.assert, sig, None, args, locals);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
