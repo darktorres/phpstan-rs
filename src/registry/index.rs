@@ -506,6 +506,22 @@ impl Registry {
             }
         }
     }
+
+    /// ROADMAP "Known but not yet scheduled": the constant-side sibling
+    /// of `merge_stub_classes`/`merge_stubs` - unlike those two (first-
+    /// occurrence-wins across the whole corpus, since a stub function/
+    /// class conflict is resolved by this project's own conditional-
+    /// declaration tiebreaking), a global constant has no such
+    /// tiebreaking mechanism, so this reuses `register_global_constant`'s
+    /// own "poison to Mixed on any real disagreement" conflict policy -
+    /// the exact same policy already used *within* one file's own
+    /// `global_constants` map, applied here across every vendored stub
+    /// file at once.
+    pub fn merge_stub_constants(&mut self, stubs: Vec<(String, Type)>) {
+        for (name, ty) in stubs {
+            register_global_constant(&mut self.global_constants, name, ty);
+        }
+    }
 }
 
 /// Pure: walks `stmts` with the identical Namespace/Use/If/Block/
@@ -795,8 +811,22 @@ fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
     // real corpus idiom) the moment this table stopped being uniformly
     // `Mixed`. `PHP_INT_MAX` itself needs no equivalent exclusion -
     // `9223372036854775807` fits exactly, no `Neg`/overflow involved.
+    //
+    // ROADMAP "Known but not yet scheduled" follow-up: returning `None`
+    // here used to mean "don't know this constant's type, fall back to
+    // `Mixed` at every read site" - a safe default for ordinary constant-
+    // *value* inference, but indistinguishable from "this constant
+    // doesn't exist at all" for the newer `use const` *existence* check
+    // (`check_use_const_imports`), which only ever sees whether a name
+    // made it into `global_constants` at all. `PHP_INT_MIN` is a real,
+    // always-defined PHP constant - a real `use const PHP_INT_MIN;`
+    // should never be flagged `constant.notFound`. `Type::Int` (not a
+    // literal, and deliberately not `infer_const_type`'s own
+    // float-overflow-affected inference) is the safe, correct level of
+    // precision: real, existing, typed as plain `int`, with no risk of
+    // the `Neg`/float-overflow mistake this exclusion exists to avoid.
     if const_name == "PHP_INT_MIN" {
-        return None;
+        return Some((const_name.clone(), Type::Int));
     }
     Some((const_name.clone(), infer_const_type(&args[1].value)))
 }
@@ -828,7 +858,7 @@ fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
 /// can never un-poison it back to a specific type - the true value is
 /// still just as undetermined regardless of which site happens to run at
 /// this constant's real, load-order-dependent definition time.
-fn register_global_constant(map: &mut FxHashMap<String, Type>, name: String, ty: Type) {
+pub(crate) fn register_global_constant(map: &mut FxHashMap<String, Type>, name: String, ty: Type) {
     match map.get(&name) {
         None => {
             map.insert(name, ty);

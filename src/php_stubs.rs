@@ -54,7 +54,7 @@
 
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::registry::{ClassInfo, FunctionSig, Registry};
+use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
 use crate::types::{TemplateParam, Type};
 
 include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
@@ -183,6 +183,56 @@ pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
             (name, info)
         })
         .collect()
+}
+
+/// ROADMAP "Known but not yet scheduled": the constant-side sibling of
+/// `generate_classes_from_source` just above - undefined-`use const`/
+/// bare-constant detection needs built-in/extension constants
+/// (`JSON_PRETTY_PRINT`, `SORT_*`, `CURLOPT_*`, ...) to actually be
+/// known, the same way undefined-function detection needs
+/// `generated_stubs()`'s functions to be known. Real phpstorm-stubs
+/// declares these via ordinary top-level `define('NAME', value)` calls
+/// (6781 of them across the vendored corpus) - `Registry::index_and_
+/// flatten` already collects those into its own `global_constants` map
+/// via the identical `define_call_constant`/`register_global_constant`
+/// path project source goes through, so there's nothing new to parse,
+/// only a new place to read the result from.
+pub fn generate_constants_from_source(source: &str) -> Vec<(String, Type)> {
+    let tokens = Lexer::new(source).tokenize_with_spans();
+    let program = Parser::new(tokens)
+        .parse_program()
+        .expect("vendored phpstorm-stubs source failed to parse");
+    let registry = Registry::index_and_flatten(&program);
+    registry.global_constants.into_iter().collect()
+}
+
+/// All constants generated from the vendored phpstorm-stubs sources,
+/// merged via `register_global_constant`'s own "poison to Mixed on any
+/// real disagreement" policy - unlike `generated_stubs`/`generated_
+/// stub_classes`'s first-occurrence-wins dedup (a stub function/class
+/// name conflict is resolved by this project's own conditional-
+/// declaration tiebreaking instead), a bare global constant has no such
+/// tiebreaking mechanism, so this reuses the exact same conflict policy
+/// already used *within* one file's own `global_constants` map, across
+/// the whole corpus at once - the identical merge `Registry::
+/// merge_stub_constants` (`registry/index.rs`) applies again for a
+/// project's own constants layered on top.
+pub fn generated_stub_constants() -> Vec<(String, Type)> {
+    // See `generated_stubs`' own doc comment - identical `LazyLock`
+    // caching, same reason.
+    static CACHE: std::sync::LazyLock<Vec<(String, Type)>> = std::sync::LazyLock::new(|| {
+        let mut merged: rustc_hash::FxHashMap<String, Type> = rustc_hash::FxHashMap::default();
+        for source in PHPSTORM_STUBS_SOURCES
+            .iter()
+            .chain(PHPSTAN_SRC_SOURCES.iter())
+        {
+            for (name, ty) in generate_constants_from_source(source) {
+                register_global_constant(&mut merged, name, ty);
+            }
+        }
+        merged.into_iter().collect()
+    });
+    CACHE.clone()
 }
 
 /// Phase 54/77 follow-up: real phpstorm-stubs' own `ReflectionClass::

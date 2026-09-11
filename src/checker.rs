@@ -1161,6 +1161,7 @@ impl<'a> Checker<'a> {
         // plain, class-shaped `use Foo;` is deliberately NOT
         // existence-checked here.
         self.check_use_function_imports(program);
+        self.check_use_const_imports(program);
         self.check_use_class_imports(program);
         // Phase 63: `UsedNamesRule`'s own case-insensitive
         // declaration-vs-import collision check - a whole-file,

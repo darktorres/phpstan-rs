@@ -541,6 +541,108 @@ fn use_function_name_case_is_not_flagged_for_a_correctly_cased_import_even_when_
     );
 }
 
+// ROADMAP "Known but not yet scheduled": `use const`'s own existence
+// check - see `Checker::check_use_const_imports`'s own doc comment.
+#[test]
+fn a_typod_use_const_import_is_flagged_with_constant_not_found() {
+    let d = diagnostics_for(
+        r#"<?php
+            use const TotallyMadeUpConstantName;
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "constant.notFound"
+            && x.message.contains("TotallyMadeUpConstantName")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_real_project_const_use_import_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            const FOO = 1;
+            use const FOO;
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "constant.notFound"),
+        "got: {d:?}"
+    );
+}
+
+// Exercises the new `php_stubs::generated_stub_constants()` path
+// directly - a real, vendored phpstorm-stubs `define()`d constant.
+#[test]
+fn a_real_builtin_stub_const_use_import_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            use const JSON_PRETTY_PRINT;
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "constant.notFound"),
+        "got: {d:?}"
+    );
+}
+
+// Real corpus false positive caught during corpus verification:
+// `define_call_constant`'s own deliberate `PHP_INT_MIN` exclusion (its
+// raw literal overflows i64, mistyping as Float) used to mean this real,
+// always-defined constant was never registered at all - indistinguishable
+// from "doesn't exist" to this existence check. Now registered with
+// `Type::Int` directly instead of being skipped entirely.
+#[test]
+fn a_real_php_int_min_use_import_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            use const PHP_INT_MIN;
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "constant.notFound"),
+        "got: {d:?}"
+    );
+}
+
+// Exercises the group-use flattening path for free - `use Foo\{const
+// BAR}` is parsed into the identical flat `Vec<UseImport>` a plain `use
+// const Foo\BAR;` is.
+#[test]
+fn a_grouped_use_const_import_typo_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            use App\{const TotallyMadeUpGroupedConst};
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "constant.notFound"),
+        "got: {d:?}"
+    );
+}
+
+// Disclosed, pinned boundary (not a fix target): a `define()` nested
+// inside a function body is invisible to `Registry::global_constants`
+// either way - documents that this stays a silent no-op rather than a
+// false positive, so a future change to `build_declarations_with_context`
+// doesn't silently start flagging real code.
+#[test]
+fn a_define_nested_inside_a_function_body_is_not_flagged_either_way() {
+    let d = diagnostics_for(
+        r#"<?php
+            function definesSomething(): void {
+                define('NESTED_CONST_XYZ', 1);
+            }
+            use const NESTED_CONST_XYZ;
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "constant.notFound"),
+        "got: {d:?} (nested define() is invisible to global_constants, so this stays flagged - not a regression, a pinned pre-existing boundary)"
+    );
+}
+
 // Phase 71 corpus find: real PHP function calls are case-insensitive -
 // `Registry::lookup_function` used to be a plain exact-case `HashMap`
 // lookup, wrongly flagging any differently-cased call (a builtin or a
@@ -1432,19 +1534,6 @@ fn a_plain_use_class_import_is_not_existence_checked() {
     let d = diagnostics_for(
         r#"<?php
             use Some\Totally\MadeUp\ClassName;
-        "#,
-    );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
-}
-
-#[test]
-fn a_use_const_import_is_not_existence_checked() {
-    // Deliberate scope decision (see `UseImport::kind`'s own doc
-    // comment): this project has no project-wide global-constant
-    // registry to check a `use const` against at all.
-    let d = diagnostics_for(
-        r#"<?php
-            use const Some\Totally\MadeUp\CONST_NAME;
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");

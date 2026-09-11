@@ -79,6 +79,7 @@ fn all_diagnostics_for_with(src: &str, configure: impl FnOnce(&mut Registry)) ->
     let mut registry = Registry::build(&program);
     registry.merge_stubs(crate::php_stubs::generated_stubs());
     registry.merge_stub_classes(crate::php_stubs::generated_stub_classes());
+    registry.merge_stub_constants(crate::php_stubs::generated_stub_constants());
     configure(&mut registry);
     // `merge_stub_classes`/`configure` can both add classes/extends edges
     // after `Registry::build`'s own internal precompute already ran -

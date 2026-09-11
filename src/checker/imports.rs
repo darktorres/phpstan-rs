@@ -90,6 +90,50 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `use const`'s own existence half of `ExistingNamesInUseRule` (see
+    /// `check_use_function_imports`'s own doc comment) - unconditional,
+    /// not opt-in: PHP constants are case-sensitive at the language
+    /// level, so there's no "resolves fine but wrong case" scenario the
+    /// way there is for a function/class name, and real PHPStan has no
+    /// `constant.nameCase` concept at all (confirmed directly against
+    /// `ExistingNamesInUseRule::checkConstants` - no name-case branch
+    /// exists there, full stop). Backed by `Registry::global_constants`,
+    /// populated for every project-level `const`/`define()` declaration
+    /// (`registry/index.rs`'s `build_declarations_with_context`) *and*
+    /// every real built-in/extension constant the vendored phpstorm-
+    /// stubs corpus declares via its own top-level `define()` calls
+    /// (`php_stubs::generated_stub_constants`, merged in at `Project::
+    /// new` alongside `generated_stubs`/`generated_stub_classes`) - a
+    /// disclosed residual: `Registry::global_constants` only ever sees a
+    /// `define()` reachable from a file's own top level (through
+    /// nested `if`/`else`/`{}` blocks, the same polyfill-idiom recursion
+    /// `use function`'s own registry already gets) - a `define()` nested
+    /// inside a function/method body is invisible to it, so a `use
+    /// const` importing one stays unflagged either way rather than
+    /// risking a false positive on a shape this project can't see.
+    pub(crate) fn check_use_const_imports(&mut self, program: &[Stmt]) {
+        for stmt in program {
+            let StmtKind::Use(imports) = &stmt.kind else {
+                continue;
+            };
+            for import in imports {
+                if import.kind != UseKind::Const {
+                    continue;
+                }
+                let fqn = import.path.trim_start_matches('\\');
+                if !self.registry.global_constants.contains_key(fqn) {
+                    self.report(
+                        "<main>".to_string(),
+                        format!("used constant {fqn} not found"),
+                        stmt.span,
+                        0,
+                        "constant.notFound",
+                    );
+                }
+            }
+        }
+    }
+
     /// Phase 48 follow-up, `ClassForbiddenNameCheck`: a `use`-imported
     /// class-shaped name matching one of a small, fixed set of internal
     /// build-tool-mangled prefixes (transcribed from real PHPStan's own

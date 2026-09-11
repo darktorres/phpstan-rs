@@ -118,6 +118,7 @@ impl Project {
         let mut registry = Registry::default();
         registry.merge_stubs(php_stubs::generated_stubs());
         registry.merge_stub_classes(php_stubs::generated_stub_classes());
+        registry.merge_stub_constants(php_stubs::generated_stub_constants());
         Project {
             files: FxHashMap::default(),
             dependents: FxHashMap::default(),

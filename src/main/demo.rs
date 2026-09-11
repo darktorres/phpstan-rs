@@ -78,6 +78,7 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     // approximations - merge_stubs only fills in names not already present.
     registry.merge_stubs(php_stubs::generated_stubs());
     registry.merge_stub_classes(php_stubs::generated_stub_classes());
+    registry.merge_stub_constants(php_stubs::generated_stub_constants());
     // `merge_stub_classes` can add extends/implements edges after
     // `Registry::build`'s own internal precompute already ran - rebuild
     // `ancestor_names`/member-owner maps once more now that the registry

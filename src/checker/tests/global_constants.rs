@@ -131,8 +131,20 @@ fn defining_a_magic_constant_never_shadows_it_with_a_stub_placeholder() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// ROADMAP "Known but not yet scheduled" follow-up: PHP_INT_MIN's own
+// definition (`define_call_constant`) used to return `None` entirely
+// (never registered at all, its raw literal overflows i64 and would
+// otherwise mistype as Float) - safe for ordinary constant-*value*
+// inference (a `global_constant_type` miss already falls back to
+// `Mixed`), but indistinguishable from "this constant doesn't exist"
+// for the newer `use const` *existence* check, which only ever sees
+// whether a name made it into `global_constants` at all. Now registered
+// with `Type::Int` directly (real, existing, correctly typed - not the
+// float-overflow-affected literal inference), so both a bare read
+// (unaffected, this test) and `use const PHP_INT_MIN;` (see
+// `symbol_existence.rs`) work correctly.
 #[test]
-fn php_int_min_is_never_registered_since_its_own_literal_overflows_to_float() {
+fn php_int_min_is_registered_as_a_plain_int_not_the_overflowing_float_literal() {
     let d = diagnostics_for(
         r#"<?php
             define('PHP_INT_MIN', -9223372036854775808);
