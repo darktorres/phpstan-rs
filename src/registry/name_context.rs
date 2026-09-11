@@ -392,6 +392,25 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .collect(),
             return_type: Box::new(resolve_names_in_type((*sig.return_type).clone(), ctx)),
         }))),
+        // Phase 80 follow-up: mirrors `mark_template_params`/`substitute_
+        // type_aliases`'s own identical new arms - a real class reference
+        // inside one of a conditional return type's own branches
+        // (Doctrine DBAL's own `DriverManager::getConnection()`, e.g.
+        // `Connection` in `@phpstan-return (... ? T : Connection)`) needs
+        // the same namespace resolution as anywhere else.
+        Type::Conditional {
+            subject,
+            target,
+            if_true,
+            if_false,
+            negated,
+        } => Type::Conditional {
+            subject,
+            target: Box::new(resolve_names_in_type(*target, ctx)),
+            if_true: Box::new(resolve_names_in_type(*if_true, ctx)),
+            if_false: Box::new(resolve_names_in_type(*if_false, ctx)),
+            negated,
+        },
         other => other,
     }
 }

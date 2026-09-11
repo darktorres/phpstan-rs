@@ -243,13 +243,13 @@ fn phpstan_template_extends_and_implements_are_recognized() {
 }
 
 #[test]
-fn a_real_phpstan_conditional_return_type_is_skipped_rather_than_parsed_into_garbage() {
-    // Doctrine DBAL's own DriverManager::getConnection() - `T` is never
-    // meant to be resolved by this project's own simple parser; leaving
-    // `return_type` unset (falling back to the native hint elsewhere)
-    // is the correct "doesn't parse this" behavior, not a bogus class
-    // name built from whatever balanced-parens token happened to be
-    // grabbed.
+fn a_real_phpstan_conditional_return_type_is_captured_as_its_own_raw_token() {
+    // Doctrine DBAL's own DriverManager::getConnection(). Phase 80
+    // follow-up: `Type::Conditional`/`resolve_conditional` now do real
+    // per-call-site binding, so this raw token is captured like any
+    // other `@return` type instead of being deliberately dropped -
+    // `take_type_token`'s own balanced-parens grab already produces the
+    // exact substring `types::parse_type_string` needs.
     let block = parse(
         r#"/**
          * @template T of Connection
@@ -257,5 +257,8 @@ fn a_real_phpstan_conditional_return_type_is_skipped_rather_than_parsed_into_gar
          * @phpstan-return ($params is array{wrapperClass: class-string<T>} ? T : Connection)
          */"#,
     );
-    assert_eq!(block.return_type, None);
+    assert_eq!(
+        block.return_type,
+        Some("($params is array{wrapperClass: class-string<T>} ? T : Connection)".to_string())
+    );
 }

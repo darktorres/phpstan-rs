@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+mod conditional;
 mod display;
 mod parse;
 mod subtype;
 mod templates;
 
+pub use conditional::resolve_conditional;
 pub use parse::parse_type_string;
 pub(crate) use parse::{canonical_int_key, strip_call_site_variance};
 pub use subtype::is_subtype;

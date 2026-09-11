@@ -570,6 +570,14 @@ impl<'a> Checker<'a> {
     /// actual argument at this call site (`identity(5)` binds `T` to
     /// `int`) and substitutes the result into the return type. A signature
     /// with no templates at all is untouched (the common case, cheap).
+    ///
+    /// Phase 80 follow-up: also resolves a `Type::Conditional` in the
+    /// (already template-substituted) return type - `param_bindings`
+    /// (parameter *name* -> actual argument type) is a deliberately
+    /// separate map from `bindings` above (template *name* -> bound type),
+    /// built from the same per-param loop; substituting templates first
+    /// matters, since a conditional's own branches may themselves mention
+    /// one (`@return ($x is T ? T : null)`).
     pub(crate) fn infer_call_return_type(
         &self,
         sig: &FunctionSig,
@@ -577,12 +585,16 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Type {
         let mut bindings: TemplateBindings = TemplateBindings::default();
+        let mut param_bindings: std::collections::HashMap<String, Type> =
+            std::collections::HashMap::new();
         for (param, slot) in sig.params.iter().zip(resolved.iter()) {
             let Some(arg) = slot else { continue };
             let arg_ty = self.infer_expr(arg, locals);
             types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
+            param_bindings.insert(param.name.clone(), arg_ty);
         }
-        types::substitute_template(&sig.return_type, &bindings)
+        let substituted = types::substitute_template(&sig.return_type, &bindings);
+        types::resolve_conditional(&substituted, &param_bindings)
     }
 
     /// Phase 79: `Suit::from(1)`/`Suit::tryFrom(1)` called with a literal

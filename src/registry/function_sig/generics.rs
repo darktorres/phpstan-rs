@@ -83,6 +83,24 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>)
                 .collect(),
             return_type: Box::new(substitute_type_aliases((*sig.return_type).clone(), aliases)),
         }))),
+        // Phase 80 follow-up: recurses into `target`/`if_true`/`if_false`,
+        // same as `mark_template_params`/`resolve_names_in_type`'s own
+        // identical new arms - a `@phpstan-type` alias referenced inside
+        // one of a conditional return type's own branches needs the same
+        // substitution as anywhere else.
+        Type::Conditional {
+            subject,
+            target,
+            if_true,
+            if_false,
+            negated,
+        } => Type::Conditional {
+            subject,
+            target: Box::new(substitute_type_aliases(*target, aliases)),
+            if_true: Box::new(substitute_type_aliases(*if_true, aliases)),
+            if_false: Box::new(substitute_type_aliases(*if_false, aliases)),
+            negated,
+        },
         other => other,
     }
 }
@@ -215,6 +233,28 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
                 .collect(),
             return_type: Box::new(mark_template_params((*sig.return_type).clone(), params)),
         }))),
+        // Phase 80 follow-up: recurses into `target`/`if_true`/`if_false` -
+        // real corpus shape (Doctrine DBAL's own `DriverManager::
+        // getConnection()`, `@phpstan-return ($params is array{
+        // wrapperClass: class-string<T>} ? T : Connection)`) - without
+        // this, a class-level/function-own `@template T` referenced
+        // inside a conditional return type's own branches stayed an
+        // unrecognized `Object("T", [])` instead of becoming a real
+        // `TemplateParam`, the same gap this function's own `ObjectShape`/
+        // `Callable` arms above were each added to close.
+        Type::Conditional {
+            subject,
+            target,
+            if_true,
+            if_false,
+            negated,
+        } => Type::Conditional {
+            subject,
+            target: Box::new(mark_template_params(*target, params)),
+            if_true: Box::new(mark_template_params(*if_true, params)),
+            if_false: Box::new(mark_template_params(*if_false, params)),
+            negated,
+        },
         other => other,
     }
 }

@@ -503,21 +503,21 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             }
             "return" => {
                 let ty = take_type_token(rest);
-                // This module's own doc comment already disclaims
-                // conditional return types (`($param is Foo ? Bar : Baz)`,
-                // real PHPStan syntax Doctrine DBAL's own
-                // `DriverManager::getConnection()` uses) as needing real
-                // per-call-site binding this project doesn't do - but
-                // before `@phpstan-return` support existed, no real
-                // `@return` in this project's corpus ever actually used
-                // one, so nothing enforced that disclaimer. `take_type_token`
-                // has no notion of the `is`/`?`/`:` conditional-type
-                // grammar; it just grabs the whole balanced-parens token,
-                // which `types::parse_type_string` then can't meaningfully
-                // parse either - leaving `return_type` unset (rather than
-                // a garbage type) is what "doesn't parse" actually has to
-                // mean once a real conditional expression reaches here.
-                if !ty.is_empty() && !ty.starts_with("($") {
+                // Phase 80 follow-up: conditional return types (`($param
+                // is Foo ? Bar : Baz)`, real PHPStan syntax Doctrine
+                // DBAL's own `DriverManager::getConnection()` uses) used
+                // to be deliberately excluded here (`!ty.starts_with
+                // ("($")`) - this project had no per-call-site binding for
+                // them, and `types::parse_type_string` collapsed one to
+                // an eager union of both branches, discarding the
+                // condition entirely, so setting `return_type` from one
+                // was worse than leaving it unset. Now that `Type::
+                // Conditional`/`resolve_conditional` exist and do real
+                // per-call-site resolution, that exclusion is gone -
+                // `take_type_token`'s own balanced-parens grab is exactly
+                // what `try_parse_conditional_type` needs to see the
+                // whole `(...)` token intact.
+                if !ty.is_empty() {
                     block.return_type = Some(ty.to_string());
                 }
             }
