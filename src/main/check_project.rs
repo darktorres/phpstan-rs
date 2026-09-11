@@ -191,6 +191,7 @@ fn run_check_project(
     // parsed result's original (sorted) index order, so this `zip`
     // inserts in exactly the same order the old fully-sequential loop
     // did.
+    let _t_insert = std::time::Instant::now();
     let mut skipped_context = 0usize;
     for (path, parsed) in context_files.iter().zip(context_parsed) {
         match parsed {
@@ -209,7 +210,10 @@ fn run_check_project(
             None => skipped_analyze += 1,
         }
     }
+    eprintln!("TIMING: per-file insert loop: {:?}", _t_insert.elapsed());
+    let _t_finish = std::time::Instant::now();
     project.finish_loading();
+    eprintln!("TIMING: finish_loading(): {:?}", _t_finish.elapsed());
 
     // Mirrors `check.rs`'s own catch_unwind-with-silenced-hook pattern: a
     // panic while checking one file is reported and skipped rather than
