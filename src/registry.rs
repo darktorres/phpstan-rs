@@ -283,6 +283,14 @@ pub struct Registry {
     // empty until the first such call, same "not yet built" precondition
     // every other post-load pass's own output already has.
     pub(crate) ancestor_names: FxHashMap<String, HashSet<String>>,
+    // Every currently-registered class's own lowercased name -> canonical
+    // key - see `lookup_class`'s own doc comment. A byproduct of
+    // `canonicalize_class_name_case`'s own already-built `canonical_by_
+    // lower` map, persisted here instead of discarded - that pass already
+    // runs at every point this registry's class graph can have settled,
+    // so this stays correct on exactly the same schedule `ancestor_names`
+    // does, with no separate invalidation path of its own to get wrong.
+    pub(crate) classes_lowercase: FxHashMap<String, String>,
 }
 
 impl Registry {

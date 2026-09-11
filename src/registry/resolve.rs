@@ -50,6 +50,19 @@ impl Registry {
                 .entry(key.to_ascii_lowercase())
                 .or_insert_with(|| key.clone());
         }
+        // Persisted as `self.classes_lowercase` too - `Registry::
+        // lookup_class`'s own doc comment explains why its linear-scan
+        // fallback uses this instead of a fresh scan on every call. Built
+        // fresh every time this pass runs (the same "just recompute the
+        // whole thing" precedent every other struct-level derived field in
+        // this file already follows, e.g. `precompute_ancestor_names`),
+        // so it can never go stale independently of this pass's own
+        // already-established call sites (`Registry::index_and_flatten`/
+        // `build`, `Project::finish_loading`/`update_file`).
+        self.classes_lowercase = canonical_by_lower
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         let canonicalize = |name: &mut String| {
             if let Some(canonical) = canonical_by_lower.get(&name.to_ascii_lowercase())
                 && canonical != name

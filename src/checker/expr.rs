@@ -234,7 +234,8 @@ impl<'a> Checker<'a> {
                 let resolved_name = match &callee.kind {
                     ExprKind::Name(name) if is_language_construct(name) => None,
                     ExprKind::Name(name) => {
-                        let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+                        let (primary, fallback) =
+                            self.resolve_function_candidates_cached(callee.span, name);
                         if self.registry.lookup_function(&primary).is_some() {
                             Some(primary)
                         } else if let Some(global) = &fallback
@@ -3349,7 +3350,8 @@ impl<'a> Checker<'a> {
             },
             ExprKind::Call(callee, args) => match &callee.kind {
                 ExprKind::Name(name) if !is_language_construct(name) => {
-                    let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+                    let (primary, fallback) =
+                        self.resolve_function_candidates_cached(callee.span, name);
                     self.registry
                         .lookup_function(&primary)
                         .map(|sig| (primary.as_str(), sig))

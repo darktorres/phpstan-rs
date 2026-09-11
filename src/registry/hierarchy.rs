@@ -770,13 +770,25 @@ impl Registry {
     /// to it (a fresh-per-check-time lookup, not a structural registry
     /// field - see `canonicalize_class_name_case`'s own doc comment for
     /// why those two need different treatment).
+    ///
+    /// The case-mismatch fallback used to be a full linear scan of every
+    /// registered class with a case-insensitive comparison on each - real
+    /// cost on a case-mismatched *or* genuinely unresolved name (this
+    /// project's own leniency elsewhere already documents the latter as
+    /// common in real corpora), since `check_type_class_names_exist` calls
+    /// this once per parameter and once per return type on every function
+    /// checked. `self.classes_lowercase` (built once alongside
+    /// `canonicalize_class_name_case`'s own identical map, see that
+    /// field's own doc comment) turns it into one `HashMap` lookup plus
+    /// one more exact `get` for the resolved canonical key. Found and
+    /// fixed via a perf-optimization investigation workflow.
     pub fn lookup_class(&self, name: &str) -> Option<(&str, &ClassInfo)> {
         if let Some((k, v)) = self.classes.get_key_value(name) {
             return Some((k.as_str(), v));
         }
+        let canonical = self.classes_lowercase.get(&name.to_ascii_lowercase())?;
         self.classes
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .get_key_value(canonical)
             .map(|(k, v)| (k.as_str(), v))
     }
 }

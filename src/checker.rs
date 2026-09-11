@@ -805,6 +805,24 @@ pub struct Checker<'a> {
     // itself is also gated off whenever no probe is active, not just this
     // one read.
     pub(crate) probe_var_provenance: RefCell<Option<HashSet<Span>>>,
+    // A `Call(callee, ...)` node's own resolved `(primary, fallback)`
+    // name pair (`NameContext::resolve_function_candidates`'s own
+    // return), keyed by `callee`'s span - `check_expr`'s own `Call` arm
+    // and `infer_expr`'s own separate `Call` arm both independently
+    // re-derive this identical pair for the same callee whenever
+    // `infer_expr` is invoked on a call `check_expr` already resolved
+    // (e.g. a call nested as another call's own argument, re-derived via
+    // `check_args`'s own contextual-type inference) - a real, if small,
+    // redundant `String` allocation plus `NameContext` lookup on every
+    // such re-entry. `RefCell`, not a plain field, for the same reason
+    // `probe_hit`/`probe_var_provenance` already are: populated/read
+    // through a shared `&self` from deep inside both `check_expr` (`&mut
+    // self`) and `infer_expr` (`&self`) without threading a new
+    // parameter through either's entire call graph. Scoped to one
+    // `Checker` (one file), so it never outlives or leaks across files -
+    // bounded by the number of distinct resolvable `Call` nodes in that
+    // file. Found via a perf-optimization investigation workflow.
+    call_candidate_cache: RefCell<HashMap<Span, (String, Option<String>)>>,
 }
 
 mod assignment;
@@ -906,7 +924,27 @@ impl<'a> Checker<'a> {
             probe_span: Cell::new(None),
             probe_hit: RefCell::new(None),
             probe_var_provenance: RefCell::new(None),
+            call_candidate_cache: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Memoized `NameContext::resolve_function_candidates` - see `call_
+    /// candidate_cache`'s own doc comment for why this exists and why a
+    /// per-callee-span key is safe (one `Checker` per file, so a `Span`
+    /// never collides across two different call sites' own callees).
+    fn resolve_function_candidates_cached(
+        &self,
+        callee_span: Span,
+        name: &str,
+    ) -> (String, Option<String>) {
+        if let Some(cached) = self.call_candidate_cache.borrow().get(&callee_span) {
+            return cached.clone();
+        }
+        let resolved = self.name_ctx.resolve_function_candidates(name);
+        self.call_candidate_cache
+            .borrow_mut()
+            .insert(callee_span, resolved.clone());
+        resolved
     }
 
     /// Sets the `$this` type Finding 1's Pest support seeds an
