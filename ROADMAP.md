@@ -1595,6 +1595,22 @@ section used to carry:
   positive this causes: `TagRepository::findCommonTags`'s own
   `$qb->getQuery()->getResult()` loop cascades `mixed` into every field
   of the row shape it builds by hand from each result object.
+- `array + array` (PHP's array-union operator, not arithmetic) always
+  answers `Array(unknown_key, Mixed)` - already disclosed inline
+  (`checker/expr.rs`'s own `BinOp::Add` arm doc comment) but not
+  previously cross-referenced here. The real per-key result (every key
+  from the left operand, filling in any key only present on the right)
+  isn't something `Type::Array`/`Type::ArrayShape` can express
+  precisely today. Confirmed corpus false positive this causes:
+  `tests/Browser/FeedControllerTest.php`'s own `[$headers, $body] =
+  explode(...) + ['', ''];` losing `$body`'s own precision down to
+  `mixed`.
+- `token_get_all()` returns bare `array` - confirmed *not* a gap versus
+  real PHPStan specifically (no dynamic-return-type extension for it
+  exists in `vendor/phpstan-src` either, unlike the several functions
+  above that real PHPStan does special-case), so a per-token shape
+  (`array{0: int, 1: string, 2: int}|string`) is correctly out of scope
+  here too.
 
 ## Won't-port (real PHPStan features with no applicable Rust target)
 
