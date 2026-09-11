@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use crate::ast::Visibility;
 use crate::docblock;
 use crate::registry::function_sig::{FunctionSig, ParamSig, mark_template_params};
-use crate::registry::name_context::{NameContext, resolve_names_in_type};
+use crate::registry::name_context::{
+    NameContext, collect_class_name_case_refs, resolve_names_in_type,
+};
 use crate::types::{self, TemplateParam, Type};
 
 /// Mirrors real PHPStan's own `Type::getObjectClassNames()` for exactly
@@ -37,21 +39,32 @@ pub(crate) fn method_tag_sig(
     template_params: &HashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> FunctionSig {
-    let resolve = |text: &str| -> Type {
+    // Phase 48 item 7d: also collects `(raw, resolved)` case refs
+    // alongside the resolved `Type` itself - `@method`'s own raw text
+    // flows through this exact same mark-then-resolve pipeline every
+    // other PHPDoc-typed position uses, so its case refs need the
+    // identical `collect_class_name_case_refs` call between the two
+    // steps.
+    let resolve = |text: &str| -> (Type, Vec<(String, String)>) {
         let ty = types::parse_type_string(text);
         let ty = mark_template_params(ty, template_params);
-        resolve_names_in_type(ty, ctx)
+        let mut case_refs = Vec::new();
+        collect_class_name_case_refs(&ty, ctx, &mut case_refs);
+        (resolve_names_in_type(ty, ctx), case_refs)
     };
-    let return_type = tag
+    let (return_type, return_case_refs) = tag
         .return_type
         .as_deref()
         .map(resolve)
-        .unwrap_or(Type::Mixed);
+        .unwrap_or((Type::Mixed, Vec::new()));
     let params = tag
         .params
         .iter()
         .map(|p| {
-            let ty = p.ty.as_deref().map(resolve).unwrap_or(Type::Mixed);
+            let (ty, case_refs) =
+                p.ty.as_deref()
+                    .map(resolve)
+                    .unwrap_or((Type::Mixed, Vec::new()));
             ParamSig {
                 name: p.name.clone(),
                 ty: ty.clone(),
@@ -61,12 +74,7 @@ pub(crate) fn method_tag_sig(
                 by_ref: p.by_ref,
                 has_own_doc: true,
                 explicit_mixed_hint: false,
-                // Phase 48 item 7d wires this for real (`@method`'s own
-                // case-ref population) - left empty for now, matching
-                // this session's own "enum-synthesis/test-fixture
-                // literals get an empty Vec::new()" convention for every
-                // site this commit (item 7b) doesn't itself touch.
-                case_refs: Vec::new(),
+                case_refs,
                 closure_this_type: None,
             }
         })
@@ -76,9 +84,7 @@ pub(crate) fn method_tag_sig(
         return_type: return_type.clone(),
         return_type_native: return_type,
         return_has_own_doc: true,
-        // Phase 48 item 7d wires this for real - see the sibling
-        // `case_refs: Vec::new()` just above for the same reasoning.
-        return_case_refs: Vec::new(),
+        return_case_refs,
         return_explicit_mixed_hint: false,
         no_discard: false,
         visibility: Visibility::Public,

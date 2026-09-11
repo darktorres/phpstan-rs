@@ -338,6 +338,14 @@ pub struct ClassInfo {
     // interfaces`'s own `UriString::parse()`, `/** @var ComponentMap
     // $components */`). Empty for a class with no such tags at all.
     pub type_aliases: HashMap<String, Type>,
+    // Phase 48 follow-up (item 7d): `ParamSig::case_refs`'s own
+    // `@phpstan-type` equivalent - keyed the same way `type_aliases`
+    // itself is (the alias's own resolved local name), `(raw, resolved)`
+    // pairs for every class-name reference the alias's *own* RHS text
+    // carries (not a reference *to* the alias elsewhere - that's this
+    // same mechanism at whatever `@param`/`@return`/property tag actually
+    // uses the alias, via its own `case_refs`).
+    pub type_alias_case_refs: HashMap<String, Vec<(String, String)>>,
     // This class's own `@phpstan-import-type` tags, name-resolved (`from`
     // to the source class's own FQN, the imported name to the local key
     // this class's own members already reference it by) but not yet
@@ -370,6 +378,15 @@ pub struct ClassInfo {
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
     // mirroring `resolve_deferred_type_imports`'s own two-step shape.
     pub mixins: Vec<String>,
+    // Phase 48 follow-up (item 7d): `ParamSig::case_refs`'s own `@mixin`-
+    // tag equivalent - `(raw, resolved)` pairs for every `@mixin` target
+    // on this class's own docblock, in declaration order (not keyed by
+    // name - unlike `type_alias_case_refs` below, a class can carry
+    // several `@mixin` tags with no unique name to key by). Populated via
+    // its own small dedicated closure, not the shared `resolve_tag_types`
+    // helper just above (also used by `require_extends`/`require_
+    // implements`/`sealed`, unrelated to case-checking).
+    pub mixin_case_refs: Vec<(String, String)>,
 }
 
 /// See `ClassInfo::type_imports`'s own doc comment.
@@ -414,7 +431,8 @@ impl ClassInfo {
         // all) via `substitute_type_aliases`. See that function's own
         // doc comment for why this must run *after* `resolve_names_in_
         // type` on each member's surrounding type, not before.
-        let type_aliases = build_type_aliases(class_doc.as_ref(), &template_params, ctx);
+        let (type_aliases, type_alias_case_refs) =
+            build_type_aliases(class_doc.as_ref(), &template_params, ctx);
         // `@phpstan-import-type` - resolved just enough here (both names,
         // via this class's own `ctx`) to be looked up in the source
         // class's own `type_aliases` once it's indexed too; see
@@ -977,6 +995,23 @@ impl ClassInfo {
             .as_ref()
             .map(|d| resolve_tag_types(&d.mixins))
             .unwrap_or_default();
+        // Phase 48 follow-up (item 7d): own small dedicated closure, not
+        // `resolve_tag_types` above - see `mixin_case_refs`'s own doc
+        // comment.
+        let mixin_case_refs: Vec<(String, String)> = class_doc
+            .as_ref()
+            .map(|d| {
+                d.mixins
+                    .iter()
+                    .flat_map(|text| {
+                        let ty = types::parse_type_string(text);
+                        let mut refs = Vec::new();
+                        collect_class_name_case_refs(&ty, ctx, &mut refs);
+                        refs
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
         let attribute_targets = compute_attribute_targets(&c.attrs);
 
@@ -1016,10 +1051,12 @@ impl ClassInfo {
             require_implements,
             sealed,
             mixins,
+            mixin_case_refs,
             deprecated,
             attribute_targets,
             enum_case_values: HashMap::new(),
             type_aliases,
+            type_alias_case_refs,
             type_imports,
             method_tags,
         }
@@ -1478,10 +1515,12 @@ impl ClassInfo {
             // combination not modeled here - same disclosed scope trim as
             // `type_aliases`/`type_imports`/`require_extends` above.
             mixins: Vec::new(),
+            mixin_case_refs: Vec::new(),
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             attribute_targets: compute_attribute_targets(&e.attrs),
             enum_case_values,
             type_aliases: HashMap::new(),
+            type_alias_case_refs: HashMap::new(),
             type_imports: Vec::new(),
             // Same disclosed scope trim as `mixins` just above - a real
             // `@method` on an enum's own docblock is a genuinely rare
@@ -1535,6 +1574,7 @@ impl ClassInfo {
         self.consts.extend(other.consts);
         self.enum_case_values.extend(other.enum_case_values);
         self.type_aliases.extend(other.type_aliases);
+        self.type_alias_case_refs.extend(other.type_alias_case_refs);
         self.type_imports.extend(other.type_imports);
         self.abstract_methods.extend(other.abstract_methods);
         self.final_methods.extend(other.final_methods);
@@ -1567,6 +1607,7 @@ impl ClassInfo {
         self.require_implements.extend(other.require_implements);
         self.sealed.extend(other.sealed);
         self.mixins.extend(other.mixins);
+        self.mixin_case_refs.extend(other.mixin_case_refs);
         self.method_tags.extend(other.method_tags);
         self.deprecated = self.deprecated.or(other.deprecated);
         self.attribute_targets = self.attribute_targets.or(other.attribute_targets);

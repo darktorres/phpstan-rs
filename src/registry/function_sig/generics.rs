@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::docblock::DocBlock;
-use crate::registry::name_context::{NameContext, resolve_names_in_type};
+use crate::registry::name_context::{
+    NameContext, collect_class_name_case_refs, resolve_names_in_type,
+};
 use crate::types::{self, CallableParam, CallableSig, TemplateParam, Type};
 
 /// Rewrites every `Object(name, _)` in `ty` whose `name` matches a key in
@@ -126,27 +128,46 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>)
 /// name, the same "don't know, don't guess further" leniency this
 /// project already accepts elsewhere rather than a full fixed-point
 /// solve for a shape not yet confirmed to occur in practice.
+/// Phase 48 follow-up (item 7d): also returns `type_alias_case_refs`,
+/// keyed the same way the returned alias map itself is (the alias's own
+/// resolved local name) - `(raw, resolved)` pairs for every class-name
+/// reference the alias's *own* RHS carries, collected during the same
+/// `mark_template_params` → `resolve_names_in_type` step every other
+/// PHPDoc-typed position uses. Collected from `raw`'s own construction,
+/// before `substitute_type_aliases`'s second pass folds in *other*
+/// aliases' own values - a sibling alias reference inside this one's RHS
+/// isn't itself a class-name reference to case-check (it's resolved
+/// separately, when *that* alias's own entry is built).
+pub(crate) type TypeAliasCaseRefs = HashMap<String, Vec<(String, String)>>;
+
 pub(crate) fn build_type_aliases(
     class_doc: Option<&DocBlock>,
     template_params: &HashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> HashMap<String, Type> {
+) -> (HashMap<String, Type>, TypeAliasCaseRefs) {
     let Some(class_doc) = class_doc else {
-        return HashMap::new();
+        return (HashMap::new(), HashMap::new());
     };
+    let mut case_refs: HashMap<String, Vec<(String, String)>> = HashMap::new();
     let raw: HashMap<String, Type> = class_doc
         .type_aliases
         .iter()
         .map(|(name, ty_text)| {
             let ty = types::parse_type_string(ty_text);
             let ty = mark_template_params(ty, template_params);
+            let mut refs = Vec::new();
+            collect_class_name_case_refs(&ty, ctx, &mut refs);
+            let resolved_name = ctx.resolve(name);
+            case_refs.insert(resolved_name.clone(), refs);
             let ty = resolve_names_in_type(ty, ctx);
-            (ctx.resolve(name), ty)
+            (resolved_name, ty)
         })
         .collect();
-    raw.iter()
+    let aliases = raw
+        .iter()
         .map(|(name, ty)| (name.clone(), substitute_type_aliases(ty.clone(), &raw)))
-        .collect()
+        .collect();
+    (aliases, case_refs)
 }
 
 /// Rewrites every `Object(name)` in a type tree whose name is one of this

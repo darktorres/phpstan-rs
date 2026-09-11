@@ -149,6 +149,9 @@ impl<'a> Checker<'a> {
                     span,
                     fqn,
                 );
+                // Phase 48 follow-up (item 7d): `class.nameCase` for this
+                // `@method`-tag parameter.
+                self.check_type_class_name_case(&param.case_refs, fqn, span);
             }
             self.check_type_class_names_exist(
                 &sig.return_type,
@@ -156,6 +159,7 @@ impl<'a> Checker<'a> {
                 span,
                 fqn,
             );
+            self.check_type_class_name_case(&sig.return_case_refs, fqn, span);
         }
     }
 
@@ -182,6 +186,12 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        // Phase 48 follow-up (item 7d): `class.nameCase` for an `@mixin`
+        // target - `check_mixin_types` doesn't route through
+        // `check_type_class_names_exist` at all (its own bare
+        // `class_name_exists` check just above), so this is a genuinely
+        // new, parallel loop rather than a rewire of an existing one.
+        self.check_type_class_name_case(&info.mixin_case_refs, fqn, span);
     }
 
     /// Phase 48.B: `RequireExtendsCheck`/`RequireImplementsDefinitionTraitRule`'s
@@ -411,6 +421,12 @@ impl<'a> Checker<'a> {
                 span,
                 fqn,
             );
+            // Phase 48 follow-up (item 7d): `class.nameCase` for this
+            // alias's own RHS - looked up by the same key already in
+            // scope here.
+            if let Some(case_refs) = info.type_alias_case_refs.get(name) {
+                self.check_type_class_name_case(case_refs, fqn, span);
+            }
         }
     }
 

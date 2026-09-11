@@ -1104,6 +1104,110 @@ fn a_correctly_cased_property_position_is_never_flagged_name_case() {
     );
 }
 
+// Phase 48 follow-up (item 7d): `class.nameCase` for `@method`/`@mixin`/
+// `@phpstan-type` tag targets.
+
+#[test]
+fn a_differently_cased_method_tag_return_type_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @method foo getX() */
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_method_tag_param_type_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @method void setX(foo $x) */
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_mixin_target_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @mixin foo */
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_phpstan_type_alias_rhs_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @phpstan-type MyAlias foo */
+            class Bar {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_phpstan_type_alias_referenced_from_a_param_tag_is_still_flagged_at_its_own_declaration() {
+    // The alias reference *site* (`@param MyAlias $x`) isn't itself a
+    // class-name reference to case-check (`MyAlias` is a real, correctly-
+    // spelled local alias name) - only the alias's own RHS declaration
+    // carries a real class-name reference worth checking.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @phpstan-type MyAlias foo */
+            class Bar {
+                /** @param MyAlias $x */
+                public function f($x): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_correctly_cased_method_mixin_and_type_alias_are_never_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /**
+             * @method Foo getX()
+             * @mixin Foo
+             * @phpstan-type MyAlias Foo
+             */
+            class Bar {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_differently_cased_call_to_a_builtin_function_is_never_flagged() {
     let d = diagnostics_for(
