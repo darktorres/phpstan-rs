@@ -167,6 +167,14 @@ pub struct ClassInfo {
     // own to inherit; `readonly class Foo { use T; }` only ever makes
     // `Foo`'s own properties readonly, never retroactively marks `T`).
     pub is_readonly: bool,
+    // Phase 41 follow-up: `@phpstan-immutable`/`@phpstan-readonly` on
+    // this class's own docblock - see `ClassInfo::from_decl`'s own
+    // construction site for the real reasoning. Never baked with parent-
+    // inheritance (`Registry::class_is_immutable` walks `extends` at
+    // query time instead) - this field alone only ever answers "did
+    // *this exact* declaration carry the tag," not "is this class
+    // immutable considering its whole ancestor chain."
+    pub is_immutable: bool,
     pub extends: Vec<String>,
     pub implements: Vec<String>,
     pub methods: HashMap<String, FunctionSig>,
@@ -909,6 +917,20 @@ impl ClassInfo {
         let is_internal = class_doc.as_ref().is_some_and(|d| d.internal);
         let is_consistent_constructor =
             class_doc.as_ref().is_some_and(|d| d.consistent_constructor);
+        // Phase 41 follow-up: `@phpstan-immutable` on the *class's own*
+        // docblock (not a property's - `DocBlock::readonly`'s own doc
+        // comment covers that separate, pre-existing use of the same
+        // tag) - real PHPStan's `ClassReflection::isImmutable()`, read
+        // directly, treats `@phpstan-immutable` OR `@phpstan-readonly`
+        // here identically, both making every property of the class (and
+        // its subclasses) behave as if individually marked readonly.
+        // Deliberately *not* baked with parent-inheritance here -
+        // `Registry::class_is_immutable` (`registry/hierarchy.rs`) walks
+        // `extends` at query time instead, avoiding a registry-build-
+        // ordering hazard (a not-yet-indexed ancestor's own tag).
+        let is_immutable = class_doc
+            .as_ref()
+            .is_some_and(|d| d.immutable || d.readonly);
         // `@phpstan-require-extends`/`-implements`/`@phpstan-sealed` -
         // each raw tag's own type expression is parsed, name-resolved,
         // then flattened to the class names it names (`object_class_names`)
@@ -971,6 +993,7 @@ impl ClassInfo {
             is_api_do_not_implement,
             is_internal,
             is_consistent_constructor,
+            is_immutable,
             require_extends,
             require_implements,
             sealed,
@@ -1372,6 +1395,11 @@ impl ClassInfo {
             // Real PHP rejects `readonly enum` at parse time - an enum
             // can never be `readonly`.
             is_readonly: false,
+            // An enum can carry `@phpstan-immutable` on its own docblock
+            // same as a class can - reuse the identical computation.
+            is_immutable: class_doc
+                .as_ref()
+                .is_some_and(|d| d.immutable || d.readonly),
             extends: Vec::new(),
             implements,
             methods,

@@ -62,7 +62,12 @@ impl<'a> Checker<'a> {
                 crate::php_version::PhpFeature::ReadonlyPropertyReinitializationOnClone
                     .is_available(v)
             });
-        if prop_sig.is_readonly
+        // Phase 41 follow-up: `@phpstan-immutable`/`@phpstan-readonly` on
+        // the *class* (not the property) makes every property of the
+        // class - and any subclass, via `class_is_immutable`'s own
+        // `extends`-walk - behave as if individually `readonly`, matching
+        // real PHPStan's `ClassReflection::isImmutable()`.
+        if (prop_sig.is_readonly || self.registry.class_is_immutable(&owner))
             && !in_clone_reinit
             && (self.current_class.as_deref() != Some(owner.as_str())
                 || self.current_method.as_deref() != Some("__construct"))

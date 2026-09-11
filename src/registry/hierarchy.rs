@@ -32,6 +32,31 @@ impl Registry {
         false
     }
 
+    /// Is `class` (or any ancestor it `extends`) tagged `@phpstan-immutable`
+    /// (or `@phpstan-readonly` on the class itself - both fold into
+    /// `ClassInfo::is_immutable` already, see its own doc comment)?
+    /// Query-time, `extends`-only (mirrors real PHPStan's own
+    /// `ClassReflection::isImmutable()`, which walks `getParentClass()`
+    /// only - never `implements`/`uses`, matching `is_immutable`'s own
+    /// deliberate non-inheriting-at-index-time design in `class_info.rs`).
+    pub(crate) fn class_is_immutable(&self, class: &str) -> bool {
+        let mut seen = HashSet::new();
+        let mut stack = vec![class.to_string()];
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            let Some(info) = self.classes.get(&current) else {
+                continue;
+            };
+            if info.is_immutable {
+                return true;
+            }
+            stack.extend(info.extends.iter().cloned());
+        }
+        false
+    }
+
     /// Every interface/trait `class` transitively inherits from at all -
     /// `extends`/`implements` (the same walk `is_subclass_of` already
     /// does, just collecting every name visited instead of stopping at

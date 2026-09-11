@@ -1201,6 +1201,76 @@ fn a_property_with_no_readonly_tag_at_all_is_never_flagged_for_a_setter_write() 
     );
 }
 
+// Phase 41 follow-up: `@phpstan-immutable` on the *class*, not the
+// property - `Registry::class_is_immutable`.
+
+#[test]
+fn a_property_of_a_phpstan_immutable_class_written_outside_the_constructor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-immutable */
+            class Point {
+                public int $x;
+                public function __construct(int $x) { $this->x = $x; }
+                public function setX(int $x): void { $this->x = $x; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(
+            |x| x.identifier == "property.readOnlyAssignNotInConstructor"
+                && x.message.contains("Point::$x is readonly")
+        ),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_subclass_of_a_phpstan_immutable_class_inherits_the_same_restriction() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-immutable */
+            class Point {
+                public int $x;
+                public function __construct(int $x) { $this->x = $x; }
+            }
+            class Point3D extends Point {
+                public int $z;
+                public function __construct(int $x, int $z) {
+                    parent::__construct($x);
+                    $this->z = $z;
+                }
+                public function setZ(int $z): void { $this->z = $z; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(
+            |x| x.identifier == "property.readOnlyAssignNotInConstructor"
+                && x.message.contains("Point3D::$z is readonly")
+        ),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_class_without_any_immutable_tag_is_unaffected_by_class_is_immutable() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Point {
+                public int $x;
+                public function __construct(int $x) { $this->x = $x; }
+                public function setX(int $x): void { $this->x = $x; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.readOnlyAssignNotInConstructor"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // Phase 64: narrowing a method's own visibility on override is a real,
 // unconditional PHP fatal error (confirmed directly against real `php`:
 // "Access level to Child::foo() must be public (as in class Base)").

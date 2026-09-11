@@ -134,6 +134,14 @@ pub struct DocBlock {
     // just the constructor) isn't modeled - a real, disclosed precision
     // gap, low corpus value for a rare tag variant.
     pub readonly: bool,
+    // Phase 41 follow-up: `@phpstan-immutable` - class-level only (real
+    // PHPStan never recognizes this tag on a property, unlike `readonly`
+    // just above). `ClassReflection::isImmutable()` treats this OR
+    // `@phpstan-readonly` on the class identically; `readonly` above
+    // already covers that second half, so `ClassInfo::from_decl`/
+    // `from_enum_decl` compute `is_immutable` as `immutable || readonly`
+    // rather than duplicating that OR here.
+    pub immutable: bool,
     // Phase 64: `@final` (also `@phpstan-final`, recognized for free via
     // the same "second pass strips `phpstan-`, same arm" mechanism
     // `readonly` above already uses) - a bare marker (no value, same
@@ -753,6 +761,9 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             }
             "readonly" => {
                 block.readonly = true;
+            }
+            "immutable" => {
+                block.immutable = true;
             }
             "final" => {
                 block.is_final = true;
