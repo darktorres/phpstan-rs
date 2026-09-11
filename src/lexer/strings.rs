@@ -13,7 +13,19 @@ impl<'a> Lexer<'a> {
         // PHP source can contain non-UTF-8 bytes, matching every other
         // byte-range conversion already in this file. Found and fixed
         // via a perf-optimization investigation workflow.
-        let mut s = String::with_capacity(self.src.len().saturating_sub(self.pos));
+        //
+        // No `with_capacity` hint here (unlike `scan_interpolated`'s
+        // `literal` buffer, which sizes to its own already-extracted
+        // run's length): the only cheap upper bound available at this
+        // point is `self.src.len() - self.pos`, the size of the *entire
+        // rest of the file* rather than of this one string - a real
+        // regression this session's own final wall-clock A/B caught (peak
+        // RSS jumped from ~4.6GB to ~7.1GB checking Drupal, since most
+        // single-quoted literals are short but sit early in large files).
+        // Finding the string's real length upfront would need its own
+        // pre-scan, not worth it for what's normally a short literal -
+        // let `String::new()` grow via ordinary amortized doubling.
+        let mut s = String::new();
         let mut run_start = self.pos;
         while self.pos < self.src.len() && self.peek() != b'\'' {
             if self.peek() == b'\\' && (self.peek_at(1) == b'\'' || self.peek_at(1) == b'\\') {
