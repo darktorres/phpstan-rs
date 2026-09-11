@@ -74,6 +74,18 @@ impl Registry {
                 let Some(info_b) = self.classes.get(b) else {
                     return true;
                 };
+                // `b` isn't generic at all, so the whole template-binding
+                // walk below (`class_template_bindings`'s ancestor-chain
+                // recursion, allocating a `HashSet`/`HashMap` per call) is
+                // guaranteed to produce nothing the loop below would ever
+                // read - `info_b.templates` being empty makes that loop a
+                // no-op regardless of `effective_args_a`'s value. Found and
+                // fixed via a perf-optimization investigation workflow;
+                // measured as the single largest real, cleanly-attributable
+                // cost in this function across two real corpora.
+                if info_b.templates.is_empty() {
+                    return true;
+                }
                 // A missing trailing slot (an "erased"/under-supplied
                 // generic reference - a bare `Collection` with no `<T>`
                 // at all is the overwhelmingly common real shape) resolves
