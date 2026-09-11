@@ -204,6 +204,20 @@ impl<'a> Checker<'a> {
                 )
             }
             ExprKind::StaticCall(class_name, method, _) => {
+                // Real PHPStan's `MethodWithoutImpurePointsCollector`
+                // explicitly excludes constructors
+                // (`if ($method->isConstructor()) return null;`) -
+                // `parent::__construct()`/`self::__construct()` is only
+                // ever checked through the `new Foo();`-statement shape
+                // (`ConstructorWithoutImpurePointsCollector`), never
+                // through this static-call syntax. PHP method names are
+                // case-insensitive, hence `eq_ignore_ascii_case` (already
+                // the established idiom for constructor-name detection
+                // elsewhere, e.g. `checker/phpstan_api.rs`,
+                // `checker/duplicates.rs`).
+                if method.eq_ignore_ascii_case("__construct") {
+                    return;
+                }
                 let Some(resolved_class) = self.resolve_static_class_name(class_name) else {
                     return;
                 };

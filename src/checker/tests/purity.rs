@@ -299,3 +299,55 @@ fn a_bare_call_to_new_on_a_class_whose_constructor_explicitly_assigns_a_property
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Real PHPStan's `MethodWithoutImpurePointsCollector` explicitly excludes
+// constructors (`if ($method->isConstructor()) return null;`) -
+// `parent::__construct()` is only ever checked through the `new Foo();`-
+// statement shape (`ConstructorWithoutImpurePointsCollector`), never
+// through this static-call syntax. A bare `parent::__construct(...)`
+// genuinely initializes the object's own inherited state (via promoted
+// properties here, same as `checker::noop`'s own doc comment already
+// distinguishes), so flagging it "has no effect" would be wrong even
+// though the parent constructor is otherwise provably pure.
+#[test]
+fn a_bare_parent_construct_call_is_never_flagged_as_result_unused() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class Base {
+                public function __construct(public int $x) {
+                }
+            }
+            final class Sub extends Base {
+                public function __construct(int $x) {
+                    parent::__construct($x);
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "staticMethod.resultUnused"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Sibling to the test above, guarding against the fix over-widening into
+// a blanket "skip every StaticCall" - a genuinely pure, non-constructor
+// static method called bare must still be flagged.
+#[test]
+fn a_bare_static_call_to_a_pure_non_constructor_method_is_still_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            final class Foo {
+                public static function noop(): void {
+                }
+            }
+            Foo::noop();
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "staticMethod.resultUnused"),
+        "got: {d:?}"
+    );
+}
