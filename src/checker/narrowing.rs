@@ -177,6 +177,39 @@ impl<'a> Checker<'a> {
                 .guarded_functions
                 .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
         }
+        // ROADMAP "Known but not yet scheduled": real PHPStan's own
+        // `MethodExistsTypeSpecifyingExtension`/
+        // `PropertyExistsTypeSpecifyingExtension` (`Accessory\
+        // HasMethodType`/`HasPropertyType`) - a `method_exists($recv,
+        // 'name')`/`property_exists($recv, 'name')` true branch proves
+        // `$recv->name(...)`/`$recv->name` is safe for the rest of that
+        // branch, regardless of `$recv`'s own static type. Mirrors
+        // `guarded_functions`'s own design exactly, one level down (a
+        // per-receiver fact instead of a global one): only the exact
+        // (bare variable, literal string) shape is recognized, matching
+        // this project's usual "don't guess" leniency. Real corpus false
+        // positive this fixes: Piwigo's own `ImageBackend::destroy()`
+        // (`if (method_exists($image, 'destroy')) { $image->destroy();
+        // }`, `$image`'s declared `ImageInterface` type never declares
+        // `destroy()` at all - only some real implementations do).
+        if branch_true
+            && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
+            && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
+            && let [recv_arg, name_arg] = args.as_slice()
+            && let ExprKind::Variable(recv_name) = &unwrap_grouping(&recv_arg.value).kind
+            && let Some(member_name) = literal_string_value(&name_arg.value)
+        {
+            let bare = fn_name.rsplit('\\').next().unwrap_or(fn_name);
+            if bare.eq_ignore_ascii_case("method_exists") {
+                locals
+                    .guarded_methods
+                    .insert((recv_name.clone(), member_name.into_owned()));
+            } else if bare.eq_ignore_ascii_case("property_exists") {
+                locals
+                    .guarded_properties
+                    .insert((recv_name.clone(), member_name.into_owned()));
+            }
+        }
         match &cond.kind {
             // `&&` narrows the "both true" branch by composing each side
             // in order (the right operand's own narrowing can rely on the

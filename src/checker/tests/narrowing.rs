@@ -200,7 +200,12 @@ fn is_callable_narrowing_catches_misuse_inside_the_guarded_branch() {
     // don't fit this table at all - they're either 2-arg calls (this
     // project's narrowing only matches a single-arg predicate call)
     // or don't narrow a *value's type* the way is_string/is_array/etc.
-    // do, so they were deliberately not force-fit here.
+    // do, so they were deliberately not force-fit here. method_exists/
+    // property_exists later got their own, structurally different
+    // mechanism instead (Locals::guarded_methods/guarded_properties,
+    // mirroring guarded_functions - see the tests below), since they
+    // assert an independent capability fact about the receiver rather
+    // than narrowing its own type.
     let d = diagnostics_for(
         r#"<?php
             function needsInt(int $x): int { return $x; }
@@ -214,6 +219,135 @@ fn is_callable_narrowing_catches_misuse_inside_the_guarded_branch() {
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert!(d[0].message.contains("needsInt"), "got: {d:?}");
+}
+
+// ROADMAP "Known but not yet scheduled": real PHPStan's own
+// `MethodExistsTypeSpecifyingExtension`/`PropertyExistsTypeSpecifyingExtension`
+// (`Accessory\HasMethodType`/`HasPropertyType`) - real corpus false
+// positive this fixes: Piwigo's own `ImageBackend::destroy()`
+// (`if (method_exists($image, 'destroy')) { $image->destroy(); }`,
+// `$image`'s declared `ImageInterface` type never declares `destroy()`
+// at all).
+#[test]
+fn method_exists_guards_a_call_to_a_method_not_on_the_declared_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface ImageInterface1 {}
+            class ImageGd1 implements ImageInterface1 {
+                public function destroy(): bool { return true; }
+            }
+            function f(ImageInterface1 $image): void {
+                if (method_exists($image, 'destroy')) {
+                    $image->destroy();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn property_exists_guards_an_access_to_a_property_not_on_the_declared_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface HasBag1 {}
+            class RealBag1 implements HasBag1 {
+                public string $bag = '';
+            }
+            function f(HasBag1 $x): void {
+                if (property_exists($x, 'bag')) {
+                    echo $x->bag;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The guard is name-specific, not a blanket suppression of every
+// missing-member diagnostic on the receiver.
+#[test]
+fn method_exists_with_a_different_name_does_not_guard_an_unrelated_call() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface ImageInterface2 {}
+            function f(ImageInterface2 $image): void {
+                if (method_exists($image, 'destroy')) {
+                    $image->somethingElse();
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.notFound"),
+        "got: {d:?}"
+    );
+}
+
+// The guard is genuinely Locals-scoped (per apply_narrowing/merge_scopes),
+// not accidentally promoted to Checker-wide state - it must not leak
+// past the branch that proved it.
+#[test]
+fn method_exists_guard_does_not_leak_past_the_branch() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface ImageInterface3 {}
+            function f(ImageInterface3 $image): void {
+                if (method_exists($image, 'destroy')) {
+                    $image->destroy();
+                }
+                $image->destroy();
+            }
+        "#,
+    );
+    assert_eq!(
+        d.iter()
+            .filter(|x| x.identifier == "method.notFound")
+            .count(),
+        1,
+        "got: {d:?}"
+    );
+}
+
+// Mirrors guarded_functions's own already-tested && composition - the
+// right operand of && is checked against the left operand's own
+// narrowed locals.
+#[test]
+fn method_exists_composes_with_the_right_side_of_an_and_expression() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface ImageInterface4 {}
+            function f(ImageInterface4 $image): void {
+                if (method_exists($image, 'destroy') && $image->destroy()) {
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Exercises the guard set's own merge_scopes intersection: only one
+// branch of an if/else proves the guard, so it must not survive past
+// the merge point.
+#[test]
+fn method_exists_guard_from_only_one_branch_does_not_survive_the_merge() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface ImageInterface5 {}
+            function f(ImageInterface5 $image, bool $flag): void {
+                if ($flag) {
+                    if (method_exists($image, 'destroy')) {
+                    }
+                } else {
+                }
+                $image->destroy();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.notFound"),
+        "got: {d:?}"
+    );
 }
 
 // Phase 28, real shape: `proc_open()`/`fsockopen()` return

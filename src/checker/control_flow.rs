@@ -420,6 +420,18 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         .guarded_functions
         .clone()
         .intersection(else_locals.guarded_functions.clone());
+    // ROADMAP "Known but not yet scheduled": identical intersection
+    // treatment for the method_exists()/property_exists() guard sets -
+    // a member is only still provably guarded after an if/else join when
+    // *both* branches proved it, same as guarded_functions above.
+    merged.guarded_methods = then_locals
+        .guarded_methods
+        .clone()
+        .intersection(else_locals.guarded_methods.clone());
+    merged.guarded_properties = then_locals
+        .guarded_properties
+        .clone()
+        .intersection(else_locals.guarded_properties.clone());
     // ROADMAP "Known but not yet scheduled" follow-up: a condition alias
     // only survives a merge point when both incoming branches still
     // agree on the exact same stored condition - `Rc::ptr_eq` (not a

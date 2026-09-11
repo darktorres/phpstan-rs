@@ -61,6 +61,19 @@ type ProvenanceMap = imbl::GenericHashMap<
 type GuardedFunctionSet =
     imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 
+// ROADMAP "Known but not yet scheduled": `(receiver_var_name, member_name)`
+// pairs currently proven guarded by a `method_exists($recv, 'name')`/
+// `property_exists($recv, 'name')` true branch on this exact control-flow
+// path - mirrors `GuardedFunctionSet`'s own Locals-scoped, O(1)-clone
+// design (Phase 71 Item 4) for the identical reason: it must merge/
+// narrow per-branch via `apply_narrowing`/`merge_scopes`, not persist
+// unconditionally.
+type GuardedMemberSet = imbl::GenericHashSet<
+    (String, String),
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
 // ROADMAP "Known but not yet scheduled" follow-up: the narrow slice of
 // real PHPStan's `ConditionalExpressionHolder` this project builds -
 // `name -> (target_key, Rc<Expr>)` for a variable whose last assignment's
@@ -141,6 +154,8 @@ pub(crate) struct Locals {
     types: LocalsMap,
     provenance: ProvenanceMap,
     pub(crate) guarded_functions: GuardedFunctionSet,
+    pub(crate) guarded_methods: GuardedMemberSet,
+    pub(crate) guarded_properties: GuardedMemberSet,
     pub(crate) condition_aliases: ConditionAliasMap,
     // Whether `declare`/`insert_with_provenance` actually do anything -
     // `false` (via `Default`) for every ordinary `check-project` run,
@@ -276,6 +291,8 @@ impl Locals {
             types: LocalsMap::default(),
             provenance: ProvenanceMap::default(),
             guarded_functions: GuardedFunctionSet::default(),
+            guarded_methods: GuardedMemberSet::default(),
+            guarded_properties: GuardedMemberSet::default(),
             condition_aliases: ConditionAliasMap::default(),
             track: self.track,
         }
@@ -303,9 +320,10 @@ impl PartialEq for Locals {
     /// regardless), and never a behavior change for `track: false`
     /// (`provenance` stays empty on both sides throughout, so this
     /// distinction is unobservable there). `guarded_functions`/
-    /// `condition_aliases` are excluded for the identical reason -
-    /// both are bookkeeping side-channels riding along `types`'s own
-    /// convergence, never inputs to it.
+    /// `guarded_methods`/`guarded_properties`/`condition_aliases` are
+    /// excluded for the identical reason - all are bookkeeping side-
+    /// channels riding along `types`'s own convergence, never inputs to
+    /// it.
     fn eq(&self, other: &Self) -> bool {
         self.types == other.types
     }

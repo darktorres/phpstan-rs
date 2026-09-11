@@ -1036,7 +1036,22 @@ impl<'a> Checker<'a> {
                     // legitimately callable at runtime, so its presence
                     // suppresses this entirely, the same way real
                     // PHPStan treats it.
-                    if self.registry.classes.contains_key(class)
+                    // ROADMAP "Known but not yet scheduled": real
+                    // PHPStan's own `MethodExistsTypeSpecifyingExtension`
+                    // - a `method_exists($recv, 'name')` true branch
+                    // proves this exact call safe for the rest of that
+                    // branch, regardless of `$recv`'s own static type
+                    // (`Locals::guarded_methods`, set in `apply_
+                    // narrowing`). Only fires when the receiver is the
+                    // exact bare-variable shape the guard itself was
+                    // recorded against.
+                    let method_exists_guarded = matches!(
+                        &unwrap_grouping(recv).kind,
+                        ExprKind::Variable(name)
+                            if locals.guarded_methods.contains(&(name.clone(), method.clone()))
+                    );
+                    if !method_exists_guarded
+                        && self.registry.classes.contains_key(class)
                         && self.member_confirmed_missing(&recv_ty, |c| {
                             self.registry.lookup_method(c, method).is_some()
                                 || self.registry.lookup_method(c, "__call").is_some()
@@ -2364,12 +2379,23 @@ impl<'a> Checker<'a> {
                 // itself, which two method-call checks below also share
                 // - an undefined *method* call on `stdClass` is still a
                 // real fatal error real PHPStan also flags.
-                if self.member_confirmed_missing(&base_ty, |c| {
-                    c == "stdClass"
-                        || self.registry.lookup_property(c, prop).is_some()
-                        || self.registry.lookup_method(c, "__get").is_some()
-                        || (is_pest_this && self.pest_hook_properties.contains(prop.as_str()))
-                }) {
+                // ROADMAP "Known but not yet scheduled": real PHPStan's
+                // own `PropertyExistsTypeSpecifyingExtension` - the
+                // `property_exists()` mirror of the `method_exists()`
+                // guard on `MethodCall` above.
+                let property_exists_guarded = matches!(
+                    &base.kind,
+                    ExprKind::Variable(name)
+                        if locals.guarded_properties.contains(&(name.clone(), prop.clone()))
+                );
+                if !property_exists_guarded
+                    && self.member_confirmed_missing(&base_ty, |c| {
+                        c == "stdClass"
+                            || self.registry.lookup_property(c, prop).is_some()
+                            || self.registry.lookup_method(c, "__get").is_some()
+                            || (is_pest_this && self.pest_hook_properties.contains(prop.as_str()))
+                    })
+                {
                     self.report(
                         label.to_string(),
                         format!("access to undefined property {base_ty}::${prop}"),
