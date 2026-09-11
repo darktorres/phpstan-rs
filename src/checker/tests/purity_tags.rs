@@ -89,6 +89,30 @@ fn a_function_declared_pure_but_echoing_is_flagged_certain_impure() {
 }
 
 #[test]
+fn a_pure_function_reading_a_class_constant_or_enum_case_is_never_flagged_static_property_access() {
+    // Corpus find (`Psl\Ansi\Cursor\back()`, php-standard-library): a class
+    // constant/enum-case read (`Foo::BAR`, no leading `$`) is immutable -
+    // real PHPStan never treats it as an impure point at all, unlike an
+    // actual static *property* read (`Foo::$bar`).
+    let d = all_diagnostics_for(
+        r#"<?php
+            enum Kind { case A; }
+            class Foo { const BAR = 1; }
+            /** @phpstan-pure */
+            function readConst(): int {
+                $k = Kind::A;
+                return Foo::BAR;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "impure.staticPropertyAccess"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
 fn a_function_declared_pure_but_calling_an_unknown_function_is_flagged_possibly_impure() {
     let d = all_diagnostics_for(
         r#"<?php

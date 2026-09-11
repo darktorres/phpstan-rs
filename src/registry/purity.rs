@@ -633,6 +633,34 @@ pub(crate) struct ImpurePointOccurrence {
 ///   description text per shape, but always the same `new` identifier;
 ///   this project's own `resolve_new` doesn't itself distinguish which
 ///   of the three specifically failed.
+///
+/// A real, corpus-confirmed precision gap (`vendor/php-standard-library`'s
+/// `Psl` package, extremely heavy `@pure` tag usage - 335 files flagged out
+/// of 467 using the tag): `possiblyImpure.functionCall`/`.methodCall`/`.new`
+/// fire for *any* call this walk's own `resolved` check can't prove targets
+/// a known declaration - which, exactly like `resolve_static_call`/
+/// `resolve_this_method_call`/`resolve_new` above (deliberately reused
+/// as-is, not widened, per this doc comment's own "don't touch the boolean
+/// classifier" rule), only recognizes `self::`/`static::`/`parent::` and
+/// `$this->` receivers, never a literal class name (`Color::ansi256(...)`)
+/// or an arbitrary object receiver - confirmed directly against real
+/// PHPStan's own `StaticCallHandler.php`/`SimpleImpurePoint::
+/// createFromVariant`, which resolves a literal-class-name static call (and
+/// any receiver's method call) the same way and only emits an `ImpurePoint`
+/// when the *resolved* target's own reflection says it has side effects -
+/// this project has no equivalent "resolve arbitrary target, then ask if
+/// pure" step. A `namespace\foo()`-relative function call compounds this
+/// further - a real, pre-existing, *unrelated* name-resolution gap
+/// (confirmed via the corpus: `namespace\Psl\invariant_violation()` already
+/// misresolves to `function.notFound` even without this phase's changes)
+/// that also defeats the plain `registry.lookup_function` check in the
+/// `Call` arm below. None of this is a regression - the exact same
+/// resolution narrowness already silently capped `is_transitively_pure`
+/// before this phase; this walk just gives it a voice for once-invisible
+/// cases. Real follow-up, not attempted here: widen call-target resolution
+/// (both here and in `resolve_static_call`/`resolve_this_method_call`, to
+/// stay consistent) to a literal class name and an arbitrary receiver type,
+/// and fix `namespace\`-relative call-name resolution generally.
 pub(crate) fn collect_impure_points(
     body: &[Stmt],
     declaring_class: Option<&str>,
@@ -729,12 +757,33 @@ fn collect_expr_impure_points(
     out: &mut Vec<ImpurePointOccurrence>,
 ) {
     match &e.kind {
-        ExprKind::StaticAccess(_, _) => out.push(ImpurePointOccurrence {
-            span: e.span,
-            identifier: "staticPropertyAccess",
-            description: "static property access",
-            certain: true,
-        }),
+        // `StaticAccess`'s second field is the parser's own single encoding
+        // for three different real things (`Foo::$prop`/`Foo::CONST`/
+        // `Foo::EnumCase`) - only a leading `$` (`checker/expr.rs`'s own
+        // `ExprKind::StaticAccess` arm uses this identical test to tell a
+        // property from a constant) means an actual, mutable static
+        // property read. A bare constant/enum-case name is immutable - real
+        // PHPStan's own `NodeScopeResolver` never emits an `ImpurePoint` for
+        // a `ClassConstFetch` at all (confirmed directly: no such call site
+        // exists in `NodeScopeResolver.php`), so flagging one here would be
+        // a real, actively-mislabeled false positive ("static property
+        // access" on something that isn't one), not just an imprecision -
+        // caught via the corpus (`Psl\Ansi\Cursor\back()`'s own
+        // `ControlSequenceIntroducerKind::CursorBack` enum-case read).
+        // `stmt_disqualifies`/`expr_disqualifies`'s own identical `Static
+        // Access(_, _) => true` arm has this same conflation - deliberately
+        // left as-is there (this function's own doc comment already
+        // explains why that file isn't touched), so it's a real, disclosed,
+        // narrower divergence between the boolean classifier and this
+        // diagnostic-only walk, in the "fewer false positives" direction.
+        ExprKind::StaticAccess(_, member) if member.starts_with('$') => {
+            out.push(ImpurePointOccurrence {
+                span: e.span,
+                identifier: "staticPropertyAccess",
+                description: "static property access",
+                certain: true,
+            })
+        }
         ExprKind::Variable(name) if is_superglobal(name) => out.push(ImpurePointOccurrence {
             span: e.span,
             identifier: "superglobal",
