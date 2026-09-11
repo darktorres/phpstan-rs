@@ -1450,7 +1450,9 @@ fn array_merge_of_a_known_shape_and_a_plain_string_keyed_array_keeps_known_field
 // Negative/no-regression case: a shape carrying a canonical int key
 // never reaches the new field-aware path (int-key renumbering isn't
 // attempted here) - still falls back to today's existing generic
-// `array<int|string, V>` behavior, unchanged.
+// fallback behavior, unchanged (`non-empty-array<V>`, since the
+// generic branch's own pre-existing `any_non_empty` flag picks up the
+// shape argument's own guaranteed non-emptiness).
 #[test]
 fn array_merge_of_an_int_keyed_shape_and_a_plain_array_is_unaffected() {
     let d = diagnostics_for(
@@ -1460,7 +1462,7 @@ fn array_merge_of_an_int_keyed_shape_and_a_plain_array_is_unaffected() {
              *  @param array<string, string> $options
              */
             function f(array $shape, array $options): void {
-                assertType('array<int|string, int|string>', array_merge($shape, $options));
+                assertType('non-empty-array<int|string>', array_merge($shape, $options));
             }
         "#,
     );
@@ -1479,7 +1481,7 @@ fn array_merge_of_a_shape_and_a_plain_array_with_an_unknown_key_type_is_unaffect
              *  @param array<int|string, string> $options
              */
             function f(array $shape, array $options): void {
-                assertType('array<int|string, int|string>', array_merge($shape, $options));
+                assertType('non-empty-array<int|string>', array_merge($shape, $options));
             }
         "#,
     );

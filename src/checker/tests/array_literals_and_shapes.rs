@@ -1061,10 +1061,10 @@ fn a_dynamic_key_write_narrowed_by_a_preceding_is_int_guard_infers_an_int_key() 
         r#"<?php
             use function PHPStan\Testing\assertType;
             /** @param array<string, mixed> $row */
-            function f(array $row): void {
+            function f(array $row, string $val): void {
                 $arr = [];
                 if (is_int($row['id'])) {
-                    $arr[$row['id']] = 'x';
+                    $arr[$row['id']] = $val;
                     assertType('array<int, string>', $arr);
                 }
             }
@@ -1079,10 +1079,10 @@ fn a_dynamic_key_write_narrowed_by_a_preceding_is_string_guard_infers_a_string_k
         r#"<?php
             use function PHPStan\Testing\assertType;
             /** @param array<string, mixed> $row */
-            function f(array $row): void {
+            function f(array $row, string $val): void {
                 $arr = [];
                 if (is_string($row['id'])) {
-                    $arr[$row['id']] = 'x';
+                    $arr[$row['id']] = $val;
                     assertType('array<string, string>', $arr);
                 }
             }
@@ -1094,17 +1094,21 @@ fn a_dynamic_key_write_narrowed_by_a_preceding_is_string_guard_infers_a_string_k
 // Negative control: without a narrowing guard, a dynamic-key write still
 // falls back to the unknown-int-or-string key default, proving the fix
 // above is additive (only narrows when the key expression's own type is
-// already confidently known), not a blanket assumption.
+// already confidently known), not a blanket assumption. A key exactly
+// equal to `unknown_array_key()` (`int|string`) displays in its own
+// single-type-param shorthand (`array<V>`, not `array<int|string, V>`) -
+// `types/display.rs`'s own established convention for the "any legal
+// key" default, unrelated to this fix.
 #[test]
 fn an_unguarded_dynamic_key_write_still_infers_an_unknown_key_type() {
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
             /** @param array<string, mixed> $row */
-            function f(array $row): void {
+            function f(array $row, string $val): void {
                 $arr = [];
-                $arr[$row['id']] = 'x';
-                assertType('array<int|string, string>', $arr);
+                $arr[$row['id']] = $val;
+                assertType('array<string>', $arr);
             }
         "#,
     );
@@ -1115,7 +1119,11 @@ fn an_unguarded_dynamic_key_write_still_infers_an_unknown_key_type() {
 // `int` key, once with a confidently `string` key) union into
 // `array<int|string, V>` on the already-widened `Type::Array` path -
 // confirms the "union in, don't just keep unchanged" generalization
-// doesn't regress the already-tested nested-write behavior.
+// doesn't regress the already-tested nested-write behavior. Displays in
+// the same single-type-param shorthand as the unguarded case above,
+// since `int|string` is exactly `unknown_array_key()`; each `if` has no
+// `else`, so the "neither write happened yet" empty-shape branch
+// survives in the union too.
 #[test]
 fn successive_narrowed_dynamic_key_writes_union_the_container_s_key_type() {
     let d = diagnostics_for(
@@ -1124,15 +1132,15 @@ fn successive_narrowed_dynamic_key_writes_union_the_container_s_key_type() {
             /** @param array<string, mixed> $a
              *  @param array<string, mixed> $b
              */
-            function f(array $a, array $b): void {
+            function f(array $a, array $b, string $val): void {
                 $arr = [];
                 if (is_int($a['id'])) {
-                    $arr[$a['id']] = 'x';
+                    $arr[$a['id']] = $val;
                 }
                 if (is_string($b['id'])) {
-                    $arr[$b['id']] = 'y';
+                    $arr[$b['id']] = $val;
                 }
-                assertType('array<int|string, string>', $arr);
+                assertType('array{}|array<string>', $arr);
             }
         "#,
     );
