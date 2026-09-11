@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::ast::*;
-use crate::checker::{Checker, TemplateBindings};
+use crate::checker::{Checker, TemplateBindings, class_kind_identifier};
 use crate::docblock;
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -188,10 +190,45 @@ impl<'a> Checker<'a> {
                     p.span,
                     fqn,
                 );
+                // Phase 48.A: `property.trait` - see `check_type_trait_refs`'s
+                // own doc comment.
+                self.check_type_trait_refs(
+                    &prop_sig.ty,
+                    &format!("property {fqn}::${}", p.name),
+                    p.span,
+                    fqn,
+                    "property.trait",
+                );
             }
         }
         self.check_property_tag_types(fqn, c);
         self.check_ancestor_generic_bounds(fqn, c.span);
+        // Phase 54: `TemplateTypeCheck`'s own declaration-validity family,
+        // class-level (real PHPStan's own per-kind rule split -
+        // `ClassTemplateTypeRule`/`InterfaceTemplateTypeRule`/
+        // `TraitTemplateTypeRule` - all funnel into the identical shared
+        // check, so one call site covers all three; an enum's own
+        // separate, already-shipped `check_enum_template_tag`/
+        // `enum.generic` check is `EnumTemplateTypeRule`'s own real
+        // counterpart, confirmed by direct read that real PHPStan
+        // excludes enums from `ClassTemplateTypeRule` entirely rather
+        // than layering this family on top of `enum.generic` too).
+        if !info.templates.is_empty() {
+            let display_name = format!("{} {fqn}", class_kind_identifier(&c.kind));
+            let templates = info.templates.clone();
+            let bounds = info.template_bounds.clone();
+            let defaults = info.template_defaults.clone();
+            let type_aliases = info.type_aliases.clone();
+            self.check_template_declaration_validity(
+                &templates,
+                &bounds,
+                &defaults,
+                &type_aliases,
+                &display_name,
+                fqn,
+                c.span,
+            );
+        }
     }
 
     /// Phase 36's own "bright spot": `@property`/`@property-read`/
@@ -399,4 +436,154 @@ impl<'a> Checker<'a> {
             );
         }
     }
+
+    /// Phase 54: `TemplateTypeCheck`'s own declaration-validity family
+    /// (confirmed by direct read, `vendor/phpstan-src`) - validates a
+    /// `@template` tag's own declaration, not a usage site. Shared
+    /// between a class/interface/trait's own templates (`templates`/
+    /// `bounds`/`defaults` read straight off its `ClassInfo`) and a
+    /// method's own (re-parsed fresh from its own doc comment, since
+    /// `FunctionSig` has no persisted raw template-bound/-default map of
+    /// its own - see `Checker::current_function_template_params`'s own
+    /// doc comment for the identical reasoning) - `type_aliases` is
+    /// always the *enclosing class's* own map either way (a type alias is
+    /// class-scoped, real PHPStan's own `hasTypeAlias(name, className)`
+    /// call takes the class regardless of whether the template itself is
+    /// class- or method-level).
+    ///
+    /// Deliberately narrower than real PHPStan's own full check in two
+    /// disclosed ways: the bound's/default's own further `GenericObjectTypeCheck`
+    /// (does *that* type, if itself generic, specify all of *its own*
+    /// required template arguments) isn't reused here - a genuinely
+    /// separate primitive this project doesn't have yet, not just a
+    /// missing wiring - left as a narrower, disclosed cut for this pass
+    /// rather than building a whole second bound/arity-checking engine on
+    /// top of the one `check_generic_bounds`/`check_generic_reference_arity`
+    /// already are for usage sites. And unlike real PHPStan, a bound's/
+    /// default's own referenced class is never existence-checked
+    /// (`class.notFound`/`generics.traitBound`) here at all - this
+    /// project's own registry is inherently partial (a real corpus false
+    /// positive already found and fixed once for `check_generic_bounds`'s
+    /// own bound-*violation* check applies identically here: a bound
+    /// naming a real class this project simply has no data for, e.g. a
+    /// PHAR-bundled dependency, is indistinguishable from a genuine typo,
+    /// and this project's own established convention is "don't know,
+    /// don't guess" for exactly that ambiguity - confirmed by a real,
+    /// already-existing test for this same class of bound).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn check_template_declaration_validity(
+        &mut self,
+        templates: &[String],
+        bounds: &HashMap<String, Type>,
+        defaults: &HashMap<String, Type>,
+        type_aliases: &HashMap<String, Type>,
+        display_name: &str,
+        label: &str,
+        span: Span,
+    ) {
+        let mut template_with_default: Option<&str> = None;
+        for name in templates {
+            if self.class_name_exists(name) {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "PHPDoc tag @template for {display_name} cannot have existing class {name} as its name."
+                    ),
+                    span,
+                    6,
+                    "generics.existingClass",
+                );
+            }
+            if type_aliases.contains_key(name) {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "PHPDoc tag @template for {display_name} cannot have existing type alias {name} as its name."
+                    ),
+                    span,
+                    6,
+                    "generics.existingTypeAlias",
+                );
+            }
+            if let Some(bound) = bounds.get(name)
+                && !is_supported_generic_bound(bound)
+            {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "PHPDoc tag @template {name} for {display_name} with bound type {bound} is not supported."
+                    ),
+                    span,
+                    6,
+                    "generics.notSupportedBound",
+                );
+            }
+            match defaults.get(name) {
+                None => {
+                    if let Some(prev) = template_with_default {
+                        self.report(
+                            label.to_string(),
+                            format!(
+                                "PHPDoc tag @template {name} for {display_name} does not have a default type but follows an optional @template {prev}."
+                            ),
+                            span,
+                            6,
+                            "generics.requiredTypeAfterOptional",
+                        );
+                    }
+                }
+                Some(default) => {
+                    template_with_default = Some(name);
+                    if let Some(bound) = bounds.get(name)
+                        && self.is_type_fully_known(default)
+                        && self.is_type_fully_known(bound)
+                        && !self.registry.is_assignable(default, bound)
+                    {
+                        self.report(
+                            label.to_string(),
+                            format!(
+                                "Default type {default} in PHPDoc tag @template {name} for {display_name} is not subtype of bound type {bound}."
+                            ),
+                            span,
+                            6,
+                            "generics.templateDefaultOutOfBounds",
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Phase 54: mirrors real PHPStan's own `TemplateTypeCheck`-internal
+/// hardcoded whitelist of ~15 supported `@template ... of Bound` shapes
+/// (confirmed by direct read) - deliberately conservative, mapped onto
+/// this project's own `Type` variants rather than PHPStan's type-class
+/// list: anything not explicitly recognized here is treated as
+/// unsupported, since a false "supported" would silently let a genuinely
+/// nonsensical bound (e.g. `@template T of callable`) through uncaught,
+/// while a false "unsupported" only ever costs a single extra, real
+/// diagnostic on an already-unusual bound choice.
+fn is_supported_generic_bound(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Mixed
+            | Type::Null
+            | Type::Array(_, _)
+            | Type::ArrayShape(_)
+            | Type::String
+            | Type::StringLiteral(_)
+            | Type::Int
+            | Type::IntLiteral(_)
+            | Type::Float
+            | Type::FloatLiteral(_)
+            | Type::Bool
+            | Type::True
+            | Type::False
+            | Type::Object(_, _)
+            | Type::ObjectShape(_)
+            | Type::Union(_)
+            | Type::Intersection(_)
+            | Type::TemplateParam(_)
+    )
 }

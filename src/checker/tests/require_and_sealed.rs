@@ -274,3 +274,148 @@ fn a_sealed_tag_naming_a_known_class_is_not_flagged() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 48.B: deeper `@phpstan-require-extends`/`-require-implements`/
+// `@phpstan-sealed` declaration-validity refinements.
+
+#[test]
+fn require_extends_naming_an_interface_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface SomeInterface {}
+            /** @phpstan-require-extends SomeInterface */
+            trait T {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "requireExtends.interface"
+            && x.message.contains(
+                "PHPDoc tag @phpstan-require-extends cannot contain an interface SomeInterface, expected a class."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn require_extends_naming_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait OtherTrait {}
+            /** @phpstan-require-extends OtherTrait */
+            trait T {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "requireExtends.trait"
+            && x.message.contains(
+                "PHPDoc tag @phpstan-require-extends cannot contain non-class type OtherTrait."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn require_extends_naming_a_final_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            final class Locked {}
+            /** @phpstan-require-extends Locked */
+            trait T {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "requireExtends.finalClass"
+            && x.message.contains(
+                "PHPDoc tag @phpstan-require-extends cannot contain final class Locked."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn require_extends_used_twice_is_flagged_duplicate() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Other {}
+            /**
+             * @phpstan-require-extends Base
+             * @phpstan-require-extends Other
+             */
+            trait T {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "requireExtends.duplicate"
+            && x.message == "PHPDoc tag @phpstan-require-extends can only be used once."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn require_extends_naming_a_non_final_class_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            /** @phpstan-require-extends Base */
+            trait T {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "requireExtends.interface" | "requireExtends.trait" | "requireExtends.finalClass"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn require_implements_naming_a_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class SomeClass {}
+            /** @phpstan-require-implements SomeClass */
+            trait T {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "requireImplements.class"
+            && x.message.contains(
+                "PHPDoc tag @phpstan-require-implements cannot contain non-interface type SomeClass."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn require_implements_naming_an_interface_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface SomeInterface {}
+            /** @phpstan-require-implements SomeInterface */
+            trait T {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier.starts_with("requireImplements.")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn sealed_on_an_enum_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Shape {}
+            /** @phpstan-sealed Shape */
+            enum Color implements Shape { case Red; case Blue; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "sealed.onEnum"
+            && x.message == "PHPDoc tag @phpstan-sealed is only valid on class or interface."),
+        "got: {d:?}"
+    );
+}

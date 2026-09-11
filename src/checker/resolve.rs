@@ -1,5 +1,5 @@
 use crate::checker::{Checker, class_type_word};
-use crate::registry::{self};
+use crate::registry::{self, FunctionSig};
 use crate::token::Span;
 use crate::types::{self, Type};
 
@@ -203,6 +203,68 @@ impl<'a> Checker<'a> {
         }
         collect_scoped_template_params(&sig.return_type, method_name, &mut out);
         out
+    }
+
+    /// Phase 48.D: `FunctionDefinitionCheck`'s own `method.
+    /// templateTypeNotInParameter` half (confirmed by direct read,
+    /// `checkParametersAcceptor`'s shared tail, so this applies uniformly
+    /// to a function/method's own `@template` - real PHPStan runs the
+    /// identical check for a closure/arrow-fn too, but neither is indexed
+    /// into this project's own registry at all, so there's no persisted
+    /// `FunctionSig`/template-name list for either to run this against;
+    /// a real, disclosed architectural boundary, not an oversight).
+    /// Real PHPStan's `TypeTraverser`-based full-tree walk over every
+    /// parameter's own type (removing each template found from a working
+    /// "still missing" set) is exactly what the params-only pass below
+    /// re-derives; a template that only shows up somewhere in the return
+    /// type (the common, high-value real shape - a generic factory
+    /// method's own `@return T` with no `T`-typed parameter at all) is
+    /// what the difference against the params+return pass catches.
+    /// Deliberately narrower in one disclosed way: a template declared
+    /// but referenced *nowhere at all* in its own signature (not even the
+    /// return type) is invisible to this check too, since `FunctionSig`
+    /// has no separate record of a declared template's own bare name
+    /// independent of where it's actually used (see `current_function_
+    /// template_params`'s own doc comment for the identical limitation) -
+    /// the rarer edge case this project's own design explicitly leaves
+    /// uncaught rather than adding new template-name-tracking machinery
+    /// just for it.
+    pub(crate) fn check_template_type_not_in_parameter(
+        &mut self,
+        sig: &FunctionSig,
+        bare_name: &str,
+        class_name: Option<&str>,
+        label: &str,
+        span: Span,
+    ) {
+        let mut in_params = std::collections::HashMap::new();
+        for p in &sig.params {
+            collect_scoped_template_params(&p.ty, bare_name, &mut in_params);
+        }
+        let mut in_signature = in_params.clone();
+        collect_scoped_template_params(&sig.return_type, bare_name, &mut in_signature);
+        if in_signature.len() == in_params.len() {
+            return;
+        }
+        let kind_word = if class_name.is_some() {
+            "method"
+        } else {
+            "function"
+        };
+        let mut missing: Vec<&String> = in_signature
+            .keys()
+            .filter(|name| !in_params.contains_key(*name))
+            .collect();
+        missing.sort();
+        for name in missing {
+            self.report(
+                label.to_string(),
+                format!("Template type {name} of {kind_word} {label}() is not referenced in a parameter."),
+                span,
+                0,
+                "method.templateTypeNotInParameter",
+            );
+        }
     }
 
     /// Resolves a `StaticAccess`/`StaticCall` target (`self`/`parent`/
@@ -422,6 +484,147 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 48.A: `FunctionDefinitionCheck`'s own "resolved but a trait"
+    /// half - `parameter.trait`/`return.trait`/`property.trait` (real
+    /// PHPStan, confirmed by direct read: a native type-hint resolving to
+    /// a real, indexed class that turns out to be a `trait` rather than a
+    /// class/interface/enum - real PHP itself rejects this at the engine
+    /// level, so this is always a real bug, never a corpus-noise risk).
+    /// Mirrors `collect_unknown_class_names`'s exact recursive shape
+    /// (including its identical, deliberate non-recursion into a class's
+    /// own `@template` argument list) - the two are mutually exclusive
+    /// per name (a name only ever reaches this function's own `out` once
+    /// `collect_unknown_class_names` has already confirmed it exists at
+    /// all), so no name is ever double-reported under both identifiers.
+    pub(crate) fn collect_trait_class_names(&self, ty: &Type, out: &mut Vec<String>) {
+        match ty {
+            Type::Object(name, _)
+                if matches!(
+                    name.as_str(),
+                    "$$covariant" | "$$contravariant" | "$$bivariant"
+                ) => {}
+            Type::Object(name, _args) => {
+                if self
+                    .registry
+                    .lookup_class(name)
+                    .is_some_and(|(_, info)| info.kind == crate::ast::ClassKind::Trait)
+                    && !out.iter().any(|n| n == name)
+                {
+                    out.push(name.clone());
+                }
+            }
+            Type::Array(key, inner) => {
+                self.collect_trait_class_names(key, out);
+                self.collect_trait_class_names(inner, out);
+            }
+            Type::ClassString(inner) => self.collect_trait_class_names(inner, out),
+            Type::Union(members) | Type::Intersection(members) => {
+                for m in members {
+                    self.collect_trait_class_names(m, out);
+                }
+            }
+            Type::ArrayShape(fields) => {
+                for (_, t, _) in fields {
+                    self.collect_trait_class_names(t, out);
+                }
+            }
+            Type::ObjectShape(fields) => {
+                for (_, t, _) in fields {
+                    self.collect_trait_class_names(t, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The reporting half for `collect_trait_class_names` above - `identifier`
+    /// is one of `parameter.trait`/`return.trait`/`property.trait`
+    /// depending on the call site's own kind, matching real PHPStan's own
+    /// uniform "same message template as `class.notFound`, different
+    /// identifier" shape (confirmed by direct read of `FunctionDefinitionCheck`/
+    /// `ExistingClassesInPropertiesRule`).
+    pub(crate) fn check_type_trait_refs(
+        &mut self,
+        ty: &Type,
+        subject: &str,
+        span: Span,
+        label: &str,
+        identifier: &'static str,
+    ) {
+        let mut traits = Vec::new();
+        self.collect_trait_class_names(ty, &mut traits);
+        for name in traits {
+            self.report(
+                label.to_string(),
+                format!("{subject} has invalid type {name}"),
+                span,
+                0,
+                identifier,
+            );
+        }
+    }
+
+    /// Phase 48.E: `parameter.noParent`/`return.noParent` - real
+    /// PHPStan's `NonexistentParentClassType` (`describe()` returns the
+    /// literal string `"parent"`, confirmed by direct read), produced
+    /// when a native `parent` type-hint is used on a class with no
+    /// `extends` ancestor at all. This project's own equivalent is
+    /// `resolve_pseudo` deliberately leaving a bare `Type::ParentRef`
+    /// unresolved in exactly that situation (see its own doc comment) -
+    /// `ty` here must already be the `resolve_pseudo`'d result, not the
+    /// raw pre-resolution type, or this can never find anything. Walks
+    /// the full type tree (unlike real PHPStan's own top-level-only
+    /// `instanceof` check) since this project's own `Type` can nest a
+    /// `ParentRef` inside a `Union` for the common `?parent` shape real
+    /// PHP itself allows - a real, more-thorough case real PHPStan's own
+    /// narrower check structurally can't hit the same way.
+    pub(crate) fn collect_bare_parent_refs(&self, ty: &Type, found: &mut bool) {
+        match ty {
+            Type::ParentRef => *found = true,
+            Type::Array(key, inner) => {
+                self.collect_bare_parent_refs(key, found);
+                self.collect_bare_parent_refs(inner, found);
+            }
+            Type::ClassString(inner) => self.collect_bare_parent_refs(inner, found),
+            Type::Union(members) | Type::Intersection(members) => {
+                for m in members {
+                    self.collect_bare_parent_refs(m, found);
+                }
+            }
+            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
+                for (_, t, _) in fields {
+                    self.collect_bare_parent_refs(t, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The reporting half for `collect_bare_parent_refs` above -
+    /// `identifier` is `parameter.noParent` or `return.noParent`
+    /// depending on the call site, `subject` the same phrase the sibling
+    /// `class.notFound`/`.trait` checks at that exact site already use.
+    pub(crate) fn check_no_parent_ref(
+        &mut self,
+        ty: &Type,
+        subject: &str,
+        span: Span,
+        label: &str,
+        identifier: &'static str,
+    ) {
+        let mut found = false;
+        self.collect_bare_parent_refs(ty, &mut found);
+        if found {
+            self.report(
+                label.to_string(),
+                format!("{subject} has invalid type parent"),
+                span,
+                0,
+                identifier,
+            );
+        }
+    }
+
     /// The shared reporting half every existence-checking call site
     /// (parameter/return/property type hints, closure/arrow-fn
     /// typehints, ...) reduces to once it has its own `subject` phrase
@@ -449,6 +652,64 @@ impl<'a> Checker<'a> {
                 "class.notFound",
             );
         }
+        // Phase 48.G: `class.prefixed`'s own pipeline-wide widening -
+        // every one of this function's own ~18 call sites gets this for
+        // free now, not just `check_use_class_imports`'s own single
+        // `use`-import site. Checked on the *successfully-resolved* name
+        // too (unlike the `class.notFound` loop just above, which only
+        // ever sees a name `collect_unknown_class_names` couldn't find at
+        // all) - a leaked Rector/PHP-Scoper/PHPUnit-PHAR/Box-prefixed
+        // vendor class is almost always still a real, indexed class (it
+        // was compiled into the vendor tree, just under a mangled name),
+        // so it would never appear in `unknown` above.
+        let mut prefixed = Vec::new();
+        collect_prefixed_class_names(ty, &mut prefixed);
+        for (name, project) in prefixed {
+            self.report_builder(
+                crate::checker::DiagnosticBuilder::new(
+                    label.to_string(),
+                    format!("Referencing prefixed {project} class: {name}."),
+                    span,
+                    0,
+                    "class.prefixed",
+                )
+                .non_ignorable(),
+            );
+        }
+    }
+}
+
+/// Phase 48.G: `collect_unknown_class_names`'s own sibling, minus the
+/// existence filter (a prefixed vendor class is almost always a real,
+/// indexed one - see `check_type_class_names_exist`'s own doc comment) -
+/// otherwise the identical recursive shape.
+fn collect_prefixed_class_names<'b>(ty: &'b Type, out: &mut Vec<(&'b str, &'static str)>) {
+    match ty {
+        Type::Object(name, _args) => {
+            for entry in crate::checker::INTERNAL_CLASS_PREFIXES {
+                let (project, prefix): (&str, &str) = *entry;
+                if name.starts_with(prefix) {
+                    out.push((name.as_str(), project));
+                    break;
+                }
+            }
+        }
+        Type::Array(key, inner) => {
+            collect_prefixed_class_names(key, out);
+            collect_prefixed_class_names(inner, out);
+        }
+        Type::ClassString(inner) => collect_prefixed_class_names(inner, out),
+        Type::Union(members) | Type::Intersection(members) => {
+            for m in members {
+                collect_prefixed_class_names(m, out);
+            }
+        }
+        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
+            for (_, t, _) in fields {
+                collect_prefixed_class_names(t, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -487,6 +748,20 @@ fn collect_scoped_template_params(
             for (_, t, _) in fields {
                 collect_scoped_template_params(t, scope, out);
             }
+        }
+        // Phase 48.D follow-up: real corpus false positive
+        // (`php-standard-library`'s own `Psl\Dict\group_by()`, `@template
+        // Tk of array-key`/`@param (Closure(Tv): ?Tk) $keyFunc` - `Tk`
+        // only ever appears nested inside a `Closure(...)`-shaped
+        // parameter's own return-type slot, never as that parameter's
+        // own bare top-level type) - a template only reachable this way
+        // is exactly as real an inference source as one reachable through
+        // an ordinary class's own generic argument list just above.
+        Type::Callable(Some(sig)) => {
+            for p in &sig.params {
+                collect_scoped_template_params(&p.ty, scope, out);
+            }
+            collect_scoped_template_params(&sig.return_type, scope, out);
         }
         _ => {}
     }

@@ -5,7 +5,10 @@ use crate::checker::{
     collect_goto_targets, generator_missing_return_type, type_allows_generator_return,
 };
 use crate::docblock;
-use crate::registry::{FunctionSig, Registry, resolve_names_in_type, resolve_type};
+use crate::php_version::PhpFeature;
+use crate::registry::{
+    FunctionSig, Registry, mark_template_params, resolve_names_in_type, resolve_type,
+};
 use crate::token::Span;
 use crate::types::{self, Type};
 
@@ -199,6 +202,97 @@ impl<'a> Checker<'a> {
         self.check_declared_param_callable_tags(f, &label);
         self.check_internal_param_and_return_types(f, class_name, &label);
         self.check_assert_tag_types(sig, f.span, &label);
+        // Phase 48.D: `method.templateTypeNotInParameter` - neither a
+        // closure nor an arrow-fn is indexed into the registry at all
+        // (see `check_template_type_not_in_parameter`'s own doc comment),
+        // so this only ever runs for a real, named function/method.
+        if let Some(sig) = sig {
+            self.check_template_type_not_in_parameter(sig, &f.name, class_name, &label, f.span);
+        }
+        // Phase 48.F: `FunctionDefinitionCheck`'s PHP-version-gated
+        // native declaration-syntax checks - see each one's own doc
+        // comment. Real PHPStan runs these against a closure/arrow-fn's
+        // own params/return too (`checkAnonymousFunction`); scoped here
+        // to a named function/method only, a deliberate, disclosed
+        // narrower cut given this whole family's own low expected corpus
+        // value against a project targeting a modern PHP version (see
+        // ROADMAP's own note on this phase).
+        self.check_native_union_types_supported(f, class_name.is_some(), &label);
+        self.check_implicitly_nullable_params(f, &label);
+        self.check_required_parameter_after_optional(f, &label);
+        // Phase 54: `TemplateTypeCheck`'s own declaration-validity family
+        // plus `method.shadowTemplate`, method-level - see `check_class_
+        // generic_bounds`'s own identical class-level call for the
+        // shared-check doc comment. Re-parses `f.doc_comment` fresh
+        // (mirroring `registry::function_sig::generics::build_template_
+        // params`'s own shallow-then-resolve pipeline exactly, so a bound/
+        // default referencing a sibling template on the same docblock -
+        // `@template A` `@template B of A` - classifies correctly instead
+        // of misreading `A` as an unknown class) since `FunctionSig` has
+        // no persisted raw template-bound/-default map of its own.
+        if let Some(c) = class_name
+            && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse)
+            && !doc.templates.is_empty()
+        {
+            let shallow: std::collections::HashMap<String, types::TemplateParam> = doc
+                .templates
+                .iter()
+                .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
+                .collect();
+            let resolve = |raw: &str| -> Type {
+                let ty = types::parse_type_string(raw);
+                let ty = mark_template_params(ty, &shallow);
+                resolve_names_in_type(ty, &self.name_ctx)
+            };
+            let bounds: std::collections::HashMap<String, Type> = doc
+                .template_bounds
+                .iter()
+                .map(|(k, v)| (k.clone(), resolve(v)))
+                .collect();
+            let defaults: std::collections::HashMap<String, Type> = doc
+                .template_defaults
+                .iter()
+                .map(|(k, v)| (k.clone(), resolve(v)))
+                .collect();
+            let type_aliases = self
+                .registry
+                .classes
+                .get(c)
+                .map(|info| info.type_aliases.clone())
+                .unwrap_or_default();
+            let display_name = format!("method {c}::{}()", f.name);
+            self.check_template_declaration_validity(
+                &doc.templates,
+                &bounds,
+                &defaults,
+                &type_aliases,
+                &display_name,
+                &label,
+                f.span,
+            );
+            // `method.shadowTemplate`: a method-level `@template` reusing
+            // a name already declared on the enclosing class.
+            if let Some(info) = self.registry.classes.get(c) {
+                let mut shadowed: Vec<&String> = doc
+                    .templates
+                    .iter()
+                    .filter(|n| info.templates.contains(n))
+                    .collect();
+                shadowed.sort();
+                for name in shadowed {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "PHPDoc tag @template {name} for method {c}::{}() shadows @template {name} for class {c}.",
+                            f.name
+                        ),
+                        f.span,
+                        6,
+                        "method.shadowTemplate",
+                    );
+                }
+            }
+        }
 
         // Phase 58: `(name, resolved type, AST span)` per parameter,
         // collected below in lockstep with `locals`'s own per-branch
@@ -249,6 +343,24 @@ impl<'a> Checker<'a> {
                         &format!("parameter ${} of {label}()", param.name),
                         ast_param.span,
                         &label,
+                    );
+                    // Phase 48.A: `parameter.trait` - see `check_type_trait_refs`'s
+                    // own doc comment.
+                    self.check_type_trait_refs(
+                        &ty,
+                        &format!("parameter ${} of {label}()", param.name),
+                        ast_param.span,
+                        &label,
+                        "parameter.trait",
+                    );
+                    // Phase 48.E: `parameter.noParent` - `ty` above is
+                    // already `resolve_pseudo`'d.
+                    self.check_no_parent_ref(
+                        &ty,
+                        &format!("parameter ${} of {label}()", param.name),
+                        ast_param.span,
+                        &label,
+                        "parameter.noParent",
                     );
                     resolved_params.push((param.name.clone(), ty.clone(), ast_param.span));
                     // `ParamSig::ty` holds a variadic parameter's own
@@ -381,6 +493,20 @@ impl<'a> Checker<'a> {
                         p.span,
                         &label,
                     );
+                    self.check_type_trait_refs(
+                        &ty,
+                        &format!("parameter ${} of {label}()", p.name),
+                        p.span,
+                        &label,
+                        "parameter.trait",
+                    );
+                    self.check_no_parent_ref(
+                        &ty,
+                        &format!("parameter ${} of {label}()", p.name),
+                        p.span,
+                        &label,
+                        "parameter.noParent",
+                    );
                     resolved_params.push((p.name.clone(), ty.clone(), p.span));
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
@@ -487,6 +613,30 @@ impl<'a> Checker<'a> {
             f.span,
             &label,
         );
+        self.check_type_trait_refs(
+            declared_return.as_ref().unwrap_or(&Type::Mixed),
+            &format!("return type of {label}()"),
+            f.span,
+            &label,
+            "return.trait",
+        );
+        // Phase 48.E: `return.noParent` - `declared_return` above is
+        // deliberately NOT `resolve_pseudo`'d yet (see this function's
+        // own comment on that), so a fresh, one-off resolve here is
+        // needed specifically to detect "this class has no real parent
+        // at all" - a top-level function has no enclosing class `parent`
+        // could ever meaningfully reference in the first place.
+        if let Some(c) = class_name {
+            let resolved_return =
+                self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed), c);
+            self.check_no_parent_ref(
+                &resolved_return,
+                &format!("return type of {label}()"),
+                f.span,
+                &label,
+                "return.noParent",
+            );
+        }
         // Phase 42's own self-contained first slice: `@throws` tag
         // validity - see `checker::throws`'s own module doc comment.
         if let Some(sig) = sig
@@ -592,6 +742,11 @@ impl<'a> Checker<'a> {
         {
             self.check_variance(sig, c, &label, f.span);
         }
+        // Phase 54: `function.variance`/`method.variance` - the OWN-
+        // declaration half, unlike `check_variance` above, runs
+        // unconditionally (including for `__construct`/private methods -
+        // see this function's own doc comment).
+        self.check_own_template_variance_declaration(f, class_name.is_some(), &label, f.span);
 
         // Phase 58: same "check the declaration once" placement as the
         // bound/variance checks just above - a missing typehint is about
@@ -806,4 +961,158 @@ impl<'a> Checker<'a> {
         self.current_method = previous_method;
         self.current_scope_deprecated = previous_scope_deprecated;
     }
+
+    /// Phase 48.F: `parameter.unionTypeNotSupported`/`return.
+    /// unionTypeNotSupported` - a native union type-hint (`int|string`)
+    /// pre-8.0. Works directly off each `Param::type_hint`'s own raw
+    /// text (a native-only union always contains a bare top-level `|`
+    /// with no enclosing `?`/generic wrapper - see `parse_type_hint`'s
+    /// own construction), not the docblock-merged `Type`, matching real
+    /// PHPStan's own native-AST-node-only scope exactly. Reports at most
+    /// once per declaration (first offending site), matching real
+    /// PHPStan's own `$unionTypeReported` latch.
+    fn check_native_union_types_supported(
+        &mut self,
+        f: &FunctionDecl,
+        is_method: bool,
+        label: &str,
+    ) {
+        if let Some(version) = self.registry.php_version
+            && !PhpFeature::NativeUnionTypes.is_available(version)
+        {
+            let kind_word = if is_method { "Method" } else { "Function" };
+            let message = format!(
+                "{kind_word} {label}() uses native union types but they're supported only on PHP 8.0 and later."
+            );
+            if f.params
+                .iter()
+                .any(|p| is_bare_native_union(p.type_hint.as_deref()))
+            {
+                self.report(
+                    label.to_string(),
+                    message,
+                    f.span,
+                    0,
+                    "parameter.unionTypeNotSupported",
+                );
+            } else if is_bare_native_union(f.return_type.as_deref()) {
+                self.report(
+                    label.to_string(),
+                    message,
+                    f.span,
+                    0,
+                    "return.unionTypeNotSupported",
+                );
+            }
+        }
+    }
+
+    /// Phase 48.F: `parameter.implicitlyNullable` (PHP 8.4) - a typed
+    /// parameter whose only source of nullability is an `= null` default
+    /// (`Foo $x = null`, not `?Foo $x = null`/a union already naming
+    /// `null`/`mixed`). Confirmed by direct read of `FunctionDefinitionCheck
+    /// ::checkImplicitlyNullableType`; `$order` there is the parameter's
+    /// own 1-based position among *every* parameter, typed or not - `i`
+    /// below mirrors that exactly, not a typed-only counter.
+    fn check_implicitly_nullable_params(&mut self, f: &FunctionDecl, label: &str) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if !PhpFeature::ImplicitlyNullableParameterDeprecated.is_available(version) {
+            return;
+        }
+        for (i, p) in f.params.iter().enumerate() {
+            let Some(hint) = p.type_hint.as_deref() else {
+                continue;
+            };
+            if hint.starts_with('?') || hint.contains('&') {
+                continue;
+            }
+            if hint.eq_ignore_ascii_case("mixed") || hint.eq_ignore_ascii_case("null") {
+                continue;
+            }
+            if hint
+                .split('|')
+                .any(|member| member.eq_ignore_ascii_case("null"))
+            {
+                continue;
+            }
+            let is_default_null = matches!(
+                &p.default,
+                Some(Expr {
+                    kind: ExprKind::Literal(Literal::Null),
+                    ..
+                })
+            );
+            if !is_default_null {
+                continue;
+            }
+            self.report(
+                label.to_string(),
+                format!(
+                    "Deprecated in PHP 8.4: Parameter #{} ${} ({hint}) is implicitly nullable via default value null.",
+                    i + 1,
+                    p.name,
+                ),
+                p.name_span,
+                0,
+                "parameter.implicitlyNullable",
+            );
+        }
+    }
+
+    /// Phase 48.F: `parameter.requiredAfterOptional` (PHP 8.0) - a
+    /// required parameter (no default, not variadic) following an
+    /// optional one (has a default). Deliberately narrower than real
+    /// PHPStan's own full version-layered logic (confirmed by direct
+    /// read, `FunctionDefinitionCheck::checkRequiredParameterAfterOptional`):
+    /// this project only ports the base PHP 8.0 rule (an ordinary
+    /// optional parameter, of any type or none, followed by a required
+    /// one) - real PHPStan's own further PHP 8.1/8.3 special cases (a
+    /// *typed*, `= null`-defaulted parameter only sometimes counting as
+    /// "optional" for this purpose, depending on whether its type is
+    /// nullable/a union naming `null`/`mixed`) are a narrow, disclosed cut
+    /// left unbuilt - the base case is the overwhelming majority real
+    /// shape.
+    fn check_required_parameter_after_optional(&mut self, f: &FunctionDecl, label: &str) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if !PhpFeature::RequiredParameterAfterOptionalDeprecated.is_available(version) {
+            return;
+        }
+        let mut optional_param: Option<&str> = None;
+        for p in &f.params {
+            if let Some(optional) = optional_param
+                && p.default.is_none()
+                && !p.variadic
+            {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Deprecated in PHP 8.0: Required parameter ${} follows optional parameter ${optional}.",
+                        p.name,
+                    ),
+                    p.name_span,
+                    0,
+                    "parameter.requiredAfterOptional",
+                );
+                continue;
+            }
+            if p.default.is_some() {
+                optional_param = Some(&p.name);
+            }
+        }
+    }
+}
+
+/// Phase 48.F: a native type-hint (raw `Param::type_hint`/`FunctionDecl::
+/// return_type` text) is a bare, top-level union (`int|string`) - `?`-
+/// prefixed nullable-single-type and any type containing `&` (an
+/// intersection, which can't also be a union) are excluded first, since
+/// `parse_type_hint`'s own construction never mixes `&` into a `|`-joined
+/// list in a way that would make a naive `contains('|')` check safe
+/// without that exclusion.
+fn is_bare_native_union(hint: Option<&str>) -> bool {
+    hint.is_some_and(|h| !h.contains('&') && h.contains('|'))
 }

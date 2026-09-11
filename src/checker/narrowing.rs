@@ -4,7 +4,7 @@ use crate::checker::{
     normalize_int_range, unwrap_grouping,
 };
 use crate::regex_groups;
-use crate::registry::FunctionSig;
+use crate::registry::{AssertTarget, FunctionSig};
 use crate::token::Span;
 use crate::types::{AccessoryKind, Type};
 mod accessory_range;
@@ -675,16 +675,30 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48.7: `AssertRuleHelper`'s equivalent - a `@phpstan-assert`-
-    /// family tag's own type is already resolved into a real `AssertInfo`
-    /// (`FunctionSig::assert`/`assert_if_true`/`assert_if_false`) and
-    /// consumed for narrowing (`apply_narrowing`'s own `check_assert_call`
-    /// dispatch above), but its own referenced classes were never
-    /// existence-checked - pure reuse of `check_type_class_names_exist`,
-    /// same pattern as `check_method_tag_types`/`check_mixin_types`/
-    /// `check_type_alias_types` (`oop.rs`). Called once per declaration,
-    /// alongside `check_declared_purity_tag`/`check_declared_param_
-    /// callable_tags` (`function_decl.rs`).
+    /// Phase 48.7/48.C: `AssertRuleHelper`'s equivalent - a `@phpstan-
+    /// assert`-family tag's own type is already resolved into a real
+    /// `AssertInfo` (`FunctionSig::assert`/`assert_if_true`/
+    /// `assert_if_false`) and consumed for narrowing (`apply_narrowing`'s
+    /// own `check_assert_call` dispatch above); this is its own
+    /// declaration-validity half - `class.notFound`/`assert.trait` reuse
+    /// this file's sibling existence-checking helpers exactly the way
+    /// `check_method_tag_types`/`check_mixin_types`/`check_type_alias_types`
+    /// (`oop.rs`) already do; `parameter.notFound`/`assert.unknownExpr`
+    /// surface `AssertTarget::NotFound`/`Unknown` (Phase 48.C's own
+    /// registry-side change - see that enum's doc comment);
+    /// `assert.impossibleType`/`.alreadyNarrowedType` are new (see
+    /// `check_one_assert_tag`'s own doc comment for scope). Deliberately
+    /// NOT built: `assert.unresolvableType` (real PHPStan's own pure-
+    /// intersection-type unsatisfiability check - a genuinely separate,
+    /// larger gap spanning multiple unrelated rule families per ROADMAP's
+    /// own audit, not specific to asserts, and not attempted here) and
+    /// the `missingType.iterableValue`/`.generics` sub-checks on an
+    /// asserted type (real value, but needs its own message-template
+    /// plumbing change to `report_missing_typehint_findings` - left as a
+    /// disclosed, narrower cut for this pass rather than risking that
+    /// already-shipped, separately-tested check family). Called once per
+    /// declaration, alongside `check_declared_purity_tag`/`check_declared_
+    /// param_callable_tags` (`function_decl.rs`).
     pub(crate) fn check_assert_tag_types(
         &mut self,
         sig: Option<&FunctionSig>,
@@ -694,18 +708,154 @@ impl<'a> Checker<'a> {
         let Some(sig) = sig else {
             return;
         };
-        for info in sig
-            .assert
-            .iter()
-            .chain(&sig.assert_if_true)
-            .chain(&sig.assert_if_false)
-        {
-            self.check_type_class_names_exist(
-                &info.ty,
-                &format!("PHPDoc tag @phpstan-assert on {label}"),
+        for (tag_name, infos) in [
+            ("@phpstan-assert", &sig.assert),
+            ("@phpstan-assert-if-true", &sig.assert_if_true),
+            ("@phpstan-assert-if-false", &sig.assert_if_false),
+        ] {
+            for info in infos {
+                self.check_one_assert_tag(info, tag_name, sig, span, label);
+            }
+        }
+    }
+
+    /// One `@phpstan-assert`-family tag's own full declaration-validity
+    /// check - see `check_assert_tag_types`'s own doc comment for the
+    /// full identifier list and what's deliberately not attempted.
+    /// `assert.impossibleType`/`.alreadyNarrowedType` are only ever
+    /// attempted for an `AssertTarget::Param` target compared against
+    /// that exact parameter's own declared type - a disclosed, narrower
+    /// cut versus real PHPStan's own `$this`/property-target coverage
+    /// too, since those need a class-level property/receiver-type lookup
+    /// this function doesn't otherwise need at all, and `Param` is by far
+    /// the dominant real-corpus shape for this tag family.
+    fn check_one_assert_tag(
+        &mut self,
+        info: &crate::registry::AssertInfo,
+        tag_name: &str,
+        sig: &FunctionSig,
+        span: Span,
+        label: &str,
+    ) {
+        let target_desc = match &info.target {
+            AssertTarget::Param(name) => format!("${name}"),
+            AssertTarget::ThisSelf => "$this".to_string(),
+            AssertTarget::ThisProp(prop) => format!("$this->{prop}"),
+            AssertTarget::NotFound(name) => {
+                self.report(
+                    label.to_string(),
+                    format!("Assert references unknown parameter ${name}."),
+                    span,
+                    0,
+                    "parameter.notFound",
+                );
+                return;
+            }
+            AssertTarget::Unknown(raw) => {
+                self.report(
+                    label.to_string(),
+                    format!("Assert references unknown {raw}."),
+                    span,
+                    0,
+                    "assert.unknownExpr",
+                );
+                return;
+            }
+        };
+        let subject = format!("PHPDoc tag {tag_name} for {target_desc}");
+        self.check_type_class_names_exist(&info.ty, &subject, span, label);
+        self.check_type_trait_refs(&info.ty, &subject, span, label, "assert.trait");
+
+        let AssertTarget::Param(name) = &info.target else {
+            return;
+        };
+        let Some(param) = sig.params.iter().find(|p| &p.name == name) else {
+            return;
+        };
+        let negated_prefix = if info.negated { "negated " } else { "" };
+        let is_super = self.registry.is_assignable(&param.ty, &info.ty);
+        let is_disjoint = types_definitely_disjoint(&info.ty, &param.ty);
+        let (impossible, already_narrowed) = if info.negated {
+            (is_super, is_disjoint)
+        } else {
+            (is_disjoint, is_super)
+        };
+        if impossible {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Asserted {negated_prefix}type {} for {target_desc} with type {} can never happen.",
+                    info.ty, param.ty
+                ),
                 span,
-                label,
+                0,
+                "assert.impossibleType",
+            );
+        } else if already_narrowed {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Asserted {negated_prefix}type {} for {target_desc} with type {} does not narrow down the type.",
+                    info.ty, param.ty
+                ),
+                span,
+                0,
+                "assert.alreadyNarrowedType",
             );
         }
+    }
+}
+
+/// Phase 48.C: `assert.impossibleType`'s own narrow, conservative type-
+/// disjointness primitive - deliberately NOT Phase 84's XL tri-state
+/// rewrite, despite surface similarity (confirmed against the design doc
+/// this phase's own plan drew that distinction from). Only ever declares
+/// two types disjoint when each resolves to one of a handful of coarse,
+/// mutually-exclusive "scalar families" (`scalar_family` below) and those
+/// families differ - e.g. `string` vs `int`, or `array` vs `object`.
+/// Recurses into `Union` on either side (every member of a union side
+/// must be disjoint from the other side for the whole comparison to
+/// count - the same "stay on the lenient side" direction this project's
+/// own union-legality check already established, see ROADMAP.md).
+/// Returns `false` (not confidently disjoint - "don't guess") for
+/// anything not covered: `Mixed`/`Never`/`Void`, two same-family types
+/// (e.g. two unrelated object types - real PHPStan's own object-vs-object
+/// disjointness needs a `final`-class/no-subtype-relation check this
+/// primitive deliberately doesn't attempt), `Intersection`, `Callable`,
+/// `Accessory`, templates, and every pseudo-type.
+fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
+    match (a, b) {
+        (Type::Union(members), _) => members.iter().all(|m| types_definitely_disjoint(m, b)),
+        (_, Type::Union(members)) => members.iter().all(|m| types_definitely_disjoint(a, m)),
+        _ => match (scalar_family(a), scalar_family(b)) {
+            (Some(fa), Some(fb)) => fa != fb,
+            _ => false,
+        },
+    }
+}
+
+#[derive(PartialEq)]
+enum ScalarFamily {
+    Int,
+    Float,
+    String,
+    Bool,
+    Null,
+    Array,
+    Object,
+}
+
+fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
+    match ty {
+        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some(ScalarFamily::Int),
+        Type::Float | Type::FloatLiteral(_) => Some(ScalarFamily::Float),
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => Some(ScalarFamily::String),
+        Type::Bool | Type::True | Type::False => Some(ScalarFamily::Bool),
+        Type::Null => Some(ScalarFamily::Null),
+        Type::Array(_, _) | Type::ArrayShape(_) => Some(ScalarFamily::Array),
+        Type::Object(_, _) | Type::EnumCase(_, _) | Type::ObjectShape(_) => {
+            Some(ScalarFamily::Object)
+        }
+        _ => None,
     }
 }

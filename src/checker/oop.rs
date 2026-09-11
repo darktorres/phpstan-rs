@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::checker::{Checker, DiagnosticBuilder, Locals, class_kind_identifier};
 use crate::docblock;
-use crate::registry::{FunctionSig, PropertySig};
+use crate::registry::{FunctionSig, PropertySig, object_class_names, resolve_names_in_type};
 use crate::token::Span;
-use crate::types::Type;
+use crate::types::{self, Type};
 
 mod attributes;
 mod enums;
@@ -184,69 +184,208 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48.7: `RequireExtendsCheck`/`RequireImplementsDefinitionTraitRule`'s
-    /// existence half - `@phpstan-require-extends`/`@phpstan-require-
-    /// implements`'s own RHS class names are already resolved
-    /// (`ClassInfo::require_extends`/`require_implements`) and semantically
-    /// consumed (`check_require_tags` above - "does a consumer of this
-    /// trait/interface actually satisfy the requirement"), but the
-    /// requirement's own target class was never itself existence-checked.
-    /// Real PHPStan's own message wording, ported verbatim; the interface-
-    /// vs-class/final-class refinements those two real rules also make
-    /// are deliberately not built, same disclosed-but-not-attempted
-    /// nuance as `check_method_tag_types`/`check_mixin_types`.
-    pub(crate) fn check_require_tag_types(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+    /// Phase 48.B: `RequireExtendsCheck`/`RequireImplementsDefinitionTraitRule`'s
+    /// full declaration-validity family, not just the existence half -
+    /// `@phpstan-require-extends`/`-implements`'s own RHS is re-parsed
+    /// directly from `c`'s own doc comment (rather than read back from
+    /// `ClassInfo::require_extends`/`require_implements`, which is
+    /// already flattened across every tag into one combined `Vec<String>`
+    /// of only the successfully-extracted object class names - exactly
+    /// the information a `.nonObject`/`.duplicate` check needs to tell
+    /// apart from "no tag at all"), mirroring real PHPStan's own
+    /// `getObjectClassNames()`/`RequireExtendsTag` resolution pipeline.
+    /// The interface-vs-class/final-class refinements this replaces are
+    /// confirmed by direct read of both real rules; the RHS's own
+    /// case-sensitivity re-check (`ClassNameCheck::checkClassNames`,
+    /// real PHPStan's own final step once a target resolves cleanly) is
+    /// deliberately not built here - that's Phase 48.H's own dedicated
+    /// `class.nameCase` pipeline-wide expansion, not re-litigated per tag
+    /// family.
+    pub(crate) fn check_require_tag_types(&mut self, fqn: &str, c: &ClassDecl) {
+        let Some(doc) = c.doc_comment.as_deref().map(docblock::parse) else {
             return;
         };
-        for required in &info.require_extends {
-            if !self.class_name_exists(required) {
+        if doc.require_extends.len() > 1 {
+            self.report(
+                fqn.to_string(),
+                "PHPDoc tag @phpstan-require-extends can only be used once.".to_string(),
+                c.span,
+                0,
+                "requireExtends.duplicate",
+            );
+        }
+        for raw in &doc.require_extends {
+            let ty = resolve_names_in_type(types::parse_type_string(raw), &self.name_ctx);
+            let names = object_class_names(ty.clone());
+            if names.is_empty() {
                 self.report(
                     fqn.to_string(),
-                    format!(
-                        "PHPDoc tag @phpstan-require-extends contains unknown class {required}."
-                    ),
-                    span,
+                    format!("PHPDoc tag @phpstan-require-extends contains non-object type {ty}."),
+                    c.span,
                     0,
-                    "class.notFound",
+                    "requireExtends.nonObject",
                 );
+                continue;
+            }
+            for name in names {
+                if !self.class_name_exists(&name) {
+                    self.report(
+                        fqn.to_string(),
+                        format!(
+                            "PHPDoc tag @phpstan-require-extends contains unknown class {name}."
+                        ),
+                        c.span,
+                        0,
+                        "class.notFound",
+                    );
+                    continue;
+                }
+                let Some((_, info)) = self.registry.lookup_class(&name) else {
+                    continue;
+                };
+                match info.kind {
+                    ClassKind::Interface => {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                fqn.to_string(),
+                                format!(
+                                    "PHPDoc tag @phpstan-require-extends cannot contain an interface {name}, expected a class."
+                                ),
+                                c.span,
+                                0,
+                                "requireExtends.interface",
+                            )
+                            .tip("If you meant an interface, use @phpstan-require-implements instead."),
+                        );
+                    }
+                    ClassKind::Trait | ClassKind::Enum => {
+                        self.report(
+                            fqn.to_string(),
+                            format!(
+                                "PHPDoc tag @phpstan-require-extends cannot contain non-class type {name}."
+                            ),
+                            c.span,
+                            0,
+                            &format!("requireExtends.{}", class_kind_identifier(&info.kind)),
+                        );
+                    }
+                    ClassKind::Class if info.is_final => {
+                        self.report(
+                            fqn.to_string(),
+                            format!(
+                                "PHPDoc tag @phpstan-require-extends cannot contain final class {name}."
+                            ),
+                            c.span,
+                            0,
+                            "requireExtends.finalClass",
+                        );
+                    }
+                    ClassKind::Class => {}
+                }
             }
         }
-        for required in &info.require_implements {
-            if !self.class_name_exists(required) {
+        for raw in &doc.require_implements {
+            let ty = resolve_names_in_type(types::parse_type_string(raw), &self.name_ctx);
+            let names = object_class_names(ty.clone());
+            if names.is_empty() {
                 self.report(
                     fqn.to_string(),
                     format!(
-                        "PHPDoc tag @phpstan-require-implements contains unknown class {required}."
+                        "PHPDoc tag @phpstan-require-implements contains non-object type {ty}."
                     ),
-                    span,
+                    c.span,
                     0,
-                    "class.notFound",
+                    "requireImplements.nonObject",
                 );
+                continue;
+            }
+            for name in names {
+                if !self.class_name_exists(&name) {
+                    self.report(
+                        fqn.to_string(),
+                        format!(
+                            "PHPDoc tag @phpstan-require-implements contains unknown class {name}."
+                        ),
+                        c.span,
+                        0,
+                        "class.notFound",
+                    );
+                    continue;
+                }
+                let Some((_, info)) = self.registry.lookup_class(&name) else {
+                    continue;
+                };
+                if info.kind != ClassKind::Interface {
+                    self.report(
+                        fqn.to_string(),
+                        format!(
+                            "PHPDoc tag @phpstan-require-implements cannot contain non-interface type {name}."
+                        ),
+                        c.span,
+                        0,
+                        &format!("requireImplements.{}", class_kind_identifier(&info.kind)),
+                    );
+                }
             }
         }
     }
 
-    /// Phase 48.7: `SealedDefinitionClassRule`'s existence half -
-    /// `@phpstan-sealed`'s own RHS class names are already resolved
-    /// (`ClassInfo::sealed`) and semantically consumed (`check_sealed_
-    /// hierarchy`), but the sealed target's own existence was never
-    /// itself checked. Real PHPStan's own message wording, ported
-    /// verbatim; the enum/non-object refinements that real rule also
-    /// makes are deliberately not built, same established nuance.
-    pub(crate) fn check_sealed_tag_types(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+    /// Phase 48.B: `SealedDefinitionClassRule`/`SealedDefinitionTraitRule`'s
+    /// full declaration-validity family - see `check_require_tag_types`'s
+    /// own identical doc comment for why the RHS is re-parsed directly
+    /// from the declaration's own doc comment rather than read back from
+    /// the already-flattened `ClassInfo::sealed`. Takes scalars rather
+    /// than a whole `&ClassDecl` (mirroring `check_get_hook`/`check_set_
+    /// hook`'s own established precedent for exactly this reason) since
+    /// `@phpstan-sealed`'s own `sealed.onEnum` check needs a real
+    /// `StmtKind::EnumDecl` call site too - `EnumDecl` and `ClassDecl` are
+    /// different AST types with no shared struct to borrow fields from.
+    pub(crate) fn check_sealed_tag_types(
+        &mut self,
+        fqn: &str,
+        doc_comment: Option<&str>,
+        span: Span,
+        is_enum: bool,
+    ) {
+        let Some(doc) = doc_comment.map(docblock::parse) else {
             return;
         };
-        for sealed in &info.sealed {
-            if !self.class_name_exists(sealed) {
+        if doc.sealed.is_empty() {
+            return;
+        }
+        if is_enum {
+            self.report(
+                fqn.to_string(),
+                "PHPDoc tag @phpstan-sealed is only valid on class or interface.".to_string(),
+                span,
+                0,
+                "sealed.onEnum",
+            );
+            return;
+        }
+        for raw in &doc.sealed {
+            let ty = resolve_names_in_type(types::parse_type_string(raw), &self.name_ctx);
+            let names = object_class_names(ty.clone());
+            if names.is_empty() {
                 self.report(
                     fqn.to_string(),
-                    format!("PHPDoc tag @phpstan-sealed contains unknown class {sealed}."),
+                    format!("PHPDoc tag @phpstan-sealed contains non-object type {ty}."),
                     span,
                     0,
-                    "class.notFound",
+                    "sealed.nonObject",
                 );
+                continue;
+            }
+            for name in names {
+                if !self.class_name_exists(&name) {
+                    self.report(
+                        fqn.to_string(),
+                        format!("PHPDoc tag @phpstan-sealed contains unknown class {name}."),
+                        span,
+                        0,
+                        "class.notFound",
+                    );
+                }
             }
         }
     }

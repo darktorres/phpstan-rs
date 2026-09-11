@@ -2592,6 +2592,13 @@ impl<'a> Checker<'a> {
                         p.span,
                         &closure_label,
                     );
+                    self.check_type_trait_refs(
+                        &ty,
+                        &format!("parameter ${} of anonymous function", p.name),
+                        p.span,
+                        &closure_label,
+                        "parameter.trait",
+                    );
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
@@ -2606,6 +2613,31 @@ impl<'a> Checker<'a> {
                     e.span,
                     &closure_label,
                 );
+                self.check_type_trait_refs(
+                    declared_return.as_ref().unwrap_or(&Type::Mixed),
+                    "return type of anonymous function",
+                    e.span,
+                    &closure_label,
+                    "return.trait",
+                );
+                // Phase 48.E: `return.noParent` - `declared_return` above
+                // never went through `resolve_pseudo` (unlike `current_
+                // declared_return_type` a bit further down), so a fresh,
+                // one-off resolve against the closure's own enclosing
+                // class (`self.current_class`, not a `class_name`
+                // parameter - a closure has no signature of its own) is
+                // needed here too.
+                if let Some(c) = self.current_class.clone() {
+                    let resolved_return =
+                        self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed), &c);
+                    self.check_no_parent_ref(
+                        &resolved_return,
+                        "return type of anonymous function",
+                        e.span,
+                        &closure_label,
+                        "return.noParent",
+                    );
+                }
                 // Phase 67 Item B: the identical `@internal` type-hint
                 // check a named function/method's own param/return list
                 // already gets - previously only ever run the existence
@@ -2747,6 +2779,13 @@ impl<'a> Checker<'a> {
                         p.span,
                         label,
                     );
+                    self.check_type_trait_refs(
+                        &ty,
+                        &format!("parameter ${} of arrow function", p.name),
+                        p.span,
+                        label,
+                        "parameter.trait",
+                    );
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
@@ -2800,6 +2839,23 @@ impl<'a> Checker<'a> {
                         e.span,
                         label,
                     );
+                    self.check_type_trait_refs(
+                        &expected,
+                        "return type of arrow function",
+                        e.span,
+                        label,
+                        "return.trait",
+                    );
+                    if let Some(c) = self.current_class.clone() {
+                        let resolved_return = self.resolve_pseudo(&expected, &c);
+                        self.check_no_parent_ref(
+                            &resolved_return,
+                            "return type of arrow function",
+                            e.span,
+                            label,
+                            "return.noParent",
+                        );
+                    }
                     if body_ty != Type::Mixed && !self.registry.is_assignable(&body_ty, &expected) {
                         self.report(
                             label.to_string(),

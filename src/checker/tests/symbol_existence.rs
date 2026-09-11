@@ -1202,3 +1202,209 @@ fn a_static_method_call_on_a_known_class_is_still_only_flagged_as_a_missing_meth
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert_eq!(d[0].identifier, "staticMethod.notFound");
 }
+
+// Phase 48.A: `parameter.trait`/`return.trait`/`property.trait` - a native
+// type-hint resolving to a real, indexed class that turns out to be a
+// `trait` rather than a class/interface/enum (real PHP itself rejects
+// this at the engine level).
+
+#[test]
+fn a_function_parameter_typed_as_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            function f(T $t): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.trait"
+            && x.message.contains("parameter $t of f() has invalid type T")),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_function_return_type_of_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            function f(): T {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.trait"
+            && x.message.contains("return type of f() has invalid type T")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_method_parameter_typed_as_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            class C {
+                public function m(T $t): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.trait" && x.message.contains("C::m()")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_closure_parameter_typed_as_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            $f = function (T $t): void {};
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.trait"
+            && x.message
+                .contains("parameter $t of anonymous function has invalid type T")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_arrow_function_return_type_of_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            $f = fn(): T => null;
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.trait"
+            && x.message
+                .contains("return type of arrow function has invalid type T")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_property_typed_as_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            class C {
+                public T $t;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.trait"
+            && x.message.contains("property C::$t has invalid type T")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_set_hook_parameter_typed_as_a_trait_is_flagged_as_a_parameter_not_a_property() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            class C {
+                public int $x {
+                    set(T $value) { }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.trait"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.trait"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_typed_parameter_is_never_flagged_as_a_trait() {
+    let d = diagnostics_for(
+        r#"<?php
+            class RealClass {}
+            function f(RealClass $x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.trait"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 48.G: `class.prefixed` pipeline-wide expansion - a Rector/PHP-
+// Scoper/PHPUnit-PHAR/Box-mangled vendor class name leaking into a
+// reference is flagged wherever it's referenced, not just at a `use`
+// import site.
+
+#[test]
+fn a_prefixed_class_used_as_a_parameter_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class RectorPrefix202508Foo {}
+            function f(RectorPrefix202508Foo $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.prefixed"
+            && x.message
+                .contains("Referencing prefixed Rector class: RectorPrefix202508Foo.")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_prefixed_class_used_as_a_return_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class _PhpScoperFoo {}
+            function f(): _PhpScoperFoo {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.prefixed"
+            && x.message.contains("Referencing prefixed PHP-Scoper class")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_prefixed_class_used_as_a_property_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class PHPUnitPHARFoo {}
+            class C { public PHPUnitPHARFoo $x; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.prefixed"
+            && x.message.contains("Referencing prefixed PHPUnit class")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_class_name_is_never_flagged_prefixed() {
+    let d = diagnostics_for(
+        r#"<?php
+            class RealClass {}
+            function f(RealClass $x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.prefixed"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

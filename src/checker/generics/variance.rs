@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::checker::Checker;
+use crate::docblock;
 use crate::registry::FunctionSig;
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -74,6 +75,64 @@ impl<'a> Checker<'a> {
         violations.dedup();
         for message in violations {
             self.report(label.to_string(), message, span, 6, "generics.variance");
+        }
+    }
+
+    /// Phase 54: `VarianceCheck::checkParametersAcceptor`'s own
+    /// declaration-validity half (confirmed by direct read,
+    /// `vendor/phpstan-src`) - a call-argument-binding function/method
+    /// `@template` has no subclass relationship at all for covariance/
+    /// contravariance to describe (that concept only makes sense for a
+    /// class/interface's own type parameter, bound once at instantiation
+    /// and held for the object's whole lifetime), so `@template-covariant`/
+    /// `-contravariant` on a function or method's own tag is always an
+    /// authoring mistake. Runs unconditionally, including for `__construct`
+    /// and private methods (unlike `check_variance` above, whose own
+    /// position-based half real PHPStan skips for both) - confirmed by
+    /// direct read: real PHPStan's own `$isPrivate` early return sits
+    /// *after* this exact check in `checkParametersAcceptor`. Re-parses
+    /// `f.doc_comment` fresh rather than reading back through `FunctionSig`
+    /// (which has no persisted raw template-variance list of its own, the
+    /// same reason `current_function_template_params` re-derives from
+    /// `Type::TemplateParam` nodes instead - see that function's own doc
+    /// comment) - cheap, since a function/method with no `@template` tag
+    /// at all (the overwhelming majority) parses to an empty `DocBlock`
+    /// in one pass either way.
+    pub(crate) fn check_own_template_variance_declaration(
+        &mut self,
+        f: &FunctionDecl,
+        is_method: bool,
+        label: &str,
+        span: Span,
+    ) {
+        let Some(doc) = f.doc_comment.as_deref().map(docblock::parse) else {
+            return;
+        };
+        if doc.covariant_templates.is_empty() && doc.contravariant_templates.is_empty() {
+            return;
+        }
+        let kind_word = if is_method { "method" } else { "function" };
+        let identifier = if is_method {
+            "method.variance"
+        } else {
+            "function.variance"
+        };
+        let mut names: Vec<&String> = doc
+            .covariant_templates
+            .iter()
+            .chain(&doc.contravariant_templates)
+            .collect();
+        names.sort();
+        for name in names {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Variance annotation is only allowed for type parameters of classes and interfaces, but occurs in template type {name} in {kind_word} {label}()."
+                ),
+                span,
+                6,
+                identifier,
+            );
         }
     }
 

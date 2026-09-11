@@ -536,6 +536,20 @@ impl<'a> Checker<'a> {
                 span,
                 &label,
             );
+            // Phase 48.A: real PHPStan's `ExistingClassesInPropertyHookTypehintsRule`
+            // reuses `FunctionDefinitionCheck::checkClassMethod` for a set
+            // hook's own parameter type too - `parameter.trait`, not
+            // `property.trait`.
+            self.check_type_trait_refs(
+                set_ty,
+                &format!(
+                    "Parameter ${} of set hook for property {fqn}::${name}",
+                    param.map(|p| p.name.as_str()).unwrap_or("value"),
+                ),
+                span,
+                &label,
+                "parameter.trait",
+            );
         }
 
         let previous_class = self.current_class.take();

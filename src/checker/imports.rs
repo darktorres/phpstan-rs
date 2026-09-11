@@ -4,6 +4,23 @@ use crate::DiagnosticBuilder;
 use crate::ast::*;
 use crate::checker::{Checker, class_kind_identifier};
 
+/// Phase 48 follow-up/48.G: real PHPStan's own `INTERNAL_CLASS_PREFIXES`
+/// (`ClassForbiddenNameCheck`), transcribed - a Rector/PHP-Scoper/PHPUnit-
+/// PHAR/Box-prefixed vendor class name almost always leaked into a
+/// reference by mistake. `pub(crate)` so `checker::resolve.rs`'s own
+/// `check_type_class_names_exist` (Phase 48.G's own pipeline-wide
+/// widening - every one of that function's ~18 call sites, not just the
+/// `use`-import site this module's own `check_use_class_imports` already
+/// covered) can share the identical list rather than drifting out of
+/// sync with a second copy.
+pub(crate) const INTERNAL_CLASS_PREFIXES: &[(&str, &str)] = &[
+    ("PHPStan", "_PHPStan_"),
+    ("Rector", "RectorPrefix"),
+    ("PHP-Scoper", "_PhpScoper"),
+    ("PHPUnit", "PHPUnitPHAR"),
+    ("Box", "_HumbugBox"),
+];
+
 impl<'a> Checker<'a> {
     /// Phase 48: real PHPStan's own `ExistingNamesInUseRule`, confirmed
     /// directly against `vendor/phpstan-src`, only ever existence-checks
@@ -80,13 +97,6 @@ impl<'a> Checker<'a> {
     /// gap) or is folded elsewhere this reading didn't find. Not guessed
     /// past - a real, disclosed uncertainty, not a lazy skip.
     pub(crate) fn check_use_class_imports(&mut self, program: &[Stmt]) {
-        const INTERNAL_CLASS_PREFIXES: &[(&str, &str)] = &[
-            ("PHPStan", "_PHPStan_"),
-            ("Rector", "RectorPrefix"),
-            ("PHP-Scoper", "_PhpScoper"),
-            ("PHPUnit", "PHPUnitPHAR"),
-            ("Box", "_HumbugBox"),
-        ];
         for stmt in program {
             let StmtKind::Use(imports) = &stmt.kind else {
                 continue;

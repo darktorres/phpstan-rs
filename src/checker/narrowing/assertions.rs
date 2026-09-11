@@ -316,6 +316,13 @@ impl<'a> Checker<'a> {
                 let current = self.current_narrowed_type(recv, &key, locals);
                 Some((key, current))
             }
+            // Phase 48.C: neither carries a real narrowing target at all
+            // - see `AssertTarget`'s own doc comment. Same "no effect"
+            // behavior this project's checker already had for both
+            // before this phase (previously dropped before ever reaching
+            // here); only the checker-side existence/validity reporting
+            // changed, not the narrowing semantics.
+            AssertTarget::NotFound(_) | AssertTarget::Unknown(_) => None,
             AssertTarget::ThisProp(prop) => {
                 let recv = recv?;
                 let base_key = narrowing_key(recv)?;

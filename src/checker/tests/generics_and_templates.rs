@@ -1888,3 +1888,116 @@ fn an_interface_extending_two_generic_parents_at_once_is_never_flagged_for_arity
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 48.D: `method.templateTypeNotInParameter` - a function/method's
+// own `@template` referenced only in its return type (or nowhere at all)
+// can never be inferred at a call site, since inference only ever reads
+// argument types.
+
+#[test]
+fn a_function_template_declared_only_in_the_return_type_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             * @return T
+             */
+            function make(string $class) {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "method.templateTypeNotInParameter"
+                && x.message
+                    == "Template type T of function make() is not referenced in a parameter."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_method_template_declared_only_in_the_return_type_is_flagged_with_method_wording() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Factory {
+                /**
+                 * @template T
+                 * @return T
+                 */
+                public function make(string $class) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.templateTypeNotInParameter"
+            && x.message
+                == "Template type T of method Factory::make() is not referenced in a parameter."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_template_also_referenced_in_a_parameter_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             * @param T $value
+             * @return T
+             */
+            function identity($value) {
+                return $value;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.templateTypeNotInParameter"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_template_referenced_only_nested_inside_a_parameters_own_generic_argument_is_never_flagged() {
+    // Real corpus shape: a template only ever appearing inside a
+    // parameter's own generic argument list (`array<int, T>`), not as
+    // the parameter's own bare top-level type - still a real, valid
+    // inference source, and must not be flagged.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             * @param array<int, T> $items
+             * @return T
+             */
+            function firstOf(array $items) {
+                return $items[0];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.templateTypeNotInParameter"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_class_level_template_is_never_flagged_by_the_method_level_check() {
+    // A class-level `@template` has no per-method "referenced in a
+    // parameter" obligation at all (it's bound once, at instantiation) -
+    // only a method's own `@template` is in scope here.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template T */
+            class Box {
+                /** @return T */
+                public function get() {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "method.templateTypeNotInParameter"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

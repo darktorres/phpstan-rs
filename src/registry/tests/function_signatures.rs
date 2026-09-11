@@ -728,7 +728,10 @@ fn a_bare_this_target_resolves() {
 }
 
 #[test]
-fn a_target_naming_a_nonexistent_parameter_is_dropped() {
+fn a_target_naming_a_nonexistent_parameter_classifies_as_not_found() {
+    // Phase 48.C: no longer silently dropped - `AssertTarget::NotFound`
+    // carries the offending name through so the checker can report
+    // `parameter.notFound`.
     let r = build_registry(
         r#"<?php
             class Foo {
@@ -738,11 +741,18 @@ fn a_target_naming_a_nonexistent_parameter_is_dropped() {
         "#,
     );
     let sig = &r.classes["Foo"].methods["f"];
-    assert!(sig.assert_if_true.is_empty());
+    assert_eq!(sig.assert_if_true.len(), 1);
+    assert_eq!(
+        sig.assert_if_true[0].target,
+        AssertTarget::NotFound("notAnActualParam".to_string())
+    );
 }
 
 #[test]
-fn a_method_call_target_is_dropped_not_misclassified() {
+fn a_method_call_target_classifies_as_unknown_not_misclassified() {
+    // Phase 48.C: no longer silently dropped - `AssertTarget::Unknown`
+    // carries the raw target text through so the checker can report
+    // `assert.unknownExpr`.
     let r = build_registry(
         r#"<?php
             class Foo {
@@ -752,7 +762,11 @@ fn a_method_call_target_is_dropped_not_misclassified() {
         "#,
     );
     let sig = &r.classes["Foo"].methods["isValid"];
-    assert!(sig.assert_if_false.is_empty());
+    assert_eq!(sig.assert_if_false.len(), 1);
+    assert_eq!(
+        sig.assert_if_false[0].target,
+        AssertTarget::Unknown("$this->parseError()".to_string())
+    );
 }
 
 #[test]

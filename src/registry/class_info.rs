@@ -15,7 +15,8 @@ mod tag_synthesis;
 mod virtual_property;
 
 use attributes::compute_attribute_targets;
-use tag_synthesis::{method_tag_sig, object_class_names};
+use tag_synthesis::method_tag_sig;
+pub(crate) use tag_synthesis::object_class_names;
 pub(crate) use virtual_property::hook_body_references_property;
 use virtual_property::{hooks_reference_backing_storage, property_hook_set_type};
 

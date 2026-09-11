@@ -314,3 +314,177 @@ fn static_of_an_ordinary_variable_is_never_flagged() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 48.F: `FunctionDefinitionCheck`'s PHP-version-gated native
+// declaration-syntax checks.
+
+#[test]
+fn a_native_union_parameter_type_pre_8_0_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(int|string $x): void {}
+        "#,
+        |r| r.php_version = Some((7, 4)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.unionTypeNotSupported"
+                && x.message.contains(
+                    "uses native union types but they're supported only on PHP 8.0 and later"
+                )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_native_union_return_type_pre_8_0_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(): int|string { return 1; }
+        "#,
+        |r| r.php_version = Some((7, 4)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "return.unionTypeNotSupported"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_native_union_parameter_type_on_8_0_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(int|string $x): void {}
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.unionTypeNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn with_no_configured_php_version_the_union_type_check_stays_silent() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int|string $x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "parameter.unionTypeNotSupported" | "return.unionTypeNotSupported"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_plain_typed_parameter_defaulting_to_null_on_8_4_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(Foo $x = null): void {}
+        "#,
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.implicitlyNullable"
+            && x.message
+                == "Deprecated in PHP 8.4: Parameter #1 $x (Foo) is implicitly nullable via default value null."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_nullable_typed_parameter_defaulting_to_null_is_never_flagged_implicitly_nullable() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(?Foo $x = null): void {}
+        "#,
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.implicitlyNullable"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_union_with_null_defaulting_to_null_is_never_flagged_implicitly_nullable() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(Foo|null $x = null): void {}
+        "#,
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.implicitlyNullable"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_plain_typed_parameter_defaulting_to_null_before_8_4_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(Foo $x = null): void {}
+        "#,
+        |r| r.php_version = Some((8, 3)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.implicitlyNullable"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_required_parameter_after_an_optional_one_on_8_0_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f($a = 1, $b): void {}
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.requiredAfterOptional"
+            && x.message
+                == "Deprecated in PHP 8.0: Required parameter $b follows optional parameter $a."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_variadic_parameter_after_an_optional_one_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f($a = 1, ...$rest): void {}
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.requiredAfterOptional"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn ordinary_parameter_ordering_is_never_flagged_required_after_optional() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f($a, $b = 1): void {}
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.requiredAfterOptional"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

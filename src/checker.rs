@@ -819,6 +819,7 @@ mod expr;
 mod function_decl;
 mod generics;
 mod imports;
+pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
 mod internal_usage;
 mod missing_typehint;
 mod narrowing;
@@ -1126,9 +1127,9 @@ impl<'a> Checker<'a> {
                     self.check_method_overrides(&fqn, c);
                     self.check_property_overrides(&fqn, c);
                     self.check_require_tags(&fqn, c.span);
-                    self.check_require_tag_types(&fqn, c.span);
+                    self.check_require_tag_types(&fqn, c);
                     self.check_sealed_hierarchy(&fqn, c.span);
-                    self.check_sealed_tag_types(&fqn, c.span);
+                    self.check_sealed_tag_types(&fqn, c.doc_comment.as_deref(), c.span, false);
                     self.check_unknown_phpstan_tags_in_class(&fqn, c);
                     self.check_property_hooks(&fqn, c);
                     self.check_property_variances(&fqn, c);
@@ -1227,6 +1228,7 @@ impl<'a> Checker<'a> {
                     }
                     self.check_ancestor_generic_bounds(&fqn, e.span);
                     self.check_enum_template_tag(&fqn, e);
+                    self.check_sealed_tag_types(&fqn, e.doc_comment.as_deref(), e.span, true);
                     self.check_enum_case_values(&fqn, e);
                     self.check_enum_sanity(&fqn, e);
                     self.check_trait_conflicts(&fqn, e.span);

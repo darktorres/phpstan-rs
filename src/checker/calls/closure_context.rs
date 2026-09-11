@@ -106,6 +106,13 @@ impl<'a> Checker<'a> {
                         p.span,
                         label,
                     );
+                    self.check_type_trait_refs(
+                        &ty,
+                        &format!("parameter ${} of arrow function", p.name),
+                        p.span,
+                        label,
+                        "parameter.trait",
+                    );
                     arrow_locals.declare(p.name.clone(), ty, p.name_span);
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
@@ -117,6 +124,23 @@ impl<'a> Checker<'a> {
                         closure_expr.span,
                         label,
                     );
+                    self.check_type_trait_refs(
+                        &expected,
+                        "return type of arrow function",
+                        closure_expr.span,
+                        label,
+                        "return.trait",
+                    );
+                    if let Some(c) = self.current_class.clone() {
+                        let resolved_return = self.resolve_pseudo(&expected, &c);
+                        self.check_no_parent_ref(
+                            &resolved_return,
+                            "return type of arrow function",
+                            closure_expr.span,
+                            label,
+                            "return.noParent",
+                        );
+                    }
                     if body_ty != Type::Mixed && !self.registry.is_assignable(&body_ty, &expected) {
                         self.report(
                             label.to_string(),
@@ -170,6 +194,13 @@ impl<'a> Checker<'a> {
                         p.span,
                         &closure_label,
                     );
+                    self.check_type_trait_refs(
+                        &ty,
+                        &format!("parameter ${} of anonymous function", p.name),
+                        p.span,
+                        &closure_label,
+                        "parameter.trait",
+                    );
                     closure_locals.declare(p.name.clone(), ty, p.name_span);
                 }
                 let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
@@ -179,6 +210,24 @@ impl<'a> Checker<'a> {
                     closure_expr.span,
                     &closure_label,
                 );
+                self.check_type_trait_refs(
+                    declared_return.as_ref().unwrap_or(&Type::Mixed),
+                    "return type of anonymous function",
+                    closure_expr.span,
+                    &closure_label,
+                    "return.trait",
+                );
+                if let Some(c) = self.current_class.clone() {
+                    let resolved_return =
+                        self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed), &c);
+                    self.check_no_parent_ref(
+                        &resolved_return,
+                        "return type of anonymous function",
+                        closure_expr.span,
+                        &closure_label,
+                        "return.noParent",
+                    );
+                }
                 let previous_generator_flag = self.current_function_is_generator;
                 self.current_function_is_generator = body_contains_yield(body);
                 let previous_declared_return_type = self.current_declared_return_type.take();

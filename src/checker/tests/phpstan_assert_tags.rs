@@ -337,3 +337,153 @@ fn an_assert_tag_naming_a_known_class_is_not_flagged_for_existence() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 48.C: `AssertRuleHelper`'s deeper declaration-validity checks.
+
+#[test]
+fn an_assert_target_naming_a_nonexistent_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert string $notAnActualParam */
+            function f($x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.notFound"
+            && x.message == "Assert references unknown parameter $notAnActualParam."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_assert_target_naming_a_method_call_is_flagged_unknown_expr() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                /** @phpstan-assert-if-false !null $this->parseError() */
+                public function isValid(): bool { return true; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "assert.unknownExpr"
+            && x.message == "Assert references unknown $this->parseError()."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_assert_tag_naming_a_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait T {}
+            /** @phpstan-assert T $x */
+            function f($x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "assert.trait"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn asserting_a_scalar_kind_disjoint_from_the_parameters_declared_type_is_impossible() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert string $x */
+            function f(int $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "assert.impossibleType"
+            && x.message == "Asserted type string for $x with type int can never happen."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn asserting_a_type_the_parameter_is_already_declared_as_is_already_narrowed() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert int $x */
+            function f(int $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "assert.alreadyNarrowedType"
+                && x.message
+                    == "Asserted type int for $x with type int does not narrow down the type."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_negated_assert_of_an_already_declared_type_is_impossible() {
+    // Asserting "NOT int" when the parameter is already always `int` can
+    // never be true - negation flips which branch means what.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert !int $x */
+            function f(int $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "assert.impossibleType"
+            && x.message == "Asserted negated type int for $x with type int can never happen."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_negated_assert_disjoint_from_the_declared_type_is_already_narrowed() {
+    // Asserting "NOT string" when the parameter is already always `int`
+    // is always true anyway (redundant) - not impossible.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert !string $x */
+            function f(int $x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "assert.alreadyNarrowedType"
+            && x.message
+                == "Asserted negated type string for $x with type int does not narrow down the type."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn asserting_a_real_narrowing_shape_is_never_flagged_impossible_or_already_narrowed() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert positive-int $x */
+            function f(int $x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "assert.impossibleType" | "assert.alreadyNarrowedType"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn asserting_against_an_untyped_parameter_is_never_flagged_impossible_or_already_narrowed() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert string $x */
+            function f($x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "assert.impossibleType" | "assert.alreadyNarrowedType"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}

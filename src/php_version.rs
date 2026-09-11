@@ -167,6 +167,23 @@ pub enum PhpFeature {
     /// supportsOverrideAttributeOnProperty`
     /// (`PropertyAttributesRule::processNode`).
     OverrideAttributeOnProperty,
+    /// Phase 48.F: native union type-hints (`int|string`) on a
+    /// parameter/return type. `PhpVersion::supportsNativeUnionTypes`
+    /// (`FunctionDefinitionCheck`'s own `parameter.unionTypeNotSupported`/
+    /// `return.unionTypeNotSupported`).
+    NativeUnionTypes,
+    /// A typed parameter's implicit-nullable-via-`= null`-default form
+    /// (`Foo $x = null`, without a real `?Foo`/union-with-`null` type)
+    /// being deprecated. `PhpVersion::deprecatesImplicitlyNullableParameterTypes`
+    /// (`FunctionDefinitionCheck`'s own `parameter.implicitlyNullable`).
+    ImplicitlyNullableParameterDeprecated,
+    /// A required parameter following an optional one being deprecated.
+    /// `PhpVersion::deprecatesRequiredParameterAfterOptional`
+    /// (`FunctionDefinitionCheck`'s own `parameter.requiredAfterOptional`,
+    /// noting that this project's own port is deliberately narrower than
+    /// real PHPStan's full version-layered logic; see
+    /// `check_required_parameter_after_optional`'s own doc comment).
+    RequiredParameterAfterOptionalDeprecated,
 }
 
 impl PhpFeature {
@@ -182,12 +199,15 @@ impl PhpFeature {
             | PromotedProperties
             | UnsetCastRemoved
             | CaseInsensitiveConstantsRemoved
-            | PrintfHhSpecifier => (8, 0),
+            | PrintfHhSpecifier
+            | NativeUnionTypes
+            | RequiredParameterAfterOptionalDeprecated => (8, 0),
             FinalClassConstants | ArrayUnpackingWithStringKeys | DeprecatesFloatArrayKey => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants
             | ReadOnlyAnonymousClasses
             | ReadonlyPropertyReinitializationOnClone => (8, 3),
+            ImplicitlyNullableParameterDeprecated => (8, 4),
             FinalPromotedProperties
             | VoidCast
             | DeprecatedNonStandardCasts

@@ -402,13 +402,25 @@ fn a_top_level_function_own_template_referenced_inside_an_inline_var_annotation_
     // is the overwhelmingly common real shape) - confirmed the hard way,
     // this exact test passed even before that fix when written without
     // one.
+    //
+    // Phase 48.D follow-up: `$keyFunc`'s own `(Closure(Tv): ?Tk)` type is
+    // copied verbatim from the real signature too (not simplified to a
+    // bare `\Closure` the way this fixture originally was) - `Tk` is only
+    // ever referenced there, nested inside the closure's own return-type
+    // slot, never as a parameter's own bare top-level type, and a real
+    // corpus false positive (`method.templateTypeNotInParameter` wrongly
+    // firing on `Tk`) confirmed this project's own template-in-parameter
+    // scan needs to recurse into `Type::Callable` too, not just an
+    // ordinary class's own generic argument list.
     let d = diagnostics_for(
         r#"<?php
             namespace Psl\Dict;
             /**
              * @template Tk of array-key
-             * @param iterable<mixed> $values
-             * @return array<Tk, mixed>
+             * @template Tv
+             * @param iterable<Tv> $values
+             * @param (Closure(Tv): ?Tk) $keyFunc
+             * @return array<Tk, list<Tv>>
              */
             function group_by(iterable $values, \Closure $keyFunc): array {
                 $result = [];

@@ -25,6 +25,22 @@ pub enum AssertTarget {
     /// `$this->propName` - a single-level property access on the
     /// receiver.
     ThisProp(String),
+    /// Phase 48.C: `$name` shaped exactly like a bare parameter
+    /// reference, but `name` doesn't match any of this declaration's own
+    /// parameters - real PHPStan's own `parameter.notFound` ("Assert
+    /// references unknown parameter $name."). Carries no narrowing
+    /// effect (there's nothing real to narrow), but - unlike the old
+    /// silent-drop behavior - is still surfaced to the checker so it can
+    /// report the real authoring mistake this almost always is (a typo,
+    /// or a stale tag left behind after a parameter rename).
+    NotFound(String),
+    /// Phase 48.C: any other target shape this project doesn't model at
+    /// all (a method-call target, an array-index/nested-chain target,
+    /// ...) - real PHPStan's own `assert.unknownExpr` ("Assert
+    /// references unknown %s."). Carries the original raw target text
+    /// verbatim, for that message. Same "no narrowing effect" note as
+    /// `NotFound` above.
+    Unknown(String),
 }
 
 #[derive(Debug, Clone)]
@@ -34,36 +50,47 @@ pub struct AssertInfo {
     pub target: AssertTarget,
 }
 
-/// Classifies `tag.target`'s own raw text into a real `AssertTarget`,
-/// `None` for anything this project doesn't model (see `AssertTarget`'s
-/// own doc comment) - `param_names` is this declaration's own parameter
-/// name list, checked so a target naming a parameter that doesn't
-/// actually exist (a stale doc comment, or simply a name this project
-/// failed to match for some other reason) isn't silently misread as
-/// some other shape instead.
-fn classify_assert_target(target: &str, param_names: &[&str]) -> Option<AssertTarget> {
+/// Classifies `tag.target`'s own raw text into a real `AssertTarget` -
+/// always succeeds now (Phase 48.C): a target this project doesn't model
+/// at all, or a bare `$name` not matching any real parameter, still
+/// produces a real `AssertTarget` variant (`Unknown`/`NotFound`) rather
+/// than being silently dropped, so the checker can report real PHPStan's
+/// own `assert.unknownExpr`/`parameter.notFound` for it. `param_names` is
+/// this declaration's own parameter name list, checked so a target naming
+/// a parameter that doesn't actually exist (a stale doc comment, or
+/// simply a name this project failed to match for some other reason)
+/// isn't silently misread as some other shape instead.
+fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
     if target == "$this" {
-        return Some(AssertTarget::ThisSelf);
+        return AssertTarget::ThisSelf;
     }
     if let Some(prop) = target.strip_prefix("$this->")
         && !prop.is_empty()
         && prop.chars().all(|c| c.is_alphanumeric() || c == '_')
     {
-        return Some(AssertTarget::ThisProp(prop.to_string()));
+        return AssertTarget::ThisProp(prop.to_string());
     }
-    let name = target.strip_prefix('$')?;
-    if param_names.contains(&name) {
-        return Some(AssertTarget::Param(name.to_string()));
+    if let Some(name) = target.strip_prefix('$')
+        && !name.is_empty()
+        && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+    {
+        return if param_names.contains(&name) {
+            AssertTarget::Param(name.to_string())
+        } else {
+            AssertTarget::NotFound(name.to_string())
+        };
     }
-    None
+    AssertTarget::Unknown(target.to_string())
 }
 
 /// Resolves every `@phpstan-assert`-family tag on `doc` into a real
-/// `AssertInfo` list, dropping any tag whose own target doesn't classify
-/// (`classify_assert_target`) or whose own type text doesn't parse into
-/// anything meaningful. Shares the exact same type-resolution pipeline
-/// (`mark_template_params` then `resolve_names_in_type`) every other
-/// declared type on this same declaration already goes through.
+/// `AssertInfo` list - every tag produces one entry now (Phase 48.C: an
+/// unrecognized target no longer drops the tag, see `AssertTarget`'s own
+/// doc comment), so callers that only care about applying real narrowing
+/// must match on `target` themselves and skip `NotFound`/`Unknown`.
+/// Shares the exact same type-resolution pipeline (`mark_template_params`
+/// then `resolve_names_in_type`) every other declared type on this same
+/// declaration already goes through.
 pub(crate) fn resolve_assert_tags(
     tags: &[docblock::AssertTag],
     param_names: &[&str],
@@ -71,16 +98,16 @@ pub(crate) fn resolve_assert_tags(
     ctx: &NameContext,
 ) -> Vec<AssertInfo> {
     tags.iter()
-        .filter_map(|tag| {
-            let target = classify_assert_target(&tag.target, param_names)?;
+        .map(|tag| {
+            let target = classify_assert_target(&tag.target, param_names);
             let ty = types::parse_type_string(&tag.ty);
             let ty = mark_template_params(ty, template_params);
             let ty = resolve_names_in_type(ty, ctx);
-            Some(AssertInfo {
+            AssertInfo {
                 negated: tag.negated,
                 ty,
                 target,
-            })
+            }
         })
         .collect()
 }

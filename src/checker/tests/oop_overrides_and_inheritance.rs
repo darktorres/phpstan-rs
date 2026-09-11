@@ -2958,3 +2958,76 @@ fn a_reordered_union_native_type_is_not_flagged_as_a_mismatch() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 48.E: `parameter.noParent`/`return.noParent` - a native `parent`
+// type-hint on a class with no real `extends` ancestor at all.
+
+#[test]
+fn a_return_type_of_parent_with_no_real_ancestor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Standalone {
+                public function f(): parent {
+                    return $this;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.noParent"
+            && x.message
+                .contains("return type of Standalone::f() has invalid type parent")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_return_type_of_parent_with_a_real_ancestor_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Dog extends Animal {
+                public function f(): parent {
+                    return $this;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.noParent"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_parameter_typed_as_parent_with_no_real_ancestor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Standalone {
+                public function f(parent $p): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.noParent"
+            && x.message
+                .contains("parameter $p of Standalone::f() has invalid type parent")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_parameter_typed_as_parent_with_a_real_ancestor_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Animal {}
+            class Dog extends Animal {
+                public function f(parent $p): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.noParent"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
