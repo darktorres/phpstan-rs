@@ -25,6 +25,30 @@ fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
     ));
 }
 
+// Phase 50: on top of the pre-existing "only when the array's own value
+// type is Mixed" rule (no per-field value comparison happens here at all -
+// that's `registry::is_assignable`'s own, separate job), a shape's own
+// real aggregate key type must also be a subtype of a precisely-keyed
+// `Type::Array`'s own declared key type.
+
+#[test]
+fn a_string_keyed_shape_is_a_subtype_of_a_matching_string_keyed_mixed_valued_array() {
+    let shape = parse_type_string("array{name: string}");
+    assert!(is_subtype(
+        &shape,
+        &Type::Array(Box::new(Type::String), Box::new(Type::Mixed))
+    ));
+}
+
+#[test]
+fn a_string_keyed_shape_is_not_a_subtype_of_an_int_keyed_mixed_valued_array() {
+    let shape = parse_type_string("array{name: string}");
+    assert!(!is_subtype(
+        &shape,
+        &Type::Array(Box::new(Type::Int), Box::new(Type::Mixed))
+    ));
+}
+
 #[test]
 fn literal_is_subtype_of_its_general_type() {
     assert!(is_subtype(&Type::IntLiteral(5), &Type::Int));

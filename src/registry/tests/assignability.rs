@@ -77,6 +77,43 @@ fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
     assert!(!r.is_assignable(&ints, &shape));
 }
 
+// Phase 50: an `ArrayShape`'s own aggregate key type (int-vs-string,
+// mirroring real PHPStan's own `ConstantArrayType::getIterableKeyType()`)
+// must actually agree with a `Type::Array`'s own declared key type, in
+// both directions - not just each field's/element's own *value* type.
+
+#[test]
+fn a_string_keyed_array_type_is_not_assignable_to_an_int_keyed_shape() {
+    let r = Registry::default();
+    let strings = Type::Array(Box::new(Type::String), Box::new(Type::Mixed));
+    let shape = Type::ArrayShape(vec![("0".to_string(), Type::Int, false)]);
+    assert!(!r.is_assignable(&strings, &shape));
+}
+
+#[test]
+fn an_int_keyed_array_type_is_not_assignable_to_a_string_keyed_shape() {
+    let r = Registry::default();
+    let ints = Type::Array(Box::new(Type::Int), Box::new(Type::Mixed));
+    let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+    assert!(!r.is_assignable(&ints, &shape));
+}
+
+#[test]
+fn a_string_keyed_shape_is_not_assignable_to_an_int_keyed_array_type() {
+    let r = Registry::default();
+    let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+    let ints = Type::Array(Box::new(Type::Int), Box::new(Type::String));
+    assert!(!r.is_assignable(&shape, &ints));
+}
+
+#[test]
+fn an_int_keyed_shape_is_still_assignable_to_a_matching_int_keyed_array_type() {
+    let r = Registry::default();
+    let shape = Type::ArrayShape(vec![("0".to_string(), Type::String, false)]);
+    let ints = Type::Array(Box::new(Type::Int), Box::new(Type::String));
+    assert!(r.is_assignable(&shape, &ints));
+}
+
 #[test]
 fn strict_mixed_arrays_opts_out_of_the_unknown_array_element_leniency() {
     let mut r = Registry {

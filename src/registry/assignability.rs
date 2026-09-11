@@ -276,8 +276,25 @@ impl Registry {
             // false-positive just because literal keys/values aren't
             // inferred. A genuinely known, homogeneous Array(V) still
             // correctly fails to satisfy an arbitrary shape.
-            (Type::Array(_, a), Type::ArrayShape(_)) => {
-                !self.strict_mixed_arrays && matches!(**a, Type::Mixed)
+            // Phase 50: the pre-existing `Array(Mixed)` leniency now also
+            // requires the array's own key type to actually accept the
+            // shape's real aggregate key type - without this, `array<
+            // string, mixed>` leniently satisfied `array{0: X}` (an
+            // int-keyed shape) purely because its *value* type was
+            // Mixed, ignoring a genuine key-type mismatch the leniency
+            // was never meant to paper over. `unknown_array_key()`
+            // itself (the "no more precise key type available" default
+            // essentially every `Array(_, Mixed)` construction site
+            // uses, `types.rs`'s own doc comment) stays unconditionally
+            // lenient here too, the exact same "don't know" spirit as
+            // the value-side `Mixed` check right next to it - only a
+            // *genuinely narrower, known* key type (a real `Type::Int`/
+            // `Type::String`) is held to the real subtyping check.
+            (Type::Array(key, a), Type::ArrayShape(fields)) => {
+                !self.strict_mixed_arrays
+                    && matches!(**a, Type::Mixed)
+                    && (**key == Type::unknown_array_key()
+                        || self.is_assignable(key, &types::shape_key_type(fields)))
             }
             // Finding 48's own completion: now that an array literal
             // carries a real per-position/per-key shape instead of
@@ -300,13 +317,22 @@ impl Registry {
             // `Array(Mixed)` - a shape literal deserves the identical
             // treatment per field, not a stricter one just because its
             // own type happens to be more structurally precise.
-            (Type::ArrayShape(fields), Type::Array(_, b)) => fields
-                .iter()
-                .filter(|(name, _, _)| name != "...")
-                .all(|(_, ty, _)| {
-                    (!self.strict_mixed_arrays && matches!(ty, Type::Mixed))
-                        || self.is_assignable(ty, b)
-                }),
+            // Phase 50: also requires the shape's own real aggregate key
+            // type to be assignable to the array's own declared key type
+            // - without this, `array{name: string}` (an all-string-keyed
+            // shape) was silently accepted as satisfying `array<int,
+            // string>`, checking only whether every field's *value* type
+            // matched.
+            (Type::ArrayShape(fields), Type::Array(key, b)) => {
+                self.is_assignable(&types::shape_key_type(fields), key)
+                    && fields
+                        .iter()
+                        .filter(|(name, _, _)| name != "...")
+                        .all(|(_, ty, _)| {
+                            (!self.strict_mixed_arrays && matches!(ty, Type::Mixed))
+                                || self.is_assignable(ty, b)
+                        })
+            }
             // Same completion for shape-to-shape: a literal's own shape
             // satisfies a declared shape when every field the declared
             // shape actually requires is present (an optional field may

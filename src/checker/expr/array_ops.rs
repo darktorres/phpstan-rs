@@ -796,54 +796,23 @@ impl<'a> Checker<'a> {
     /// Phase 73/50 follow-up: `array_element_type`'s own key-side
     /// counterpart. A bare `Type::Array` (or one wrapped in the
     /// `list<T>`/`non-empty-array<T>` `Intersection` shape) carries a
-    /// real key type directly; an `ArrayShape`'s own key type is the
-    /// union of each *real* field's own key kind (`is_canonical_int_key`
-    /// per field), mirroring real PHPStan's own `ConstantArrayType::
-    /// getIterableKeyType()` - the `"..."` unsealed-tail sentinel itself
-    /// contributes nothing (see its own arm's doc comment for why: a
-    /// real corpus false positive when it's the shape's *only* field).
-    /// An empty (or "..."-only) `fields` list naturally falls out of
-    /// `.reduce` as `None`, matching every caller's own existing
-    /// `unwrap_or_else`/`if let Some` handling - this project's `Type`
-    /// has no safe way to represent a "vacuous" key type the way real
-    /// PHPStan's explicit `NeverType(true)` does, so `None` (exactly what
-    /// a plain, non-shape array-like value already produces) is the
-    /// right answer here too.
+    /// real key type directly; an `ArrayShape`'s own key type is now
+    /// `types::shape_key_type` (Phase 50, also reused directly by
+    /// `registry::assignability`/`types::subtype` for the identical
+    /// reasoning against a real `Type::Array`'s own declared key type -
+    /// this function used to duplicate that same union-of-per-field-kind
+    /// logic locally). `shape_key_type`'s own `Type::Never` (no real,
+    /// non-"..." field at all - see its own doc comment for the `"..."`
+    /// unsealed-tail-sentinel skip and why) maps back to `None` here, this
+    /// function's own existing "don't know" answer, matching every
+    /// caller's own existing `unwrap_or_else`/`if let Some` handling.
     pub(crate) fn array_key_type(ty: &Type) -> Option<Type> {
         match ty {
             Type::Array(key, _) => Some((**key).clone()),
-            // The `"..."` unsealed-tail sentinel (a dynamic-key write onto
-            // an initially-literal shape, e.g. `$cats[$row->id] = $row;`
-            // inside a loop, widens the shape this way - `checker/
-            // assignment.rs`'s own dynamic-key-write handling has no way
-            // to know the real key expression's own type at that point)
-            // is skipped entirely here, not folded in as `unknown_array_
-            // key()` - real corpus false positive: a shape whose *only*
-            // field is an unsealed tail (the common case for exactly this
-            // widening pattern) would otherwise classify as `int|string`
-            // and propagate through `array_keys()` into a `list<int>`-typed
-            // parameter, when the real, always-int key type was simply
-            // never captured at the write site. Skipping it here instead
-            // means a shape with only a "..." field correctly falls back
-            // to `None` (the caller's own generic, unclassified handling)
-            // rather than actively guessing wrong - "don't know" is a
-            // sound answer this dynamic-key-write shape already deserves,
-            // matching this project's own favor-false-negatives
-            // convention. A shape with *both* real literal fields and a
-            // "..." tail still classifies correctly from its real fields
-            // alone - the tail contributes nothing extra, but nothing
-            // wrong either.
-            Type::ArrayShape(fields) => fields
-                .iter()
-                .filter(|(k, _, _)| k != "...")
-                .map(|(k, _, _)| {
-                    if is_canonical_int_key(k) {
-                        Type::Int
-                    } else {
-                        Type::String
-                    }
-                })
-                .reduce(union_types),
+            Type::ArrayShape(fields) => match types::shape_key_type(fields) {
+                Type::Never => None,
+                key => Some(key),
+            },
             Type::Intersection(members) => members.iter().find_map(Self::array_key_type),
             _ => None,
         }

@@ -775,13 +775,21 @@ fn array_key_first_and_last_report_the_key_type_when_provably_non_empty() {
 fn array_key_first_reports_a_real_key_type_for_a_literal_array_shape() {
     // Phase 50 follow-up: `array_key_type` now handles `Type::ArrayShape`
     // directly - a real union of each field's own key kind, not the
-    // generic `int|string` fallback this used to degrade to.
+    // generic `int|string` fallback this used to degrade to. Phase 50's
+    // own further refinement (`types::shape_key_type` now contributing
+    // each int-canonical key's real `IntLiteral`, not a widened `Type::
+    // Int`, per corpus false positive found verifying it) makes this
+    // even more precise: `0|1|2`, not just `int` - `array_key_first`
+    // has no per-call "which key is really first" tracking of its own
+    // (it reuses the same aggregate key union `key()`/`array_key_last`
+    // do), so a real union of every known key is the best this project's
+    // own architecture gets here, still strictly more precise than `int`.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
             function f(): void {
                 assertType('string', array_key_first(['a' => 1, 'b' => 2]));
-                assertType('int', array_key_first([1, 2, 3]));
+                assertType('0|1|2', array_key_first([1, 2, 3]));
             }
         "#,
     );

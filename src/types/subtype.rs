@@ -32,6 +32,50 @@ pub(crate) fn shape_fields_are_list_like(fields: &[(String, Type, bool)]) -> boo
     true
 }
 
+/// Phase 50: the aggregate key type real PHPStan's own `ConstantArrayType::
+/// getIterableKeyType()` reports for a shape - the union of each *real*
+/// field's own key kind (the `"..."` unsealed-tail sentinel contributes
+/// nothing, same reasoning as `Checker::array_key_type`'s own identical
+/// skip, `checker/expr/array_ops.rs`). Standalone here (not `checker`-
+/// scoped) so `registry::assignability`/this module's own `is_subtype`
+/// can compare an `ArrayShape`'s real key type against a `Type::Array`'s
+/// declared one - a real, previously-missing check: `array{name: string}`
+/// (an all-string-keyed shape) used to be silently accepted as assignable
+/// to `array<int, string>`. `Type::Never` for a shape with no real fields
+/// at all (every field is `"..."`, or the list is empty) - vacuously a
+/// subtype of any key type via `is_subtype`'s own existing
+/// `(Never, _) => true` arm just below, so callers need no special case.
+///
+/// An int-canonical key contributes its own real `Type::IntLiteral`, not
+/// the bare `Type::Int` widening `Checker::array_key_type` used to settle
+/// for - a real corpus false positive found verifying this against
+/// Piwigo: `array{0: ...}` (a real, known-non-negative literal `0` key)
+/// wrongly failed against a `array<int<0, max>, ...>`-typed parameter
+/// (a real shape, e.g. Doctrine DBAL's own `executeStatement`/several of
+/// Piwigo's own local `fetchCount`-style helpers) purely because `Type::
+/// Int` isn't a confirmed subtype of `int<0, max>` (it could be
+/// negative), even though the one concrete key actually written always
+/// is. `IntLiteral -> IntRange` subtyping already exists (`is_subtype`'s
+/// own arm just below this function) - this only needed the literal
+/// itself preserved, not new subtyping logic.
+pub(crate) fn shape_key_type(fields: &[(String, Type, bool)]) -> Type {
+    let mut key_types: Vec<Type> = Vec::new();
+    for (key, _, _) in fields.iter().filter(|(k, _, _)| k != "...") {
+        let kt = match crate::types::canonical_int_key(key) {
+            Some(n) => Type::IntLiteral(n),
+            None => Type::String,
+        };
+        if !key_types.contains(&kt) {
+            key_types.push(kt);
+        }
+    }
+    match key_types.len() {
+        0 => Type::Never,
+        1 => key_types.into_iter().next().expect("len checked above"),
+        _ => Type::Union(key_types),
+    }
+}
+
 /// Is every value described by `sub` also described by `sup`? This is the
 /// same relation PHPStan calls `isSuperTypeOf` (inverted) - the thing every
 /// "does this assignment/return/argument type-check" question reduces to.
@@ -284,7 +328,16 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // literal inference, so it's left unrelated rather than guessed.
         // Two shapes are only related via the general `a == b` case above -
         // no shape subtyping (e.g. "has at least these keys") is modeled.
-        (Type::ArrayShape(_), Type::Array(_, b)) => matches!(**b, Type::Mixed),
+        // Phase 50: on top of the pre-existing "only when the array's
+        // own value type is Mixed" rule (this function does no per-field
+        // value comparison of its own - that's `registry::is_assignable`'s
+        // job), also require the shape's own real aggregate key type to
+        // be a subtype of the array's own declared key type -
+        // `array{name: string}` (all-string-keyed) must never satisfy
+        // `array<int, mixed>` just because the value side is lenient.
+        (Type::ArrayShape(fields), Type::Array(key, b)) => {
+            matches!(**b, Type::Mixed) && is_subtype(&shape_key_type(fields), key)
+        }
 
         // Phase 80: an object shape is structurally an object, so it
         // satisfies the bare native `object` hint - the same "shape
