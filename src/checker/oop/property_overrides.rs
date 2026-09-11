@@ -6,28 +6,22 @@ use crate::registry::PropertySig;
 use crate::token::Span;
 
 impl<'a> Checker<'a> {
-    /// Phase 64's own still-open property-override half - real PHPStan's
-    /// `OverridingPropertyRule` equivalent, scoped to the three mismatch
+    /// Real PHPStan's `OverridingPropertyRule` equivalent: the mismatch
     /// kinds answerable with fields `PropertyDecl`/`PropertySig` already
     /// carry (`is_static`/`is_readonly`/`visibility` - all three
     /// confirmed directly via `php -r` as real, unconditional fatal
     /// errors, in whichever direction is checked below; the *other*
     /// direction of each is real, legal PHP and deliberately left
-    /// unflagged). Native-type-variance (`property.nativeType` - real
-    /// PHP requires a property's own type to match its ancestor's
-    /// *exactly*, invariantly, unlike a method's covariant return type)
-    /// is deliberately not attempted here: `PropertySig` only carries a
-    /// single, already-docblock-merged `ty` (no `return_type_native`-
-    /// style split the way `FunctionSig` has for return types), and
-    /// comparing that merged type directly would risk the identical
+    /// unflagged), plus native-type-variance (`property.nativeType`/
+    /// `.missingNativeType`/`.extraNativeType` - real PHP requires a
+    /// property's own type to match its ancestor's *exactly*,
+    /// invariantly, unlike a method's covariant return type), checked at
+    /// the native level via `PropertySig::ty_native`/`has_native_type`
+    /// (mirroring `ParamSig`'s identical split - see `check_property_
+    /// native_type_override`'s own doc comment for why a plain, already-
+    /// docblock-merged `ty` comparison would have risked the identical
     /// false-positive class `method.childReturnType`'s own doc comment
-    /// above already found and fixed for methods (an ancestor's own
-    /// native type re-declared identically, but with an *added* `@var`
-    /// docblock refinement on just one side) - needs a `PropertySig`
-    /// split first, not attempted in this pass. `#[Override]`
-    /// (`property.override`/`missingOverride`) and property hooks
-    /// (`notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`)
-    /// are separate, still-open items too. A promoted constructor
+    /// already found and fixed for methods). A promoted constructor
     /// property is a real property for override purposes too (confirmed
     /// directly: `class Child extends Base { public function
     /// __construct(public readonly int $x) {} }` overriding a plain
@@ -229,6 +223,98 @@ impl<'a> Checker<'a> {
             );
         }
         self.check_property_hook_override(fqn, name, own_sig, &ancestor_owner, ancestor_sig, span);
+        self.check_property_native_type_override(
+            fqn,
+            name,
+            own_sig,
+            &ancestor_owner,
+            ancestor_sig,
+            span,
+        );
+    }
+
+    /// `OverridingPropertyRule`'s own native-type-variance half
+    /// (`property.nativeType`/`.missingNativeType`/`.extraNativeType`) -
+    /// the one sub-item this phase's own header doc comment above used to
+    /// name as still-open, now that `PropertySig::ty_native`/
+    /// `has_native_type` exist (mirroring `ParamSig`'s identical split).
+    /// Checked purely at the native level, exactly like every other
+    /// override-compatibility check in this file and `method_overrides.rs`,
+    /// since real PHP itself only ever enforces this invariantly against
+    /// the native type, never the PHPDoc-merged one. Deliberately doesn't
+    /// attempt real PHPStan's own further hook-driven contravariant/
+    /// covariant refinement (only reachable when a property is virtual/
+    /// abstract *and* asymmetrically readable-xor-writable), since this
+    /// project's own hook-variance model doesn't track per-direction
+    /// native types precisely enough to draw that distinction safely, so
+    /// every mismatch here uses the same "must be exactly equal" rule
+    /// real PHPStan's own plain (non-hook) branch already uses, matching
+    /// this project's convention of a disclosed, narrower cut over a
+    /// guess. Equality is checked bidirectionally through `is_assignable`
+    /// (not raw `Type` `PartialEq`, which is sensitive to union-member
+    /// order), the same shape `resolve_pseudo`'d comparisons throughout
+    /// this checker already use for two types that must genuinely match.
+    fn check_property_native_type_override(
+        &mut self,
+        fqn: &str,
+        name: &str,
+        own_sig: &PropertySig,
+        ancestor_owner: &str,
+        ancestor_sig: &PropertySig,
+        span: Span,
+    ) {
+        if !ancestor_sig.has_native_type {
+            if own_sig.has_native_type {
+                let own_ty = self.resolve_pseudo(&own_sig.ty_native, fqn);
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "Property {fqn}::${name} ({own_ty}) overriding property {ancestor_owner}::${name} should not have a native type."
+                        ),
+                        span,
+                        0,
+                        "property.extraNativeType",
+                    )
+                    .non_ignorable(),
+                );
+            }
+            return;
+        }
+        let ancestor_ty = self.resolve_pseudo(&ancestor_sig.ty_native, ancestor_owner);
+        if !own_sig.has_native_type {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    fqn.to_string(),
+                    format!(
+                        "Property {fqn}::${name} overriding property {ancestor_owner}::${name} ({ancestor_ty}) should also have native type {ancestor_ty}."
+                    ),
+                    span,
+                    0,
+                    "property.missingNativeType",
+                )
+                .non_ignorable(),
+            );
+            return;
+        }
+        let own_ty = self.resolve_pseudo(&own_sig.ty_native, fqn);
+        if self.registry.is_assignable(&own_ty, &ancestor_ty)
+            && self.registry.is_assignable(&ancestor_ty, &own_ty)
+        {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                fqn.to_string(),
+                format!(
+                    "Type {own_ty} of property {fqn}::${name} is not the same as type {ancestor_ty} of overridden property {ancestor_owner}::${name}."
+                ),
+                span,
+                0,
+                "property.nativeType",
+            )
+            .non_ignorable(),
+        );
     }
 
     /// Phase 64 Item 1: `OverridingPropertyRule`'s own property-hook half -

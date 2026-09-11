@@ -2637,3 +2637,160 @@ fn neither_side_having_a_throws_tag_at_all_is_never_flagged() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 64: `OverridingPropertyRule`'s native-type-variance half
+// (`property.nativeType`/`.missingNativeType`/`.extraNativeType`).
+
+#[test]
+fn an_identical_native_type_override_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 0; }
+            class Child extends Base { public int $x = 0; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "property.nativeType" | "property.missingNativeType" | "property.extraNativeType"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_different_native_type_override_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 0; }
+            class Child extends Base { public string $x = ""; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.nativeType"
+            && x.message.contains(
+                "Type string of property Child::$x is not the same as type int of overridden property Base::$x."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn dropping_the_ancestors_native_type_is_flagged_missing() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int $x = 0; }
+            class Child extends Base {
+                /** @var int */
+                public $x = 0;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.missingNativeType"
+            && x.message.contains(
+                "Property Child::$x overriding property Base::$x (int) should also have native type int."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn adding_a_native_type_the_ancestor_never_had_is_flagged_extra() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public $x = 0; }
+            class Child extends Base { public int $x = 0; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.extraNativeType"
+            && x.message.contains(
+                "Property Child::$x (int) overriding property Base::$x should not have a native type."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn neither_side_having_a_native_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public $x = 0; }
+            class Child extends Base { public $x = 0; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "property.nativeType" | "property.missingNativeType" | "property.extraNativeType"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_self_typed_property_override_resolves_against_its_own_declaring_class() {
+    // Guards against a real false-*negative* a bare, unresolved `self`
+    // comparison would produce: confirmed directly via `php -r` that
+    // this is a real, unconditional fatal error ("Type of Child::$next
+    // must be Base (as in class Base)") - each side's own `self` means
+    // "this exact declaring class," not "whatever `self` textually
+    // says," so `resolve_pseudo`'d Base-vs-Child is the *correct*
+    // mismatch to report, not a false positive to avoid.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public self $next;
+            }
+            class Child extends Base {
+                public self $next;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.nativeType"
+            && x.message.contains(
+                "Type Child of property Child::$next is not the same as type Base of overridden property Base::$next."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_self_typed_property_never_redeclared_by_a_subclass_is_not_flagged() {
+    // The safe, common case: a subclass that never textually re-declares
+    // an inherited `self`-typed property at all has no override pair to
+    // compare in the first place.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public self $next;
+            }
+            class Child extends Base {
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.nativeType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_reordered_union_native_type_is_not_flagged_as_a_mismatch() {
+    // Guards against the other real false-positive vector this check's
+    // own implementation flags: raw `Type` `PartialEq` is union-order-
+    // sensitive, but two unions naming the same members in a different
+    // order are the same type.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base { public int|string $x = 0; }
+            class Child extends Base { public string|int $x = 0; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.nativeType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

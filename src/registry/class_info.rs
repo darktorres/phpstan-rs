@@ -112,6 +112,18 @@ pub struct PropertySig {
     // tag, enum built-in) - none of those can carry hooks.
     pub has_get_hook: bool,
     pub has_set_hook: bool,
+    // Phase 64: the native, no-docblock-merge type this property alone
+    // declares - the exact `ty`-vs-`ty_native` split `ParamSig` already
+    // has (see that field's own doc comment), needed here for
+    // `OverridingPropertyRule`'s own `property.nativeType`/
+    // `.missingNativeType`/`.extraNativeType` family, which real PHPStan
+    // checks purely at the native level (never the PHPDoc-merged type).
+    // `resolve_type(None, native_hint)` collapses "no native hint" and an
+    // explicit `mixed` hint into the same `Type::Mixed` value, which is
+    // why `has_native_type` below must be a separate boolean rather than
+    // testing this field against `Type::Mixed`.
+    pub ty_native: Type,
+    pub has_native_type: bool,
 }
 
 // Phase 57's own still-open item: a class constant's own `public`/
@@ -471,6 +483,9 @@ impl ClassInfo {
                 let ty = mark_template_params(ty, &template_params);
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
+                let ty_native = resolve_type(None, p.type_hint.as_deref());
+                let ty_native = mark_template_params(ty_native, &template_params);
+                let ty_native = resolve_names_in_type(ty_native, ctx);
                 let set_ty = property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
                 let is_virtual = p
                     .hooks
@@ -480,6 +495,8 @@ impl ClassInfo {
                     p.name.clone(),
                     PropertySig {
                         ty,
+                        ty_native,
+                        has_native_type: p.type_hint.is_some(),
                         is_static: p.is_static,
                         // `@readonly` (`DocBlock::readonly`'s own doc
                         // comment) folds into the exact same flag native
@@ -538,6 +555,10 @@ impl ClassInfo {
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
+                let ty_native = resolve_type(None, p.type_hint.as_deref());
+                let ty_native = mark_template_params(ty_native, &template_params);
+                let ty_native = resolve_names_in_type(ty_native, ctx);
+                let ty_native = apply_implicit_nullable_default(ty_native, p.default.as_ref());
                 // A promoted param's own inline `@readonly` (rare - most
                 // real code that reaches for `@readonly` at all predates
                 // promoted properties, let alone tags one - but cheap to
@@ -562,6 +583,8 @@ impl ClassInfo {
                     p.name.clone(),
                     PropertySig {
                         ty,
+                        ty_native,
+                        has_native_type: p.type_hint.is_some(),
                         is_static: false,
                         is_readonly: p.promoted_readonly || doc_readonly,
                         set_ty,
@@ -603,6 +626,12 @@ impl ClassInfo {
                     let ty = resolve_names_in_type(ty, ctx);
                     PropertySig {
                         ty,
+                        // A magic `@property` tag has no native
+                        // declaration at all to check against - `false`,
+                        // matching every other synthetic-property field
+                        // here.
+                        ty_native: Type::Mixed,
+                        has_native_type: false,
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,
                         set_ty: None,
@@ -1082,6 +1111,14 @@ impl ClassInfo {
             "name".to_string(),
             PropertySig {
                 ty: Type::String,
+                // Every enum case's `->name` is language-guaranteed to be
+                // a real, natively-`string`-typed property - matching
+                // `has_default` just below's identical "language-
+                // guaranteed, not a guess" reasoning. Enums can't be
+                // extended, so no override check ever actually reads this,
+                // but a real, correct value costs nothing to provide.
+                ty_native: Type::String,
+                has_native_type: true,
                 is_static: false,
                 is_readonly: false,
                 set_ty: None,
@@ -1129,6 +1166,15 @@ impl ClassInfo {
                 "value".to_string(),
                 PropertySig {
                     ty: value_ty,
+                    // Same reasoning as `->name` above - language-
+                    // guaranteed, but here `ty_native` is the plain
+                    // backing type, not the possibly-narrower literal-
+                    // union `ty` a fully-literal case set gets - real
+                    // PHP's own native reflection only ever sees the
+                    // backing type (`string`/`int`), never a per-case
+                    // refinement PHPStan derives from analysis alone.
+                    ty_native: types::parse_type_string(backing),
+                    has_native_type: true,
                     is_static: false,
                     is_readonly: false,
                     set_ty: None,
