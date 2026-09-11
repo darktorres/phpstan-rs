@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::ast_walk::stmt_children;
+use crate::ast_walk::{any_stmt_child, stmt_children};
 use crate::checker::{Checker, Locals, union_types};
 use crate::types::Type;
 
@@ -571,13 +571,22 @@ pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
 /// function - a real, hand-written HTTP/1.1 parsing state machine) is
 /// exactly this shape.
 pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> std::collections::HashSet<String> {
+    // `any_stmt_child` (non-allocating - see its own doc comment) instead
+    // of `stmt_children`/a `for` loop: this runs on every function/
+    // method/closure body checked, a real, measured cost at that call
+    // volume; found and fixed via a perf-optimization investigation
+    // workflow. The closure always returns `false`, so `any_stmt_child`
+    // never short-circuits - every child gets visited, matching the
+    // original unconditional `for child in stmt_children(stmt) { ... }`
+    // loop exactly.
     fn walk(stmt: &Stmt, targets: &mut std::collections::HashSet<String>) {
         if let StmtKind::Goto(name) = &stmt.kind {
             targets.insert(name.clone());
         }
-        for child in stmt_children(stmt) {
+        any_stmt_child(stmt, &mut |child| {
             walk(child, targets);
-        }
+            false
+        });
     }
     let mut targets = std::collections::HashSet::new();
     for stmt in stmts {

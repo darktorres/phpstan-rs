@@ -184,5 +184,122 @@ pub fn stmt_children(s: &Stmt) -> Vec<&Stmt> {
     }
 }
 
+/// Non-allocating counterpart to `expr_children(e).into_iter().any(f)` -
+/// mirrors the exact same match arms (verified arm-by-arm against
+/// `expr_children`'s own source, not just assumed - including the same
+/// three deliberately-empty `Closure`/`ArrowFn`/`NewAnonymousClass`
+/// variants) without ever building a `Vec`. Short-circuits in the
+/// identical order `expr_children`'s own `Vec` would iterate in, so
+/// `any_expr_child(e, &mut f)` always agrees with `expr_children(e).
+/// into_iter().any(f)` - just without the intermediate allocation on
+/// every node visited. A generic-over-`f` helper, not one hand-
+/// duplicated per caller, for the same reason `expr_children` itself
+/// exists (see this module's own doc comment) - `f` returning `false`
+/// unconditionally turns this into a plain "visit every child" walk
+/// (used by callers that need a side effect on every node, not a
+/// short-circuiting predicate).
+pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
+    match &e.kind {
+        ExprKind::Literal(_)
+        | ExprKind::Variable(_)
+        | ExprKind::StaticAccess(_, _)
+        | ExprKind::Name(_) => false,
+        ExprKind::DynamicVariable(inner)
+        | ExprKind::Unary(_, inner)
+        | ExprKind::Cast(_, inner)
+        | ExprKind::Grouping(inner)
+        | ExprKind::FirstClassCallable(inner)
+        | ExprKind::Throw(inner)
+        | ExprKind::YieldFrom(inner)
+        | ExprKind::PropertyAccess(inner, _, _) => f(inner),
+        ExprKind::ArrayLiteral(items) => items
+            .iter()
+            .any(|item| item.key.as_ref().is_some_and(&mut f) || f(&item.value)),
+        ExprKind::Binary(_, l, r)
+        | ExprKind::Assign(l, r)
+        | ExprKind::CompoundAssign(_, l, r)
+        | ExprKind::DynamicPropertyAccess(l, r) => f(l) || f(r),
+        ExprKind::Ternary(cond, then_, else_) => {
+            f(cond) || then_.as_ref().is_some_and(|t| f(t)) || f(else_)
+        }
+        ExprKind::Call(callee, args) | ExprKind::New(callee, args) => {
+            f(callee) || args.iter().any(|a| f(&a.value))
+        }
+        ExprKind::MethodCall(recv, _, args, _) => f(recv) || args.iter().any(|a| f(&a.value)),
+        ExprKind::DynamicMethodCall(recv, name_expr, args) => {
+            f(recv) || f(name_expr) || args.iter().any(|a| f(&a.value))
+        }
+        ExprKind::StaticCall(_, _, args) => args.iter().any(|a| f(&a.value)),
+        ExprKind::Index(base, idx) => f(base) || idx.as_ref().is_some_and(|i| f(i)),
+        ExprKind::Instanceof(inner, target) => {
+            f(inner) || matches!(target, InstanceofTarget::Expr(t) if f(t))
+        }
+        ExprKind::Clone(inner, overrides) => f(inner) || overrides.as_ref().is_some_and(|o| f(o)),
+        ExprKind::Yield(k, v) => {
+            k.as_ref().is_some_and(|b| f(b)) || v.as_ref().is_some_and(|b| f(b))
+        }
+        ExprKind::Interpolated(parts) => parts.iter().any(f),
+        ExprKind::Match {
+            subject,
+            arms,
+            default,
+        } => {
+            f(subject)
+                || arms
+                    .iter()
+                    .any(|(conds, result)| conds.iter().any(&mut f) || f(result))
+                || default.as_ref().is_some_and(|d| f(d))
+        }
+        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } | ExprKind::NewAnonymousClass(..) => {
+            false
+        }
+    }
+}
+
+/// Non-allocating counterpart to `stmt_children(s).into_iter().any(f)` -
+/// see `any_expr_child`'s own doc comment for the full rationale and
+/// verification approach, mirrored here for `stmt_children` instead.
+pub fn any_stmt_child(s: &Stmt, mut f: &mut impl FnMut(&Stmt) -> bool) -> bool {
+    match &s.kind {
+        StmtKind::InlineHtml(_)
+        | StmtKind::Expression(_)
+        | StmtKind::Echo(_)
+        | StmtKind::Return(_)
+        | StmtKind::Break(_)
+        | StmtKind::Continue(_)
+        | StmtKind::Global(_)
+        | StmtKind::Namespace(_)
+        | StmtKind::Use(_)
+        | StmtKind::GlobalConst(_)
+        | StmtKind::StaticVar(_)
+        | StmtKind::Throw(_)
+        | StmtKind::Goto(_)
+        | StmtKind::Label(_)
+        | StmtKind::FunctionDecl(_)
+        | StmtKind::ClassDecl(_)
+        | StmtKind::EnumDecl(_) => false,
+        StmtKind::Block(stmts) => stmts.iter().any(f),
+        StmtKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } => f(then_branch) || else_branch.as_ref().is_some_and(|e| f(e)),
+        StmtKind::While { body, .. }
+        | StmtKind::DoWhile { body, .. }
+        | StmtKind::For { body, .. }
+        | StmtKind::Foreach { body, .. } => f(body),
+        StmtKind::Switch { cases, .. } => cases.iter().any(|c| c.body.iter().any(&mut f)),
+        StmtKind::Try {
+            body,
+            catches,
+            finally,
+        } => {
+            body.iter().any(&mut f)
+                || catches.iter().any(|c| c.body.iter().any(&mut f))
+                || finally.iter().flatten().any(f)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

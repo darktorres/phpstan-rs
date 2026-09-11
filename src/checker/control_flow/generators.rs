@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
+use crate::ast_walk::{any_expr_child, any_stmt_child};
 use crate::checker::Checker;
 use crate::registry::Registry;
 use crate::token::Span;
@@ -92,19 +92,23 @@ pub(crate) fn generator_template_param(ty: &Type, registry: &Registry, param: &s
 
 /// Phase 70: an arrow function's own body is a single expression, not a
 /// `Vec<Stmt>` `body_contains_yield` above can walk - this is that same
-/// walk's expression-only counterpart (`expr_children` already stops at
+/// walk's expression-only counterpart (`any_expr_child` already stops at
 /// a nested `Closure`/`ArrowFn` boundary, the correct semantics here
 /// too: a `yield` inside a nested one doesn't make *this* arrow function
-/// a generator).
+/// a generator). Uses `any_expr_child` (non-allocating) rather than
+/// `expr_children`/`.into_iter().any()` - this runs on every function/
+/// method/closure body checked, a real, measured cost at that call
+/// volume; found and fixed via a perf-optimization investigation
+/// workflow.
 pub(crate) fn expr_contains_yield(e: &Expr) -> bool {
     matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
-        || expr_children(e).into_iter().any(expr_contains_yield)
+        || any_expr_child(e, &mut expr_contains_yield)
 }
 
 /// Mirrors `deps::collect_stmt`'s own exhaustive per-variant shape: each
 /// `StmtKind` variant's own `Expr`-bearing field(s), checked via
-/// `expr_contains_yield`, plus recursing into `stmt_children` for nested
-/// statements. `stmt_children` (and `expr_children`, transitively)
+/// `expr_contains_yield`, plus recursing into `any_stmt_child` for nested
+/// statements. `any_stmt_child` (and `any_expr_child`, transitively)
 /// already stop at `Closure`/`ArrowFn`/`NewAnonymousClass`/`FunctionDecl`/
 /// `ClassDecl`/`EnumDecl` boundaries by design - exactly the correct
 /// semantics here too, since a `yield` inside any of those nested scopes
@@ -143,7 +147,7 @@ fn stmt_contains_yield(stmt: &Stmt) -> bool {
         }
         _ => false,
     };
-    own || stmt_children(stmt).into_iter().any(stmt_contains_yield)
+    own || any_stmt_child(stmt, &mut stmt_contains_yield)
 }
 
 impl<'a> Checker<'a> {
