@@ -105,6 +105,23 @@ impl<'a> Checker<'a> {
         label: &str,
         span: Span,
     ) {
+        // Cheap substring pre-filter before the real docblock::parse below
+        // - this runs unconditionally on every checked function/method,
+        // and the overwhelming majority declare no `@template-covariant`/
+        // `-contravariant` tag at all. Found via a perf-optimization
+        // investigation workflow. All 4 spellings must be checked -
+        // `@phpstan-template-covariant`/`-contravariant` are real,
+        // corpus-confirmed aliases `docblock::parse` treats identically
+        // via its own "strip `phpstan-`, same arm" normalization.
+        let has_variance_tag = f.doc_comment.as_deref().is_some_and(|d| {
+            d.contains("@template-covariant")
+                || d.contains("@template-contravariant")
+                || d.contains("@phpstan-template-covariant")
+                || d.contains("@phpstan-template-contravariant")
+        });
+        if !has_variance_tag {
+            return;
+        }
         let Some(doc) = f.doc_comment.as_deref().map(docblock::parse) else {
             return;
         };

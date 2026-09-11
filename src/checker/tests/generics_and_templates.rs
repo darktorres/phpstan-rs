@@ -1000,6 +1000,58 @@ fn a_top_level_function_has_no_enclosing_class_variance_to_violate() {
 }
 
 #[test]
+fn a_phpstan_prefixed_own_template_still_shadows_a_class_level_template() {
+    // Regression test for a perf-optimization fix: check_function_
+    // with_ancestor_hint's own-@template parse is now gated behind a
+    // cheap substring pre-filter (checking both `@template` and
+    // `@phpstan-template`) before the real docblock::parse - this locks
+    // in that the `@phpstan-template` alias spelling still gets the
+    // real parse and still registers as the method's own template, not
+    // silently skipped by an under-specified filter.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T
+             */
+            class Box {
+                /**
+                 * @phpstan-template T
+                 * @param T $value
+                 */
+                public function replace($value): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.shadowTemplate"),
+        "expected method.shadowTemplate for the @phpstan-template-declared T shadowing the class's own T, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_phpstan_prefixed_template_covariant_tag_still_flags_method_variance() {
+    // Regression test for the sibling perf-optimization fix in
+    // check_own_template_variance_declaration - the pre-filter there
+    // must check all 4 spellings (`@template-covariant`/
+    // `-contravariant` and their `@phpstan-`-prefixed aliases), not
+    // just the bare two, or this diagnostic would be silently dropped
+    // for a docblock using the phpstan-prefixed spelling.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @phpstan-template-covariant T
+             * @param T $x
+             */
+            function f($x): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.variance"),
+        "expected function.variance for a bare function's @phpstan-template-covariant tag, got: {d:?}"
+    );
+}
+
+#[test]
 fn a_covariant_template_in_a_constructor_parameter_is_exempt() {
     // Real bug found on the real Piwigo corpus: every single one of
     // 27 real-corpus diagnostics this check produced before this

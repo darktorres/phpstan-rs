@@ -232,7 +232,22 @@ impl<'a> Checker<'a> {
         // `@template A` `@template B of A` - classifies correctly instead
         // of misreading `A` as an unknown class) since `FunctionSig` has
         // no persisted raw template-bound/-default map of its own.
+        // Cheap substring pre-filter before the real docblock::parse below
+        // - the overwhelming majority of documented methods declare no
+        // own @template at all, so this skips a real parse cost on every
+        // one of them (found via a perf-optimization investigation
+        // workflow, matching the established pattern already used in
+        // `noop.rs`'s own `@impure`/`@phpstan-impure` gate). Both
+        // spellings must be checked: `@phpstan-template*` is a real,
+        // corpus-confirmed alias `docblock::parse` treats identically to
+        // `@template*` - a filter checking only the bare spelling would
+        // silently stop catching it.
+        let has_own_template = f
+            .doc_comment
+            .as_deref()
+            .is_some_and(|d| d.contains("@template") || d.contains("@phpstan-template"));
         if let Some(c) = class_name
+            && has_own_template
             && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse)
             && !doc.templates.is_empty()
         {
@@ -340,17 +355,13 @@ impl<'a> Checker<'a> {
                     // (a variadic parameter's declared type, not the
                     // `array` it collects into), the same reasoning the
                     // Closure/arrow-fn arms in `checker/expr.rs` share.
-                    self.check_type_class_names_exist(
-                        &ty,
-                        &format!("parameter ${} of {label}()", param.name),
-                        ast_param.span,
-                        &label,
-                    );
+                    let subject = format!("parameter ${} of {label}()", param.name);
+                    self.check_type_class_names_exist(&ty, &subject, ast_param.span, &label);
                     // Phase 48.A: `parameter.trait` - see `check_type_trait_refs`'s
                     // own doc comment.
                     self.check_type_trait_refs(
                         &ty,
-                        &format!("parameter ${} of {label}()", param.name),
+                        &subject,
                         ast_param.span,
                         &label,
                         "parameter.trait",
@@ -359,7 +370,7 @@ impl<'a> Checker<'a> {
                     // already `resolve_pseudo`'d.
                     self.check_no_parent_ref(
                         &ty,
-                        &format!("parameter ${} of {label}()", param.name),
+                        &subject,
                         ast_param.span,
                         &label,
                         "parameter.noParent",
@@ -507,26 +518,10 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(&ty, c),
                         None => ty,
                     };
-                    self.check_type_class_names_exist(
-                        &ty,
-                        &format!("parameter ${} of {label}()", p.name),
-                        p.span,
-                        &label,
-                    );
-                    self.check_type_trait_refs(
-                        &ty,
-                        &format!("parameter ${} of {label}()", p.name),
-                        p.span,
-                        &label,
-                        "parameter.trait",
-                    );
-                    self.check_no_parent_ref(
-                        &ty,
-                        &format!("parameter ${} of {label}()", p.name),
-                        p.span,
-                        &label,
-                        "parameter.noParent",
-                    );
+                    let subject = format!("parameter ${} of {label}()", p.name);
+                    self.check_type_class_names_exist(&ty, &subject, p.span, &label);
+                    self.check_type_trait_refs(&ty, &subject, p.span, &label, "parameter.trait");
+                    self.check_no_parent_ref(&ty, &subject, p.span, &label, "parameter.noParent");
                     self.check_type_class_name_case(&case_refs, &label, p.span);
                     resolved_params.push((p.name.clone(), ty.clone(), p.span));
                     let ty = if p.variadic {
@@ -651,16 +646,17 @@ impl<'a> Checker<'a> {
         // `?`-and-`resolve_pseudo`-adjusted `expected` the falls-off-the-
         // end check further down builds), same as every other existence
         // check in this function.
+        let subject = format!("return type of {label}()");
         self.check_type_class_names_exist(
             declared_return.as_ref().unwrap_or(&Type::Mixed),
-            &format!("return type of {label}()"),
+            &subject,
             f.span,
             &label,
         );
         self.check_type_class_name_case(&declared_return_case_refs, &label, f.span);
         self.check_type_trait_refs(
             declared_return.as_ref().unwrap_or(&Type::Mixed),
-            &format!("return type of {label}()"),
+            &subject,
             f.span,
             &label,
             "return.trait",
@@ -676,7 +672,7 @@ impl<'a> Checker<'a> {
                 self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed), c);
             self.check_no_parent_ref(
                 &resolved_return,
-                &format!("return type of {label}()"),
+                &subject,
                 f.span,
                 &label,
                 "return.noParent",
