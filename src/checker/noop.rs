@@ -65,7 +65,7 @@ use crate::ast::{BinOp, Expr, ExprKind, FunctionDecl, UnaryOp};
 use crate::ast_walk::expr_children;
 use crate::checker::{Checker, Locals};
 use crate::docblock;
-use crate::registry::FunctionSig;
+use crate::registry::{FunctionSig, collect_impure_points};
 use crate::types::Type;
 
 /// Whether `e`'s own subtree provably has no observable side effect at
@@ -301,6 +301,128 @@ impl<'a> Checker<'a> {
             0,
             identifier,
         );
+    }
+
+    /// Phase 41 follow-up: `Rules/Pure/FunctionPurityCheck.php`'s own
+    /// remaining three diagnostics for a declaration real PHPStan
+    /// considers pure - `pure{Function,Method}.parameterByRef`,
+    /// `pure{Function,Method}.void`, and per-construct `impure.<id>`/
+    /// `possiblyImpure.<id>` (`registry::collect_impure_points`'s own
+    /// doc comment has the full identifier/certain-vs-maybe mapping,
+    /// read directly from `vendor/phpstan-src`).
+    ///
+    /// Gated on an *explicit* `@phpstan-pure`/`@pure` tag only, **not**
+    /// `sig.is_transitively_pure` alone - a real, corpus-confirmed
+    /// finding, not the original design: real PHPStan's own reflection
+    /// layer can infer purity without any tag at all, but doing the same
+    /// here made every one of these four diagnostics fire on any
+    /// ordinary, untagged void function/method the classifier happens to
+    /// prove pure (an extremely common, unremarkable shape - a short
+    /// helper with no observable side effects, tagged or not) - 287 of
+    /// this project's own existing tests broke the moment this ran
+    /// untagged, each for a real void method nobody ever meant to
+    /// annotate as `@phpstan-pure`. Requiring the tag matches this same
+    /// file's own `check_declared_purity_tag`'s already-working
+    /// precedent (also tag-gated, not classifier-alone) and is the only
+    /// way to keep this new family from being a broad, unwanted-by-
+    /// default noise source rather than the `@phpstan-pure`-authoring-
+    /// aid it's meant to be.
+    ///
+    /// One real, disclosed consequence of the tag-only gate, worth
+    /// stating plainly: `impure.<id>`/`possiblyImpure.<id>` can *only*
+    /// ever be non-vacuous for a declaration this project's own
+    /// classifier does *not* independently confirm pure (`registry::
+    /// purity`'s own fixed point is short-circuiting - the moment it
+    /// finds one disqualifying construct the whole declaration is
+    /// marked "can never be proven pure" and stops, so `sig.is_
+    /// transitively_pure == true` already implies zero disqualifying
+    /// constructs exist in the body at all) - i.e. exactly the
+    /// `@phpstan-pure`-tagged-but-actually-impure case, the same
+    /// scenario `impureFunction.pure`'s own opposite-direction sibling
+    /// already covers. `pureFunction.parameterByRef` has the identical
+    /// property for a different reason (a by-ref parameter
+    /// unconditionally disqualifies `is_transitively_pure` outright,
+    /// `purity_gate_passes`) - only `pure{Function,Method}.void` can
+    /// fire for a declaration that's *genuinely, correctly* pure (a
+    /// real, intended "you tagged this pure and it's void - the tag
+    /// adds nothing real PHPStan callers would ever observe" nudge).
+    pub(crate) fn check_purity_impure_points(
+        &mut self,
+        f: &FunctionDecl,
+        sig: Option<&FunctionSig>,
+        is_method: bool,
+        label: &str,
+    ) {
+        let Some(sig) = sig else {
+            return;
+        };
+        let tagged_pure = f.doc_comment.as_deref().is_some_and(|doc| {
+            (doc.contains("@phpstan-pure") || doc.contains("@pure")) && docblock::parse(doc).pure
+        });
+        if !tagged_pure {
+            return;
+        }
+        let (kind_word, identifier_prefix) = if is_method {
+            ("Method", "pureMethod")
+        } else {
+            ("Function", "pureFunction")
+        };
+        for param in &f.params {
+            if param.by_ref {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Parameter ${} of pure {} {label}() is passed by reference.",
+                        param.name,
+                        kind_word.to_lowercase()
+                    ),
+                    param.name_span,
+                    0,
+                    &format!("{identifier_prefix}.parameterByRef"),
+                );
+            }
+        }
+        if sig.return_type == Type::Void
+            && f.name != "__construct"
+            && sig.throws.is_none()
+            && sig.assert.is_empty()
+            && sig.assert_if_true.is_empty()
+            && sig.assert_if_false.is_empty()
+        {
+            self.report(
+                label.to_string(),
+                format!("{kind_word} {label}() is pure but has no return value."),
+                f.name_span,
+                0,
+                &format!("{identifier_prefix}.void"),
+            );
+        }
+        let class_name = if is_method {
+            label.split("::").next()
+        } else {
+            None
+        };
+        for occ in collect_impure_points(&f.body, class_name, self.registry) {
+            let (verb, identifier) = if occ.certain {
+                ("Impure", format!("impure.{}", occ.identifier))
+            } else {
+                (
+                    "Possibly impure",
+                    format!("possiblyImpure.{}", occ.identifier),
+                )
+            };
+            self.report(
+                label.to_string(),
+                format!(
+                    "{verb} {} in pure {} {label}().",
+                    occ.description,
+                    kind_word.to_lowercase()
+                ),
+                occ.span,
+                0,
+                &identifier,
+            );
+        }
     }
 
     /// Phase 36: declaration-time validation for `@param-immediately-

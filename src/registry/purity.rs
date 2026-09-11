@@ -56,6 +56,7 @@ use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::is_superglobal;
 use crate::registry::{FunctionSig, Registry};
+use crate::token::Span;
 
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base
@@ -574,4 +575,352 @@ fn resolve_new(target_class: &str, registry: &Registry, deps: &mut Vec<PurityDep
         "__construct".to_string(),
     ));
     false
+}
+
+/// Phase 41 follow-up: one real, resolved `ImpurePoint` occurrence
+/// (`vendor/phpstan-src/src/Analyser/ImpurePoint.php`'s own `identifier`/
+/// `description`/`isCertain()`, read directly from its real construction
+/// sites throughout `Analyser/{Expr,Stmt}Handler/*.php`, not guessed from
+/// the identifier names alone) - the diagnostic-only sibling of `stmt_
+/// disqualifies`/`expr_disqualifies` above (see `collect_impure_points`'s
+/// own doc comment for why it's a genuinely separate, non-short-
+/// circuiting walk rather than a repurposing of those two).
+pub(crate) struct ImpurePointOccurrence {
+    pub(crate) span: Span,
+    pub(crate) identifier: &'static str,
+    pub(crate) description: &'static str,
+    pub(crate) certain: bool,
+}
+
+/// A second, **non-short-circuiting** walk over the identical body `stmt_
+/// disqualifies`/`expr_disqualifies` already classify, for `checker::
+/// noop::check_purity_impure_points`'s own diagnostic use - that walk
+/// stops at the *first* disqualifying construct and records only "can
+/// never be proven pure, no matter what" (`purity_dependencies = None`),
+/// correct for the fixed point (one impure point already means "not
+/// pure," a second one adds nothing) but wrong for reporting every real
+/// occurrence a `@phpstan-pure`-tagged-but-actually-impure declaration
+/// contains - real PHPStan's own `FunctionPurityCheck` reports every one
+/// of them, not just the first. Deliberately does **not** modify `stmt_
+/// disqualifies`/`expr_disqualifies` themselves (regression risk to the
+/// already-working fixed point) - this mirrors their own match arms
+/// exactly, one call site at a time, but always keeps walking every
+/// child regardless of what it just found.
+///
+/// A few real, disclosed narrowings relative to the full `ImpurePoint`
+/// catalog, all in the "favor false negatives" direction this project
+/// has held throughout:
+/// - An *explicit* `throw` isn't included at all - real PHPStan's own
+///   `ImpurePoint` family has no `throw` identifier; a declared/explicit
+///   throw is a *throw point*, a separate concept `purity_gate_passes`
+///   already excludes any `@throws`-declared/thrown-bodied function from
+///   reaching this walk's own caller in the first place.
+/// - A property write (`propertyAssign`, certain) and a by-reference one
+///   (`propertyAssignByRef`, *not* certain) are real PHPStan's own two
+///   distinct identifiers - this project's own `expr_disqualifies` never
+///   distinguished a plain assignment target from a by-ref one for this
+///   purpose, so both report as the common, dominant `propertyAssign`
+///   case here too.
+/// - Superglobal *read* (`'access to superglobal variable'`) and *write*
+///   (`'assign to superglobal variable'`) share real PHPStan's own
+///   identical `superglobal` identifier but different description text -
+///   this project's own `expr_disqualifies` doesn't distinguish the two
+///   either, so this always reports the read wording.
+/// - `new`'s own three disqualifying shapes (a dynamic target, a
+///   genuinely unknown class, a real class with no declared constructor
+///   at all) all report uniformly as `new`/`"instantiation of unknown
+///   class"` - real PHPStan's own construction sites use varying
+///   description text per shape, but always the same `new` identifier;
+///   this project's own `resolve_new` doesn't itself distinguish which
+///   of the three specifically failed.
+pub(crate) fn collect_impure_points(
+    body: &[Stmt],
+    declaring_class: Option<&str>,
+    registry: &Registry,
+) -> Vec<ImpurePointOccurrence> {
+    let mut out = Vec::new();
+    for stmt in body {
+        collect_stmt_impure_points(stmt, declaring_class, registry, &mut out);
+    }
+    out
+}
+
+fn collect_stmt_impure_points(
+    stmt: &Stmt,
+    declaring_class: Option<&str>,
+    registry: &Registry,
+    out: &mut Vec<ImpurePointOccurrence>,
+) {
+    match &stmt.kind {
+        StmtKind::Echo(_) => out.push(ImpurePointOccurrence {
+            span: stmt.span,
+            identifier: "echo",
+            description: "echo",
+            certain: true,
+        }),
+        StmtKind::Global(_) => out.push(ImpurePointOccurrence {
+            span: stmt.span,
+            identifier: "global",
+            description: "global variable",
+            certain: true,
+        }),
+        StmtKind::StaticVar(_) => out.push(ImpurePointOccurrence {
+            span: stmt.span,
+            identifier: "static",
+            description: "static variable",
+            certain: true,
+        }),
+        StmtKind::InlineHtml(_) => out.push(ImpurePointOccurrence {
+            span: stmt.span,
+            identifier: "betweenPhpTags",
+            description: "output between PHP opening and closing tags",
+            certain: true,
+        }),
+        StmtKind::Expression(e) => collect_expr_impure_points(e, declaring_class, registry, out),
+        StmtKind::Return(Some(e)) => collect_expr_impure_points(e, declaring_class, registry, out),
+        StmtKind::If { cond, .. }
+        | StmtKind::While { cond, .. }
+        | StmtKind::DoWhile { cond, .. } => {
+            collect_expr_impure_points(cond, declaring_class, registry, out);
+        }
+        StmtKind::For {
+            init, cond, step, ..
+        } => {
+            for e in init.iter().chain(cond).chain(step) {
+                collect_expr_impure_points(e, declaring_class, registry, out);
+            }
+        }
+        StmtKind::Foreach {
+            subject,
+            key,
+            value,
+            ..
+        } => {
+            collect_expr_impure_points(subject, declaring_class, registry, out);
+            if let Some(k) = key {
+                collect_expr_impure_points(k, declaring_class, registry, out);
+            }
+            collect_expr_impure_points(value, declaring_class, registry, out);
+        }
+        StmtKind::Switch { subject, cases } => {
+            collect_expr_impure_points(subject, declaring_class, registry, out);
+            for c in cases {
+                if let Some(t) = &c.test {
+                    collect_expr_impure_points(t, declaring_class, registry, out);
+                }
+            }
+        }
+        StmtKind::GlobalConst(consts) => {
+            for c in consts {
+                collect_expr_impure_points(&c.value, declaring_class, registry, out);
+            }
+        }
+        _ => {}
+    }
+    for child in stmt_children(stmt) {
+        collect_stmt_impure_points(child, declaring_class, registry, out);
+    }
+}
+
+fn collect_expr_impure_points(
+    e: &Expr,
+    declaring_class: Option<&str>,
+    registry: &Registry,
+    out: &mut Vec<ImpurePointOccurrence>,
+) {
+    match &e.kind {
+        ExprKind::StaticAccess(_, _) => out.push(ImpurePointOccurrence {
+            span: e.span,
+            identifier: "staticPropertyAccess",
+            description: "static property access",
+            certain: true,
+        }),
+        ExprKind::Variable(name) if is_superglobal(name) => out.push(ImpurePointOccurrence {
+            span: e.span,
+            identifier: "superglobal",
+            description: "access to superglobal variable",
+            certain: true,
+        }),
+        ExprKind::Yield(..) => out.push(ImpurePointOccurrence {
+            span: e.span,
+            identifier: "yield",
+            description: "yield",
+            certain: true,
+        }),
+        ExprKind::YieldFrom(_) => out.push(ImpurePointOccurrence {
+            span: e.span,
+            identifier: "yieldFrom",
+            description: "yield from",
+            certain: true,
+        }),
+        ExprKind::Assign(lhs, rhs) | ExprKind::CompoundAssign(_, lhs, rhs) => {
+            if property_write_target(lhs) {
+                out.push(ImpurePointOccurrence {
+                    span: e.span,
+                    identifier: "propertyAssign",
+                    description: "property assignment",
+                    certain: true,
+                });
+            }
+            collect_expr_impure_points(lhs, declaring_class, registry, out);
+            collect_expr_impure_points(rhs, declaring_class, registry, out);
+        }
+        ExprKind::Call(callee, args) => {
+            if let ExprKind::Name(name) = &callee.kind {
+                let lname = name.trim_start_matches('\\').to_ascii_lowercase();
+                match lname.as_str() {
+                    "isset" | "empty" => {}
+                    "unset" => {
+                        for a in args {
+                            if property_write_target(&a.value) {
+                                out.push(ImpurePointOccurrence {
+                                    span: e.span,
+                                    identifier: "propertyUnset",
+                                    description: "property unset",
+                                    certain: true,
+                                });
+                            }
+                        }
+                    }
+                    "die" | "exit" => out.push(ImpurePointOccurrence {
+                        span: e.span,
+                        identifier: "exit",
+                        description: "exit",
+                        certain: true,
+                    }),
+                    "print" => out.push(ImpurePointOccurrence {
+                        span: e.span,
+                        identifier: "print",
+                        description: "print",
+                        certain: true,
+                    }),
+                    "eval" => out.push(ImpurePointOccurrence {
+                        span: e.span,
+                        identifier: "eval",
+                        description: "eval",
+                        certain: true,
+                    }),
+                    "include" | "include_once" | "require" | "require_once" => {
+                        out.push(ImpurePointOccurrence {
+                            span: e.span,
+                            identifier: "include",
+                            description: "include",
+                            certain: true,
+                        });
+                    }
+                    _ => {
+                        if registry.lookup_function(name).is_none() {
+                            out.push(ImpurePointOccurrence {
+                                span: e.span,
+                                identifier: "functionCall",
+                                description: "call to unknown function",
+                                certain: false,
+                            });
+                        }
+                    }
+                }
+            } else {
+                out.push(ImpurePointOccurrence {
+                    span: e.span,
+                    identifier: "functionCall",
+                    description: "call to unknown function",
+                    certain: false,
+                });
+            }
+            for a in args {
+                collect_expr_impure_points(&a.value, declaring_class, registry, out);
+            }
+        }
+        ExprKind::MethodCall(recv, name, args, _) => {
+            let resolved =
+                matches!(&recv.kind, ExprKind::Variable(v) if v == "this")
+                    && declaring_class.is_some_and(|class| {
+                        registry.lookup_method_with_owner(class, name).is_some_and(
+                            |(owner, sig)| is_non_overridable(registry, class, &owner, name, sig),
+                        )
+                    });
+            if !resolved {
+                out.push(ImpurePointOccurrence {
+                    span: e.span,
+                    identifier: "methodCall",
+                    description: "call to unknown method",
+                    certain: false,
+                });
+            }
+            collect_expr_impure_points(recv, declaring_class, registry, out);
+            for a in args {
+                collect_expr_impure_points(&a.value, declaring_class, registry, out);
+            }
+        }
+        ExprKind::StaticCall(class_name, name, args) => {
+            let resolved = declaring_class.is_some_and(|class| {
+                let target = if class_name.eq_ignore_ascii_case("parent") {
+                    registry.lookup_ancestor_method_with_owner(class, name)
+                } else if class_name.eq_ignore_ascii_case("self")
+                    || class_name.eq_ignore_ascii_case("static")
+                {
+                    registry.lookup_method_with_owner(class, name)
+                } else {
+                    None
+                };
+                target.is_some()
+            });
+            if !resolved {
+                out.push(ImpurePointOccurrence {
+                    span: e.span,
+                    identifier: "methodCall",
+                    description: "call to unknown method",
+                    certain: false,
+                });
+            }
+            for a in args {
+                collect_expr_impure_points(&a.value, declaring_class, registry, out);
+            }
+        }
+        ExprKind::New(callee, args) => {
+            let resolved = if let ExprKind::Name(name) = &callee.kind {
+                let target_class = match name.trim_start_matches('\\') {
+                    n if n.eq_ignore_ascii_case("self") || n.eq_ignore_ascii_case("static") => {
+                        declaring_class.map(str::to_string)
+                    }
+                    n => Some(n.to_string()),
+                };
+                target_class.is_some_and(|class| {
+                    registry
+                        .classes
+                        .get(&class)
+                        .is_some_and(|info| info.methods.contains_key("__construct"))
+                })
+            } else {
+                false
+            };
+            if !resolved {
+                out.push(ImpurePointOccurrence {
+                    span: e.span,
+                    identifier: "new",
+                    description: "instantiation of unknown class",
+                    certain: false,
+                });
+            }
+            for a in args {
+                collect_expr_impure_points(&a.value, declaring_class, registry, out);
+            }
+        }
+        // Every arm above already recurses into its own real children
+        // explicitly (matching `expr_disqualifies`'s identical structure,
+        // not just visually similar to it) - falling through to `expr_
+        // children` unconditionally after the match, the way `stmt_
+        // children` safely does in `collect_stmt_impure_points` just
+        // above, would double-visit (and so double-report) every one of
+        // those same children here, since `expr_children` returns a
+        // matched arm's own sub-expressions too, not just an unhandled
+        // arm's. Only reachable for anything *not* explicitly matched
+        // above (`BinaryOp`, `Ternary`, ...), exactly like `expr_
+        // disqualifies`'s own `_` arm.
+        _ => {
+            for child in expr_children(e) {
+                collect_expr_impure_points(child, declaring_class, registry, out);
+            }
+        }
+    }
 }

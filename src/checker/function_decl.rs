@@ -199,6 +199,7 @@ impl<'a> Checker<'a> {
             self.check_unknown_phpstan_tags_on(&label, f.doc_comment.as_deref(), f.name_span);
         }
         self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
+        self.check_purity_impure_points(f, sig, class_name.is_some(), &label);
         self.check_declared_param_callable_tags(f, &label);
         self.check_internal_param_and_return_types(f, class_name, &label);
         self.check_assert_tag_types(sig, f.span, &label);
