@@ -864,9 +864,19 @@ reads `extends`/`implements`/`uses`) plus `Registry::lookup_class`
 fix the underlying resolution bug, and a new `class.nameCase`/
 `interface.nameCase`/`trait.nameCase`/`enum.nameCase` diagnostic
 (`checker::resolve::check_class_name_case`) flags a differently-cased
-`extends`/`implements`/trait-`use` reference on a class/enum
-declaration - scoped to that slice of the ~15 MVP existence-check call
-sites, not all of them, a disclosed narrower cut. `ExistingClassesInPropertyHookTypehintsRule`'s
+reference. Phase 48.H widened its call sites from just a class/enum
+declaration's own `extends`/`implements`/trait-`use` to every native-
+syntax class-name reference: `new`, `instanceof`, a static method/
+property/constant access (`Foo::...`), and a `catch` clause - none of
+which needed new parser/registry plumbing (the raw, as-written text
+was already a bare AST string at each position). Still open, and
+genuinely bigger: every *PHPDoc-typed* position (a param/return/
+property hint, `@method`/`@mixin`/`@phpstan-type` tag target) - this
+project's own type-parsing pipeline collapses each reference straight
+into a resolved `Type` with no per-reference raw spelling retained
+anywhere, so extending case-checking there needs real plumbing through
+`types.rs`/`registry/function_sig.rs`, not just a new checker call
+site. `ExistingClassesInPropertyHookTypehintsRule`'s
 existence-checking half is done (Phase 43 unblocked it); its other
 sub-checks (a template type not referenced in a parameter, an
 unresolvable native type, a native union type pre-PHP-8.0) turned out
