@@ -9,7 +9,8 @@ use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
 
 use super::{
-    int_range_bounds, is_false_literal, is_non_falsy_string, is_true_literal, normalize_int_range,
+    int_range_bounds, is_canonical_int_key, is_false_literal, is_non_falsy_string, is_true_literal,
+    normalize_int_range,
 };
 
 impl<'a> Checker<'a> {
@@ -841,6 +842,78 @@ impl<'a> Checker<'a> {
                 // array-of-arrays itself - never eligible for the
                 // fixed-arity precise shape merge below.
                 let has_spread = args.iter().any(|a| a.spread);
+                // Phase 68 follow-up: merging a known shape with one or
+                // more plain, unproven arrays (e.g. `array_merge($defaults,
+                // $options)`) used to fall all the way through to the
+                // generic branch below, discarding every known field name.
+                // Real PHPStan's own full-fidelity mixed-input algorithm
+                // (`vendor/phpstan-src/src/Type/Php/
+                // ArrayMergeFunctionDynamicReturnTypeExtension.php`) needs
+                // a `HasOffsetType`-equivalent accessory layer this
+                // project doesn't have (see ROADMAP's own "long tail"
+                // bullet) - deliberately not attempted here. Instead,
+                // cover the single most common corpus idiom (a
+                // config/options-array merge) by staying eligible only
+                // when no argument anywhere could contribute a canonical
+                // int key - sidesteps real PHP's int-key-renumbering
+                // semantics entirely, which is the actual reason real
+                // PHPStan's own algorithm is so large.
+                let all_string_keyed_or_shape = !has_spread
+                    && arg_types.iter().any(|t| matches!(t, Type::ArrayShape(_)))
+                    && arg_types.iter().all(|t| match t {
+                        Type::ArrayShape(fields) => fields
+                            .iter()
+                            .all(|(k, _, _)| k == "..." || !is_canonical_int_key(k)),
+                        // A plain array is only eligible when its own key
+                        // type is definitely `string` - an `int`/
+                        // `unknown_array_key()`-keyed plain array could
+                        // still contribute int keys that need real PHP's
+                        // renumbering semantics, which this restricted
+                        // path deliberately doesn't attempt.
+                        _ => Self::array_key_type(t).is_some_and(|k| matches!(k, Type::String)),
+                    });
+                if all_string_keyed_or_shape {
+                    let mut fields: Vec<(String, Type, bool)> = Vec::new();
+                    let mut next_index: i64 = 0; // unused - no int keys reach this path
+                    for arg_ty in &arg_types {
+                        match arg_ty {
+                            Type::ArrayShape(inner) => {
+                                for (k, t, opt) in inner {
+                                    if k != "..." {
+                                        Self::merge_shape_field(
+                                            &mut fields,
+                                            &mut next_index,
+                                            k,
+                                            t.clone(),
+                                            *opt,
+                                        );
+                                    }
+                                }
+                            }
+                            _ => {
+                                // A plain string-keyed array: every
+                                // already-known field might be overwritten
+                                // by one of its (unknown) keys, or might
+                                // not - broaden the type, keep it present
+                                // (the earlier shape already guaranteed
+                                // presence; the plain array can only
+                                // change the *value*, never remove a key
+                                // array_merge never touches).
+                                let elem_ty =
+                                    Self::array_element_type(arg_ty).unwrap_or(Type::Mixed);
+                                for (_, t, _) in fields.iter_mut() {
+                                    *t = union_types(t.clone(), elem_ty.clone());
+                                }
+                                // Mark unsealed - the plain array may also
+                                // contribute keys this shape never had.
+                                if !fields.iter().any(|(k, _, _)| k == "...") {
+                                    fields.push(("...".to_string(), Type::Mixed, false));
+                                }
+                            }
+                        }
+                    }
+                    return Type::ArrayShape(fields);
+                }
                 if !has_spread && arg_types.iter().all(|t| matches!(t, Type::ArrayShape(_))) {
                     let mut fields: Vec<(String, Type, bool)> = Vec::new();
                     let mut next_index: i64 = 0;
@@ -2000,6 +2073,47 @@ fn narrow_array_element_type_to(registry: &Registry, ty: Type, target: &Type) ->
 fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
     match ty {
         Type::Array(key, elem) => Type::Array(key, Box::new(narrow_type_excluding_falsy(&elem))),
+        // A fixed-position `ArrayShape` input needs the identical
+        // narrowing applied per field, not just per homogeneous element
+        // type - real PHP's no-callback filtering can drop a specific
+        // field entirely (not just narrow its type in place) when it's
+        // provably always-falsy, and can no longer *guarantee* a field's
+        // presence when it's merely *possibly* falsy. Real corpus false
+        // positive this fixes: `array_filter([$sourceId, $copyId])`
+        // (`$copyId: ?GroupId`) passed to a `list<GroupId>`-typed
+        // parameter - field `1`'s `null` member drops it from the shape
+        // when null, so it becomes optional rather than staying
+        // unconditionally required as `GroupId|null`.
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .filter_map(|(key, field_ty, optional)| {
+                    // The unsealed-tail sentinel isn't a real field - its
+                    // own type is always `Mixed` (never falsy-provable) -
+                    // leave it untouched.
+                    if key == "..." {
+                        return Some((key, field_ty, optional));
+                    }
+                    let narrowed = narrow_type_excluding_falsy(&field_ty);
+                    if narrowed == Type::Never {
+                        // Provably always-falsy (a bare `null`, `false`,
+                        // literal `0`/`''`/`'0'`) - array_filter always
+                        // drops it, so the field is genuinely gone.
+                        None
+                    } else {
+                        // Anything narrow_type_excluding_falsy actually
+                        // changed *could* have been falsy at runtime, so
+                        // its presence in the filtered result is no
+                        // longer guaranteed - the field becomes optional
+                        // (or stays optional, if it already was), same as
+                        // real PHP's own "may or may not survive"
+                        // filtering.
+                        let could_be_falsy = narrowed != field_ty;
+                        Some((key, narrowed, optional || could_be_falsy))
+                    }
+                })
+                .collect(),
+        ),
         other => other,
     }
 }

@@ -1,4 +1,6 @@
-use crate::checker::narrowing::accessory_range::upgrade_array_to_non_empty;
+use crate::checker::narrowing::accessory_range::{
+    upgrade_array_to_non_empty, upgrade_string_with_accessory,
+};
 use crate::checker::union_types;
 use crate::types::{AccessoryKind, Type};
 
@@ -143,11 +145,15 @@ pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {
         Type::Null | Type::False | Type::IntLiteral(0) => Type::Never,
         Type::StringLiteral(s) if s.is_empty() || s == "0" => Type::Never,
         Type::ArrayShape(fields) if fields.is_empty() => Type::Never,
-        Type::String => Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::NonFalsyString),
-        ]),
         Type::Array(_, _) => upgrade_array_to_non_empty(original),
-        other => other.clone(),
+        // Delegates to the same general-purpose "add one more accessory
+        // fact onto a string, bare or already-refined" helper the
+        // `is_numeric()` upgrade already uses - a bare `String` gets the
+        // identical `Intersection([String, NonFalsyString])` the old
+        // hand-rolled arm built directly, but an already-refined value
+        // (e.g. a known `non-empty-string`) now also gets upgraded to
+        // the strictly narrower `non-falsy-string`, instead of falling
+        // through unchanged.
+        other => upgrade_string_with_accessory(other, AccessoryKind::NonFalsyString),
     }
 }

@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::checker::{
     Checker, Locals, is_unsealed_shape, narrowing_key, purge_stale_narrowing_for, union_types,
 };
-use crate::types::{AccessoryKind, Type};
+use crate::types::{AccessoryKind, Type, is_subtype};
 
 impl<'a> Checker<'a> {
     /// The actual variable-binding side effect of an assignment - lives in
@@ -231,76 +231,88 @@ impl<'a> Checker<'a> {
             // then bind *that* back onto `base` - which lands in this
             // same arm again if `base` itself is another `Index`,
             // correctly handling any nesting depth.
-            ExprKind::Index(base, idx) => match &base.kind {
-                ExprKind::Variable(name) => {
-                    // A write through an as-yet-undefined variable
-                    // (`$x[] = 1;`/`$x['key'] = 1;` as `$x`'s very first
-                    // use) is real PHP's own array auto-vivification -
-                    // silently creates a fresh `[]` and writes into it,
-                    // no warning at any error-reporting level (confirmed
-                    // directly via `php -d error_reporting=E_ALL -r`).
-                    // Previously bailed out here entirely, leaving `$x`
-                    // permanently undefined for every later read - a
-                    // real corpus `variable.undefined` false positive.
-                    // Starting `write_index_into` from a fresh empty
-                    // `ArrayShape` reuses its own existing "a real append
-                    // onto a provably list-like container (an empty
-                    // shape included) stays a real, now-non-empty list"
-                    // rule, so `$x[] = 1;` alone correctly infers
-                    // `non-empty-list<int>`, not just `array`.
-                    //
-                    // A superglobal (`$_SERVER['PHP_SELF'] = ...;`, a
-                    // real, common test-setup idiom) must NOT go through
-                    // this same fresh-empty-shape path even though it's
-                    // also typically absent from `locals` - unlike an
-                    // ordinary local, a superglobal already has a real,
-                    // much wider shape PHP itself populates before the
-                    // script ever runs, so treating this write as if it
-                    // were the array's *first* key would wrongly narrow
-                    // it down to only the key(s) a test happens to write
-                    // locally - a real corpus regression this fix's own
-                    // first version introduced, caught via corpus diff
-                    // before shipping (`tests/Unit/Core/
-                    // PageFilterHelperTest.php` writing `$_SERVER[
-                    // 'SCRIPT_FILENAME']` then separately reading the
-                    // real, pre-existing `$_SERVER['PHP_SELF']` - flagged
-                    // as accessing a key the freshly-narrowed shape could
-                    // never have). `superglobal_default_type` already
-                    // exists for exactly this "read before any real
-                    // assignment appears in locals" case - reused
-                    // verbatim rather than re-deriving it.
-                    // Phase 17 follow-up: was `name` genuinely undefined
-                    // before this write? A superglobal never really is
-                    // (PHP populates it before the script runs, even
-                    // though it's typically absent from `locals` too) -
-                    // only a real local's own first `$x[...] = ...`
-                    // write is this variable's true declaration site.
-                    let was_defined = locals.contains_key(name);
-                    let current = locals.get(name).cloned().unwrap_or_else(|| {
-                        if is_superglobal(name) {
-                            superglobal_default_type(name)
-                        } else {
-                            Type::ArrayShape(vec![])
-                        }
-                    });
-                    if let Some(new_ty) = write_index_into(&current, idx.as_deref(), ty) {
-                        if was_defined || is_superglobal(name) {
-                            locals.insert(name.clone(), new_ty);
-                        } else {
-                            locals.declare(name.clone(), new_ty, base.span);
+            ExprKind::Index(base, idx) => {
+                // Computed once here (not inside `write_index_into`
+                // itself, a free function with no access to `self`/
+                // `locals`) so a dynamic key already narrowed by a
+                // preceding `is_int()`/`is_string()`-family guard (e.g.
+                // `if (is_int($row['id'])) { $arr[$row['id']] = ... }`)
+                // can pick a definite `int`/`string` key type instead of
+                // always falling back to `unknown_array_key()`.
+                let idx_ty = idx.as_deref().map(|i| self.infer_expr(i, locals));
+                match &base.kind {
+                    ExprKind::Variable(name) => {
+                        // A write through an as-yet-undefined variable
+                        // (`$x[] = 1;`/`$x['key'] = 1;` as `$x`'s very first
+                        // use) is real PHP's own array auto-vivification -
+                        // silently creates a fresh `[]` and writes into it,
+                        // no warning at any error-reporting level (confirmed
+                        // directly via `php -d error_reporting=E_ALL -r`).
+                        // Previously bailed out here entirely, leaving `$x`
+                        // permanently undefined for every later read - a
+                        // real corpus `variable.undefined` false positive.
+                        // Starting `write_index_into` from a fresh empty
+                        // `ArrayShape` reuses its own existing "a real append
+                        // onto a provably list-like container (an empty
+                        // shape included) stays a real, now-non-empty list"
+                        // rule, so `$x[] = 1;` alone correctly infers
+                        // `non-empty-list<int>`, not just `array`.
+                        //
+                        // A superglobal (`$_SERVER['PHP_SELF'] = ...;`, a
+                        // real, common test-setup idiom) must NOT go through
+                        // this same fresh-empty-shape path even though it's
+                        // also typically absent from `locals` - unlike an
+                        // ordinary local, a superglobal already has a real,
+                        // much wider shape PHP itself populates before the
+                        // script ever runs, so treating this write as if it
+                        // were the array's *first* key would wrongly narrow
+                        // it down to only the key(s) a test happens to write
+                        // locally - a real corpus regression this fix's own
+                        // first version introduced, caught via corpus diff
+                        // before shipping (`tests/Unit/Core/
+                        // PageFilterHelperTest.php` writing `$_SERVER[
+                        // 'SCRIPT_FILENAME']` then separately reading the
+                        // real, pre-existing `$_SERVER['PHP_SELF']` - flagged
+                        // as accessing a key the freshly-narrowed shape could
+                        // never have). `superglobal_default_type` already
+                        // exists for exactly this "read before any real
+                        // assignment appears in locals" case - reused
+                        // verbatim rather than re-deriving it.
+                        // Phase 17 follow-up: was `name` genuinely undefined
+                        // before this write? A superglobal never really is
+                        // (PHP populates it before the script runs, even
+                        // though it's typically absent from `locals` too) -
+                        // only a real local's own first `$x[...] = ...`
+                        // write is this variable's true declaration site.
+                        let was_defined = locals.contains_key(name);
+                        let current = locals.get(name).cloned().unwrap_or_else(|| {
+                            if is_superglobal(name) {
+                                superglobal_default_type(name)
+                            } else {
+                                Type::ArrayShape(vec![])
+                            }
+                        });
+                        if let Some(new_ty) =
+                            write_index_into(&current, idx.as_deref(), idx_ty.as_ref(), ty)
+                        {
+                            if was_defined || is_superglobal(name) {
+                                locals.insert(name.clone(), new_ty);
+                            } else {
+                                locals.declare(name.clone(), new_ty, base.span);
+                            }
                         }
                     }
-                }
-                ExprKind::Index(..) => {
-                    let current_base_ty = self.infer_expr(base, locals);
-                    if let Some(new_base_ty) =
-                        write_index_into(&current_base_ty, idx.as_deref(), ty)
-                    {
-                        self.bind_assignment_target(base, new_base_ty, locals);
+                    ExprKind::Index(..) => {
+                        let current_base_ty = self.infer_expr(base, locals);
+                        if let Some(new_base_ty) =
+                            write_index_into(&current_base_ty, idx.as_deref(), idx_ty.as_ref(), ty)
+                        {
+                            self.bind_assignment_target(base, new_base_ty, locals);
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
@@ -443,7 +455,30 @@ pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
 /// `container_ty` doesn't carry enough shape information to update
 /// precisely - left alone, matching this project's usual "don't guess"
 /// scope.
-fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> Option<Type> {
+/// Maps `idx_ty` (a dynamic key expression's own already-narrowed
+/// inferred type) to a definite array key type for a write - `Type::Int`/
+/// `Type::String` when `idx_ty` is confidently one or the other (an
+/// `is_int()`/`is_string()`-family guard already narrowed it, the same
+/// benefit an ordinary variable read already gets via `infer_expr`),
+/// `unknown_array_key()` otherwise - today's existing default for
+/// anything else (`Mixed`, a float/bool PHP would coerce, or a union
+/// straddling both kinds), never a wrong guess.
+fn dynamic_write_key_type(idx_ty: &Type) -> Type {
+    if is_subtype(idx_ty, &Type::Int) {
+        Type::Int
+    } else if is_subtype(idx_ty, &Type::String) {
+        Type::String
+    } else {
+        Type::unknown_array_key()
+    }
+}
+
+fn write_index_into(
+    container_ty: &Type,
+    idx: Option<&Expr>,
+    idx_ty: Option<&Type>,
+    value_ty: Type,
+) -> Option<Type> {
     match container_ty {
         Type::ArrayShape(fields) => match idx.and_then(literal_string_key) {
             Some(key) => {
@@ -475,10 +510,16 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
                         Type::Accessory(AccessoryKind::NonEmptyArray),
                     ]))
                 } else {
-                    Some(Type::Array(
-                        Box::new(Type::unknown_array_key()),
-                        Box::new(widened),
-                    ))
+                    // A genuinely dynamic (non-literal) key - `idx` being
+                    // `Some` here (a bare append onto a non-list-like
+                    // shape, `idx.is_none()`, still falls back to
+                    // `unknown_array_key()` below, since there's no key
+                    // expression to have narrowed in the first place).
+                    let key_ty = idx
+                        .and(idx_ty)
+                        .map(dynamic_write_key_type)
+                        .unwrap_or_else(Type::unknown_array_key);
+                    Some(Type::Array(Box::new(key_ty), Box::new(widened)))
                 }
             }
         },
@@ -494,14 +535,26 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
         // frozen at its *initial* shape and producing a real false
         // positive once that initial shape was read back with a field
         // only ever added by the untracked nested write.
-        // Phase 50: keeps the container's own existing key type (widening
-        // it isn't attempted here - the write's own key isn't known to
-        // be a literal at this call site, see the doc comment above)
-        // rather than resetting to the fully-unknown default.
-        Type::Array(key, inner) => Some(Type::Array(
-            key.clone(),
-            Box::new(union_types(value_ty, (**inner).clone())),
-        )),
+        // Phase 50 (+ follow-up): the container's own existing key type is
+        // unioned with a confidently-narrowed dynamic key's own type
+        // (`Type::Int`/`Type::String`, from a preceding `is_int()`/
+        // `is_string()`-family guard on the key expression) rather than
+        // kept unconditionally unchanged - a sound generalization, not a
+        // behavior regression: `union_types(existing_key,
+        // unknown_array_key())` collapses right back to
+        // `unknown_array_key()` (a no-op) whenever there's no narrowed
+        // key type to contribute, which is every case this arm used to
+        // handle before this follow-up.
+        Type::Array(key, inner) => {
+            let key_ty = match idx.and(idx_ty).map(dynamic_write_key_type) {
+                Some(new_key_ty) => union_types((**key).clone(), new_key_ty),
+                None => (**key).clone(),
+            };
+            Some(Type::Array(
+                Box::new(key_ty),
+                Box::new(union_types(value_ty, (**inner).clone())),
+            ))
+        }
         // Phase 12 Finding E: a real, pre-existing gap found by making
         // `check_shape_key_access` `Union`-aware and re-checking the real
         // corpus - a container whose type is a `Union` (e.g. two
@@ -522,7 +575,7 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
         Type::Union(members) => {
             let mut updated = Vec::with_capacity(members.len());
             for m in members {
-                updated.push(write_index_into(m, idx, value_ty.clone())?);
+                updated.push(write_index_into(m, idx, idx_ty, value_ty.clone())?);
             }
             Some(
                 updated
@@ -545,17 +598,18 @@ fn write_index_into(container_ty: &Type, idx: Option<&Expr>, value_ty: Type) -> 
         Type::Intersection(members) => {
             let inner = members.iter().find_map(Checker::array_element_type)?;
             let widened = union_types(value_ty, inner);
+            let key_ty = idx
+                .and(idx_ty)
+                .map(dynamic_write_key_type)
+                .unwrap_or_else(Type::unknown_array_key);
             if idx.is_none() && members.contains(&Type::Accessory(AccessoryKind::ArrayList)) {
                 Some(Type::Intersection(vec![
-                    Type::Array(Box::new(Type::unknown_array_key()), Box::new(widened)),
+                    Type::Array(Box::new(key_ty), Box::new(widened)),
                     Type::Accessory(AccessoryKind::ArrayList),
                     Type::Accessory(AccessoryKind::NonEmptyArray),
                 ]))
             } else {
-                Some(Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(widened),
-                ))
+                Some(Type::Array(Box::new(key_ty), Box::new(widened)))
             }
         }
         _ => None,

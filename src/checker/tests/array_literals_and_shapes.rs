@@ -1047,3 +1047,94 @@ fn a_shape_with_a_key_needing_quotes_displays_it_quoted() {
         "got: {d:?}"
     );
 }
+
+// A dynamic-key array write's own key type is now narrowed by a
+// preceding `is_int()`/`is_string()`-family guard on the key expression
+// itself, the same benefit an ordinary variable read already gets via
+// `infer_expr` - real corpus find (Piwigo's own
+// CategoryAvailableListController.php:283-284): `if (is_int($row['id']))
+// { $arr[$row['id']] = ...; }` used to infer `$arr`'s key type from
+// `$row['id']`'s *unnarrowed* type, not `int`.
+#[test]
+fn a_dynamic_key_write_narrowed_by_a_preceding_is_int_guard_infers_an_int_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $row */
+            function f(array $row): void {
+                $arr = [];
+                if (is_int($row['id'])) {
+                    $arr[$row['id']] = 'x';
+                    assertType('array<int, string>', $arr);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_dynamic_key_write_narrowed_by_a_preceding_is_string_guard_infers_a_string_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $row */
+            function f(array $row): void {
+                $arr = [];
+                if (is_string($row['id'])) {
+                    $arr[$row['id']] = 'x';
+                    assertType('array<string, string>', $arr);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative control: without a narrowing guard, a dynamic-key write still
+// falls back to the unknown-int-or-string key default, proving the fix
+// above is additive (only narrows when the key expression's own type is
+// already confidently known), not a blanket assumption.
+#[test]
+fn an_unguarded_dynamic_key_write_still_infers_an_unknown_key_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $row */
+            function f(array $row): void {
+                $arr = [];
+                $arr[$row['id']] = 'x';
+                assertType('array<int|string, string>', $arr);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Two successive narrowed dynamic-key writes (once with a confidently
+// `int` key, once with a confidently `string` key) union into
+// `array<int|string, V>` on the already-widened `Type::Array` path -
+// confirms the "union in, don't just keep unchanged" generalization
+// doesn't regress the already-tested nested-write behavior.
+#[test]
+fn successive_narrowed_dynamic_key_writes_union_the_container_s_key_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $a
+             *  @param array<string, mixed> $b
+             */
+            function f(array $a, array $b): void {
+                $arr = [];
+                if (is_int($a['id'])) {
+                    $arr[$a['id']] = 'x';
+                }
+                if (is_string($b['id'])) {
+                    $arr[$b['id']] = 'y';
+                }
+                assertType('array<int|string, string>', $arr);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

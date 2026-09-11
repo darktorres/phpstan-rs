@@ -1248,6 +1248,50 @@ fn array_filter_with_no_callback_drops_every_falsy_element() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive this fixes (Piwigo's own
+// tests/Integration/GroupServiceTest.php:363): `array_filter([$sourceId,
+// $copyId])` where `$copyId` is `?GroupId` used to keep field `1` typed
+// `GroupId|null` and unconditionally required, rejecting a
+// `list<GroupId>`-typed sink even though real PHP's no-callback
+// filtering really can (and does, when `$copyId` is null) drop that key
+// entirely.
+#[test]
+fn array_filter_with_no_callback_on_a_shape_drops_a_provably_null_field() {
+    let d = diagnostics_for(
+        r#"<?php
+            class GroupId {}
+            /** @param list<GroupId> $ids */
+            function sink(array $ids): void {}
+            function f(GroupId $sourceId, ?GroupId $copyId): void {
+                sink(array_filter([$sourceId, $copyId]));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A field that's provably *always* falsy (a literal `null` in the
+// shape, not merely possibly-null) must be dropped from the shape
+// entirely, not just marked optional.
+#[test]
+fn array_filter_with_no_callback_on_a_shape_drops_an_always_falsy_field_entirely() {
+    let d = diagnostics_for(
+        r#"<?php
+            class GroupId {}
+            /** @param array{0: GroupId} $ids */
+            function sink(array $ids): void {}
+            function f(GroupId $sourceId): void {
+                // Position 1 is a literal `null` - always falsy, so
+                // array_filter's own result can never carry key 1 at
+                // all, matching the exact `array{0: GroupId}` shape
+                // `sink()` requires (not `array{0: GroupId, 1?: mixed}`).
+                sink(array_filter([$sourceId, null]));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn array_slice_and_array_reverse_preserve_list_ness_only_with_default_preserve_keys() {
     let d = diagnostics_for(
@@ -1375,6 +1419,67 @@ fn array_merge_of_two_known_shapes_produces_a_precise_merged_shape() {
                 public function __construct(array $x) {
                     $this->opts = array_merge($this->opts, $x);
                 }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 68 follow-up: merging a known shape with a plain, string-keyed
+// array (e.g. `array_merge($defaults, $options)`) now stays field-aware
+// instead of degrading straight to a generic array - every known field
+// name is kept, broadened by the plain array's own element type, and the
+// result is marked unsealed since the plain array may also contribute
+// unknown keys of its own.
+#[test]
+fn array_merge_of_a_known_shape_and_a_plain_string_keyed_array_keeps_known_field_names() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{a: int} $defaults
+             *  @param array<string, string> $options
+             */
+            function f(array $defaults, array $options): void {
+                assertType('array{a: int|string, ...}', array_merge($defaults, $options));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative/no-regression case: a shape carrying a canonical int key
+// never reaches the new field-aware path (int-key renumbering isn't
+// attempted here) - still falls back to today's existing generic
+// `array<int|string, V>` behavior, unchanged.
+#[test]
+fn array_merge_of_an_int_keyed_shape_and_a_plain_array_is_unaffected() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{0: int, a: string} $shape
+             *  @param array<string, string> $options
+             */
+            function f(array $shape, array $options): void {
+                assertType('array<int|string, int|string>', array_merge($shape, $options));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A plain array whose own key type isn't confidently `string` (here,
+// unknown/int-or-string) also stays outside the new path, for the same
+// int-key-renumbering reason.
+#[test]
+fn array_merge_of_a_shape_and_a_plain_array_with_an_unknown_key_type_is_unaffected() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{a: int} $shape
+             *  @param array<int|string, string> $options
+             */
+            function f(array $shape, array $options): void {
+                assertType('array<int|string, int|string>', array_merge($shape, $options));
             }
         "#,
     );

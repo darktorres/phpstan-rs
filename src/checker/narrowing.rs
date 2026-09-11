@@ -29,6 +29,43 @@ pub(crate) use predicates::{
 use type_ops::narrow_instanceof_true;
 pub(crate) use type_ops::{narrow_type_excluding, narrow_type_to};
 
+/// `count($x)`'s own operand-order detection for the count-comparison
+/// narrowing below - same shape as `int_comparison_operands`, but keyed
+/// on "is this side a single-argument `count(...)` call" rather than
+/// `narrowing_key` (a bare `count(...)` call isn't itself a narrowable
+/// key). Returns the call's own argument and whether `count(...)` was
+/// written on the left (`count($x) > 0`, the already-handled form) or
+/// the right (`0 < count($x)`, previously unhandled).
+fn count_call_operand<'e>(l: &'e Expr, r: &'e Expr) -> Option<(&'e Expr, bool)> {
+    fn as_count_arg(e: &Expr) -> Option<&Expr> {
+        if let ExprKind::Call(callee, args) = &e.kind
+            && let ExprKind::Name(name) = &callee.kind
+            && name.trim_start_matches('\\') == "count"
+            && let [single_arg] = args.as_slice()
+        {
+            Some(&single_arg.value)
+        } else {
+            None
+        }
+    }
+    as_count_arg(l)
+        .map(|a| (a, true))
+        .or_else(|| as_count_arg(r).map(|a| (a, false)))
+}
+
+/// Flips a comparison operator to the operand-swapped equivalent - `0 <
+/// count($x)` narrows the same way `count($x) > 0` already does, once
+/// the operator itself is mirrored to match.
+fn mirror_comparison(op: &BinOp) -> BinOp {
+    match op {
+        BinOp::Lt => BinOp::Gt,
+        BinOp::Gt => BinOp::Lt,
+        BinOp::LtEq => BinOp::GtEq,
+        BinOp::GtEq => BinOp::LtEq,
+        other => other.clone(),
+    }
+}
+
 impl<'a> Checker<'a> {
     /// Narrows `locals` in place based on `cond` being true (`branch_true`)
     /// or false, along one branch of an `if`/`while`. Only handles the
@@ -165,15 +202,18 @@ impl<'a> Checker<'a> {
                 if is_eq || is_neq {
                     let matches_when_true = if is_eq { branch_true } else { !branch_true };
                     self.apply_equality_narrowing(l, r, locals, matches_when_true);
-                } else if let ExprKind::Call(callee, args) = &l.kind
-                    && let ExprKind::Name(name) = &callee.kind
-                    && name.trim_start_matches('\\') == "count"
-                    && let [single_arg] = args.as_slice()
-                    && let Some(key) = narrowing_key(&single_arg.value)
-                    && let ExprKind::Literal(Literal::Int(n)) = &r.kind
+                } else if let Some((count_arg, count_on_left)) = count_call_operand(l, r)
+                    && let Some(key) = narrowing_key(count_arg)
+                    && let bound_expr = if count_on_left { r } else { l }
+                    && let effective_op = if count_on_left {
+                        op.clone()
+                    } else {
+                        mirror_comparison(op)
+                    }
+                    && let ExprKind::Literal(Literal::Int(n)) = &bound_expr.kind
                     && ((branch_true
-                        && ((matches!(op, BinOp::Gt) && *n == 0)
-                            || (matches!(op, BinOp::GtEq) && *n == 1)))
+                        && ((matches!(effective_op, BinOp::Gt) && *n == 0)
+                            || (matches!(effective_op, BinOp::GtEq) && *n == 1)))
                         // Real corpus find (Piwigo's own `ImageDerivativeController::
                         // parseCustomParams`): `if (count($x) < 1) { $this
                         // ->ierror(...); }` (a real, `never`-typed early-
@@ -182,18 +222,20 @@ impl<'a> Checker<'a> {
                         // as the *false* branch of the mirrored comparison
                         // (`count($x) < 1` false, or `count($x) <= 0`
                         // false, both mean `count($x) >= 1`) - the
-                        // reversed-operand form (`1 > count($x)`) still
-                        // isn't handled, the identical scope trim the
-                        // `Gt`/`GtEq` case above already discloses.
+                        // reversed-operand form (`1 > count($x)`) is now
+                        // handled too, via `count_call_operand`/
+                        // `mirror_comparison` above.
                         || (!branch_true
-                            && ((matches!(op, BinOp::Lt) && *n == 1)
-                                || (matches!(op, BinOp::LtEq) && *n == 0))))
+                            && ((matches!(effective_op, BinOp::Lt) && *n == 1)
+                                || (matches!(effective_op, BinOp::LtEq) && *n == 0))))
                 {
-                    // Phase 14: `count($x) > 0`/`count($x) >= 1` proves
-                    // `$x` non-empty - scoped to exactly this shape with
-                    // `count(...)` on the left (the verified real idiom);
-                    // the reversed form (`0 < count($x)`) isn't handled.
-                    let current = self.current_narrowed_type(&single_arg.value, &key, locals);
+                    // Phase 14 (+ follow-up): `count($x) > 0`/`count($x) >=
+                    // 1` proves `$x` non-empty - now handles both operand
+                    // orders (`count($x) > 0` and `0 < count($x)`), via
+                    // `count_call_operand`'s own left/right detection and
+                    // `mirror_comparison` canonicalizing the operator back
+                    // to the `count(...)`-on-the-left shape below.
+                    let current = self.current_narrowed_type(count_arg, &key, locals);
                     locals.insert(key, upgrade_array_to_non_empty(&current));
                 } else if matches!(op, BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq)
                     && let Some((keyed_expr, bound_expr, keyed_on_left)) =

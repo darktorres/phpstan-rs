@@ -375,6 +375,47 @@ fn not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// A redundant nested `!empty($x)` guard on an already-`non-empty-string`
+// value must still upgrade it to the strictly narrower `non-falsy-string`
+// (excludes the literal `"0"` too), same as the bare-string case above -
+// mirrors `is_numeric_upgrades_an_already_non_empty_string_to_numeric_
+// string_too`'s own "stack onto an already-refined string" shape.
+#[test]
+fn not_empty_upgrades_an_already_non_empty_string_to_non_falsy_string_too() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            /** @param non-empty-string $x */
+            function f($x): void {
+                if (!empty($x)) {
+                    sink($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative control: without the redundant guard, a plain `non-empty-string`
+// must still be rejected by a `non-falsy-string`-typed sink - proves the
+// fix above is additive (only narrows inside the guard), not a blanket
+// relaxation of `non-empty-string` into `non-falsy-string` everywhere.
+#[test]
+fn a_non_empty_string_without_an_empty_guard_is_still_rejected_by_a_non_falsy_string_sink() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-falsy-string $x */
+            function sink($x): void {}
+            /** @param non-empty-string $x */
+            function f($x): void {
+                sink($x);
+            }
+        "#,
+    );
+    assert!(!d.is_empty(), "expected a diagnostic, got none");
+}
+
 #[test]
 fn not_empty_on_an_array_narrows_to_non_empty_array() {
     let d = diagnostics_for(
@@ -432,6 +473,56 @@ fn count_less_than_one_in_a_terminating_branch_narrows_to_non_empty_array() {
             }
             function g(array $x): void {
                 if (count($x) <= 0) {
+                    bail();
+                }
+                sink($x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Reversed operand order: `0 < count($x)`/`1 <= count($x)` prove the
+// identical fact `count($x) > 0`/`count($x) >= 1` already do.
+#[test]
+fn reversed_count_comparison_narrows_to_non_empty_array() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function f(array $x): void {
+                if (0 < count($x)) {
+                    sink($x);
+                }
+            }
+            function g(array $x): void {
+                if (1 <= count($x)) {
+                    sink($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Reversed operand order for the terminating-branch mirror too: `1 >
+// count($x)`/`0 >= count($x)` prove the identical fact `count($x) < 1`/
+// `count($x) <= 0` already do.
+#[test]
+fn reversed_count_comparison_in_a_terminating_branch_narrows_to_non_empty_array() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function bail(): never { throw new \Exception(); }
+            function f(array $x): void {
+                if (1 > count($x)) {
+                    bail();
+                }
+                sink($x);
+            }
+            function g(array $x): void {
+                if (0 >= count($x)) {
                     bail();
                 }
                 sink($x);
