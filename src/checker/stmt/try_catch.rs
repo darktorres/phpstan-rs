@@ -97,7 +97,7 @@ impl<'a> Checker<'a> {
             // real, unconditional PHP fatal error at
             // declaration time otherwise ("Cannot catch X
             // because it does not implement Throwable").
-            for t in &c.types {
+            for (i, t) in c.types.iter().enumerate() {
                 if let Type::Object(class, _) = self.resolve_name_expr(t) {
                     // Phase 48: `CaughtExceptionExistenceRule`'s own
                     // existence half, checked first - a typo'd/
@@ -137,6 +137,12 @@ impl<'a> Checker<'a> {
                                 "catch.notThrowable",
                             );
                         }
+                        // Phase 48.H: `class.nameCase` - `t` is the raw,
+                        // as-written text; `types_spans` carries one span
+                        // per `types` entry, same index (`FunctionDecl::
+                        // return_type_span`'s own precedent).
+                        let span = c.types_spans.get(i).copied().unwrap_or(c.span);
+                        self.check_class_name_case(label, t, span);
                         self.check_internal_catch(&class, c.span, label);
                     }
                 }

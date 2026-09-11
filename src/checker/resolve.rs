@@ -372,18 +372,28 @@ impl<'a> Checker<'a> {
         ) || self.registry.lookup_class(name).is_some()
     }
 
-    /// Phase 48.2: `ClassCaseSensitivityCheck`'s equivalent, scoped to a
-    /// class/enum declaration's own `extends`/`implements`/trait-`use`
-    /// references (the historically highest-signal reference kinds, and
-    /// the ones that already carry per-item spans - `ClassDecl::extends_
-    /// spans`/`implements_spans`/`uses_spans` - for a precise report
-    /// location) rather than all ~15 MVP existence-check call sites -
-    /// a deliberate, disclosed narrowing to keep this addition self-
-    /// contained, matching this project's own established precedent of
-    /// shipping a real, correct subset rather than a half-built full
-    /// sweep. Skips a `use`-imported reference (real PHPStan's own
-    /// default `checkImportedClassNameCase: false`) and a built-in stub
-    /// class (`checkInternalClassCaseSensitivity: false`) - both
+    /// Phase 48.2/37/48.H: `ClassCaseSensitivityCheck`'s equivalent.
+    /// Started scoped to a class/enum declaration's own `extends`/
+    /// `implements`/trait-`use` references (Phase 48.2 - the ones that
+    /// already carried a per-item span, `ClassDecl::extends_spans`/
+    /// `implements_spans`/`uses_spans`, at the time), gained an attribute-
+    /// reference call site soon after (Phase 37), and Phase 48.H widened
+    /// it further to every *native-syntax* class-name reference: `new`,
+    /// `instanceof`, a static method call/property/constant access
+    /// (`Foo::...`), and a `catch` clause. Each of those needed no new
+    /// parser/registry plumbing at all - the raw, as-written text was
+    /// already sitting in the AST as a bare `String`/`ExprKind::Name`
+    /// field, just never read for this purpose - unlike a *PHPDoc-typed*
+    /// position (a param/return/property type hint, `@method`/`@mixin`/
+    /// `@phpstan-type` tag target), where this project's own type-parsing
+    /// pipeline collapses every reference straight into a resolved `Type`
+    /// with no per-reference raw spelling retained anywhere: extending
+    /// case-checking there would need real, broader plumbing through
+    /// `types.rs`/`registry/function_sig.rs` to preserve it, a
+    /// genuinely bigger, still-open undertaking left for a future pass.
+    /// Skips a `use`-imported reference (real PHPStan's own default
+    /// `checkImportedClassNameCase: false`) and a built-in stub class
+    /// (`checkInternalClassCaseSensitivity: false`) - both
     /// unconditionally, matching real PHPStan's own non-bleeding-edge
     /// default config exactly. `raw` is the reference exactly as written
     /// in source (needed fresh here, not `ClassInfo::extends`/etc., which

@@ -1490,7 +1490,7 @@ impl<'a> Checker<'a> {
                     // comment), so anything that comes back as an
                     // `Object` here is a genuine bare class-name
                     // reference.
-                    InstanceofTarget::Name(name, _) => {
+                    InstanceofTarget::Name(name, name_span) => {
                         if let Type::Object(class, _) = self.resolve_name_expr(name) {
                             if !self.class_name_exists(&class) {
                                 self.report(
@@ -1501,6 +1501,10 @@ impl<'a> Checker<'a> {
                                     "class.notFound",
                                 );
                             } else {
+                                // Phase 48.H: `class.nameCase` - `name` is
+                                // the raw, as-written text, still a bare
+                                // string right here in the AST.
+                                self.check_class_name_case(label, name, *name_span);
                                 self.check_internal_instanceof(&class, e.span, label);
                             }
                         }
@@ -1720,7 +1724,7 @@ impl<'a> Checker<'a> {
                     None => Type::Mixed,
                 }
             }
-            ExprKind::New(_, args) => {
+            ExprKind::New(class_expr, args) => {
                 // `new Foo()` never carries known type arguments itself -
                 // real PHP's constructor syntax has no way to write
                 // `new Foo<Bar>()` at all, and inferring them from the
@@ -1789,6 +1793,21 @@ impl<'a> Checker<'a> {
                     // - no "can't resolve a namespaced name" case left, the
                     // way there used to be before Phase 9.5's namespace
                     // support.
+                    // Phase 48.H: `class.nameCase` - the raw, as-written
+                    // name is still available directly on `class_expr`'s
+                    // own `ExprKind::Name` (a dynamic target, `new
+                    // $var()`, never reaches this arm at all - `resolved_
+                    // class` above is `None` for it). Unlike the earlier
+                    // `extends`/`implements`/`use` MVP, this needs no new
+                    // plumbing: unlike a PHPDoc-derived `Type`, which
+                    // this project's own type-parsing pipeline never
+                    // retains a per-reference raw spelling for, `new`'s
+                    // own class name is still a bare source string right
+                    // here in the AST, exactly like `instanceof`/`catch`
+                    // just below.
+                    if let ExprKind::Name(raw) = &class_expr.kind {
+                        self.check_class_name_case(label, raw, class_expr.span);
+                    }
                     // Phase 67: `@internal` - called before the borrow
                     // just below (this check does its own, separate
                     // registry lookup) since it needs `&mut self`.
@@ -2017,6 +2036,14 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some(class) = &resolved_class {
+                    // Phase 48.H: `class.nameCase` - `class_name` is the
+                    // raw, as-written text (`resolve_static_class_name`
+                    // above already resolved `self`/`parent`/`static`/a
+                    // variable target to `class`, but never touches
+                    // `class_name` itself; `check_class_name_case`'s own
+                    // registry lookup harmlessly no-ops for a pseudo-
+                    // keyword like `self` or a genuinely undefined class).
+                    self.check_class_name_case(label, class_name, e.span);
                     if let Some(sig) = sig {
                         // Phase 57: visibility.
                         if let Some((owner, _)) = &sig_with_owner {
@@ -2136,6 +2163,18 @@ impl<'a> Checker<'a> {
                 let Some(class) = self.resolve_static_class_name(class_name) else {
                     return Type::Mixed;
                 };
+                // Phase 48.H: rebind to the registry's own canonical-case
+                // spelling up front, same as `ExprKind::New`'s identical
+                // Phase 48.1 fix - without it, a differently-cased real
+                // reference (`base::CONST` for a real `class Base`) always
+                // fell into the "class doesn't exist" branch below before
+                // `check_class_name_case` ever got a chance to run,
+                // confirmed by this phase's own new tests.
+                let class = self
+                    .registry
+                    .lookup_class(&class)
+                    .map(|(canonical, _)| canonical.to_string())
+                    .unwrap_or(class);
                 if !self.registry.classes.contains_key(&class) {
                     // Phase 48.7: `AccessStaticPropertiesCheck`/
                     // `ClassConstantRule`'s own "class doesn't exist at
@@ -2158,6 +2197,12 @@ impl<'a> Checker<'a> {
                     );
                     return Type::Mixed;
                 }
+                // Phase 48.H: `class.nameCase` - `class_name` is the raw,
+                // as-written text (`resolve_static_class_name` above
+                // already resolved `self`/`parent`/`static`/a variable
+                // target to `class`, but never touches `class_name`
+                // itself).
+                self.check_class_name_case(label, class_name, e.span);
                 if let Some(prop_name) = member.strip_prefix('$') {
                     // Unlike an instance property, PHP has no legal way
                     // to dynamically create a static property at all -

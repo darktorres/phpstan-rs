@@ -732,6 +732,157 @@ fn a_differently_cased_trait_use_reference_is_flagged_name_case() {
     );
 }
 
+// Phase 48.H: `class.nameCase` widened to every native-syntax class-name
+// reference - `new`, `instanceof`, a static method/property/constant
+// access, and `catch` - none of which needed new parser/registry
+// plumbing (the raw, as-written text was already a bare AST string at
+// each of these positions).
+
+#[test]
+fn a_differently_cased_new_reference_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            function f(): void {
+                new base();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_instanceof_reference_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            function f(object $o): void {
+                if ($o instanceof base) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_catch_reference_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class MyException extends \Exception {}
+            function f(): void {
+                try {
+                } catch (myexception $e) {
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_static_call_reference_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public static function make(): void {}
+            }
+            function f(): void {
+                base::make();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_static_property_reference_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public static int $x = 1;
+            }
+            function f(): void {
+                $y = base::$x;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_differently_cased_class_constant_reference_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                const X = 1;
+            }
+            function f(): void {
+                $y = base::X;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_correctly_cased_static_call_is_never_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public static function make(): void {}
+            }
+            function f(): void {
+                Base::make();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_self_static_call_target_is_never_flagged_name_case() {
+    // `self`/`parent`/`static` are pseudo-references, not real class
+    // names - `check_class_name_case`'s own registry lookup naturally
+    // no-ops for them (never registered under those literal names), but
+    // worth locking in as its own test given how load-bearing that
+    // silent no-op is for every one of this phase's new call sites.
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public static function make(): void {
+                    self::make();
+                    static::make();
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.ends_with(".nameCase")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_use_imported_reference_is_never_flagged_name_case_regardless_of_case() {
     let d = diagnostics_for(
