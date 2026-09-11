@@ -293,7 +293,7 @@ impl Project {
 
     /// Same as `load_file`, but marks the file as a first-party,
     /// actually-analyzed one rather than context (`--scan-dir`/composer
-    /// vendor) - see `Registry::index_with_context`'s own `analyzed`
+    /// vendor) - see `Registry::insert_built_decl`'s own `analyzed`
     /// parameter doc comment for why this distinction has to reach all
     /// the way down to class indexing: an analyzed file's own declaration
     /// must always win a same-name collision outright, never merge with a
@@ -338,8 +338,11 @@ impl Project {
             references,
             ignore_lines,
             ignore_identifiers,
+            built_decls,
         } = parsed;
-        self.registry.index(&ast, analyzed);
+        for decl in built_decls {
+            self.registry.insert_built_decl(decl, analyzed);
+        }
         if self.retain_source {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), &path);
@@ -646,6 +649,17 @@ pub struct ParsedFile {
     references: HashSet<String>,
     ignore_lines: HashSet<u32>,
     ignore_identifiers: HashMap<u32, Vec<String>>,
+    // Phase (parallelize insert+finish_loading): this file's own
+    // declarations, already built into registry-independent `ClassInfo`/
+    // `FunctionSig`/`Type` values (see `registry::build_declarations`'s
+    // own doc comment for why that split is pure and safe to compute
+    // here, alongside everything else in this struct) - `insert_parsed_
+    // file` feeds these into `Registry::insert_built_decl` one at a
+    // time instead of re-deriving them from `ast` via `Registry::index`,
+    // so the expensive "turn an AST node into a ClassInfo/FunctionSig"
+    // work (confirmed the majority of `Registry::index`'s own cost) runs
+    // here, in parallel, rather than in the sequential insert loop.
+    built_decls: Vec<crate::registry::BuiltDecl>,
 }
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
@@ -662,11 +676,13 @@ pub fn parse_file(source: &str) -> Result<ParsedFile, ParseError> {
     let references = deps::referenced_names(&ast);
     let ignore_lines = ignore_comments::ignored_lines(source);
     let ignore_identifiers = ignore_comments::ignored_identifiers(source);
+    let built_decls = crate::registry::build_declarations(&ast);
     Ok(ParsedFile {
         ast,
         functions,
         classes,
         references,
+        built_decls,
         ignore_lines,
         ignore_identifiers,
     })
@@ -707,8 +723,8 @@ fn bare_name(fqn: &str) -> &str {
 /// Must produce exactly the same names `Registry::index` actually keys
 /// its entries under - otherwise an incremental update's removal step
 /// would look up the wrong key and leave a stale entry behind. Mirrors
-/// `Registry::index_with_context`'s structure (including its positional,
-/// mutated-in-place `NameContext` tracking - see that method's own doc
+/// `registry::build_declarations`'s structure (including its positional,
+/// mutated-in-place `NameContext` tracking - see that function's own doc
 /// comment on why a namespace can't just be computed once up front for
 /// the whole file) for exactly that reason.
 fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {

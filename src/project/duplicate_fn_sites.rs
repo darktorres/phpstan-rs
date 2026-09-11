@@ -31,7 +31,7 @@ pub(crate) struct FnDeclSite {
 /// declarations` needs to run by default for `check-project`, matching
 /// real PHPStan's own always-on `function.duplicate` rule. A new,
 /// purpose-built walker (not a generalization of `DeclLocations::index` or
-/// `Registry::index_with_context`) for the same reason `DeclLocations`
+/// `registry::build_declarations`) for the same reason `DeclLocations`
 /// itself gives for being its own walker: this one's `conditional`
 /// handling is load-bearing for correctness (an `if (!function_exists(...))
 /// { function foo() {} }` polyfill guard must never be tracked at all -
@@ -43,9 +43,9 @@ pub(crate) struct DuplicateFunctionSites {
 }
 
 impl DuplicateFunctionSites {
-    /// `conditional` mirrors `Registry::index_with_context`'s own
+    /// `conditional` mirrors `registry::build_declarations`'s own
     /// identical parameter and `If`/`Block` recursion shape - but where
-    /// that method still *records* a conditional declaration (just with
+    /// that function still *records* a conditional declaration (just with
     /// weaker "first unconditional wins" semantics), this one drops a
     /// conditionally-reached `FunctionDecl` entirely: real PHPStan's own
     /// rule has no such guard and is a known, disclosed false-positive

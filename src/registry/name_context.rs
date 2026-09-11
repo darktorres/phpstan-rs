@@ -74,7 +74,7 @@ impl NameContext {
     /// a real false-positive `class.notFound`, not merely a missed
     /// diagnostic as `Checker::check_program`'s own doc comment,
     /// intentionally accepting *this exact* imprecision, assumes).
-    /// `Registry::index_with_context`'s sibling, positional
+    /// `registry::build_declarations`'s sibling, positional
     /// `ctx.set_namespace` walk gets this right, and so now does
     /// `Checker::check_program`'s own main per-statement loop (fixed
     /// once this got found) - this whole-file `build` function itself is

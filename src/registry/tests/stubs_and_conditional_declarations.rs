@@ -524,7 +524,7 @@ fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
 // `class Imagick { public function convolveImage(...) {} }` meaning
 // to patch one method) gets indexed later. Without also recording
 // the merged-in name in `unconditionally_declared_classes`,
-// `index_with_context`'s own merge fix would see "no unconditional
+// `insert_built_decl`'s own merge fix would see "no unconditional
 // declaration recorded yet" and wholesale-replace the entire
 // built-in class with the override's bare one-method version.
 #[test]

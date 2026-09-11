@@ -5,34 +5,79 @@ use crate::registry::Registry;
 use crate::registry::{ClassInfo, FunctionSig, NameContext, infer_const_type};
 use crate::types::Type;
 
+/// One declaration's already-built, registry-independent info/sig, plus
+/// the file-position facts (`name`, `conditional`) `Registry::
+/// insert_built_decl` needs to decide how it interacts with whatever's
+/// already in the registry - the output of `build_declarations`, meant
+/// to be consumed one at a time, in order, by `insert_built_decl`. See
+/// `build_declarations`'s own doc comment for why this exists as a
+/// wholly separate step from the insertion logic below.
+pub(crate) enum BuiltDecl {
+    Class {
+        name: String,
+        conditional: bool,
+        info: ClassInfo,
+    },
+    Enum {
+        name: String,
+        conditional: bool,
+        info: ClassInfo,
+    },
+    Function {
+        name: String,
+        conditional: bool,
+        sig: FunctionSig,
+    },
+    GlobalConst {
+        name: String,
+        ty: Type,
+    },
+}
+
 impl Registry {
     /// `pub(crate)` for the same reason as `flatten_traits` - lets
     /// `Project` index one file's statements into an already-built
     /// registry (initial load, or after a re-parse) without re-running
     /// `build`'s from-scratch pass over every other file.
-    /// Indexes a file's declarations, tracking the current
-    /// `NameContext` *positionally* as it walks - a `namespace` statement
-    /// changes it for everything from that point on, exactly like real
-    /// PHP, rather than computing one static context up front for the
-    /// whole file. This matters concretely: the parser has no real model
-    /// of brace-delimited `namespace X { ... }` (see `StmtKind::Namespace`'s
-    /// own parsing comment), so it falls out as a `StmtKind::Namespace(name)`
-    /// immediately followed by a sibling `StmtKind::Block` holding what was
-    /// inside the braces - and real vendored stub files (phpstorm-stubs'
-    /// own `PDO/PDO.php`) really do have *two* such blocks in one file
-    /// (`namespace { ... }` for the global `PDO` class, then a later
-    /// `namespace Pdo { ... }` for PHP 8.4's `Pdo\*` subclasses) - a
-    /// single whole-file context would apply whichever one it saw last to
-    /// both blocks, silently mis-qualifying the first one's classes.
+    ///
+    /// A thin sequential wrapper: `build_declarations` (see its own doc
+    /// comment) does the actual tree walk and produces every declaration
+    /// this file contributes as an already-built, registry-independent
+    /// `BuiltDecl`, in the same depth-first order this function used to
+    /// insert them inline before this split; this just feeds each one to
+    /// `insert_built_decl` in that same order. Kept as one function
+    /// (rather than inlining this loop at every call site) so `Project::
+    /// load_file`'s and `update_file`'s existing single-file callers need
+    /// no changes at all - `check_project.rs`'s parallel batch path calls
+    /// `build_declarations` directly instead (once per file, concurrently,
+    /// no `&mut self`/registry access needed for that half at all), then
+    /// runs this same `insert_built_decl` sequentially, in whatever file
+    /// order its own collision-resolution policy needs. See
+    /// `insert_built_decl`'s own doc comment for why splitting it out
+    /// this way - rather than writing a second, independent tree-walker
+    /// for the parallel path - matters here specifically.
     #[hotpath::measure]
     pub(crate) fn index(&mut self, stmts: &[Stmt], analyzed: bool) {
-        let mut ctx = NameContext::default();
-        self.index_with_context(stmts, &mut ctx, false, analyzed);
+        for decl in build_declarations(stmts) {
+            self.insert_built_decl(decl, analyzed);
+        }
     }
 
-    /// `conditional` is `true` once inside any `if`/`else` branch (see the
-    /// `StmtKind::If` arm below) - a declaration found there only fills a
-    /// name in if nothing unconditional has already claimed it
+    /// Applies one already-built declaration (see `BuiltDecl`/
+    /// `build_declarations`) to the registry - the exact FQN-collision
+    /// resolution `index`'s own inline walk used to do as it went, now
+    /// factored out so both the sequential single-file path above and
+    /// the parallel-parse batch path in `check_project.rs`'s
+    /// `insert_parsed_file` call site share one implementation of every
+    /// collision decision below, rather than risking two independently
+    /// maintained copies of logic this dense with real, hard-won corpus
+    /// regressions (documented per-branch below) silently drifting apart
+    /// from each other over time.
+    ///
+    /// `conditional` is `true` once inside any `if`/`else` branch
+    /// (tracked by `build_declarations`, mirroring this method's own
+    /// former `StmtKind::If` handling) - a declaration found there only
+    /// fills a name in if nothing unconditional has already claimed it
     /// (`or_insert_with`), while a top-level, unconditional declaration
     /// always wins outright (`insert`), regardless of which is indexed
     /// first. Without this distinction, two files declaring the same
@@ -54,31 +99,25 @@ impl Registry {
     /// every real subclass).
     /// `analyzed` is `true` only for a first-party file being checked
     /// (never for a `--scan-dir`/composer-vendor context file or a
-    /// built-in stub) - see the `ClassDecl` arm's own `unconditionally_
-    /// declared_classes` branch for why this needs to be threaded all the
-    /// way down here rather than decided once by the caller: an analyzed
-    /// file's own declaration must always win a same-name collision
-    /// outright, never merge with a pre-existing context/stub entry the
-    /// way two context-only declarations legitimately do (Piwigo's own
-    /// `Imagick.stub.php` override shape, see that branch's own doc
-    /// comment) - `main.rs::run_check_project`'s context-file-loads-first
-    /// ordering only guarantees *which* declaration is present first, not
-    /// that a per-file bit like this exists to tell the two apart.
-    fn index_with_context(
-        &mut self,
-        stmts: &[Stmt],
-        ctx: &mut NameContext,
-        conditional: bool,
-        analyzed: bool,
-    ) {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::ClassDecl(c) => {
-                    let name = ctx.declared_name(&c.name);
-                    let new_info = ClassInfo::from_decl(c, ctx);
-                    if conditional && self.built_in_stub_classes.contains(&name) {
+    /// built-in stub) - see the `BuiltDecl::Class` arm's own
+    /// `unconditionally_declared_classes` branch for why this needs to be
+    /// threaded all the way down here rather than decided once by the
+    /// caller: an analyzed file's own declaration must always win a
+    /// same-name collision outright, never merge with a pre-existing
+    /// context/stub entry the way two context-only declarations
+    /// legitimately do (Piwigo's own `Imagick.stub.php` override shape,
+    /// see that branch's own doc comment) - `main.rs::run_check_project`'s
+    /// context-file-loads-first ordering only guarantees *which*
+    /// declaration is present first, not that a per-file bit like this
+    /// exists to tell the two apart.
+    pub(crate) fn insert_built_decl(&mut self, decl: BuiltDecl, analyzed: bool) {
+        match decl {
+            BuiltDecl::Class {
+                name,
+                conditional,
+                info: new_info,
+            } => {
+                if conditional && self.built_in_stub_classes.contains(&name) {
                         // A plain `or_insert_with` no-op (the shape every
                         // other conditional case below still uses) fully
                         // discards a conditional declaration's *own*
@@ -216,181 +255,119 @@ impl Registry {
                         self.unconditionally_declared_classes.insert(name.clone());
                         self.classes.insert(name, new_info);
                     }
+            }
+            BuiltDecl::Enum {
+                name,
+                conditional,
+                info,
+            } => {
+                if conditional {
+                    self.classes.entry(name).or_insert_with(|| info);
+                } else {
+                    self.classes.insert(name, info);
                 }
-                StmtKind::EnumDecl(e) => {
-                    let name = ctx.declared_name(&e.name);
-                    if conditional {
-                        self.classes
-                            .entry(name)
-                            .or_insert_with(|| ClassInfo::from_enum_decl(e, ctx));
-                    } else {
-                        self.classes.insert(name, ClassInfo::from_enum_decl(e, ctx));
-                    }
-                }
-                StmtKind::FunctionDecl(f) => {
-                    let name = ctx.declared_name(&f.name);
-                    let new_sig = FunctionSig::from_decl(
-                        f,
-                        ctx,
-                        &std::collections::HashMap::new(),
-                        &std::collections::HashMap::new(),
-                        Visibility::Public,
-                    );
-                    if conditional {
-                        // Gated on arity *and* not losing any type
-                        // precision the existing slot already had (see
-                        // `conditional_declaration_may_replace_stub`'s own
-                        // doc comment for both real corpus shapes this
-                        // guards against) - keeps the door open for
-                        // whichever real conditional declaration actually
-                        // matches best, wherever in the corpus that turns
-                        // out to be, rather than committing to the first
-                        // one seen regardless of quality. Runs the
-                        // identical comparison whether the existing slot
-                        // came from a built-in stub *or* an earlier
-                        // ordinary conditional declaration of the same
-                        // global function - a plain `self.stub_provided_
-                        // functions.remove(&name)` gate here used to
-                        // decide *when this comparison even runs at all*,
-                        // so two real, non-stub conditional declarations
-                        // of the same name (two separate `if (!function_
-                        // exists(...)) { function foo(...) {...} }`
-                        // guards in two unrelated vendor files) fell
-                        // straight to a plain first-wins `or_insert_with`
-                        // below, never tiebroken at all - real corpus
-                        // find: an alphabetically-earlier, `func_get_args(
-                        // )`-forwarding 0-param shim (`scoper-autoload.
-                        // php`) won registry-wide over the real,
-                        // correctly-typed 3-required-plus-variadic
-                        // `symfony/deprecation-contracts` declaration,
-                        // producing phantom `arguments.count` false
-                        // positives at every real call site matching the
-                        // real signature. `.remove(&name)` on a name that
-                        // was never stub-provided in the first place is a
-                        // harmless no-op (`HashSet::remove` returns
-                        // `false`, nothing else), so unconditionally
-                        // clearing the marker whenever the new
-                        // declaration wins is correct either way. Uses
-                        // `better_conditional_function_declaration`
-                        // (which also lets a real, non-zero-parameter
-                        // declaration replace an entirely parameter-less
-                        // `existing` one, on top of the exact-arity-match
-                        // rule `conditional_declaration_may_replace_stub`
-                        // alone still enforces the rest of the time) -
-                        // safe to use uniformly for both origins: a stub
-                        // is realistically never itself zero-parameter,
-                        // so this never weakens the existing stub-
-                        // protection tests.
-                        match self.functions.get(&name) {
-                            Some(existing)
-                                if !better_conditional_function_declaration(&new_sig, existing) =>
-                            {
-                                // `existing` already wins this comparison
-                                // - leave it in place, matching `or_insert_
-                                // with`'s own "first one seen (that's good
-                                // enough) wins" behavior for the case this
-                                // fix doesn't change.
-                            }
-                            _ => {
-                                self.stub_provided_functions.remove(&name);
-                                self.functions.insert(name, new_sig);
-                            }
+            }
+            BuiltDecl::Function {
+                name,
+                conditional,
+                sig: new_sig,
+            } => {
+                if conditional {
+                    // Gated on arity *and* not losing any type
+                    // precision the existing slot already had (see
+                    // `conditional_declaration_may_replace_stub`'s own
+                    // doc comment for both real corpus shapes this
+                    // guards against) - keeps the door open for
+                    // whichever real conditional declaration actually
+                    // matches best, wherever in the corpus that turns
+                    // out to be, rather than committing to the first
+                    // one seen regardless of quality. Runs the
+                    // identical comparison whether the existing slot
+                    // came from a built-in stub *or* an earlier
+                    // ordinary conditional declaration of the same
+                    // global function - a plain `self.stub_provided_
+                    // functions.remove(&name)` gate here used to
+                    // decide *when this comparison even runs at all*,
+                    // so two real, non-stub conditional declarations
+                    // of the same name (two separate `if (!function_
+                    // exists(...)) { function foo(...) {...} }`
+                    // guards in two unrelated vendor files) fell
+                    // straight to a plain first-wins `or_insert_with`
+                    // below, never tiebroken at all - real corpus
+                    // find: an alphabetically-earlier, `func_get_args(
+                    // )`-forwarding 0-param shim (`scoper-autoload.
+                    // php`) won registry-wide over the real,
+                    // correctly-typed 3-required-plus-variadic
+                    // `symfony/deprecation-contracts` declaration,
+                    // producing phantom `arguments.count` false
+                    // positives at every real call site matching the
+                    // real signature. `.remove(&name)` on a name that
+                    // was never stub-provided in the first place is a
+                    // harmless no-op (`HashSet::remove` returns
+                    // `false`, nothing else), so unconditionally
+                    // clearing the marker whenever the new
+                    // declaration wins is correct either way. Uses
+                    // `better_conditional_function_declaration`
+                    // (which also lets a real, non-zero-parameter
+                    // declaration replace an entirely parameter-less
+                    // `existing` one, on top of the exact-arity-match
+                    // rule `conditional_declaration_may_replace_stub`
+                    // alone still enforces the rest of the time) -
+                    // safe to use uniformly for both origins: a stub
+                    // is realistically never itself zero-parameter,
+                    // so this never weakens the existing stub-
+                    // protection tests.
+                    match self.functions.get(&name) {
+                        Some(existing)
+                            if !better_conditional_function_declaration(&new_sig, existing) =>
+                        {
+                            // `existing` already wins this comparison
+                            // - leave it in place, matching `or_insert_
+                            // with`'s own "first one seen (that's good
+                            // enough) wins" behavior for the case this
+                            // fix doesn't change.
                         }
-                    } else if self.unconditionally_declared_functions.contains(&name) {
-                        // Phase 32 Finding C: a *second* unconditional
-                        // declaration of the same name - the real-overload
-                        // shape described on this registry's own
-                        // `unconditionally_declared_functions` field -
-                        // merges onto the first rather than replacing it.
-                        //
-                        // Deliberately does *not* also clear
-                        // `stub_provided_functions` here, unlike the
-                        // "first real declaration, replaces outright"
-                        // branch below - real corpus shape: Piwigo itself
-                        // vendors `jetbrains/phpstorm-stubs` as a real
-                        // dependency, so its own unconditional (bare,
-                        // guard-free) `function str_contains(string
-                        // $haystack, string $needle): bool {}` gets
-                        // indexed as if it were ordinary project source,
-                        // merging harmlessly onto the identical signature
-                        // `merge_stubs` already put there - clearing the
-                        // marker here would wrongly tell a *later*,
-                        // better-typed conditional polyfill declaration
-                        // (`?string`-typed, from the real
-                        // symfony/polyfill-php80 package) that the slot
-                        // is no longer stub-equivalent and off limits,
-                        // right back to this phase's own original bug.
-                        let existing = self.functions.remove(&name).expect(
+                        _ => {
+                            self.stub_provided_functions.remove(&name);
+                            self.functions.insert(name, new_sig);
+                        }
+                    }
+                } else if self.unconditionally_declared_functions.contains(&name) {
+                    // Phase 32 Finding C: a *second* unconditional
+                    // declaration of the same name - the real-overload
+                    // shape described on this registry's own
+                    // `unconditionally_declared_functions` field -
+                    // merges onto the first rather than replacing it.
+                    //
+                    // Deliberately does *not* also clear
+                    // `stub_provided_functions` here, unlike the
+                    // "first real declaration, replaces outright"
+                    // branch below - real corpus shape: Piwigo itself
+                    // vendors `jetbrains/phpstorm-stubs` as a real
+                    // dependency, so its own unconditional (bare,
+                    // guard-free) `function str_contains(string
+                    // $haystack, string $needle): bool {}` gets
+                    // indexed as if it were ordinary project source,
+                    // merging harmlessly onto the identical signature
+                    // `merge_stubs` already put there - clearing the
+                    // marker here would wrongly tell a *later*,
+                    // better-typed conditional polyfill declaration
+                    // (`?string`-typed, from the real
+                    // symfony/polyfill-php80 package) that the slot
+                    // is no longer stub-equivalent and off limits,
+                    // right back to this phase's own original bug.
+                    let existing = self.functions.remove(&name).expect(
                             "name is in unconditionally_declared_functions, so it must already be indexed",
                         );
-                        self.functions.insert(name, existing.merge(new_sig));
-                    } else {
-                        self.stub_provided_functions.remove(&name);
-                        self.unconditionally_declared_functions.insert(name.clone());
-                        self.functions.insert(name, new_sig);
-                    }
+                    self.functions.insert(name, existing.merge(new_sig));
+                } else {
+                    self.stub_provided_functions.remove(&name);
+                    self.unconditionally_declared_functions.insert(name.clone());
+                    self.functions.insert(name, new_sig);
                 }
-                // The real, common `if (!function_exists('foo')) { function
-                // foo() {} }` polyfill idiom (used throughout the PHP
-                // ecosystem, e.g. symfony/deprecation-contracts and every
-                // symfony/polyfill-* package) declares a genuinely global
-                // function/class from inside a conditional - recursing
-                // here is what makes those visible at all. Cloning `ctx`
-                // for each branch means a `use`/`namespace` change inside
-                // one doesn't leak into the other or past the `if` -
-                // conservative, and irrelevant in practice (real code
-                // doesn't declare namespaces inside an `if`). Both
-                // branches are marked `conditional = true` regardless of
-                // the `if`'s own condition text - this registry has no
-                // notion of *which* conditions are actually guards, only
-                // "was this declaration reached unconditionally or not,"
-                // which is exactly the distinction the doc comment above
-                // needs.
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    self.index_with_context(
-                        std::slice::from_ref(then_branch),
-                        &mut ctx.clone(),
-                        true,
-                        analyzed,
-                    );
-                    if let Some(else_branch) = else_branch {
-                        self.index_with_context(
-                            std::slice::from_ref(else_branch),
-                            &mut ctx.clone(),
-                            true,
-                            analyzed,
-                        );
-                    }
-                }
-                // Unlike `If`, deliberately *not* cloned: this is the
-                // brace-namespace body itself (see this method's doc
-                // comment), so a `use` statement inside it must be
-                // visible to the declarations that follow it in the very
-                // same block - it's the statement *after* the block ends
-                // that must not see it, which cloning at the point the
-                // *next* `StmtKind::Namespace` resets `ctx.use_map` already
-                // ensures (see `set_namespace`). Inherits whatever
-                // `conditional` its enclosing context already has.
-                StmtKind::Block(inner) => {
-                    self.index_with_context(inner, ctx, conditional, analyzed)
-                }
-                StmtKind::GlobalConst(consts) => {
-                    for c in consts {
-                        let name = ctx.declared_name(&c.name);
-                        let ty = infer_const_type(&c.value);
-                        register_global_constant(&mut self.global_constants, name, ty);
-                    }
-                }
-                StmtKind::Expression(e) => {
-                    if let Some((name, ty)) = define_call_constant(e) {
-                        register_global_constant(&mut self.global_constants, name, ty);
-                    }
-                }
-                _ => {}
+            }
+            BuiltDecl::GlobalConst { name, ty } => {
+                register_global_constant(&mut self.global_constants, name, ty);
             }
         }
     }
@@ -425,7 +402,7 @@ impl Registry {
             // whole reason for calling this) would find a stale "already
             // unconditionally declared" marker with nothing left in
             // `classes` for it to point at, wrongly taking the merge path
-            // (`index_with_context`'s `ClassDecl` arm) against a
+            // (`insert_built_decl`'s `BuiltDecl::Class` arm) against a
             // now-nonexistent entry instead of a clean first insertion.
             self.unconditionally_declared_classes.remove(name);
         }
@@ -444,7 +421,7 @@ impl Registry {
     /// `unconditionally_declared_functions` regardless - not for this call
     /// itself (which never merges), but so a *later* real project file
     /// legitimately declaring a function with the same name as a builtin
-    /// correctly takes `index_with_context`'s own merge path (the `strtr`
+    /// correctly takes `insert_built_decl`'s own merge path (the `strtr`
     /// case) instead of blindly overwriting.
     pub fn merge_stubs<S: Into<String>>(&mut self, stubs: Vec<(S, FunctionSig)>) {
         for (name, sig) in stubs {
@@ -464,11 +441,11 @@ impl Registry {
     /// `unconditionally_declared_classes` - this runs once, in
     /// `Project::new`, *before* any real project file is indexed, so a
     /// built-in class like `Imagick` is already present by the time
-    /// `index_with_context` later processes a project's own
+    /// `insert_built_decl` later processes a project's own
     /// `#[stubFiles]`-style override (Piwigo's own real shape:
     /// `phpstan-stubs/Imagick.stub.php`, a bare `class Imagick { public
     /// function convolveImage(...) {} }` meaning to patch one method).
-    /// Without this, `index_with_context`'s own merge logic (added
+    /// Without this, `insert_built_decl`'s own merge logic (added
     /// alongside this) would only ever see "no unconditional declaration
     /// recorded for this name yet" and wholesale-replace the entire
     /// built-in class with the override's bare one-method version -
@@ -491,6 +468,153 @@ impl Registry {
                     self.classes.insert(name, info);
                 }
             }
+        }
+    }
+}
+
+/// Pure: walks `stmts` with the identical Namespace/Use/If/Block/
+/// GlobalConst/Expression(`define()`) recursion `Registry::index`'s own
+/// insertion pass used to do inline before this was split out - but
+/// calling only `ClassInfo::from_decl`/`from_enum_decl`/`FunctionSig::
+/// from_decl`/`infer_const_type`/`define_call_constant`, collecting each
+/// result into `BuiltDecl`s instead of mutating a registry. No `&self`/
+/// `&Registry` access anywhere in this function or anything it calls, so
+/// it's safe to call concurrently for many files at once -
+/// `check_project.rs`'s parallel parse stage does exactly that, once per
+/// file, inside the same rayon pool `project::parse_file` already runs
+/// in. Returns every declaration `stmts` contributes, in the same
+/// depth-first order the removed inline version used to insert them -
+/// `Registry::insert_built_decl` must still see them fed back in this
+/// order (single-file callers get that for free from `Registry::index`'s
+/// own loop; the parallel batch path must preserve per-file order too,
+/// though it may interleave whole files in any order relative to each
+/// other - see `insert_parsed_file`'s own doc comment).
+///
+/// Tracks the current `NameContext` *positionally* as it walks - a
+/// `namespace` statement changes it for everything from that point on,
+/// exactly like real PHP, rather than computing one static context up
+/// front for the whole file. This matters concretely: the parser has no
+/// real model of brace-delimited `namespace X { ... }` (see `StmtKind::
+/// Namespace`'s own parsing comment), so it falls out as a `StmtKind::
+/// Namespace(name)` immediately followed by a sibling `StmtKind::Block`
+/// holding what was inside the braces - and real vendored stub files
+/// (phpstorm-stubs' own `PDO/PDO.php`) really do have *two* such blocks
+/// in one file (`namespace { ... }` for the global `PDO` class, then a
+/// later `namespace Pdo { ... }` for PHP 8.4's `Pdo\*` subclasses) - a
+/// single whole-file context would apply whichever one it saw last to
+/// both blocks, silently mis-qualifying the first one's classes.
+pub(crate) fn build_declarations(stmts: &[Stmt]) -> Vec<BuiltDecl> {
+    let mut ctx = NameContext::default();
+    let mut out = Vec::new();
+    build_declarations_with_context(stmts, &mut ctx, false, &mut out);
+    out
+}
+
+/// `conditional` is `true` once inside any `if`/`else` branch - see
+/// `Registry::insert_built_decl`'s own doc comment for what that flag
+/// means to the insertion side; this function only ever threads it
+/// through to each `BuiltDecl` it produces, never acts on it itself.
+fn build_declarations_with_context(
+    stmts: &[Stmt],
+    ctx: &mut NameContext,
+    conditional: bool,
+    out: &mut Vec<BuiltDecl>,
+) {
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Namespace(name) => ctx.set_namespace(name),
+            StmtKind::Use(imports) => ctx.add_uses(imports),
+            StmtKind::ClassDecl(c) => {
+                let name = ctx.declared_name(&c.name);
+                let info = ClassInfo::from_decl(c, ctx);
+                out.push(BuiltDecl::Class {
+                    name,
+                    conditional,
+                    info,
+                });
+            }
+            StmtKind::EnumDecl(e) => {
+                let name = ctx.declared_name(&e.name);
+                let info = ClassInfo::from_enum_decl(e, ctx);
+                out.push(BuiltDecl::Enum {
+                    name,
+                    conditional,
+                    info,
+                });
+            }
+            StmtKind::FunctionDecl(f) => {
+                let name = ctx.declared_name(&f.name);
+                let sig = FunctionSig::from_decl(
+                    f,
+                    ctx,
+                    &std::collections::HashMap::new(),
+                    &std::collections::HashMap::new(),
+                    Visibility::Public,
+                );
+                out.push(BuiltDecl::Function {
+                    name,
+                    conditional,
+                    sig,
+                });
+            }
+            // The real, common `if (!function_exists('foo')) { function
+            // foo() {} }` polyfill idiom (used throughout the PHP
+            // ecosystem, e.g. symfony/deprecation-contracts and every
+            // symfony/polyfill-* package) declares a genuinely global
+            // function/class from inside a conditional - recursing here
+            // is what makes those visible at all. Cloning `ctx` for each
+            // branch means a `use`/`namespace` change inside one doesn't
+            // leak into the other or past the `if` - conservative, and
+            // irrelevant in practice (real code doesn't declare
+            // namespaces inside an `if`). Both branches are marked
+            // `conditional = true` regardless of the `if`'s own condition
+            // text - nothing downstream has a notion of *which*
+            // conditions are actually guards, only "was this declaration
+            // reached unconditionally or not."
+            StmtKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                build_declarations_with_context(
+                    std::slice::from_ref(then_branch),
+                    &mut ctx.clone(),
+                    true,
+                    out,
+                );
+                if let Some(else_branch) = else_branch {
+                    build_declarations_with_context(
+                        std::slice::from_ref(else_branch),
+                        &mut ctx.clone(),
+                        true,
+                        out,
+                    );
+                }
+            }
+            // Unlike `If`, deliberately *not* cloned: this is the
+            // brace-namespace body itself (see `Registry::index`'s former
+            // doc comment, now on `build_declarations`), so a `use`
+            // statement inside it must be visible to the declarations
+            // that follow it in the very same block - it's the statement
+            // *after* the block ends that must not see it, which cloning
+            // at the point the *next* `StmtKind::Namespace` resets
+            // `ctx.use_map` already ensures (see `set_namespace`).
+            // Inherits whatever `conditional` its enclosing context
+            // already has.
+            StmtKind::Block(inner) => build_declarations_with_context(inner, ctx, conditional, out),
+            StmtKind::GlobalConst(consts) => {
+                for c in consts {
+                    let name = ctx.declared_name(&c.name);
+                    let ty = infer_const_type(&c.value);
+                    out.push(BuiltDecl::GlobalConst { name, ty });
+                }
+            }
+            StmtKind::Expression(e) => {
+                if let Some((name, ty)) = define_call_constant(e) {
+                    out.push(BuiltDecl::GlobalConst { name, ty });
+                }
+            }
+            _ => {}
         }
     }
 }

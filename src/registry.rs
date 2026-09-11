@@ -25,6 +25,7 @@ pub(crate) use function_sig::is_override_attribute_name;
 pub(crate) use function_sig::resolve_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
 pub(crate) use function_sig::{infer_const_type, mark_template_params, substitute_type_aliases};
+pub(crate) use index::{BuiltDecl, build_declarations};
 pub(crate) use name_context::{NameContext, collect_class_name_case_refs, resolve_names_in_type};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
@@ -195,7 +196,7 @@ pub struct Registry {
     // feature-availability lookup table this unlocks.
     pub php_version: Option<crate::php_version::PhpVersion>,
     // Phase 25: class names that have had at least one *unconditional*
-    // declaration indexed so far - lets `index_with_context` tell "this
+    // declaration indexed so far - lets `Registry::insert_built_decl` tell "this
     // name's existing entry is itself unconditional, so a second
     // unconditional declaration should merge onto it" (Piwigo's own
     // `phpstan-stubs/Imagick.stub.php` shape) apart from "this name's
@@ -211,7 +212,7 @@ pub struct Registry {
     // instantiated" from "this name's existing entry is a real,
     // unconditionally-declared vendor/first-party class". Both look
     // identical from `unconditionally_declared_classes.contains(&name)`
-    // alone, but `index_with_context`'s own `if conditional` branch
+    // alone, but `Registry::insert_built_decl`'s own `if conditional` branch
     // needs to tell them apart: merging a version-gated real polyfill
     // implementation's own members onto a built-in stub is safe and
     // desired (the stub is fictional either way, see that branch's own
@@ -238,8 +239,8 @@ pub struct Registry {
     unconditionally_declared_functions: HashSet<String>,
     // Phase 60 corpus find: names `merge_stubs` provided a signature for,
     // not yet overwritten by any real, already-indexed conditional
-    // declaration - lets `index_with_context`'s own `StmtKind::
-    // FunctionDecl` conditional branch tell "this name's existing entry
+    // declaration - lets `Registry::insert_built_decl`'s own `BuiltDecl::
+    // Function` conditional branch tell "this name's existing entry
     // is only the built-in stub's" apart from "this name's existing
     // entry is a real, already-indexed conditional declaration of the
     // same name from an earlier file" (both look identical from

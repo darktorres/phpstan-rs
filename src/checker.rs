@@ -1075,7 +1075,7 @@ impl<'a> Checker<'a> {
         top_locals.set_track(self.probe_span.get().is_some());
         let diagnostics_before = self.diagnostics.len();
         // `self.name_ctx` is tracked *positionally* here, mirroring
-        // `Registry::index_with_context`'s own identical walk exactly -
+        // `registry::build_declarations`'s own identical walk exactly -
         // real PHP only ever allows a `namespace`/`use` statement at the
         // top level of a file (never nested inside a class/function/
         // block), so a single left-to-right pass over `program`'s own
