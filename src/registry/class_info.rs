@@ -405,6 +405,38 @@ pub struct ResolvedTypeImport {
     pub source_alias_name: String,
 }
 
+/// Same "two full declarations of one name collapse into their positional
+/// union" rule `Registry::insert_built_decl`'s free-function path already
+/// applies (Phase 32 Finding C, `registry/index.rs`) - phpstorm-stubs
+/// represents a method's own version-split/overload the identical way
+/// inside one class body (`DatePeriod::__construct`'s four declarations,
+/// `ReflectionMethod::setAccessible()`'s pre-/post-8.0 split), but unlike
+/// a free function's declarations (seen one at a time as the registry
+/// walks top-level statements) a class's own `c.methods`/`e.methods`
+/// arrives as one already-parsed batch - a bare `.collect()` into a
+/// `HashMap` would silently keep only whichever declaration happens to be
+/// last in source order and drop every alternate parameter list the
+/// earlier declaration(s) carried, with zero trace (confirmed real:
+/// `DatePeriod::__construct($start, $interval, $end)` - the stub's own
+/// first, 3-required-arg overload - vanishes entirely, since the file's
+/// last declaration is the unrelated `($isostr, $options = 0)` form).
+fn collect_merged_methods(
+    methods: impl Iterator<Item = (String, FunctionSig)>,
+) -> HashMap<String, FunctionSig> {
+    let mut out: HashMap<String, FunctionSig> = HashMap::new();
+    for (name, sig) in methods {
+        match out.remove(&name) {
+            Some(existing) => {
+                out.insert(name, existing.merge(sig));
+            }
+            None => {
+                out.insert(name, sig);
+            }
+        }
+    }
+    out
+}
+
 impl ClassInfo {
     pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassInfo {
         let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
@@ -454,10 +486,8 @@ impl ClassInfo {
             })
             .unwrap_or_default();
 
-        let methods: HashMap<String, FunctionSig> = c
-            .methods
-            .iter()
-            .map(|m| {
+        let methods: HashMap<String, FunctionSig> =
+            collect_merged_methods(c.methods.iter().map(|m| {
                 (
                     m.function.name.clone(),
                     FunctionSig::from_decl(
@@ -468,8 +498,7 @@ impl ClassInfo {
                         m.visibility.clone(),
                     ),
                 )
-            })
-            .collect();
+            }));
         let abstract_methods: HashSet<String> = c
             .methods
             .iter()
@@ -1109,10 +1138,8 @@ impl ClassInfo {
                 },
             )
             .collect();
-        let mut methods: HashMap<String, FunctionSig> = e
-            .methods
-            .iter()
-            .map(|m| {
+        let mut methods: HashMap<String, FunctionSig> =
+            collect_merged_methods(e.methods.iter().map(|m| {
                 (
                     m.function.name.clone(),
                     FunctionSig::from_decl(
@@ -1123,8 +1150,7 @@ impl ClassInfo {
                         m.visibility.clone(),
                     ),
                 )
-            })
-            .collect();
+            }));
         // `cases(): array` is a real, built-in static method every enum
         // gets from the language itself (`UnitEnum`), and a backed
         // enum's `from(int|string $value): static` /

@@ -680,3 +680,79 @@ fn a_conditional_declaration_s_extends_never_leaks_onto_a_built_in_stub() {
         "the built-in stub's own implements must survive unchanged"
     );
 }
+
+// phpstorm-stubs' interleaved-multiple-parameter-list shape one level
+// down from Phase 32 Finding C's own free-function fix: a class/enum
+// declaring the same method name twice in one body (its documented idiom
+// for a version-split or genuine overload, e.g. real `DatePeriod::
+// __construct`'s four declarations). `ClassInfo::from_decl`/
+// `from_enum_decl` used to build the method table with a bare
+// `.collect()`, silently keeping only the textually-last declaration and
+// dropping every earlier alternate parameter list with zero trace.
+#[test]
+fn two_method_declarations_with_different_arities_in_one_class_body_merge() {
+    // Mirrors real `DatePeriod`'s own three distinct constructor shapes
+    // (vendor/phpstorm-stubs/date/date_c.php:1529,1538,1548 - the fourth,
+    // identical-signature declaration there is just a PHP-8.3-gated copy
+    // of the third and doesn't change the merged result). `FunctionSig::
+    // merge`'s own positional-union rule (registry/function_sig.rs:606)
+    // means only the position every real overload declares as required
+    // stays required in the merged signature - position 0 here, since
+    // `$start`/`$isostr` are both required, but `$interval`/`$end` only
+    // appear in two of the three overloads (position 3, `$options`, is
+    // optional everywhere already).
+    let r = build_registry(
+        r#"<?php
+            class DatePeriod {
+                public function __construct(DateTimeInterface $start, DateInterval $interval, DateTimeInterface $end, $options = 0) {}
+                public function __construct(DateTimeInterface $start, DateInterval $interval, $recurrences, $options = 0) {}
+                public function __construct($isostr, $options = 0) {}
+            }
+        "#,
+    );
+    let sig = &r.classes["DatePeriod"].methods["__construct"];
+    assert_eq!(
+        sig.params.len(),
+        4,
+        "the merged signature must be as wide as the widest real overload"
+    );
+    assert!(
+        !sig.params[0].has_default,
+        "start/isostr is required in every real overload"
+    );
+    assert!(
+        sig.params[1].has_default,
+        "interval is required in only two of the three real overloads \
+         (absent from the isostr-only one), so a caller matching that \
+         third overload can't be forced to supply it"
+    );
+    assert!(
+        sig.params[2].has_default,
+        "end/recurrences is required in only two of the three real \
+         overloads, same reasoning as position 1"
+    );
+}
+
+#[test]
+fn two_method_declarations_with_different_arities_in_one_enum_body_merge() {
+    let r = build_registry(
+        r#"<?php
+            enum E {
+                case A;
+                public function m(int $a) {}
+                public function m(int $a, int $b) {}
+            }
+        "#,
+    );
+    let sig = &r.classes["E"].methods["m"];
+    assert_eq!(
+        sig.params.len(),
+        2,
+        "from_enum_decl's own .collect() site must merge too, not just from_decl's"
+    );
+    assert!(!sig.params[0].has_default);
+    assert!(
+        sig.params[1].has_default,
+        "b is only required in the second overload"
+    );
+}

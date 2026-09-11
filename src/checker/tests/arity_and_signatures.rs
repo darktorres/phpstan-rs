@@ -1010,3 +1010,57 @@ fn spread_of_a_non_shape_array_stays_silent() {
         "got: {d:?}"
     );
 }
+
+// Real `DatePeriod` (vendor/phpstorm-stubs/date/date_c.php) declares its
+// constructor four times in one class body (phpstorm-stubs' own
+// version-split/overload idiom) - before `collect_merged_methods`
+// (registry/class_info.rs), only the textually-last declaration
+// (`($isostr, $options = 0)`) survived, so the common
+// start/interval/end (or start/interval/recurrences) constructor forms
+// were false-positively flagged.
+#[test]
+fn date_period_constructor_with_start_interval_end_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            $start = new DateTime();
+            $interval = new DateInterval('P1D');
+            $end = new DateTime();
+            new DatePeriod($start, $interval, $end);
+        "#,
+    );
+    assert!(d.is_empty(), "got: {d:?}");
+}
+
+#[test]
+fn date_period_constructor_with_start_interval_recurrences_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            $start = new DateTime();
+            $interval = new DateInterval('P1D');
+            new DatePeriod($start, $interval, 5);
+        "#,
+    );
+    assert!(d.is_empty(), "got: {d:?}");
+}
+
+#[test]
+fn date_period_constructor_second_position_still_catches_a_genuinely_wrong_type() {
+    // Guards against over-merging in the other direction: the merge must
+    // not swallow every real type error on a merged position. Position 0
+    // (`$start`/`$isostr`) can't be used for this guard - real
+    // `DatePeriod` types it via its own `@template TDate of
+    // DateTimeInterface`, and this project's argument-type checking is
+    // already, independently, lenient toward an unresolved class-level
+    // template param (unrelated to this fix). Position 1 (`$interval`/
+    // `$options`, merged type `DateInterval|int`) has no such template
+    // involved and still correctly flags a value that satisfies neither
+    // union member.
+    let d = diagnostics_for(
+        r#"<?php
+            $start = new DateTime();
+            new DatePeriod($start, "not an interval or int");
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("expects"));
+}
