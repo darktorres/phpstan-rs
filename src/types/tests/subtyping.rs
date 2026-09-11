@@ -340,3 +340,21 @@ fn array_subtyping_is_covariant_on_value_type() {
     assert!(is_subtype(&ints, &mixed_arr));
     assert!(!is_subtype(&mixed_arr, &ints));
 }
+
+// Phase 80 follow-up: an unresolved `Type::Conditional` falls back to
+// comparing against `Union([if_true, if_false])` on either side, mirroring
+// the existing `Union` arms exactly.
+#[test]
+fn an_unresolved_conditional_as_sub_requires_both_branches_to_satisfy_sup() {
+    let conditional = parse_type_string("($x is int ? int : string)");
+    assert!(is_subtype(&conditional, &parse_type_string("int|string")));
+    assert!(!is_subtype(&conditional, &Type::Int));
+}
+
+#[test]
+fn an_unresolved_conditional_as_sup_is_satisfied_by_either_branch() {
+    let conditional = parse_type_string("($x is int ? int : string)");
+    assert!(is_subtype(&Type::Int, &conditional));
+    assert!(is_subtype(&Type::String, &conditional));
+    assert!(!is_subtype(&Type::Bool, &conditional));
+}

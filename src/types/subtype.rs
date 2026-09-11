@@ -236,6 +236,39 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::TemplateParam(tp), _) => {
             matches!(*tp.bound, Type::Mixed) || is_subtype(&tp.bound, sup)
         }
+        // Phase 80 follow-up: an unresolved `Conditional` - either it
+        // leaked into a position `types::conditional::resolve_conditional`
+        // never runs against (a `@param`/`@var` tag, since `parse_type_
+        // string` is shared across every tag kind, not scoped to
+        // `@return` only), or resolution ran but the subject was left
+        // unbound/`Mixed`. Falls back to the same `Union([if_true,
+        // if_false])` comparison this project's own parser always
+        // produced before this variant existed, mirroring the `Union`
+        // arms just below exactly (`.all`/`.any`) - the safe direction:
+        // treating it as *never* satisfying anything (falling through to
+        // the trailing `_ => false` unchanged) would be a false-positive-
+        // producing gap this project's own conventions avoid throughout.
+        // Placed *before* the `Union`-as-`sup` arm below, not after -
+        // when both `sub` is `Conditional` and `sup` is a real `Union`,
+        // decomposing `sub` first here (rather than letting the generic
+        // `(_, Union(members)) => .any` arm decompose `sup` first
+        // instead) is what makes each of the two resulting recursive
+        // calls still reach that same `Union`-as-`sup` arm on its own
+        // turn - the reverse order silently produces the wrong answer
+        // (confirmed the hard way: a first version placed after these
+        // two `Union` arms failed exactly this case).
+        (
+            Type::Conditional {
+                if_true, if_false, ..
+            },
+            _,
+        ) => is_subtype(if_true, sup) && is_subtype(if_false, sup),
+        (
+            _,
+            Type::Conditional {
+                if_true, if_false, ..
+            },
+        ) => is_subtype(sub, if_true) || is_subtype(sub, if_false),
         (Type::Union(members), _) => members.iter().all(|m| is_subtype(m, sup)),
         (_, Type::Union(members)) => members.iter().any(|m| is_subtype(sub, m)),
 

@@ -183,6 +183,26 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
                 .collect(),
             return_type: Box::new(substitute_template(&sig.return_type, bindings)),
         }))),
+        // Phase 80 follow-up: recurses into `target`/`if_true`/`if_false` -
+        // `subject` is a raw parameter name, not a `Type`, so there's
+        // nothing to substitute there. Without this arm, a template
+        // param used inside one of a conditional return type's own
+        // branches (`@return ($x is T ? T : null)`, a real, if narrower,
+        // shape) would silently keep reading as the bare, unsubstituted
+        // template instead of the caller's actual bound type.
+        Type::Conditional {
+            subject,
+            target,
+            if_true,
+            if_false,
+            negated,
+        } => Type::Conditional {
+            subject: subject.clone(),
+            target: Box::new(substitute_template(target, bindings)),
+            if_true: Box::new(substitute_template(if_true, bindings)),
+            if_false: Box::new(substitute_template(if_false, bindings)),
+            negated: *negated,
+        },
         other => other.clone(),
     }
 }

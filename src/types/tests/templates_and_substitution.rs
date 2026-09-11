@@ -57,3 +57,32 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
         Type::Object("Box".to_string(), vec![Type::Int])
     );
 }
+
+// Phase 80 follow-up: a template param used inside one of a conditional
+// return type's own branches (`@return ($x is T ? T : null)`) needs the
+// same substitution as anywhere else - `subject` (a raw parameter name,
+// not a `Type`) is left untouched.
+#[test]
+fn substitute_template_recurses_into_a_conditional_types_branches() {
+    let mut bindings = HashMap::new();
+    bindings.insert("T".to_string(), Type::Int);
+
+    let t = || Type::TemplateParam(TemplateParam::unbounded("T".to_string()));
+    let conditional = Type::Conditional {
+        subject: "x".to_string(),
+        target: Box::new(t()),
+        if_true: Box::new(t()),
+        if_false: Box::new(Type::Null),
+        negated: false,
+    };
+    assert_eq!(
+        substitute_template(&conditional, &bindings),
+        Type::Conditional {
+            subject: "x".to_string(),
+            target: Box::new(Type::Int),
+            if_true: Box::new(Type::Int),
+            if_false: Box::new(Type::Null),
+            negated: false,
+        }
+    );
+}
