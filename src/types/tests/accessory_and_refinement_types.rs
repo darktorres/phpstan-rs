@@ -28,21 +28,59 @@ fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
 
 #[test]
 fn string_refinement_pseudo_types_with_no_verifiable_content_stay_plain_string() {
-    // `callable-string`/`class-string`/`trait-string`/
-    // `interface-string`/`enum-string` each name "a string believed
-    // to hold a specific kind of identifier," with no literal-based
-    // or narrowing-based way for this project to ever verify content -
-    // without this they fell through to the generic-user-class
-    // branch and got treated as literal class references.
-    for name in [
-        "callable-string",
-        "class-string",
-        "trait-string",
-        "interface-string",
-        "enum-string",
-    ] {
-        assert_eq!(parse_type_string(name), Type::String, "for {name}");
-    }
+    // `class-string` (bare, no `<T>`) has nothing to preserve and stays
+    // plain `String` - `callable-string`/`trait-string`/`interface-
+    // string`/`enum-string` each now have their own real semantics
+    // instead (see the tests below), rather than all five being
+    // indistinguishable aliases.
+    assert_eq!(parse_type_string("class-string"), Type::String);
+}
+
+#[test]
+fn enum_string_is_a_class_string_bound_to_unit_enum() {
+    // Mirrors real PHPStan's own `enum-string` resolution
+    // (`GenericClassStringType(UnitEnum)`) - every enum this project's
+    // own registry sees already synthesizes `implements UnitEnum`.
+    assert_eq!(
+        parse_type_string("enum-string"),
+        Type::ClassString(Box::new(Type::Object("UnitEnum".to_string(), vec![])))
+    );
+    assert_eq!(
+        parse_type_string("enum-string<Suit>"),
+        Type::ClassString(Box::new(Type::Intersection(vec![
+            Type::Object("Suit".to_string(), vec![]),
+            Type::Object("UnitEnum".to_string(), vec![]),
+        ])))
+    );
+}
+
+#[test]
+fn callable_string_is_a_string_and_callable_intersection() {
+    // Mirrors real PHPStan's own `callable-string` resolution
+    // (`IntersectionType([StringType, CallableType])`) - architecturally
+    // unrelated to the `class-string` family despite the shared name.
+    assert_eq!(
+        parse_type_string("callable-string"),
+        Type::Intersection(vec![Type::String, Type::Callable(None)])
+    );
+}
+
+#[test]
+fn interface_string_and_trait_string_are_class_strings_bound_to_an_internal_kind_sentinel() {
+    // This project is allowed to check things more strictly than real
+    // PHPStan does (real PHPStan gives these no distinguishing semantics
+    // from bare `class-string` either) - these route through
+    // `Type::ClassString` bound to an internal `$$interface`/`$$trait`
+    // sentinel, checked against the real `ClassKind` at
+    // `registry::is_assignable`'s own `ClassString` arm.
+    assert_eq!(
+        parse_type_string("interface-string"),
+        Type::ClassString(Box::new(Type::Object("$$interface".to_string(), vec![])))
+    );
+    assert_eq!(
+        parse_type_string("trait-string"),
+        Type::ClassString(Box::new(Type::Object("$$trait".to_string(), vec![])))
+    );
 }
 
 // A top-10-bucket corpus round found `lowercase-string`/`uppercase-

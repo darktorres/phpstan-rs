@@ -2723,3 +2723,59 @@ fn reflection_class_from_a_plain_string_variable_leaves_t_erased_not_bound_to_st
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// `interface-string`/`trait-string` real content verification - this
+// project is allowed to check more strictly than real PHPStan does (real
+// PHPStan gives these no distinguishing semantics from bare
+// `class-string` either).
+#[test]
+fn an_interface_string_parameter_accepts_a_real_interface_class_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Shape3 {}
+            /** @param interface-string $x */
+            function f($x): void {}
+            f(Shape3::class);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_interface_string_parameter_rejects_a_plain_class_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Plain3 {}
+            /** @param interface-string $x */
+            function f($x): void {}
+            f(Plain3::class);
+        "#,
+    );
+    assert!(!d.is_empty(), "expected a diagnostic, got none");
+}
+
+#[test]
+fn a_trait_string_parameter_accepts_a_real_trait_class_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait Helper3 {}
+            /** @param trait-string $x */
+            function f($x): void {}
+            f(Helper3::class);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_trait_string_parameter_rejects_a_plain_class_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Plain4 {}
+            /** @param trait-string $x */
+            function f($x): void {}
+            f(Plain4::class);
+        "#,
+    );
+    assert!(!d.is_empty(), "expected a diagnostic, got none");
+}

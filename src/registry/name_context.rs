@@ -302,6 +302,14 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // type used in two different namespaces was treated as two
         // unrelated "classes" (`App\resource` vs. plain `resource`).
         Type::Object(name, args) if name == "resource" => Type::Object(name, args),
+        // Same reasoning again: `"$$interface"`/`"$$trait"`
+        // (`types::parse_type_keyword_or_class`'s own bare `interface-
+        // string`/`trait-string` sentinels, always argument-less) are
+        // internal markers `registry::is_assignable`'s `ClassString` arm
+        // recognizes directly, not class references to resolve.
+        Type::Object(name, args) if name == "$$interface" || name == "$$trait" => {
+            Type::Object(name, args)
+        }
         // Phase 80 follow-up: `"$$valueof"` (`types::parse_type_keyword_or_class`'s
         // own `value-of<T>`-on-a-class/enum sentinel, `Type::Object("$$valueof",
         // [Type::Object(name, [])])`) is a marker, not a class reference
@@ -440,13 +448,17 @@ pub(crate) fn collect_class_name_case_refs(
     out: &mut Vec<(String, String)>,
 ) {
     match ty {
-        // Mirrors `resolve_names_in_type`'s own three sentinel arms
-        // exactly: `object`/`Traversable`/`resource` are never a real
-        // class reference to check the case of, and (unlike the `$$...`
-        // sentinels just below) their own argument list isn't recursed
-        // into there either, so this doesn't either.
-        Type::Object(name, _) if matches!(name.as_str(), "object" | "Traversable" | "resource") => {
-        }
+        // Mirrors `resolve_names_in_type`'s own sentinel arms exactly:
+        // `object`/`Traversable`/`resource`/`$$interface`/`$$trait` are
+        // never a real class reference to check the case of, and (unlike
+        // the `$$valueof`/variance sentinels just below) their own
+        // argument list isn't recursed into there either, so this
+        // doesn't either.
+        Type::Object(name, _)
+            if matches!(
+                name.as_str(),
+                "object" | "Traversable" | "resource" | "$$interface" | "$$trait"
+            ) => {}
         Type::Object(name, args)
             if matches!(
                 name.as_str(),

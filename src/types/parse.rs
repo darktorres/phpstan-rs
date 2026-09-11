@@ -877,14 +877,66 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::Accessory(AccessoryKind::NumericString),
         ]),
         "string"
-        | "callable-string"
-        | "trait-string"
-        | "interface-string"
-        | "enum-string"
         | "lowercase-string"
         | "uppercase-string"
         | "non-empty-lowercase-string"
         | "non-empty-uppercase-string" => Type::String,
+        // `callable-string` mirrors real PHPStan's own resolution
+        // (`TypeNodeResolver.php`: `IntersectionType([StringType,
+        // CallableType])`) - architecturally unrelated to the
+        // `class-string` family below despite the shared "-string" name,
+        // and the identical `Intersection([String, X])` shape this
+        // file's own `non-empty-string`/`numeric-string` arms already
+        // use just above.
+        "callable-string" => Type::Intersection(vec![Type::String, Type::Callable(None)]),
+        // `enum-string`/`enum-string<T>` mirror real PHPStan's own
+        // `GenericClassStringType(UnitEnum)`/`GenericClassStringType(T &
+        // UnitEnum)` (`TypeNodeResolver.php` - `GenericClassStringType
+        // extends ClassStringType`, i.e. `enum-string` really is
+        // `class-string<UnitEnum>` under real PHPStan's own hood too).
+        // Every enum this project's own registry sees already
+        // synthesizes `implements UnitEnum` at declaration time
+        // (`registry/class_info.rs`), so this gets real narrowing/
+        // assignability for free through the ordinary Object-vs-Object
+        // class-hierarchy walk in `registry::is_assignable` - no new
+        // type-system machinery needed.
+        "enum-string" => {
+            let unit_enum = Type::Object("UnitEnum".to_string(), Vec::new());
+            match generic_args {
+                [single] => Type::ClassString(Box::new(Type::Intersection(vec![
+                    parse_type_string(single),
+                    unit_enum,
+                ]))),
+                _ => Type::ClassString(Box::new(unit_enum)),
+            }
+        }
+        // `interface-string`/`trait-string` (bare form): real PHPStan
+        // itself gives these **no** distinguishing semantics from bare
+        // `class-string` (`TypeNodeResolver.php` builds the identical
+        // untyped `ClassStringType()` for all three) - but that's not by
+        // itself a reason to skip real content verification in this
+        // project (explicit project decision: phpstan-rs is allowed to
+        // check things more strictly than real PHPStan does). `ClassInfo`
+        // already tracks exactly the distinction needed
+        // (`ClassKind::Interface`/`ClassKind::Trait`), so these route
+        // through `Type::ClassString` bound to one of this project's own
+        // internal `$$`-prefixed sentinel markers (the same convention
+        // already used for `$$valueof`/`$$covariant`/`$$contravariant`/
+        // `$$bivariant`) - `registry::is_assignable`'s `ClassString`
+        // arm special-cases these two sentinel names to check the
+        // candidate's real `ClassKind` instead of walking class
+        // hierarchy (see that file). No generic `<T>` form - real
+        // PHPStan has none for `trait-string` at all, and `interface-
+        // string<T>` would need the *same* class to be simultaneously a
+        // real interface and a subtype of `T`, a combination with no
+        // real corpus evidence calling for it.
+        "interface-string" => Type::ClassString(Box::new(Type::Object(
+            "$$interface".to_string(),
+            Vec::new(),
+        ))),
+        "trait-string" => {
+            Type::ClassString(Box::new(Type::Object("$$trait".to_string(), Vec::new())))
+        }
         // Unlike its string-refinement neighbors above, `class-string<T>`
         // carries a real, template-bindable inner type when given one -
         // needed for `@template R of Base` / `@param class-string<R> $x`

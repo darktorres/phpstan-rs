@@ -1,3 +1,4 @@
+use crate::ast::ClassKind;
 use crate::registry::Registry;
 use crate::types::{self, Type, Variance};
 
@@ -228,6 +229,35 @@ impl Registry {
             // `class-string<Derived>` value would incorrectly fail to
             // satisfy a `class-string<Base>`-typed parameter even when
             // `Derived extends Base`.
+            // `interface-string`/`trait-string`'s own internal
+            // `"$$interface"`/`"$$trait"` sentinel bound (`types::
+            // parse_type_keyword_or_class`) - the *only* two `ClassString`
+            // inner types this project ever builds that aren't a real
+            // class reference at all. real PHPStan itself draws no
+            // distinction here (bare `interface-string`/`trait-string`
+            // resolve to the identical untyped `ClassStringType()` as
+            // bare `class-string`), but this project is allowed to check
+            // more strictly - `ClassInfo::kind` already tracks exactly
+            // this, so check it directly instead of the ordinary
+            // class-hierarchy walk below (which would need `sub`'s own
+            // name to be a real ancestor of a sentinel name that was
+            // never indexed at all, always failing).
+            (Type::ClassString(a), Type::ClassString(b)) if matches!(&**b, Type::Object(name, _) if name == "$$interface" || name == "$$trait") =>
+            {
+                let Type::Object(name, _) = &**a else {
+                    return false;
+                };
+                let Type::Object(sentinel, _) = &**b else {
+                    unreachable!("guarded by the match arm's own condition above")
+                };
+                let wanted_kind = if sentinel == "$$interface" {
+                    ClassKind::Interface
+                } else {
+                    ClassKind::Trait
+                };
+                self.lookup_class(name)
+                    .is_some_and(|(_, info)| info.kind == wanted_kind)
+            }
             (Type::ClassString(a), Type::ClassString(b)) => self.is_assignable(a, b),
             // Mirrors `types::is_subtype`'s own bound-aware `TemplateParam`
             // arm (see its doc comment for the full reasoning and why

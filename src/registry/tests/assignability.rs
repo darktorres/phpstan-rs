@@ -187,3 +187,53 @@ fn is_assignable_handles_intersection_types_on_either_side() {
     // two doesn't satisfy a requirement for both.
     assert!(!r.is_assignable(&countable_only, &both));
 }
+
+#[test]
+fn a_real_enum_class_string_satisfies_enum_string() {
+    let r = build_registry(
+        r#"<?php
+            enum Suit { case Hearts; }
+            class Foo {}
+        "#,
+    );
+    let enum_string = Type::ClassString(Box::new(Type::Object("UnitEnum".to_string(), vec![])));
+    assert!(r.is_assignable(
+        &Type::ClassString(Box::new(Type::Object("Suit".to_string(), vec![]))),
+        &enum_string
+    ));
+    assert!(!r.is_assignable(
+        &Type::ClassString(Box::new(Type::Object("Foo".to_string(), vec![]))),
+        &enum_string
+    ));
+}
+
+#[test]
+fn interface_string_and_trait_string_check_the_real_class_kind() {
+    let r = build_registry(
+        r#"<?php
+            interface Shape2 {}
+            trait Helper2 {}
+            class Plain2 {}
+        "#,
+    );
+    let interface_string =
+        Type::ClassString(Box::new(Type::Object("$$interface".to_string(), vec![])));
+    let trait_string = Type::ClassString(Box::new(Type::Object("$$trait".to_string(), vec![])));
+
+    assert!(r.is_assignable(
+        &Type::ClassString(Box::new(Type::Object("Shape2".to_string(), vec![]))),
+        &interface_string
+    ));
+    assert!(!r.is_assignable(
+        &Type::ClassString(Box::new(Type::Object("Plain2".to_string(), vec![]))),
+        &interface_string
+    ));
+    assert!(r.is_assignable(
+        &Type::ClassString(Box::new(Type::Object("Helper2".to_string(), vec![]))),
+        &trait_string
+    ));
+    assert!(!r.is_assignable(
+        &Type::ClassString(Box::new(Type::Object("Plain2".to_string(), vec![]))),
+        &trait_string
+    ));
+}

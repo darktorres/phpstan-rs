@@ -485,11 +485,15 @@ impl<'a> Checker<'a> {
             // function's own existing, deliberate leniency of not
             // recursing into a generic argument list at all (see this
             // function's own doc comment above), so the wrapped inner
-            // type isn't recursed into here either.
+            // type isn't recursed into here either. `$$interface`/
+            // `$$trait` (`interface-string`/`trait-string`'s own
+            // internal bound) need the same exclusion - never a real
+            // class reference, checked by `ClassKind` directly at
+            // `registry::is_assignable`'s `ClassString` arm instead.
             Type::Object(name, _)
                 if matches!(
                     name.as_str(),
-                    "$$covariant" | "$$contravariant" | "$$bivariant"
+                    "$$covariant" | "$$contravariant" | "$$bivariant" | "$$interface" | "$$trait"
                 ) => {}
             Type::Object(name, _args) => {
                 if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
