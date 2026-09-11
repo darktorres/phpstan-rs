@@ -2404,3 +2404,173 @@ fn a_single_argument_traversable_reference_is_never_flagged_for_arity() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Phase 54's last build item: `generics.interfaceConflict` -
+// `check_cross_path_interface_conflicts`, ported from
+// `Rules/Generics/CrossCheckInterfacesHelper.php`. A real "diamond
+// generic" shape: `Box<T>` reaches `BaseIface` via two different paths
+// (`AIface`/`BIface`), each pinning `BaseIface`'s own template to a
+// different concrete type.
+
+#[test]
+fn two_paths_pinning_a_shared_interface_s_template_to_different_types_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template Y */
+            interface BaseIface {}
+            /**
+             * @template X
+             * @extends BaseIface<X>
+             */
+            interface AIface extends BaseIface {}
+            /**
+             * @template Z
+             * @extends BaseIface<Z>
+             */
+            interface BIface extends BaseIface {}
+            /**
+             * @template T
+             * @implements AIface<T>
+             * @implements BIface<int>
+             */
+            class Box implements AIface, BIface {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "generics.interfaceConflict"
+                && x.message.contains("template type Y of interface BaseIface")
+                && x.message.contains("but it's already specified as")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn two_paths_pinning_a_shared_interface_s_template_to_the_same_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template Y */
+            interface BaseIface {}
+            /**
+             * @template X
+             * @extends BaseIface<X>
+             */
+            interface AIface extends BaseIface {}
+            /**
+             * @template Z
+             * @extends BaseIface<Z>
+             */
+            interface BIface extends BaseIface {}
+            /**
+             * @template T
+             * @implements AIface<T>
+             * @implements BIface<T>
+             */
+            class Box implements AIface, BIface {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.interfaceConflict"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_enum_implementing_two_interfaces_with_conflicting_concrete_bindings_is_flagged() {
+    // Real PHPStan's own message literally says "Class" here even for an
+    // enum (`EnumAncestorsRule` calls the identical, unmodified
+    // `CrossCheckInterfacesHelper` - confirmed by direct read) - ported
+    // as-is rather than "corrected" to a word real PHPStan itself
+    // doesn't use in this message.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template Y */
+            interface BaseIface {}
+            /**
+             * @template X
+             * @extends BaseIface<X>
+             */
+            interface AIface extends BaseIface {}
+            /**
+             * @template Z
+             * @extends BaseIface<Z>
+             */
+            interface BIface extends BaseIface {}
+            /**
+             * @implements AIface<int>
+             * @implements BIface<string>
+             */
+            enum Suit implements AIface, BIface {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "generics.interfaceConflict"
+                && x.message
+                    .starts_with("Class Suit specifies template type Y of interface BaseIface")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_single_path_to_a_generic_interface_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template Y */
+            interface BaseIface {}
+            /**
+             * @template X
+             * @extends BaseIface<X>
+             */
+            interface AIface extends BaseIface {}
+            /** @template T
+             *   @implements AIface<T>
+             */
+            class Box implements AIface {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "generics.interfaceConflict"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn two_independent_root_templates_forwarded_to_the_same_ancestor_slot_are_flagged() {
+    // Regression for the identity-binding refinement in
+    // `check_cross_path_interface_conflicts`'s own entry point: without
+    // it, both `T` and `U` (Box's own, genuinely independent templates)
+    // would collapse to the same `Mixed` placeholder the moment they're
+    // forwarded into `AIface`/`BIface`, silently agreeing when they're
+    // actually two unrelated, independently-instantiable templates.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template Y */
+            interface BaseIface {}
+            /**
+             * @template X
+             * @extends BaseIface<X>
+             */
+            interface AIface extends BaseIface {}
+            /**
+             * @template Z
+             * @extends BaseIface<Z>
+             */
+            interface BIface extends BaseIface {}
+            /**
+             * @template T
+             * @template U
+             * @implements AIface<T>
+             * @implements BIface<U>
+             */
+            class Box implements AIface, BIface {}
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "generics.interfaceConflict"),
+        "got: {d:?}"
+    );
+}

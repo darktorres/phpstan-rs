@@ -400,6 +400,9 @@ impl<'a> Checker<'a> {
         for (ty, check_arity) in &types_to_check {
             self.check_generic_bounds_and_arity(ty, fqn, span, *check_arity);
         }
+        // Phase 54's last build item: `generics.interfaceConflict` - see
+        // `checker::generics::interfaces`'s own module doc comment.
+        self.check_cross_path_interface_conflicts(fqn, span);
     }
 
     /// Phase 54 follow-up: `GenericObjectTypeCheck`'s own arity/well-
