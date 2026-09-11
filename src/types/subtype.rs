@@ -240,35 +240,46 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // leaked into a position `types::conditional::resolve_conditional`
         // never runs against (a `@param`/`@var` tag, since `parse_type_
         // string` is shared across every tag kind, not scoped to
-        // `@return` only), or resolution ran but the subject was left
-        // unbound/`Mixed`. Falls back to the same `Union([if_true,
-        // if_false])` comparison this project's own parser always
-        // produced before this variant existed, mirroring the `Union`
-        // arms just below exactly (`.all`/`.any`) - the safe direction:
-        // treating it as *never* satisfying anything (falling through to
-        // the trailing `_ => false` unchanged) would be a false-positive-
-        // producing gap this project's own conventions avoid throughout.
-        // Placed *before* the `Union`-as-`sup` arm below, not after -
-        // when both `sub` is `Conditional` and `sup` is a real `Union`,
-        // decomposing `sub` first here (rather than letting the generic
-        // `(_, Union(members)) => .any` arm decompose `sup` first
-        // instead) is what makes each of the two resulting recursive
-        // calls still reach that same `Union`-as-`sup` arm on its own
-        // turn - the reverse order silently produces the wrong answer
-        // (confirmed the hard way: a first version placed after these
-        // two `Union` arms failed exactly this case).
+        // `@return` only, or a `return` *statement*'s own compliance
+        // check against its declaring function's signature, which has no
+        // call-site argument to resolve the subject against at all), or
+        // resolution ran but the subject was left unbound/`Mixed`. Falls
+        // back to the same `Union([if_true, if_false])` comparison this
+        // project's own parser always produced before this variant
+        // existed - literally builds that `Union` and delegates to
+        // `is_subtype` again, rather than hand-rolling a narrower
+        // `is_subtype(sub, if_true) || is_subtype(sub, if_false)`-style
+        // check: a real corpus false positive (`NotificationByMailSender::
+        // sendMailNotifications()`) showed that narrower form rejects a
+        // `sub` that's *itself* a `Union` straddling both branches (e.g.
+        // `list<string>|list<X>`, entirely valid piecewise) unless the
+        // *whole* union happened to fit in just one branch alone -
+        // delegating to the real `Union`-vs-`Union` rule two arms below
+        // (`.all` over `sub`'s own members, `.any` against the
+        // reconstructed branch set) is what correctly allows that.
+        // Placed *before* the `Union` arms below, not after: `sub`/`sup`
+        // must be able to reach this arm however they're nested (a
+        // `Conditional` buried inside a real `Union`, or vice versa)
+        // before either generic `Union` arm gets a chance to consume the
+        // match first.
         (
             Type::Conditional {
                 if_true, if_false, ..
             },
             _,
-        ) => is_subtype(if_true, sup) && is_subtype(if_false, sup),
+        ) => is_subtype(
+            &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
+            sup,
+        ),
         (
             _,
             Type::Conditional {
                 if_true, if_false, ..
             },
-        ) => is_subtype(sub, if_true) || is_subtype(sub, if_false),
+        ) => is_subtype(
+            sub,
+            &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
+        ),
         (Type::Union(members), _) => members.iter().all(|m| is_subtype(m, sup)),
         (_, Type::Union(members)) => members.iter().any(|m| is_subtype(sub, m)),
 
