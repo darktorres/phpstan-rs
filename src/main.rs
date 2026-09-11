@@ -59,6 +59,14 @@ enum Command {
         /// check_internal_usage`'s own doc comment for why.
         #[arg(long)]
         check_internal_usage: bool,
+        /// Enables `use function`'s own `function.nameCase` check (a
+        /// case-mismatched `use function` import, e.g. `use function
+        /// STRLEN;`). Off by default, mirroring real PHPStan's own
+        /// opt-in `checkFunctionNameCase` parameter - see `registry::
+        /// Registry::check_function_name_case`'s own doc comment for
+        /// why.
+        #[arg(long)]
+        check_function_name_case: bool,
         /// Enables `@deprecated` usage warnings (`function.deprecated`/
         /// `method.deprecated`/`staticMethod.deprecated`/
         /// `property.deprecated`/`staticProperty.deprecated`/
@@ -174,6 +182,7 @@ fn main() {
             strict_mixed_arrays,
             check_uninitialized_properties,
             check_internal_usage,
+            check_function_name_case,
             check_deprecated_usage,
             check_empty_method_bodies,
             check_missing_checked_exceptions,
@@ -193,6 +202,7 @@ fn main() {
             strict_mixed_arrays,
             check_uninitialized_properties,
             check_internal_usage,
+            check_function_name_case,
             check_deprecated_usage,
             check_empty_method_bodies,
             check_missing_checked_exceptions,

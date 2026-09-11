@@ -103,6 +103,21 @@ pub struct Registry {
     // field via `#[derive(Default)]`, config -> CLI flag -> `Project`
     // setter -> here.
     pub check_internal_usage: bool,
+    // ROADMAP "Known but not yet scheduled": opts into `check_use_
+    // function_imports`'s own `function.nameCase` half - real PHPStan's
+    // `ExistingNamesInUseRule` checks this too, but only when its own
+    // `checkFunctionNameCase` parameter is enabled (`false` in `conf/
+    // config.neon`, not part of any of the standard level 0-10 rule
+    // sets, no level ever overrides it) - the same non-default posture
+    // `check_internal_usage` above already established a precedent for.
+    // Same wiring chain: a plain `pub` field via `#[derive(Default)]`,
+    // config -> CLI flag -> `Project` setter -> here. `use const`'s own
+    // existence check (`constant.notFound`) is unconditional, not gated
+    // by this flag - real PHPStan has no name-case equivalent for a
+    // constant at all (constants are case-sensitive in PHP, so there's
+    // no "resolves fine but wrong case" scenario the way there is for a
+    // function/class name).
+    pub check_function_name_case: bool,
     // Phase 39: opts into `Checker::check_deprecated_*`
     // (`deprecated_usage.rs`). Defaults to `false` - real PHPStan's own
     // equivalent (`phpstan/phpstan-deprecation-rules`) isn't even part of

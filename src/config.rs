@@ -45,6 +45,11 @@ pub struct Config {
     /// check_internal_usage`'s own doc comment for why this defaults to
     /// `false` (unset) too.
     pub check_internal_usage: Option<bool>,
+    /// ROADMAP "Known but not yet scheduled": mirrors real PHPStan's own
+    /// opt-in `checkFunctionNameCase` parameter - see `registry::
+    /// Registry::check_function_name_case`'s own doc comment for why
+    /// this defaults to `false` (unset) too.
+    pub check_function_name_case: Option<bool>,
     /// Phase 39: mirrors real PHPStan's own separate, opt-in
     /// `phpstan/phpstan-deprecation-rules` package - see
     /// `registry::Registry::check_deprecated_usage`'s own doc comment

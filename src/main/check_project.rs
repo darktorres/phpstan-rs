@@ -111,6 +111,7 @@ fn run_check_project(
     strict_mixed_arrays: bool,
     check_uninitialized_properties: bool,
     check_internal_usage: bool,
+    check_function_name_case: bool,
     check_deprecated_usage: bool,
     check_empty_method_bodies: bool,
     check_missing_checked_exceptions: bool,
@@ -146,6 +147,7 @@ fn run_check_project(
     project.set_strict_mixed_arrays(strict_mixed_arrays);
     project.set_check_uninitialized_properties(check_uninitialized_properties);
     project.set_check_internal_usage(check_internal_usage);
+    project.set_check_function_name_case(check_function_name_case);
     project.set_check_deprecated_usage(check_deprecated_usage);
     project.set_check_empty_method_bodies(check_empty_method_bodies);
     project.set_check_missing_checked_exceptions(check_missing_checked_exceptions);
@@ -402,6 +404,7 @@ pub(crate) fn run_check_project_command(
     strict_mixed_arrays: bool,
     check_uninitialized_properties: bool,
     check_internal_usage: bool,
+    check_function_name_case: bool,
     check_deprecated_usage: bool,
     check_empty_method_bodies: bool,
     check_missing_checked_exceptions: bool,
@@ -465,6 +468,8 @@ pub(crate) fn run_check_project_command(
     let check_uninitialized_properties =
         check_uninitialized_properties || config.check_uninitialized_properties.unwrap_or(false);
     let check_internal_usage = check_internal_usage || config.check_internal_usage.unwrap_or(false);
+    let check_function_name_case =
+        check_function_name_case || config.check_function_name_case.unwrap_or(false);
     let check_deprecated_usage =
         check_deprecated_usage || config.check_deprecated_usage.unwrap_or(false);
     let check_empty_method_bodies =
@@ -532,6 +537,7 @@ pub(crate) fn run_check_project_command(
         strict_mixed_arrays,
         check_uninitialized_properties,
         check_internal_usage,
+        check_function_name_case,
         check_deprecated_usage,
         check_empty_method_bodies,
         check_missing_checked_exceptions,

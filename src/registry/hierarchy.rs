@@ -946,6 +946,23 @@ impl Registry {
         })
     }
 
+    /// `lookup_function`'s own canonical-name-returning sibling, mirroring
+    /// `lookup_class`'s identical `(&str, &Info)` shape - `FunctionSig`
+    /// carries no `name` field of its own (unlike `ClassInfo`, whose own
+    /// declared name a caller can't otherwise recover once a case-
+    /// insensitive fallback match has happened), so `check_function_name_
+    /// case`'s own `function.nameCase` diagnostic needs this to report
+    /// the real declared casing rather than just presence.
+    pub(crate) fn lookup_function_with_name(&self, name: &str) -> Option<(&str, &FunctionSig)> {
+        if let Some((k, v)) = self.functions.get_key_value(name) {
+            return Some((k.as_str(), v));
+        }
+        self.functions
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(k, v)| (k.as_str(), v))
+    }
+
     /// Phase 48.1: `lookup_function`'s own class-side mirror - real PHP
     /// resolves class/interface/trait/enum names case-insensitively too,
     /// the same rationale `lookup_function`'s own doc comment already

@@ -22,21 +22,22 @@ pub(crate) const INTERNAL_CLASS_PREFIXES: &[(&str, &str)] = &[
 ];
 
 impl<'a> Checker<'a> {
-    /// Phase 48: real PHPStan's own `ExistingNamesInUseRule`, confirmed
-    /// directly against `vendor/phpstan-src`, only ever existence-checks
-    /// the `use function foo;` and `use const FOO;` forms - a plain,
-    /// class-shaped `use Foo;` goes through `ClassNameCheck::
-    /// checkClassNames` with a `null` usage location, which (per its own
-    /// source) only runs case-sensitivity/forbidden-name checking in that
-    /// case and never calls `hasClass` at all; a class reference is only
-    /// ever existence-checked at the point it's actually *used* (a
-    /// typehint, `new`, `instanceof`, ...), not merely imported. This
-    /// project has no project-wide global-constant registry to check a
-    /// `use const` against (see `UseImport::kind`'s own doc comment for
-    /// why building a partial one would be worse than none), so only the
-    /// function half is checked here - `self.registry.functions` already
-    /// exists and is exactly as reliable a source for this as it is for
-    /// every other function-existence check in this project.
+    /// Phase 48 (+ follow-up): real PHPStan's own `ExistingNamesInUseRule`,
+    /// confirmed directly against `vendor/phpstan-src`, only ever
+    /// existence-checks the `use function foo;` and `use const FOO;`
+    /// forms - a plain, class-shaped `use Foo;` goes through
+    /// `ClassNameCheck::checkClassNames` with a `null` usage location,
+    /// which (per its own source) only runs case-sensitivity/
+    /// forbidden-name checking in that case and never calls `hasClass`
+    /// at all; a class reference is only ever existence-checked at the
+    /// point it's actually *used* (a typehint, `new`, `instanceof`, ...),
+    /// not merely imported. `use const`'s own half
+    /// (`check_use_const_imports`, below) is a separate function; this
+    /// one is the `use function` half, also covering its own
+    /// `function.nameCase` check (opt-in, `Registry::
+    /// check_function_name_case`, mirroring real PHPStan's own
+    /// `checkFunctionNameCase`-gated half of the same rule, default
+    /// `false` at every level).
     pub(crate) fn check_use_function_imports(&mut self, program: &[Stmt]) {
         for stmt in program {
             let StmtKind::Use(imports) = &stmt.kind else {
@@ -54,14 +55,36 @@ impl<'a> Checker<'a> {
                 // logic, so a bare `trim_start_matches` is the whole of
                 // it.
                 let fqn = import.path.trim_start_matches('\\');
-                if self.registry.lookup_function(fqn).is_none() {
-                    self.report(
-                        "<main>".to_string(),
-                        format!("used function {fqn} not found"),
-                        stmt.span,
-                        0,
-                        "function.notFound",
-                    );
+                match self.registry.lookup_function_with_name(fqn) {
+                    None => {
+                        self.report(
+                            "<main>".to_string(),
+                            format!("used function {fqn} not found"),
+                            stmt.span,
+                            0,
+                            "function.notFound",
+                        );
+                    }
+                    // Opt-in (`Registry::check_function_name_case`,
+                    // default `false`), mirroring real PHPStan's own
+                    // `checkFunctionNameCase`-gated half of
+                    // `ExistingNamesInUseRule::checkFunctions` -
+                    // case-insensitive-equal but not identical, matching
+                    // that rule's own condition exactly.
+                    Some((real_name, _))
+                        if self.registry.check_function_name_case
+                            && real_name.eq_ignore_ascii_case(fqn)
+                            && real_name != fqn =>
+                    {
+                        self.report(
+                            "<main>".to_string(),
+                            format!("Function {real_name} used with incorrect case: {fqn}."),
+                            stmt.span,
+                            0,
+                            "function.nameCase",
+                        );
+                    }
+                    Some(_) => {}
                 }
             }
         }
@@ -80,22 +103,22 @@ impl<'a> Checker<'a> {
     /// hooking into every existing class-reference checkpoint in this
     /// project - a real, disclosed scope trim, not attempted here).
     /// `ClassCaseSensitivityCheck`'s own half of this same real rule
-    /// (`class.nameCase`) is deliberately NOT built alongside this: unlike
-    /// `check_use_function_imports`'s sibling `function.nameCase` check
-    /// (itself not built either, since real PHPStan's own
-    /// `checkFunctionNameCase` config defaults `false` at every level,
-    /// confirmed in `conf/*.neon` - building it unconditionally would flag
-    /// more than real PHPStan does by default), the class case-check's own
-    /// gating flag defaults *active* - but this project's own class-name
-    /// resolution (`registry::name_context::NameContext::resolve`'s own
-    /// `use_map: HashMap<String, String>`) turned out, on direct reading,
-    /// to already be exact-case-keyed with no case-insensitive fallback
-    /// visible anywhere in `registry.rs`/`name_context.rs` - genuinely
-    /// unclear without deeper study whether every class reference already
-    /// silently requires exact-case matching today (in which case this
-    /// diagnostic would be pure noise on top of an existing, unrelated
-    /// gap) or is folded elsewhere this reading didn't find. Not guessed
-    /// past - a real, disclosed uncertainty, not a lazy skip.
+    /// (`class.nameCase` on a `use`-import site specifically) is
+    /// deliberately NOT built here: unlike `check_use_function_imports`'s
+    /// sibling `function.nameCase` check (opt-in, since real PHPStan's
+    /// own `checkFunctionNameCase` config defaults `false` at every
+    /// level), the class case-check's own gating flag defaults *active*
+    /// in real PHPStan - but this project's own class-name resolution
+    /// does already have a real case-insensitive fallback
+    /// (`Registry::lookup_class`, `registry/hierarchy.rs`, Phase 48.1),
+    /// contrary to an earlier reading of this comment (correction:
+    /// verified directly against current source). `class.nameCase`
+    /// itself is already built and wired at other class-reference sites
+    /// project-wide (`checker/resolve.rs`'s `check_type_class_names_
+    /// exist` pipeline) - whether a `use`-import site specifically still
+    /// needs its own dedicated wiring, or is already covered end to end
+    /// through that shared pipeline, is a separate question this scope
+    /// trim doesn't resolve.
     pub(crate) fn check_use_class_imports(&mut self, program: &[Stmt]) {
         for stmt in program {
             let StmtKind::Use(imports) = &stmt.kind else {

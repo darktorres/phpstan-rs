@@ -175,6 +175,15 @@ impl Project {
         self.registry.check_internal_usage = enabled;
     }
 
+    /// ROADMAP "Known but not yet scheduled": opts the whole project's
+    /// checking into `use function`'s own `function.nameCase` check,
+    /// following `set_check_internal_usage`'s exact precedent - see
+    /// `registry::Registry::check_function_name_case`'s own doc comment
+    /// for why this defaults to `false`.
+    pub fn set_check_function_name_case(&mut self, enabled: bool) {
+        self.registry.check_function_name_case = enabled;
+    }
+
     /// Phase 39: opts the whole project's checking into `@deprecated`
     /// usage warnings, following `set_check_internal_usage`'s exact
     /// precedent - see `registry::Registry::check_deprecated_usage`'s

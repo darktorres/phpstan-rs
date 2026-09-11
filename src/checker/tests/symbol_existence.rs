@@ -493,6 +493,54 @@ fn a_real_use_function_import_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// ROADMAP "Known but not yet scheduled": `use function`'s own
+// `function.nameCase` check, opt-in (`Registry::check_function_name_case`,
+// default `false`) mirroring real PHPStan's own `checkFunctionNameCase`
+// parameter (also default `false`, not part of any standard level 0-10
+// rule set).
+#[test]
+fn use_function_name_case_is_not_flagged_by_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function STRLEN;
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn use_function_name_case_is_flagged_when_opted_in() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            use function STRLEN;
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.nameCase"
+            && x.message.contains("strlen")
+            && x.message.contains("STRLEN")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn use_function_name_case_is_not_flagged_for_a_correctly_cased_import_even_when_opted_in() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            use function strlen;
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.nameCase"),
+        "got: {d:?}"
+    );
+}
+
 // Phase 71 corpus find: real PHP function calls are case-insensitive -
 // `Registry::lookup_function` used to be a plain exact-case `HashMap`
 // lookup, wrongly flagging any differently-cased call (a builtin or a
