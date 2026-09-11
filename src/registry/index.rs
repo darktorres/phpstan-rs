@@ -503,6 +503,7 @@ impl Registry {
 /// later `namespace Pdo { ... }` for PHP 8.4's `Pdo\*` subclasses) - a
 /// single whole-file context would apply whichever one it saw last to
 /// both blocks, silently mis-qualifying the first one's classes.
+#[hotpath::measure]
 pub(crate) fn build_declarations(stmts: &[Stmt]) -> Vec<BuiltDecl> {
     let mut ctx = NameContext::default();
     let mut out = Vec::new();

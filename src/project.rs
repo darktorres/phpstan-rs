@@ -683,6 +683,7 @@ pub struct ParsedFile {
 /// that field) - never read to make any decision, so it's fine that a
 /// caller building many `ParsedFile`s concurrently passes a different
 /// `path` to each call with no coordination needed between them.
+#[hotpath::measure]
 pub fn parse_file(path: &Path, source: &str) -> Result<ParsedFile, ParseError> {
     let ast = parse(source)?;
     let (functions, classes) = declared_names(&ast);
