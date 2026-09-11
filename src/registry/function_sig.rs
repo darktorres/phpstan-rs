@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::ast::{ExprKind, FunctionDecl, Stmt, Visibility};
+use crate::ast::{Attribute, ExprKind, FunctionDecl, Literal, Stmt, Visibility};
 use crate::checker::{has_explicit_mixed_nested_somewhere, union_types};
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{
@@ -336,6 +336,75 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
 /// imports the way an ordinary attribute-class reference would, since
 /// real PHP's own attribute is always the single global-namespace one and
 /// there's no other plausible class this could mean.
+/// phpstorm-stubs' own `#[ArrayShape(["key" => "type", ...])]` attribute -
+/// a JetBrains/phpstorm-stubs convention (not a PHP language feature)
+/// real PHPStan reads directly to recover a precise array shape for a
+/// stub function whose native return type is only a bare `array`/`mixed`
+/// (real PHP itself has no way to express this in a type hint). Used 85
+/// times across 37 vendored stub files - a real Piwigo corpus false
+/// positive this fixes: `imagecolorsforindex()`'s own declared
+/// `#[ArrayShape(["red" => "int", "green" => "int", "blue" => "int",
+/// "alpha" => "int"])]` was silently ignored, so every caller's own
+/// `$colors['red']` etc. read back as `Mixed` instead of `int`.
+///
+/// Only ever *refines* an already-resolved `array`/`array|X` return type
+/// (see `apply_array_shape_attribute` below) rather than replacing it
+/// outright - this same function's own docblock (`@return array|false`
+/// here) can carry real, meaningful union members (a `false` failure
+/// case) this attribute says nothing about and must not silently drop.
+fn array_shape_attribute_type(attrs: &[Attribute]) -> Option<Type> {
+    let attr = attrs
+        .iter()
+        .find(|a| is_array_shape_attribute_name(&a.name))?;
+    let ExprKind::ArrayLiteral(items) = &attr.args.first()?.value.kind else {
+        return None;
+    };
+    let mut fields = Vec::new();
+    for item in items {
+        let ExprKind::Literal(Literal::String(key)) = &item.key.as_ref()?.kind else {
+            return None;
+        };
+        let ExprKind::Literal(Literal::String(ty_str)) = &item.value.kind else {
+            return None;
+        };
+        fields.push((key.clone(), types::parse_type_string(ty_str), false));
+    }
+    Some(Type::ArrayShape(fields))
+}
+
+/// Grafts `shape` onto whichever plain, unrefined `Type::Array` member(s)
+/// of `return_type` exist - a bare top-level `Array`, or an `Array` member
+/// inside a `Union` (the `array|false` shape above) - leaving every other
+/// member (`False`, `Null`, ...) untouched. No-op when `return_type`
+/// doesn't have a plain `Array` anywhere (e.g. a docblock already gave it
+/// real shape precision of its own) - conservative, don't guess-override.
+fn apply_array_shape_attribute(return_type: Type, shape: &Type) -> Type {
+    match return_type {
+        Type::Array(..) => shape.clone(),
+        Type::Union(members) => Type::Union(
+            members
+                .into_iter()
+                .map(|m| {
+                    if matches!(m, Type::Array(..)) {
+                        shape.clone()
+                    } else {
+                        m
+                    }
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn is_array_shape_attribute_name(name: &str) -> bool {
+    name.trim_start_matches('\\')
+        .rsplit('\\')
+        .next()
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("ArrayShape")
+}
+
 pub(crate) fn is_no_discard_attribute_name(name: &str) -> bool {
     name.trim_start_matches('\\')
         .rsplit('\\')
@@ -528,6 +597,10 @@ impl FunctionSig {
         collect_class_name_case_refs(&return_type, ctx, &mut return_case_refs);
         let return_type = resolve_names_in_type(return_type, ctx);
         let return_type = substitute_type_aliases(return_type, class_type_aliases);
+        let return_type = match array_shape_attribute_type(&f.attrs) {
+            Some(shape) => apply_array_shape_attribute(return_type, &shape),
+            None => return_type,
+        };
 
         let return_type_native = resolve_type(None, f.return_type.as_deref());
         let return_type_native = mark_template_params(return_type_native, &template_params);

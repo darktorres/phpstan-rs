@@ -1301,3 +1301,64 @@ fn an_attribute_reference_with_correct_case_is_never_flagged_for_case() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// phpstorm-stubs' own `#[ArrayShape(["key" => "type", ...])]` attribute -
+// a Piwigo corpus false positive found this was silently ignored, so a
+// stub function like `imagecolorsforindex()` (bare `array`-typed, its own
+// real shape only ever expressed through this attribute) always returned
+// `Mixed` element types. Matched by short name only, case-insensitively,
+// the same as the real `NoDiscard`/`Override` attributes this project
+// already recognizes this way - see `is_array_shape_attribute_name`'s own
+// doc comment.
+
+#[test]
+fn array_shape_attribute_refines_a_bare_array_return_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class ArrayShape { public function __construct(array $shape) {} }
+            /** @param string $x */
+            function needsString($x): void {}
+            #[ArrayShape(["red" => "int", "green" => "int"])]
+            function pixel(): array {
+                return ['red' => 1, 'green' => 2];
+            }
+            function f(): void {
+                needsString(pixel()['red']);
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type"
+                && x.message.contains("expects string, int given")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn array_shape_attribute_preserves_a_false_failure_union_member() {
+    // Real vendored shape: `imagecolorsforindex()` declares both
+    // `#[ArrayShape(...)]` and `@return array|false` - the attribute must
+    // only refine the `array` half, never silently drop the real `false`
+    // failure case a caller might still need to check for.
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class ArrayShape { public function __construct(array $shape) {} }
+            /** @return array|false */
+            #[ArrayShape(["red" => "int"])]
+            function pixel(): array|false {
+                return ['red' => 1];
+            }
+            function f(): void {
+                $p = pixel();
+                if ($p === false) {
+                    return;
+                }
+                echo $p['red'];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
