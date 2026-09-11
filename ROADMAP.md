@@ -124,8 +124,8 @@ unsealed one, `array{..., ...}`), `value-of<T>`/`key-of<T>` (a
 deferred-resolution registry pass; other cases stay `Mixed`, matching
 real PHPStan's own lack of a special case there), `OffsetAccessType`
 (`SomeShape['key']`), and conditional PHPDoc return types (`@return
-($x is T ? A : B)`, widened to the union of both branches) are all
-parsed and resolved instead of mangling into bogus class names. Enum
+($x is T ? A : B)`) are all parsed and resolved instead of mangling
+into bogus class names. Enum
 cases have their own singleton `Type::EnumCase` identity, with
 `::from()`/`::tryFrom()` narrowing to the exact matching case on a
 literal argument. GMP/`BcMath\Number` operator-overload dispatch.
@@ -141,6 +141,37 @@ marker, and between two different shapes (no real
 contravariant-parameter/covariant-return comparison attempted), the
 biggest false-positive-avoidance call in this feature (see Rule
 catalog for its consumer-side contextual closure-body checking).
+
+Phase 80 follow-up: a conditional PHPDoc return type now resolves to a
+specific call site's real branch (`Type::Conditional`, `types::
+resolve_conditional`, wired into `Checker::infer_call_return_type`,
+the single choke point all ~9 real call-return-type sites already
+use), instead of always widening to the union of both branches - real
+PHPStan's own actual per-call-site behavior. A position with no bound
+argument to resolve the subject against (a `@param`/`@var` tag, or a
+`return` statement's own compliance check against its declaring
+function's signature) falls back to the same safe union comparison
+this project always did, reusing the real `Union`-vs-`Union`
+decomposition rule rather than a hand-rolled, coarser check (a real
+corpus false positive caught before landing: a compound `sub`
+straddling both branches piecewise, e.g. `list<string>|list<X>`,
+was wrongly rejected unless it fit entirely inside just one branch).
+Two real, disclosed, pre-existing gaps this newly exercises (both in
+adjacent-but-separate subsystems, not this resolution mechanism
+itself, confirmed via isolated repros with zero conditional-type
+involvement) rather than fixed here: this project's own return-
+statement type inference doesn't correlate a value accumulated across
+several separate `if`/`else` branches/loops with an outer condition
+made much earlier in the same function (a real corpus find,
+`NotificationByMailSender::sendMailNotifications()`, where the
+returned list's element type depends on the same `$action` a
+conditional return type's own subject also names, but the two aren't
+tracked as related); and ternary/if-else branches don't track a
+`bool`/string literal narrowly enough for a declaration-level
+conditional-return-type self-check to match precisely (`return $x ===
+[] ;`-shaped code widens to plain `bool` rather than `true`/`false`
+per branch - several real instances across `vendor/php-standard-
+library`'s own heavily-conditional-typed functions).
 PHPDoc-inheritance backfill: a method correctly omitting its own
 `@param`/`@return` in favor of an ancestor's/interface's tag resolves
 through that tag instead of looking untyped, including through
@@ -1086,19 +1117,6 @@ validation and `DateTime`'s relative-date-string parsing both need real
 PHP-runtime/XML-parser simulation this project has no way to do -
 low-priority, possibly a permanent boundary rather than concretely
 scheduled.
-
-**80 - Object-shape/key-of/conditional-type syntax, remaining
-(PARTIAL).** `object{...}` shapes, `value-of<T>`/`key-of<T>`,
-conditional-return-type syntax, `value-of<T>` naming a real registered
-enum, and `OffsetAccessType` are all done (see Done). `key-of<T>`
-naming a class/enum reference is a deliberate non-gap (real PHPStan has
-no special case there either). Letting a conditional return type pick a
-specific call site's real branch instead of always widening to the
-union of both was investigated and deliberately not attempted: the
-condition itself is discarded at parse time today, so building this
-would mean a new lazily-resolved `Type` variant touching every match
-arm and call site - a genuinely large, cross-cutting change, independently
-sized "M" before this was ever investigated.
 
 **82 - Collector / cross-file aggregation architecture (RETIRED - real
 architecture built as a registry fixed point instead; see Phase 41,
