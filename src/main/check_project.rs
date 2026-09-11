@@ -42,12 +42,17 @@ fn apply_level_filter(
 /// only place a `ParseError` can originate in `Project::load_file`'s
 /// pipeline is `parse()`, called before any registry/`self.files`
 /// mutation.
-fn try_load_file(project: &mut project::Project, path: &Path) -> bool {
+fn try_load_file(project: &mut project::Project, path: &Path, analyzed: bool) -> bool {
     let Ok(bytes) = fs::read(path) else {
         return false;
     };
     let source = String::from_utf8_lossy(&bytes).into_owned();
-    project.load_file(path.to_path_buf(), &source).is_ok()
+    let result = if analyzed {
+        project.load_analyzed_file(path.to_path_buf(), &source)
+    } else {
+        project.load_file(path.to_path_buf(), &source)
+    };
+    result.is_ok()
 }
 
 // Phase 40's own new `phpstan_api_check_enabled` gate pushed this past
@@ -140,11 +145,11 @@ fn run_check_project(
     // such collision.
     let skipped_context = context_files
         .iter()
-        .filter(|path| !try_load_file(&mut project, path))
+        .filter(|path| !try_load_file(&mut project, path, false))
         .count();
     let skipped_analyze = analyze_files
         .iter()
-        .filter(|path| !try_load_file(&mut project, path))
+        .filter(|path| !try_load_file(&mut project, path, true))
         .count();
     std::panic::set_hook(default_hook);
     project.finish_loading();

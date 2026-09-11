@@ -177,7 +177,12 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
         "arr.php",
         r#"<?php
             /** @param int[] $xs */
-            function needsInts(array $xs): void {}
+            // A non-empty, impure body (Phase 41/82's transitive-purity
+            // pass would otherwise prove an empty-bodied `needsInts`
+            // effect-free, making its own statement-level call below a
+            // second, unrelated `function.resultUnused` finding that has
+            // nothing to do with this test's actual point).
+            function needsInts(array $xs): void { echo count($xs); }
             function test(array $untyped): void { needsInts($untyped); }
         "#,
     );

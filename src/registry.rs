@@ -15,6 +15,7 @@ mod purity;
 mod resolve;
 
 pub(crate) use class_info::hook_body_references_property;
+pub(crate) use class_info::object_class_names;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
 pub use function_sig::format_signature;
 pub(crate) use function_sig::is_allow_dynamic_properties_attribute_name;
@@ -288,7 +289,7 @@ impl Registry {
     /// here couldn't have skipped them via that gate either way.
     pub(crate) fn index_and_flatten(program: &[Stmt]) -> Registry {
         let mut registry = Registry::default();
-        registry.index(program);
+        registry.index(program, false);
         registry.canonicalize_class_name_case();
         registry.flatten_traits();
         registry.resolve_method_tags();

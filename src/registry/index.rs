@@ -25,9 +25,9 @@ impl Registry {
     /// single whole-file context would apply whichever one it saw last to
     /// both blocks, silently mis-qualifying the first one's classes.
     #[hotpath::measure]
-    pub(crate) fn index(&mut self, stmts: &[Stmt]) {
+    pub(crate) fn index(&mut self, stmts: &[Stmt], analyzed: bool) {
         let mut ctx = NameContext::default();
-        self.index_with_context(stmts, &mut ctx, false);
+        self.index_with_context(stmts, &mut ctx, false, analyzed);
     }
 
     /// `conditional` is `true` once inside any `if`/`else` branch (see the
@@ -52,7 +52,25 @@ impl Registry {
     /// after the real `vendor/phpunit/phpunit/.../TestCase.php`, so it
     /// silently won the registry slot and dropped `assertEquals` from
     /// every real subclass).
-    fn index_with_context(&mut self, stmts: &[Stmt], ctx: &mut NameContext, conditional: bool) {
+    /// `analyzed` is `true` only for a first-party file being checked
+    /// (never for a `--scan-dir`/composer-vendor context file or a
+    /// built-in stub) - see the `ClassDecl` arm's own `unconditionally_
+    /// declared_classes` branch for why this needs to be threaded all the
+    /// way down here rather than decided once by the caller: an analyzed
+    /// file's own declaration must always win a same-name collision
+    /// outright, never merge with a pre-existing context/stub entry the
+    /// way two context-only declarations legitimately do (Piwigo's own
+    /// `Imagick.stub.php` override shape, see that branch's own doc
+    /// comment) - `main.rs::run_check_project`'s context-file-loads-first
+    /// ordering only guarantees *which* declaration is present first, not
+    /// that a per-file bit like this exists to tell the two apart.
+    fn index_with_context(
+        &mut self,
+        stmts: &[Stmt],
+        ctx: &mut NameContext,
+        conditional: bool,
+        analyzed: bool,
+    ) {
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Namespace(name) => ctx.set_namespace(name),
@@ -166,11 +184,28 @@ impl Registry {
                         // bare `class Imagick { public function
                         // convolveImage(...) {} }` was indexed, regardless
                         // of which file happened to load first.
-                        let existing = self
-                            .classes
-                            .remove(&name)
-                            .expect("name is in unconditionally_declared_classes, so it must already be indexed");
-                        self.classes.insert(name, existing.merge(new_info));
+                        if analyzed {
+                            // An analyzed (first-party) file's own class
+                            // declaration is ground truth for whatever is
+                            // actually being checked - it must always
+                            // outright replace a pre-existing context/
+                            // vendor/stub entry of the same name, not merge
+                            // with it the way two context-only
+                            // declarations legitimately do above (real
+                            // corpus find pinning this: a context file and
+                            // an analyzed file both declaring `Shape` with
+                            // a different, incompatible `area()` return
+                            // type used to resolve to a merged, `int|
+                            // string`-returning method instead of letting
+                            // the analyzed declaration win outright).
+                            self.classes.insert(name, new_info);
+                        } else {
+                            let existing = self
+                                .classes
+                                .remove(&name)
+                                .expect("name is in unconditionally_declared_classes, so it must already be indexed");
+                            self.classes.insert(name, existing.merge(new_info));
+                        }
                     } else {
                         // The *first* unconditional declaration of this
                         // name always wins outright over any earlier
@@ -320,12 +355,14 @@ impl Registry {
                         std::slice::from_ref(then_branch),
                         &mut ctx.clone(),
                         true,
+                        analyzed,
                     );
                     if let Some(else_branch) = else_branch {
                         self.index_with_context(
                             std::slice::from_ref(else_branch),
                             &mut ctx.clone(),
                             true,
+                            analyzed,
                         );
                     }
                 }
@@ -338,7 +375,9 @@ impl Registry {
                 // *next* `StmtKind::Namespace` resets `ctx.use_map` already
                 // ensures (see `set_namespace`). Inherits whatever
                 // `conditional` its enclosing context already has.
-                StmtKind::Block(inner) => self.index_with_context(inner, ctx, conditional),
+                StmtKind::Block(inner) => {
+                    self.index_with_context(inner, ctx, conditional, analyzed)
+                }
                 StmtKind::GlobalConst(consts) => {
                     for c in consts {
                         let name = ctx.declared_name(&c.name);

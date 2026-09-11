@@ -297,12 +297,32 @@ impl Project {
     /// incremental change.
     #[hotpath::measure]
     pub fn load_file(&mut self, path: PathBuf, source: &str) -> Result<(), ParseError> {
+        self.load_file_impl(path, source, false)
+    }
+
+    /// Same as `load_file`, but marks the file as a first-party,
+    /// actually-analyzed one rather than context (`--scan-dir`/composer
+    /// vendor) - see `Registry::index_with_context`'s own `analyzed`
+    /// parameter doc comment for why this distinction has to reach all
+    /// the way down to class indexing: an analyzed file's own declaration
+    /// must always win a same-name collision outright, never merge with a
+    /// pre-existing context/stub entry.
+    pub fn load_analyzed_file(&mut self, path: PathBuf, source: &str) -> Result<(), ParseError> {
+        self.load_file_impl(path, source, true)
+    }
+
+    fn load_file_impl(
+        &mut self,
+        path: PathBuf,
+        source: &str,
+        analyzed: bool,
+    ) -> Result<(), ParseError> {
         let ast = parse(source)?;
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
         let ignore_lines = ignore_comments::ignored_lines(source);
         let ignore_identifiers = ignore_comments::ignored_identifiers(source);
-        self.registry.index(&ast);
+        self.registry.index(&ast, analyzed);
         if self.retain_source {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), &path);
@@ -385,7 +405,13 @@ impl Project {
         changed_symbols.extend(functions.iter().map(|s| bare_name(s).to_string()));
         changed_symbols.extend(classes.iter().map(|s| bare_name(s).to_string()));
 
-        self.registry.index(&ast);
+        // `true`: `update_file` only ever re-indexes a file already known
+        // to the project (an edit to it), so it's a first-party/analyzed
+        // file by construction - see `load_analyzed_file`'s own doc
+        // comment. Mostly inert in practice, since the removal above
+        // already clears any prior unconditional entry this file itself
+        // owned before this re-index runs.
+        self.registry.index(&ast, true);
         if self.retain_source {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), path);
