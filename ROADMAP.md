@@ -910,25 +910,38 @@ almost everything done).** See Done for what shipped.
 `ArrayShape`'s own int-vs-string key precision remains unbuilt,
 genuinely separate from what shipped so far.
 
-**54 - Generic template richness (PARTIAL, variance-aware assignability
-and arity checking done).** See Done for what shipped. Declined, each
-for a verified reason: real PHPStan's `Static` call-site/internal
-variance kind and the whole `GenericAncestorsCheck`/
-`GenericObjectTypeCheck` rule family (a genuinely different, unbuilt
-rule, not a variance-kind gap in what's built); the ~19-concrete-
-subclass internal type representation real PHPStan uses internally (no
-independently observable behavior this project's single-variant-plus-
-sentinel representation doesn't already produce); `generics.notGeneric`
+**54 - Generic template richness (PARTIAL, variance-aware assignability,
+arity, and cross-path conflict checking all done).** See Done for what
+shipped - by this point essentially all of `GenericObjectTypeCheck`
+(pervasive arity, bound-checking, call-site-variance
+conflict/redundancy), `TemplateTypeCheck`'s own declaration-validity
+family, `MethodTemplateTypeRule`'s shadow-check, `VarianceCheck`'s
+own-declaration half, `UsedTraitsRule`'s bound/arity/variance half via
+`@use Trait<Args>`, and `CrossCheckInterfacesHelper`
+(`generics.interfaceConflict`, cross-path diamond-generic conflicts)
+are built - only each rule's own real-PHPStan-specific residual stays
+disclosed-open (bound/default existence-checking against this
+project's inherently partial registry; `UsedTraitsRule`'s own separate
+tag-validity diagnostics and its call-site-variance-never-allowed
+rule). Declined, each for a verified reason: real PHPStan's `Static`
+call-site/internal variance kind (pure internal control-flow plumbing,
+no user-observable gap); the ~19-concrete-subclass internal type
+representation real PHPStan uses internally (no independently
+observable behavior this project's single-variant-plus-sentinel
+representation doesn't already produce); `generics.notGeneric`
 (indistinguishable, in this project's own `@template`-tag model, from a
 legitimate stub-granted-generics case on a real zero-`@template`
-built-in). Newly identified, real, still-open gap: no constructor-
-argument-driven class-level generic-type inference for `new X(...)`
-exists at all, so `new ReflectionClass($view)` never binds `ReflectionClass<T>`'s
-own class-level `T` from `$view`'s type the way real PHPStan's own
-`ReflectionClassDynamicReturnTypeExtension` does - confirmed directly
-(`(new ReflectionClass($view))`'s own inferred type stays plain
-`ReflectionClass`, no type argument). Not built - a genuinely missing
-general capability, not a narrow bug; would need its own design.
+built-in); a `@method` tag's own inline generic template syntax (zero
+corpus value, and this project's `@method`-tag parser has no
+template-syntax support to build on at all). Newly identified, real,
+still-open gap: no constructor-argument-driven class-level generic-type
+inference for `new X(...)` exists at all, so `new ReflectionClass($view)`
+never binds `ReflectionClass<T>`'s own class-level `T` from `$view`'s
+type the way real PHPStan's own `ReflectionClassDynamicReturnTypeExtension`
+does - confirmed directly (`(new ReflectionClass($view))`'s own
+inferred type stays plain `ReflectionClass`, no type argument). Not
+built - a genuinely missing general capability, not a narrow bug;
+would need its own design (Phase-54-scale, not a small addition).
 
 **56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
 a lenient, hand-rolled ad-hoc string tokenizer (not built on the
