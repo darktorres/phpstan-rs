@@ -171,25 +171,45 @@ impl Registry {
     }
 
     /// The exhaustive BFS build `precompute_member_owners` runs once per
-    /// class per member kind, replacing what `lookup_method`/`lookup_
-    /// property`/`lookup_const`/their `_with_owner` siblings used to walk
-    /// live on every call - walks `class`'s own `extends` (*and*
-    /// `implements`, so an interface-typed receiver's own multi-parent
-    /// `extends` chain and a class's declared-but-not-overridden interface
-    /// methods both resolve) ancestor graph, in the same order `is_
-    /// subclass_of` does, recording every member `names_of` finds under
-    /// the *closest* (first-visited-by-BFS) declaring ancestor - `class`
-    /// itself included, checked before any parent. A single-parent-only
-    /// walk (`extends.first()`) would be wrong for interfaces specifically,
+    /// class, replacing what `lookup_method`/`lookup_property`/`lookup_
+    /// const`/their `_with_owner` siblings used to walk live on every
+    /// call. Walks `class`'s own `extends` (*and* `implements`, so an
+    /// interface-typed receiver's own multi-parent `extends` chain and a
+    /// class's declared-but-not-overridden interface methods both resolve)
+    /// ancestor graph, in the same order `is_subclass_of` does, recording
+    /// every method/property/const name found under the *closest*
+    /// (first-visited-by-BFS) declaring ancestor - `class` itself
+    /// included, checked before any parent. A single-parent-only walk
+    /// (`extends.first()`) would be wrong for interfaces specifically,
     /// since unlike a class, PHP lets an interface `extends` more than one
     /// parent at once (real example that surfaced this: league/flysystem's
     /// `FilesystemOperator extends FilesystemReader, FilesystemWriter`).
-    fn own_owner_names<'r>(
-        &'r self,
+    ///
+    /// Fused: this used to be a single generic `own_owner_names(class,
+    /// names_of: impl Fn(&ClassInfo) -> Vec<&str>)` called three separate
+    /// times per class (once each for methods/properties/consts), each
+    /// independently re-walking the identical ancestor graph with its own
+    /// queue/seen-set/lookup - the BFS topology never depends on which
+    /// member kind is being extracted, only on `class`'s own `extends`/
+    /// `implements`, so walking it once and extracting all three kinds at
+    /// each visited node reproduces the exact same per-map first-visited-
+    /// wins result while removing two of the three seen-set/queue/lookup
+    /// passes. `contains_key` guards (rather than `entry(name.to_string())
+    /// .or_insert_with(...)`) avoid allocating a String key on a name a
+    /// closer ancestor already claimed. Found and fixed via a perf-
+    /// optimization investigation workflow; the old three-call version
+    /// measured at 1.91s/124K calls (Symfony), 3.62s/123K calls (Drupal).
+    fn own_owner_names(
+        &self,
         class: &str,
-        names_of: impl Fn(&'r ClassInfo) -> Vec<&'r str>,
-    ) -> FxHashMap<String, String> {
-        let mut owner_by_name = FxHashMap::default();
+    ) -> (
+        FxHashMap<String, String>,
+        FxHashMap<String, String>,
+        FxHashMap<String, String>,
+    ) {
+        let mut method_owner = FxHashMap::default();
+        let mut property_owner = FxHashMap::default();
+        let mut const_owner = FxHashMap::default();
         let mut seen = HashSet::new();
         let mut queue = VecDeque::new();
         queue.push_back(class.to_string());
@@ -200,16 +220,26 @@ impl Registry {
             let Some(info) = self.classes.get(&current) else {
                 continue;
             };
-            for name in names_of(info) {
-                owner_by_name
-                    .entry(name.to_string())
-                    .or_insert_with(|| current.clone());
+            for name in info.methods.keys() {
+                if !method_owner.contains_key(name) {
+                    method_owner.insert(name.clone(), current.clone());
+                }
+            }
+            for name in info.properties.keys() {
+                if !property_owner.contains_key(name) {
+                    property_owner.insert(name.clone(), current.clone());
+                }
+            }
+            for name in info.consts.keys() {
+                if !const_owner.contains_key(name) {
+                    const_owner.insert(name.clone(), current.clone());
+                }
             }
             for parent in info.extends.iter().chain(info.implements.iter()) {
                 queue.push_back(parent.clone());
             }
         }
-        owner_by_name
+        (method_owner, property_owner, const_owner)
     }
 
     /// Builds an `ancestor_*_owner_by_class` entry for `class` from
@@ -232,7 +262,9 @@ impl Registry {
         for parent in parents {
             if let Some(parent_map) = own_owner_by_class.get(&parent) {
                 for (name, owner) in parent_map {
-                    merged.entry(name.clone()).or_insert_with(|| owner.clone());
+                    if !merged.contains_key(name) {
+                        merged.insert(name.clone(), owner.clone());
+                    }
                 }
             }
         }
@@ -280,39 +312,25 @@ impl Registry {
         // below, including the two `ancestor_*` ones that read `method_
         // owner_by_class`/`property_owner_by_class` back as locals, not
         // as `self` fields, for the same reason).
-        let method_owner_by_class: FxHashMap<String, FxHashMap<String, String>> = class_names
+        // A single fused BFS per class builds all three own-maps at once
+        // (see `own_owner_names`'s own doc comment for why this is safe -
+        // the ancestor-walk topology never depends on which member kind
+        // is being extracted) rather than three independent walks.
+        let own_by_class: Vec<_> = class_names
             .par_iter()
             .map(|name| {
-                (
-                    name.clone(),
-                    registry.own_owner_names(name, |info| {
-                        info.methods.keys().map(String::as_str).collect()
-                    }),
-                )
+                let (methods, properties, consts) = registry.own_owner_names(name);
+                (name.clone(), methods, properties, consts)
             })
             .collect();
-        let property_owner_by_class: FxHashMap<String, FxHashMap<String, String>> = class_names
-            .par_iter()
-            .map(|name| {
-                (
-                    name.clone(),
-                    registry.own_owner_names(name, |info| {
-                        info.properties.keys().map(String::as_str).collect()
-                    }),
-                )
-            })
-            .collect();
-        let const_owner_by_class: FxHashMap<String, FxHashMap<String, String>> = class_names
-            .par_iter()
-            .map(|name| {
-                (
-                    name.clone(),
-                    registry.own_owner_names(name, |info| {
-                        info.consts.keys().map(String::as_str).collect()
-                    }),
-                )
-            })
-            .collect();
+        let mut method_owner_by_class = FxHashMap::default();
+        let mut property_owner_by_class = FxHashMap::default();
+        let mut const_owner_by_class = FxHashMap::default();
+        for (name, methods, properties, consts) in own_by_class {
+            method_owner_by_class.insert(name.clone(), methods);
+            property_owner_by_class.insert(name.clone(), properties);
+            const_owner_by_class.insert(name, consts);
+        }
 
         let ancestor_method_owner_by_class: FxHashMap<String, FxHashMap<String, String>> =
             class_names
