@@ -54,11 +54,17 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   isolating just those 3 commits' effect from the unrelated commits the
   rebase itself pulled in; produced in a throwaway worktree at this
   commit, stored under `phpstan-rs-master2`.
-- `299e5c5` - post-fix (341 scoped) - current baseline for future diffs.
-  Removed exactly the 12 confirmed false positives (2
-  `staticMethod.resultUnused` on a bare `parent::__construct()`, 8
-  `method.unused`/`property.onlyWritten`/`classConstant.unused` from
-  private-member usage inside a closure/arrow-fn, 2 more of the same
-  from usage through a non-`$this` same-class-instance local variable)
-  and nothing else in the diff moved - produced/stored in the
-  `phpstan-rs-master2` worktree.
+- `299e5c5` - post-fix (341 scoped). Removed exactly the 12 confirmed
+  false positives (2 `staticMethod.resultUnused` on a bare
+  `parent::__construct()`, 8 `method.unused`/`property.onlyWritten`/
+  `classConstant.unused` from private-member usage inside a closure/
+  arrow-fn, 2 more of the same from usage through a non-`$this`
+  same-class-instance local variable) and nothing else in the diff
+  moved - produced/stored in the `phpstan-rs-master2` worktree.
+- `452eb2b` - post Phase-1 of the corpus-findings-triage plan (339
+  scoped) - current baseline for future diffs. Removed exactly 2
+  `argument.type` findings (`PaginationService::createNavigationBar`'s
+  own bare `min()`, `HistoryService::logVisit`'s own `array_find()`)
+  and nothing else moved, despite `min`/`max`/`array_find`-family/
+  non-variable-`++`/`--` each touching 20-36 more call sites in `src/`
+  alone - produced/stored in the `phpstan-rs-master2` worktree.
