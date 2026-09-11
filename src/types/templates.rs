@@ -14,7 +14,43 @@ use crate::types::{CallableParam, CallableSig, Type};
 pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMap<String, Type>) {
     match param_ty {
         Type::TemplateParam(tp) => {
-            if *arg_ty != Type::Mixed {
+            // Phase 54/77 follow-up: reject a bare `T` binding to a
+            // *definite scalar* when `T`'s own declared bound requires an
+            // object (`@template T of object`) - real corpus find (`new
+            // ReflectionClass($className)`, a plain `string`-typed
+            // variable, not a `Foo::class`/object-instance `T`-carrying
+            // argument): without this, the bare-`T` union member of
+            // `class-string<T>|T` happily bound `T` to the raw `string`
+            // itself once the `ClassString` member's own, stricter arm
+            // declined to match - producing a bound-violating
+            // `ReflectionClass<string>` that then broke real downstream
+            // `ReflectionClass<object>` call sites. Deliberately narrower
+            // than a full `is_subtype`/bound check: this module has no
+            // registry access, so it can't tell a real subclass (`T of
+            // Base` satisfied by a `Derived` argument, the common case)
+            // from an unrelated class - only a *scalar-vs-object* mismatch
+            // is structurally unambiguous without one (confirmed the hard
+            // way: a real `is_subtype` version broke six existing tests,
+            // every one a legitimate `T of SomeClass` bound satisfied by an
+            // actual subclass argument `is_subtype`'s own registry-free,
+            // purely-structural comparison can't see as related at all).
+            let bound_requires_object =
+                matches!(&*tp.bound, Type::Object(name, _) if name == "object");
+            let arg_is_definite_scalar = matches!(
+                arg_ty,
+                Type::String
+                    | Type::StringLiteral(_)
+                    | Type::Int
+                    | Type::IntLiteral(_)
+                    | Type::IntRange(_, _)
+                    | Type::Float
+                    | Type::FloatLiteral(_)
+                    | Type::Bool
+                    | Type::True
+                    | Type::False
+                    | Type::Null
+            );
+            if *arg_ty != Type::Mixed && !(bound_requires_object && arg_is_definite_scalar) {
                 bindings
                     .entry(tp.name.clone())
                     .or_insert_with(|| arg_ty.clone());

@@ -2650,3 +2650,24 @@ fn reflection_class_binds_its_own_template_from_a_class_string_argument() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn reflection_class_from_a_plain_string_variable_leaves_t_erased_not_bound_to_string() {
+    // Corpus regression this exact patch introduced and fixed in the same
+    // pass: `new ReflectionClass($className)`, a plain `string`-typed
+    // variable (not `Foo::class`), must not bind `T` to `string` itself -
+    // `bind_template_param`'s bare-`T` union arm would otherwise happily
+    // do so once the stricter `ClassString` arm declined to match,
+    // producing a bound-violating `ReflectionClass<string>` (`T of
+    // object`) that broke real downstream `ReflectionClass<object>` call
+    // sites (`tools/phpstan/Latte/*.php` in the real Piwigo corpus).
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $className): void {
+                assertType('ReflectionClass', new ReflectionClass($className));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
