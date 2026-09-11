@@ -2400,3 +2400,240 @@ fn an_override_attribute_with_a_real_but_still_wrong_ancestor_is_still_flagged()
         "got: {d:?}"
     );
 }
+
+// Phase 42: `MethodThrowTypeCovarianceRule` - opt-in, off by default.
+
+#[test]
+fn the_covariance_check_is_off_by_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                /** @throws \LogicException */
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                /** @throws \RuntimeException */
+                public function foo(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "throws.notCovariant" | "throws.shouldBeVoid"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_covariant_throws_type_against_the_immediate_parent_class_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base {
+                /** @throws \LogicException */
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                /** @throws \RuntimeException */
+                public function foo(): void {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.notCovariant"
+            && x.message.contains(
+                "PHPDoc tag @throws type RuntimeException of method Child::foo() should be covariant with PHPDoc @throws type LogicException of method Base::foo()."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_covariant_narrower_throws_type_is_not_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base {
+                /** @throws \Exception */
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                /** @throws \RuntimeException */
+                public function foo(): void {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.notCovariant"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn throwing_when_the_parent_declares_throws_void_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base {
+                /** @throws void */
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                /** @throws \RuntimeException */
+                public function foo(): void {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.shouldBeVoid"
+            && x.message.contains(
+                "Method Child::foo() should not throw RuntimeException because parent method Base::foo() has PHPDoc tag @throws void."
+            )),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_covariant_throws_type_against_a_transitively_implemented_interface_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            interface Fooer {
+                /** @throws \LogicException */
+                public function foo(): void;
+            }
+            class Widget implements Fooer {
+                /** @throws \RuntimeException */
+                public function foo(): void {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "throws.notCovariant"
+                && x.message.contains("method Fooer::foo()")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_covariant_throws_type_against_an_abstract_trait_declaration_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            trait FooTrait {
+                /** @throws \LogicException */
+                abstract public function foo(): void;
+            }
+            class Widget {
+                use FooTrait;
+                /** @throws \RuntimeException */
+                public function foo(): void {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.notCovariant"
+            && x.message.contains("method FooTrait::foo()")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn constructors_are_exempt_from_the_covariance_check() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base {
+                /** @throws \LogicException */
+                public function __construct() {}
+            }
+            class Child extends Base {
+                /** @throws \RuntimeException */
+                public function __construct() {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "throws.notCovariant" | "throws.shouldBeVoid"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_private_methods_own_throws_type_is_exempt_from_the_covariance_check() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base {
+                /** @throws \LogicException */
+                private function foo(): void {}
+            }
+            class Child extends Base {
+                /** @throws \RuntimeException */
+                private function foo(): void {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "throws.notCovariant" | "throws.shouldBeVoid"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_own_throws_void_tag_is_always_exempt_regardless_of_the_parent() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base {
+                /** @throws \LogicException */
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                /** @throws void */
+                public function foo(): void {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "throws.notCovariant" | "throws.shouldBeVoid"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn neither_side_having_a_throws_tag_at_all_is_never_flagged() {
+    // Real PHPStan's own default `exceptions.implicitThrows: true`: an
+    // untagged declaration is treated as "throws Throwable" on both
+    // sides, which is trivially covariant with itself.
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Base {
+                public function foo(): void {}
+            }
+            class Child extends Base {
+                public function foo(): void {}
+            }
+        "#,
+        |r| r.check_method_throw_type_covariance = true,
+    );
+    assert!(
+        !d.iter().any(|x| matches!(
+            x.identifier.as_str(),
+            "throws.notCovariant" | "throws.shouldBeVoid"
+        )),
+        "unexpected diagnostics: {d:?}"
+    );
+}

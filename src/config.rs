@@ -96,6 +96,11 @@ pub struct Config {
     /// own doc comment for why this defaults to `false` (unset), the same
     /// reason every other opt-in check above does.
     pub check_too_wide_throw_type_in_protected_and_public_methods: Option<bool>,
+    /// Phase 42: opt-in `MethodThrowTypeCovarianceRule` - see
+    /// `registry::Registry::check_method_throw_type_covariance`'s own
+    /// doc comment for why this defaults to `false` (unset), the same
+    /// reason every other opt-in check above does.
+    pub check_method_throw_type_covariance: Option<bool>,
     /// A hand-mirrored subset of real PHPStan's own `ignoreErrors:` -
     /// this project has no NEON parser and one isn't otherwise justified
     /// (see `baseline.rs`'s own identical judgment for a related

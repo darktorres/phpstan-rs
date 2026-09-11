@@ -229,6 +229,14 @@ impl Project {
             .check_too_wide_throw_type_in_protected_and_public_methods = enabled;
     }
 
+    /// Phase 42: opts the whole project's checking into `MethodThrowType
+    /// CovarianceRule`, following `set_check_empty_method_bodies`'s exact
+    /// precedent - see `registry::Registry::check_method_throw_type_
+    /// covariance`'s own doc comment for why this defaults to `false`.
+    pub fn set_check_method_throw_type_covariance(&mut self, enabled: bool) {
+        self.registry.check_method_throw_type_covariance = enabled;
+    }
+
     /// Phase 38: configures the project's target PHP version
     /// (`registry::Registry::php_version`), following
     /// `set_strict_mixed_arrays`'s exact precedent - a narrow setter

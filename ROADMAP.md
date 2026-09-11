@@ -358,10 +358,39 @@ attribute reference itself also gets `<kind>.nameCase` parity, reusing
 the already-shipped case-sensitivity helper.
 PHPStan-API-usage checks (instantiation, static calls, class-const
 fetches, `instanceof`, `extends`/`implements`/trait-use, and a
-syntactically-typed slice of method calls). Checked-exception
-groundwork: `@throws`-vs-`Throwable` validity, `throws.void`, dead-catch
-detection, and `finally`'s own exit-point-overwrite detection - the full
-transitive throw-type model across the call graph remains open.
+syntactically-typed slice of method calls). Checked-exception/throw-type
+model: `@throws`-vs-`Throwable` validity, `throws.void`, dead-catch
+detection, `finally`'s own exit-point-overwrite detection, transitive
+throw-point collection across the call graph (`Checker::current_
+function_throw_points`/`current_function_has_unannotated_call`, recorded
+at every real `throw` and every already-resolved-signature call choke
+point, with a curated, disclosed subset of per-callee dynamic-throw-type
+extensions - `intdiv`, `array_combine`, `assert`, `json_encode`/
+`json_decode`, `filter_var`, `new DateInterval(...)`, `DateTime[Immutable]
+::sub()`, the four `Reflection*` constructors; `version_compare()` and
+the DOM/SimpleXML/DateTime-relative-string extensions excluded, each for
+its own disclosed reason), `TooWideFunctionThrowTypeRule`/
+`TooWideMethodThrowTypeRule` (`throws.unusedType` - the method version
+gated on visibility/finality/first-declaration, `Registry::check_too_
+wide_throw_type_in_protected_and_public_methods`, mirroring real
+PHPStan's own default-off `checkTooWideThrowTypesInProtectedAndPublicMethods`,
+an ordinary overridable method's unused `@throws` tag staying silent by
+default), the same family ported onto property hooks (`InvalidThrowsPhpDoc
+ValueRule`/`ThrowsVoidPropertyHookWithExplicitThrowPointRule`/
+`TooWidePropertyHookThrowTypeRule`/`MissingCheckedExceptionInPropertyHook
+ThrowsRule`, needing a hook's own `@throws` doc comment and `final`
+modifier threaded through the parser at all - `ast::PropertyHooks::
+get_doc`/`set_doc`/`get_final`/`set_final`), `MethodThrowTypeCovarianceRule`
+(opt-in, `Registry::check_method_throw_type_covariance` - a pure
+declaration-vs-declaration comparison against the immediate parent
+class/every transitive interface/abstract trait declaration, real
+PHPStan's own default `exceptions.implicitThrows: true` hardcoded rather
+than separately configurable), and an opt-in "missing checked exception"
+family with no real PHPStan equivalent at the function/method level
+(`throws.missing`, `Registry::check_missing_checked_exceptions`, default
+off given the real corpus's documented inconsistent `@throws` tagging -
+consumes only a declaration's own *explicit* throw points, never a
+called function's).
 Uninitialized-property detection, both halves (off by default, given
 this class of heuristic's own real false-positive history): the
 "assigned anywhere in the class body" check, and real per-constructor
@@ -762,44 +791,6 @@ transitive slice and `NoopRule`'s own bare-statement family are done
 (see Done). Unbuilt: the fuller ~20-kind impure-point classification
 with `certain`-vs-`maybe` grading, and `@phpstan-immutable` tag
 validation.
-
-**42 - Checked-exception / throw-type model, remaining (PARTIAL, only
-one sub-item left declined).** `@throws`-vs-`Throwable` validity,
-`throws.void`, dead-catch detection, and `finally`'s own exit-point
-overwrite are done (see Done). Now also done: transitive throw-point
-collection across the call graph (`Checker::current_function_throw_
-points`/`current_function_has_unannotated_call`, recorded at every real
-`throw` and every already-resolved-signature call choke point); a
-curated, disclosed subset of the per-callee dynamic-throw-type
-extension cluster (`checker/throws/dynamic.rs` - `intdiv`,
-`array_combine`, `assert`, `json_encode`/`json_decode`, `filter_var`,
-`new DateInterval(...)` [reusing the Phase 78 spec validator],
-`DateTime[Immutable]::sub()`, and the four `Reflection*` constructors;
-`version_compare()` and the DOM/SimpleXML/DateTime-relative-string
-extensions excluded, each for its own disclosed reason);
-`TooWideFunctionThrowTypeRule`/`TooWideMethodThrowTypeRule`
-(`throws.unusedType`, `checker/throws/too_wide.rs`), the latter now
-correctly gated on visibility/finality/first-declaration (`Registry::
-check_too_wide_throw_type_in_protected_and_public_methods`, mirroring
-real PHPStan's own default-off `checkTooWideThrowTypesInProtectedAndPublicMethods`
-- an ordinary overridable method's unused `@throws` tag stays silent
-by default, a real corpus-confirmed false-positive class the earlier,
-unconditional port produced); an opt-in "missing checked exception"
-family (`throws.missing`, gated on `Registry::check_missing_checked_
-exceptions`, default off given the real corpus's documented
-inconsistent `@throws` tagging - consumes only a declaration's own
-*explicit* throw points, never a called function's); and the full
-property-hook sibling family (`InvalidThrowsPhpDocValueRule`/`ThrowsVoid
-PropertyHookWithExplicitThrowPointRule`/`TooWidePropertyHookThrowTypeRule`/
-`MissingCheckedExceptionInPropertyHookThrowsRule`, `checker/oop/
-property_hooks.rs` - needed threading a hook's own `@throws` doc comment
-through the parser at all, `ast::PropertyHooks::get_doc`/`set_doc`, plus
-a new `get_final`/`set_final` bit for the hook-level `final` modifier the
-parser previously only consumed without recording). Still declined:
-`MethodThrowTypeCovarianceRule` (no call-graph-wide implicit-throw model
-exists to build it on - an implicit "void when untagged" default would
-false-positive heavily given how inconsistently this corpus tags
-`@throws`).
 
 **45 - Declared-vs-actual-narrowest-type inference (PLANNED).** No
 mechanism compares a declared type against the narrowest type a body

@@ -112,6 +112,13 @@ enum Command {
         /// own doc comment for why.
         #[arg(long)]
         check_too_wide_throw_type_in_protected_and_public_methods: bool,
+        /// Enables `MethodThrowTypeCovarianceRule` (a method's own
+        /// `@throws` type must be covariant with its immediate parent
+        /// class/every transitive interface/abstract trait declaration's
+        /// own `@throws`). Off by default - see `registry::Registry::
+        /// check_method_throw_type_covariance`'s own doc comment for why.
+        #[arg(long)]
+        check_method_throw_type_covariance: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -180,6 +187,7 @@ fn main() {
             check_strict_printf_placeholder_types,
             check_array_filter_falsy_noop,
             check_too_wide_throw_type_in_protected_and_public_methods,
+            check_method_throw_type_covariance,
             php_version,
             generate_baseline,
             baseline,
@@ -199,6 +207,7 @@ fn main() {
             check_strict_printf_placeholder_types,
             check_array_filter_falsy_noop,
             check_too_wide_throw_type_in_protected_and_public_methods,
+            check_method_throw_type_covariance,
             php_version,
             generate_baseline,
             baseline,

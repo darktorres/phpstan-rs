@@ -53,6 +53,116 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Phase 42: `MethodThrowTypeCovarianceRule` (`vendor/phpstan-src/
+    /// src/Rules/Exceptions/MethodThrowTypeCovarianceRule.php`, confirmed
+    /// by direct read) - opt-in (`Registry::check_method_throw_type_
+    /// covariance`, see its own doc comment for why this project ships
+    /// it opt-in unlike real PHPStan's own unconditional registration). A
+    /// pure declaration-vs-declaration comparison: this method's own
+    /// `@throws` (or, absent one, an implicit `Throwable` - real
+    /// PHPStan's own default `exceptions.implicitThrows: true`, hardcoded
+    /// here rather than separately configurable) must be covariant with
+    /// every immediate parent class/transitive interface/abstract trait
+    /// declaration's own `@throws` (same implicit-`Throwable` fallback).
+    /// No call-graph-wide implicit-throw model is needed for this - real
+    /// PHPStan's own default already treats an untagged declaration as
+    /// "throws Throwable" rather than needing to trace what it actually,
+    /// transitively throws, which is exactly what made the earlier
+    /// decline's premise ("no such model exists") not apply here.
+    fn check_method_throw_type_covariance(
+        &mut self,
+        fqn: &str,
+        method_name: &str,
+        own_visibility: &Visibility,
+        span: Span,
+    ) {
+        if !self.registry.check_method_throw_type_covariance {
+            return;
+        }
+        if method_name == "__construct" || *own_visibility == Visibility::Private {
+            return;
+        }
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        let Some(own_sig) = info.methods.get(method_name) else {
+            return;
+        };
+        let throwable = || Type::Object("Throwable".to_string(), Vec::new());
+        let own_throws = own_sig.throws.clone().unwrap_or_else(throwable);
+        if own_throws == Type::Void {
+            return;
+        }
+
+        // `ParentMethodHelper::collectParentMethods`, transcribed: the
+        // immediate parent class's own native declaration (not the full
+        // `extends` chain - each class in a longer chain runs this same
+        // check against only its own immediate parent, so a multi-level
+        // chain still gets fully covered, one link at a time), every
+        // transitive interface declaring this method, and every used
+        // trait's own *abstract* declaration of it (a trait's concrete
+        // contribution becomes the class's own effective implementation,
+        // not something to compare the class against).
+        let mut ancestors: Vec<(String, Type)> = Vec::new();
+        if let Some(parent) = info.extends.first()
+            && let Some(parent_sig) = self
+                .registry
+                .classes
+                .get(parent)
+                .and_then(|p| p.methods.get(method_name))
+            && parent_sig.visibility != Visibility::Private
+        {
+            ancestors.push((
+                parent.clone(),
+                parent_sig.throws.clone().unwrap_or_else(throwable),
+            ));
+        }
+        for (owner, sig) in self
+            .registry
+            .all_interfaces_declaring_method(fqn, method_name)
+        {
+            ancestors.push((owner, sig.throws.clone().unwrap_or_else(throwable)));
+        }
+        for used in &info.uses {
+            if let Some(trait_info) = self.registry.classes.get(used)
+                && trait_info.abstract_methods.contains(method_name)
+                && let Some(trait_sig) = trait_info.methods.get(method_name)
+            {
+                ancestors.push((
+                    used.clone(),
+                    trait_sig.throws.clone().unwrap_or_else(throwable),
+                ));
+            }
+        }
+
+        for (owner, parent_throws) in ancestors {
+            if parent_throws == Type::Void {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "Method {fqn}::{method_name}() should not throw {own_throws} because parent method {owner}::{method_name}() has PHPDoc tag @throws void."
+                    ),
+                    span,
+                    2,
+                    "throws.shouldBeVoid",
+                );
+                continue;
+            }
+            if self.registry.is_assignable(&own_throws, &parent_throws) {
+                continue;
+            }
+            self.report(
+                fqn.to_string(),
+                format!(
+                    "PHPDoc tag @throws type {own_throws} of method {fqn}::{method_name}() should be covariant with PHPDoc @throws type {parent_throws} of method {owner}::{method_name}()."
+                ),
+                span,
+                2,
+                "throws.notCovariant",
+            );
+        }
+    }
+
     /// The full per-method override-compatibility check, shared between a
     /// class's own textually-declared methods and a trait-supplied method
     /// it never re-declares (see `check_method_overrides` above) - the
@@ -64,6 +174,7 @@ impl<'a> Checker<'a> {
         own_visibility: &Visibility,
         span: Span,
     ) {
+        self.check_method_throw_type_covariance(fqn, method_name, own_visibility, span);
         // Finding 46: overriding a `final` method is a real,
         // unconditional fatal error in PHP - including for __construct,
         // unlike the signature-compatibility checks below, so this runs

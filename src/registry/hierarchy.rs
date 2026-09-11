@@ -465,6 +465,48 @@ impl Registry {
         None
     }
 
+    /// Phase 42 (`MethodThrowTypeCovarianceRule`): every interface
+    /// anywhere in `class`'s own transitive ancestry (its own `implements`,
+    /// any ancestor class's own `implements`, and any of those
+    /// interfaces' own `extends` chain) that itself declares `method` -
+    /// mirrors real PHPStan's own `ClassReflection::getInterfaces()`
+    /// closely enough for this purpose (a plain BFS, not attempting its
+    /// full internal dedup/priority machinery).
+    pub(crate) fn all_interfaces_declaring_method(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Vec<(String, &FunctionSig)> {
+        let mut seen_classes = HashSet::new();
+        let mut class_queue: VecDeque<String> = VecDeque::new();
+        class_queue.push_back(class.to_string());
+        let mut seen_ifaces = HashSet::new();
+        let mut result = Vec::new();
+        while let Some(c) = class_queue.pop_front() {
+            if !seen_classes.insert(c.clone()) {
+                continue;
+            }
+            let Some(info) = self.classes.get(&c) else {
+                continue;
+            };
+            class_queue.extend(info.extends.iter().cloned());
+            let mut iface_queue: VecDeque<String> = info.implements.iter().cloned().collect();
+            while let Some(iface) = iface_queue.pop_front() {
+                if !seen_ifaces.insert(iface.clone()) {
+                    continue;
+                }
+                let Some(iface_info) = self.classes.get(&iface) else {
+                    continue;
+                };
+                if let Some(sig) = iface_info.methods.get(method) {
+                    result.push((iface.clone(), sig));
+                }
+                iface_queue.extend(iface_info.extends.iter().cloned());
+            }
+        }
+        result
+    }
+
     /// Every method name `class` must provide a concrete (non-abstract)
     /// implementation of somewhere in its own hierarchy: every abstract
     /// method declared by an ancestor class, every method declared by an

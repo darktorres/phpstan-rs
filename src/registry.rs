@@ -162,6 +162,23 @@ pub struct Registry {
     // *re-declaration* narrowing an ancestor's own wider `@throws` gets
     // checked. Same wiring chain as the flags above.
     pub check_too_wide_throw_type_in_protected_and_public_methods: bool,
+    // Phase 42: opts into `MethodThrowTypeCovarianceRule` (`checker/oop/
+    // method_overrides.rs`) - a real PHPStan rule (unlike `check_missing_
+    // checked_exceptions`), but shipped opt-in here rather than mirroring
+    // its own unconditional-by-default registration: this project's own
+    // "@throws" model has no call-graph-wide implicit-throw inference,
+    // and the real corpus's own documented inconsistent `@throws` tagging
+    // makes even this rule's pure declaration-vs-declaration comparison
+    // (own signature vs. immediate parent class/every transitive
+    // interface/abstract trait declaration, real PHPStan's own default
+    // `exceptions.implicitThrows: true` treating an untagged declaration
+    // as "throws Throwable" throughout - hardcoded here rather than
+    // separately configurable, since this project's own `@throws` never
+    // distinguishes "explicitly untagged" from "implicit" the way real
+    // PHPStan's `ResolvedPhpDocBlock` provenance does) worth verifying
+    // against a real corpus before defaulting on. Same wiring chain as
+    // the flags above.
+    pub check_method_throw_type_covariance: bool,
     // Phase 40.C: whether this project consumes real PHPStan as a
     // dependency at all (mirrors `Project::phpstan_api_check_enabled`,
     // set once from `composer::detect_phpstan_dependency` before any
