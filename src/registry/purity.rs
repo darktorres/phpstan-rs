@@ -52,6 +52,8 @@
 //! throughout `Analyser/ExprHandler/`/`Analyser/StmtHandler/`, not
 //! guessed from the identifier names alone.
 
+use rayon::prelude::*;
+
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::is_superglobal;
@@ -100,41 +102,69 @@ impl Registry {
     /// ever pre-disqualified by an existing annotation - every
     /// declaration starts "maybe pure" until its own body says
     /// otherwise.
+    /// `classify_body` only ever *reads* the registry (resolving
+    /// `$this`/`self`/`parent`/`static`/plain-function call targets, see
+    /// its own doc comment) - the write
+    /// (`...purity_dependencies = deps`) happens after, per function/
+    /// method, to a disjoint key, so this parallelizes with the same
+    /// reborrow-as-`&Registry` technique `flatten_traits_one_pass`/
+    /// `flatten_phpdoc_inheritance_one_pass` already use. Two separate
+    /// parallel passes (functions, then class methods) rather than one
+    /// combined one, matching the two loops this replaces - each needs
+    /// its own fresh reborrow since the sequential apply loop in between
+    /// needs `&mut self` again.
     fn classify_purity(&mut self) {
         let function_names: Vec<String> = self.functions.keys().cloned().collect();
-        for name in function_names {
-            let sig = &self.functions[&name];
-            if !purity_gate_passes(sig) {
-                continue;
-            }
-            let Some(body) = sig.body.clone() else {
-                continue;
-            };
-            let deps = classify_body(&body, None, self);
+        let registry: &Registry = self;
+        let function_deps: Vec<(String, Option<Vec<PurityDependency>>)> = function_names
+            .par_iter()
+            .filter_map(|name| {
+                let sig = &registry.functions[name];
+                if !purity_gate_passes(sig) {
+                    return None;
+                }
+                let body = sig.body.clone()?;
+                let deps = classify_body(&body, None, registry);
+                Some((name.clone(), deps))
+            })
+            .collect();
+        for (name, deps) in function_deps {
             self.functions.get_mut(&name).unwrap().purity_dependencies = deps;
         }
 
         let class_names: Vec<String> = self.classes.keys().cloned().collect();
-        for class_name in class_names {
-            let method_names: Vec<String> =
-                self.classes[&class_name].methods.keys().cloned().collect();
-            for method_name in method_names {
-                let sig = &self.classes[&class_name].methods[&method_name];
-                if !purity_gate_passes(sig) {
-                    continue;
-                }
-                let Some(body) = sig.body.clone() else {
-                    continue;
-                };
-                let deps = classify_body(&body, Some(&class_name), self);
-                self.classes
-                    .get_mut(&class_name)
-                    .unwrap()
+        let registry: &Registry = self;
+        let method_deps: Vec<(String, String, Option<Vec<PurityDependency>>)> = class_names
+            .par_iter()
+            .flat_map(|class_name| {
+                let method_names: Vec<String> = registry.classes[class_name]
                     .methods
-                    .get_mut(&method_name)
-                    .unwrap()
-                    .purity_dependencies = deps;
-            }
+                    .keys()
+                    .cloned()
+                    .collect();
+                let mut per_class = Vec::new();
+                for method_name in method_names {
+                    let sig = &registry.classes[class_name].methods[&method_name];
+                    if !purity_gate_passes(sig) {
+                        continue;
+                    }
+                    let Some(body) = sig.body.clone() else {
+                        continue;
+                    };
+                    let deps = classify_body(&body, Some(class_name), registry);
+                    per_class.push((class_name.clone(), method_name, deps));
+                }
+                per_class
+            })
+            .collect();
+        for (class_name, method_name, deps) in method_deps {
+            self.classes
+                .get_mut(&class_name)
+                .unwrap()
+                .methods
+                .get_mut(&method_name)
+                .unwrap()
+                .purity_dependencies = deps;
         }
     }
 

@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 
@@ -31,6 +32,16 @@ impl Registry {
     /// get(&current)`-style lookup stays a plain, allocation-free `HashMap`
     /// lookup, now simply correct because the stored string is always
     /// canonical - matching `lookup_function`'s own stated philosophy.
+    /// Building `canonical_by_lower` stays a single sequential pass (it's
+    /// already O(classes), one cheap `HashMap` entry each) - only the
+    /// per-class rewrite below is parallelized, since it's the part whose
+    /// cost actually scales with how many reference-shaped fields each
+    /// class has. Each class's own rewrite touches only its own
+    /// `ClassInfo` (`extends`/`implements`/`uses`/`mixins`/
+    /// `trait_aliases`/`type_imports`) and reads only the immutable,
+    /// already-fully-built `canonical_by_lower` table - no other class is
+    /// ever read or written, so `values_mut()` directly (no remove/
+    /// reinsert dance) is sound to run concurrently.
     #[hotpath::measure]
     pub(crate) fn canonicalize_class_name_case(&mut self) {
         let mut canonical_by_lower: HashMap<String, String> = HashMap::new();
@@ -46,30 +57,29 @@ impl Registry {
                 *name = canonical.clone();
             }
         };
-        let class_names: Vec<String> = self.classes.keys().cloned().collect();
-        for class_name in class_names {
-            let Some(mut info) = self.classes.remove(&class_name) else {
-                continue;
-            };
-            for name in info
-                .extends
-                .iter_mut()
-                .chain(info.implements.iter_mut())
-                .chain(info.uses.iter_mut())
-                .chain(info.mixins.iter_mut())
-            {
-                canonicalize(name);
-            }
-            for alias in &mut info.trait_aliases {
-                if let Some(trait_name) = &mut alias.trait_name {
-                    canonicalize(trait_name);
+        self.classes
+            .values_mut()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .for_each(|info| {
+                for name in info
+                    .extends
+                    .iter_mut()
+                    .chain(info.implements.iter_mut())
+                    .chain(info.uses.iter_mut())
+                    .chain(info.mixins.iter_mut())
+                {
+                    canonicalize(name);
                 }
-            }
-            for import in &mut info.type_imports {
-                canonicalize(&mut import.source_class_fqn);
-            }
-            self.classes.insert(class_name, info);
-        }
+                for alias in &mut info.trait_aliases {
+                    if let Some(trait_name) = &mut alias.trait_name {
+                        canonicalize(trait_name);
+                    }
+                }
+                for import in &mut info.type_imports {
+                    canonicalize(&mut import.source_class_fqn);
+                }
+            });
     }
 
     /// A `use TraitName;` can reference a trait declared later in the same
@@ -105,6 +115,15 @@ impl Registry {
     /// comment for why this needs to run more than once. Returns whether
     /// anything was actually added anywhere, so the caller knows when a
     /// fixed point has been reached.
+    ///
+    /// The collection loop below only ever *reads* `self.classes` (its
+    /// own class, and whichever trait(s) it uses) - no write happens
+    /// until the sequential apply loop afterward, so it parallelizes by
+    /// reborrowing `self` as a shared `&Registry` for the duration of the
+    /// parallel `filter_map` (ends before the apply loop takes `&mut
+    /// self` again) - the actual cost here (cloning every trait method/
+    /// property signature into `methods`/`properties`) is what scales
+    /// with corpus size, not the cheap, still-sequential apply step.
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
             String,
@@ -115,93 +134,98 @@ impl Registry {
         );
 
         let class_names: Vec<String> = self.classes.keys().cloned().collect();
-        let mut additions: Vec<TraitAddition> = Vec::new();
-
-        for class_name in &class_names {
-            let uses = self.classes[class_name].uses.clone();
-            let trait_aliases = self.classes[class_name].trait_aliases.clone();
-            if uses.is_empty() && trait_aliases.is_empty() {
-                continue;
-            }
-            // A trait can declare its own `abstract` method (the using
-            // class is required to supply it) - a using class's own
-            // directly-declared method for that same name (checked here,
-            // before any trait's contribution is applied) always wins,
-            // matching the same `or_insert` "first/own wins" semantics
-            // `methods` itself already uses below.
-            let own_method_names: HashSet<String> =
-                self.classes[class_name].methods.keys().cloned().collect();
-            let mut methods = Vec::new();
-            let mut properties = Vec::new();
-            let mut abstract_from_traits: HashSet<String> = HashSet::new();
-            // Phase 64: `static_methods` needs the identical trait-
-            // flattening treatment `abstract_from_traits` already gets
-            // just below - without it, a using class's own `static_
-            // methods` set silently never learns about a trait-supplied
-            // static method it doesn't also redeclare itself, even though
-            // that method's own (correctly flattened-in) `FunctionSig` is
-            // right there in `info.methods`. A real corpus false positive
-            // this fixes: `Symfony\Component\Cache\Adapter\RedisAdapter`
-            // (`use RedisTrait;`) was flagged as overriding
-            // `AbstractAdapter::createConnection()` non-statically, since
-            // `RedisTrait::createConnection()`'s own real static-ness
-            // never made it into `RedisAdapter.static_methods` at all.
-            let mut static_from_traits: HashSet<String> = HashSet::new();
-            for trait_name in &uses {
-                if let Some(trait_info) = self.classes.get(trait_name) {
-                    for (name, sig) in &trait_info.methods {
-                        methods.push((name.clone(), sig.clone()));
-                        if trait_info.abstract_methods.contains(name)
-                            && !own_method_names.contains(name)
-                        {
-                            abstract_from_traits.insert(name.clone());
+        let registry: &Registry = self;
+        let additions: Vec<TraitAddition> = class_names
+            .par_iter()
+            .filter_map(|class_name| {
+                let uses = registry.classes[class_name].uses.clone();
+                let trait_aliases = registry.classes[class_name].trait_aliases.clone();
+                if uses.is_empty() && trait_aliases.is_empty() {
+                    return None;
+                }
+                // A trait can declare its own `abstract` method (the using
+                // class is required to supply it) - a using class's own
+                // directly-declared method for that same name (checked here,
+                // before any trait's contribution is applied) always wins,
+                // matching the same `or_insert` "first/own wins" semantics
+                // `methods` itself already uses below.
+                let own_method_names: HashSet<String> = registry.classes[class_name]
+                    .methods
+                    .keys()
+                    .cloned()
+                    .collect();
+                let mut methods = Vec::new();
+                let mut properties = Vec::new();
+                let mut abstract_from_traits: HashSet<String> = HashSet::new();
+                // Phase 64: `static_methods` needs the identical trait-
+                // flattening treatment `abstract_from_traits` already gets
+                // just below - without it, a using class's own `static_
+                // methods` set silently never learns about a trait-supplied
+                // static method it doesn't also redeclare itself, even though
+                // that method's own (correctly flattened-in) `FunctionSig` is
+                // right there in `info.methods`. A real corpus false positive
+                // this fixes: `Symfony\Component\Cache\Adapter\RedisAdapter`
+                // (`use RedisTrait;`) was flagged as overriding
+                // `AbstractAdapter::createConnection()` non-statically, since
+                // `RedisTrait::createConnection()`'s own real static-ness
+                // never made it into `RedisAdapter.static_methods` at all.
+                let mut static_from_traits: HashSet<String> = HashSet::new();
+                for trait_name in &uses {
+                    if let Some(trait_info) = registry.classes.get(trait_name) {
+                        for (name, sig) in &trait_info.methods {
+                            methods.push((name.clone(), sig.clone()));
+                            if trait_info.abstract_methods.contains(name)
+                                && !own_method_names.contains(name)
+                            {
+                                abstract_from_traits.insert(name.clone());
+                            }
+                            if trait_info.static_methods.contains(name)
+                                && !own_method_names.contains(name)
+                            {
+                                static_from_traits.insert(name.clone());
+                            }
                         }
-                        if trait_info.static_methods.contains(name)
-                            && !own_method_names.contains(name)
-                        {
-                            static_from_traits.insert(name.clone());
-                        }
+                        properties.extend(
+                            trait_info
+                                .properties
+                                .iter()
+                                .map(|(n, s)| (n.clone(), s.clone())),
+                        );
                     }
-                    properties.extend(
-                        trait_info
-                            .properties
+                }
+                // Finding 30: `use A, B { B::hello as helloB; }` - register
+                // the trait method under its new alias too, *alongside* its
+                // original name (both stay callable in real PHP). A bare
+                // `method as newName;` with no `TraitName::` prefix (real,
+                // valid PHP when the name is unambiguous among the traits
+                // actually used) resolves against the first used trait that
+                // declares it - this project doesn't detect the ambiguous
+                // case (two used traits both declaring the same method name
+                // with no `insteadof`) as its own separate error either, so
+                // this leniency doesn't introduce a new gap next to it.
+                for alias in &trait_aliases {
+                    let source_sig = match &alias.trait_name {
+                        Some(t) => registry
+                            .classes
+                            .get(t)
+                            .and_then(|i| i.methods.get(&alias.method)),
+                        None => uses
                             .iter()
-                            .map(|(n, s)| (n.clone(), s.clone())),
-                    );
+                            .find_map(|t| registry.classes.get(t)?.methods.get(&alias.method)),
+                    };
+                    if let Some(sig) = source_sig {
+                        methods.push((alias.alias.clone(), sig.clone()));
+                    }
                 }
-            }
-            // Finding 30: `use A, B { B::hello as helloB; }` - register
-            // the trait method under its new alias too, *alongside* its
-            // original name (both stay callable in real PHP). A bare
-            // `method as newName;` with no `TraitName::` prefix (real,
-            // valid PHP when the name is unambiguous among the traits
-            // actually used) resolves against the first used trait that
-            // declares it - this project doesn't detect the ambiguous
-            // case (two used traits both declaring the same method name
-            // with no `insteadof`) as its own separate error either, so
-            // this leniency doesn't introduce a new gap next to it.
-            for alias in &trait_aliases {
-                let source_sig = match &alias.trait_name {
-                    Some(t) => self
-                        .classes
-                        .get(t)
-                        .and_then(|i| i.methods.get(&alias.method)),
-                    None => uses
-                        .iter()
-                        .find_map(|t| self.classes.get(t)?.methods.get(&alias.method)),
-                };
-                if let Some(sig) = source_sig {
-                    methods.push((alias.alias.clone(), sig.clone()));
-                }
-            }
-            additions.push((
-                class_name.clone(),
-                methods,
-                properties,
-                abstract_from_traits,
-                static_from_traits,
-            ));
-        }
+                Some((
+                    class_name.clone(),
+                    methods,
+                    properties,
+                    abstract_from_traits,
+                    static_from_traits,
+                ))
+            })
+            .collect();
 
         let mut changed = false;
         for (class_name, methods, properties, abstract_from_traits, static_from_traits) in additions
@@ -250,18 +274,23 @@ impl Registry {
     /// backfill candidate) - no fixed-point loop of its own needed, since
     /// a class's own `method_tags` list is fixed the moment `from_decl`
     /// built it.
+    ///
+    /// Fully self-contained per class (`info.method_tags` -> `info.
+    /// methods`, on that same `info` only) - no other class is ever read
+    /// or written, so this parallelizes with no read phase to separate
+    /// out first, unlike `flatten_traits`/`flatten_phpdoc_inheritance`
+    /// below (which do need one, since they read *other* classes).
     #[hotpath::measure]
     pub(crate) fn resolve_method_tags(&mut self) {
-        let class_names: Vec<String> = self.classes.keys().cloned().collect();
-        for class_name in class_names {
-            let Some(mut info) = self.classes.remove(&class_name) else {
-                continue;
-            };
-            for (name, sig) in std::mem::take(&mut info.method_tags) {
-                info.methods.entry(name).or_insert(sig);
-            }
-            self.classes.insert(class_name, info);
-        }
+        self.classes
+            .values_mut()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .for_each(|info| {
+                for (name, sig) in std::mem::take(&mut info.method_tags) {
+                    info.methods.entry(name).or_insert(sig);
+                }
+            });
     }
 
     /// Phase 87: real PHPStan backfills a method's own missing `@param`/
@@ -711,6 +740,14 @@ impl Registry {
     /// resolved position permanently ineligible for re-visiting on a
     /// later pass, the same never-revisit-a-filled-slot shape
     /// `flatten_traits_one_pass`'s own `Entry::Vacant` check already has.
+    /// The collection loop below only ever *reads* the registry
+    /// (`self.classes.get`, `lookup_ancestor_method_with_owner`'s own
+    /// read-only ancestor-chain walk, `built_in_stub_classes.contains`) -
+    /// no write happens until the sequential apply loop afterward, the
+    /// identical shape `flatten_traits_one_pass` already parallelizes -
+    /// same reborrow-as-`&Registry` technique, `flat_map` instead of
+    /// `filter_map` since one class can contribute more than one
+    /// backfill (one per method).
     fn flatten_phpdoc_inheritance_one_pass(&mut self) -> bool {
         type Backfill = (
             String,
@@ -720,174 +757,180 @@ impl Registry {
         );
 
         let class_names: Vec<String> = self.classes.keys().cloned().collect();
-        let mut backfills: Vec<Backfill> = Vec::new();
-
-        for class_name in &class_names {
-            let Some(info) = self.classes.get(class_name) else {
-                continue;
-            };
-            for (method_name, sig) in &info.methods {
-                let needs_param = sig.params.iter().any(|p| !p.has_own_doc);
-                let needs_return = !sig.return_has_own_doc;
-                if !needs_param && !needs_return {
-                    continue;
-                }
-                let Some((owner, ancestor_sig)) =
-                    self.lookup_ancestor_method_with_owner(class_name, method_name)
-                else {
-                    continue;
+        let registry: &Registry = self;
+        let backfills: Vec<Backfill> = class_names
+            .par_iter()
+            .flat_map(|class_name| {
+                let mut per_class: Vec<Backfill> = Vec::new();
+                let Some(info) = registry.classes.get(class_name) else {
+                    return per_class;
                 };
-                if ancestor_sig.visibility == Visibility::Private {
-                    continue;
-                }
-                // Real PHPStan's own identical carve-out
-                // (`PhpDocInheritanceResolver::resolvePhpDocForMethod`:
-                // `$parentMethod->getName() !== '__construct' ||
-                // !$parentMethod->getDeclaringClass()->isBuiltin()`) - a
-                // subclass's own `__construct` legitimately takes
-                // completely unrelated parameters from a native/engine
-                // ancestor's own constructor (real PHP doesn't require
-                // constructor signature compatibility at all), so
-                // `RuntimeException`/`Exception`'s own `@param string
-                // $message` must never backfill onto e.g. `final class
-                // ResponseReadyException extends RuntimeException {
-                // public function __construct(private readonly
-                // ResponseInterface $response) {...} }` - a genuine
-                // corpus false positive caught verifying this pass.
-                // `built_in_stub_classes` (populated by
-                // `merge_stub_classes`, phpstorm-stubs' own native/
-                // engine-class declarations) is this project's
-                // equivalent of `ClassReflection::isBuiltin()` (real
-                // PHP's `ReflectionClass::isInternal()`) - true for
-                // `Exception`/`ArrayObject`/... but not for a real
-                // vendored userland base class (Symfony's `Command`,
-                // Doctrine's console commands, ...), which must still
-                // participate in this pass normally.
-                if method_name == "__construct" && self.built_in_stub_classes.contains(&owner) {
-                    continue;
-                }
-                let mut param_fills = Vec::new();
-                if needs_param {
-                    // Real PHP never enforces constructor-signature
-                    // compatibility (arity, order, or names can differ
-                    // freely between a class and its parent), so
-                    // `remapParameterNames`'s usual by-*position*
-                    // correspondence - correct for a real, LSP-bound
-                    // override, where PHP itself guarantees positions
-                    // line up - cannot be trusted for `__construct`.
-                    // Real PHPStan special-cases exactly this
-                    // (`resolveMethodPhpDocFromParentClass`'s own
-                    // `$lowercaseMethodName !== '__construct'` guard
-                    // around building the real positional-name list, vs.
-                    // falling back to the child's own names, which makes
-                    // its later remap a same-name-only match): match by
-                    // parameter *name* instead. Real corpus false
-                    // positive caught verifying this pass: `Doctrine
-                    // Migrations\Tools\Console\Command\DoctrineCommand`'s
-                    // own `__construct(?DependencyFactory
-                    // $dependencyFactory, ?string $name)` has no own
-                    // doc; positional matching against `Symfony\
-                    // Component\Console\Command\Command::__construct(
-                    // ?string $name)` (own `@param string|null $name`)
-                    // would wrongly stamp `string|null` onto position 0
-                    // (`$dependencyFactory`) - name matching correctly
-                    // leaves it alone and still lets the genuinely
-                    // same-named `$name` inherit.
-                    if method_name == "__construct" {
-                        for (i, p) in sig.params.iter().enumerate() {
-                            if p.has_own_doc {
-                                continue;
+                for (method_name, sig) in &info.methods {
+                    let needs_param = sig.params.iter().any(|p| !p.has_own_doc);
+                    let needs_return = !sig.return_has_own_doc;
+                    if !needs_param && !needs_return {
+                        continue;
+                    }
+                    let Some((owner, ancestor_sig)) =
+                        registry.lookup_ancestor_method_with_owner(class_name, method_name)
+                    else {
+                        continue;
+                    };
+                    if ancestor_sig.visibility == Visibility::Private {
+                        continue;
+                    }
+                    // Real PHPStan's own identical carve-out
+                    // (`PhpDocInheritanceResolver::resolvePhpDocForMethod`:
+                    // `$parentMethod->getName() !== '__construct' ||
+                    // !$parentMethod->getDeclaringClass()->isBuiltin()`) - a
+                    // subclass's own `__construct` legitimately takes
+                    // completely unrelated parameters from a native/engine
+                    // ancestor's own constructor (real PHP doesn't require
+                    // constructor signature compatibility at all), so
+                    // `RuntimeException`/`Exception`'s own `@param string
+                    // $message` must never backfill onto e.g. `final class
+                    // ResponseReadyException extends RuntimeException {
+                    // public function __construct(private readonly
+                    // ResponseInterface $response) {...} }` - a genuine
+                    // corpus false positive caught verifying this pass.
+                    // `built_in_stub_classes` (populated by
+                    // `merge_stub_classes`, phpstorm-stubs' own native/
+                    // engine-class declarations) is this project's
+                    // equivalent of `ClassReflection::isBuiltin()` (real
+                    // PHP's `ReflectionClass::isInternal()`) - true for
+                    // `Exception`/`ArrayObject`/... but not for a real
+                    // vendored userland base class (Symfony's `Command`,
+                    // Doctrine's console commands, ...), which must still
+                    // participate in this pass normally.
+                    if method_name == "__construct"
+                        && registry.built_in_stub_classes.contains(&owner)
+                    {
+                        continue;
+                    }
+                    let mut param_fills = Vec::new();
+                    if needs_param {
+                        // Real PHP never enforces constructor-signature
+                        // compatibility (arity, order, or names can differ
+                        // freely between a class and its parent), so
+                        // `remapParameterNames`'s usual by-*position*
+                        // correspondence - correct for a real, LSP-bound
+                        // override, where PHP itself guarantees positions
+                        // line up - cannot be trusted for `__construct`.
+                        // Real PHPStan special-cases exactly this
+                        // (`resolveMethodPhpDocFromParentClass`'s own
+                        // `$lowercaseMethodName !== '__construct'` guard
+                        // around building the real positional-name list, vs.
+                        // falling back to the child's own names, which makes
+                        // its later remap a same-name-only match): match by
+                        // parameter *name* instead. Real corpus false
+                        // positive caught verifying this pass: `Doctrine
+                        // Migrations\Tools\Console\Command\DoctrineCommand`'s
+                        // own `__construct(?DependencyFactory
+                        // $dependencyFactory, ?string $name)` has no own
+                        // doc; positional matching against `Symfony\
+                        // Component\Console\Command\Command::__construct(
+                        // ?string $name)` (own `@param string|null $name`)
+                        // would wrongly stamp `string|null` onto position 0
+                        // (`$dependencyFactory`) - name matching correctly
+                        // leaves it alone and still lets the genuinely
+                        // same-named `$name` inherit.
+                        if method_name == "__construct" {
+                            for (i, p) in sig.params.iter().enumerate() {
+                                if p.has_own_doc {
+                                    continue;
+                                }
+                                if let Some(ancestor_param) =
+                                    ancestor_sig.params.iter().find(|ap| ap.name == p.name)
+                                    && ancestor_param.has_own_doc
+                                    && Registry::safe_to_backfill_mixed(
+                                        &ancestor_param.ty,
+                                        &p.ty_native,
+                                    )
+                                    && !Registry::type_mentions_template_param(&ancestor_param.ty)
+                                    && Registry::safe_to_backfill_object_type(
+                                        &ancestor_param.ty,
+                                        &p.ty_native,
+                                    )
+                                {
+                                    param_fills.push((
+                                        i,
+                                        function_sig::reconcile_with_native(
+                                            ancestor_param.ty.clone(),
+                                            p.ty_native.clone(),
+                                        ),
+                                        ancestor_param.explicit_mixed_hint,
+                                    ));
+                                }
                             }
-                            if let Some(ancestor_param) =
-                                ancestor_sig.params.iter().find(|ap| ap.name == p.name)
-                                && ancestor_param.has_own_doc
-                                && Registry::safe_to_backfill_mixed(
-                                    &ancestor_param.ty,
-                                    &p.ty_native,
-                                )
-                                && !Registry::type_mentions_template_param(&ancestor_param.ty)
-                                && Registry::safe_to_backfill_object_type(
-                                    &ancestor_param.ty,
-                                    &p.ty_native,
-                                )
-                            {
-                                param_fills.push((
-                                    i,
-                                    function_sig::reconcile_with_native(
-                                        ancestor_param.ty.clone(),
-                                        p.ty_native.clone(),
-                                    ),
-                                    ancestor_param.explicit_mixed_hint,
-                                ));
-                            }
-                        }
-                    } else {
-                        for (i, p) in sig.params.iter().enumerate() {
-                            if p.has_own_doc {
-                                continue;
-                            }
-                            if let Some(ancestor_param) = ancestor_sig.params.get(i)
-                                && ancestor_param.has_own_doc
-                                && Registry::safe_to_backfill_mixed(
-                                    &ancestor_param.ty,
-                                    &p.ty_native,
-                                )
-                                && !Registry::type_mentions_template_param(&ancestor_param.ty)
-                                && Registry::safe_to_backfill_object_type(
-                                    &ancestor_param.ty,
-                                    &p.ty_native,
-                                )
-                            {
-                                param_fills.push((
-                                    i,
-                                    function_sig::reconcile_with_native(
-                                        ancestor_param.ty.clone(),
-                                        p.ty_native.clone(),
-                                    ),
-                                    ancestor_param.explicit_mixed_hint,
-                                ));
+                        } else {
+                            for (i, p) in sig.params.iter().enumerate() {
+                                if p.has_own_doc {
+                                    continue;
+                                }
+                                if let Some(ancestor_param) = ancestor_sig.params.get(i)
+                                    && ancestor_param.has_own_doc
+                                    && Registry::safe_to_backfill_mixed(
+                                        &ancestor_param.ty,
+                                        &p.ty_native,
+                                    )
+                                    && !Registry::type_mentions_template_param(&ancestor_param.ty)
+                                    && Registry::safe_to_backfill_object_type(
+                                        &ancestor_param.ty,
+                                        &p.ty_native,
+                                    )
+                                {
+                                    param_fills.push((
+                                        i,
+                                        function_sig::reconcile_with_native(
+                                            ancestor_param.ty.clone(),
+                                            p.ty_native.clone(),
+                                        ),
+                                        ancestor_param.explicit_mixed_hint,
+                                    ));
+                                }
                             }
                         }
                     }
+                    // `safe_to_backfill_mixed` (both here and in the param
+                    // loops above) isn't about `__construct` at all - see its
+                    // own doc comment for the two real corpus shapes it
+                    // reconciles (Doctrine DBAL's `Type::convertToPHPValue():
+                    // mixed` must never overwrite a concrete native return
+                    // type, but PSR-3's `LoggerInterface::log(mixed $level,
+                    // ...)` must still propagate onto an equally-untyped
+                    // override, or `explicit_mixed_hint` never reaches it).
+                    let return_fill = (needs_return
+                        && ancestor_sig.return_has_own_doc
+                        && Registry::safe_to_backfill_mixed(
+                            &ancestor_sig.return_type,
+                            &sig.return_type_native,
+                        )
+                        && !Registry::type_mentions_template_param(&ancestor_sig.return_type)
+                        && Registry::safe_to_backfill_object_type(
+                            &ancestor_sig.return_type,
+                            &sig.return_type_native,
+                        ))
+                    .then(|| {
+                        (
+                            function_sig::reconcile_with_native(
+                                ancestor_sig.return_type.clone(),
+                                sig.return_type_native.clone(),
+                            ),
+                            ancestor_sig.return_explicit_mixed_hint,
+                        )
+                    });
+                    if !param_fills.is_empty() || return_fill.is_some() {
+                        per_class.push((
+                            class_name.clone(),
+                            method_name.clone(),
+                            param_fills,
+                            return_fill,
+                        ));
+                    }
                 }
-                // `safe_to_backfill_mixed` (both here and in the param
-                // loops above) isn't about `__construct` at all - see its
-                // own doc comment for the two real corpus shapes it
-                // reconciles (Doctrine DBAL's `Type::convertToPHPValue():
-                // mixed` must never overwrite a concrete native return
-                // type, but PSR-3's `LoggerInterface::log(mixed $level,
-                // ...)` must still propagate onto an equally-untyped
-                // override, or `explicit_mixed_hint` never reaches it).
-                let return_fill = (needs_return
-                    && ancestor_sig.return_has_own_doc
-                    && Registry::safe_to_backfill_mixed(
-                        &ancestor_sig.return_type,
-                        &sig.return_type_native,
-                    )
-                    && !Registry::type_mentions_template_param(&ancestor_sig.return_type)
-                    && Registry::safe_to_backfill_object_type(
-                        &ancestor_sig.return_type,
-                        &sig.return_type_native,
-                    ))
-                .then(|| {
-                    (
-                        function_sig::reconcile_with_native(
-                            ancestor_sig.return_type.clone(),
-                            sig.return_type_native.clone(),
-                        ),
-                        ancestor_sig.return_explicit_mixed_hint,
-                    )
-                });
-                if !param_fills.is_empty() || return_fill.is_some() {
-                    backfills.push((
-                        class_name.clone(),
-                        method_name.clone(),
-                        param_fills,
-                        return_fill,
-                    ));
-                }
-            }
-        }
+                per_class
+            })
+            .collect();
 
         let mut changed = false;
         for (class_name, method_name, param_fills, return_fill) in backfills {
