@@ -62,9 +62,18 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   same-class-instance local variable) and nothing else in the diff
   moved - produced/stored in the `phpstan-rs-master2` worktree.
 - `452eb2b` - post Phase-1 of the corpus-findings-triage plan (339
-  scoped) - current baseline for future diffs. Removed exactly 2
-  `argument.type` findings (`PaginationService::createNavigationBar`'s
-  own bare `min()`, `HistoryService::logVisit`'s own `array_find()`)
-  and nothing else moved, despite `min`/`max`/`array_find`-family/
-  non-variable-`++`/`--` each touching 20-36 more call sites in `src/`
-  alone - produced/stored in the `phpstan-rs-master2` worktree.
+  scoped). Removed exactly 2 `argument.type` findings
+  (`PaginationService::createNavigationBar`'s own bare `min()`,
+  `HistoryService::logVisit`'s own `array_find()`) and nothing else
+  moved, despite `min`/`max`/`array_find`-family/non-variable-`++`/`--`
+  each touching 20-36 more call sites in `src/` alone - produced/stored
+  in the `phpstan-rs-master2` worktree.
+- `069cff9` - post `#[ArrayShape(...)]` attribute support (348 scoped) -
+  current baseline for future diffs. Removed `ImageDerivativeController
+  Test.php`'s own `idcPixel()`/`imagecolorsforindex()` `return.type`
+  finding; correctly *added* one new, genuine `nullCoalesce.offset`
+  finding at `ImageBackend::getGraphicsLibrary` (`gd_info()['GD
+  Version'] ?? null` - `gd_info()`'s own `#[ArrayShape]` declares that
+  key unconditionally present, matching what real PHPStan would also
+  now report with the same precision) - produced/stored in the
+  `phpstan-rs-master2` worktree.
