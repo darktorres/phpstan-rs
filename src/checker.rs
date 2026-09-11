@@ -61,6 +61,32 @@ type ProvenanceMap = imbl::GenericHashMap<
 type GuardedFunctionSet =
     imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 
+// ROADMAP "Known but not yet scheduled" follow-up: the narrow slice of
+// real PHPStan's `ConditionalExpressionHolder` this project builds -
+// `name -> (target_key, Rc<Expr>)` for a variable whose last assignment's
+// RHS was itself a recognized narrowable condition shape (see
+// `condition_alias_shape`/`condition_alias_target` in `checker/
+// narrowing.rs`), replayed through `apply_narrowing` when `name` is
+// later checked bare (`if ($name)`) - correlating a *second* variable's
+// narrowing to `name`'s own truthiness without any new type math: the
+// stored `Expr` is the original AST node, re-run through the exact same
+// dispatch a direct `if (<rhsExpr>)` would use. `target_key` (computed
+// once at store time, mirroring `narrowing_key`'s own string form) is
+// what `Locals::declare` scans for to invalidate a stale alias whose
+// *target* was rebound, not just the alias variable itself - see that
+// function's own doc comment. `Rc`, not a deep clone, so every branch
+// fork of `Locals` stays O(1); the real (not `Rc`'s pointer identity)
+// `Expr` a given alias holds never changes after it's first stored,
+// only ever wholesale-replaced or purged, so `Rc::ptr_eq` is a correct,
+// cheap "did both branches inherit this unchanged" merge test (see
+// `merge_scopes`).
+type ConditionAliasMap = imbl::GenericHashMap<
+    String,
+    (String, std::rc::Rc<Expr>),
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
 /// A checked scope's variable-name-to-inferred-type bindings, plus (Phase
 /// 17 follow-up) an opt-in, parallel declaration-span side-channel the
 /// LSP's own local-variable-navigation feature reads through `Checker::
@@ -115,6 +141,7 @@ pub(crate) struct Locals {
     types: LocalsMap,
     provenance: ProvenanceMap,
     pub(crate) guarded_functions: GuardedFunctionSet,
+    pub(crate) condition_aliases: ConditionAliasMap,
     // Whether `declare`/`insert_with_provenance` actually do anything -
     // `false` (via `Default`) for every ordinary `check-project` run,
     // `true` only for the one throwaway, per-request `Checker` `lsp.rs`'s
@@ -169,7 +196,42 @@ impl Locals {
             set.insert(span);
             self.provenance.insert(key.clone(), set);
         }
+        // This name's own prior alias (if any) is stale the instant it's
+        // rebound - and so is any *other* alias whose stored condition
+        // targets this name (e.g. `$ok = $x !== null;` then a `foreach
+        // ($xs as $x)` rebinding `$x` before `if ($ok)` is ever reached).
+        self.purge_condition_aliases_targeting(&key);
         self.types.insert(key, ty)
+    }
+
+    /// The store half of the condition-alias mechanism - see
+    /// `ConditionAliasMap`'s own doc comment. `target_key` is `condition`'s
+    /// own narrowing target (e.g. `$x` for `$x instanceof Foo`), computed
+    /// once by the caller (`Checker::record_condition_alias`,
+    /// `checker/narrowing.rs`) via `condition_alias_target`.
+    pub(crate) fn set_condition_alias(
+        &mut self,
+        name: String,
+        target_key: String,
+        condition: std::rc::Rc<Expr>,
+    ) {
+        self.condition_aliases.insert(name, (target_key, condition));
+    }
+
+    /// Drops `key`'s own stored alias (if any - rebinding the alias
+    /// variable itself makes whatever it used to alias stale) and every
+    /// *other* alias whose own `target_key` is `key` (rebinding an
+    /// alias's *target* makes the alias itself stale, even though the
+    /// alias variable's own name is untouched). Called from `declare` on
+    /// every rebind, unconditionally - `Checker::record_condition_alias`
+    /// runs immediately after and re-inserts a fresh alias for `key`
+    /// itself when the new RHS actually qualifies, so a real re-alias
+    /// (`$ok = $x instanceof Foo; $ok = $y instanceof Bar;`) isn't lost,
+    /// only ever a stale one.
+    fn purge_condition_aliases_targeting(&mut self, key: &str) {
+        self.condition_aliases.remove(key);
+        self.condition_aliases
+            .retain(|_, (target, _)| target != key);
     }
 
     /// The provenance-*copying* primitive - used where a value moves
@@ -214,6 +276,7 @@ impl Locals {
             types: LocalsMap::default(),
             provenance: ProvenanceMap::default(),
             guarded_functions: GuardedFunctionSet::default(),
+            condition_aliases: ConditionAliasMap::default(),
             track: self.track,
         }
     }
@@ -239,7 +302,10 @@ impl PartialEq for Locals {
     /// bounded approximation, never a hang (still capped at `MAX_PASSES`
     /// regardless), and never a behavior change for `track: false`
     /// (`provenance` stays empty on both sides throughout, so this
-    /// distinction is unobservable there).
+    /// distinction is unobservable there). `guarded_functions`/
+    /// `condition_aliases` are excluded for the identical reason -
+    /// both are bookkeeping side-channels riding along `types`'s own
+    /// convergence, never inputs to it.
     fn eq(&self, other: &Self) -> bool {
         self.types == other.types
     }

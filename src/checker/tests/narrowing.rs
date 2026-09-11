@@ -3711,3 +3711,183 @@ fn comparison_on_a_non_numeric_current_type_is_never_narrowed() {
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
+
+// ROADMAP "Known but not yet scheduled" follow-up: the narrow slice of
+// real PHPStan's own `ConditionalExpressionHolder` this project builds -
+// correlating a *second* variable's narrowing to a first variable's own
+// truthiness, for the single-hop case (`$ok = <condition>; if ($ok)
+// {...}`), by storing the RHS condition expression and replaying it
+// through the already-correct `apply_narrowing` recursion.
+
+#[test]
+fn bool_variable_alias_from_instanceof_narrows_on_branch() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base1 {}
+            class Foo1 extends Base1 {
+                public function fooOnlyMethod(): void {}
+            }
+            function f(Base1 $x): void {
+                $isFoo = $x instanceof Foo1;
+                if ($isFoo) {
+                    $x->fooOnlyMethod();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn bool_variable_alias_negated_branch_narrows_the_false_side() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base1 {}
+            function sink1(Base1 $x): void {}
+            function f(?Base1 $x): void {
+                $isNull = $x === null;
+                if (!$isNull) {
+                    sink1($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn plain_alias_assignment_correlates_truthiness() {
+    let d = diagnostics_for(
+        r#"<?php
+            function sink2(int $x): void {}
+            function f(?int $x): void {
+                $y = $x;
+                if ($y) {
+                    sink2($x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Regression guard against unsoundness: reassigning the *aliased*
+// variable between the alias's own creation and the branch that
+// replays it must invalidate the alias.
+#[test]
+fn condition_alias_invalidated_by_reassigning_the_aliased_variable() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base1 {}
+            class Foo1 extends Base1 {
+                public function fooOnlyMethod(): void {}
+            }
+            function other1(): Base1 { return new Base1(); }
+            function f(Base1 $x): void {
+                $ok = $x instanceof Foo1;
+                $x = other1();
+                if ($ok) {
+                    $x->fooOnlyMethod();
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+// Reassigning the *boolean* alias variable itself (not its target) must
+// also invalidate the alias.
+#[test]
+fn condition_alias_invalidated_by_reassigning_the_bool_variable_itself() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base1 {}
+            class Foo1 extends Base1 {
+                public function fooOnlyMethod(): void {}
+            }
+            function otherBool1(): bool { return false; }
+            function f(Base1 $x): void {
+                $ok = $x instanceof Foo1;
+                $ok = otherBool1();
+                if ($ok) {
+                    $x->fooOnlyMethod();
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+// Exercises the `Rc::ptr_eq` merge path: an unrelated branch that
+// touches neither the alias variable nor its target must not disturb
+// the alias.
+#[test]
+fn condition_alias_survives_an_unrelated_branch_merge() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base1 {}
+            class Foo1 extends Base1 {
+                public function fooOnlyMethod(): void {}
+            }
+            function unrelatedCond1(): bool { return true; }
+            function doSomething1(): void {}
+            function f(Base1 $x): void {
+                $ok = $x instanceof Foo1;
+                if (unrelatedCond1()) {
+                    doSomething1();
+                }
+                if ($ok) {
+                    $x->fooOnlyMethod();
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Exercises the merge correctly *dropping* the alias when only one side
+// of a branch reassigns the target.
+#[test]
+fn condition_alias_does_not_survive_a_branch_that_only_sometimes_reassigns() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base1 {}
+            class Foo1 extends Base1 {
+                public function fooOnlyMethod(): void {}
+            }
+            function unrelatedCond2(): bool { return true; }
+            function other2(): Base1 { return new Base1(); }
+            function f(Base1 $x): void {
+                $ok = $x instanceof Foo1;
+                if (unrelatedCond2()) {
+                    $x = other2();
+                }
+                if ($ok) {
+                    $x->fooOnlyMethod();
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+// Regression guard for the self-reference guard in
+// `Checker::record_condition_alias` - must not infinite-loop or
+// misbehave.
+#[test]
+fn condition_alias_self_reference_guard() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base1 {}
+            class Foo1 extends Base1 {
+                public function fooOnlyMethod(): void {}
+            }
+            function f(Base1 $x): void {
+                $x = $x instanceof Foo1;
+                if ($x) {
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

@@ -66,6 +66,56 @@ fn mirror_comparison(op: &BinOp) -> BinOp {
     }
 }
 
+/// ROADMAP "Known but not yet scheduled" follow-up - the narrow slice
+/// of real PHPStan's `ConditionalExpressionHolder` this project builds:
+/// whether `rhs` (an assignment's right-hand side) is a recognized
+/// narrowable condition shape worth storing as a condition alias for
+/// `apply_narrowing` to replay later. Deliberately closed and small -
+/// the same four shapes `apply_narrowing` itself already dispatches on
+/// directly (`Instanceof`, the four equality operators, a single-arg
+/// predicate `Call`, and a bare `Variable` for the plain-alias case,
+/// `$y = $x;`) - not attempted: compound `&&`/`||`, `isset()`/array-dim
+/// correlation, `match`-arm correlation (the genuinely large part of
+/// real PHPStan's own mechanism this project declines to build).
+fn condition_alias_shape(rhs: &Expr) -> bool {
+    matches!(
+        &rhs.kind,
+        ExprKind::Instanceof(..)
+            | ExprKind::Binary(
+                BinOp::Identical | BinOp::NotIdentical | BinOp::Eq | BinOp::NotEq,
+                ..
+            )
+            | ExprKind::Call(..)
+            | ExprKind::Variable(_)
+    )
+}
+
+/// The one thing a condition-alias-eligible `rhs` actually narrows -
+/// reuses `narrowing_key` exactly the way `apply_equality_narrowing`
+/// already does for the identical operand-order-agnostic lookup. `None`
+/// for a shape `condition_alias_shape` accepted but whose own "narrowed
+/// thing" isn't `narrowing_key`-representable (most `Call`/`MethodCall`
+/// targets) - a real, disclosed leniency: such a condition simply never
+/// gets stored as an alias, matching this project's "don't guess, don't
+/// false-positive" precedent throughout `narrowing.rs`, not a false
+/// conclusion.
+fn condition_alias_target(rhs: &Expr) -> Option<String> {
+    match &rhs.kind {
+        ExprKind::Instanceof(inner, _) => narrowing_key(inner),
+        ExprKind::Binary(
+            BinOp::Identical | BinOp::NotIdentical | BinOp::Eq | BinOp::NotEq,
+            l,
+            r,
+        ) => narrowing_key(l).or_else(|| narrowing_key(r)),
+        ExprKind::Call(_, args) => match args.as_slice() {
+            [single_arg] => narrowing_key(&single_arg.value),
+            _ => None,
+        },
+        ExprKind::Variable(name) => Some(name.clone()),
+        _ => None,
+    }
+}
+
 impl<'a> Checker<'a> {
     /// Narrows `locals` in place based on `cond` being true (`branch_true`)
     /// or false, along one branch of an `if`/`while`. Only handles the
@@ -702,6 +752,31 @@ impl<'a> Checker<'a> {
                     locals.insert(key, narrow_type_excluding_falsy(&current));
                 }
             }
+            // ROADMAP "Known but not yet scheduled" follow-up: the narrow
+            // slice of real PHPStan's `ConditionalExpressionHolder` this
+            // project builds - `$ok = $x instanceof Foo; if ($ok) {...}`
+            // (or the plain-alias form `$y = $x; if ($y) {...}`) replays
+            // the *stored* condition through this exact same recursive
+            // dispatch, correlating a *second* variable's narrowing to
+            // `name`'s own truthiness with zero new type-narrowing logic
+            // - only replay. Must run for both `branch_true` values
+            // (`if (!$ok) {...}` needs the negated replay too), unlike
+            // the bare-truthiness catch-all just below, so this can't
+            // simply be folded into that arm's own `branch_true`-gated
+            // guard. Runs *in addition to* that catch-all's own bare-
+            // variable behavior (preserved verbatim right after), not
+            // instead of it - a strict superset for a bare-`Variable`
+            // condition, never a behavior change when there's no alias
+            // to replay.
+            ExprKind::Variable(name) => {
+                if let Some((_, alias)) = locals.condition_aliases.get(name).cloned() {
+                    self.apply_narrowing(&alias, locals, branch_true);
+                }
+                if branch_true {
+                    let current = self.current_narrowed_type(cond, name, locals);
+                    locals.insert(name.clone(), narrow_type_excluding_falsy(&current));
+                }
+            }
             // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
             // reaching here via the `Not` arm's recursion above) - only
             // the truthy branch is narrowable, by excluding the falsy
@@ -715,6 +790,38 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
+    }
+
+    /// The store half of the condition-alias mechanism (see `apply_
+    /// narrowing`'s own `ExprKind::Variable` arm for the replay half) -
+    /// called right after an ordinary assignment binds `lhs`. Cheap on
+    /// the fast path: `condition_alias_shape` is a plain `matches!` with
+    /// no clone, so the overwhelming majority of assignments that could
+    /// never qualify (`$x = 5;`, `$x = $obj->method();` with no
+    /// recognized shape) cost one match check and nothing else. Only the
+    /// narrow subset that passes it pays for `rhs.clone()` (an owned
+    /// `Expr` deep-clone, once), which then lives behind an `Rc` so every
+    /// later branch-fork of `Locals` stays O(1).
+    pub(crate) fn record_condition_alias(&self, lhs: &Expr, rhs: &Expr, locals: &mut Locals) {
+        let ExprKind::Variable(name) = &lhs.kind else {
+            return;
+        };
+        if !condition_alias_shape(rhs) {
+            return;
+        }
+        // Real-PHPStan-confirmed self-reference guard
+        // (`AssignHandler::isExprSafeToProjectThroughVariable`,
+        // `$expr->name !== $variableName`) - `$x = $x instanceof Foo;`
+        // must never alias to itself (the replay would just re-derive
+        // `$x`'s own type from its own not-yet-narrowed self, and a
+        // pathological "$x = $x;" must not loop).
+        if matches!(&rhs.kind, ExprKind::Variable(n) if n == name) {
+            return;
+        }
+        let Some(target_key) = condition_alias_target(rhs) else {
+            return;
+        };
+        locals.set_condition_alias(name.clone(), target_key, std::rc::Rc::new(rhs.clone()));
     }
 
     /// Phase 48.7/48.C: `AssertRuleHelper`'s equivalent - a `@phpstan-

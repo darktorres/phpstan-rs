@@ -420,6 +420,31 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         .guarded_functions
         .clone()
         .intersection(else_locals.guarded_functions.clone());
+    // ROADMAP "Known but not yet scheduled" follow-up: a condition alias
+    // only survives a merge point when both incoming branches still
+    // agree on the exact same stored condition - `Rc::ptr_eq` (not a
+    // deep `Expr` comparison) is a correct, cheap test for this: it's
+    // exactly true whenever both branches inherited the alias unchanged
+    // from before the split (the overwhelmingly common case - the
+    // assignment happened before an unrelated `if`/`else`, both forks
+    // are still the same `Rc` allocation), and correctly false whenever
+    // either branch reassigned the aliased name or the alias's own
+    // target in between (`Locals::declare`'s own purge already dropped
+    // it on that side, so the key is simply absent there and this filter
+    // drops it too) - no case needs comparing two independently-
+    // constructed-but-textually-identical conditions from different
+    // branches, so no `Expr: PartialEq` bound is needed anywhere.
+    merged.condition_aliases = then_locals
+        .condition_aliases
+        .iter()
+        .filter(|(k, (_, rc))| {
+            else_locals
+                .condition_aliases
+                .get(*k)
+                .is_some_and(|(_, other_rc)| std::rc::Rc::ptr_eq(rc, other_rc))
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     for (name, then_ty) in then_locals.iter() {
         if let Some(else_ty) = else_locals.get(name) {
             let mut provenance = then_locals

@@ -1539,6 +1539,7 @@ impl<'a> Checker<'a> {
                 self.check_assignment_target(lhs, locals, label);
                 self.check_property_assignment(lhs, rhs, locals, label);
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
+                self.record_condition_alias(lhs, rhs, locals);
                 rhs_ty
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {
