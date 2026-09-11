@@ -1,6 +1,7 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 
 use crate::ast::ClassKind;
 use crate::registry::Registry;
@@ -169,42 +170,28 @@ impl Registry {
         result
     }
 
-    /// Walks `class`'s own `extends` (*and* `implements`, so an
-    /// interface-typed receiver's own multi-parent `extends` chain and a
-    /// class's declared-but-not-overridden interface methods both
-    /// resolve) ancestor graph, in the same order `is_subclass_of` does,
-    /// returning the first ancestor (closest first) whose `ClassInfo`
-    /// satisfies `get`. A single-parent-only walk (`extends.first()`) is
-    /// wrong for interfaces specifically - unlike a class, PHP lets an
-    /// interface `extends` more than one parent at once (real example
-    /// that surfaced this: league/flysystem's `FilesystemOperator extends
-    /// FilesystemReader, FilesystemWriter`) - so every lookup below needs
-    /// this, not just `is_subclass_of`.
-    fn lookup_in_hierarchy<'r, T>(
+    /// The exhaustive BFS build `precompute_member_owners` runs once per
+    /// class per member kind, replacing what `lookup_method`/`lookup_
+    /// property`/`lookup_const`/their `_with_owner` siblings used to walk
+    /// live on every call - walks `class`'s own `extends` (*and*
+    /// `implements`, so an interface-typed receiver's own multi-parent
+    /// `extends` chain and a class's declared-but-not-overridden interface
+    /// methods both resolve) ancestor graph, in the same order `is_
+    /// subclass_of` does, recording every member `names_of` finds under
+    /// the *closest* (first-visited-by-BFS) declaring ancestor - `class`
+    /// itself included, checked before any parent. A single-parent-only
+    /// walk (`extends.first()`) would be wrong for interfaces specifically,
+    /// since unlike a class, PHP lets an interface `extends` more than one
+    /// parent at once (real example that surfaced this: league/flysystem's
+    /// `FilesystemOperator extends FilesystemReader, FilesystemWriter`).
+    fn own_owner_names<'r>(
         &'r self,
         class: &str,
-        get: impl Fn(&'r ClassInfo) -> Option<T>,
-    ) -> Option<T> {
-        self.lookup_in_hierarchy_with_owner(class, get)
-            .map(|(_, found)| found)
-    }
-
-    /// Same walk as `lookup_in_hierarchy`, but also returns *which*
-    /// ancestor (closest first, `class` itself included) actually
-    /// satisfied `get` - needed wherever a caller goes on to do
-    /// class-level generic substitution (Phase 10.5's `checker::
-    /// class_template_bindings`), since a `@template` name is scoped to
-    /// the class that declares it, not globally unique - substituting an
-    /// inherited method/property's `TemplateParam`s correctly requires
-    /// knowing which ancestor's own template scope they belong to, not
-    /// just the value found.
-    fn lookup_in_hierarchy_with_owner<'r, T>(
-        &'r self,
-        class: &str,
-        get: impl Fn(&'r ClassInfo) -> Option<T>,
-    ) -> Option<(String, T)> {
+        names_of: impl Fn(&'r ClassInfo) -> Vec<&'r str>,
+    ) -> HashMap<String, String> {
+        let mut owner_by_name = HashMap::new();
         let mut seen = HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
+        let mut queue = VecDeque::new();
         queue.push_back(class.to_string());
         while let Some(current) = queue.pop_front() {
             if !seen.insert(current.clone()) {
@@ -213,14 +200,173 @@ impl Registry {
             let Some(info) = self.classes.get(&current) else {
                 continue;
             };
-            if let Some(found) = get(info) {
-                return Some((current, found));
+            for name in names_of(info) {
+                owner_by_name
+                    .entry(name.to_string())
+                    .or_insert_with(|| current.clone());
             }
             for parent in info.extends.iter().chain(info.implements.iter()) {
                 queue.push_back(parent.clone());
             }
         }
-        None
+        owner_by_name
+    }
+
+    /// Builds an `ancestor_*_owner_by_class` entry for `class` from
+    /// already-computed `own` maps - correct, not just fast, because of
+    /// how `lookup_ancestor_method_with_owner`/`lookup_ancestor_property_
+    /// with_owner` are specified: for each of `class`'s own direct
+    /// parents *in order*, try that parent's *entire* ancestor chain
+    /// before ever trying the next parent - not a single BFS merged
+    /// across all parents at once. A parent's own `own_owner_names` entry
+    /// already correctly captures "first found within that parent's own
+    /// BFS" (`class` itself included in fully bottom of its BFS start),
+    /// so merging each direct parent's own map in order, first-insert-
+    /// wins, reproduces that exact "try parent 0 fully, then parent 1
+    /// fully" priority without re-walking anything.
+    fn merge_ancestor_owner_names(
+        parents: impl Iterator<Item = String>,
+        own_owner_by_class: &FxHashMap<String, HashMap<String, String>>,
+    ) -> HashMap<String, String> {
+        let mut merged = HashMap::new();
+        for parent in parents {
+            if let Some(parent_map) = own_owner_by_class.get(&parent) {
+                for (name, owner) in parent_map {
+                    merged.entry(name.clone()).or_insert_with(|| owner.clone());
+                }
+            }
+        }
+        merged
+    }
+
+    /// Rebuilds every `*_owner_by_class` map (see their own doc comments
+    /// on `Registry`) from scratch over every currently-registered class -
+    /// call this any time the class graph could have changed, exactly the
+    /// same "just recompute the whole thing" precedent `precompute_
+    /// ancestor_names` already follows (called from the identical settle
+    /// points: `Registry::index_and_flatten`/`build`, `Project::finish_
+    /// loading`/`update_file`).
+    ///
+    /// Replaces a fresh BFS (`own_owner_names`'s own per-call `HashSet`/
+    /// `VecDeque`, or worse, a full sequential-per-parent walk for the
+    /// `lookup_ancestor_*` siblings) on every `lookup_method`/`lookup_
+    /// property`/`lookup_const`/their `_with_owner`/`lookup_ancestor_*`
+    /// call - measured, via a perf-optimization investigation workflow,
+    /// at roughly half of total wall time combined across two real
+    /// corpora before this change (Symfony: ~49%, `lookup_method_with_
+    /// owner` alone 1.46M calls/21.81%; Drupal: ~93%, `lookup_method_
+    /// with_owner` alone 1.87M calls/51.93%). `find_method_signature_
+    /// prototype`'s own hand-ordered interface/trait/extends priority
+    /// walk is untouched - it only calls `lookup_method_with_owner` as a
+    /// sub-step, so it benefits automatically without needing its own
+    /// cache or any change to its own ordering logic.
+    ///
+    /// Two phases, `own` then `ancestor`, since every `ancestor_*_owner_
+    /// by_class` entry is built by merging its class's own already-
+    /// computed direct parents' `own` maps (`merge_ancestor_owner_names`'s
+    /// own doc comment) - every class's `own` map must finish before any
+    /// class's `ancestor` map starts.
+    #[hotpath::measure]
+    pub fn precompute_member_owners(&mut self) {
+        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let registry: &Registry = self;
+
+        // Every `self.X = ...`-style assignment below is deferred to the
+        // very end of this function, once `registry` (a borrow of the
+        // *whole* `self`, including every field being written here) is no
+        // longer needed - each intermediate map is built into a plain
+        // local first, exactly as the parallel computation itself already
+        // requires (`registry` must outlive every `par_iter()` call
+        // below, including the two `ancestor_*` ones that read `method_
+        // owner_by_class`/`property_owner_by_class` back as locals, not
+        // as `self` fields, for the same reason).
+        let method_owner_by_class: FxHashMap<String, HashMap<String, String>> = class_names
+            .par_iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    registry.own_owner_names(name, |info| {
+                        info.methods.keys().map(String::as_str).collect()
+                    }),
+                )
+            })
+            .collect();
+        let property_owner_by_class: FxHashMap<String, HashMap<String, String>> = class_names
+            .par_iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    registry.own_owner_names(name, |info| {
+                        info.properties.keys().map(String::as_str).collect()
+                    }),
+                )
+            })
+            .collect();
+        let const_owner_by_class: FxHashMap<String, HashMap<String, String>> = class_names
+            .par_iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    registry.own_owner_names(name, |info| {
+                        info.consts.keys().map(String::as_str).collect()
+                    }),
+                )
+            })
+            .collect();
+
+        let ancestor_method_owner_by_class: FxHashMap<String, HashMap<String, String>> =
+            class_names
+                .par_iter()
+                .map(|name| {
+                    let parents = registry
+                        .classes
+                        .get(name)
+                        .map(|info| {
+                            info.extends
+                                .iter()
+                                .chain(info.implements.iter())
+                                .cloned()
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    (
+                        name.clone(),
+                        Self::merge_ancestor_owner_names(
+                            parents.into_iter(),
+                            &method_owner_by_class,
+                        ),
+                    )
+                })
+                .collect();
+
+        // Real PHP interfaces can't declare properties at all, so
+        // `lookup_ancestor_property_with_owner`'s own walk (unlike the
+        // method version) only ever considers `extends`, never
+        // `implements` - mirrored here.
+        let ancestor_property_owner_by_class: FxHashMap<String, HashMap<String, String>> =
+            class_names
+                .par_iter()
+                .map(|name| {
+                    let parents = registry
+                        .classes
+                        .get(name)
+                        .map(|info| info.extends.clone())
+                        .unwrap_or_default();
+                    (
+                        name.clone(),
+                        Self::merge_ancestor_owner_names(
+                            parents.into_iter(),
+                            &property_owner_by_class,
+                        ),
+                    )
+                })
+                .collect();
+
+        self.method_owner_by_class = method_owner_by_class;
+        self.property_owner_by_class = property_owner_by_class;
+        self.const_owner_by_class = const_owner_by_class;
+        self.ancestor_method_owner_by_class = ancestor_method_owner_by_class;
+        self.ancestor_property_owner_by_class = ancestor_property_owner_by_class;
     }
 
     /// Looks up a method, walking the extends/implements ancestor graph
@@ -228,18 +374,30 @@ impl Registry {
     /// a distinct concept - `flatten_traits` already merges a trait's
     /// members directly into the using class's own `methods` map, so they
     /// show up as if declared there.
+    ///
+    /// A single two-level `HashMap` lookup against `self.method_owner_by_
+    /// class` (see `precompute_member_owners`'s own doc comment for what
+    /// this replaced and why).
     pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionSig> {
-        self.lookup_in_hierarchy(class, |info| info.methods.get(method))
+        let owner = self.method_owner_by_class.get(class)?.get(method)?;
+        self.classes.get(owner)?.methods.get(method)
     }
 
     /// Same as `lookup_method`, but also returns the declaring ancestor's
-    /// name - see `lookup_in_hierarchy_with_owner`'s doc comment for why.
+    /// name - needed wherever a caller goes on to do class-level generic
+    /// substitution (Phase 10.5's `checker::class_template_bindings`),
+    /// since a `@template` name is scoped to the class that declares it,
+    /// not globally unique - substituting an inherited method/property's
+    /// `TemplateParam`s correctly requires knowing which ancestor's own
+    /// template scope they belong to, not just the value found.
     pub fn lookup_method_with_owner(
         &self,
         class: &str,
         method: &str,
     ) -> Option<(String, &FunctionSig)> {
-        self.lookup_in_hierarchy_with_owner(class, |info| info.methods.get(method))
+        let owner = self.method_owner_by_class.get(class)?.get(method)?;
+        let sig = self.classes.get(owner)?.methods.get(method)?;
+        Some((owner.clone(), sig))
     }
 
     /// Same as `lookup_method_with_owner`, but starts the walk at
@@ -251,13 +409,12 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(String, &FunctionSig)> {
-        let info = self.classes.get(class)?;
-        for parent in info.extends.iter().chain(info.implements.iter()) {
-            if let Some(found) = self.lookup_method_with_owner(parent, method) {
-                return Some(found);
-            }
-        }
-        None
+        let owner = self
+            .ancestor_method_owner_by_class
+            .get(class)?
+            .get(method)?;
+        let sig = self.classes.get(owner)?.methods.get(method)?;
+        Some((owner.clone(), sig))
     }
 
     /// Phase 64 Item 4: faithful port of real PHPStan's own
@@ -469,19 +626,20 @@ impl Registry {
     /// Phase 64's own still-open property-override half: same idea as
     /// `lookup_ancestor_method_with_owner` just above, but walking only
     /// `extends` - real PHP interfaces can't declare properties at all,
-    /// so there's no `implements` side to check.
+    /// so there's no `implements` side to check (`precompute_member_
+    /// owners`'s own `ancestor_property_owner_by_class` build mirrors
+    /// this same `extends`-only restriction).
     pub fn lookup_ancestor_property_with_owner(
         &self,
         class: &str,
         prop: &str,
     ) -> Option<(String, &PropertySig)> {
-        let info = self.classes.get(class)?;
-        for parent in &info.extends {
-            if let Some(found) = self.lookup_property_with_owner(parent, prop) {
-                return Some(found);
-            }
-        }
-        None
+        let owner = self
+            .ancestor_property_owner_by_class
+            .get(class)?
+            .get(prop)?;
+        let sig = self.classes.get(owner)?.properties.get(prop)?;
+        Some((owner.clone(), sig))
     }
 
     /// Finding 46: real PHP forbids overriding a method declared `final`
@@ -685,26 +843,32 @@ impl Registry {
 
     /// Looks up a property, walking the ancestor graph if not declared
     /// directly on `class` (covers inherited properties, including ones
-    /// introduced via constructor promotion).
+    /// introduced via constructor promotion). A single two-level
+    /// `HashMap` lookup against `self.property_owner_by_class` - see
+    /// `precompute_member_owners`'s own doc comment.
     pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertySig> {
-        self.lookup_in_hierarchy(class, |info| info.properties.get(prop))
+        let owner = self.property_owner_by_class.get(class)?.get(prop)?;
+        self.classes.get(owner)?.properties.get(prop)
     }
 
     /// Same as `lookup_property`, but also returns the declaring
-    /// ancestor's name - see `lookup_in_hierarchy_with_owner`'s doc
-    /// comment for why.
+    /// ancestor's name - class-level generic substitution needs it the
+    /// same way `lookup_method_with_owner`'s own doc comment explains.
     pub fn lookup_property_with_owner(
         &self,
         class: &str,
         prop: &str,
     ) -> Option<(String, &PropertySig)> {
-        self.lookup_in_hierarchy_with_owner(class, |info| info.properties.get(prop))
+        let owner = self.property_owner_by_class.get(class)?.get(prop)?;
+        let sig = self.classes.get(owner)?.properties.get(prop)?;
+        Some((owner.clone(), sig))
     }
 
     /// Looks up a class constant, walking the ancestor graph if not
     /// declared directly on `class` - mirrors `lookup_property`.
     pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstSig> {
-        self.lookup_in_hierarchy(class, |info| info.consts.get(const_name))
+        let owner = self.const_owner_by_class.get(class)?.get(const_name)?;
+        self.classes.get(owner)?.consts.get(const_name)
     }
 
     /// Same as `lookup_const`, but also returns the declaring ancestor's
@@ -718,7 +882,9 @@ impl Registry {
         class: &str,
         const_name: &str,
     ) -> Option<(String, &ConstSig)> {
-        self.lookup_in_hierarchy_with_owner(class, |info| info.consts.get(const_name))
+        let owner = self.const_owner_by_class.get(class)?.get(const_name)?;
+        let sig = self.classes.get(owner)?.consts.get(const_name)?;
+        Some((owner.clone(), sig))
     }
 
     /// Phase 79: a backed enum case's own literal backing value, if this

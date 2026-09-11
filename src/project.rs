@@ -370,10 +370,27 @@ impl Project {
         self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
         self.registry.resolve_method_tags();
+        // `flatten_phpdoc_inheritance` consumes `lookup_ancestor_method_
+        // with_owner`/`lookup_method_with_owner` internally - see
+        // `Registry::index_and_flatten`'s own identical two-precompute-
+        // calls comment for why a single call at the very end (like
+        // `precompute_ancestor_names`) isn't enough here.
+        self.registry.precompute_member_owners();
         self.registry.flatten_phpdoc_inheritance();
         self.registry.resolve_deferred_value_of();
         self.registry.resolve_deferred_type_imports();
+        // Adds more method/property names (mixin members) -
+        // `resolve_transitive_purity` right after this also consumes
+        // `lookup_method_with_owner`/`lookup_ancestor_method_with_owner`
+        // internally, so the member-owner maps need a second rebuild
+        // here, before it runs, not just once at the very end.
         self.registry.resolve_deferred_mixins();
+        self.registry.precompute_member_owners();
+        // Neither `resolve_transitive_purity` nor anything below it adds
+        // or removes a method/property/const name anywhere, so the
+        // member-owner maps built just above stay correct through this
+        // point and for the checker's own later use - no third rebuild
+        // needed.
         self.registry.resolve_transitive_purity();
         self.registry.precompute_ancestor_names();
         self.rebuild_pest_config();
@@ -446,10 +463,23 @@ impl Project {
         self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
         self.registry.resolve_method_tags();
+        // `flatten_phpdoc_inheritance` consumes `lookup_ancestor_method_
+        // with_owner`/`lookup_method_with_owner` internally - see
+        // `Registry::index_and_flatten`'s own identical two-precompute-
+        // calls comment for why a single call at the very end (like
+        // `precompute_ancestor_names`) isn't enough here.
+        self.registry.precompute_member_owners();
         self.registry.flatten_phpdoc_inheritance();
         self.registry.resolve_deferred_value_of();
         self.registry.resolve_deferred_type_imports();
+        // Adds more method/property names (mixin members) -
+        // `resolve_transitive_purity` right after this also consumes a
+        // lookup internally, so the member-owner maps need a second
+        // rebuild here, before it runs - neither it nor anything below
+        // it adds/removes a name, so this second rebuild is also the
+        // final, correct one for the checker's own later use.
         self.registry.resolve_deferred_mixins();
+        self.registry.precompute_member_owners();
         self.registry.resolve_transitive_purity();
         self.registry.precompute_ancestor_names();
         register_references(&mut self.dependents, path, &references);

@@ -80,10 +80,11 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     registry.merge_stub_classes(php_stubs::generated_stub_classes());
     // `merge_stub_classes` can add extends/implements edges after
     // `Registry::build`'s own internal precompute already ran - rebuild
-    // `ancestor_names` once more now that the registry is settled, so the
-    // "class hierarchy" section below (`is_subclass_of`) sees every
-    // merged-in stub class too.
+    // `ancestor_names`/member-owner maps once more now that the registry
+    // is settled, so the "class hierarchy" section below (`is_subclass_
+    // of`) sees every merged-in stub class too.
     registry.precompute_ancestor_names();
+    registry.precompute_member_owners();
 
     println!("\n-- resolved signatures (from source) --");
     let mut fn_names: Vec<&String> = registry.functions.keys().collect();

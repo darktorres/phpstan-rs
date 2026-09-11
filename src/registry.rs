@@ -1,5 +1,5 @@
 use rustc_hash::FxHashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::Stmt;
 use crate::types::Type;
@@ -291,6 +291,17 @@ pub struct Registry {
     // so this stays correct on exactly the same schedule `ancestor_names`
     // does, with no separate invalidation path of its own to get wrong.
     pub(crate) classes_lowercase: FxHashMap<String, String>,
+    // Every currently-registered class's own precomputed member-name ->
+    // owning-ancestor-name map, one per member kind - see `lookup_method`/
+    // `Registry::precompute_member_owners`'s own doc comments
+    // (`registry/hierarchy.rs`) for what these replace and why. Rebuilt
+    // from scratch at exactly the same settle points `ancestor_names`/
+    // `classes_lowercase` already are.
+    pub(crate) method_owner_by_class: FxHashMap<String, HashMap<String, String>>,
+    pub(crate) ancestor_method_owner_by_class: FxHashMap<String, HashMap<String, String>>,
+    pub(crate) property_owner_by_class: FxHashMap<String, HashMap<String, String>>,
+    pub(crate) ancestor_property_owner_by_class: FxHashMap<String, HashMap<String, String>>,
+    pub(crate) const_owner_by_class: FxHashMap<String, HashMap<String, String>>,
 }
 
 impl Registry {
@@ -321,11 +332,25 @@ impl Registry {
         registry.canonicalize_class_name_case();
         registry.flatten_traits();
         registry.resolve_method_tags();
+        // `flatten_phpdoc_inheritance` consumes `lookup_ancestor_method_
+        // with_owner`/`lookup_method_with_owner` internally - the member-
+        // owner maps must already reflect every name `flatten_traits`/
+        // `resolve_method_tags` just added before it runs (see `Registry::
+        // precompute_member_owners`'s own doc comment on why this can't
+        // just be a single call at the very end the way `precompute_
+        // ancestor_names` is).
+        registry.precompute_member_owners();
         registry.flatten_phpdoc_inheritance();
         registry.resolve_deferred_value_of();
         registry.resolve_deferred_type_imports();
+        // Adds more method/property names (`or_insert`-merges mixin
+        // members in) - the member-owner maps need a second rebuild
+        // after this, before anything else (this function's own callers,
+        // or `resolve_transitive_purity` in `Registry::build`/`Project::
+        // finish_loading`/`update_file`) consumes a lookup again.
         registry.resolve_deferred_mixins();
         registry.precompute_ancestor_names();
+        registry.precompute_member_owners();
         registry
     }
 }

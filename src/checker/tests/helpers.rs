@@ -82,10 +82,12 @@ fn all_diagnostics_for_with(src: &str, configure: impl FnOnce(&mut Registry)) ->
     configure(&mut registry);
     // `merge_stub_classes`/`configure` can both add classes/extends edges
     // after `Registry::build`'s own internal precompute already ran -
-    // rebuild `ancestor_names` once more here, now that the registry is
-    // actually settled, so `is_subclass_of` sees every merged-in stub
-    // class too (see `precompute_ancestor_names`'s own doc comment).
+    // rebuild `ancestor_names`/member-owner maps once more here, now that
+    // the registry is actually settled, so `is_subclass_of`/`lookup_
+    // method`/etc. see every merged-in stub class too (see `precompute_
+    // ancestor_names`/`precompute_member_owners`'s own doc comments).
     registry.precompute_ancestor_names();
+    registry.precompute_member_owners();
     let mut checker = Checker::new(&registry);
     checker.check_program(&program);
     checker.into_diagnostics()
