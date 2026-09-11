@@ -1564,6 +1564,37 @@ section used to carry:
   (only a tag on a statement inside the body is) - a header tag would
   need to affect the loop body's own checking, and shipping that
   half-working was judged worse than not supporting it.
+- `new class(...) { ... }` (anonymous class) infers as plain `Mixed`,
+  never a real `Object` type - confirmed, not just assumed, during a
+  round of Piwigo corpus-findings triage: the parser gives *every*
+  anonymous class in the whole program the identical literal name
+  `"class@anonymous"` (`parser/classes.rs`'s own `parse_anonymous_class_
+  new`), explicitly never indexed into the registry under it. Giving
+  this expression a real `Type::Object` here would be actively wrong,
+  not just imprecise - every anonymous class anywhere in the program
+  would collide on that one shared identity, and an `is_assignable`/
+  hierarchy check against it could resolve to a completely unrelated
+  anonymous class's own `extends`/`implements` edges. A real fix needs
+  per-declaration-site synthetic identity threaded all the way into the
+  registry (each anonymous class registered as its own real class, not
+  just parsed) - a materially bigger feature than a one-line type
+  change, not attempted here. Confirmed corpus false positive this
+  causes: a `new class() implements SomeInterface { ... }` test double
+  assigned into a shape/parameter typed `SomeInterface|null` can't
+  satisfy it, since its own type is bare `Mixed` regardless of what it
+  implements (`tests/Unit/Http/Middleware/{Exception,Sentry}
+  MiddlewareTest.php`'s own `Sentry\init()` calls).
+- Doctrine ORM `QueryBuilder`/`AbstractQuery::getResult()`'s own real
+  result-row shape is never inferred - its native PHP signature is
+  bare `mixed` (confirmed directly in `vendor/doctrine-orm`), and real
+  PHPStan only recovers precision here via a separate, dedicated
+  `doctrine/orm` PHPStan extension (DQL-aware dynamic-return-type
+  inference keyed off the query's own `select()`/`from()` calls) this
+  project doesn't replicate - a materially bigger, Doctrine-specific
+  feature, not a general type-system gap. Confirmed corpus false
+  positive this causes: `TagRepository::findCommonTags`'s own
+  `$qb->getQuery()->getResult()` loop cascades `mixed` into every field
+  of the row shape it builds by hand from each result object.
 
 ## Won't-port (real PHPStan features with no applicable Rust target)
 
