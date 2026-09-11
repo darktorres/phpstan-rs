@@ -686,7 +686,12 @@ rather than replicating real PHPStan's accessory-type hierarchy.
 Unsealed-shape (`array{...}`) tracking: the `...` marker is now a real
 sentinel field, gating both "definitely absent" narrowing and
 `shapeAccess.notFound`. `ArrayShape`'s own int-vs-string key precision
-remains unbuilt.
+(`types::shape_key_type`, mirroring real PHPStan's own `ConstantArrayType::
+getIterableKeyType()`, each int-canonical key contributing its own real
+`Type::IntLiteral` rather than a widened `Type::Int`) is wired into both
+`registry::is_assignable`'s `Array`/`ArrayShape` arms and `types::is_subtype`'s
+own - a real, previously-unsound gap this closes: `array{name: string}`
+(all-string-keyed) no longer silently satisfies `array<int, string>`.
 
 ## Performance & tooling
 
@@ -904,11 +909,6 @@ re-confirmed as correct, not gaps. What remains of the ~27-location
 pipeline is a genuinely smaller residual than before - still a
 size-XL/low-priority stretch goal, go one-by-one only if/when there's a
 concrete reason to prioritize it.
-
-**50 - `Type::Array` key-type / offset engine, remaining (PARTIAL,
-almost everything done).** See Done for what shipped.
-`ArrayShape`'s own int-vs-string key precision remains unbuilt,
-genuinely separate from what shipped so far.
 
 **54 - Generic template richness (PARTIAL, variance-aware assignability,
 arity, and cross-path conflict checking all done).** See Done for what
