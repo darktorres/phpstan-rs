@@ -375,6 +375,7 @@ impl Project {
         self.registry.resolve_deferred_type_imports();
         self.registry.resolve_deferred_mixins();
         self.registry.resolve_transitive_purity();
+        self.registry.precompute_ancestor_names();
         self.rebuild_pest_config();
     }
 
@@ -450,6 +451,7 @@ impl Project {
         self.registry.resolve_deferred_type_imports();
         self.registry.resolve_deferred_mixins();
         self.registry.resolve_transitive_purity();
+        self.registry.precompute_ancestor_names();
         register_references(&mut self.dependents, path, &references);
 
         self.files.insert(

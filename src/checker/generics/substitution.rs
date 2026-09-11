@@ -70,6 +70,29 @@ impl<'a> Checker<'a> {
         type_args: &[Type],
         owner: &str,
     ) -> FunctionSig {
+        // Fast path: `owner`'s own `templates` list being empty
+        // guarantees `class_template_bindings` produces an empty binding
+        // map regardless of `type_args` (`Registry::class_template_
+        // bindings_rec`'s own `zip(owner.templates, type_args)` is always
+        // empty when the left side is), so every `substitute_scoped` call
+        // below would be a no-op walk that still clones the whole
+        // signature (every `ParamSig`, the return/throws/assert types) -
+        // skip straight to the already-owned `sig.clone()` instead. This
+        // is the overwhelmingly common case (a non-generic class), and
+        // `substitute_class_templates` runs on every resolved method
+        // call/return-type lookup (`checker/expr.rs`'s `MethodCall` arm,
+        // `expr/member_resolution.rs::method_call_return_type` and its
+        // own `Union`/`Intersection` recursion) - found via a
+        // perf-optimization investigation workflow, verified against
+        // this file's own real source before implementing.
+        if self
+            .registry
+            .classes
+            .get(owner)
+            .is_none_or(|c| c.templates.is_empty())
+        {
+            return sig.clone();
+        }
         let bindings = self.class_template_bindings(class, type_args, owner);
         let subst = |ty: &Type| substitute_scoped(ty, &bindings, owner);
         FunctionSig {

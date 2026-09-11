@@ -78,6 +78,12 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     // approximations - merge_stubs only fills in names not already present.
     registry.merge_stubs(php_stubs::generated_stubs());
     registry.merge_stub_classes(php_stubs::generated_stub_classes());
+    // `merge_stub_classes` can add extends/implements edges after
+    // `Registry::build`'s own internal precompute already ran - rebuild
+    // `ancestor_names` once more now that the registry is settled, so the
+    // "class hierarchy" section below (`is_subclass_of`) sees every
+    // merged-in stub class too.
+    registry.precompute_ancestor_names();
 
     println!("\n-- resolved signatures (from source) --");
     let mut fn_names: Vec<&String> = registry.functions.keys().collect();

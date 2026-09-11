@@ -275,6 +275,14 @@ pub struct Registry {
     // this way (both the parallel batch build and the single-file LSP
     // `update_file` path route through the same `insert_built_decl`).
     pub(crate) names_with_assert_tags: HashSet<String>,
+    // Every class's own precomputed `extends`+`implements` transitive
+    // closure - see `is_subclass_of`/`precompute_ancestor_names`'s own
+    // doc comments (`registry/hierarchy.rs`). Rebuilt from scratch
+    // whenever the class graph could have changed (`Registry::
+    // index_and_flatten`, `Project::finish_loading`/`update_file`) -
+    // empty until the first such call, same "not yet built" precondition
+    // every other post-load pass's own output already has.
+    pub(crate) ancestor_names: FxHashMap<String, HashSet<String>>,
 }
 
 impl Registry {
@@ -309,6 +317,7 @@ impl Registry {
         registry.resolve_deferred_value_of();
         registry.resolve_deferred_type_imports();
         registry.resolve_deferred_mixins();
+        registry.precompute_ancestor_names();
         registry
     }
 }

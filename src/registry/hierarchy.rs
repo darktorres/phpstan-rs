@@ -1,5 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
+use rayon::prelude::*;
+
 use crate::ast::ClassKind;
 use crate::registry::Registry;
 use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig};
@@ -7,14 +9,32 @@ use crate::types::Type;
 
 impl Registry {
     /// Does `class` derive from or implement `of`, directly or transitively?
-    /// Walks `extends` and `implements` together as one graph, which also
-    /// covers an interface extending several other interfaces.
+    /// A single `HashSet::contains` against `self.ancestor_names` (see
+    /// `precompute_ancestor_names`'s own doc comment) - this used to be a
+    /// fresh `extends`+`implements` DFS, with its own per-call `HashSet`/
+    /// `Vec` allocations, on every one of this function's real call sites
+    /// (dozens, all in `checker/*`/`assignability.rs`, all read-only and
+    /// post-load - confirmed by grepping every call site before making
+    /// this change). Found and fixed via a perf-optimization investigation
+    /// workflow.
     pub fn is_subclass_of(&self, class: &str, of: &str) -> bool {
-        if class == of {
-            return true;
-        }
+        class == of
+            || self
+                .ancestor_names
+                .get(class)
+                .is_some_and(|ancestors| ancestors.contains(of))
+    }
+
+    /// The exact `extends`+`implements`-only transitive closure
+    /// `is_subclass_of` itself used to walk live on every call - NOT
+    /// `all_ancestor_names`'s superset (which also chains `uses`, a trait
+    /// relationship `instanceof`/`is_subclass_of` never recognizes, see
+    /// that function's own doc comment). `class` itself is never included
+    /// (matching `is_subclass_of`'s own separate `class == of` check).
+    fn class_extends_implements_closure(&self, class: &str) -> HashSet<String> {
         let mut seen = HashSet::new();
         let mut stack = vec![class.to_string()];
+        let mut result = HashSet::new();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -23,13 +43,42 @@ impl Registry {
                 continue;
             };
             for parent in info.extends.iter().chain(info.implements.iter()) {
-                if parent == of {
-                    return true;
-                }
+                result.insert(parent.clone());
                 stack.push(parent.clone());
             }
         }
-        false
+        result
+    }
+
+    /// Rebuilds `self.ancestor_names` (see `is_subclass_of`'s own doc
+    /// comment) from scratch over every currently-registered class - call
+    /// this any time the class graph could have changed, exactly the same
+    /// "just recompute the whole thing" precedent every other `finish_
+    /// loading`-style pass in this file/`resolve.rs` already follows
+    /// (`canonicalize_class_name_case`, `flatten_traits`, ...). Called
+    /// from `Registry::index_and_flatten` (covers `Registry::build` and
+    /// `php_stubs.rs`'s own stub-extraction registries), `Project::
+    /// finish_loading`, and `Project::update_file` - every place that
+    /// finishes building or mutating a registry's class graph, so `is_
+    /// subclass_of` can always trust this map is current. Read-only over
+    /// `self.classes`, so it parallelizes the same way `flatten_traits_
+    /// one_pass` does: reborrow as `&Registry` for the DFS itself, then a
+    /// plain sequential map assignment - unlike `flatten_traits_one_pass`,
+    /// there's no per-class "apply" step, since no class's own result can
+    /// invalidate another's.
+    #[hotpath::measure]
+    pub fn precompute_ancestor_names(&mut self) {
+        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let registry: &Registry = self;
+        self.ancestor_names = class_names
+            .par_iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    registry.class_extends_implements_closure(name),
+                )
+            })
+            .collect();
     }
 
     /// Is `class` (or any ancestor it `extends`) tagged `@phpstan-immutable`

@@ -552,7 +552,30 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         sig: Option<&FunctionSig>,
     ) {
-        let doc = f.doc_comment.as_deref().map(docblock::parse);
+        // The registry-computed `sig` (built once at index time via
+        // `FunctionSig::from_decl`) already carries every per-param/
+        // return "was there an explicit `mixed` somewhere" verdict this
+        // function would otherwise re-derive by re-parsing the identical
+        // raw docblock text again here - a real, measured cost at
+        // `check_function`'s own call volume (found and fixed via a
+        // perf-optimization investigation workflow). Skip the full parse
+        // whenever `sig` already covers every param (`resolved_params`
+        // and `sig.params` are always built 1:1 from the same `f.params`,
+        // so `sig.is_some()` alone is enough - see `lookup_own_signature`'s
+        // own doc comment: `sig` is only ever `None` for an anonymous
+        // class method) *and* the magic-method short-circuit just below
+        // can't possibly need `doc_return`'s real presence/absence either
+        // (checked here, cheaply, via the same name-table lookup that
+        // short-circuit itself uses - not a substring probe, to avoid any
+        // false-positive risk on that carefully-tuned check).
+        let magic_method_may_need_doc_return = class_name.is_some()
+            && f.return_type.is_none()
+            && is_magic_method_with_implicit_return_type(&f.name);
+        let doc = if sig.is_none() || magic_method_may_need_doc_return {
+            f.doc_comment.as_deref().map(docblock::parse)
+        } else {
+            None
+        };
         let kind_word = if class_name.is_some() {
             "Method"
         } else {
