@@ -212,8 +212,9 @@ assignment inside a loop's `if`-branch (assigning an object, then
 `continue`) and its own fall-through path (assigning a different value)
 each built their own separate `Array` member instead of merging into
 one precise type, one of the two root causes behind the earlier,
-dropped `arrayFilter.same`/`arrayFilter.alwaysEmpty` attempt (see
-"Pending/partial", Phase 68). Corpus-verified project-wide: fixes the
+dropped `arrayFilter.same`/`arrayFilter.alwaysEmpty` attempt (since
+fixed and shipped unconditionally - see "Array no-op conditions"
+above). Corpus-verified project-wide: fixes the
 identical redundant-union-member pattern across dozens of unrelated
 findings (cleaner, correctly-merged displayed types), and surfaces
 several new, plausible true positives from a real key type that was
@@ -577,7 +578,11 @@ array-literal duplicate-key detection (key resolution goes through
 `define()`d global constant, and PHP's own bool/null key coercion
 (`true`/`false` to the int key `1`/`0`, `null` to the empty-string key)
 are all real, statically-known-scalar keys too), `array_values`/`array_filter`
-no-op conditions, `array_multisort()`'s stub fix,
+no-op conditions (including `arrayFilter.same`/`arrayFilter.alwaysEmpty`,
+the element-type-based sub-checks - unconditional, matching real
+PHPStan's own unconditional level-5 default; previously shipped opt-in
+after two corpus false positives, both since root-caused and fixed -
+see Phase 68), `array_multisort()`'s stub fix,
 `call_user_func(_array)`'s argument re-checking (for the two
 statically-resolvable shapes: a string-literal callable, or a
 two-element array literal naming a class/object plus a literal method
@@ -1107,24 +1112,6 @@ project has no plugin-loading mechanism at all (Phase 18, deliberately
 last). A purely declarative alternative (a static `restricted_symbols:
 Vec<{kind, name, message}>` config list) would be a materially different
 feature shape, needing its own new phase if ever wanted.
-
-**68 - Array no-op diagnostics, remaining (PARTIAL).** Duplicate-key
-detection and the two no-op `array_values`/`array_filter`-empty checks
-are done (see Done). `arrayFilter.same`/`arrayFilter.alwaysEmpty` are
-done too, currently opt-in (`check_array_filter_falsy_noop`, default
-`false`) - an earlier attempt at them was dropped entirely after
-corpus verification caught two live false positives, both since
-root-caused to independent variable-type-tracking imprecision
-unrelated to this check's own logic. Both are now fixed (see Done,
-"Narrowing engine" and "Type system"), and a fresh corpus diff with
-the flag on confirms both original false positives (`ProxyHelper.php`,
-`GroupServiceTest.php`) now stay silent, both scoped and unscoped -
-the flag is ready to flip on by default (matching real PHPStan's own
-unconditional level-5 default for this exact check), left as an
-explicit, deliberate opt-in for now rather than flipped unilaterally,
-since - unlike every other fix in this whole batch - that specific
-change is a real, externally-visible default-behavior change for
-every existing user of this tool, not an internal correctness fix.
 
 **75 - String accessory case-tracking (PLANNED).** No `Lowercase`/
 `Uppercase`/`DecimalIntegerString` accessory kinds; `strtolower()`/

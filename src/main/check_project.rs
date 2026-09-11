@@ -77,7 +77,6 @@ fn run_check_project(
     check_empty_method_bodies: bool,
     check_missing_checked_exceptions: bool,
     check_strict_printf_placeholder_types: bool,
-    check_array_filter_falsy_noop: bool,
     check_too_wide_throw_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
     php_version: Option<php_version::PhpVersion>,
@@ -122,7 +121,6 @@ fn run_check_project(
     project.set_check_empty_method_bodies(check_empty_method_bodies);
     project.set_check_missing_checked_exceptions(check_missing_checked_exceptions);
     project.set_check_strict_printf_placeholder_types(check_strict_printf_placeholder_types);
-    project.set_check_array_filter_falsy_noop(check_array_filter_falsy_noop);
     project.set_check_too_wide_throw_type_in_protected_and_public_methods(
         check_too_wide_throw_type_in_protected_and_public_methods,
     );
@@ -243,7 +241,6 @@ pub(crate) fn run_check_project_command(
     check_empty_method_bodies: bool,
     check_missing_checked_exceptions: bool,
     check_strict_printf_placeholder_types: bool,
-    check_array_filter_falsy_noop: bool,
     check_too_wide_throw_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
     php_version: Option<String>,
@@ -313,8 +310,6 @@ pub(crate) fn run_check_project_command(
         || config
             .check_strict_printf_placeholder_types
             .unwrap_or(false);
-    let check_array_filter_falsy_noop =
-        check_array_filter_falsy_noop || config.check_array_filter_falsy_noop.unwrap_or(false);
     let check_too_wide_throw_type_in_protected_and_public_methods =
         check_too_wide_throw_type_in_protected_and_public_methods
             || config
@@ -376,7 +371,6 @@ pub(crate) fn run_check_project_command(
         check_empty_method_bodies,
         check_missing_checked_exceptions,
         check_strict_printf_placeholder_types,
-        check_array_filter_falsy_noop,
         check_too_wide_throw_type_in_protected_and_public_methods,
         check_method_throw_type_covariance,
         php_version,

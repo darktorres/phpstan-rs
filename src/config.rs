@@ -84,12 +84,6 @@ pub struct Config {
     /// this defaults to `false` (unset), the same reason every other
     /// opt-in check above does.
     pub check_strict_printf_placeholder_types: Option<bool>,
-    /// Phase 68.1: opt-in `array_filter()` `arrayFilter.same`/
-    /// `arrayFilter.alwaysEmpty` no-op checks - see `registry::Registry::
-    /// check_array_filter_falsy_noop`'s own doc comment for why this
-    /// defaults to `false` (unset), the same reason every other opt-in
-    /// check above does.
-    pub check_array_filter_falsy_noop: Option<bool>,
     /// Phase 42 gating fix: mirrors real PHPStan's own opt-in
     /// `checkTooWideThrowTypesInProtectedAndPublicMethods` parameter - see
     /// `registry::Registry::check_too_wide_throw_type_in_protected_and_public_methods`'s

@@ -97,13 +97,6 @@ enum Command {
         /// own doc comment for why.
         #[arg(long)]
         check_strict_printf_placeholder_types: bool,
-        /// Enables array_filter()'s own arrayFilter.same/
-        /// arrayFilter.alwaysEmpty no-op checks. Off by default - see
-        /// `registry::Registry::check_array_filter_falsy_noop`'s own doc
-        /// comment for the confirmed corpus false-positive history this
-        /// avoids.
-        #[arg(long)]
-        check_array_filter_falsy_noop: bool,
         /// Enables `TooWideMethodThrowTypeRule`'s wider, re-declaration-
         /// only mode for a protected/public method that isn't final (and
         /// isn't on a final class). Off by default - matches real
@@ -185,7 +178,6 @@ fn main() {
             check_empty_method_bodies,
             check_missing_checked_exceptions,
             check_strict_printf_placeholder_types,
-            check_array_filter_falsy_noop,
             check_too_wide_throw_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
             php_version,
@@ -205,7 +197,6 @@ fn main() {
             check_empty_method_bodies,
             check_missing_checked_exceptions,
             check_strict_printf_placeholder_types,
-            check_array_filter_falsy_noop,
             check_too_wide_throw_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
             php_version,

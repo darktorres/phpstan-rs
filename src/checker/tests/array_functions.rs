@@ -1629,15 +1629,29 @@ fn array_filter_on_an_empty_array_literal_is_flagged() {
 }
 
 #[test]
-fn array_filter_on_a_list_of_objects_is_never_flagged_by_default() {
-    // `arrayFilter.same`/`arrayFilter.alwaysEmpty` (real PHPStan's own
-    // element-type-based sub-checks) are opt-in
-    // (`check_array_filter_falsy_noop`, default `false`) - an earlier
-    // attempt at them was dropped entirely after corpus verification
-    // caught live false positives in exactly this element-type-is-
-    // provably-truthy shape - see `check_array_filter_no_op`'s own doc
-    // comment for the two real-corpus repros this project's own variable-
-    // type-tracking gaps caused (unrelated to this check's own logic).
+fn array_filter_on_an_ambiguous_element_type_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $x */
+            function f(array $x): array {
+                return array_filter($x);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Phase 68 / 68.4: `arrayFilter.same`/`arrayFilter.alwaysEmpty` -
+// unconditional, matching real PHPStan's own unconditional level-5
+// default (previously shipped opt-in via `check_array_filter_falsy_noop`
+// until a fresh corpus re-verify confirmed both root-caused false
+// positives stayed fixed).
+
+#[test]
+fn array_filter_on_a_list_of_objects_is_flagged() {
     let d = diagnostics_for(
         r#"<?php
             class Foo {}
@@ -1648,59 +1662,20 @@ fn array_filter_on_a_list_of_objects_is_never_flagged_by_default() {
         "#,
     );
     assert!(
-        !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
-        "unexpected diagnostics: {d:?}"
-    );
-}
-
-#[test]
-fn array_filter_on_an_ambiguous_element_type_is_never_flagged() {
-    let d = diagnostics_for_with(
-        r#"<?php
-            /** @param list<int> $x */
-            function f(array $x): array {
-                return array_filter($x);
-            }
-        "#,
-        |r| r.check_array_filter_falsy_noop = true,
-    );
-    assert!(
-        !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
-        "unexpected diagnostics: {d:?}"
-    );
-}
-
-// Phase 68.1: `arrayFilter.same`/`arrayFilter.alwaysEmpty`, opt-in via
-// `check_array_filter_falsy_noop`.
-
-#[test]
-fn array_filter_on_a_list_of_objects_is_flagged_when_opted_in() {
-    let d = diagnostics_for_with(
-        r#"<?php
-            class Foo {}
-            /** @param list<Foo> $x */
-            function f(array $x): array {
-                return array_filter($x);
-            }
-        "#,
-        |r| r.check_array_filter_falsy_noop = true,
-    );
-    assert!(
         d.iter().any(|x| x.identifier == "arrayFilter.same"),
         "got: {d:?}"
     );
 }
 
 #[test]
-fn array_filter_on_a_list_of_true_is_flagged_when_opted_in() {
-    let d = diagnostics_for_with(
+fn array_filter_on_a_list_of_true_is_flagged() {
+    let d = diagnostics_for(
         r#"<?php
             /** @param list<true> $x */
             function f(array $x): array {
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         d.iter().any(|x| x.identifier == "arrayFilter.same"),
@@ -1709,15 +1684,14 @@ fn array_filter_on_a_list_of_true_is_flagged_when_opted_in() {
 }
 
 #[test]
-fn array_filter_on_a_list_of_false_is_flagged_always_empty_when_opted_in() {
-    let d = diagnostics_for_with(
+fn array_filter_on_a_list_of_false_is_flagged_always_empty() {
+    let d = diagnostics_for(
         r#"<?php
             /** @param list<false> $x */
             function f(array $x): array {
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         d.iter().any(|x| x.identifier == "arrayFilter.alwaysEmpty"),
@@ -1726,15 +1700,14 @@ fn array_filter_on_a_list_of_false_is_flagged_always_empty_when_opted_in() {
 }
 
 #[test]
-fn array_filter_on_a_list_of_null_is_flagged_always_empty_when_opted_in() {
-    let d = diagnostics_for_with(
+fn array_filter_on_a_list_of_null_is_flagged_always_empty() {
+    let d = diagnostics_for(
         r#"<?php
             /** @param list<null> $x */
             function f(array $x): array {
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         d.iter().any(|x| x.identifier == "arrayFilter.alwaysEmpty"),
@@ -1743,7 +1716,7 @@ fn array_filter_on_a_list_of_null_is_flagged_always_empty_when_opted_in() {
 }
 
 #[test]
-fn array_filter_on_a_bare_int_element_type_is_never_flagged_even_when_opted_in() {
+fn array_filter_on_a_bare_int_element_type_is_never_flagged() {
     // Real bug found and fixed while building this: a bare `int` element
     // type must stay ambiguous (a real `int` genuinely can be exactly
     // `0`), not "provably never falsy" - the naive approach of comparing
@@ -1751,14 +1724,13 @@ fn array_filter_on_a_bare_int_element_type_is_never_flagged_even_when_opted_in()
     // would have wrongly treated it as never-falsy, since that function
     // (built for a different purpose, condition-narrowing) leaves a bare
     // `Int`/`Float`/`Bool` unchanged rather than marking it ambiguous.
-    let d = diagnostics_for_with(
+    let d = diagnostics_for(
         r#"<?php
             /** @param list<int> $x */
             function f(array $x): array {
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
@@ -1767,15 +1739,14 @@ fn array_filter_on_a_bare_int_element_type_is_never_flagged_even_when_opted_in()
 }
 
 #[test]
-fn array_filter_on_a_bare_bool_element_type_is_never_flagged_even_when_opted_in() {
-    let d = diagnostics_for_with(
+fn array_filter_on_a_bare_bool_element_type_is_never_flagged() {
+    let d = diagnostics_for(
         r#"<?php
             /** @param list<bool> $x */
             function f(array $x): array {
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
@@ -1785,7 +1756,7 @@ fn array_filter_on_a_bare_bool_element_type_is_never_flagged_even_when_opted_in(
 
 #[test]
 fn array_filter_on_a_union_mixing_a_falsy_and_a_truthy_member_is_never_flagged() {
-    let d = diagnostics_for_with(
+    let d = diagnostics_for(
         r#"<?php
             class Foo {}
             /** @param list<Foo|null> $x */
@@ -1793,7 +1764,6 @@ fn array_filter_on_a_union_mixing_a_falsy_and_a_truthy_member_is_never_flagged()
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
@@ -1802,15 +1772,14 @@ fn array_filter_on_a_union_mixing_a_falsy_and_a_truthy_member_is_never_flagged()
 }
 
 #[test]
-fn array_filter_on_a_positive_int_range_is_flagged_when_opted_in() {
-    let d = diagnostics_for_with(
+fn array_filter_on_a_positive_int_range_is_flagged() {
+    let d = diagnostics_for(
         r#"<?php
             /** @param list<positive-int> $x */
             function f(array $x): array {
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         d.iter().any(|x| x.identifier == "arrayFilter.same"),
@@ -1825,14 +1794,13 @@ fn array_filter_on_a_map_of_lists_is_never_flagged_a_list_can_be_empty() {
     // unmatchedSkippedViolations`, `array<string, list<string>>`):
     // `list<T>` only promises sequential int keys, never non-emptiness -
     // `[]` is a perfectly real, empty (falsy) `list<T>`.
-    let d = diagnostics_for_with(
+    let d = diagnostics_for(
         r#"<?php
             /** @param array<string, list<string>> $x */
             function f(array $x): array {
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         !d.iter().any(|x| x.identifier.starts_with("arrayFilter.")),
@@ -1841,15 +1809,14 @@ fn array_filter_on_a_map_of_lists_is_never_flagged_a_list_can_be_empty() {
 }
 
 #[test]
-fn array_filter_on_a_map_of_non_empty_lists_is_flagged_when_opted_in() {
-    let d = diagnostics_for_with(
+fn array_filter_on_a_map_of_non_empty_lists_is_flagged() {
+    let d = diagnostics_for(
         r#"<?php
             /** @param array<string, non-empty-list<string>> $x */
             function f(array $x): array {
                 return array_filter($x);
             }
         "#,
-        |r| r.check_array_filter_falsy_noop = true,
     );
     assert!(
         d.iter().any(|x| x.identifier == "arrayFilter.same"),

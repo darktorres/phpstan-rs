@@ -438,19 +438,22 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 68 / 68.1: `ArrayFilterRule` - `arrayFilter.empty` (real
-    /// PHP's own default no-callback "drop every falsy element" behavior
-    /// on a provably-empty array) is unconditional; the other two real
-    /// PHPStan sub-checks (`arrayFilter.same`/`arrayFilter.alwaysEmpty`,
-    /// gated on the array's own *element* type being provably always-
-    /// truthy/always-falsy) are opt-in (`Registry::check_array_filter_
-    /// falsy_noop`, default `false`) - an *earlier* attempt at them was
-    /// dropped entirely after corpus verification caught two live false
-    /// positives, both since root-caused (Phase 68.2/68.3) to independent
-    /// variable-type-tracking imprecision, not this check's own logic: a
-    /// dynamic-key index-assignment inside a loop's `if`-branch not
-    /// correctly widening the tracked element type across the branch
-    /// (`vendor/symfony/var-exporter/ProxyHelper.php`'s
+    /// Phase 68 / 68.1 / 68.4: `ArrayFilterRule` - `arrayFilter.empty`
+    /// (real PHP's own default no-callback "drop every falsy element"
+    /// behavior on a provably-empty array) and the other two real PHPStan
+    /// sub-checks (`arrayFilter.same`/`arrayFilter.alwaysEmpty`, gated on
+    /// the array's own *element* type being provably always-truthy/
+    /// always-falsy) are all unconditional, matching real PHPStan's own
+    /// unconditional level-5 default for this exact check (no separate
+    /// opt-in `featureToggles.*` parameter exists for it there either).
+    /// `arrayFilter.same`/`.alwaysEmpty` were previously gated behind
+    /// `Registry::check_array_filter_falsy_noop` (default `false`) after
+    /// an *earlier* attempt at them was dropped entirely for two
+    /// confirmed corpus false positives, both since root-caused (Phase
+    /// 68.2/68.3) to independent variable-type-tracking imprecision, not
+    /// this check's own logic: a dynamic-key index-assignment inside a
+    /// loop's `if`-branch not correctly widening the tracked element type
+    /// across the branch (`vendor/symfony/var-exporter/ProxyHelper.php`'s
     /// `$abstractProperties[$name] = new \ReflectionProperty(...)` vs
     /// `$abstractProperties[$name] = false;`, inferred as bare
     /// `array<false>` - the object-valued branch went missing entirely),
@@ -459,9 +462,13 @@ impl<'a> Checker<'a> {
     /// `try` never ran (Piwigo's own
     /// `tests/Integration/GroupServiceTest.php`, `$copyId = null;`
     /// reassigned only conditionally inside `try`, inferred as bare
-    /// `GroupId` with the `null` branch dropped). `is_known_empty_array`
-    /// just above has no such exposure (purely syntactic, no flow-
-    /// sensitive inference involved) - stays unconditional.
+    /// `GroupId` with the `null` branch dropped). Both root causes are now
+    /// fixed (see ROADMAP.md); a fresh scoped+unscoped corpus re-run with
+    /// the flag on produced byte-identical output to the flag being off
+    /// (zero new findings anywhere, not just the two originally-disclosed
+    /// false positives staying silent), so the gate itself - which real
+    /// PHPStan never had in the first place - was removed rather than
+    /// flipped on by default.
     pub(crate) fn check_array_filter_no_op(
         &mut self,
         args: &[Arg],
@@ -484,15 +491,6 @@ impl<'a> Checker<'a> {
                 0,
                 "arrayFilter.empty",
             );
-            return;
-        }
-        // Phase 68.1: `arrayFilter.same`/`arrayFilter.alwaysEmpty` - opt-in
-        // (`Registry::check_array_filter_falsy_noop`, default `false`),
-        // rebuilt after an earlier attempt was dropped for two confirmed
-        // corpus false positives, both since root-caused to independent
-        // variable-type-tracking imprecision (documented in ROADMAP.md)
-        // rather than anything wrong with this check's own logic.
-        if !self.registry.check_array_filter_falsy_noop {
             return;
         }
         let Some(element_ty) = Self::array_element_type(&arr_ty) else {
