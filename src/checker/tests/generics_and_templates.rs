@@ -2767,6 +2767,37 @@ fn a_trait_string_parameter_accepts_a_real_trait_class_string() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// ROADMAP "Known but not yet scheduled" follow-up: the call-site payoff
+// of backfilling a method-scoped `@template` (see
+// src/registry/tests/phpdoc_inheritance.rs's own registry-level test for
+// the signature-shape assertion) - once backfilled, an actual method
+// call through it must really bind `T`, not just carry a `TemplateParam`
+// that nothing ever consumes.
+#[test]
+fn a_call_through_a_method_scoped_backfilled_template_binds_t_from_the_real_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo14 {}
+            interface Repo14 {
+                /**
+                 * @template T of object
+                 * @param class-string<T> $entityName
+                 * @return T|null
+                 */
+                public function getReference(string $entityName, mixed $id): object|null;
+            }
+            class ConcreteRepo14 implements Repo14 {
+                public function getReference(string $entityName, mixed $id): object|null { return null; }
+            }
+            function f(ConcreteRepo14 $repo): void {
+                assertType('Foo14|null', $repo->getReference(Foo14::class, 1));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_trait_string_parameter_rejects_a_plain_class_string() {
     let d = diagnostics_for(

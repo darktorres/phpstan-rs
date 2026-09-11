@@ -293,6 +293,60 @@ fn an_ancestors_template_parameterized_type_is_never_inherited() {
     );
 }
 
+// ROADMAP "Known but not yet scheduled" follow-up: unlike the
+// class-scoped `@template` case just above (which must stay refused,
+// unmodeled cross-inheritance binding), a `@template` declared directly
+// on the ancestor *method* itself is safe to backfill verbatim - real
+// corpus shape: `Doctrine\ORM\EntityManagerInterface::getReference()`
+// (`@template T of object`, `@param class-string<T> $entityName`,
+// `@return T|null`) backfilling cleanly onto `EntityManager::
+// getReference()`'s own wholly undocumented native signature.
+#[test]
+fn a_method_scoped_template_parameterized_type_is_inherited() {
+    let r = build_registry(
+        r#"<?php
+            interface Repo13 {
+                /**
+                 * @template T of object
+                 * @param class-string<T> $entityName
+                 * @return T|null
+                 */
+                public function getReference(string $entityName, mixed $id): object|null;
+            }
+            class ConcreteRepo13 implements Repo13 {
+                public function getReference(string $entityName, mixed $id): object|null { return null; }
+            }
+            "#,
+    );
+    let sig = &r.classes["ConcreteRepo13"].methods["getReference"];
+    let Type::ClassString(inner) = &sig.params[0].ty else {
+        panic!(
+            "expected the param to backfill to ClassString(TemplateParam(T)), got {:?}",
+            sig.params[0].ty
+        );
+    };
+    assert!(
+        matches!(**inner, Type::TemplateParam(_)),
+        "expected a TemplateParam inside the ClassString, got {inner:?}"
+    );
+    let Type::Union(members) = &sig.return_type else {
+        panic!(
+            "expected the return type to backfill to a Union containing TemplateParam and Null, got {:?}",
+            sig.return_type
+        );
+    };
+    assert!(
+        members.iter().any(|m| matches!(m, Type::TemplateParam(_))),
+        "expected a TemplateParam member in the return union, got {:?}",
+        sig.return_type
+    );
+    assert!(
+        members.contains(&Type::Null),
+        "expected Null to survive in the return union, got {:?}",
+        sig.return_type
+    );
+}
+
 // Real corpus false positive: `Doctrine\ORM\EntityManagerInterface::
 // getMetadataFactory()` has no own doc, and its own native hint already
 // resolves (via that file's own `use` import) to the concrete ORM

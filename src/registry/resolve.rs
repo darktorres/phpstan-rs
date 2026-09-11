@@ -636,42 +636,76 @@ impl Registry {
         resolve_deferred_value_of_with_native_fallback(ty, native, &self.classes)
     }
 
-    /// Whether `ty` mentions a `Type::TemplateParam` anywhere in its tree -
-    /// mirrors `function_sig::mark_template_params`'s own recursive-case
-    /// list (`Object`'s type args, `Array`'s key/value, `ClassString`,
-    /// `Union`/`Intersection`, `ArrayShape`/`ObjectShape` fields).
-    /// `flatten_phpdoc_inheritance_one_pass` uses this to refuse
-    /// backfilling a template-parameterized ancestor type at all: a
-    /// `Type::TemplateParam` is only meaningful within the *ancestor's
-    /// own* `@template` scope, and (per `Type::Object`'s own doc comment)
-    /// this project does not model cross-inheritance template binding
-    /// (`@extends Base<Concrete>` fixing a parent's own type parameter) -
-    /// cloning the raw value onto an unrelated descendant would silently
-    /// keep it bound to the *ancestor's* own (often wider) bound instead.
-    /// Real corpus false positive caught verifying this pass: Doctrine's
-    /// `AbstractClassMetadataFactory implements ClassMetadataFactory`
-    /// (`@template T of ClassMetadata`, `@phpstan-return list<T>` on
-    /// `getAllMetadata()`) backfilling verbatim onto
-    /// `Doctrine\ORM\Mapping\ClassMetadataFactory` (which real PHPStan
-    /// binds `T` to the *concrete* `Doctrine\ORM\Mapping\ClassMetadata`
-    /// via its own `@extends AbstractClassMetadataFactory<ClassMetadata>`)
-    /// left `T` resolved against the *interface* bound instead, silently
-    /// losing `Doctrine\ORM\Mapping\ClassMetadata::getTableName()`.
-    pub(crate) fn type_mentions_template_param(ty: &Type) -> bool {
+    /// Whether `ty` mentions a `Type::TemplateParam` scoped anywhere
+    /// other than `method_name` - mirrors `function_sig::
+    /// mark_template_params`'s own recursive-case list (`Object`'s type
+    /// args, `Array`'s key/value, `ClassString`, `Union`/`Intersection`,
+    /// `ArrayShape`/`ObjectShape` fields). `flatten_phpdoc_inheritance_
+    /// one_pass` uses this to refuse backfilling a *foreign*-scoped
+    /// template-parameterized ancestor type - i.e. genuinely unsafe to
+    /// backfill because it's scoped to the ancestor's own *enclosing
+    /// class* (meaningful only via unmodeled `@extends Base<Concrete>`
+    /// cross-inheritance binding - this project does not model that).
+    /// Real corpus false positive caught verifying this guard's original,
+    /// blanket version: Doctrine's `AbstractClassMetadataFactory
+    /// implements ClassMetadataFactory` (`@template T of ClassMetadata`,
+    /// `@phpstan-return list<T>` on `getAllMetadata()`) backfilling
+    /// verbatim onto `Doctrine\ORM\Mapping\ClassMetadataFactory` (which
+    /// real PHPStan binds `T` to the *concrete* `Doctrine\ORM\Mapping\
+    /// ClassMetadata` via its own `@extends
+    /// AbstractClassMetadataFactory<ClassMetadata>`) left `T` resolved
+    /// against the *interface* bound instead, silently losing
+    /// `Doctrine\ORM\Mapping\ClassMetadata::getTableName()`. This class-
+    /// scoped half stays exactly as refused as it always was.
+    ///
+    /// As opposed to a `@template` declared directly on the ancestor
+    /// *method* itself
+    /// (`function_sig::from_decl`'s own `build_template_params(d,
+    /// &f.name, ctx)` stamps `scope: Some(f.name)` for exactly this
+    /// case, vs. `class_info.rs`'s own `class_scope =
+    /// ctx.declared_name(&c.name)` for a class-level one - an FQN vs. a
+    /// bare method name, structurally distinguishable). A method-scoped
+    /// template is safe to copy through verbatim: `types::
+    /// bind_template_param`/`substitute_template`'s own call-site
+    /// binding is purely name-keyed and blind to which class's
+    /// `FunctionSig` a signature came from - confirmed against real,
+    /// vendored `Doctrine\ORM\EntityManagerInterface::getReference()`
+    /// (`@template T of object`, `@param class-string<T> $entityName`,
+    /// `@return T|null`) backfilling cleanly onto `EntityManager::
+    /// getReference()`'s own wholly undocumented native signature. Real
+    /// PHPStan draws the identical line: `ResolvedPhpDocBlock::
+    /// resolveTemplateTypeInTag` substitutes an ancestor tag's type
+    /// through `$parentClass->getActiveTemplateTypeMap()`, which only
+    /// ever holds *class*-level bindings - a method-scoped `@template`
+    /// is never a member of it, so that substitution is a verified
+    /// no-op for exactly this shape, and real PHPStan's own merge
+    /// leaves it untouched too - it doesn't special-case `getReference()`,
+    /// it just never touches method-scoped templates during inheritance
+    /// merge.
+    pub(crate) fn type_mentions_foreign_scoped_template_param(
+        ty: &Type,
+        method_name: &str,
+    ) -> bool {
         match ty {
-            Type::TemplateParam(_) => true,
-            Type::Object(_, args) => args.iter().any(Registry::type_mentions_template_param),
-            Type::Array(key, inner) => {
-                Registry::type_mentions_template_param(key)
-                    || Registry::type_mentions_template_param(inner)
-            }
-            Type::ClassString(inner) => Registry::type_mentions_template_param(inner),
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().any(Registry::type_mentions_template_param)
-            }
-            Type::ArrayShape(fields) | Type::ObjectShape(fields) => fields
+            Type::TemplateParam(tp) => tp.scope.as_deref() != Some(method_name),
+            Type::Object(_, args) => args
                 .iter()
-                .any(|(_, t, _)| Registry::type_mentions_template_param(t)),
+                .any(|a| Registry::type_mentions_foreign_scoped_template_param(a, method_name)),
+            Type::Array(key, inner) => {
+                Registry::type_mentions_foreign_scoped_template_param(key, method_name)
+                    || Registry::type_mentions_foreign_scoped_template_param(inner, method_name)
+            }
+            Type::ClassString(inner) => {
+                Registry::type_mentions_foreign_scoped_template_param(inner, method_name)
+            }
+            Type::Union(members) | Type::Intersection(members) => members
+                .iter()
+                .any(|m| Registry::type_mentions_foreign_scoped_template_param(m, method_name)),
+            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
+                fields.iter().any(|(_, t, _)| {
+                    Registry::type_mentions_foreign_scoped_template_param(t, method_name)
+                })
+            }
             _ => false,
         }
     }
@@ -859,7 +893,10 @@ impl Registry {
                                         &ancestor_param.ty,
                                         &p.ty_native,
                                     )
-                                    && !Registry::type_mentions_template_param(&ancestor_param.ty)
+                                    && !Registry::type_mentions_foreign_scoped_template_param(
+                                        &ancestor_param.ty,
+                                        method_name,
+                                    )
                                     && Registry::safe_to_backfill_object_type(
                                         &ancestor_param.ty,
                                         &p.ty_native,
@@ -886,7 +923,10 @@ impl Registry {
                                         &ancestor_param.ty,
                                         &p.ty_native,
                                     )
-                                    && !Registry::type_mentions_template_param(&ancestor_param.ty)
+                                    && !Registry::type_mentions_foreign_scoped_template_param(
+                                        &ancestor_param.ty,
+                                        method_name,
+                                    )
                                     && Registry::safe_to_backfill_object_type(
                                         &ancestor_param.ty,
                                         &p.ty_native,
@@ -918,7 +958,10 @@ impl Registry {
                             &ancestor_sig.return_type,
                             &sig.return_type_native,
                         )
-                        && !Registry::type_mentions_template_param(&ancestor_sig.return_type)
+                        && !Registry::type_mentions_foreign_scoped_template_param(
+                            &ancestor_sig.return_type,
+                            method_name,
+                        )
                         && Registry::safe_to_backfill_object_type(
                             &ancestor_sig.return_type,
                             &sig.return_type_native,

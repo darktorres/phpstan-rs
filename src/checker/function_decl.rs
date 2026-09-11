@@ -506,7 +506,9 @@ impl<'a> Checker<'a> {
                             .filter(|ap| {
                                 ap.has_own_doc
                                     && Registry::safe_to_backfill_mixed(&ap.ty, &ty)
-                                    && !Registry::type_mentions_template_param(&ap.ty)
+                                    && !Registry::type_mentions_foreign_scoped_template_param(
+                                        &ap.ty, &f.name,
+                                    )
                                     && Registry::safe_to_backfill_object_type(&ap.ty, &ty)
                             })
                             .map(|ap| ap.ty.clone())
@@ -595,7 +597,10 @@ impl<'a> Checker<'a> {
                     .filter(|s| {
                         s.return_has_own_doc
                             && Registry::safe_to_backfill_mixed(&s.return_type, &ty)
-                            && !Registry::type_mentions_template_param(&s.return_type)
+                            && !Registry::type_mentions_foreign_scoped_template_param(
+                                &s.return_type,
+                                &f.name,
+                            )
                             && Registry::safe_to_backfill_object_type(&s.return_type, &ty)
                     })
                     .map(|s| s.return_type.clone())

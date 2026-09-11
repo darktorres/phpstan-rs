@@ -248,6 +248,37 @@ fn an_anonymous_class_inherits_a_precise_ancestor_return_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// ROADMAP "Known but not yet scheduled" follow-up: the anonymous-class
+// mirror of `a_method_scoped_template_parameterized_type_is_inherited`
+// (src/registry/tests/phpdoc_inheritance.rs) - this code path
+// (`Checker::check_function_decl`'s own inline backfill,
+// `function_decl.rs`) is a hand-maintained duplicate of the same three
+// safety guards, not a shared call into `registry::resolve`, so it
+// needs its own fix, not just the registry-side one.
+#[test]
+fn an_anonymous_class_inherits_a_method_scoped_template_parameterized_type() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            interface Repo92 {
+                /**
+                 * @template T of object
+                 * @param class-string<T> $entityName
+                 * @return T|null
+                 */
+                public function getReference(string $entityName, mixed $id): object|null;
+            }
+            function make(): Repo92 {
+                return new class implements Repo92 {
+                    public function getReference(string $entityName, mixed $id): object|null {
+                        return null;
+                    }
+                };
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // The inverse - when neither the anonymous class's own docblock nor the
 // implemented interface's has anything to say about a position, it must
 // still be flagged normally (nothing anywhere to inherit).
