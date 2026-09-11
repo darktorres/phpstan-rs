@@ -1209,6 +1209,38 @@ fn a_correctly_cased_method_mixin_and_type_alias_are_never_flagged_name_case() {
 }
 
 #[test]
+fn a_backfilled_return_type_inherited_from_an_ancestor_is_not_re_flagged_name_case() {
+    // Phase 48 item 7e (disclosed exclusion): `flatten_phpdoc_
+    // inheritance`'s own backfill pass copies `ty` from an ancestor but
+    // deliberately never re-collects `case_refs` from it - the raw text
+    // was written under that *ancestor's* file's own `use` imports, not
+    // this (identical, but still separate) file's `name_ctx`, so
+    // checking it here would be a real cross-file-context correctness
+    // hazard. `HasX::getX()`'s own genuinely mis-cased `@return foo` is
+    // correctly flagged once, on its own declaration - `Impl::getX()`,
+    // which declares no `@return` of its own and backfills `foo` from
+    // `HasX`, must not get a second, duplicate flag for the identical
+    // inherited text.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            interface HasX {
+                /** @return foo */
+                public function getX();
+            }
+            class Impl implements HasX {
+                public function getX() { return new Foo(); }
+            }
+        "#,
+    );
+    let name_case_hits: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "class.nameCase")
+        .collect();
+    assert_eq!(name_case_hits.len(), 1, "got: {d:?}");
+}
+
+#[test]
 fn a_differently_cased_call_to_a_builtin_function_is_never_flagged() {
     let d = diagnostics_for(
         r#"<?php
