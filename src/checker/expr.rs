@@ -1577,13 +1577,20 @@ impl<'a> Checker<'a> {
                     self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span, label);
                     self.check_division_by_literal_zero(op, rhs, &rhs_ty, rhs.span, label);
                 }
-                if let ExprKind::Variable(name) = &lhs.kind {
-                    let ty = self.infer_binary(op, lhs, rhs, locals);
-                    purge_stale_narrowing_for(locals, name);
-                    // Phase 17 follow-up: `$x += 1`/`$x ??= ...` is a
-                    // real rebind of `$x`.
-                    locals.declare(name.clone(), ty, lhs.span);
-                }
+                // Phase 17 follow-up: `$x += 1`/`$x ??= ...` is a real
+                // rebind of `$x` - generalized here (from a bare-`Variable`-
+                // only check) to route through the same `bind_assignment_
+                // target` every other assignment shape already uses, so a
+                // property/index target rebinds too, not just a bare
+                // local. Real corpus false positive this fixes:
+                // `ImageStdParams::getWatermark`'s own `$this->watermark
+                // ??= new WatermarkParams(); return $this->watermark;` -
+                // the property's own tracked type never actually updated
+                // before this fix (silently skipped, `lhs.kind` being a
+                // `PropertyAccess`, not a `Variable`), so the return
+                // still saw the stale, nullable pre-`??=` type.
+                let ty = self.infer_binary(op, lhs, rhs, locals);
+                self.bind_assignment_target(lhs, ty, locals);
                 Type::Mixed
             }
             ExprKind::Ternary(cond, then_, else_) => {

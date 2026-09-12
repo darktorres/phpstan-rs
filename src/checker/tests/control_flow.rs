@@ -1232,6 +1232,34 @@ fn a_superglobal_coalesce_assign_does_not_collapse_to_an_empty_shape() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive found while triaging the wider Piwigo
+// corpus (`ImageStdParams::getWatermark`): `CompoundAssign`'s own
+// rebind-after-the-fact step only ever fired for a bare
+// `ExprKind::Variable` left side, silently skipping any other
+// assignment-target shape (a property, an array index) - `$this->prop
+// ??= $default;` never actually updated `$this->prop`'s own tracked
+// type at all, so a read right afterward still saw its stale,
+// pre-assignment (nullable) type. Generalized to route through
+// `bind_assignment_target`, the same machinery every other assignment
+// shape already uses.
+#[test]
+fn a_coalesce_assign_on_a_property_target_rebinds_it() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            class Bar {
+                private ?Foo $watermark = null;
+                public function getWatermark(): Foo
+                {
+                    $this->watermark ??= new Foo();
+                    return $this->watermark;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Real Piwigo corpus bug: isset()/empty()'s own direct argument went
 // through the ordinary check_expr, so isset($shaped['maybe_missing'])
 // hit the same check_shape_key_access a bare read would - even though
