@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, build_matched_shape, int_range_bounds, literal_string_value,
-    normalize_int_range, unwrap_grouping,
+    Checker, Locals, build_matched_shape, int_range_bounds, literal_string_key,
+    literal_string_value, normalize_int_range, unwrap_grouping,
 };
 use crate::regex_groups;
 use crate::registry::{AssertTarget, FunctionSig};
@@ -552,7 +552,17 @@ impl<'a> Checker<'a> {
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "array_key_exists"
                     && let [key_arg, arr_arg] = args.as_slice()
-                    && let ExprKind::Literal(Literal::String(lit_key)) = &key_arg.value.kind
+                    // `literal_string_key` (not a bare `Literal::String`
+                    // match) also accepts an int literal, stringifying it
+                    // the same way an `ArrayShape`'s own field keys already
+                    // are internally - without this, `array_key_exists(0,
+                    // $arr)` (an extremely common tuple/numeric-shape
+                    // check, as common as the string-key form) never
+                    // triggered this narrowing at all, silently keeping a
+                    // `Union` member that couldn't possibly have offset
+                    // `0` at all (a real corpus false negative:
+                    // `qexprDateData`'s own `array_key_exists(0, $data)`).
+                    && let Some(lit_key) = literal_string_key(&key_arg.value)
                     && let Some(arr_key) = narrowing_key(&arr_arg.value)
                 {
                     // Phase 33 Finding 4: the checked expression here is
@@ -564,7 +574,7 @@ impl<'a> Checker<'a> {
                     // member resolution already uses.
                     let current = self.current_narrowed_type(&arr_arg.value, &arr_key, locals);
                     let narrowed =
-                        narrow_array_shape_by_key_presence(&current, lit_key, branch_true);
+                        narrow_array_shape_by_key_presence(&current, &lit_key, branch_true);
                     // Phase 50/73-74: also narrow the specific element
                     // access itself (`$arr['key']`), not just `$arr`'s
                     // own overall type - see `array_value_type_for_key`'s
@@ -579,7 +589,7 @@ impl<'a> Checker<'a> {
                     // "exclude `Null`" half of that for the false
                     // branch, a different, already-covered concern).
                     if branch_true
-                        && let Some(value_ty) = array_value_type_for_key(&narrowed, lit_key)
+                        && let Some(value_ty) = array_value_type_for_key(&narrowed, &lit_key)
                     {
                         locals.insert(format!("{arr_key}[{lit_key}]"), value_ty);
                     }

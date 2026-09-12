@@ -1659,6 +1659,33 @@ fn array_key_exists_false_branch_keeps_only_shapes_lacking_the_key() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false negative found while triaging the wider Piwigo
+// corpus (`qexprDateData`): the dispatch above required a literal
+// `Literal::String` key specifically, so `array_key_exists(0, $x)` (an
+// int-literal key - just as common a shape as a string-literal one,
+// e.g. a tuple/numeric-shape check) never triggered this narrowing at
+// all, keeping a `Union` member that couldn't possibly have offset `0`
+// in the first place (it only has *string*-named fields).
+#[test]
+fn array_key_exists_with_an_int_literal_key_also_narrows() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsPair(string $a, string $b): void {}
+            /**
+             * @param array{0: string, 1: string} $pair
+             * @param array{range: array{0: int, 1: int}} $range
+             */
+            function handle(array $pair, array $range, bool $cond): void {
+                $x = $cond ? $pair : $range;
+                if (array_key_exists(0, $x)) {
+                    needsPair($x[0], $x[1]);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn array_key_exists_on_a_merely_optional_key_narrows_neither_branch() {
     let shape = Type::ArrayShape(vec![("a".to_string(), Type::Int, true)]);
