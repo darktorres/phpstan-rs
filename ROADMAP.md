@@ -39,7 +39,8 @@ reasoning is needed verbatim.)
 
 - Piwigo frozen-corpus diagnostic count (`phpstan-rs.toml`-scoped,
   `/home/torres/piwigo17-frozen`) - the primary false-positive-hunt
-  metric - is 342, down from a 343 pre-batch baseline (`6412b33`) after
+  metric - is 342 as of `c8555bd`, down from a 343 pre-batch baseline
+  (`6412b33`) after
   a 14-item batch (Phases 17, 18, 19, 40, 45, 46, 48, 54, 67, 75, 77, 78,
   83, 84 - see Done for each). The net *decrease* despite several brand-
   new checks shipping is real: this batch's own corpus-diff pass found
@@ -66,7 +67,8 @@ reasoning is needed verbatim.)
   number either way - it drifts release to release even without new
   checks shipping.
 - Full Piwigo+`vendor/` corpus (~20,200 files, unscoped): 40,459
-  diagnostics, the overwhelming majority genuine findings in third-party
+  diagnostics as of `c8555bd`, the overwhelming majority genuine findings
+  in third-party
   code this project doesn't control - not re-verified line-by-line at
   this scale (best-effort secondary coverage, per **Verification
   approach**), only spot-checked per new-finding bucket. Re-run before
