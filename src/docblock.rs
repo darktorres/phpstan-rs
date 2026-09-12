@@ -467,6 +467,28 @@ pub fn parse(raw: &str) -> DocBlock {
     block
 }
 
+/// Extracts a PHPDoc-conventional `$name` token - the variable-name half
+/// of `@param Type $name description`/`@var Type $name`/`@property Type
+/// $name`/... every tag handler below that needs one shares this same
+/// shape. Strips a leading `&` (by-ref, e.g. `@param string[] &$matches
+/// [optional]`, real common PHP-manual style) and `...` (variadic,
+/// `@param int ...$nums` - without this, `strip_prefix('$')` fails on the
+/// literal `.`), plus a trailing `:` real corpus PHPDoc sometimes runs the
+/// description straight into with no separating space (`@param Type
+/// $name: description`) - `split_whitespace` alone leaves that colon
+/// attached to the extracted name, silently storing/looking up the tag
+/// under a name (`"post:"`) the real parameter (`"post"`) never matches,
+/// discarding its own doc type entirely. Confirmed live: Piwigo's own
+/// `NotificationByMailSubController::doTimeoutTreatment` docblock uses
+/// exactly this style for two of its own three `@param` tags.
+fn extract_doc_var_name(token: &str) -> Option<&str> {
+    token
+        .trim_start_matches('&')
+        .trim_start_matches("...")
+        .strip_prefix('$')
+        .map(|name| name.trim_end_matches(':'))
+}
+
 fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
     {
         match tag {
@@ -475,23 +497,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let ty = take_type_token(rest);
                 let remainder = rest[ty.len()..].trim_start();
                 let var_token = remainder.split_whitespace().next().unwrap_or("");
-                // A by-ref param is conventionally documented as `&$name`
-                // (real, common PHP-manual style, e.g. phpstorm-stubs'
-                // `@param string[] &$matches [optional]`) - strip the
-                // leading `&` too, or the name never matches at all and
-                // both its doc type and `[optional]` marker are silently
-                // dropped. Same idea for a documented variadic parameter
-                // (`@param int ...$nums`) - without stripping the leading
-                // `...`, `strip_prefix('$')` fails on the literal `.`,
-                // silently losing the type for a real, common PHPDoc
-                // convention (confirmed present throughout the vendored
-                // phpstorm-stubs corpus itself, e.g. `gd`/`xdebug`/
-                // `RedisCluster`).
-                if let Some(name) = var_token
-                    .trim_start_matches('&')
-                    .trim_start_matches("...")
-                    .strip_prefix('$')
-                {
+                if let Some(name) = extract_doc_var_name(var_token) {
                     if !ty.is_empty() {
                         block.params.insert(name.to_string(), ty.to_string());
                     }
@@ -529,7 +535,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     if let Some(name) = remainder
                         .split_whitespace()
                         .next()
-                        .and_then(|t| t.strip_prefix('$'))
+                        .and_then(extract_doc_var_name)
                     {
                         block.var_name = Some(name.to_string());
                     }
@@ -541,7 +547,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 if let Some(name) = rest
                     .split_whitespace()
                     .next()
-                    .and_then(|t| t.strip_prefix('$'))
+                    .and_then(extract_doc_var_name)
                 {
                     block.param_immediately_invoked_callable.insert(
                         name.to_string(),
@@ -556,7 +562,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     if let Some(name) = remainder
                         .split_whitespace()
                         .next()
-                        .and_then(|t| t.strip_prefix('$'))
+                        .and_then(extract_doc_var_name)
                     {
                         block
                             .param_closure_this
@@ -571,7 +577,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     if let Some(name) = remainder
                         .split_whitespace()
                         .next()
-                        .and_then(|t| t.strip_prefix('$'))
+                        .and_then(extract_doc_var_name)
                     {
                         block.properties.push(PropertyTag {
                             name: name.to_string(),

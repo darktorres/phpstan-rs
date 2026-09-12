@@ -45,6 +45,29 @@ fn a_documented_variadic_param_s_ellipsis_prefixed_name_is_still_recognized() {
     assert_eq!(block.params.get("nums"), Some(&"int".to_string()));
 }
 
+// Real corpus find: a Piwigo docblock running its own description text
+// straight into the parameter name with no separating space
+// (`NotificationByMailSubController::doTimeoutTreatment`'s own `@param
+// array<int|string, mixed> $post: handle()'s own local post working
+// copy...`) left the trailing `:` attached to the extracted name -
+// `split_whitespace` alone can't tell a real word-boundary from `:`, so
+// the type was silently stored under `"post:"`, a key the real parameter
+// (`"post"`) never looks up, discarding the doc type entirely (a real
+// missingType.iterableValue false positive on an otherwise fully-typed
+// parameter).
+#[test]
+fn a_param_tag_whose_description_runs_into_the_name_with_a_colon_is_still_recognized() {
+    let block = parse(
+        r#"/**
+         * @param array<int|string, mixed> $post: some description text
+         */"#,
+    );
+    assert_eq!(
+        block.params.get("post"),
+        Some(&"array<int|string, mixed>".to_string())
+    );
+}
+
 #[test]
 fn parses_property_property_read_and_property_write_tags() {
     let block = parse(
@@ -80,6 +103,20 @@ fn parses_property_property_read_and_property_write_tags() {
 }
 
 #[test]
+fn a_property_tag_whose_description_runs_into_the_name_with_a_colon_is_still_recognized() {
+    let block = parse("/** @property int $magic: some description text */");
+    assert_eq!(
+        block.properties,
+        vec![PropertyTag {
+            name: "magic".to_string(),
+            ty: "int".to_string(),
+            readable: true,
+            writable: true,
+        }]
+    );
+}
+
+#[test]
 fn a_malformed_property_tag_with_no_name_is_skipped() {
     let block = parse("/** @property int */");
     assert!(block.properties.is_empty());
@@ -95,6 +132,13 @@ fn parses_var() {
 #[test]
 fn parses_var_with_a_name() {
     let block = parse("/** @var SplFileInfo $file */");
+    assert_eq!(block.var_type, Some("SplFileInfo".to_string()));
+    assert_eq!(block.var_name, Some("file".to_string()));
+}
+
+#[test]
+fn a_var_tag_whose_description_runs_into_the_name_with_a_colon_is_still_recognized() {
+    let block = parse("/** @var SplFileInfo $file: some description text */");
     assert_eq!(block.var_type, Some("SplFileInfo".to_string()));
     assert_eq!(block.var_name, Some("file".to_string()));
 }
