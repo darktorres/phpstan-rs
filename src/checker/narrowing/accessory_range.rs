@@ -1,7 +1,8 @@
 use crate::ast::*;
 use crate::checker::int_range_bounds;
 use crate::checker::narrowing::predicates::narrowing_key;
-use crate::types::{AccessoryKind, Type};
+use crate::php_float_format::format_php_float;
+use crate::types::{self, AccessoryKind, Type};
 
 /// Shared by `narrow_type_excluding_falsy`'s own `Array` arm above and
 /// the `count($x) > 0` narrowing below, so the two "prove this array is
@@ -49,6 +50,222 @@ pub(crate) fn upgrade_string_with_accessory(ty: &Type, kind: AccessoryKind) -> T
                 .collect(),
         ),
         other => other.clone(),
+    }
+}
+
+/// Phase 75: whether `ty` (a string-shaped type) is provably `kind` -
+/// generalizes what used to be `checker::expr::is_non_falsy_string`'s own
+/// hardcoded `NonFalsyString` check into a reusable predicate for any
+/// accessory kind (`is_non_falsy_string` itself is now a one-line
+/// delegate to this, unchanged for every existing call site).
+pub(crate) fn string_type_has_accessory(ty: &Type, kind: AccessoryKind) -> bool {
+    types::is_subtype(
+        ty,
+        &Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
+    )
+}
+
+/// Strips a `Type::StringLiteral("")` member out of a `Union` (a no-op
+/// for every other shape) - mirrors real PHPStan's own `TypeCombinator::
+/// remove($leftStringType, new ConstantStringType(''))` step in
+/// `resolveConcatType`'s own numeric-string propagation below, needed so
+/// e.g. a `bool`'s own `toString()` projection (`Union(['', '1'])`)
+/// doesn't fail `NumericString` proof-checking purely because of its own
+/// always-possible empty-string member.
+fn strip_empty_string_member(ty: &Type) -> Type {
+    match ty {
+        Type::Union(members) => {
+            let filtered: Vec<Type> = members
+                .iter()
+                .filter(|m| **m != Type::StringLiteral(String::new()))
+                .cloned()
+                .collect();
+            match filtered.len() {
+                0 => ty.clone(),
+                1 => filtered.into_iter().next().unwrap(),
+                _ => Type::Union(filtered),
+            }
+        }
+        other => other.clone(),
+    }
+}
+
+/// Phase 75: the "as if concatenated" string projection of one concat/
+/// interpolation operand's own type - mirrors real PHPStan's own
+/// `Type::toString()` dispatch (each real `*Type::toString()`
+/// implementation read directly, not reconstructed from memory) for
+/// every operand shape this project's own inference can actually
+/// produce. `ty` unchanged (a `String`/`StringLiteral`/already-
+/// accessoried `Intersection`) passes straight through - it's already
+/// its own "as a string" projection.
+pub(crate) fn concat_operand_to_string(ty: &Type) -> Type {
+    match ty {
+        Type::StringLiteral(_) | Type::String => ty.clone(),
+        Type::Intersection(members) if members.contains(&Type::String) => ty.clone(),
+        Type::IntLiteral(n) => Type::StringLiteral(n.to_string()),
+        Type::FloatLiteral(f) => Type::StringLiteral(format_php_float(*f)),
+        Type::True => Type::StringLiteral("1".to_string()),
+        Type::False | Type::Null => Type::StringLiteral(String::new()),
+        Type::Bool => Type::Union(vec![
+            Type::StringLiteral(String::new()),
+            Type::StringLiteral("1".to_string()),
+        ]),
+        Type::Int | Type::IntRange(_, _) => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::DecimalIntegerString),
+        ]),
+        Type::Float => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::UppercaseString),
+            Type::Accessory(AccessoryKind::NumericString),
+        ]),
+        Type::Union(members) => Type::Union(members.iter().map(concat_operand_to_string).collect()),
+        // Every other shape (`Mixed`, an object without `__toString()` -
+        // already flagged separately by this project's own implicit-
+        // `__toString()`/array-to-string checks, not this function's
+        // concern) has no more precise "as a string" projection than
+        // plain `string`.
+        _ => Type::String,
+    }
+}
+
+/// Every literal string value `ty` could concretely be, when it's a
+/// `StringLiteral` or a `Union` of one - `vec![]` for anything else
+/// (never guessed at for a bare `String`/accessoried `Intersection`).
+fn constant_strings(ty: &Type) -> Vec<String> {
+    match ty {
+        Type::StringLiteral(s) => vec![s.clone()],
+        Type::Union(members) => members.iter().flat_map(constant_strings).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Real PHPStan's own `CALCULATE_SCALARS_LIMIT` (`InitializerExprTypeResolver
+/// .php`) - bounds the constant-string cross-product below so a
+/// concatenation of two wide literal unions can't blow up combinatorially.
+const CALCULATE_SCALARS_LIMIT: usize = 8;
+
+/// Phase 75: a full port of real PHPStan's own `InitializerExprTypeResolver
+/// ::resolveConcatType` - the shared engine behind both `BinOp::Concat`
+/// and `ExprKind::Interpolated` (the latter as a left-fold over its own
+/// parts). `l`/`r` are the operands' own *original* inferred types (not
+/// yet projected to their "as a string" shape) - this function does that
+/// projection itself via `concat_operand_to_string`, then also consults
+/// the originals directly wherever real PHPStan's own algorithm does
+/// (the numeric-string propagation's own `$left->isInteger()`/
+/// `$right`-range checks, which run against the un-stringified operand).
+pub(crate) fn resolve_concat_type(l: &Type, r: &Type) -> Type {
+    let l_str = concat_operand_to_string(l);
+    let r_str = concat_operand_to_string(r);
+
+    // Empty-string identity shortcuts.
+    if let Type::StringLiteral(s) = &l_str
+        && s.is_empty()
+    {
+        return r_str;
+    }
+    if let Type::StringLiteral(s) = &r_str
+        && s.is_empty()
+    {
+        return l_str;
+    }
+    // Full constant fold when both sides are single literals.
+    if let (Type::StringLiteral(a), Type::StringLiteral(b)) = (&l_str, &r_str) {
+        return Type::StringLiteral(format!("{a}{b}"));
+    }
+
+    // Bounded constant-string cross product - covers a `Union` of
+    // literals on either/both sides (e.g. `bool`'s own `toString()`
+    // projection) without needing its own separate special case.
+    let l_consts = constant_strings(&l_str);
+    let r_consts = constant_strings(&r_str);
+    let combined_count = l_consts.len() * r_consts.len();
+    if combined_count > 0 && combined_count <= CALCULATE_SCALARS_LIMIT {
+        let mut combos: Vec<String> = Vec::new();
+        for a in &l_consts {
+            if a.is_empty() {
+                combos.extend(r_consts.iter().cloned());
+                continue;
+            }
+            for b in &r_consts {
+                if b.is_empty() {
+                    combos.push(a.clone());
+                    continue;
+                }
+                combos.push(format!("{a}{b}"));
+            }
+        }
+        combos.sort();
+        combos.dedup();
+        if !combos.is_empty() {
+            return if combos.len() == 1 {
+                Type::StringLiteral(combos.into_iter().next().unwrap())
+            } else {
+                Type::Union(combos.into_iter().map(Type::StringLiteral).collect())
+            };
+        }
+    }
+
+    let mut accessories: Vec<AccessoryKind> = Vec::new();
+    let l_non_empty = string_type_has_accessory(&l_str, AccessoryKind::NonEmptyString);
+    let r_non_empty = string_type_has_accessory(&r_str, AccessoryKind::NonEmptyString);
+    let l_non_falsy = string_type_has_accessory(&l_str, AccessoryKind::NonFalsyString);
+    let r_non_falsy = string_type_has_accessory(&r_str, AccessoryKind::NonFalsyString);
+    if (l_non_empty && r_non_empty) || l_non_falsy || r_non_falsy {
+        accessories.push(AccessoryKind::NonFalsyString);
+    } else if l_non_empty || r_non_empty {
+        accessories.push(AccessoryKind::NonEmptyString);
+    }
+
+    if string_type_has_accessory(&l_str, AccessoryKind::LiteralString)
+        && string_type_has_accessory(&r_str, AccessoryKind::LiteralString)
+    {
+        accessories.push(AccessoryKind::LiteralString);
+    }
+    if string_type_has_accessory(&l_str, AccessoryKind::LowercaseString)
+        && string_type_has_accessory(&r_str, AccessoryKind::LowercaseString)
+    {
+        accessories.push(AccessoryKind::LowercaseString);
+    }
+    if string_type_has_accessory(&l_str, AccessoryKind::UppercaseString)
+        && string_type_has_accessory(&r_str, AccessoryKind::UppercaseString)
+    {
+        accessories.push(AccessoryKind::UppercaseString);
+    }
+
+    // Numeric-string propagation - only from the left operand, after
+    // excluding an always-possible empty-string member, matching real
+    // PHPStan's own `TypeCombinator::remove($leftStringType, new
+    // ConstantStringType(''))` guard exactly.
+    let l_numeric_capable = string_type_has_accessory(
+        &strip_empty_string_member(&l_str),
+        AccessoryKind::NumericString,
+    );
+    if l_numeric_capable {
+        let l_is_int = matches!(l, Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _));
+        let validate: fn(&str) -> bool = if l_is_int {
+            |v: &str| !v.starts_with('-')
+        } else {
+            |v: &str| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())
+        };
+        let right_is_non_negative_int_range =
+            int_range_bounds(r).is_some_and(|(min, _)| min.is_some_and(|m| m >= 0));
+        let all_right_constants_zero_or_more = !r_consts.is_empty()
+            && r_consts
+                .iter()
+                .filter(|v| !v.is_empty())
+                .all(|v| types::is_numeric_string_literal(v) && validate(v));
+        if all_right_constants_zero_or_more || right_is_non_negative_int_range {
+            accessories.push(AccessoryKind::NumericString);
+        }
+    }
+
+    if accessories.is_empty() {
+        Type::String
+    } else {
+        let mut members = vec![Type::String];
+        members.extend(accessories.into_iter().map(Type::Accessory));
+        Type::Intersection(members)
     }
 }
 
@@ -238,5 +455,67 @@ pub(crate) fn upgrade_array_to_list(ty: &Type) -> Type {
             Type::Intersection(members)
         }
         _ => ty.clone(),
+    }
+}
+
+#[cfg(test)]
+mod resolve_concat_type_tests {
+    use super::*;
+
+    #[test]
+    fn a_float_literal_operand_uses_the_real_php_float_formatter() {
+        // Direct coverage of `concat_operand_to_string`'s own `FloatLiteral`
+        // arm - this project's own checker-level inference never actually
+        // produces a `Type::FloatLiteral` for a bare float literal
+        // expression (`checker/expr.rs`'s `Literal::Float` arm collapses
+        // to plain `Type::Float`), so this is exercised directly rather
+        // than through an end-to-end checker test.
+        assert_eq!(
+            concat_operand_to_string(&Type::FloatLiteral(1.5)),
+            Type::StringLiteral("1.5".to_string())
+        );
+        let result = resolve_concat_type(
+            &Type::FloatLiteral(1.5),
+            &Type::StringLiteral("-suffix".to_string()),
+        );
+        assert_eq!(result, Type::StringLiteral("1.5-suffix".to_string()));
+    }
+
+    #[test]
+    fn two_literal_strings_fully_constant_fold() {
+        assert_eq!(
+            resolve_concat_type(
+                &Type::StringLiteral("a".to_string()),
+                &Type::StringLiteral("b".to_string())
+            ),
+            Type::StringLiteral("ab".to_string())
+        );
+    }
+
+    #[test]
+    fn an_empty_string_operand_is_dropped_via_the_identity_shortcut() {
+        assert_eq!(
+            resolve_concat_type(&Type::StringLiteral(String::new()), &Type::Int),
+            concat_operand_to_string(&Type::Int)
+        );
+    }
+
+    #[test]
+    fn an_int_typed_left_operand_concatenated_with_a_pure_digit_right_literal_is_numeric() {
+        let result = resolve_concat_type(&Type::Int, &Type::StringLiteral("5".to_string()));
+        assert!(string_type_has_accessory(
+            &result,
+            AccessoryKind::NumericString
+        ));
+    }
+
+    #[test]
+    fn an_int_typed_left_operand_concatenated_with_a_negative_signed_right_literal_is_not_numeric()
+    {
+        let result = resolve_concat_type(&Type::Int, &Type::StringLiteral("-5".to_string()));
+        assert!(!string_type_has_accessory(
+            &result,
+            AccessoryKind::NumericString
+        ));
     }
 }

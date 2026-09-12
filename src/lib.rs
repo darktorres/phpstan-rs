@@ -19,12 +19,16 @@ pub mod lexer;
 pub mod lsp;
 pub mod output;
 pub mod parser;
+pub(crate) mod pcre_validate;
 pub mod pest_config;
+pub(crate) mod php_float_format;
 pub mod php_stubs;
 pub mod php_version;
 pub mod project;
+pub mod reflection_rule;
 pub mod regex_groups;
 pub mod registry;
+pub mod restricted_symbols;
 pub mod token;
 pub mod types;
 

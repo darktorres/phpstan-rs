@@ -102,6 +102,34 @@ fn class_interface_and_trait_declarations_are_tagged_with_their_own_kind() {
 }
 
 #[test]
+fn a_class_named_the_same_as_a_keyword_keeps_its_own_declared_case() {
+    // Phase 48 follow-up (item 6): real vendored `marc-mabe/php-enum`
+    // declares a class literally named `Enum` (case-sensitive match
+    // against the `enum` keyword's own canonical spelling) - this used
+    // to be silently corrupted to `enum` by `take_name_segment`'s own
+    // keyword-recovery path.
+    let program = parse("<?php class Enum { public static function foo(): void {} }");
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    assert_eq!(c.name, "Enum");
+}
+
+#[test]
+fn a_qualified_name_segment_matching_a_keyword_keeps_its_own_case() {
+    let program = parse("<?php namespace MabeEnum; class Foo extends \\MabeEnum\\Enum {}");
+    let StmtKind::ClassDecl(c) = &program[1].kind else {
+        panic!("expected ClassDecl");
+    };
+    assert_eq!(c.extends.len(), 1);
+    assert!(
+        c.extends[0].ends_with("MabeEnum\\Enum"),
+        "expected the qualified name's own Enum segment to keep its case, got: {:?}",
+        c.extends[0]
+    );
+}
+
+#[test]
 fn a_final_method_is_recorded_as_final_and_a_non_final_one_is_not() {
     let program = parse(
         "<?php class C { final public function locked(): void {} public function open(): void {} }",

@@ -14,9 +14,11 @@ use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
 
 mod decl_locations;
+pub(crate) mod duplicate_class_sites;
 pub(crate) mod duplicate_fn_sites;
 
 use decl_locations::DeclLocations;
+use duplicate_class_sites::DuplicateClassSites;
 use duplicate_fn_sites::DuplicateFunctionSites;
 
 /// One file's parsed state, kept around so `Project::update_file` can undo
@@ -111,6 +113,13 @@ pub struct Project {
     // needs to run by default for `check-project`. See
     // `DuplicateFunctionSites`'s own doc comment.
     duplicate_fn_sites: DuplicateFunctionSites,
+    // Phase 83: the class-like counterpart to `duplicate_fn_sites` above -
+    // always populated too (its own gate is at the *check* side,
+    // `Registry::check_duplicate_class_declarations`, not the indexing
+    // side, so an opt-out project pays only the cost of an unused table,
+    // not a missing one it might later want turned on incrementally).
+    // See `DuplicateClassSites`'s own doc comment.
+    duplicate_class_sites: DuplicateClassSites,
 }
 
 impl Project {
@@ -128,6 +137,7 @@ impl Project {
             retain_source: false,
             decl_locations: DeclLocations::default(),
             duplicate_fn_sites: DuplicateFunctionSites::default(),
+            duplicate_class_sites: DuplicateClassSites::default(),
         }
     }
 
@@ -174,6 +184,18 @@ impl Project {
     /// `false`.
     pub fn set_check_internal_usage(&mut self, enabled: bool) {
         self.registry.check_internal_usage = enabled;
+    }
+
+    /// Phase 67: compiles a project's own configured `restricted_symbols`
+    /// list into the `Registry`-held index `checker::restricted_symbol_
+    /// usage` consults. Empty by default (no entries configured), so this
+    /// is a zero-cost no-op call for every ordinary project.
+    pub fn set_restricted_symbols(
+        &mut self,
+        entries: &[crate::restricted_symbols::RestrictedSymbolEntry],
+    ) {
+        self.registry.restricted_symbols =
+            crate::restricted_symbols::RestrictedSymbols::compile(entries);
     }
 
     /// ROADMAP "Known but not yet scheduled": opts the whole project's
@@ -230,12 +252,42 @@ impl Project {
             .check_too_wide_throw_type_in_protected_and_public_methods = enabled;
     }
 
+    /// Phase 45 (item 11, 45A): the return-type analogue - see
+    /// `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`'s
+    /// own doc comment.
+    pub fn set_check_too_wide_return_type_in_protected_and_public_methods(
+        &mut self,
+        enabled: bool,
+    ) {
+        self.registry
+            .check_too_wide_return_type_in_protected_and_public_methods = enabled;
+    }
+
     /// Phase 42: opts the whole project's checking into `MethodThrowType
     /// CovarianceRule`, following `set_check_empty_method_bodies`'s exact
     /// precedent - see `registry::Registry::check_method_throw_type_
     /// covariance`'s own doc comment for why this defaults to `false`.
     pub fn set_check_method_throw_type_covariance(&mut self, enabled: bool) {
         self.registry.check_method_throw_type_covariance = enabled;
+    }
+
+    /// Phase 83: opts the whole project's checking into `checker::
+    /// duplicate_classes::check_duplicate_class_declarations`, following
+    /// `set_check_method_throw_type_covariance`'s exact precedent - see
+    /// `registry::Registry::check_duplicate_class_declarations`'s own doc
+    /// comment for why this defaults to `false`.
+    pub fn set_check_duplicate_class_declarations(&mut self, enabled: bool) {
+        self.registry.check_duplicate_class_declarations = enabled;
+    }
+
+    /// Phase 84: configures the project's own `level` setting for
+    /// `registry::Registry::accepts_at_configured_level` - see that
+    /// field's own doc comment for why this is `Option<u8>` (not the
+    /// collapsed `u8` `check-project` otherwise uses for diagnostic
+    /// filtering) and why `None` must keep today's always-strict
+    /// behavior.
+    pub fn set_configured_level(&mut self, level: Option<u8>) {
+        self.registry.configured_level = level;
     }
 
     /// Phase 38: configures the project's target PHP version
@@ -318,7 +370,12 @@ impl Project {
         source: &str,
         analyzed: bool,
     ) -> Result<(), ParseError> {
-        let parsed = parse_file(&path, source)?;
+        // `is_stub: false` - `load_file`/`load_analyzed_file` are the
+        // LSP/test-harness convenience path, which has no `stub_paths`
+        // concept at all (that's a batch `check-project`-only config key,
+        // wired through `read_and_parse_file` instead) and no way to
+        // enable `check_duplicate_class_declarations` in the first place.
+        let parsed = parse_file(&path, source, false)?;
         self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
         Ok(())
     }
@@ -350,6 +407,7 @@ impl Project {
             ignore_identifiers,
             built_decls,
             duplicate_fn_sites,
+            duplicate_class_sites,
         } = parsed;
         for decl in built_decls {
             self.registry.insert_built_decl(decl, analyzed);
@@ -358,7 +416,15 @@ impl Project {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), &path);
         }
+        // Phase 40 follow-up: `record_phpstan_class_file` no-ops unless
+        // `phpstan_api_check_enabled` and the name is `PHPStan\*`-
+        // namespaced, so this is a zero-cost loop for every ordinary
+        // corpus.
+        for name in &classes {
+            self.registry.record_phpstan_class_file(name, &path);
+        }
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
+        self.duplicate_class_sites.merge(duplicate_class_sites);
         register_references(&mut self.dependents, &path, &references);
         self.files.insert(
             path,
@@ -429,6 +495,8 @@ impl Project {
             }
             self.duplicate_fn_sites
                 .remove_declarations(path, &old.functions);
+            self.duplicate_class_sites
+                .remove_declarations(path, &old.classes);
             changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
             changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
             unregister_references(&mut self.dependents, path, &old.references);
@@ -459,12 +527,20 @@ impl Project {
         // already clears any prior unconditional entry this file itself
         // owned before this re-index runs.
         self.registry.index(&ast, true);
+        for name in &classes {
+            self.registry.record_phpstan_class_file(name, path);
+        }
         if self.retain_source {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), path);
         }
         self.duplicate_fn_sites
             .index(&ast, &mut NameContext::default(), path, false);
+        // `is_stub: false` - same reasoning as `load_file_impl`'s own
+        // identical note: `update_file` is the LSP/incremental-edit path,
+        // which has no `stub_paths` concept.
+        self.duplicate_class_sites
+            .index(&ast, &mut NameContext::default(), path, false, false);
         // A changed class's `use TraitName;` list (added, removed, or a
         // trait's own members changed in this same file) means the whole
         // registry's trait flattening can't be assumed still correct -
@@ -596,6 +672,14 @@ impl Project {
                 &self.duplicate_fn_sites,
             ),
         );
+        if self.registry.check_duplicate_class_declarations {
+            diagnostics.extend(
+                checker::duplicate_classes::check_duplicate_class_declarations(
+                    path,
+                    &self.duplicate_class_sites,
+                ),
+            );
+        }
         diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
         if self.phpstan_api_check_enabled {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
@@ -639,6 +723,33 @@ impl Project {
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Phase 18 Axis 2: runs every `rules` entry's own `check_class`/
+    /// `check_function` against every class-like/plain-function this
+    /// project's own registry currently knows about - the single entry
+    /// point `reflection_rule::ReflectionRule`'s own doc comment
+    /// promises. Iteration order follows `FxHashMap`'s own (unspecified,
+    /// load-order-dependent) iteration - a caller that needs a stable
+    /// output order should sort the returned `Vec` itself, the same way
+    /// `main/check_project.rs`'s own batch-checking path already sorts
+    /// before printing.
+    pub fn run_reflection_rules(
+        &self,
+        rules: &[Box<dyn crate::reflection_rule::ReflectionRule>],
+    ) -> Vec<Diagnostic> {
+        let mut out = Vec::new();
+        for (fqn, info) in &self.registry.classes {
+            for rule in rules {
+                out.extend(rule.check_class(info, fqn));
+            }
+        }
+        for (fqn, sig) in &self.registry.functions {
+            for rule in rules {
+                out.extend(rule.check_function(sig, fqn));
+            }
+        }
+        out
     }
 
     /// Runs the checker over every currently-loaded file, not just one -
@@ -711,6 +822,11 @@ pub struct ParsedFile {
     // parallel step. Unlike `built_decls`, this needs `path` (baked into
     // every `FnDeclSite`), which is why `parse_file` below takes one now.
     duplicate_fn_sites: DuplicateFunctionSites,
+    // Phase 83: the class-like counterpart to `duplicate_fn_sites` above,
+    // built the same way and for the same reason - `parse_file`'s own new
+    // `is_stub` parameter is baked into every `ClassDeclSite` here (see
+    // that field's own doc comment for why it's needed at all).
+    duplicate_class_sites: DuplicateClassSites,
 }
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
@@ -726,7 +842,7 @@ pub struct ParsedFile {
 /// caller building many `ParsedFile`s concurrently passes a different
 /// `path` to each call with no coordination needed between them.
 #[hotpath::measure]
-pub fn parse_file(path: &Path, source: &str) -> Result<ParsedFile, ParseError> {
+pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile, ParseError> {
     let ast = parse(source)?;
     let (functions, classes) = declared_names(&ast);
     let references = deps::referenced_names(&ast);
@@ -735,6 +851,8 @@ pub fn parse_file(path: &Path, source: &str) -> Result<ParsedFile, ParseError> {
     let built_decls = crate::registry::build_declarations(&ast);
     let mut duplicate_fn_sites = DuplicateFunctionSites::default();
     duplicate_fn_sites.index(&ast, &mut NameContext::default(), path, false);
+    let mut duplicate_class_sites = DuplicateClassSites::default();
+    duplicate_class_sites.index(&ast, &mut NameContext::default(), path, false, is_stub);
     Ok(ParsedFile {
         ast,
         functions,
@@ -742,6 +860,7 @@ pub fn parse_file(path: &Path, source: &str) -> Result<ParsedFile, ParseError> {
         references,
         built_decls,
         duplicate_fn_sites,
+        duplicate_class_sites,
         ignore_lines,
         ignore_identifiers,
     })

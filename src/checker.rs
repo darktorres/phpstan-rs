@@ -677,6 +677,46 @@ pub struct Checker<'a> {
     // exceptions` - see that module's own doc comment for why only the
     // explicit subset is checked.
     pub(crate) current_function_explicit_throw_points: Vec<(Type, Span)>,
+    // Phase 45 (item 11): every real return point recorded so far inside
+    // the enclosing function/method/closure body - `StmtKind::
+    // Return(Some(e))`'s own actual value type, `StmtKind::Return(None)`'s
+    // implicit `Type::Void` (real PHPStan pushes `new VoidType()` for a
+    // bare `return;`, not `Null` - a real, easy-to-get-wrong distinction),
+    // and the falls-off-the-end path's own implicit `Type::Null` (only
+    // when the native return type allows it - see `check_function`'s own
+    // choke point). Never populated for a generator (`current_function_
+    // is_generator`) - a generator's own `return` sets `Generator::
+    // getReturn()`, not this function's return value, an unrelated
+    // check `stmt.rs`'s own generator-exemption already handles
+    // separately. Mirrors `current_function_throw_points`'s own wiring
+    // chain exactly - consumed by `checker::return_type::too_wide`'s
+    // `TooWideFunctionReturnTypehintRule`/`TooWideMethodReturnTypehintRule`
+    // port.
+    pub(crate) current_function_return_points: Vec<Type>,
+    // Phase 45: real PHPStan's own `TooWideTypeCheck` bails via a count
+    // of *explicit* return statements, not "is the accumulated return-
+    // point vector empty" - the falls-off-the-end contribution alone can
+    // make `current_function_return_points` non-empty with zero explicit
+    // returns, which would otherwise spuriously flag a function whose
+    // `return.missing` bug (a forgotten return) is already separately
+    // caught. Set the moment either `Return` arm above runs (value or
+    // bare), consulted instead of `.is_empty()` by `check_too_wide_
+    // return_type`.
+    pub(crate) current_function_saw_explicit_return: bool,
+    // Phase 45: by-ref parameter direct-assignment/execution-end
+    // tracking (45B/45C/45D) - `name -> declared type` for every by-ref
+    // parameter of the enclosing function/method/closure (native type,
+    // or `@param-out` when the new tag supplies one - see `ParamSig::
+    // out_ty`'s own doc comment), set/restored at the identical choke
+    // point as `current_declared_return_type`.
+    pub(crate) current_function_by_ref_params: std::collections::HashMap<String, Type>,
+    // Phase 45 (45D): every value ever assigned to a by-ref parameter
+    // anywhere in the enclosing body (direct/compound assignment,
+    // destructuring, `foreach`-rebind) - unioned and compared against
+    // each by-ref parameter's own declared type by `check_too_wide_
+    // by_ref_param_type`'s own too-wide narrowing check, the by-ref-
+    // parameter analogue of `current_function_return_points`.
+    pub(crate) current_function_by_ref_assigned_types: std::collections::HashMap<String, Vec<Type>>,
     // Set for the duration of one function/method/closure body to every
     // label name `goto`-targeted anywhere in it (`collect_goto_targets`'s
     // own doc comment has the full real corpus false positive this
@@ -910,11 +950,13 @@ pub struct Checker<'a> {
 }
 
 mod assignment;
+mod by_ref_params;
 mod calls;
 mod coercion;
 mod control_flow;
 mod date_interval;
 mod deprecated_usage;
+pub(crate) mod duplicate_classes;
 pub(crate) mod duplicate_functions;
 mod duplicates;
 mod expr;
@@ -922,6 +964,7 @@ mod function_decl;
 mod generics;
 mod imports;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
+mod internal_rules;
 mod internal_usage;
 mod missing_typehint;
 mod narrowing;
@@ -929,8 +972,11 @@ mod noop;
 mod oop;
 mod operators;
 pub(crate) mod phpstan_api;
+mod preg_pattern_validity;
 mod property_assignment;
 mod resolve;
+mod restricted_symbol_usage;
+mod return_type_too_wide;
 mod stmt;
 mod throws;
 mod type_union;
@@ -938,6 +984,8 @@ mod uninitialized;
 mod uninitialized_dataflow;
 mod unused;
 mod visibility;
+mod xml_name;
+mod xml_wellformedness;
 
 pub(crate) use assignment::{
     is_superglobal, literal_string_key, literal_string_value, superglobal_default_type,
@@ -956,7 +1004,7 @@ pub(crate) use expr::{
 };
 pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::{
-    ITERABLE_GENERIC_CLASS_NAMES, has_explicit_mixed_nested_somewhere,
+    ITERABLE_GENERIC_CLASS_NAMES, class_kind_word, has_explicit_mixed_nested_somewhere,
 };
 pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
@@ -971,7 +1019,8 @@ pub(crate) use type_union::union_types;
 pub(crate) use narrowing::{
     array_value_type_for_key, is_real_variable_key, is_unsealed_shape,
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
-    narrow_type_to, narrowing_key, purge_stale_narrowing_for,
+    narrow_type_to, narrowing_key, purge_stale_narrowing_for, resolve_concat_type,
+    string_type_has_accessory,
 };
 #[cfg(test)]
 pub(crate) use type_union::generalize_by_key_set;
@@ -993,6 +1042,10 @@ impl<'a> Checker<'a> {
             current_function_throw_points: Vec::new(),
             current_function_has_unannotated_call: false,
             current_function_explicit_throw_points: Vec::new(),
+            current_function_return_points: Vec::new(),
+            current_function_saw_explicit_return: false,
+            current_function_by_ref_params: std::collections::HashMap::new(),
+            current_function_by_ref_assigned_types: std::collections::HashMap::new(),
             current_function_goto_targets: std::collections::HashSet::new(),
             in_bare_statement_position: false,
             in_condition_position: false,

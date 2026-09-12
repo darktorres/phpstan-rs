@@ -358,3 +358,112 @@ fn an_unresolved_conditional_as_sup_is_satisfied_by_either_branch() {
     assert!(is_subtype(&Type::String, &conditional));
     assert!(!is_subtype(&Type::Bool, &conditional));
 }
+
+// Phase 75: the 3 new literal-proving arms + 4 implication arms for
+// `LowercaseString`/`UppercaseString`/`DecimalIntegerString`.
+
+fn lowercase_string() -> Type {
+    Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::LowercaseString),
+    ])
+}
+fn uppercase_string() -> Type {
+    Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::UppercaseString),
+    ])
+}
+fn decimal_int_string() -> Type {
+    Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::DecimalIntegerString),
+    ])
+}
+
+#[test]
+fn a_lowercase_literal_proves_lowercase_string() {
+    assert!(is_subtype(
+        &Type::StringLiteral("abc".to_string()),
+        &lowercase_string()
+    ));
+    assert!(is_subtype(
+        &Type::StringLiteral("abc123".to_string()),
+        &lowercase_string()
+    ));
+    assert!(!is_subtype(
+        &Type::StringLiteral("Abc".to_string()),
+        &lowercase_string()
+    ));
+    // No letters at all - vacuously lowercase, matching real
+    // `strtolower($v) === $v`.
+    assert!(is_subtype(
+        &Type::StringLiteral("123".to_string()),
+        &lowercase_string()
+    ));
+}
+
+#[test]
+fn an_uppercase_literal_proves_uppercase_string() {
+    assert!(is_subtype(
+        &Type::StringLiteral("ABC".to_string()),
+        &uppercase_string()
+    ));
+    assert!(!is_subtype(
+        &Type::StringLiteral("Abc".to_string()),
+        &uppercase_string()
+    ));
+    assert!(is_subtype(
+        &Type::StringLiteral("123".to_string()),
+        &uppercase_string()
+    ));
+}
+
+#[test]
+fn a_canonical_decimal_integer_literal_proves_decimal_integer_string() {
+    for s in ["0", "1", "1234", "-1"] {
+        assert!(
+            is_subtype(&Type::StringLiteral(s.to_string()), &decimal_int_string()),
+            "{s} should be a decimal-int-string"
+        );
+    }
+    // Leading zero, explicit sign, `-0`, empty, and a non-integer numeric
+    // string are all excluded - the exact real `ConstantStringType::
+    // isDecimalIntegerString`'s own confirmed edge cases.
+    for s in ["007", "+1", "-0", "", "1.0", "1,3", "foo"] {
+        assert!(
+            !is_subtype(&Type::StringLiteral(s.to_string()), &decimal_int_string()),
+            "{s} should NOT be a decimal-int-string"
+        );
+    }
+}
+
+#[test]
+fn a_decimal_integer_string_implies_numeric_lowercase_uppercase_and_non_empty() {
+    let decimal = decimal_int_string();
+    assert!(is_subtype(
+        &decimal,
+        &Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NumericString)
+        ])
+    ));
+    assert!(is_subtype(&decimal, &lowercase_string()));
+    assert!(is_subtype(&decimal, &uppercase_string()));
+    assert!(is_subtype(
+        &decimal,
+        &Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString)
+        ])
+    ));
+    // The reverse doesn't hold - an ordinary numeric string isn't
+    // necessarily a decimal integer string (e.g. `"1.5"`).
+    assert!(!is_subtype(
+        &Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NumericString)
+        ]),
+        &decimal
+    ));
+}

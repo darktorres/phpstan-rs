@@ -10,32 +10,33 @@ fn a_class_named_enum_is_accepted_as_a_parameter_type_hint() {
     // class reference. Found via bulk-running this project's checker
     // against the vendored phpstan-src corpus (nsrt/bug-4213.php uses
     // exactly this shape).
+    //
+    // Phase 48 item 6: `take_name_segment` used to reconstruct a
+    // keyword-shaped identifier from `Keyword::as_str()`'s own canonical
+    // lowercase spelling, silently corrupting this source's real
+    // capitalization - fixed via the `Lexer::pending_keyword_raw`/
+    // `Parser::keyword_raw` out-of-band channel, so this now correctly
+    // keeps the identifier's own declared case.
     let program = parse("<?php function f(Enum ...$enums): void {}");
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a FunctionDecl, got {:?}", program[0].kind);
     };
-    assert_eq!(f.params[0].type_hint.as_deref(), Some("enum"));
+    assert_eq!(f.params[0].type_hint.as_deref(), Some("Enum"));
     assert!(f.params[0].variadic);
 }
 
 #[test]
 fn qualified_name_with_keyword_segment_parses() {
     // `Enum` here is a namespace segment, not the `enum` declaration
-    // keyword - PHP's keywords are mostly "semi-reserved". The main
-    // assertion is just that this doesn't panic (it used to). Known,
-    // low-impact precision loss: Keyword::as_str() only has the
-    // canonical lowercase spelling, not this source's original
-    // capitalization, so the reconstructed segment comes back as
-    // "enum" - inert for a `use` target specifically, since a bare
-    // class-name reference to it (the only thing checker.rs's use-map
-    // resolution consumes) is looked up by its final segment's short
-    // name, which PHP identifiers treat case-insensitively for this
-    // purpose anyway.
+    // keyword - PHP's keywords are mostly "semi-reserved". Phase 48 item
+    // 6's own fix (see the sibling test above) means this now keeps its
+    // real declared case throughout the qualified name, not just a
+    // bare, unqualified reference.
     let program = parse("<?php use Piwigo\\Common\\Enum\\AlbumSortOrder;");
     let StmtKind::Use(imports) = &program[0].kind else {
         panic!("expected Use");
     };
-    assert_eq!(imports[0].path, "Piwigo\\Common\\enum\\AlbumSortOrder");
+    assert_eq!(imports[0].path, "Piwigo\\Common\\Enum\\AlbumSortOrder");
 }
 
 #[test]

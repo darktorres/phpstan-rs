@@ -206,14 +206,35 @@ pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<ParsedPatter
 }
 
 /// Splits a PHP PCRE pattern literal into its raw body and modifier
-/// letters, stripping the delimiter pair. The first character is the
-/// delimiter, unless it's one of PCRE's four bracket pairs, in which case
-/// the matching closing bracket is the real closer; the body runs up to
-/// the *last* occurrence of the closing delimiter (so a bracket-delimited
-/// pattern's own body may itself legitimately contain the same bracket
-/// type nested inside, e.g. `(foo(bar))i`), and everything after that is
-/// the modifier string.
-fn split_delimiters_and_modifiers(pattern: &str) -> Option<(&str, &str)> {
+/// letters, stripping the delimiter pair. The first non-whitespace
+/// character is the delimiter, unless it's one of PCRE's four bracket
+/// pairs, in which case the matching closing bracket is the real closer;
+/// the body runs up to the *last* occurrence of the closing delimiter (so
+/// a bracket-delimited pattern's own body may itself legitimately contain
+/// the same bracket type nested inside, e.g. `(foo(bar))i`), and
+/// everything after that (short of trailing whitespace) is the modifier
+/// string.
+///
+/// Real, corpus-confirmed gap: real PHP's own `ext/pcre` skips leading
+/// whitespace before reading the delimiter (and tolerates trailing
+/// whitespace after the modifiers), confirmed live - `preg_split("
+/// /abc/x", ...)` (a literal leading space) compiles and runs with no
+/// error. This isn't a contrived case: PHP's own flexible heredoc/nowdoc
+/// indentation stripping (7.3+) only removes whitespace common with the
+/// *closing marker's* own indentation, so a multi-line `/x`-flagged
+/// regex written with nested, readable indentation (matching the
+/// pattern's own `(?(DEFINE)...)` nesting depth, deeper than the closing
+/// marker) legitimately keeps literal leading spaces before its real
+/// delimiter - Symfony's own `OptionsResolver::splitOutsideParenthesis()`
+/// is exactly this shape. Treating the literal first byte as the
+/// delimiter regardless (this function's own pre-fix behavior) produced
+/// a false "Unknown modifier" `regexp.pattern` diagnostic on that exact,
+/// real, working pattern.
+pub(crate) fn split_delimiters_and_modifiers(pattern: &str) -> Option<(&str, &str)> {
+    fn is_php_pattern_whitespace(c: char) -> bool {
+        matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{0B}' | '\u{0C}')
+    }
+    let pattern = pattern.trim_start_matches(is_php_pattern_whitespace);
     let open = pattern.chars().next()?;
     let close = match open {
         '(' => ')',
@@ -225,7 +246,8 @@ fn split_delimiters_and_modifiers(pattern: &str) -> Option<(&str, &str)> {
     let rest = &pattern[open.len_utf8()..];
     let last_close = rest.rfind(close)?;
     let body = &rest[..last_close];
-    let modifiers = &rest[last_close + close.len_utf8()..];
+    let modifiers =
+        rest[last_close + close.len_utf8()..].trim_end_matches(is_php_pattern_whitespace);
     Some((body, modifiers))
 }
 

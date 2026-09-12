@@ -588,7 +588,15 @@ impl<'a> Checker<'a> {
         for (param, slot) in sig.params.iter().zip(resolved.iter()) {
             let Some(arg) = slot else { continue };
             let arg_ty = self.infer_expr(arg, locals);
-            types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
+            // Phase 54 follow-up: same literal-class-string promotion as
+            // the `ExprKind::New` constructor-binding arm - only for
+            // template binding, never for `param_bindings` (which feeds
+            // `resolve_conditional`'s `$x is T` checks and must see the
+            // argument's real, unpromoted type).
+            let promoted = types::promote_class_string_literals(&param.ty, &arg_ty, &|s| {
+                self.registry.lookup_class(s).map(|(c, _)| c.to_string())
+            });
+            types::bind_template_param(&param.ty, &promoted, &mut bindings);
             param_bindings.insert(param.name.clone(), arg_ty);
         }
         let substituted = types::substitute_template(&sig.return_type, &bindings);

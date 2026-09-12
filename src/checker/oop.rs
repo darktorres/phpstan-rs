@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::checker::{Checker, DiagnosticBuilder, Locals, class_kind_identifier};
 use crate::docblock;
-use crate::registry::{FunctionSig, PropertySig, object_class_names, resolve_names_in_type};
+use crate::registry::{
+    FunctionSig, PropertySig, collect_class_name_case_refs, object_class_names,
+    resolve_names_in_type,
+};
 use crate::token::Span;
 use crate::types::{self, Type};
 
@@ -152,6 +155,7 @@ impl<'a> Checker<'a> {
                 // Phase 48 follow-up (item 7d): `class.nameCase` for this
                 // `@method`-tag parameter.
                 self.check_type_class_name_case(&param.case_refs, fqn, span);
+                self.check_type_internal_usage(&param.case_refs, fqn, span);
             }
             self.check_type_class_names_exist(
                 &sig.return_type,
@@ -160,6 +164,7 @@ impl<'a> Checker<'a> {
                 fqn,
             );
             self.check_type_class_name_case(&sig.return_case_refs, fqn, span);
+            self.check_type_internal_usage(&sig.return_case_refs, fqn, span);
         }
     }
 
@@ -192,6 +197,7 @@ impl<'a> Checker<'a> {
         // `class_name_exists` check just above), so this is a genuinely
         // new, parallel loop rather than a rewire of an existing one.
         self.check_type_class_name_case(&info.mixin_case_refs, fqn, span);
+        self.check_type_internal_usage(&info.mixin_case_refs, fqn, span);
     }
 
     /// Phase 48.B: `RequireExtendsCheck`/`RequireImplementsDefinitionTraitRule`'s
@@ -225,7 +231,11 @@ impl<'a> Checker<'a> {
             );
         }
         for raw in &doc.require_extends {
-            let ty = resolve_names_in_type(types::parse_type_string(raw), &self.name_ctx);
+            let parsed = types::parse_type_string(raw);
+            let mut case_refs = Vec::new();
+            collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
+            self.check_type_class_name_case(&case_refs, fqn, c.span);
+            let ty = resolve_names_in_type(parsed, &self.name_ctx);
             let names = object_class_names(ty.clone());
             if names.is_empty() {
                 self.report(
@@ -295,7 +305,11 @@ impl<'a> Checker<'a> {
             }
         }
         for raw in &doc.require_implements {
-            let ty = resolve_names_in_type(types::parse_type_string(raw), &self.name_ctx);
+            let parsed = types::parse_type_string(raw);
+            let mut case_refs = Vec::new();
+            collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
+            self.check_type_class_name_case(&case_refs, fqn, c.span);
+            let ty = resolve_names_in_type(parsed, &self.name_ctx);
             let names = object_class_names(ty.clone());
             if names.is_empty() {
                 self.report(
@@ -374,7 +388,11 @@ impl<'a> Checker<'a> {
             return;
         }
         for raw in &doc.sealed {
-            let ty = resolve_names_in_type(types::parse_type_string(raw), &self.name_ctx);
+            let parsed = types::parse_type_string(raw);
+            let mut case_refs = Vec::new();
+            collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
+            self.check_type_class_name_case(&case_refs, fqn, span);
+            let ty = resolve_names_in_type(parsed, &self.name_ctx);
             let names = object_class_names(ty.clone());
             if names.is_empty() {
                 self.report(
@@ -426,6 +444,7 @@ impl<'a> Checker<'a> {
             // scope here.
             if let Some(case_refs) = info.type_alias_case_refs.get(name) {
                 self.check_type_class_name_case(case_refs, fqn, span);
+                self.check_type_internal_usage(case_refs, fqn, span);
             }
         }
     }

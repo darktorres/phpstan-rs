@@ -21,13 +21,20 @@
 //! Excluded from this subset, each for its own disclosed reason:
 //! `version_compare()` (PHP-version-conditional in real PHPStan - this
 //! project has no PHP-version-awareness plumbing to gate it on, and the
-//! value density is low); the DOM/SimpleXML/DateTime-relative-string
-//! extensions (already, separately declined under Phase 78 - this phase
-//! doesn't re-litigate that).
+//! value density is low); DateTime's own relative-date-string parsing
+//! (`DateTimeConstructorThrowTypeExtension`/`DateTimeModifyMethodThrow
+//! TypeExtension` - genuinely infeasible, real PHP invokes its actual
+//! C/ICU date parser at analysis time, with no formally-specified
+//! grammar to replicate the way DOM/SimpleXML's own extensions have).
+//! DOM (`DomDocumentCreateElementDynamicThrowTypeExtension`) and
+//! SimpleXML (`SimpleXMLElementConstructorThrowTypeExtension`) are both
+//! covered below.
 
 use crate::ast::{Arg, ExprKind, Literal, UnaryOp};
 use crate::checker::date_interval::is_valid_date_interval_spec;
 use crate::checker::expr::{contains_flag_name, unwrap_grouping};
+use crate::checker::xml_name::is_valid_xml_name;
+use crate::checker::xml_wellformedness::is_well_formed_xml;
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
 
@@ -188,12 +195,33 @@ impl<'a> Checker<'a> {
             }
             "ReflectionClass" | "ReflectionObject" | "ReflectionFunction" | "ReflectionMethod"
             | "ReflectionProperty" => (!args.is_empty()).then(|| throwable("ReflectionException")),
+            // Phase 78: `SimpleXMLElementConstructorThrowTypeExtension` -
+            // real PHP throws a plain `Exception` when the argument isn't
+            // well-formed XML.
+            "SimpleXMLElement" => {
+                let arg = args.first()?;
+                if arg.name.is_some() || arg.spread {
+                    return Some(throwable("Exception"));
+                }
+                match &unwrap_grouping(&arg.value).kind {
+                    ExprKind::Literal(Literal::String(xml)) => {
+                        if is_well_formed_xml(xml).is_none() {
+                            Some(Type::Void)
+                        } else {
+                            Some(throwable("Exception"))
+                        }
+                    }
+                    _ => Some(throwable("Exception")),
+                }
+            }
             _ => None,
         }
     }
 
     /// Phase 42 Sub-item D: `$obj->method(...)`'s own dynamic throw type -
-    /// `DateTimeSubMethodThrowTypeExtension` (`DateTime[Immutable]::sub()`).
+    /// `DateTimeSubMethodThrowTypeExtension` (`DateTime[Immutable]::sub()`)
+    /// and `DomDocumentCreateElementDynamicThrowTypeExtension`
+    /// (`DOMDocument::createElement()`).
     pub(crate) fn dynamic_method_throw_type(
         &self,
         class: &str,
@@ -203,6 +231,24 @@ impl<'a> Checker<'a> {
         if method == "sub" && matches!(class, "DateTime" | "DateTimeImmutable") && !args.is_empty()
         {
             return Some(throwable("DateInvalidOperationException"));
+        }
+        if class == "DOMDocument" && method == "createElement" {
+            let [arg] = args else {
+                return Some(throwable("DOMException"));
+            };
+            if arg.name.is_some() || arg.spread {
+                return Some(throwable("DOMException"));
+            }
+            return match &unwrap_grouping(&arg.value).kind {
+                ExprKind::Literal(Literal::String(name)) => {
+                    if is_valid_xml_name(name) {
+                        Some(Type::Void)
+                    } else {
+                        Some(throwable("DOMException"))
+                    }
+                }
+                _ => Some(throwable("DOMException")),
+            };
         }
         None
     }

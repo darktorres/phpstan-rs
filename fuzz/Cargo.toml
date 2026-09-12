@@ -1,0 +1,30 @@
+[package]
+name = "phpstan-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = "1"
+libfuzzer-sys = "0.4"
+
+[dependencies.phpstan-rs]
+path = ".."
+features = ["fuzzing"]
+
+[[bin]]
+name = "lex_parse"
+path = "fuzz_targets/lex_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "token_stream_parse"
+path = "fuzz_targets/token_stream_parse.rs"
+test = false
+doc = false
+bench = false

@@ -627,6 +627,38 @@ fn calling_sub_on_a_datetime_satisfies_a_date_invalid_operation_exception_throws
     );
 }
 
+#[test]
+fn create_element_with_a_non_literal_name_satisfies_a_dom_exception_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \DOMException */
+            function f(\DOMDocument $doc, string $name): void {
+                $doc->createElement($name);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn constructing_simplexml_element_from_a_non_literal_argument_satisfies_an_exception_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \Exception */
+            function f(string $xml): void {
+                new \SimpleXMLElement($xml);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // Phase 42 bonus item: opt-in "missing checked exception" family - off
 // by default, enabled per-test via `diagnostics_for_with`.
 

@@ -161,6 +161,15 @@ impl<'a> Checker<'a> {
             }
             StmtKind::Return(Some(e)) => {
                 let actual = self.check_expr(e, locals, label);
+                // Phase 45 (item 11, 45A): real PHPStan pushes the actual
+                // returned value's own type onto its per-declaration
+                // "actually returned" accumulator here - never for a
+                // generator (`return $x;` inside one sets `Generator::
+                // getReturn()`, not this function's own return value).
+                if !self.current_function_is_generator {
+                    self.current_function_saw_explicit_return = true;
+                    self.current_function_return_points.push(actual.clone());
+                }
                 if let Some(expected) = declared_return {
                     let expected = match &self.current_class {
                         Some(c) => self.resolve_pseudo(expected, c),
@@ -234,7 +243,9 @@ impl<'a> Checker<'a> {
                             "return.void",
                         );
                     } else if actual != Type::Mixed
-                        && !self.registry.is_assignable(&actual, &expected)
+                        && !self
+                            .registry
+                            .accepts_at_configured_level(&actual, &expected)
                     {
                         self.report(
                             label.to_string(),
@@ -253,6 +264,17 @@ impl<'a> Checker<'a> {
             // slip as forgetting to add a return value after an
             // early-exit guard clause).
             StmtKind::Return(None) => {
+                // Phase 45 (item 11, 45A): mirrors real PHPStan pushing
+                // `new VoidType()` for a bare `return;` - deliberately
+                // `Type::Void`, not `Type::Null` (an easy-to-get-wrong
+                // distinction: `Void` is a return-position-only marker
+                // meaning "produced no value," while a too-wide check's
+                // own accumulated union needs to know that specifically,
+                // not conflate it with an actual `null` value).
+                if !self.current_function_is_generator {
+                    self.current_function_saw_explicit_return = true;
+                    self.current_function_return_points.push(Type::Void);
+                }
                 // A bare `return;` inside a generator (Finding 3) sets
                 // Generator::getReturn()'s own value, not this function's
                 // return value - real PHPStan never checks it against the
@@ -296,7 +318,9 @@ impl<'a> Checker<'a> {
                         );
                     } else if expected != Type::Void
                         && expected != Type::Mixed
-                        && !self.registry.is_assignable(&Type::Null, &expected)
+                        && !self
+                            .registry
+                            .accepts_at_configured_level(&Type::Null, &expected)
                     {
                         self.report(
                             label.to_string(),

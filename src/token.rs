@@ -6,6 +6,7 @@
 /// characters), and a byte-offset column would silently overshoot the true
 /// character position on every such line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct Position {
     pub line: u32,
     pub col: u32,
@@ -24,6 +25,7 @@ pub struct Span {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum Keyword {
     Function,
     Class,
@@ -277,6 +279,7 @@ impl Keyword {
 // `$var[key]` access) that gets re-lexed and re-parsed as a full expression -
 // this avoids writing a second, cut-down expression grammar just for strings.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum StringPart {
     Literal(String),
     SimpleVar(String),
@@ -291,6 +294,7 @@ pub enum StringPart {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum Token {
     InlineHtml(String),
     // Raw `/** ... */` text, including the delimiters. Regular `/* */` and

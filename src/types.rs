@@ -13,7 +13,7 @@ pub use subtype::is_subtype;
 pub(crate) use subtype::{
     is_numeric_string_literal, shape_fields_are_list_like, shape_key_type, types_equal_for_union,
 };
-pub use templates::{bind_template_param, substitute_template};
+pub use templates::{bind_template_param, promote_class_string_literals, substitute_template};
 
 // A deliberately small slice of PHPStan's type system: enough to represent
 // what our parser already captures as raw type-hint strings, plus the
@@ -304,6 +304,21 @@ pub enum AccessoryKind {
     NumericString,
     ArrayList,
     NonEmptyArray,
+    // Phase 75: `lowercase-string`/`uppercase-string` - PHPDoc's own
+    // case-tracking pseudo-types, real `AccessoryLowercaseStringType`/
+    // `AccessoryUppercaseStringType`. ASCII-only (mirroring PHP 8.2+'s
+    // own locale-independent `strtolower`/`strtoupper` semantics), same
+    // as every other accessory here.
+    LowercaseString,
+    UppercaseString,
+    // Phase 75: `AccessoryDecimalIntegerStringType` - a string proven to
+    // parse as a canonical decimal integer (no leading zero/`+`/
+    // whitespace, round-trips through `i64`). Only the "is this string
+    // provably one" half is built here - the `inverse`/array-key-casting
+    // variant needs a wholly separate dynamic-array-key-narrowing
+    // consumer this codebase doesn't have yet (see this phase's own
+    // Deferred/declined note), so nothing consumes that half.
+    DecimalIntegerString,
 }
 
 #[cfg(test)]

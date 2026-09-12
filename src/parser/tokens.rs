@@ -219,10 +219,24 @@ impl Parser {
                 Some(part)
             }
             Token::Keyword(_) => {
+                let idx = self.pos;
                 let Token::Keyword(kw) = self.take_token() else {
                     unreachable!()
                 };
-                Some(kw.as_str().to_string())
+                // Phase 48 follow-up (item 6): a real vendored class can
+                // be literally named the same as a PHP keyword
+                // (`marc-mabe/php-enum`'s own `MabeEnum\Enum`) - use the
+                // original source spelling when we have it, falling back
+                // to the keyword's own canonical (always-lowercase) form
+                // only if it's somehow missing (shouldn't happen for a
+                // real lexer-produced token stream).
+                Some(
+                    self.keyword_raw
+                        .get(idx)
+                        .cloned()
+                        .flatten()
+                        .unwrap_or_else(|| kw.as_str().to_string()),
+                )
             }
             _ => None,
         }

@@ -4,24 +4,43 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
 clap = { version = "4", features = ["derive"] }
 hotpath = "0.24"
 imbl = "7.0.1"
 lsp-server = "0.10.0"
 lsp-types = "0.97.0"
+pcre2-sys = { version = "0.2.10", optional = true }
 rayon = "1"
 regex = "1"
+roxmltree = "0.20"
 rustc-hash = "2.1.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 
 [features]
+default = ["pcre-validate"]
 hotpath = ["hotpath/hotpath"]
 hotpath-alloc = ["hotpath/hotpath-alloc"]
+# Phase 46: `regexp.pattern` validation calls real PCRE2 (via the
+# low-level `pcre2-sys` FFI, not the higher-level `pcre2` crate - see
+# `src/pcre_validate.rs`'s own doc comment for why) - the one place this
+# project links a C dependency at all. `cargo build --no-default-features`
+# keeps the rest of the crate 100% pure Rust, at the cost of only this
+# one diagnostic.
+pcre-validate = ["dep:pcre2-sys"]
+# Phase 19 Part A: `Token`/`Keyword`/`StringPart`/`Position` gain a real
+# `arbitrary::Arbitrary` derive under this feature only - the fuzz
+# workspace's own `token_stream_parse` target needs it (bypasses the
+# lexer, feeding an `arbitrary`-derived token stream straight into
+# `Parser::new`), and this keeps the main crate's ordinary build (and
+# every other consumer) from ever pulling `arbitrary` in.
+fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
 criterion = "0.8.2"
+proptest = "1.11.0"
 
 [[bench]]
 name = "vendored_corpus"

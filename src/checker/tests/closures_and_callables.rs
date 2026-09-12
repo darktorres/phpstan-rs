@@ -688,3 +688,92 @@ fn array_map_with_a_by_ref_use_capture_still_widens_the_outer_variable() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn use_of_a_never_defined_outer_variable_is_flagged_as_undefined() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): int {
+                $fn = function () use ($typo) {
+                    return $typo;
+                };
+                return $fn();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "variable.undefined"),
+        "expected variable.undefined, got: {d:?}"
+    );
+}
+
+#[test]
+fn use_of_this_as_a_lexical_variable_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function make(): callable {
+                return function () use ($this) {
+                    return $this;
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "closure.useThis"),
+        "expected closure.useThis, got: {d:?}"
+    );
+}
+
+#[test]
+fn use_of_a_superglobal_as_a_lexical_variable_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): callable {
+                return function () use ($_SERVER) {
+                    return $_SERVER;
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "closure.useSuperGlobal"),
+        "expected closure.useSuperGlobal, got: {d:?}"
+    );
+}
+
+#[test]
+fn use_of_a_variable_matching_a_parameter_name_is_flagged_as_duplicate() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                $x = 1;
+                $fn = function ($x) use ($x) {
+                    return $x;
+                };
+                $fn(2);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "closure.useDuplicate"),
+        "expected closure.useDuplicate, got: {d:?}"
+    );
+}
+
+#[test]
+fn array_map_closure_use_of_a_never_defined_outer_variable_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int[] $items */
+            function test(array $items): array {
+                return array_map(function (int $x) use ($typo) {
+                    return $x + $typo;
+                }, $items);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "variable.undefined"),
+        "expected variable.undefined, got: {d:?}"
+    );
+}

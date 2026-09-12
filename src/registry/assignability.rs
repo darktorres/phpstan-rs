@@ -471,4 +471,130 @@ impl Registry {
             _ => types::is_subtype(sub, sup),
         }
     }
+
+    /// Phase 84: the level-aware counterpart to `is_assignable` above -
+    /// real PHPStan's `RuleLevelHelper::accepts()` two genuinely level-
+    /// gated behaviors (`checkNullables`/`checkUnionTypes`,
+    /// `vendor/phpstan-src/src/Rules/RuleLevelHelper.php:152-164`)
+    /// applied to the identical argument/return/property-type check
+    /// `is_assignable` already performs, for the handful of real call
+    /// sites a `Rule` class actually consumes `RuleLevelHelper` through
+    /// (not every `is_assignable` call site project-wide - narrowing,
+    /// LSP-override compatibility, and generics bound-checking are real
+    /// PHPStan's own separate, never-level-gated `isSuperTypeOf()`
+    /// domain, and must keep calling `is_assignable` directly).
+    ///
+    /// `self.configured_level` is the project's own `level` setting
+    /// *before* `check-project`'s own `MAX_LEVEL`-driven `.unwrap_or(6)`
+    /// collapse - `None` (never configured) keeps today's always-strict
+    /// answer exactly, the safe default for every existing caller/test
+    /// that never opts into this.
+    ///
+    /// Deliberately not a full tri-state (`Yes`/`No`/`Maybe`) rewrite of
+    /// `is_assignable`'s own boolean API (see this phase's own
+    /// re-scoping note) - real PHPStan's `checkUnionTypes` distinguishes
+    /// "definitely accepts" from "maybe accepts" via `TrinaryLogic`, a
+    /// distinction this project's plain boolean `.all()`/`.any()`
+    /// combinators (already used, unconditionally, by `is_assignable`
+    /// itself) have no way to represent without that larger rewrite -
+    /// `UNION_TYPES_CHECK_LEVEL` is still named and folded into the
+    /// fast-path guard below (both real gates must be at their strict
+    /// threshold before this collapses to `is_assignable` unchanged), but
+    /// doesn't get its own separate `.all()`-vs-`.any()` switch the way
+    /// `NULLABLES_CHECK_LEVEL` gets its own null-stripping switch.
+    pub fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
+        let Some(level) = self.configured_level else {
+            return self.is_assignable(sub, sup);
+        };
+        self.accepts_at_configured_level_rec(sub, sup, level)
+    }
+
+    fn accepts_at_configured_level_rec(&self, sub: &Type, sup: &Type, level: u8) -> bool {
+        const UNION_TYPES_CHECK_LEVEL: u8 = 7;
+        const NULLABLES_CHECK_LEVEL: u8 = 8;
+
+        // Fast path: both real gates already at their strict threshold -
+        // byte-identical to plain `is_assignable`, the safe default for
+        // a project explicitly configured at (or above) real PHPStan's
+        // own strictest level for this behavior. `NULLABLES_CHECK_LEVEL`
+        // (8) is strictly above `UNION_TYPES_CHECK_LEVEL` (7), so
+        // `level >= NULLABLES_CHECK_LEVEL` alone already implies the
+        // other - both consts are still named here (rather than one bare
+        // `8`) so this reads as "both real gates," matching real
+        // PHPStan's own two separately-named flags.
+        if level >= NULLABLES_CHECK_LEVEL {
+            debug_assert!(level >= UNION_TYPES_CHECK_LEVEL);
+            return self.is_assignable(sub, sup);
+        }
+        // Fast path: neither side is a `Union` at all - nothing for
+        // either level-gated behavior to touch, so this collapses to
+        // plain `is_assignable` too (the `Union` arms below are the only
+        // ones this method ever needs to diverge from `is_assignable`
+        // on).
+        if !matches!(sub, Type::Union(_)) && !matches!(sup, Type::Union(_)) {
+            return self.is_assignable(sub, sup);
+        }
+
+        // `checkNullables` (real PHPStan's own `transformAcceptedType`,
+        // `RuleLevelHelper.php:130-137`): below level 8, strip `Null` out
+        // of a multi-member `sub` ("acceptedType" in real PHPStan's own
+        // naming - the *actual/given* type, e.g. a `?string`-typed
+        // argument) Union before deciding acceptance - real PHPStan's own
+        // guard, applied exactly as it is there: never when `sup`
+        // ("acceptingType" - the *declared/expected* type) is bare
+        // `Type::Null` (a nullable value must never satisfy a definite-
+        // null-only target), and never when `sub` is bare `Type::Null`
+        // itself (a definite null literal stays definitely rejected at
+        // every level, `sub` must be a multi-member Union that *includes*
+        // Null, not Null alone).
+        let stripped_sub = if level < NULLABLES_CHECK_LEVEL
+            && *sup != Type::Null
+            && *sub != Type::Null
+            && let Type::Union(members) = sub
+            && members.contains(&Type::Null)
+        {
+            let non_null: Vec<Type> = members
+                .iter()
+                .filter(|m| **m != Type::Null)
+                .cloned()
+                .collect();
+            Some(match non_null.len() {
+                // Unreachable in practice (`sub` was excluded above
+                // whenever it's bare `Type::Null`, so a real Union always
+                // has at least one non-Null member) - kept as a safe,
+                // total fallback rather than an `unwrap`/panic.
+                0 => Type::Never,
+                1 => non_null.into_iter().next().unwrap(),
+                _ => Type::Union(non_null),
+            })
+        } else {
+            None
+        };
+        let sub = stripped_sub.as_ref().unwrap_or(sub);
+
+        // Real bug this method exists to fix (found during this phase's
+        // own adversarial review): a naive version of this method bailed
+        // straight to plain `is_assignable` whenever `sup` was *also* a
+        // Union, on the theory that a nested Union-vs-Union pair is rare
+        // - but this project represents *every* nullable declared type
+        // (`?string`, `?int`, `?Foo`, the single most common PHP
+        // nullability idiom) as `Type::Union([X, Type::Null])`
+        // (`types/parse.rs`), so `sup` is a Union at every one of this
+        // method's own real call sites checking a nullable-declared
+        // parameter/property/return type - exactly the scenario
+        // `checkNullables` exists for. Recursing into `self.accepts_at_
+        // configured_level_rec` (not plain `is_assignable`) on both sides
+        // whenever either is a Union, symmetric to `is_assignable`'s own
+        // existing `282`/`283` arms, is what keeps that leniency reaching
+        // its single most common trigger.
+        match (sub, sup) {
+            (Type::Union(members), _) => members
+                .iter()
+                .all(|m| self.accepts_at_configured_level_rec(m, sup, level)),
+            (_, Type::Union(members)) => members
+                .iter()
+                .any(|m| self.accepts_at_configured_level_rec(sub, m, level)),
+            _ => self.is_assignable(sub, sup),
+        }
+    }
 }

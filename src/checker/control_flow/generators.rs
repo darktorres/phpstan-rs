@@ -216,7 +216,9 @@ impl<'a> Checker<'a> {
         let enclosing_send = generator_template_param(&enclosing, self.registry, "TSend");
         if enclosing_key != Type::Mixed
             && inner_key != Type::Mixed
-            && !self.registry.is_assignable(&inner_key, &enclosing_key)
+            && !self
+                .registry
+                .accepts_at_configured_level(&inner_key, &enclosing_key)
         {
             self.report(
                 label.to_string(),
@@ -230,7 +232,9 @@ impl<'a> Checker<'a> {
         }
         if enclosing_value != Type::Mixed
             && inner_value != Type::Mixed
-            && !self.registry.is_assignable(&inner_value, &enclosing_value)
+            && !self
+                .registry
+                .accepts_at_configured_level(&inner_value, &enclosing_value)
         {
             self.report(
                 label.to_string(),

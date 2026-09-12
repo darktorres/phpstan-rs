@@ -94,6 +94,20 @@ impl<'a> Checker<'a> {
     /// `FunctionSig::from_decl`'s own identical "this function's own
     /// same-named template wins over the class's" precedent.
     pub(crate) fn resolve_type_hint(&self, hint: Option<&str>) -> Type {
+        self.resolve_type_hint_with_case_refs(hint).0
+    }
+
+    /// Phase 48 follow-up (item 6d): `resolve_type_hint`'s own case_refs-
+    /// collecting sibling - a closure/arrow-fn literal has no `FunctionSig`
+    /// of its own for `case_refs` to live on at registry-build time the
+    /// way an ordinary function/method parameter's does, so this
+    /// registry-independent, checker-side pipeline collects them fresh at
+    /// check time instead, identically to how every other `resolve_type_
+    /// hint` caller already resolves the type itself.
+    pub(crate) fn resolve_type_hint_with_case_refs(
+        &self,
+        hint: Option<&str>,
+    ) -> (Type, Vec<(String, String)>) {
         match hint {
             Some(h) => {
                 let ty = types::parse_type_string(h);
@@ -104,10 +118,12 @@ impl<'a> Checker<'a> {
                 } else {
                     registry::mark_template_params(ty, &params)
                 };
+                let mut case_refs = Vec::new();
+                registry::collect_class_name_case_refs(&ty, &self.name_ctx, &mut case_refs);
                 let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
-                self.registry.resolve_deferred_value_of_now(ty)
+                (self.registry.resolve_deferred_value_of_now(ty), case_refs)
             }
-            None => Type::Mixed,
+            None => (Type::Mixed, Vec::new()),
         }
     }
 
@@ -341,6 +357,38 @@ impl<'a> Checker<'a> {
                     .map(|(k, t, opt)| (k.clone(), self.resolve_pseudo(t, defining_class), *opt))
                     .collect(),
             ),
+            // Real, corpus-confirmed bug: a generic class's own template
+            // arguments (`SortEntry<self, string>` - `Object("SortEntry",
+            // [SelfRef, String])`) never got `self`/`static`/`parent`
+            // resolved inside the argument list, only ever at the top
+            // level. Left unresolved, a `list<SortEntry<self, string>>`
+            // declared return type's `self` never matches the concrete
+            // class an actual returned `SortEntry<UserSortField, string>`
+            // carries, so any comparison keyed on the resolved type (e.g.
+            // `check_too_wide_return_type`'s own `is_assignable` check)
+            // wrongly concludes the declared member is never produced.
+            Type::Object(name, args) => Type::Object(
+                name.clone(),
+                args.iter()
+                    .map(|a| self.resolve_pseudo(a, defining_class))
+                    .collect(),
+            ),
+            // PHPDoc conditional return types (`@return ($x is Foo ? A :
+            // B)`) can carry `self`/`static`/`parent` inside any of their
+            // three type positions too.
+            Type::Conditional {
+                subject,
+                target,
+                if_true,
+                if_false,
+                negated,
+            } => Type::Conditional {
+                subject: subject.clone(),
+                target: Box::new(self.resolve_pseudo(target, defining_class)),
+                if_true: Box::new(self.resolve_pseudo(if_true, defining_class)),
+                if_false: Box::new(self.resolve_pseudo(if_false, defining_class)),
+                negated: *negated,
+            },
             _ => ty.clone(),
         }
     }

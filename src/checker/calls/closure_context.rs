@@ -1,5 +1,8 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, body_contains_yield, collect_goto_targets, union_types};
+use crate::checker::{
+    Checker, DiagnosticBuilder, Locals, body_contains_yield, collect_goto_targets, is_superglobal,
+    union_types,
+};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -95,10 +98,10 @@ impl<'a> Checker<'a> {
                 }
                 let mut arrow_locals = locals.clone();
                 for (p, override_ty) in params.iter().zip(param_overrides) {
-                    let ty = if p.type_hint.is_some() {
-                        self.resolve_type_hint(p.type_hint.as_deref())
+                    let (ty, case_refs) = if p.type_hint.is_some() {
+                        self.resolve_type_hint_with_case_refs(p.type_hint.as_deref())
                     } else {
-                        override_ty.clone()
+                        (override_ty.clone(), Vec::new())
                     };
                     self.check_type_class_names_exist(
                         &ty,
@@ -113,17 +116,20 @@ impl<'a> Checker<'a> {
                         label,
                         "parameter.trait",
                     );
+                    self.check_type_class_name_case(&case_refs, label, p.span);
                     arrow_locals.declare(p.name.clone(), ty, p.name_span);
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 if return_type.is_some() {
-                    let expected = self.resolve_type_hint(return_type.as_deref());
+                    let (expected, expected_case_refs) =
+                        self.resolve_type_hint_with_case_refs(return_type.as_deref());
                     self.check_type_class_names_exist(
                         &expected,
                         "return type of arrow function",
                         closure_expr.span,
                         label,
                     );
+                    self.check_type_class_name_case(&expected_case_refs, label, closure_expr.span);
                     self.check_type_trait_refs(
                         &expected,
                         "return type of arrow function",
@@ -141,7 +147,11 @@ impl<'a> Checker<'a> {
                             "return.noParent",
                         );
                     }
-                    if body_ty != Type::Mixed && !self.registry.is_assignable(&body_ty, &expected) {
+                    if body_ty != Type::Mixed
+                        && !self
+                            .registry
+                            .accepts_at_configured_level(&body_ty, &expected)
+                    {
                         self.report(
                             label.to_string(),
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
@@ -168,10 +178,58 @@ impl<'a> Checker<'a> {
                 }
                 let mut closure_locals: Locals = locals.fresh_scope();
                 for u in uses {
+                    // Phase 17 follow-up: see the identical fix's own
+                    // comment at `checker::expr`'s `ExprKind::Closure` arm.
+                    if u.name == "this" {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                "Cannot use $this as lexical variable.".to_string(),
+                                u.span,
+                                0,
+                                "closure.useThis",
+                            )
+                            .non_ignorable(),
+                        );
+                    } else if is_superglobal(&u.name) {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                format!(
+                                    "Cannot use superglobal variable ${} as lexical variable.",
+                                    u.name
+                                ),
+                                u.span,
+                                0,
+                                "closure.useSuperGlobal",
+                            )
+                            .non_ignorable(),
+                        );
+                    } else if params.iter().any(|p| p.name == u.name) {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                format!(
+                                    "Cannot use lexical variable ${} since a parameter with the same name already exists.",
+                                    u.name
+                                ),
+                                u.span,
+                                0,
+                                "closure.useDuplicate",
+                            )
+                            .non_ignorable(),
+                        );
+                    } else if !u.by_ref && !locals.contains_key(&u.name) {
+                        self.report(
+                            label.to_string(),
+                            format!("undefined variable ${}", u.name),
+                            u.span,
+                            0,
+                            "variable.undefined",
+                        );
+                    }
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
-                    // Phase 17: see the identical fix's own comment at
-                    // `checker::expr`'s `ExprKind::Closure` arm.
                     if self.probe_span.get() == Some(u.span) {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
@@ -183,10 +241,10 @@ impl<'a> Checker<'a> {
                 }
                 let closure_label = format!("{label} (closure)");
                 for (p, override_ty) in params.iter().zip(param_overrides) {
-                    let ty = if p.type_hint.is_some() {
-                        self.resolve_type_hint(p.type_hint.as_deref())
+                    let (ty, case_refs) = if p.type_hint.is_some() {
+                        self.resolve_type_hint_with_case_refs(p.type_hint.as_deref())
                     } else {
-                        override_ty.clone()
+                        (override_ty.clone(), Vec::new())
                     };
                     self.check_type_class_names_exist(
                         &ty,
@@ -201,9 +259,12 @@ impl<'a> Checker<'a> {
                         &closure_label,
                         "parameter.trait",
                     );
+                    self.check_type_class_name_case(&case_refs, &closure_label, p.span);
                     closure_locals.declare(p.name.clone(), ty, p.name_span);
                 }
-                let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
+                let (declared_return_ty, declared_return_case_refs) =
+                    self.resolve_type_hint_with_case_refs(return_type.as_deref());
+                let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
                     declared_return.as_ref().unwrap_or(&Type::Mixed),
                     "return type of anonymous function",
@@ -216,6 +277,11 @@ impl<'a> Checker<'a> {
                     closure_expr.span,
                     &closure_label,
                     "return.trait",
+                );
+                self.check_type_class_name_case(
+                    &declared_return_case_refs,
+                    &closure_label,
+                    closure_expr.span,
                 );
                 if let Some(c) = self.current_class.clone() {
                     let resolved_return =

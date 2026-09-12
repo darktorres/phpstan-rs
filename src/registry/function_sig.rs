@@ -103,6 +103,17 @@ pub struct ParamSig {
     // check_closure_literal_with_this_and_scope`, the same mechanism
     // `Closure::bind`/`->bindTo()` already use.
     pub closure_this_type: Option<Type>,
+    // Phase 45 (item 11): `@param-out Type $name`'s own resolved `Type` -
+    // the widened type this by-ref parameter's own value is guaranteed
+    // to hold once the function returns. Resolved through the identical
+    // mark-then-resolve-then-substitute pipeline `ty`/`closure_this_type`
+    // above already use. `None` when no such tag targets this parameter
+    // (every non-by-ref parameter, and the overwhelming majority of
+    // by-ref ones too) - every by-ref-parameter check below falls back
+    // to this parameter's own native/`@param` type when it's absent,
+    // matching real PHPStan's own `getOutType() ?? getType()` fallback
+    // (`ParameterOutAssignedTypeRule`/`TooWideParameterOutTypeCheck`).
+    pub out_ty: Option<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -571,6 +582,17 @@ impl FunctionSig {
                         let ty = resolve_names_in_type(ty, ctx);
                         substitute_type_aliases(ty, class_type_aliases)
                     });
+                // Phase 45: mirrors `closure_this_type`'s own resolution
+                // pipeline exactly.
+                let out_ty = doc
+                    .as_ref()
+                    .and_then(|d| d.param_out.get(&p.name))
+                    .map(|raw| {
+                        let ty = types::parse_type_string(raw);
+                        let ty = mark_template_params(ty, &template_params);
+                        let ty = resolve_names_in_type(ty, ctx);
+                        substitute_type_aliases(ty, class_type_aliases)
+                    });
                 ParamSig {
                     name: p.name.clone(),
                     ty,
@@ -585,6 +607,7 @@ impl FunctionSig {
                     ),
                     case_refs,
                     closure_this_type,
+                    out_ty,
                 }
             })
             .collect();
@@ -735,6 +758,9 @@ impl FunctionSig {
                     // above - falls back to the earlier one when only it
                     // declared the tag.
                     closure_this_type: b.closure_this_type.or(a.closure_this_type),
+                    // Same later-declaration-wins-on-conflict-falling-
+                    // back-to-earlier rule as `closure_this_type` above.
+                    out_ty: b.out_ty.or(a.out_ty),
                 },
                 // A position present in only one real overload can't be
                 // required in the merged callable either.

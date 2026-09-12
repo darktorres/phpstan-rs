@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use output::OutputFormat;
 use phpstan_rs::{
     baseline, checker, composer, config, ignore_errors, output, php_version, project,
+    restricted_symbols,
 };
 use rayon::prelude::*;
 
@@ -48,10 +49,10 @@ fn apply_level_filter(
 /// error handling (the parser itself no longer panics on ordinary
 /// malformed syntax) - the identical precaution `check.rs`'s own lex+parse
 /// worker threads already take, needed here for the same reason.
-fn read_and_parse_file(path: &Path) -> Option<(String, project::ParsedFile)> {
+fn read_and_parse_file(path: &Path, is_stub: bool) -> Option<(String, project::ParsedFile)> {
     let bytes = fs::read(path).ok()?;
     let source = String::from_utf8_lossy(&bytes).into_owned();
-    let parsed = std::panic::catch_unwind(|| project::parse_file(path, &source))
+    let parsed = std::panic::catch_unwind(|| project::parse_file(path, &source, is_stub))
         .ok()?
         .ok()?;
     Some((source, parsed))
@@ -117,11 +118,16 @@ fn run_check_project(
     check_missing_checked_exceptions: bool,
     check_strict_printf_placeholder_types: bool,
     check_too_wide_throw_type_in_protected_and_public_methods: bool,
+    check_too_wide_return_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
+    check_duplicate_class_declarations: bool,
+    configured_level: Option<u8>,
+    stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
     ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
+    restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
     phpstan_api_check_enabled: bool,
     format: OutputFormat,
 ) {
@@ -155,7 +161,13 @@ fn run_check_project(
     project.set_check_too_wide_throw_type_in_protected_and_public_methods(
         check_too_wide_throw_type_in_protected_and_public_methods,
     );
+    project.set_check_too_wide_return_type_in_protected_and_public_methods(
+        check_too_wide_return_type_in_protected_and_public_methods,
+    );
     project.set_check_method_throw_type_covariance(check_method_throw_type_covariance);
+    project.set_check_duplicate_class_declarations(check_duplicate_class_declarations);
+    project.set_configured_level(configured_level);
+    project.set_restricted_symbols(restricted_symbol_entries);
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
@@ -202,11 +214,27 @@ fn run_check_project(
     // downstream `zip(context_files.iter(), ...)`/`zip(analyze_files.
     // iter(), ...)` insert loops below are unchanged either way. Found
     // via a perf-optimization investigation workflow.
+    // Phase 83: every real on-disk file reachable through a configured
+    // `stub_paths` entry (a directory, walked, or a single file listed
+    // directly - `collect_php_files` already handles both) - tags
+    // `DuplicateClassSites`' own `is_stub` provenance per file, so a
+    // designated stub override (e.g. `Imagick.stub.php`) is never itself
+    // flagged by `check_duplicate_class_declarations` and never counts
+    // toward flagging the real declaration it overrides. `stub_dirs` is
+    // already unioned into `scan_dirs` by the caller (so these files load
+    // as context exactly as before) - this is purely an additional,
+    // parallel tagging pass, not a second file-collection pass.
+    let mut stub_files_vec = Vec::new();
+    for dir in stub_dirs {
+        project::collect_php_files(dir, &mut stub_files_vec);
+    }
+    let stub_files: std::collections::HashSet<PathBuf> = stub_files_vec.into_iter().collect();
+
     let combined_files: Vec<&PathBuf> = context_files.iter().chain(analyze_files.iter()).collect();
     let mut combined_parsed: Vec<Option<(String, project::ParsedFile)>> = pool.install(|| {
         combined_files
             .par_iter()
-            .map(|p| read_and_parse_file(p))
+            .map(|p| read_and_parse_file(p, stub_files.contains(p.as_path())))
             .collect()
     });
     let analyze_parsed = combined_parsed.split_off(context_files.len());
@@ -410,11 +438,14 @@ pub(crate) fn run_check_project_command(
     check_missing_checked_exceptions: bool,
     check_strict_printf_placeholder_types: bool,
     check_too_wide_throw_type_in_protected_and_public_methods: bool,
+    check_too_wide_return_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
+    check_duplicate_class_declarations: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
     scan_dirs: Vec<PathBuf>,
+    stub_paths: Vec<PathBuf>,
     no_composer: bool,
     config: Option<PathBuf>,
     format: Option<OutputFormat>,
@@ -463,6 +494,12 @@ pub(crate) fn run_check_project_command(
         eprintln!("no paths given on the command line or in the config file");
         std::process::exit(1);
     }
+    // Phase 84: `configured_level` is the raw, pre-collapse value -
+    // `None` when neither the CLI flag nor the config key set one at
+    // all, distinct from `level` below (which always collapses to a
+    // concrete `u8`, defaulting to `MAX_LEVEL`, purely for diagnostic
+    // filtering).
+    let configured_level = level.or(config.level);
     let level = level.or(config.level).unwrap_or(MAX_LEVEL);
     let strict_mixed_arrays = strict_mixed_arrays || config.strict_mixed_arrays.unwrap_or(false);
     let check_uninitialized_properties =
@@ -485,8 +522,15 @@ pub(crate) fn run_check_project_command(
             || config
                 .check_too_wide_throw_type_in_protected_and_public_methods
                 .unwrap_or(false);
+    let check_too_wide_return_type_in_protected_and_public_methods =
+        check_too_wide_return_type_in_protected_and_public_methods
+            || config
+                .check_too_wide_return_type_in_protected_and_public_methods
+                .unwrap_or(false);
     let check_method_throw_type_covariance = check_method_throw_type_covariance
         || config.check_method_throw_type_covariance.unwrap_or(false);
+    let check_duplicate_class_declarations = check_duplicate_class_declarations
+        || config.check_duplicate_class_declarations.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -499,6 +543,7 @@ pub(crate) fn run_check_project_command(
     };
     let baseline = baseline.or(config.baseline.map(resolve_against_config));
     let ignore_error_entries = config.ignore_errors.unwrap_or_default();
+    let restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
 
     let mut scan_dirs = if !scan_dirs.is_empty() {
         scan_dirs
@@ -511,6 +556,26 @@ pub(crate) fn run_check_project_command(
             .collect()
     };
     let no_composer = no_composer || config.no_composer.unwrap_or(false);
+
+    // Phase 83: mirrors `scan_dirs`'s own resolution exactly (CLI flag
+    // wins, else the config key, resolved against the config file's own
+    // directory) - a `stub_paths` entry is unioned into `scan_dirs` below
+    // so it still loads for type-resolution context exactly as before
+    // (nothing about the existing merge-into-registry behavior changes),
+    // while also being kept separately so `run_check_project` can walk it
+    // a second time to tag `DuplicateClassSites`' own `is_stub`
+    // provenance per file.
+    let stub_dirs: Vec<PathBuf> = if !stub_paths.is_empty() {
+        stub_paths
+    } else {
+        config
+            .stub_paths
+            .unwrap_or_default()
+            .into_iter()
+            .map(resolve_against_config)
+            .collect()
+    };
+    scan_dirs.extend(stub_dirs.iter().cloned());
 
     let mut scan_files = Vec::new();
     // Phase 40: gated the same way as the vendor-context load just
@@ -543,11 +608,16 @@ pub(crate) fn run_check_project_command(
         check_missing_checked_exceptions,
         check_strict_printf_placeholder_types,
         check_too_wide_throw_type_in_protected_and_public_methods,
+        check_too_wide_return_type_in_protected_and_public_methods,
         check_method_throw_type_covariance,
+        check_duplicate_class_declarations,
+        configured_level,
+        &stub_dirs,
         php_version,
         generate_baseline.as_deref(),
         baseline.as_deref(),
         &ignore_error_entries,
+        &restricted_symbol_entries,
         phpstan_api_check_enabled,
         format.unwrap_or_default(),
     )

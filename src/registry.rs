@@ -30,6 +30,26 @@ pub(crate) use name_context::{NameContext, collect_class_name_case_refs, resolve
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
 
+/// Phase 40: real PHPStan's own `ApiRuleHelper::isPhpStanName()` - whether
+/// `fqn` is under the `PHPStan\` namespace itself (excluding the two
+/// bundled-but-not-really-PHPStan namespaces it explicitly carves out).
+/// Relocated here (from `checker/phpstan_api.rs`) so the vendor-directory
+/// check's own registry-side plumbing (`phpstan_class_files`, populated
+/// during indexing) can call it without a backward `registry -> checker`
+/// dependency.
+pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
+    // Phase 40 follow-up: real `isPhpStanName()` special-cases a bare
+    // `namespace PHPStan;` (no trailing backslash, 7 characters) as true
+    // too (confirmed: `ApiRuleHelperTest.php`'s own `PHPStan`/no-
+    // declaring-file row expects `true`) - this project's own `fqn.len()
+    // >= 8` guard below rejected it before this fix.
+    fqn.eq_ignore_ascii_case("PHPStan")
+        || (fqn.len() >= 8
+            && fqn.as_bytes()[..8].eq_ignore_ascii_case(b"PHPStan\\")
+            && !fqn.starts_with("PHPStan\\PhpDocParser\\")
+            && !fqn.starts_with("PHPStan\\BetterReflection\\"))
+}
+
 /// A symbol table built by indexing already-parsed source, standing in for
 /// the reflection a real PHP runtime would normally provide (see the
 /// discussion this project started from: no live interpreter means no
@@ -170,6 +190,13 @@ pub struct Registry {
     // *re-declaration* narrowing an ancestor's own wider `@throws` gets
     // checked. Same wiring chain as the flags above.
     pub check_too_wide_throw_type_in_protected_and_public_methods: bool,
+    // Phase 45 (item 11, 45A): the return-type analogue of the flag just
+    // above - mirrors real PHPStan's own `checkTooWideReturnTypesInProtectedAndPublicMethods`
+    // gate for `TooWideMethodReturnTypehintRule`, identical wiring chain
+    // and identical default-off reasoning (an overridable method's own
+    // "unused" declared return-type member might genuinely be needed by
+    // a subclass override).
+    pub check_too_wide_return_type_in_protected_and_public_methods: bool,
     // Phase 42: opts into `MethodThrowTypeCovarianceRule` (`checker/oop/
     // method_overrides.rs`) - a real PHPStan rule (unlike `check_missing_
     // checked_exceptions`), but shipped opt-in here rather than mirroring
@@ -187,6 +214,29 @@ pub struct Registry {
     // against a real corpus before defaulting on. Same wiring chain as
     // the flags above.
     pub check_method_throw_type_covariance: bool,
+    // Phase 83: opts into `checker::duplicate_classes::check_duplicate_
+    // class_declarations` - unlike `duplicate_functions`'s own always-on
+    // equivalent, this one is opt-in (default `false`) because its one
+    // known corpus false-positive shape (a vendored built-in stub
+    // override, e.g. `Imagick.stub.php`, colliding with the real PHP
+    // extension's own class) can only be defused by a project's `stub_
+    // paths` config being correctly populated, and no existing
+    // `phpstan-rs.toml` does that yet. Same wiring chain as the flags
+    // above; see `checker::duplicate_classes`'s own module doc comment
+    // for the full design and why this goes beyond real PHPStan (which
+    // has no whole-project equivalent of this check to mirror at all).
+    pub check_duplicate_class_declarations: bool,
+    // Phase 84: the project's own `level` setting, *before* `check-
+    // project`'s own `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None`
+    // when never explicitly configured (CLI `--level`/config `level`
+    // both absent), which `Registry::accepts_at_configured_level` treats
+    // as "keep today's always-strict answer," not real PHPStan's own
+    // lenient level-0 default. Not a CLI-configurable flag of its own the
+    // way every other flag in this group is - set once from `check-
+    // project`'s own already-resolved `level`/`config.level` merge,
+    // mirroring `phpstan_api_check_enabled`'s own "computed once,
+    // upstream of any single flag" precedent.
+    pub configured_level: Option<u8>,
     // Phase 40.C: whether this project consumes real PHPStan as a
     // dependency at all (mirrors `Project::phpstan_api_check_enabled`,
     // set once from `composer::detect_phpstan_dependency` before any
@@ -201,6 +251,23 @@ pub struct Registry {
     // `false`, so every existing call site untouched by this is
     // completely unaffected.
     pub phpstan_api_check_enabled: bool,
+    // Phase 40 follow-up: the one narrow, disclosed crack in this
+    // struct's own "path-agnostic" contract (see `project/decl_
+    // locations.rs`'s doc comment for why `ClassInfo`/`Registry` are
+    // deliberately path-agnostic everywhere else) - needed to port real
+    // `ApiRuleHelper::isPhpStanCode`'s own vendor-directory check
+    // (`is_phpstan_code`, `checker/phpstan_api.rs`). Only ever populated
+    // for a name already passing `is_phpstan_namespace`, so it stays
+    // empty (zero cost) for every ordinary corpus with no `PHPStan\*`-
+    // namespaced code of its own.
+    pub phpstan_class_files: FxHashMap<String, std::path::PathBuf>,
+    // Phase 67: a project's own configured `restricted_symbols` list
+    // (`crate::restricted_symbols::RestrictedSymbolEntry`), compiled once
+    // via `RestrictedSymbols::compile` - `Project::set_restricted_symbols`.
+    // Empty by default, following `check_internal_usage`'s own registry-
+    // field wiring shape (minus the CLI-flag hop, since this is a list,
+    // not a boolean).
+    pub restricted_symbols: crate::restricted_symbols::RestrictedSymbols,
     // Phase 38: the project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to

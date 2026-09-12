@@ -450,6 +450,7 @@ impl<'a> Checker<'a> {
                     // Phase 48 follow-up (item 7b): `class.nameCase` for
                     // this PHPDoc-typed parameter position.
                     self.check_type_class_name_case(&param.case_refs, &label, ast_param.span);
+                    self.check_type_internal_usage(&param.case_refs, &label, ast_param.span);
                     resolved_params.push((param.name.clone(), ty.clone(), ast_param.span));
                     // `ParamSig::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
@@ -597,6 +598,7 @@ impl<'a> Checker<'a> {
                     self.check_type_trait_refs(&ty, &subject, p.span, &label, "parameter.trait");
                     self.check_no_parent_ref(&ty, &subject, p.span, &label, "parameter.noParent");
                     self.check_type_class_name_case(&case_refs, &label, p.span);
+                    self.check_type_internal_usage(&case_refs, &label, p.span);
                     resolved_params.push((p.name.clone(), ty.clone(), p.span));
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
@@ -731,6 +733,7 @@ impl<'a> Checker<'a> {
             &label,
         );
         self.check_type_class_name_case(&declared_return_case_refs, &label, f.span);
+        self.check_type_internal_usage(&declared_return_case_refs, &label, f.span);
         self.check_type_trait_refs(
             declared_return.as_ref().unwrap_or(&Type::Mixed),
             &subject,
@@ -923,6 +926,44 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_has_unannotated_call);
         let previous_explicit_throw_points =
             std::mem::take(&mut self.current_function_explicit_throw_points);
+        // Phase 45 (item 11): see `Checker::current_function_return_points`'s
+        // own doc comment - reset/restored at the identical choke point
+        // as the throw-tracking fields just above.
+        let previous_return_points = std::mem::take(&mut self.current_function_return_points);
+        let previous_saw_explicit_return =
+            std::mem::take(&mut self.current_function_saw_explicit_return);
+        // Phase 45 (45B/45C/45D): populates `current_function_by_ref_
+        // params` with every by-ref parameter's own check target
+        // (`@param-out` when present, else its ordinary declared type -
+        // real PHPStan's own `getOutType() ?? getType()` fallback).
+        // Falls back to a raw native-hint resolution when this
+        // declaration has no resolved `sig` at all (the same rare
+        // anonymous-class-ancestor-hint gap `ancestor_sig_hint`'s own
+        // doc comment names) - correctly lenient-by-omission, matching
+        // every other registry-aware check in this function.
+        let previous_by_ref_params = std::mem::take(&mut self.current_function_by_ref_params);
+        let previous_by_ref_assigned_types =
+            std::mem::take(&mut self.current_function_by_ref_assigned_types);
+        match sig {
+            Some(sig) => {
+                for param in &sig.params {
+                    if param.by_ref {
+                        let check_ty = param.out_ty.clone().unwrap_or_else(|| param.ty.clone());
+                        self.current_function_by_ref_params
+                            .insert(param.name.clone(), check_ty);
+                    }
+                }
+            }
+            None => {
+                for p in &f.params {
+                    if p.by_ref {
+                        let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                        self.current_function_by_ref_params
+                            .insert(p.name.clone(), ty);
+                    }
+                }
+            }
+        }
         self.check_generator_return_type(native_return.as_ref(), f.span, &label);
 
         // `check_block`, not a bare loop over `check_stmt`: a function's
@@ -968,9 +1009,27 @@ impl<'a> Checker<'a> {
                 )
             })
             .flatten();
+        // Phase 45 (item 11, 45A): the falls-off-the-end path's own two
+        // *separate* contributions to `current_function_return_points` -
+        // real PHPStan's own `TooWideTypeCheck.php:194-195` pushes
+        // `VoidType` unconditionally whenever the body doesn't always-
+        // terminate (not folded into the `Null` push below), and a
+        // `Null` push only when there's no native return type at all
+        // (a native type always wins for "what does falling off the end
+        // actually produce" purposes - an untyped function is the only
+        // shape where PHP's own implicit-`null`-return is the real,
+        // uncommitted fact). Never for a generator, same reasoning as
+        // both `Return` arms in `stmt.rs`.
+        let body_falls_off_end = !f.body.iter().any(|s| self.always_terminates(s, &locals));
+        if !self.current_function_is_generator && body_falls_off_end {
+            self.current_function_return_points.push(Type::Void);
+            if native_return.is_none() {
+                self.current_function_return_points.push(Type::Null);
+            }
+        }
         if let Some(expected) = &declared_return
             && (!f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete))
-            && !f.body.iter().any(|s| self.always_terminates(s, &locals))
+            && body_falls_off_end
             && (!self.current_function_is_generator || generator_treturn.is_some())
         {
             let expected = if let Some(treturn) = generator_treturn {
@@ -1062,6 +1121,41 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_missing_checked_exceptions(throws_tag, &subject, &label);
+
+            // Phase 45 (item 11, 45A): same "has a real body at all"
+            // gate, same choke point as the throw-type check just above.
+            if let Some(declared) = &declared_return {
+                let declared = match &self.current_class {
+                    Some(c) => self.resolve_pseudo(declared, c),
+                    None => declared.clone(),
+                };
+                let should_check = match (class_name, sig) {
+                    (Some(c), Some(s)) => self.should_check_too_wide_method_return_type(
+                        c,
+                        &f.name,
+                        s.visibility.clone(),
+                    ),
+                    _ => true,
+                };
+                if should_check {
+                    let is_first_declaration = match (class_name, sig) {
+                        (Some(c), Some(_)) => self
+                            .registry
+                            .find_method_signature_prototype(c, &f.name)
+                            .is_none(),
+                        _ => true,
+                    };
+                    let is_private = sig.is_some_and(|s| s.visibility == Visibility::Private);
+                    self.check_too_wide_return_type(
+                        &declared,
+                        is_first_declaration,
+                        is_private,
+                        &subject,
+                        f.span,
+                        &label,
+                    );
+                }
+            }
         }
 
         if self.saw_dynamic_var_construct {
@@ -1073,6 +1167,10 @@ impl<'a> Checker<'a> {
         self.current_function_throw_points = previous_throw_points;
         self.current_function_has_unannotated_call = previous_unannotated_call;
         self.current_function_explicit_throw_points = previous_explicit_throw_points;
+        self.current_function_return_points = previous_return_points;
+        self.current_function_saw_explicit_return = previous_saw_explicit_return;
+        self.current_function_by_ref_params = previous_by_ref_params;
+        self.current_function_by_ref_assigned_types = previous_by_ref_assigned_types;
         self.current_function_goto_targets = previous_goto_targets;
 
         self.current_class = previous_class;

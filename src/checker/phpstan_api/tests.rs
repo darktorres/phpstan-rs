@@ -283,7 +283,14 @@ fn a_static_call_to_an_api_classs_own_constructor_is_still_flagged() {
 // "current class" state at all to resolve them against.
 
 #[test]
-fn a_static_call_to_parent_on_a_non_api_base_is_flagged() {
+fn a_static_call_to_parent_on_a_non_api_base_is_not_flagged_absent_vendor_evidence() {
+    // Phase 40 follow-up: the calling scope (`MyRule`) is itself
+    // `PHPStan\*`-namespaced, so real `ApiRuleHelper::isPhpStanCode`
+    // additionally requires vendor-directory evidence for the target -
+    // this string-only harness (`Registry::build`, no real file paths)
+    // never has any, matching real PHPStan's own no-`declaringFile`
+    // answer (`ApiRuleHelperTest.php`'s own `PHPStan\Foo`-calling-
+    // `PHPStan\Foo`-with-no-declaringFile row expects `false`).
     let diags = diagnostics_for(
         r#"<?php
         namespace PHPStan\Rules;
@@ -300,19 +307,16 @@ fn a_static_call_to_parent_on_a_non_api_base_is_flagged() {
         }
         "#,
     );
-    // Also, separately, flags `extends BaseRule` itself (Phase 40.A) -
-    // both are real, independent findings; this test cares only about
-    // the `parent::check()` one.
     assert!(
-        diags.iter().any(|d| d
+        !diags.iter().any(|d| d
             .message
             .contains("calling PHPStan\\Rules\\BaseRule::check()")),
-        "got: {diags:?}"
+        "unexpected diagnostics: {diags:?}"
     );
 }
 
 #[test]
-fn a_static_call_to_self_on_a_non_api_class_is_flagged() {
+fn a_static_call_to_self_on_a_non_api_class_is_not_flagged_absent_vendor_evidence() {
     let diags = diagnostics_for(
         r#"<?php
         namespace App;
@@ -328,16 +332,11 @@ fn a_static_call_to_self_on_a_non_api_class_is_flagged() {
         }
         "#,
     );
-    assert_eq!(diags.len(), 1);
-    assert!(
-        diags[0]
-            .message
-            .contains("calling PHPStan\\Rules\\MyRule::check()")
-    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
 #[test]
-fn a_static_call_to_static_on_a_non_api_class_is_flagged() {
+fn a_static_call_to_static_on_a_non_api_class_is_not_flagged_absent_vendor_evidence() {
     let diags = diagnostics_for(
         r#"<?php
         namespace App;
@@ -353,12 +352,7 @@ fn a_static_call_to_static_on_a_non_api_class_is_flagged() {
         }
         "#,
     );
-    assert_eq!(diags.len(), 1);
-    assert!(
-        diags[0]
-            .message
-            .contains("calling PHPStan\\Rules\\MyRule::check()")
-    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
 #[test]

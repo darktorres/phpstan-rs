@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use crate::docblock;
-use crate::registry::name_context::{NameContext, resolve_names_in_type};
+use crate::registry::name_context::{
+    NameContext, collect_class_name_case_refs, resolve_names_in_type,
+};
 use crate::types::{self, TemplateParam, Type};
 
 use super::generics::mark_template_params;
@@ -48,6 +50,10 @@ pub struct AssertInfo {
     pub negated: bool,
     pub ty: Type,
     pub target: AssertTarget,
+    // Phase 48 follow-up (item 6b): shares the exact same type-resolution
+    // pipeline as every other declared type on this same declaration,
+    // which already collects `case_refs` - this one never did.
+    pub case_refs: Vec<(String, String)>,
 }
 
 /// Classifies `tag.target`'s own raw text into a real `AssertTarget` -
@@ -102,11 +108,14 @@ pub(crate) fn resolve_assert_tags(
             let target = classify_assert_target(&tag.target, param_names);
             let ty = types::parse_type_string(&tag.ty);
             let ty = mark_template_params(ty, template_params);
+            let mut case_refs = Vec::new();
+            collect_class_name_case_refs(&ty, ctx, &mut case_refs);
             let ty = resolve_names_in_type(ty, ctx);
             AssertInfo {
                 negated: tag.negated,
                 ty,
                 target,
+                case_refs,
             }
         })
         .collect()

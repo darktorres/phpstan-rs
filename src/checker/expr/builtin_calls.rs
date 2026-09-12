@@ -2,7 +2,8 @@ use crate::ast::*;
 use crate::checker::type_union::union_types;
 use crate::checker::{
     Checker, Locals, literal_string_key, literal_string_value, narrow_type_excluding,
-    narrow_type_excluding_falsy, narrow_type_to, resolve_call_args, to_absolute_number,
+    narrow_type_excluding_falsy, narrow_type_to, resolve_call_args, string_type_has_accessory,
+    to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;
@@ -1435,6 +1436,74 @@ impl<'a> Checker<'a> {
                 }
                 return Type::String;
             }
+            // Phase 75: `StrCaseFunctionsReturnTypeExtension` - a literal
+            // argument is constant-folded outright (ASCII-only, mirroring
+            // PHP 8.2+'s own locale-independent semantics - this
+            // project's own case-tracking is ASCII-only project-wide, see
+            // `AccessoryKind::LowercaseString`/`UppercaseString`'s own
+            // doc comment), otherwise the matching case accessory is
+            // composed with whatever numeric/non-empty/non-falsy
+            // accessory the argument already carried.
+            "strtolower" | "mb_strtolower" if !args.is_empty() => {
+                return self.infer_case_function_call(
+                    &args[0].value,
+                    locals,
+                    true,
+                    false,
+                    false,
+                    false,
+                );
+            }
+            "strtoupper" | "mb_strtoupper" if !args.is_empty() => {
+                return self.infer_case_function_call(
+                    &args[0].value,
+                    locals,
+                    false,
+                    false,
+                    true,
+                    false,
+                );
+            }
+            "lcfirst" | "mb_lcfirst" if !args.is_empty() => {
+                return self.infer_case_function_call(
+                    &args[0].value,
+                    locals,
+                    false,
+                    true,
+                    false,
+                    false,
+                );
+            }
+            "ucfirst" | "mb_ucfirst" if !args.is_empty() => {
+                return self.infer_case_function_call(
+                    &args[0].value,
+                    locals,
+                    false,
+                    false,
+                    false,
+                    true,
+                );
+            }
+            // Phase 75 correction: `mb_convert_case` was wrongly lumped
+            // in with `ucwords`/`mb_convert_kana` (which genuinely never
+            // touch these booleans) in an earlier pass of this plan -
+            // verified false by reading `StrCaseFunctionsReturnTypeExtension.
+            // php` directly: it derives the identical force/keep-
+            // lowercase/uppercase booleans from its resolvable `$mode`
+            // argument, composed through the exact same machinery.
+            "mb_convert_case" if args.len() >= 2 => {
+                let mode_ty = self.infer_expr(&args[1].value, locals);
+                let (force_lower, keep_lower, force_upper, keep_upper) =
+                    mb_convert_case_flags(&mode_ty);
+                return self.infer_case_function_call(
+                    &args[0].value,
+                    locals,
+                    force_lower,
+                    keep_lower,
+                    force_upper,
+                    keep_upper,
+                );
+            }
             // The vendored stub's own `@return string[]|false` reflects
             // PHP 7's behavior for an empty `$separator` - PHP 8+ throws a
             // `ValueError` there instead of returning `false` at all, so
@@ -1908,6 +1977,119 @@ impl<'a> Checker<'a> {
                 "filterVar.nullOnFailureAndThrowOnFailure",
             );
         }
+    }
+
+    /// Phase 75: shared by every `StrCaseFunctionsReturnTypeExtension`-
+    /// backed builtin (`strtolower`/`strtoupper`/`lcfirst`/`ucfirst` and
+    /// their `mb_` siblings, plus `mb_convert_case`) - a real port of
+    /// that extension's own two-tier algorithm: constant-fold a literal
+    /// argument outright (ASCII-only case flip, matching PHP 8.2+'s own
+    /// locale-independent semantics), otherwise compose the matching
+    /// case accessory (`force_lower`/`force_upper` always applies it;
+    /// `keep_lower`/`keep_upper` only when the argument already provably
+    /// carries it) with whatever numeric/non-falsy/non-empty accessory
+    /// the argument's own type already carries - unconditionally, not
+    /// gated on the literal-fold path succeeding, exactly mirroring the
+    /// real extension's own always-run second half.
+    fn infer_case_function_call(
+        &self,
+        arg: &Expr,
+        locals: &Locals,
+        force_lower: bool,
+        keep_lower: bool,
+        force_upper: bool,
+        keep_upper: bool,
+    ) -> Type {
+        let arg_ty = self.infer_expr(arg, locals);
+        if let Type::StringLiteral(s) = &arg_ty {
+            let folded = if force_lower {
+                s.to_ascii_lowercase()
+            } else if force_upper {
+                s.to_ascii_uppercase()
+            } else if keep_lower {
+                lowercase_first_char(s)
+            } else if keep_upper {
+                uppercase_first_char(s)
+            } else {
+                s.clone()
+            };
+            return Type::StringLiteral(folded);
+        }
+
+        let mut accessories = Vec::new();
+        if force_lower
+            || (keep_lower && string_type_has_accessory(&arg_ty, AccessoryKind::LowercaseString))
+        {
+            accessories.push(AccessoryKind::LowercaseString);
+        }
+        if force_upper
+            || (keep_upper && string_type_has_accessory(&arg_ty, AccessoryKind::UppercaseString))
+        {
+            accessories.push(AccessoryKind::UppercaseString);
+        }
+        if string_type_has_accessory(&arg_ty, AccessoryKind::NumericString) {
+            accessories.push(AccessoryKind::NumericString);
+        } else if is_non_falsy_string(&arg_ty) {
+            accessories.push(AccessoryKind::NonFalsyString);
+        } else if string_type_has_accessory(&arg_ty, AccessoryKind::NonEmptyString) {
+            accessories.push(AccessoryKind::NonEmptyString);
+        }
+
+        if accessories.is_empty() {
+            Type::String
+        } else {
+            let mut members: Vec<Type> = vec![Type::String];
+            members.extend(accessories.into_iter().map(Type::Accessory));
+            Type::Intersection(members)
+        }
+    }
+}
+
+fn lowercase_first_char(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn uppercase_first_char(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Phase 75: `mb_convert_case`'s own real `$mode` resolution
+/// (`StrCaseFunctionsReturnTypeExtension.php:82-106`) - derives the same
+/// four force/keep-lowercase/uppercase booleans every other case
+/// function above already has, from whichever `MB_CASE_*` constant
+/// value(s) `mode_ty` resolves to (a bare `Type::IntLiteral` for the
+/// overwhelmingly common single-constant call, or a `Union` of them for
+/// a conditional/computed mode - `real` PHPStan's own `TypeUtils::
+/// getConstantIntegers` collects from a `Union` the identical way).
+/// `MB_CASE_FOLD`/`MB_CASE_FOLD_SIMPLE` (`3`/`7`) count toward `keep_*`
+/// but not `force_*`, matching the real extension's own `array_diff`
+/// membership checks exactly.
+fn mb_convert_case_flags(mode_ty: &Type) -> (bool, bool, bool, bool) {
+    let modes = collect_int_literals(mode_ty);
+    if modes.is_empty() {
+        return (false, false, false, false);
+    }
+    let is_subset_of = |allowed: &[i64]| modes.iter().all(|m| allowed.contains(m));
+    let force_lower = is_subset_of(&[1, 5]); // MB_CASE_LOWER, MB_CASE_LOWER_SIMPLE
+    let keep_lower = is_subset_of(&[1, 5, 3, 7]); // + MB_CASE_FOLD, MB_CASE_FOLD_SIMPLE
+    let force_upper = is_subset_of(&[0, 4]); // MB_CASE_UPPER, MB_CASE_UPPER_SIMPLE
+    let keep_upper = is_subset_of(&[0, 4, 3, 7]);
+    (force_lower, keep_lower, force_upper, keep_upper)
+}
+
+fn collect_int_literals(ty: &Type) -> Vec<i64> {
+    match ty {
+        Type::IntLiteral(n) => vec![*n],
+        Type::Union(members) => members.iter().flat_map(collect_int_literals).collect(),
+        _ => Vec::new(),
     }
 }
 

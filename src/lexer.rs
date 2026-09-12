@@ -74,6 +74,17 @@ pub struct Lexer<'a> {
     // so the backward search can only happen where `tokens` itself lives -
     // `tokenize_with_spans`'s own loop, not this lexer's inner methods.
     pending_param_doc_override: Option<(String, String)>,
+    // Phase 48 follow-up (item 6): the just-lexed keyword's own original
+    // source-text spelling, stashed out of band the same way the three
+    // `pending_*` fields above already do for unrelated data -
+    // `Token::Keyword` itself carries only the keyword's canonical
+    // (always-lowercase) spelling, never the raw bytes, so a keyword-
+    // shaped identifier (`class Enum { ... }`, a real vendored class
+    // literally named the same as the `enum` keyword) would otherwise
+    // have its true declared-name case lost the moment it's lexed.
+    // `tokenize_with_spans` reads this right after each `next_token()`
+    // call, exactly like `last_token_start` above.
+    pending_keyword_raw: Option<String>,
 }
 
 /// Advances past a single- or double-quoted string literal starting at
@@ -124,6 +135,7 @@ impl<'a> Lexer<'a> {
             pending_return_type_override: None,
             pending_param_type_tokens: None,
             pending_param_doc_override: None,
+            pending_keyword_raw: None,
         }
     }
 
@@ -142,6 +154,7 @@ impl<'a> Lexer<'a> {
             pending_return_type_override: None,
             pending_param_type_tokens: None,
             pending_param_doc_override: None,
+            pending_keyword_raw: None,
         }
     }
 
@@ -201,10 +214,11 @@ impl<'a> Lexer<'a> {
     /// below is a thin adapter over this for the handful of tests that
     /// want to compare bare tokens without spans getting in the way.
     #[hotpath::measure]
-    pub fn tokenize_with_spans(mut self) -> Vec<(Token, Span)> {
-        let mut tokens = Vec::new();
+    pub fn tokenize_with_spans(mut self) -> Vec<(Token, Span, Option<String>)> {
+        let mut tokens: Vec<(Token, Span, Option<String>)> = Vec::new();
         loop {
             let tok = self.next_token();
+            let keyword_raw = self.pending_keyword_raw.take();
             if let Some(override_ty) = self.pending_return_type_override.take() {
                 // Phase 37: a plain `tokens.last_mut()` check assumed the
                 // doc comment was always the immediately-preceding token -
@@ -224,7 +238,7 @@ impl<'a> Lexer<'a> {
                 // such trailing attribute group(s) first restores the
                 // original adjacency check's own intent.
                 let end = skip_trailing_attribute_groups(&tokens);
-                if let Some((Token::DocComment(doc), _)) =
+                if let Some((Token::DocComment(doc), _, _)) =
                     end.checked_sub(1).and_then(|i| tokens.get_mut(i))
                 {
                     *doc = append_return_type_override(doc, &override_ty);
@@ -241,7 +255,7 @@ impl<'a> Lexer<'a> {
                     end: synthetic_pos,
                 };
                 for t in type_tokens {
-                    tokens.push((t, synthetic_span));
+                    tokens.push((t, synthetic_span, None));
                 }
             }
             if let Some((name, override_ty)) = self.pending_param_doc_override.take() {
@@ -255,7 +269,7 @@ impl<'a> Lexer<'a> {
                 // to avoid misattributing the override to an unrelated
                 // *earlier* declaration's docblock when the current
                 // function has none of its own.
-                for (t, _) in tokens.iter_mut().rev() {
+                for (t, _, _) in tokens.iter_mut().rev() {
                     match t {
                         Token::DocComment(doc) => {
                             *doc = append_param_type_override(doc, &name, &override_ty);
@@ -271,7 +285,7 @@ impl<'a> Lexer<'a> {
                 end: self.line_col_at(self.pos),
             };
             let done = tok == Token::Eof;
-            tokens.push((tok, span));
+            tokens.push((tok, span, keyword_raw));
             if done {
                 break;
             }
@@ -282,7 +296,7 @@ impl<'a> Lexer<'a> {
     pub fn tokenize(self) -> Vec<Token> {
         self.tokenize_with_spans()
             .into_iter()
-            .map(|(t, _)| t)
+            .map(|(t, _, _)| t)
             .collect()
     }
 
@@ -378,6 +392,11 @@ impl<'a> Lexer<'a> {
         if is_ident_start(c) {
             let span = self.lex_ident_span();
             if let Some(kw) = Keyword::try_from_bytes(&self.src[span.clone()]) {
+                // Phase 48 follow-up (item 6): stash the raw source
+                // spelling out of band - `Token::Keyword` itself carries
+                // only `kw`'s own canonical (always-lowercase) form.
+                self.pending_keyword_raw =
+                    Some(String::from_utf8_lossy(&self.src[span]).into_owned());
                 return Token::Keyword(kw);
             }
             let s = String::from_utf8_lossy(&self.src[span]).into_owned();

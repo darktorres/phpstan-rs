@@ -826,7 +826,7 @@ fn preg_match_all_with_a_pattern_this_parser_bails_on_stays_mixed() {
     let d = diagnostics_for(
         r#"<?php
             function f($subject): void {
-                preg_match_all('/(?(1)a|b)/', $subject, $matches);
+                preg_match_all('/(x)(?(1)a|b)/', $subject, $matches);
                 echo $matches[99];
             }
         "#,
@@ -839,7 +839,7 @@ fn preg_match_with_a_pattern_this_parser_bails_on_stays_mixed() {
     let d = diagnostics_for(
         r#"<?php
             function f($subject): void {
-                preg_match('/(?(1)a|b)/', $subject, $matches);
+                preg_match('/(x)(?(1)a|b)/', $subject, $matches);
                 echo $matches[99];
             }
         "#,

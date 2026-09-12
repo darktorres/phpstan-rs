@@ -9,7 +9,7 @@ fn tokens_on_a_later_line_get_real_line_and_column_positions() {
     let src = "<?php\n$x = 1;\n$y = 2;\n";
     let toks = Lexer::new(src).tokenize_with_spans();
     // toks: Variable(x), Equals, Integer(1), Semicolon, Variable(y), ...
-    let (tok, span) = &toks[4];
+    let (tok, span, _) = &toks[4];
     assert_eq!(*tok, Token::Variable("y".to_string()));
     assert_eq!(span.start, Position { line: 3, col: 1 });
     assert_eq!(span.end, Position { line: 3, col: 3 });
@@ -21,7 +21,7 @@ fn a_token_spanning_multiple_lines_does_not_throw_off_the_next_token_s_position(
     let toks = Lexer::new(src).tokenize_with_spans();
     let heredoc_end = toks
         .iter()
-        .find(|(t, _)| matches!(t, Token::InterpString(_)))
+        .find(|(t, _, _)| matches!(t, Token::InterpString(_)))
         .unwrap()
         .1
         .end;
@@ -29,9 +29,9 @@ fn a_token_spanning_multiple_lines_does_not_throw_off_the_next_token_s_position(
     // extent runs through its closing marker on line 5, not just the
     // last content line.
     assert_eq!(heredoc_end.line, 5);
-    let (next_tok, next_span) = toks
+    let (next_tok, next_span, _) = toks
         .iter()
-        .find(|(t, _)| *t == Token::Variable("y".to_string()))
+        .find(|(t, _, _)| *t == Token::Variable("y".to_string()))
         .unwrap();
     assert_eq!(*next_tok, Token::Variable("y".to_string()));
     assert_eq!(next_span.start, Position { line: 6, col: 1 });
@@ -44,9 +44,9 @@ fn a_multi_byte_character_earlier_on_a_line_does_not_shift_later_columns() {
     // is 7.
     let src = "<?php\n'é'; $x;\n";
     let toks = Lexer::new(src).tokenize_with_spans();
-    let (_, span) = toks
+    let (_, span, _) = toks
         .iter()
-        .find(|(t, _)| *t == Token::Variable("x".to_string()))
+        .find(|(t, _, _)| *t == Token::Variable("x".to_string()))
         .unwrap();
     assert_eq!(span.start, Position { line: 2, col: 6 });
 }
@@ -55,9 +55,9 @@ fn a_multi_byte_character_earlier_on_a_line_does_not_shift_later_columns() {
 fn complex_interpolation_gets_a_real_base_position_on_a_later_line() {
     let src = "<?php\n$s = \"a\\n{$obj->prop}\";\n";
     let toks = Lexer::new(src).tokenize_with_spans();
-    let (tok, _) = toks
+    let (tok, _, _) = toks
         .iter()
-        .find(|(t, _)| matches!(t, Token::InterpString(_)))
+        .find(|(t, _, _)| matches!(t, Token::InterpString(_)))
         .unwrap();
     let Token::InterpString(parts) = tok else {
         unreachable!()
@@ -80,9 +80,9 @@ fn complex_interpolation_gets_a_real_base_position_on_a_later_line() {
 fn shorthand_property_interpolation_base_points_at_the_dollar_sign() {
     let src = "<?php\n$s = \"x $obj->prop y\";\n";
     let toks = Lexer::new(src).tokenize_with_spans();
-    let (tok, _) = toks
+    let (tok, _, _) = toks
         .iter()
-        .find(|(t, _)| matches!(t, Token::InterpString(_)))
+        .find(|(t, _, _)| matches!(t, Token::InterpString(_)))
         .unwrap();
     let Token::InterpString(parts) = tok else {
         unreachable!()

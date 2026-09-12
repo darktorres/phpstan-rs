@@ -416,7 +416,10 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(&param.ty, c),
                 None => param.ty.clone(),
             };
-            if !self.registry.is_assignable(&arg_ty, &param_ty) {
+            if !self
+                .registry
+                .accepts_at_configured_level(&arg_ty, &param_ty)
+            {
                 self.report(
                     label.to_string(),
                     format!(
@@ -517,7 +520,10 @@ impl<'a> Checker<'a> {
             if arg_ty == Type::Mixed {
                 continue;
             }
-            if !self.registry.is_assignable(&arg_ty, &param.ty) {
+            if !self
+                .registry
+                .accepts_at_configured_level(&arg_ty, &param.ty)
+            {
                 self.report(
                     label.to_string(),
                     format!(
@@ -604,7 +610,10 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(&param.ty, c),
                 None => param.ty.clone(),
             };
-            if !self.registry.is_assignable(field_ty, &param_ty) {
+            if !self
+                .registry
+                .accepts_at_configured_level(field_ty, &param_ty)
+            {
                 self.report(
                     label.to_string(),
                     format!(

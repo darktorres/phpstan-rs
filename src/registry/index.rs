@@ -441,7 +441,24 @@ impl Registry {
             // (`insert_built_decl`'s `BuiltDecl::Class` arm) against a
             // now-nonexistent entry instead of a clean first insertion.
             self.unconditionally_declared_classes.remove(name);
+            // Must stay in lockstep with `classes` too, for the identical
+            // reason - otherwise a later re-index would find a stale
+            // declaring-file entry pointing at a name that may no longer
+            // be `PHPStan\*`-namespaced at all (or may not exist).
+            self.phpstan_class_files.remove(name);
         }
+    }
+
+    /// Phase 40 follow-up: records `name`'s own declaring file path, for
+    /// `is_phpstan_code`'s vendor-directory check - only ever populated
+    /// for a name already passing `is_phpstan_namespace`, so this is a
+    /// zero-cost no-op for every ordinary corpus.
+    pub(crate) fn record_phpstan_class_file(&mut self, name: &str, path: &std::path::Path) {
+        if !self.phpstan_api_check_enabled || !crate::registry::is_phpstan_namespace(name) {
+            return;
+        }
+        self.phpstan_class_files
+            .insert(name.to_string(), path.to_path_buf());
     }
 
     /// User-defined symbols always win: a stub only fills in a name that

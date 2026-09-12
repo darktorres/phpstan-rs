@@ -69,7 +69,7 @@ impl<'a> Checker<'a> {
     /// "throws Throwable" rather than needing to trace what it actually,
     /// transitively throws, which is exactly what made the earlier
     /// decline's premise ("no such model exists") not apply here.
-    fn check_method_throw_type_covariance(
+    pub(crate) fn check_method_throw_type_covariance(
         &mut self,
         fqn: &str,
         method_name: &str,
@@ -174,7 +174,12 @@ impl<'a> Checker<'a> {
         own_visibility: &Visibility,
         span: Span,
     ) {
-        self.check_method_throw_type_covariance(fqn, method_name, own_visibility, span);
+        // Phase 18 Axis 3 Stage 1: dispatched through `internal_rules`'s
+        // own `Vec<Box<dyn InternalRule>>` rather than called directly -
+        // see that module's own doc comment.
+        for rule in crate::checker::internal_rules::declaration_level_rules() {
+            rule.check_method(self, fqn, method_name, own_visibility, span);
+        }
         // Finding 46: overriding a `final` method is a real,
         // unconditional fatal error in PHP - including for __construct,
         // unlike the signature-compatibility checks below, so this runs

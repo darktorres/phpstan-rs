@@ -436,3 +436,163 @@ fn literal_integer_union_type_still_rejects_a_genuinely_invalid_value() {
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
+
+// Phase 75: string accessory case-tracking, full concat algorithm.
+
+#[test]
+fn strtolower_of_a_literal_constant_folds() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            assertType("'abc'", strtolower('ABC'));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn strtolower_of_a_plain_string_produces_lowercase_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType('lowercase-string', strtolower($x));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn mb_convert_case_with_a_resolvable_upper_mode_produces_uppercase_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $x): void {
+                assertType('uppercase-string', mb_convert_case($x, MB_CASE_UPPER));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn two_literal_strings_concatenated_constant_fold() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            assertType("'ab'", 'a' . 'b');
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_literal_string_typed_parameter_still_accepts_a_concat_of_two_literals() {
+    // The real false-positive-fix regression: `LiteralString` used to
+    // have zero producers - `BinOp::Concat` collapsed to bare `string`
+    // even when both operands were literals, which a `literal-string`-
+    // typed callee correctly rejected.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param literal-string $s */
+            function needs_literal(string $s): void {}
+            needs_literal('a' . 'b');
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_lowercase_string_phpdoc_parameter_rejects_a_plain_unproven_string() {
+    // The `parse.rs` reversal's own regression test: before Phase 75,
+    // `lowercase-string` degraded to plain `string`, so this call was
+    // wrongly accepted.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param lowercase-string $s */
+            function needs_lowercase(string $s): void {}
+            function f(string $x): void {
+                needs_lowercase($x);
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn a_lowercase_string_phpdoc_parameter_accepts_a_proven_lowercase_string() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param lowercase-string $s */
+            function needs_lowercase(string $s): void {}
+            function f(string $x): void {
+                needs_lowercase(strtolower($x));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn concatenating_an_int_left_operand_with_a_pure_digit_right_literal_is_numeric_string() {
+    // Isolates the `NumericString` propagation specifically (rather than
+    // pinning the full composed type string, which also picks up
+    // `NonFalsyString`/`NonEmptyString` from the same concat) via a
+    // `numeric-string`-typed receiver.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param numeric-string $s */
+            function needs_numeric_string(string $s): void {}
+            function f(int $x): void {
+                needs_numeric_string($x . '5');
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn concatenating_an_int_left_operand_with_a_negative_signed_right_literal_withholds_numeric_string()
+{
+    // The one real false-positive-risk edge case this phase's own
+    // validation predicate exists for: real PHPStan's own `int`-left
+    // validation callback (`!str_starts_with($value, '-')`) excludes a
+    // right constant that is itself negative-signed - concatenating an
+    // arbitrary (possibly already-negative) int with another negative-
+    // signed piece is not reliably numeric-looking.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param numeric-string $s */
+            function needs_numeric_string(string $s): void {}
+            function f(int $x): void {
+                needs_numeric_string($x . '-5');
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn a_float_literal_concatenated_with_a_string_literal_narrows_via_the_composed_accessories() {
+    // This project's own inference has never given a bare float literal
+    // expression a precise `Type::FloatLiteral` (only `Literal::Int`
+    // does, `checker/expr.rs`'s own `ExprKind::Literal` arm collapses
+    // `Literal::Float` straight to plain `Type::Float`) - so `1.5` here
+    // reaches `resolve_concat_type` as `Type::Float`, not a literal, and
+    // the result is the composed-accessory answer for that shape
+    // (`Float`'s own `toString()` projection carries no non-empty/non-
+    // falsy accessory on its own, so only the literal `'-suffix'`
+    // operand's own non-falsiness survives the AND/OR composition).
+    // `format_php_float`'s own real algorithm is covered directly by
+    // `checker::narrowing::accessory_range`'s own unit tests instead,
+    // where a real `Type::FloatLiteral` value is easy to construct by
+    // hand.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            assertType('non-falsy-string', 1.5 . '-suffix');
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

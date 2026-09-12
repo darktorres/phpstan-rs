@@ -113,6 +113,14 @@ enum Command {
         /// own doc comment for why.
         #[arg(long)]
         check_too_wide_throw_type_in_protected_and_public_methods: bool,
+        /// Enables `TooWideMethodReturnTypehintRule`'s wider, re-
+        /// declaration-only mode for a protected/public method that
+        /// isn't final (and isn't on a final class) - the return-type
+        /// analogue of the flag above. Off by default, same reason - see
+        /// `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`'s
+        /// own doc comment.
+        #[arg(long)]
+        check_too_wide_return_type_in_protected_and_public_methods: bool,
         /// Enables `MethodThrowTypeCovarianceRule` (a method's own
         /// `@throws` type must be covariant with its immediate parent
         /// class/every transitive interface/abstract trait declaration's
@@ -120,6 +128,18 @@ enum Command {
         /// check_method_throw_type_covariance`'s own doc comment for why.
         #[arg(long)]
         check_method_throw_type_covariance: bool,
+        /// Enables opt-in whole-project duplicate class/interface/trait/
+        /// enum-declaration detection (`class.duplicate`/etc.) - going
+        /// beyond real PHPStan, which has no whole-project equivalent of
+        /// this check at all (see `checker::duplicate_classes`'s own
+        /// module doc comment). Off by default: its one known corpus
+        /// false-positive shape (a vendored built-in stub override
+        /// colliding with the real extension's own class) needs
+        /// `--stub-path`/`stub_paths` correctly populated first - see
+        /// `registry::Registry::check_duplicate_class_declarations`'s own
+        /// doc comment.
+        #[arg(long)]
+        check_duplicate_class_declarations: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -134,6 +154,14 @@ enum Command {
         /// never analyzed or reported on. Repeatable.
         #[arg(long = "scan-dir")]
         scan_dirs: Vec<PathBuf>,
+        /// A directory (walked) or single file whose class-like
+        /// declarations are designated overrides, never a genuine
+        /// accidental duplicate (e.g. a vendored `Imagick.stub.php`) -
+        /// see `check_duplicate_class_declarations` above. Repeatable.
+        /// Also loaded for type-resolution context, exactly like
+        /// `--scan-dir` (unioned into it internally).
+        #[arg(long = "stub-path")]
+        stub_paths: Vec<PathBuf>,
         /// Disables the automatic Composer-autoloader-based `vendor/`
         /// context load (see `composer::discover_vendor_context`).
         /// `--scan-dir` still works.
@@ -188,11 +216,14 @@ fn main() {
             check_missing_checked_exceptions,
             check_strict_printf_placeholder_types,
             check_too_wide_throw_type_in_protected_and_public_methods,
+            check_too_wide_return_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
+            check_duplicate_class_declarations,
             php_version,
             generate_baseline,
             baseline,
             scan_dirs,
+            stub_paths,
             no_composer,
             config,
             format,
@@ -208,11 +239,14 @@ fn main() {
             check_missing_checked_exceptions,
             check_strict_printf_placeholder_types,
             check_too_wide_throw_type_in_protected_and_public_methods,
+            check_too_wide_return_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
+            check_duplicate_class_declarations,
             php_version,
             generate_baseline,
             baseline,
             scan_dirs,
+            stub_paths,
             no_composer,
             config,
             format,

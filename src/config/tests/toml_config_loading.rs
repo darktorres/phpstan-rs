@@ -14,6 +14,8 @@ fn loads_every_field_from_a_real_toml_file() {
         baseline = "phpstan-baseline.json"
         strict_mixed_arrays = true
         scan_paths = ["vendor/some-manual-extra"]
+        stub_paths = ["phpstan-stubs/Imagick.stub.php"]
+        check_duplicate_class_declarations = true
         no_composer = true
         php_version = "8.1"
         "#,
@@ -35,6 +37,11 @@ fn loads_every_field_from_a_real_toml_file() {
         config.scan_paths,
         Some(vec![PathBuf::from("vendor/some-manual-extra")])
     );
+    assert_eq!(
+        config.stub_paths,
+        Some(vec![PathBuf::from("phpstan-stubs/Imagick.stub.php")])
+    );
+    assert_eq!(config.check_duplicate_class_declarations, Some(true));
     assert_eq!(config.no_composer, Some(true));
     assert_eq!(config.php_version, Some("8.1".to_string()));
 

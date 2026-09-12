@@ -1359,6 +1359,21 @@ fn a_correctly_cased_method_mixin_and_type_alias_are_never_flagged_name_case() {
 }
 
 #[test]
+fn a_class_named_the_same_as_a_keyword_is_referenced_correctly_by_a_differently_cased_use() {
+    // Phase 48 item 6: `class Enum { ... }` used to have its own declared
+    // name silently corrupted to `enum` by `take_name_segment`'s keyword-
+    // recovery path - a real reference to it by its true case would have
+    // wrongly resolved to nothing (`class.notFound`) before this fix.
+    let d = diagnostics_for(
+        r#"<?php
+            class Enum {}
+            function f(): Enum { return new Enum(); }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn a_backfilled_return_type_inherited_from_an_ancestor_is_not_re_flagged_name_case() {
     // Phase 48 item 7e (disclosed exclusion): `flatten_phpdoc_
     // inheritance`'s own backfill pass copies `ty` from an ancestor but

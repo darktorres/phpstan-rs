@@ -550,6 +550,10 @@ impl<'a> Checker<'a> {
                 &label,
                 "parameter.trait",
             );
+            // Phase 48 follow-up (item 6a): `class.nameCase` for the set
+            // hook's own parameter type - same shape as every other
+            // PHPDoc/native-typed position's `case_refs` fan-out.
+            self.check_type_class_name_case(&prop_sig.set_case_refs, &label, span);
         }
 
         let previous_class = self.current_class.take();

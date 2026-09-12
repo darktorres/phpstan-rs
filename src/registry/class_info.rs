@@ -134,6 +134,10 @@ pub struct PropertySig {
     // `-write` tag) - the tag site rides along for free, since it's the
     // exact same `PropertySig` the real-property sites already populate.
     pub case_refs: Vec<(String, String)>,
+    // Phase 48 follow-up (item 6a): `set_ty`'s own case_refs equivalent -
+    // `property_hook_set_type` never collected these, unlike the sibling
+    // `ty` field two lines above its own call site.
+    pub set_case_refs: Vec<(String, String)>,
 }
 
 // Phase 57's own still-open item: a class constant's own `public`/
@@ -622,7 +626,8 @@ impl ClassInfo {
                 let ty_native = resolve_type(None, p.type_hint.as_deref());
                 let ty_native = mark_template_params(ty_native, &template_params);
                 let ty_native = resolve_names_in_type(ty_native, ctx);
-                let set_ty = property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
+                let (set_ty, set_case_refs) =
+                    property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
                 let is_virtual = p
                     .hooks
                     .as_ref()
@@ -653,6 +658,7 @@ impl ClassInfo {
                         has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
                         case_refs,
+                        set_case_refs,
                     },
                 )
             })
@@ -713,7 +719,8 @@ impl ClassInfo {
                 // like a plain property declaration can - resolved
                 // through the identical generalized helpers, not new
                 // logic.
-                let set_ty = property_hook_set_type(p.hooks.as_deref(), &template_params, ctx);
+                let (set_ty, set_case_refs) =
+                    property_hook_set_type(p.hooks.as_deref(), &template_params, ctx);
                 let is_virtual = p
                     .hooks
                     .as_deref()
@@ -744,6 +751,7 @@ impl ClassInfo {
                         has_get_hook: p.hooks.as_ref().is_some_and(|h| h.get.is_some()),
                         has_set_hook: p.hooks.as_ref().is_some_and(|h| h.set.is_some()),
                         case_refs,
+                        set_case_refs,
                     },
                 );
             }
@@ -793,6 +801,7 @@ impl ClassInfo {
                         has_get_hook: false,
                         has_set_hook: false,
                         case_refs,
+                        set_case_refs: Vec::new(),
                     }
                 });
             }
@@ -1225,6 +1234,7 @@ impl ClassInfo {
                 explicit_mixed_hint: false,
                 case_refs: Vec::new(),
                 closure_this_type: None,
+                out_ty: None,
             };
             methods.insert(
                 "from".to_string(),
@@ -1386,6 +1396,7 @@ impl ClassInfo {
                 // A language built-in, not textual - nothing to check
                 // the case of.
                 case_refs: Vec::new(),
+                set_case_refs: Vec::new(),
             },
         );
         if let Some(backing) = &e.backing_type {
@@ -1440,6 +1451,7 @@ impl ClassInfo {
                     has_get_hook: false,
                     has_set_hook: false,
                     case_refs: Vec::new(),
+                    set_case_refs: Vec::new(),
                 },
             );
         }

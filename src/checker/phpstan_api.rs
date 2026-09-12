@@ -24,25 +24,22 @@
 //! this unconditionally would risk flagging a project's own, unrelated
 //! `PHPStan\`-namespaced code with a diagnostic that means nothing to it.
 //!
-//! **Namespace signal only, deliberately not also a vendor-path check**:
-//! real PHPStan's own `ApiRuleHelper::isPhpStanCode` additionally confirms
-//! the referenced declaration's own file lives under a `vendor/`
-//! directory, specifically so analyzing phpstan-src's own source against
-//! itself doesn't flag its *own* internal, same-namespace references. This
-//! project's registry doesn't track a per-class declaring file path at
-//! all (`registry::ClassInfo` has never needed one), and the existing
-//! vendor-context split (`composer::discover_vendor_context`,
-//! `main.rs::run_check_project`'s own `context_files`/`analyze_files`
-//! separation) already guarantees a real vendor-loaded `PHPStan\*` class
-//! is never itself among the files this check - or any check - reports
-//! diagnostics *on*; it only ever needs to know whether such a class is
-//! `@api` when some *other*, actually-analyzed file references it. A
-//! first-party project declaring its own classes directly under the
-//! `PHPStan\` namespace without actually being PHPStan itself is exactly
-//! the kind of pathological self-inflicted collision `ApiRuleHelper`'s
-//! path check exists to rule out for phpstan-src's own corpus - real,
-//! but not something any corpus evidence available to this project
-//! justifies building the extra registry plumbing for.
+//! **Namespace signal plus a vendor-path check** (built in full - a
+//! previous version of this comment declined the vendor-path half as not
+//! worth the registry plumbing; that plumbing turned out small): real
+//! PHPStan's own `ApiRuleHelper::isPhpStanCode` additionally confirms the
+//! referenced declaration's own file lives under a `vendor/` directory,
+//! but *only* when the *calling* scope's own namespace is *also*
+//! `PHPStan\*`-prefixed - self-referential PHPStan code (PHPStan
+//! analyzing itself) or a PHPStan extension package conventionally
+//! namespaced `PHPStan\<Vendor>` (phpstan-doctrine, phpstan-symfony, ...).
+//! For the overwhelming majority of real usage (an ordinary project's own
+//! non-`PHPStan\*`-namespaced code referencing real PHPStan), this is a
+//! pure no-op - `is_phpstan_code` reduces to the same bare namespace
+//! check as before. `Registry::phpstan_class_files` (populated during
+//! indexing, only for names already `PHPStan\*`-namespaced) carries the
+//! one narrow, disclosed crack in this project's usual path-agnostic
+//! registry design that this needed.
 //!
 //! **Reference kinds covered** (each only against a name the registry
 //! actually has an entry for - an unresolved/typo'd name already gets its
@@ -79,7 +76,7 @@ use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::{Checker, Diagnostic, class_type_word, literal_string_value};
 use crate::composer;
-use crate::registry::{FunctionSig, NameContext, Registry};
+use crate::registry::{FunctionSig, NameContext, Registry, is_phpstan_namespace};
 use crate::token::Span;
 
 /// `$variable-name -> resolved fully-qualified class name` for whichever
@@ -255,13 +252,6 @@ const INSTANCEOF_DEPRECATED_CLASSES: &[(&str, Option<&str>)] = &[
     ),
 ];
 
-pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
-    fqn.len() >= 8
-        && fqn.as_bytes()[..8].eq_ignore_ascii_case(b"PHPStan\\")
-        && !fqn.starts_with("PHPStan\\PhpDocParser\\")
-        && !fqn.starts_with("PHPStan\\BetterReflection\\")
-}
-
 /// Phase 40.6: whether `fqn` transitively derives from, implements, or
 /// uses anything under the `PHPStan\` namespace at all -
 /// `RuntimeReflectionFunctionRule`/`RuntimeReflectionInstantiationRule`/
@@ -281,6 +271,43 @@ pub(crate) fn class_implements_phpstan_interface(fqn: &str, registry: &Registry)
         .all_ancestor_names(fqn)
         .iter()
         .any(|name| is_phpstan_namespace(name))
+}
+
+/// Direct port of `ApiRuleHelper::isPhpStanCode`
+/// (`vendor/phpstan-src/src/Rules/Api/ApiRuleHelper.php:19-48`).
+/// `is_phpstan_namespace` alone is exactly real PHPStan's own
+/// `isPhpStanName()` half - correct for a global-namespace or non-
+/// PHPStan calling scope (the overwhelming majority of real usage). This
+/// adds the vendor-directory half, which only ever changes the answer
+/// when the *calling* scope's own namespace is *also* `PHPStan\*`-
+/// prefixed - self-referential PHPStan code, or a PHPStan extension
+/// package conventionally namespaced `PHPStan\<Vendor>` (phpstan-
+/// doctrine, phpstan-symfony, ...). `target_fqn` is assumed to already
+/// have passed `is_phpstan_namespace` at every real call site, so the
+/// only real branch this ever takes past that is the vendor-evidence
+/// check. Deliberately does NOT replicate real PHPStan's own
+/// `ParentDirectoryRelativePathHelper` relative-path walk - this project
+/// only ever deals with plain on-disk paths, so "does the declaring
+/// file's own absolute path have any component literally named `vendor`"
+/// is an exact, simpler equivalent for every case that matters here. A
+/// free function (not a `Walker`/`Checker` method) so both the standalone
+/// `Walker` pass and the main `Checker`'s own `check_phpstan_api_method_
+/// call` can share it.
+pub(crate) fn is_phpstan_code(
+    scope_namespace: &str,
+    target_fqn: &str,
+    registry: &Registry,
+) -> bool {
+    if scope_namespace.is_empty() || !is_phpstan_namespace(scope_namespace) {
+        return is_phpstan_namespace(target_fqn);
+    }
+    if !is_phpstan_namespace(target_fqn) {
+        return false;
+    }
+    registry
+        .phpstan_class_files
+        .get(target_fqn)
+        .is_some_and(|path| path.components().any(|c| c.as_os_str() == "vendor"))
 }
 
 /// Phase 40.6: `OldPhpParser4ClassRule`'s own hardcoded rename table -
@@ -467,7 +494,10 @@ impl<'a> Checker<'a> {
         span: Span,
         label: &str,
     ) {
-        if !self.registry.phpstan_api_check_enabled || sig.is_api || !is_phpstan_namespace(owner) {
+        if !self.registry.phpstan_api_check_enabled
+            || sig.is_api
+            || !is_phpstan_code(self.name_ctx.namespace(), owner, self.registry)
+        {
             return;
         }
         let Some(owner_info) = self.registry.classes.get(owner) else {
@@ -583,15 +613,52 @@ impl<'a> Walker<'a> {
     /// silently resolved `"parent"` as a literal, always-unqualified bare
     /// name and never matched `is_phpstan_namespace` at all.
     fn resolve_if_phpstan(&self, name: &str, ctx: &NameContext) -> Option<String> {
-        let fqn = match name {
-            "self" | "static" => self.current_class_fqn.clone()?,
+        self.resolve_class_name(name, ctx)
+            .filter(|fqn| is_phpstan_namespace(fqn))
+    }
+
+    /// Same `self`/`static`/`parent`-aware resolution as `resolve_if_
+    /// phpstan`, without its own `is_phpstan_namespace` filter - needed
+    /// at the `StaticCall` site, which must resolve the FQN
+    /// unconditionally (real `ApiStaticCallRule` gates on the resolved
+    /// *method's declaring class*, never on the literally-written class
+    /// name's own namespace - a real, previously-undetected false
+    /// negative: `MyNonPhpStanSubclass::inheritedPhpStanMethod()`, where
+    /// `MyNonPhpStanSubclass extends PHPStan\Foo`, never reached `report_
+    /// static_method_not_covered` at all under the old bare-`resolve_if_
+    /// phpstan`-as-pre-filter shape).
+    fn resolve_class_name(&self, name: &str, ctx: &NameContext) -> Option<String> {
+        match name {
+            "self" | "static" => self.current_class_fqn.clone(),
             "parent" => {
                 let current = self.current_class_fqn.as_deref()?;
-                self.registry.classes.get(current)?.extends.first()?.clone()
+                self.registry.classes.get(current)?.extends.first().cloned()
             }
-            _ => ctx.resolve(name),
-        };
-        is_phpstan_namespace(&fqn).then_some(fqn)
+            _ => Some(ctx.resolve(name)),
+        }
+    }
+
+    /// Direct port of `ApiRuleHelper::isPhpStanCode`
+    /// (`vendor/phpstan-src/src/Rules/Api/ApiRuleHelper.php:19-48`).
+    /// `is_phpstan_namespace` alone is exactly real PHPStan's own
+    /// `isPhpStanName()` half - correct for a global-namespace or non-
+    /// PHPStan calling scope (the overwhelming majority of real usage).
+    /// This adds the vendor-directory half, which only ever changes the
+    /// answer when the *calling* scope's own namespace is *also*
+    /// `PHPStan\*`-prefixed - self-referential PHPStan code, or a PHPStan
+    /// extension package conventionally namespaced `PHPStan\<Vendor>`
+    /// (phpstan-doctrine, phpstan-symfony, ...). `target_fqn` is assumed
+    /// to already have passed `is_phpstan_namespace` (every real call
+    /// site here reaches this only via `resolve_if_phpstan`'s own
+    /// filter), so the only real branch this ever takes past that is the
+    /// vendor-evidence check. Deliberately does NOT replicate real
+    /// PHPStan's own `ParentDirectoryRelativePathHelper` relative-path
+    /// walk - this project only ever deals with plain on-disk paths, so
+    /// "does the declaring file's own absolute path have any component
+    /// literally named `vendor`" is an exact, simpler equivalent for
+    /// every case that matters here.
+    fn is_phpstan_code(&self, scope_namespace: &str, target_fqn: &str) -> bool {
+        is_phpstan_code(scope_namespace, target_fqn, self.registry)
     }
 
     /// Phase 40.E: `ApiInstanceofTypeRule`, direct port - a wholly
@@ -669,7 +736,11 @@ impl<'a> Walker<'a> {
         span: Span,
         label: &str,
         identifier: &str,
+        ctx: &NameContext,
     ) {
+        if !self.is_phpstan_code(ctx.namespace(), fqn) {
+            return;
+        }
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
@@ -719,6 +790,7 @@ impl<'a> Walker<'a> {
         method: &str,
         span: Span,
         label: &str,
+        ctx: &NameContext,
     ) {
         let Some((owner, sig)) = self.registry.lookup_method_with_owner(class, method) else {
             return;
@@ -726,7 +798,7 @@ impl<'a> Walker<'a> {
         if sig.is_api {
             return;
         }
-        if !is_phpstan_namespace(&owner) {
+        if !self.is_phpstan_code(ctx.namespace(), &owner) {
             return;
         }
         let Some(owner_info) = self.registry.classes.get(&owner) else {
@@ -764,7 +836,11 @@ impl<'a> Walker<'a> {
         span: Span,
         label: &str,
         identifier: &str,
+        ctx: &NameContext,
     ) {
+        if !self.is_phpstan_code(ctx.namespace(), fqn) {
+            return;
+        }
         self.diagnostics.push(Diagnostic {
             location: label.to_string(),
             message: format!(
@@ -788,6 +864,14 @@ impl<'a> Walker<'a> {
     /// `isApiDoNotImplement()`). `false` for a class's own `extends`
     /// call site (Phase 40.4); `true` everywhere else (interface
     /// `extends`, `implements`, and this function's own general shape).
+    /// Phase 40 follow-up's own new `ctx` parameter (needed for the
+    /// vendor-directory `is_phpstan_code` check) pushed this past
+    /// clippy's default 7-argument threshold - every argument here is
+    /// already its own independently-meaningful piece of this one
+    /// report site's own shape, not a bag of fields crying out for a
+    /// struct (mirrors this project's own existing precedent for the
+    /// identical situation, `main/check_project.rs::run_check_project`).
+    #[allow(clippy::too_many_arguments)]
     fn report_inheritance(
         &mut self,
         fqn: &str,
@@ -796,7 +880,11 @@ impl<'a> Walker<'a> {
         label: &str,
         identifier: &str,
         check_do_not_implement: bool,
+        ctx: &NameContext,
     ) {
+        if !self.is_phpstan_code(ctx.namespace(), fqn) {
+            return;
+        }
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
@@ -881,13 +969,22 @@ impl<'a> Walker<'a> {
                     &fqn,
                     identifier,
                     c.kind != ClassKind::Class,
+                    ctx,
                 );
             }
         }
         for iface in &c.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(&ifqn, &action, c.span, &fqn, "phpstanApi.interface", true);
+                self.report_inheritance(
+                    &ifqn,
+                    &action,
+                    c.span,
+                    &fqn,
+                    "phpstanApi.interface",
+                    true,
+                    ctx,
+                );
             }
         }
         for used in &c.uses {
@@ -898,7 +995,7 @@ impl<'a> Walker<'a> {
                 // unconditionally - no `@api`/`@api-do-not-implement`
                 // exemption of any kind, unlike extends/implements.
                 let action = format!("using trait {ufqn}");
-                self.report_always(&ufqn, &action, c.span, &fqn, "phpstanApi.trait");
+                self.report_always(&ufqn, &action, c.span, &fqn, "phpstanApi.trait", ctx);
             }
         }
         let empty = ParamTypes::new();
@@ -928,7 +1025,15 @@ impl<'a> Walker<'a> {
         for iface in &e.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(&ifqn, &action, e.span, &fqn, "phpstanApi.interface", true);
+                self.report_inheritance(
+                    &ifqn,
+                    &action,
+                    e.span,
+                    &fqn,
+                    "phpstanApi.interface",
+                    true,
+                    ctx,
+                );
             }
         }
         for used in &e.uses {
@@ -936,7 +1041,7 @@ impl<'a> Walker<'a> {
                 && self.registry.classes.contains_key(&ufqn)
             {
                 let action = format!("using trait {ufqn}");
-                self.report_always(&ufqn, &action, e.span, &fqn, "phpstanApi.trait");
+                self.report_always(&ufqn, &action, e.span, &fqn, "phpstanApi.trait", ctx);
             }
         }
         let empty = ParamTypes::new();
@@ -1221,6 +1326,7 @@ impl<'a> Walker<'a> {
                                 e.span,
                                 label,
                                 "phpstanApi.constructor",
+                                ctx,
                             );
                         }
                     }
@@ -1232,8 +1338,14 @@ impl<'a> Walker<'a> {
                 }
             }
             ExprKind::StaticCall(class_name, method, args) => {
-                if let Some(fqn) = self.resolve_if_phpstan(class_name, ctx) {
-                    self.report_static_method_not_covered(&fqn, method, e.span, label);
+                // Phase 40 follow-up: resolved unconditionally, NOT
+                // pre-filtered through `resolve_if_phpstan` - see
+                // `resolve_class_name`'s own doc comment for why.
+                // `report_static_method_not_covered` does its own
+                // `is_phpstan_code` gating against the method's real
+                // *declaring* class once it looks it up.
+                if let Some(fqn) = self.resolve_class_name(class_name, ctx) {
+                    self.report_static_method_not_covered(&fqn, method, e.span, label, ctx);
                 }
                 for a in args {
                     self.check_expr(&a.value, ctx, param_types, label);
@@ -1255,6 +1367,7 @@ impl<'a> Walker<'a> {
                         e.span,
                         label,
                         "phpstanApi.classConstant",
+                        ctx,
                     );
                 }
             }
@@ -1306,7 +1419,7 @@ impl<'a> Walker<'a> {
                         let action = format!("instanceof {fqn}");
                         let identifier =
                             format!("phpstanApi.{}", class_type_word(info.kind).to_lowercase());
-                        self.report_always(&fqn, &action, e.span, label, &identifier);
+                        self.report_always(&fqn, &action, e.span, label, &identifier, ctx);
                     } else if fqn != "PHPStan\\Type\\Type" && info.kind != ClassKind::Interface {
                         self.diagnostics.push(Diagnostic {
                             location: label.to_string(),

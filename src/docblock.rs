@@ -16,6 +16,13 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DocBlock {
     pub params: HashMap<String, String>,
+    // Phase 45 (item 11): `@param-out Type $name` - the widened type a
+    // by-ref parameter's own value is guaranteed to hold once the
+    // function returns (real PHPStan's own way of documenting a by-ref
+    // "output" parameter beyond what its native type alone commits to).
+    // Parsed the identical way `params` above is - see `apply_tag`'s own
+    // `"param-out"` arm.
+    pub param_out: HashMap<String, String>,
     pub return_type: Option<String>,
     pub var_type: Option<String>,
     // The `$name` half of `@var Type $name`, when present - the common
@@ -505,6 +512,18 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     if after_name.starts_with("[optional]") {
                         block.optional_params.insert(name.to_string());
                     }
+                }
+            }
+            "param-out" => {
+                // Identical shape to `"param"` above (minus its own
+                // `[optional]` marker, meaningless for an output type).
+                let ty = take_type_token(rest);
+                let remainder = rest[ty.len()..].trim_start();
+                let var_token = remainder.split_whitespace().next().unwrap_or("");
+                if let Some(name) = extract_doc_var_name(var_token)
+                    && !ty.is_empty()
+                {
+                    block.param_out.insert(name.to_string(), ty.to_string());
                 }
             }
             "return" => {

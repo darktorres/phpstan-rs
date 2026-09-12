@@ -36,6 +36,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
                 explicit_mixed_hint: false,
                 case_refs: Vec::new(),
                 closure_this_type: None,
+                out_ty: None,
             },
             registry::ParamSig {
                 name: "rest".to_string(),
@@ -48,6 +49,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
                 explicit_mixed_hint: false,
                 case_refs: Vec::new(),
                 closure_this_type: None,
+                out_ty: None,
             },
         ],
         return_type: types::Type::Bool,

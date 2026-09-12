@@ -73,6 +73,16 @@ const MISSING_ITERABLE_VALUE_TYPE_TIP: &str =
 pub(crate) const ITERABLE_GENERIC_CLASS_NAMES: [&str; 4] =
     ["Traversable", "Iterator", "IteratorAggregate", "Generator"];
 
+/// Phase 77: `ReflectionMethod`/`ReflectionProperty` carry a `TClass`
+/// `@template` this project's own `php_stubs::patch_reflection_method_
+/// and_property_templates` synthesizes internally (neither is generic in
+/// real phpstorm-stubs, and real PHPStan itself never flags a bare
+/// reference to either) - a bare, untemplated reference to one must never
+/// be flagged, the same reasoning as `ITERABLE_GENERIC_CLASS_NAMES` just
+/// above, just for a synthetic template rather than a real one.
+pub(crate) const SYNTHETIC_GENERIC_CLASS_NAMES: [&str; 2] =
+    ["ReflectionMethod", "ReflectionProperty"];
+
 /// Method names PHP (and real PHPStan's own `PhpMethodReflection::
 /// getReturnType`) give an implicit, non-`mixed` return type even when the
 /// source writes no `: T` hint at all - confirmed directly from that
@@ -102,7 +112,7 @@ fn is_magic_method_with_implicit_return_type(name: &str) -> bool {
         .any(|m| name.eq_ignore_ascii_case(m))
 }
 
-fn class_kind_word(kind: ClassKind) -> &'static str {
+pub(crate) fn class_kind_word(kind: ClassKind) -> &'static str {
     match kind {
         ClassKind::Class => "class",
         ClassKind::Interface => "interface",
@@ -328,7 +338,9 @@ impl<'a> Checker<'a> {
                     }
                     return;
                 }
-                if ITERABLE_GENERIC_CLASS_NAMES.contains(&name.as_str()) {
+                if ITERABLE_GENERIC_CLASS_NAMES.contains(&name.as_str())
+                    || SYNTHETIC_GENERIC_CLASS_NAMES.contains(&name.as_str())
+                {
                     return;
                 }
                 if let Some(info) = self.registry.classes.get(name)

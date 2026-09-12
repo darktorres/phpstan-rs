@@ -102,6 +102,7 @@ impl<'a> Checker<'a> {
                 .map(|p| ParamSig {
                     ty: subst(&p.ty),
                     ty_native: subst(&p.ty_native),
+                    out_ty: p.out_ty.as_ref().map(&subst),
                     ..p.clone()
                 })
                 .collect(),
@@ -144,6 +145,7 @@ fn substitute_assert_infos(
             negated: info.negated,
             ty: subst(&info.ty),
             target: info.target.clone(),
+            case_refs: info.case_refs.clone(),
         })
         .collect()
 }

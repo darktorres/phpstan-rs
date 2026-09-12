@@ -1,0 +1,109 @@
+//! Phase 83: a same-shape sibling of `checker::duplicate_functions`, but
+//! going *beyond* real PHPStan rather than porting one of its existing
+//! rules. Real PHPStan's own `DuplicateClassDeclarationRule` is tagged
+//! only `#[ValidatesStubFiles]`, wired exclusively into `StubValidator`'s
+//! own isolated, from-scratch reflector over a project's configured
+//! `stubFiles:` entries alone (confirmed directly against
+//! `vendor/phpstan-src/src/Rules/Classes/DuplicateClassDeclarationRule.
+//! php`'s own consumer, `StubValidatorRuleServicesExtension`, and
+//! `AnalyseApplication.php`'s own call to `StubValidator::validate()`) -
+//! it never runs against a project's ordinary analyzed/vendor tree at all.
+//! Real PHPStan therefore has no whole-project "same class declared
+//! twice" detection to port here; this is phpstan-rs choosing to go
+//! stricter (an in-bounds, previously-established convention - see
+//! `feedback_stricter_than_phpstan_is_fine`), not filling a gap real
+//! PHPStan already closes elsewhere. (The identical mischaracterization -
+//! "ported from a real PHPStan always-on rule" - was inherited verbatim
+//! into `duplicate_functions`'s own doc comment; not fixed here, since
+//! that module's own real corpus evidence, the `strtr` two-declaration
+//! stub split, is unaffected by the correction and out of this phase's
+//! own scope.)
+//!
+//! Unlike the function-side check, this one is opt-in
+//! (`Registry::check_duplicate_class_declarations`, default `false`): its
+//! one known corpus false-positive shape (a vendored built-in stub
+//! override, e.g. `Imagick.stub.php`, colliding with the real PHP
+//! extension's own class) can only be defused by a project's
+//! `stub_paths` config being correctly populated, and no existing
+//! `phpstan-rs.toml` in the wild does that yet (they put such files under
+//! plain `scan_paths` instead, indistinguishable from an ordinary context
+//! file). Every `ClassDeclSite` this check sees already carries its own
+//! `is_stub` provenance (`project::duplicate_class_sites::
+//! DuplicateClassSites`) - a site tagged `is_stub` is filtered out
+//! entirely before counting, so a stub override is never itself flagged
+//! and never counts toward flagging the real declaration it overrides.
+//! Unlike `duplicate_functions`'s own signature-differs grouping (built
+//! for a real, confirmed phpstorm-stubs version-split idiom on the
+//! function side), no such grouping exists here - real PHPStan's own
+//! rule has no equivalent concept for a class-like declaration, and no
+//! corpus evidence motivates inventing one.
+
+use std::path::Path;
+
+use crate::checker::{Diagnostic, class_kind_identifier, class_kind_word};
+use crate::project::duplicate_class_sites::{ClassDeclSite, DuplicateClassSites};
+
+pub(crate) fn check_duplicate_class_declarations(
+    path: &Path,
+    sites: &DuplicateClassSites,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (name, decl_sites) in sites.iter() {
+        // A stub-tagged site is never itself flagged, and never counts
+        // toward flagging the real declaration it overrides - see this
+        // module's own doc comment.
+        let mut real_sites: Vec<&ClassDeclSite> =
+            decl_sites.iter().filter(|s| !s.is_stub).collect();
+        if real_sites.len() < 2 {
+            continue;
+        }
+        // Sorted for determinism, mirroring `duplicate_functions`'s own
+        // identical reasoning - which location list order a reader sees
+        // must not depend on `FxHashMap` file-load-order.
+        real_sites.sort_by(|a, b| {
+            (&a.path, a.span.start.line, a.span.start.col).cmp(&(
+                &b.path,
+                b.span.start.line,
+                b.span.start.col,
+            ))
+        });
+
+        let location_list = real_sites
+            .iter()
+            .map(|s| format!("- {}:{}", s.path.display(), s.span.start.line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Every real site's own `kind` is expected to agree in practice
+        // (the same fully-qualified name naming a class in one file and,
+        // say, an interface in another would already be a stranger bug
+        // than plain duplication) - the first site's own kind names the
+        // message/identifier, matching this project's general "don't
+        // guess past what's already known" bias rather than inventing a
+        // dedicated mixed-kind message no real corpus evidence motivates.
+        let kind = real_sites[0].kind;
+        let word = class_kind_word(kind);
+        let identifier = format!("{}.duplicate", class_kind_identifier(&kind));
+        let message = format!(
+            "{}{} {name} declared multiple times:\n{location_list}",
+            word[..1].to_uppercase(),
+            &word[1..]
+        );
+        for s in &real_sites {
+            if s.path != path {
+                continue;
+            }
+            diagnostics.push(Diagnostic {
+                location: name.clone(),
+                message: message.clone(),
+                span: s.span,
+                level: 0,
+                identifier: identifier.clone(),
+                tip: None,
+                non_ignorable: true,
+                metadata: std::collections::HashMap::new(),
+                fix: None,
+            });
+        }
+    }
+    diagnostics
+}

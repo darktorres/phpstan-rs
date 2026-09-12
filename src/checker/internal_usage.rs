@@ -13,13 +13,19 @@
 //! instance/static method call, an instance/static property read, a
 //! class-constant read (both a constant's own individual `@internal` tag
 //! and its declaring class's), instantiation (`new Foo()`), `instanceof`,
-//! and a `catch` clause's own caught type. Real PHPStan's own
-//! `RestrictedInternalClassNameUsageExtension` additionally covers
-//! `extends`/`implements`/param-and-return-type-hints/first-class-
-//! callables, and `RestrictedUsageOfDeprecatedStringCastRule` extends
-//! the method-call check to an implicit `(string)`-cast-triggered
-//! `__toString()` call - neither is implemented here (see ROADMAP.md's
-//! own Phase 67 entry for the full list of what's still open).
+//! a `catch` clause's own caught type, `extends`/`implements`/trait-use,
+//! a named function/method's own *and* a closure/arrow-fn literal's own
+//! native param/return type hints, first-class-callables, the implicit
+//! `__toString()` call an echo/print/string-cast/interpolation triggers,
+//! and (Phase 67 follow-up) every PHPDoc-tag-typed position real
+//! `RestrictedInternalClassNameUsageExtension` also covers (`@var`/
+//! `@assert`/`@method`/`@mixin`/`@property`/`@phpstan-require-extends`/
+//! `@phpstan-require-implements`/`@phpstan-sealed`/`@template` bound-and-
+//! default) via `check_type_internal_usage`, reusing Phase 48's own
+//! `case_refs` threading network. Not covered: attribute usage (real
+//! PHPStan's own extension checks this too, but no case-tracking
+//! plumbing exists for attribute-usage positions in this project yet -
+//! see ROADMAP.md's own Phase 67 entry).
 
 use crate::ast::{ClassKind, FunctionDecl, Param};
 use crate::checker::Checker;
@@ -312,6 +318,32 @@ impl<'a> Checker<'a> {
     /// nothing to check beyond the class's own `is_internal` bit), so real
     /// PHPStan's own per-location message text differs only in its leading
     /// verb phrase and identifier prefix - both threaded in by the caller.
+    /// Phase 67 follow-up: `RestrictedInternalClassNameUsageExtension`'s
+    /// own PHPDoc-tag-position coverage (`@var`/`@assert`/`@method`/
+    /// `@mixin`/`@property`/`@phpstan-require-extends`/`@phpstan-require-
+    /// implements`/`@phpstan-sealed`/`@template` bound-and-default) - real
+    /// PHPStan checks `@internal` at every position a class name can
+    /// appear, not just the native-syntax positions the rest of this file
+    /// covers. Reuses Phase 48's own `case_refs` threading network
+    /// (`collect_class_name_case_refs`, populated once at registry-build
+    /// time for exactly these same positions for a *different* check,
+    /// `class.nameCase`) instead of building new call-site plumbing -
+    /// each `(raw, resolved)` pair's `resolved` half is already the
+    /// fully-qualified name this check needs.
+    pub(crate) fn check_type_internal_usage(
+        &mut self,
+        case_refs: &[(String, String)],
+        label: &str,
+        span: Span,
+    ) {
+        if !self.registry.check_internal_usage {
+            return;
+        }
+        for (_, resolved) in case_refs {
+            self.check_internal_class_name_usage(resolved, "Referencing", "type", span, label);
+        }
+    }
+
     fn check_internal_class_name_usage(
         &mut self,
         class: &str,

@@ -841,25 +841,62 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // discarded here, not left unconsumed.
         "int-mask" | "int-mask-of" => Type::Int,
         "float" | "double" => Type::Float,
-        // Phase 14: the four accessory-refined string pseudo-types are
-        // now real `Intersection([String, Accessory(_)])` types, mirroring
-        // real PHPStan's own `IntersectionType([StringType,
-        // AccessoryXType])` representation. `callable-string`/
-        // `trait-string`/`interface-string`/`enum-string` stay aliased
-        // to plain `string`: each names "a string believed to hold a
-        // specific kind of identifier," with no literal-based or
-        // narrowing-based way for this project to ever verify content -
-        // `class-string`'s own optional `<Foo>` generic argument is
-        // similarly just dropped rather than tracked. `lowercase-string`/
-        // `uppercase-string`/`non-empty-lowercase-string`/`non-empty-
-        // uppercase-string` join the same "can't verify content" group
-        // for an identical reason (case-content isn't something this
-        // project can prove from a type alone) - previously missing
-        // entirely, falling through to the generic class-name branch and
-        // producing bogus namespace-qualified "class" names (e.g.
-        // `Psl\HPACK\non-empty-lowercase-string`) that then failed every
-        // ordinary `string`-typed assignability check, a real corpus
-        // false positive.
+        // Phase 14: the accessory-refined string pseudo-types are real
+        // `Intersection([String, Accessory(_)])` types, mirroring real
+        // PHPStan's own `IntersectionType([StringType, AccessoryXType])`
+        // representation. `callable-string`/`trait-string`/
+        // `interface-string`/`enum-string` stay aliased to plain
+        // `string`: each names "a string believed to hold a specific kind
+        // of identifier," with no literal-based or narrowing-based way
+        // for this project to ever verify content - `class-string`'s own
+        // optional `<Foo>` generic argument is similarly just dropped
+        // rather than tracked.
+        //
+        // Phase 75: `lowercase-string`/`uppercase-string`/`non-empty-
+        // lowercase-string`/`non-empty-uppercase-string` used to join
+        // that same "can't verify content" group too, downgraded to
+        // plain `string` - but unlike `callable-string`/`trait-string`/
+        // etc., case-content genuinely *is* now something this project
+        // can prove: `types::subtype`'s own new `LowercaseString`/
+        // `UppercaseString` literal-fact arms, and the case-tracking
+        // producers `strtolower`/`strtoupper`/etc. now wire (`checker/
+        // expr/builtin_calls.rs`), give these two real, checkable
+        // content. Routed through the identical `Intersection([String,
+        // Accessory(_)])` machinery as `non-empty-string`/`numeric-string`
+        // just above, rather than staying degraded now that a real
+        // producer/consumer pipeline exists for them.
+        "lowercase-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::LowercaseString),
+        ]),
+        "uppercase-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::UppercaseString),
+        ]),
+        "non-empty-lowercase-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString),
+            Type::Accessory(AccessoryKind::LowercaseString),
+        ]),
+        "non-empty-uppercase-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString),
+            Type::Accessory(AccessoryKind::UppercaseString),
+        ]),
+        // Phase 75: `decimal-int-string` mirrors real PHPStan's own
+        // `IntersectionType([StringType, AccessoryDecimalIntegerStringType])`
+        // (`TypeNodeResolver.php`) - the `inverse` variant (`non-decimal-
+        // int-string`) stays unaliased/undegraded-to-string here (falls
+        // through to the generic-class-name branch, same as any other
+        // unrecognized name) since it needs the wholly separate dynamic-
+        // array-key-narrowing consumer this phase deliberately doesn't
+        // build (see this phase's own Deferred/declined note) - aliasing
+        // it to a kind with no real consumer would be a silent, false
+        // claim of support.
+        "decimal-int-string" => Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::DecimalIntegerString),
+        ]),
         "non-empty-string" => Type::Intersection(vec![
             Type::String,
             Type::Accessory(AccessoryKind::NonEmptyString),
@@ -876,11 +913,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::String,
             Type::Accessory(AccessoryKind::NumericString),
         ]),
-        "string"
-        | "lowercase-string"
-        | "uppercase-string"
-        | "non-empty-lowercase-string"
-        | "non-empty-uppercase-string" => Type::String,
+        "string" => Type::String,
         // `callable-string` mirrors real PHPStan's own resolution
         // (`TypeNodeResolver.php`: `IntersectionType([StringType,
         // CallableType])`) - architecturally unrelated to the

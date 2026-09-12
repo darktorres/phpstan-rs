@@ -5,7 +5,8 @@ use crate::checker::{
     body_contains_yield, collect_goto_targets, expr_contains_yield, generator_template_param,
     is_language_construct, is_real_variable_key, is_superglobal, literal_string_key,
     literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
-    purge_stale_narrowing_for, resolve_call_args, superglobal_default_type, to_bitwise_not,
+    purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
+    superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -555,6 +556,8 @@ impl<'a> Checker<'a> {
                         self.record_call_throw_point(dynamic_throw, Some(sig));
                         // Phase 67: `@internal`.
                         self.check_internal_function_call(name, sig, e.span, label);
+                        // Phase 67 follow-up: `restricted_symbols`.
+                        self.check_restricted_function_call(name, e.span, label);
                         // Phase 39: `@deprecated`.
                         self.check_deprecated_function_call(name, sig, e.span, label);
                         // Phase 68: no-op array_filter()/array_values().
@@ -630,6 +633,15 @@ impl<'a> Checker<'a> {
                         {
                             self.check_filter_var_flag_conflict(args, e.span, label);
                         }
+                        if name
+                            .rsplit('\\')
+                            .next()
+                            .unwrap_or(name)
+                            .eq_ignore_ascii_case("simplexml_load_string")
+                        {
+                            self.check_simplexml_load_string_call(args, e.span, label);
+                        }
+                        self.check_preg_pattern_validity(name, args, label);
                         {
                             let bare = name.rsplit('\\').next().unwrap_or(name);
                             if bare.eq_ignore_ascii_case("sscanf")
@@ -1085,8 +1097,14 @@ impl<'a> Checker<'a> {
                         });
                         // Phase 67: `@internal`.
                         self.check_internal_method_call(owner, method, sig, false, e.span, label);
+                        // Phase 67 follow-up: `restricted_symbols`.
+                        self.check_restricted_method_call(owner, method, false, e.span, label);
                         // Phase 39: `@deprecated`.
                         self.check_deprecated_method_call(owner, method, sig, false, e.span, label);
+                        // Phase 78: `DOMDocument::createElement()`'s own
+                        // tag-name validation - independent of the
+                        // internal/deprecated checks just above.
+                        self.check_dom_create_element(class, method, args, e.span, label);
                         // Finding 29 / Phase 49: see the identical
                         // comment on the plain-function Call arm above -
                         // `check_args` is spread-aware now, so it's
@@ -1130,7 +1148,7 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if *nullsafe && result != Type::Mixed {
+                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed {
                     union_types(result, Type::Null)
                 } else {
                     result
@@ -1512,6 +1530,12 @@ impl<'a> Checker<'a> {
                                 // string right here in the AST.
                                 self.check_class_name_case(label, name, *name_span);
                                 self.check_internal_instanceof(&class, e.span, label);
+                                self.check_restricted_class_name_usage(
+                                    &class,
+                                    "Instanceof references",
+                                    e.span,
+                                    label,
+                                );
                             }
                         }
                     }
@@ -1542,6 +1566,10 @@ impl<'a> Checker<'a> {
                 // reads $obj).
                 self.check_assignment_target(lhs, locals, label);
                 self.check_property_assignment(lhs, rhs, locals, label);
+                // Phase 45 (45B): a bare by-ref-parameter variable
+                // directly assigned a value its own declared type can't
+                // hold.
+                self.check_param_out_assignment(lhs, &rhs_ty, label);
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
                 self.record_condition_alias(lhs, rhs, locals);
                 rhs_ty
@@ -1590,6 +1618,9 @@ impl<'a> Checker<'a> {
                 // `PropertyAccess`, not a `Variable`), so the return
                 // still saw the stale, nullable pre-`??=` type.
                 let ty = self.infer_binary(op, lhs, rhs, locals);
+                // Phase 45 (45B): same by-ref-parameter check as plain
+                // `=`, against the compound operation's own real result.
+                self.check_param_out_assignment(lhs, &ty, label);
                 self.bind_assignment_target(lhs, ty, locals);
                 Type::Mixed
             }
@@ -1833,6 +1864,12 @@ impl<'a> Checker<'a> {
                     // just below (this check does its own, separate
                     // registry lookup) since it needs `&mut self`.
                     self.check_internal_instantiation(class, e.span, label);
+                    self.check_restricted_class_name_usage(
+                        class,
+                        "Instantiation of",
+                        e.span,
+                        label,
+                    );
                     // Phase 39 follow-up: `@deprecated`.
                     self.check_deprecated_instantiation(class, e.span, label);
                     // Phase 78: `DateInterval`'s own duration-string
@@ -1840,6 +1877,9 @@ impl<'a> Checker<'a> {
                     // the class is otherwise instantiable at all, so
                     // this runs unconditionally before that dispatch.
                     self.check_date_interval_constructor(class, args, e.span, label);
+                    // Phase 78: `SimpleXMLElement`'s own construction
+                    // well-formedness validation - same shape.
+                    self.check_simplexml_element_constructor(class, args, e.span, label);
                     // Phase 42 Sub-item A/D: this constructor's own throw
                     // contribution.
                     let dynamic_throw = self.dynamic_new_throw_type(class, args);
@@ -2081,6 +2121,7 @@ impl<'a> Checker<'a> {
                             self.check_internal_method_call(
                                 owner, method, sig, true, e.span, label,
                             );
+                            self.check_restricted_method_call(owner, method, true, e.span, label);
                             // Phase 39: `@deprecated`.
                             self.check_deprecated_method_call(
                                 owner, method, sig, true, e.span, label,
@@ -2252,6 +2293,9 @@ impl<'a> Checker<'a> {
                     } else if let Some((owner, sig)) = &prop_with_owner {
                         // Phase 67: `@internal`.
                         self.check_internal_property_access(owner, prop_name, sig, e.span, label);
+                        self.check_restricted_property_access(
+                            owner, prop_name, true, e.span, label,
+                        );
                         // Phase 39 follow-up: `@deprecated`.
                         self.check_deprecated_property_access(owner, prop_name, sig, e.span, label);
                         // Phase 57 follow-up: a static property shares
@@ -2294,6 +2338,7 @@ impl<'a> Checker<'a> {
                     } else if let Some((owner, cs)) = &const_with_owner {
                         // Phase 67: `@internal`.
                         self.check_internal_class_constant_access(owner, member, cs, e.span, label);
+                        self.check_restricted_class_constant_access(owner, member, e.span, label);
                         // Phase 39 follow-up: `@deprecated`.
                         self.check_deprecated_class_constant_access(
                             owner, member, cs, e.span, label,
@@ -2442,6 +2487,7 @@ impl<'a> Checker<'a> {
                     });
                     // Phase 67: `@internal`.
                     self.check_internal_property_access(owner, prop, p, e.span, label);
+                    self.check_restricted_property_access(owner, prop, false, e.span, label);
                     // Phase 39 follow-up: `@deprecated`.
                     self.check_deprecated_property_access(owner, prop, p, e.span, label);
                 }
@@ -2458,7 +2504,7 @@ impl<'a> Checker<'a> {
                 // bases silently falling to `Mixed`).
                 let result =
                     self.property_access_type(&narrow_type_excluding(&base_ty, &Type::Null), prop);
-                if *nullsafe && result != Type::Mixed {
+                if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed {
                     union_types(result, Type::Null)
                 } else {
                     result
@@ -2548,19 +2594,8 @@ impl<'a> Checker<'a> {
                     for c in conds {
                         self.check_expr(c, locals, label);
                     }
-                    let mut arm_locals = accumulated.clone();
-                    if let [only_cond] = conds.as_slice() {
-                        if match_true {
-                            self.apply_narrowing(only_cond, &mut arm_locals, true);
-                        } else {
-                            self.apply_equality_narrowing(
-                                subject,
-                                only_cond,
-                                &mut arm_locals,
-                                true,
-                            );
-                        }
-                    }
+                    let mut arm_locals =
+                        self.narrow_match_arm_conditions(subject, conds, &accumulated, match_true);
                     result_types.push(self.check_expr(result, &mut arm_locals, label));
                     merged = Some(match merged {
                         Some(m) => merge_scopes(&m, &arm_locals),
@@ -2592,22 +2627,25 @@ impl<'a> Checker<'a> {
                 }
                 // Same "don't let an unknown arm compose into a partial
                 // Union that looks more precise than it is" rule Ternary
-                // applies.
-                if result_types.contains(&Type::Mixed) {
-                    Type::Mixed
-                } else {
-                    let mut deduped: Vec<Type> = Vec::new();
-                    for t in result_types {
-                        if !deduped.contains(&t) {
-                            deduped.push(t);
-                        }
-                    }
-                    match deduped.len() {
-                        0 => Type::Never,
-                        1 => deduped.into_iter().next().unwrap(),
-                        _ => Type::Union(deduped),
-                    }
-                }
+                // applies (`union_types` already absorbs `Mixed`) - and,
+                // just as important, the same flattening `union_types`
+                // already gives every other multi-branch construct
+                // (`Ternary`, `??`, ...). Building a raw `Type::Union
+                // (deduped)` by hand here (this arm's own pre-fix shape)
+                // left a nested `Union` sitting as one opaque, un-
+                // flattened member whenever one arm's own result was
+                // already a Union (e.g. a ternary arm producing `null |
+                // string`) - a real, corpus-confirmed bug: a nested Union
+                // member breaks any consumer that walks a Union's own
+                // members expecting each to be a flat leaf type
+                // (`return_type_too_wide`'s own `flatten_union`, among
+                // others), since `is_assignable`/`is_subtype` then
+                // wrongly require the *whole* nested sub-Union to satisfy
+                // a comparison meant for just one of its members.
+                result_types
+                    .into_iter()
+                    .reduce(union_types)
+                    .unwrap_or(Type::Never)
             }
             ExprKind::Closure {
                 params,
@@ -2636,6 +2674,60 @@ impl<'a> Checker<'a> {
                 // as real PHP.
                 let mut closure_locals: Locals = locals.fresh_scope();
                 for u in uses {
+                    // Phase 17 follow-up: real PHPStan's own
+                    // `InvalidLexicalVariablesInClosureUseRule` - `$this`,
+                    // a superglobal, or a name already used as a parameter
+                    // can never be captured via `use (...)` at all (a real
+                    // PHP compile error), distinct from - and checked
+                    // before - the plain "undefined variable" case below.
+                    if u.name == "this" {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                "Cannot use $this as lexical variable.".to_string(),
+                                u.span,
+                                0,
+                                "closure.useThis",
+                            )
+                            .non_ignorable(),
+                        );
+                    } else if is_superglobal(&u.name) {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                format!(
+                                    "Cannot use superglobal variable ${} as lexical variable.",
+                                    u.name
+                                ),
+                                u.span,
+                                0,
+                                "closure.useSuperGlobal",
+                            )
+                            .non_ignorable(),
+                        );
+                    } else if params.iter().any(|p| p.name == u.name) {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                format!(
+                                    "Cannot use lexical variable ${} since a parameter with the same name already exists.",
+                                    u.name
+                                ),
+                                u.span,
+                                0,
+                                "closure.useDuplicate",
+                            )
+                            .non_ignorable(),
+                        );
+                    } else if !u.by_ref && !locals.contains_key(&u.name) {
+                        self.report(
+                            label.to_string(),
+                            format!("undefined variable ${}", u.name),
+                            u.span,
+                            0,
+                            "variable.undefined",
+                        );
+                    }
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     // Phase 17 follow-up: a captured variable's own real
                     // declaration is wherever the *outer* scope already
@@ -2662,7 +2754,8 @@ impl<'a> Checker<'a> {
                 }
                 let closure_label = format!("{label} (closure)");
                 for p in params {
-                    let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    let (ty, case_refs) =
+                        self.resolve_type_hint_with_case_refs(p.type_hint.as_deref());
                     // Phase 48: `ExistingClassesInClosureTypehintsRule`'s
                     // own check - checked on the un-array-wrapped element
                     // type below (a variadic parameter's own declared
@@ -2682,6 +2775,7 @@ impl<'a> Checker<'a> {
                         &closure_label,
                         "parameter.trait",
                     );
+                    self.check_type_class_name_case(&case_refs, &closure_label, p.span);
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
@@ -2689,7 +2783,9 @@ impl<'a> Checker<'a> {
                     };
                     closure_locals.declare(p.name.clone(), ty, p.name_span);
                 }
-                let declared_return = Some(self.resolve_type_hint(return_type.as_deref()));
+                let (declared_return_ty, declared_return_case_refs) =
+                    self.resolve_type_hint_with_case_refs(return_type.as_deref());
+                let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
                     declared_return.as_ref().unwrap_or(&Type::Mixed),
                     "return type of anonymous function",
@@ -2703,6 +2799,7 @@ impl<'a> Checker<'a> {
                     &closure_label,
                     "return.trait",
                 );
+                self.check_type_class_name_case(&declared_return_case_refs, &closure_label, e.span);
                 // Phase 48.E: `return.noParent` - `declared_return` above
                 // never went through `resolve_pseudo` (unlike `current_
                 // declared_return_type` a bit further down), so a fresh,
@@ -2850,7 +2947,8 @@ impl<'a> Checker<'a> {
                 // needed) - a plain clone of `locals` is exactly that.
                 let mut arrow_locals = locals.clone();
                 for p in params {
-                    let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    let (ty, case_refs) =
+                        self.resolve_type_hint_with_case_refs(p.type_hint.as_deref());
                     // Phase 48:
                     // `ExistingClassesInArrowFunctionTypehintsRule`'s own
                     // check - same "check the element type, not the
@@ -2869,6 +2967,7 @@ impl<'a> Checker<'a> {
                         label,
                         "parameter.trait",
                     );
+                    self.check_type_class_name_case(&case_refs, label, p.span);
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
@@ -2915,13 +3014,15 @@ impl<'a> Checker<'a> {
                 // Return-vs-declared_return check, kept here since
                 // there's no StmtKind::Return for it to share.
                 if return_type.is_some() {
-                    let expected = self.resolve_type_hint(return_type.as_deref());
+                    let (expected, expected_case_refs) =
+                        self.resolve_type_hint_with_case_refs(return_type.as_deref());
                     self.check_type_class_names_exist(
                         &expected,
                         "return type of arrow function",
                         e.span,
                         label,
                     );
+                    self.check_type_class_name_case(&expected_case_refs, label, e.span);
                     self.check_type_trait_refs(
                         &expected,
                         "return type of arrow function",
@@ -2939,7 +3040,11 @@ impl<'a> Checker<'a> {
                             "return.noParent",
                         );
                     }
-                    if body_ty != Type::Mixed && !self.registry.is_assignable(&body_ty, &expected) {
+                    if body_ty != Type::Mixed
+                        && !self
+                            .registry
+                            .accepts_at_configured_level(&body_ty, &expected)
+                    {
                         self.report(
                             label.to_string(),
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
@@ -3082,6 +3187,9 @@ impl<'a> Checker<'a> {
                                 self.check_internal_method_call(
                                     &owner, method, sig, false, e.span, label,
                                 );
+                                self.check_restricted_method_call(
+                                    &owner, method, false, e.span, label,
+                                );
                                 self.check_deprecated_method_call(
                                     &owner, method, sig, false, e.span, label,
                                 );
@@ -3119,6 +3227,9 @@ impl<'a> Checker<'a> {
                                 });
                                 self.check_internal_method_call(
                                     &owner, method, sig, true, e.span, label,
+                                );
+                                self.check_restricted_method_call(
+                                    &owner, method, true, e.span, label,
                                 );
                                 self.check_deprecated_method_call(
                                     &owner, method, sig, true, e.span, label,
@@ -3198,19 +3309,8 @@ impl<'a> Checker<'a> {
                 let mut accumulated = locals.clone();
                 let mut result_types: Vec<Type> = Vec::new();
                 for (conds, result) in arms {
-                    let mut arm_locals = accumulated.clone();
-                    if let [only_cond] = conds.as_slice() {
-                        if match_true {
-                            self.apply_narrowing(only_cond, &mut arm_locals, true);
-                        } else {
-                            self.apply_equality_narrowing(
-                                subject,
-                                only_cond,
-                                &mut arm_locals,
-                                true,
-                            );
-                        }
-                    }
+                    let arm_locals =
+                        self.narrow_match_arm_conditions(subject, conds, &accumulated, match_true);
                     result_types.push(self.infer_expr(result, &arm_locals));
                     if let [only_cond] = conds.as_slice() {
                         if match_true {
@@ -3228,21 +3328,14 @@ impl<'a> Checker<'a> {
                 if let Some(d) = default {
                     result_types.push(self.infer_expr(d, &accumulated));
                 }
-                if result_types.contains(&Type::Mixed) {
-                    Type::Mixed
-                } else {
-                    let mut deduped: Vec<Type> = Vec::new();
-                    for t in result_types {
-                        if !deduped.contains(&t) {
-                            deduped.push(t);
-                        }
-                    }
-                    match deduped.len() {
-                        0 => Type::Never,
-                        1 => deduped.into_iter().next().unwrap(),
-                        _ => Type::Union(deduped),
-                    }
-                }
+                // See `check_expr`'s identical arm's own doc comment for
+                // why this must be a `union_types` reduction, not a raw
+                // dedup-then-`Type::Union(deduped)` construction (a real,
+                // corpus-confirmed nested-Union bug).
+                result_types
+                    .into_iter()
+                    .reduce(union_types)
+                    .unwrap_or(Type::Never)
             }
             // A throw expression never actually produces a value - Never
             // is exactly the right type for it, the same way it's used for
@@ -3335,7 +3428,23 @@ impl<'a> Checker<'a> {
                                 for (param, slot) in sig.params.iter().zip(resolved_args.iter()) {
                                     let Some(arg) = slot else { continue };
                                     let arg_ty = self.infer_expr(arg, locals);
-                                    types::bind_template_param(&param.ty, &arg_ty, &mut bindings);
+                                    // Phase 54 follow-up: a bare string
+                                    // literal naming a real, registered
+                                    // class binds a `class-string<T>` slot
+                                    // exactly like an explicit `Foo::class`
+                                    // would (real PHPStan's own
+                                    // `ConstantStringType::isClassString()`
+                                    // treats the two identically).
+                                    let promoted = types::promote_class_string_literals(
+                                        &param.ty,
+                                        &arg_ty,
+                                        &|s| {
+                                            self.registry
+                                                .lookup_class(s)
+                                                .map(|(c, _)| c.to_string())
+                                        },
+                                    );
+                                    types::bind_template_param(&param.ty, &promoted, &mut bindings);
                                 }
                             }
                             // A template the constructor's own arguments
@@ -3411,7 +3520,7 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if *nullsafe && result != Type::Mixed {
+                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed {
                     union_types(result, Type::Null)
                 } else {
                     result
@@ -3476,30 +3585,22 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
-            // Same reasoning as `BinOp::Concat`'s own identical check
-            // just below - real corpus false positive this fix closes:
-            // an interpolated string with a provably non-falsy literal
-            // segment (`"prefix-{$suffix}"`) always produces a real
-            // `non-falsy-string`, the same way `'prefix-' . $suffix`
-            // already did, but this arm unconditionally returned bare
-            // `Type::String` regardless of any part's own content -
-            // `check_expr`'s own separate `Interpolated` arm already
-            // walks each part for a *different* purpose (implicit
-            // `__toString()`/array-to-string checks), not reused here
-            // since it doesn't compute or return a refined type.
-            ExprKind::Interpolated(parts) => {
-                if parts
-                    .iter()
-                    .any(|p| is_non_falsy_string(&self.infer_expr(p, locals)))
-                {
-                    Type::Intersection(vec![
-                        Type::String,
-                        Type::Accessory(AccessoryKind::NonFalsyString),
-                    ])
-                } else {
-                    Type::String
-                }
-            }
+            // Phase 75: routed through the identical `resolve_concat_type`
+            // engine as `BinOp::Concat` just above, as a left-fold over
+            // each part (an interpolated string is exactly a chain of
+            // concatenations) - `check_expr`'s own separate `Interpolated`
+            // arm already walks each part for a *different* purpose
+            // (implicit `__toString()`/array-to-string checks), not reused
+            // here since it doesn't compute or return a refined type. An
+            // empty `parts` list can't occur in practice (the parser never
+            // produces an interpolated string with zero segments), but
+            // folds to plain `Type::String` rather than panicking if it
+            // somehow did.
+            ExprKind::Interpolated(parts) => parts
+                .iter()
+                .map(|p| self.infer_expr(p, locals))
+                .reduce(|acc, part_ty| resolve_concat_type(&acc, &part_ty))
+                .unwrap_or(Type::String),
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
@@ -3512,7 +3613,7 @@ impl<'a> Checker<'a> {
                 let result = self.property_access_type(&base_ty, prop);
                 // Same implicit nullability as `?->method()` just above,
                 // for `$x?->prop`.
-                if *nullsafe && result != Type::Mixed {
+                if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed {
                     union_types(result, Type::Null)
                 } else {
                     result
@@ -3696,7 +3797,10 @@ impl<'a> Checker<'a> {
                 sig.map(|s| {
                     let mut bindings: TemplateBindings = TemplateBindings::default();
                     for (param, ty) in s.params.iter().zip(param_overrides) {
-                        types::bind_template_param(&param.ty, ty, &mut bindings);
+                        let promoted = types::promote_class_string_literals(&param.ty, ty, &|s| {
+                            self.registry.lookup_class(s).map(|(c, _)| c.to_string())
+                        });
+                        types::bind_template_param(&param.ty, &promoted, &mut bindings);
                     }
                     let substituted = types::substitute_template(&s.return_type, &bindings);
                     match &class {
@@ -3819,26 +3923,19 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &Locals) -> Type {
         match op {
-            // Round 12: verified via dumpType() - concatenating any two
-            // strings where *either* side is provably non-falsy (a real
-            // string literal other than `''`/`'0'`, or already a
-            // `non-falsy-string`) always produces a `non-falsy-string`
-            // result, regardless of the other side's own type - real
-            // corpus shape: `sys_get_temp_dir() . '/'`, `dirname(...) .
-            // '/backups/'`, `'.' . $ext`, each feeding a PHPUnit
-            // `assertStringStartsWith()`/`assertStringEndsWith()` whose
-            // stub declares its needle as `non-empty-string`.
+            // Phase 75: `resolve_concat_type` (`checker/narrowing/
+            // accessory_range.rs`) - a full port of real PHPStan's own
+            // `InitializerExprTypeResolver::resolveConcatType`, replacing
+            // this arm's own earlier, narrower "either side non-falsy"
+            // special case (Round 12's own `dumpType()`-verified finding,
+            // still covered as one case among several the ported
+            // algorithm itself handles): real constant-folding for two
+            // literal operands, and AND/OR composition of every accessory
+            // kind (`NonFalsyString`/`NonEmptyString`/`LiteralString`/
+            // `LowercaseString`/`UppercaseString`/`NumericString`), not
+            // just non-falsiness.
             BinOp::Concat => {
-                if is_non_falsy_string(&self.infer_expr(l, locals))
-                    || is_non_falsy_string(&self.infer_expr(r, locals))
-                {
-                    Type::Intersection(vec![
-                        Type::String,
-                        Type::Accessory(AccessoryKind::NonFalsyString),
-                    ])
-                } else {
-                    Type::String
-                }
+                resolve_concat_type(&self.infer_expr(l, locals), &self.infer_expr(r, locals))
             }
             // Phase 15 continuation: real constant folding, confirmed
             // directly against `vendor/phpstan-src`'s own
@@ -4320,18 +4417,11 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
 }
 
 /// Whether `ty` is provably a `non-falsy-string` (non-empty and never
-/// exactly `"0"`) - shared by `BinOp::Concat` and `ExprKind::
-/// Interpolated`'s own identical "does any one operand/part guarantee
-/// the whole result is non-falsy" check, factored out so both build the
-/// same `Intersection([String, Accessory(NonFalsyString)])` target type
-/// and run the same `is_subtype` check against it, rather than each
-/// constructing it independently.
+/// exactly `"0"`). Phase 75: now a one-line delegate to the generalized
+/// `string_type_has_accessory` (`checker/narrowing/accessory_range.rs`) -
+/// every existing call site keeps working unchanged.
 fn is_non_falsy_string(ty: &Type) -> bool {
-    let non_falsy_string = Type::Intersection(vec![
-        Type::String,
-        Type::Accessory(AccessoryKind::NonFalsyString),
-    ]);
-    types::is_subtype(ty, &non_falsy_string)
+    string_type_has_accessory(ty, AccessoryKind::NonFalsyString)
 }
 
 /// Phase 50 (reattempt): whether `ty` is confidently array-shaped for
@@ -4537,5 +4627,84 @@ pub(crate) fn unwrap_grouping(e: &Expr) -> &Expr {
     match &e.kind {
         ExprKind::Grouping(inner) => unwrap_grouping(inner),
         _ => e,
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// Real bug found via corpus verification: a `match(true) { $a, $b =>
+    /// X, ... }` arm listing more than one condition for the same result
+    /// (real PHP semantics: the arm runs iff `$a || $b`) got *no*
+    /// narrowing applied to its own body at all - only a single-
+    /// condition arm did (`if let [only_cond] = conds.as_slice()`,
+    /// this method's own pre-fix call sites). `$uri`'s type inside such
+    /// an arm therefore stayed the full, unnarrowed subject type even
+    /// after e.g. four `instanceof` checks - normally invisible (most
+    /// consumers never noticed the arm's own contributed type was wider
+    /// than it should be), until fixing `Match`'s own union-flattening
+    /// bug (see the sibling fix a few commits up) started properly
+    /// merging that leftover width into the whole match expression's own
+    /// composite type, producing a real, corpus-confirmed false
+    /// `argument.type` positive (`League\Uri\Modifier::wrap()`, a
+    /// `match (true) { $uri instanceof A, $uri instanceof B, ... => $uri
+    /// }` arm). Fix: narrow by each listed condition independently (same
+    /// single-condition logic, once per condition) starting from the same
+    /// baseline, then OR-merge the results via `merge_scopes` - the same
+    /// combinator already used to merge sibling *arms'* own locals,
+    /// applied here across one arm's own multiple conditions instead.
+    fn narrow_match_arm_conditions(
+        &self,
+        subject: &Expr,
+        conds: &[Expr],
+        base: &Locals,
+        match_true: bool,
+    ) -> Locals {
+        let narrow_one = |cond: &Expr| {
+            let mut locals = base.clone();
+            if match_true {
+                self.apply_narrowing(cond, &mut locals, true);
+            } else {
+                self.apply_equality_narrowing(subject, cond, &mut locals, true);
+            }
+            locals
+        };
+        match conds {
+            [] => base.clone(),
+            [only_cond] => narrow_one(only_cond),
+            multiple => multiple
+                .iter()
+                .map(narrow_one)
+                .reduce(|a, b| merge_scopes(&a, &b))
+                .unwrap_or_else(|| base.clone()),
+        }
+    }
+}
+
+/// Real bug found via Piwigo corpus verification (Phase 45/item 11): PHP's
+/// `?->` short-circuits the *entire remaining postfix chain* to `null`,
+/// not just the single arrow it's written on - `$a?->b->c` means
+/// `$a === null ? null : $a->b->c`, so the composite expression's type
+/// must include `Null` even though only the first link is nullsafe.
+/// `$a?->b->c`'s inner `?->b` node already unions `Null` into its own
+/// result correctly; the bug was the outer, plain `->c` node silently
+/// dropping that inherited nullability instead of forwarding it, because
+/// it only ever checked its *own* `nullsafe` flag, never whether an
+/// earlier link in the same chain already used one. Deliberately checks
+/// only the direct base-chain lineage (not into unrelated
+/// subexpressions like call arguments), and deliberately does *not*
+/// apply to a base that's nullable for some *other* reason with no
+/// nullsafe anywhere in its chain (e.g. a plain `$nullableVar->prop`) -
+/// that's a real, already-diagnosed mistake elsewhere, and re-widening
+/// its result to include `Null` here would risk masking further bugs
+/// behind a spurious extra nullable, not fixing anything.
+pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
+    match &base.kind {
+        ExprKind::PropertyAccess(inner, _, nullsafe) => {
+            *nullsafe || postfix_chain_has_nullsafe(inner)
+        }
+        ExprKind::MethodCall(inner, _, _, nullsafe) => {
+            *nullsafe || postfix_chain_has_nullsafe(inner)
+        }
+        ExprKind::Grouping(inner) => postfix_chain_has_nullsafe(inner),
+        _ => false,
     }
 }

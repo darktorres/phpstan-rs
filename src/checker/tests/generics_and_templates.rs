@@ -2724,6 +2724,60 @@ fn reflection_class_from_a_plain_string_variable_leaves_t_erased_not_bound_to_st
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+#[test]
+fn reflection_class_binds_its_own_template_from_a_bare_string_literal_naming_a_real_class() {
+    // Phase 54 follow-up: real PHPStan's own `ConstantStringType::
+    // isClassString()` treats a literal naming a real, registered class
+    // exactly like an explicit `Foo::class` - this project was behind
+    // real PHPStan here, not stricter than it, before this fix.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            assertType('ReflectionClass<Foo>', new ReflectionClass('Foo'));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_class_from_a_string_literal_naming_no_real_class_stays_erased() {
+    // Negative control: a literal that doesn't name any registered class
+    // must not be wrongly bound as if it were a real `Object` type.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            assertType('ReflectionClass', new ReflectionClass('NotARealClass'));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_class_string_template_parameter_binds_from_a_literal_naming_a_real_class_through_an_ordinary_call()
+ {
+    // Covers `infer_call_return_type` (`checker/expr/array_ops.rs`)
+    // separately from the `ExprKind::New` constructor-binding arm above -
+    // the general call-site template-binding path shared by every
+    // ordinary function/method call, not just `new`.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            /**
+             * @template T of object
+             * @param class-string<T> $class
+             * @return T|null
+             */
+            function make(string $class): object|null {
+                return null;
+            }
+            assertType('Foo|null', make('Foo'));
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Real corpus false positive found while triaging the wider Piwigo
 // corpus (`MailServiceTestTransportSwap::with`): unlike `newInstance()`/
 // `newInstanceWithoutConstructor()` (both already correctly `@return T`-
@@ -2747,6 +2801,150 @@ fn reflection_class_new_instance_args_returns_its_own_template_not_a_nullable_ob
             }
         "#,
     );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 77: `ReflectionMethod`/`ReflectionProperty` carry a synthesized
+// `TClass` template (not real in phpstorm-stubs) so the 4 receiver-
+// propagating `ReflectionClass<T>` methods below bind it to `T`, and
+// `getDeclaringClass()` hands it straight back.
+#[test]
+fn reflection_class_get_method_binds_its_receiver_s_own_template() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                assertType('ReflectionMethod<Foo>', $reflClass->getMethod('bar'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_class_get_methods_binds_its_receiver_s_own_template_through_the_list_form() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                assertType('array<ReflectionMethod<Foo>>', $reflClass->getMethods());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_class_get_property_binds_its_receiver_s_own_template() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                assertType('ReflectionProperty<Foo>', $reflClass->getProperty('bar'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_class_get_properties_binds_its_receiver_s_own_template_through_the_list_form() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                assertType('array<ReflectionProperty<Foo>>', $reflClass->getProperties());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_method_get_declaring_class_hands_back_its_own_template() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                $method = $reflClass->getMethod('bar');
+                assertType('ReflectionClass<Foo>', $method->getDeclaringClass());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_property_get_declaring_class_hands_back_its_own_template() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                $prop = $reflClass->getProperty('bar');
+                assertType('ReflectionClass<Foo>', $prop->getDeclaringClass());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_class_get_method_leaves_t_erased_when_the_receiver_s_own_t_is_erased() {
+    // Negative control: an erased receiver `T` (a plain `string`-typed
+    // variable, not `Foo::class`) must not wrongly bind the returned
+    // `ReflectionMethod`'s own `TClass` to anything concrete either.
+    // Renders as `ReflectionMethod<mixed>`, not bare `ReflectionMethod` -
+    // `substitute_class_templates`'s own generic `substitute_scoped`
+    // fallback (used pervasively for every other generic method-return
+    // substitution project-wide) always fills an unbound `TemplateParam`
+    // with a literal `Type::Mixed` argument, unlike `ExprKind::New`'s own
+    // *separate*, special-cased "trim trailing unbound template
+    // arguments" logic for a freshly-constructed object's own type
+    // (which is what makes `new ReflectionClass($erased)` itself render
+    // as bare `ReflectionClass` - a different code path, not something
+    // an ordinary method-return substitution reuses).
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $className): void {
+                $reflClass = new ReflectionClass($className);
+                assertType('ReflectionMethod<mixed>', $reflClass->getMethod('bar'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_bare_reflection_method_return_type_hint_produces_no_missing_generics_diagnostic() {
+    // Phase 77 step 5's own regression test: `ReflectionMethod`'s newly
+    // synthesized `TClass` template must be exempted from
+    // `missingType.generics` (level 6+) the same way the 4 built-in
+    // iterable interfaces already are - otherwise this invented template
+    // would start flagging every ordinary bare `ReflectionMethod`/
+    // `ReflectionProperty` type hint project-wide.
+    let d: Vec<_> = all_diagnostics_for(
+        r#"<?php
+            class C {
+                public function f(ReflectionMethod $m, ReflectionProperty $p): void {}
+            }
+        "#,
+    )
+    .into_iter()
+    .filter(|d| d.identifier == "missingType.generics")
+    .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 

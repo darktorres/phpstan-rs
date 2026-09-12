@@ -76,6 +76,7 @@ pub(crate) fn method_tag_sig(
                 explicit_mixed_hint: false,
                 case_refs,
                 closure_this_type: None,
+                out_ty: None,
             }
         })
         .collect();

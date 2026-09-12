@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use crate::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::registry::function_sig::{mark_template_params, resolve_type};
-use crate::registry::name_context::{NameContext, resolve_names_in_type};
+use crate::registry::name_context::{
+    NameContext, collect_class_name_case_refs, resolve_names_in_type,
+};
 use crate::types::{TemplateParam, Type};
 
 /// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can
@@ -23,12 +25,18 @@ pub(crate) fn property_hook_set_type(
     hooks: Option<&PropertyHooks>,
     template_params: &HashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> Option<Type> {
-    let (param, _) = hooks?.set.as_ref()?;
-    let param = param.as_ref()?;
+) -> (Option<Type>, Vec<(String, String)>) {
+    let Some((Some(param), _)) = hooks.and_then(|h| h.set.as_ref()) else {
+        return (None, Vec::new());
+    };
     let ty = resolve_type(None, param.type_hint.as_deref());
     let ty = mark_template_params(ty, template_params);
-    Some(resolve_names_in_type(ty, ctx))
+    // Phase 48 follow-up (item 6a): `set_ty`'s own case_refs equivalent -
+    // this call was missing entirely before, unlike the sibling `ty`
+    // field's construction two lines above its own call site.
+    let mut case_refs = Vec::new();
+    collect_class_name_case_refs(&ty, ctx, &mut case_refs);
+    (Some(resolve_names_in_type(ty, ctx)), case_refs)
 }
 
 /// Phase 43: whether either hook of `hooks` references `$this->prop_name`

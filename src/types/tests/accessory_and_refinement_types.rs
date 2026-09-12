@@ -90,17 +90,57 @@ fn interface_string_and_trait_string_are_class_strings_bound_to_an_internal_kind
 // `amphp/hpack`'s own header-name typing) that fell through to the
 // generic-user-class branch and got namespace-qualified into a bogus
 // "class" (e.g. `Psl\HPACK\non-empty-lowercase-string`), which then
-// failed every ordinary `string`-typed assignability check.
+// failed every ordinary `string`-typed assignability check. Originally
+// fixed by downgrading all four to plain `Type::String` (parity with
+// `class-string`'s own "nothing to verify" reasoning) - Phase 75
+// reverses that downgrade (this test's own name and body updated to
+// match): unlike `class-string`, case-content genuinely is now
+// something this project can prove and produce, so these route through
+// the same real `Intersection([String, Accessory(_)])` machinery as
+// `non-empty-string`/`numeric-string` instead.
 #[test]
-fn case_refinement_string_pseudo_types_also_stay_plain_string() {
-    for name in [
-        "lowercase-string",
-        "uppercase-string",
-        "non-empty-lowercase-string",
-        "non-empty-uppercase-string",
-    ] {
-        assert_eq!(parse_type_string(name), Type::String, "for {name}");
-    }
+fn case_refinement_string_pseudo_types_are_now_real_accessory_types() {
+    assert_eq!(
+        parse_type_string("lowercase-string"),
+        Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::LowercaseString)
+        ])
+    );
+    assert_eq!(
+        parse_type_string("uppercase-string"),
+        Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::UppercaseString)
+        ])
+    );
+    assert_eq!(
+        parse_type_string("non-empty-lowercase-string"),
+        Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString),
+            Type::Accessory(AccessoryKind::LowercaseString)
+        ])
+    );
+    assert_eq!(
+        parse_type_string("non-empty-uppercase-string"),
+        Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::NonEmptyString),
+            Type::Accessory(AccessoryKind::UppercaseString)
+        ])
+    );
+}
+
+#[test]
+fn decimal_int_string_is_a_real_accessory_type() {
+    assert_eq!(
+        parse_type_string("decimal-int-string"),
+        Type::Intersection(vec![
+            Type::String,
+            Type::Accessory(AccessoryKind::DecimalIntegerString)
+        ])
+    );
 }
 
 // Same corpus round: `int-mask<Flag::*>`/`int-mask-of<Flag::*>` -
@@ -170,6 +210,61 @@ fn class_string_with_a_generic_argument_is_tracked_precisely() {
     // Two or more args isn't real PHPStan syntax - falls back to plain
     // string rather than guessing which one is meant.
     assert_eq!(parse_type_string("class-string<Foo, Bar>"), Type::String);
+}
+
+// Phase 75: `describe_accessory_intersection`'s generic ordered-parts
+// join, replacing the old fixed 4-tuple match - each existing singleton
+// case still renders exactly as before, and a combination none of those
+// 4 tuples covered (`date('Y')`'s own real `non-empty-numeric-string`,
+// silently mis-rendered via the raw `&`-joined fallback before this fix)
+// now composes correctly too.
+#[test]
+fn accessory_intersection_display_composes_every_combination() {
+    assert_eq!(
+        parse_type_string("non-empty-string").to_string(),
+        "non-empty-string"
+    );
+    assert_eq!(
+        parse_type_string("non-falsy-string").to_string(),
+        "non-falsy-string"
+    );
+    assert_eq!(
+        parse_type_string("literal-string").to_string(),
+        "literal-string"
+    );
+    assert_eq!(
+        parse_type_string("numeric-string").to_string(),
+        "numeric-string"
+    );
+    assert_eq!(
+        parse_type_string("lowercase-string").to_string(),
+        "lowercase-string"
+    );
+    assert_eq!(
+        parse_type_string("uppercase-string").to_string(),
+        "uppercase-string"
+    );
+    assert_eq!(
+        parse_type_string("decimal-int-string").to_string(),
+        "decimal-int-string"
+    );
+    assert_eq!(
+        parse_type_string("non-empty-lowercase-string").to_string(),
+        "non-empty-lowercase-string"
+    );
+    assert_eq!(
+        parse_type_string("non-empty-uppercase-string").to_string(),
+        "non-empty-uppercase-string"
+    );
+    // The `date('Y')`-shaped mis-render this generalization fixes as a
+    // confirmed side effect: `Intersection([String, NonEmptyString,
+    // NumericString])` didn't match any of the old 4 fixed tuples.
+    let date_y_shaped = Type::Intersection(vec![
+        Type::String,
+        Type::Accessory(AccessoryKind::NonEmptyString),
+        Type::Accessory(AccessoryKind::NumericString),
+    ]);
+    assert_eq!(date_y_shaped.to_string(), "non-empty-numeric-string");
 }
 
 #[test]

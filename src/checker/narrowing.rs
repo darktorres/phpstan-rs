@@ -18,6 +18,7 @@ use accessory_range::{
     upgrade_array_to_list, upgrade_array_to_non_empty, upgrade_string_to_numeric,
     upgrade_string_with_accessory,
 };
+pub(crate) use accessory_range::{resolve_concat_type, string_type_has_accessory};
 pub(crate) use array_shape::{
     array_value_type_for_key, is_unsealed_shape, narrow_array_shape_by_key_presence,
     narrow_type_excluding_falsy,
@@ -957,6 +958,7 @@ impl<'a> Checker<'a> {
         let subject = format!("PHPDoc tag {tag_name} for {target_desc}");
         self.check_type_class_names_exist(&info.ty, &subject, span, label);
         self.check_type_trait_refs(&info.ty, &subject, span, label, "assert.trait");
+        self.check_type_class_name_case(&info.case_refs, label, span);
 
         let AssertTarget::Param(name) = &info.target else {
             return;

@@ -115,9 +115,12 @@ pub(crate) fn append_param_type_override(doc: &str, name: &str, override_ty: &st
 /// doesn't stop the walk short. Falls back to returning `tokens.len()`
 /// unchanged (skip nothing) if the depth count runs off the start without
 /// balancing - malformed input, not worth guessing at.
-pub(crate) fn skip_trailing_attribute_groups(tokens: &[(Token, Span)]) -> usize {
+pub(crate) fn skip_trailing_attribute_groups(tokens: &[(Token, Span, Option<String>)]) -> usize {
     let mut end = tokens.len();
-    while matches!(tokens.get(end.wrapping_sub(1)), Some((Token::RBracket, _))) {
+    while matches!(
+        tokens.get(end.wrapping_sub(1)),
+        Some((Token::RBracket, _, _))
+    ) {
         let mut depth = 1i32;
         let mut i = end - 1;
         loop {

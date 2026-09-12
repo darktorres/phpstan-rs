@@ -92,6 +92,7 @@ impl<'a> Checker<'a> {
         // ever ran for a write. Confirmed via the exact same corpus this
         // project already used for the read side - see ROADMAP.md.
         self.check_internal_property_access(&owner, prop, prop_sig, lhs.span, label);
+        self.check_restricted_property_access(&owner, prop, false, lhs.span, label);
         self.check_deprecated_property_access(&owner, prop, prop_sig, lhs.span, label);
         // Phase 57: visibility - shares the same "property.private"/
         // "property.protected" identifiers a read gets (`ExprKind::
@@ -124,7 +125,11 @@ impl<'a> Checker<'a> {
         let expected = types::substitute_template(write_ty, &bindings);
         let expected = self.resolve_pseudo(&expected, &class);
         let actual = self.infer_expr(rhs, locals);
-        if actual == Type::Mixed || self.registry.is_assignable(&actual, &expected) {
+        if actual == Type::Mixed
+            || self
+                .registry
+                .accepts_at_configured_level(&actual, &expected)
+        {
             return;
         }
         self.report(

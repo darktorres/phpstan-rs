@@ -123,6 +123,17 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
     match (sub, sup) {
         (_, Type::Mixed) => true,
         (Type::Never, _) => true,
+        // Phase 19: `Type` derives plain structural `PartialEq`, so the
+        // `a == b` fast path just below is `false` for `FloatLiteral
+        // (f64::NAN)` compared to itself (Rust's own `f64: PartialEq`
+        // makes `NAN != NAN`) - reflexivity genuinely failed for this one
+        // value before this arm existed, found by a proptest reflexivity
+        // property (`types/tests/subtyping_properties.rs`) rather than
+        // observed in a real corpus. Mirrors real PHPStan's own
+        // `ConstantFloatType::equals()` (`vendor/phpstan-src/src/Type/
+        // Constant/ConstantFloatType.php:42-45`), which explicitly
+        // special-cases exactly this (`is_nan(a) && is_nan(b)`).
+        (Type::FloatLiteral(a), Type::FloatLiteral(b)) if a.is_nan() && b.is_nan() => true,
         (a, b) if a == b => true,
 
         // Phase 53: a shaped callable is always compatible with a bare
@@ -185,11 +196,47 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::StringLiteral(s), Type::Accessory(AccessoryKind::NumericString)) => {
             is_numeric_string_literal(s)
         }
+        // Phase 75: mirrors real `ConstantStringType::isLowercaseString`/
+        // `isUppercaseString` (`strtolower($v) === $v`/`strtoupper($v) ===
+        // $v`) - ASCII-only, matching PHP 8.2+'s own locale-independent
+        // `strtolower`/`strtoupper` (this project's only supported PHP
+        // version range).
+        (Type::StringLiteral(s), Type::Accessory(AccessoryKind::LowercaseString)) => {
+            s.bytes().all(|b| !b.is_ascii_uppercase())
+        }
+        (Type::StringLiteral(s), Type::Accessory(AccessoryKind::UppercaseString)) => {
+            s.bytes().all(|b| !b.is_ascii_lowercase())
+        }
+        // Phase 75: mirrors real `ConstantStringType::isDecimalIntegerString`
+        // (`(string) (int) $v === $v`) - round-trips through `i64`, so a
+        // leading zero (`"007"`), an explicit sign (`"+1"`), `"-0"`, an
+        // empty string, or a non-integer numeric string (`"1.0"`) are all
+        // correctly excluded.
+        (Type::StringLiteral(s), Type::Accessory(AccessoryKind::DecimalIntegerString)) => {
+            is_decimal_integer_string_literal(s)
+        }
         // Real containment between kinds: every non-falsy string is
         // non-empty; no other pair implies another.
         (
             Type::Accessory(AccessoryKind::NonFalsyString),
             Type::Accessory(AccessoryKind::NonEmptyString),
+        ) => true,
+        // Phase 75: mirrors real `AccessoryDecimalIntegerStringType`'s own
+        // (non-inverse) `isNumericString`/`isLowercaseString`/
+        // `isUppercaseString` (all `TrinaryLogic::createYes()`,
+        // `AccessoryDecimalIntegerStringType.php:364-397`) and
+        // `isNonEmptyString` (`:374-377`) - a decimal integer string
+        // (`"0"`, `"123"`, `"-1"`) is always also numeric, "lowercase" and
+        // "uppercase" (it has no letters to fail either check), and
+        // non-empty.
+        (
+            Type::Accessory(AccessoryKind::DecimalIntegerString),
+            Type::Accessory(
+                AccessoryKind::NumericString
+                | AccessoryKind::LowercaseString
+                | AccessoryKind::UppercaseString
+                | AccessoryKind::NonEmptyString,
+            ),
         ) => true,
         (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::NonEmptyArray)) => {
             fields.iter().any(|(name, _, _)| name != "...")
@@ -280,6 +327,32 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
             sub,
             &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
         ),
+        // Phase 19: a real, pre-existing soundness gap found via a
+        // proptest `intersection_projection` property - `A & B <: B` is
+        // a basic law of intersection types that must hold
+        // unconditionally, but with only the two generic rules below
+        // (and the identical pair further down for `Intersection`), an
+        // `Intersection` whose own member happens to *be* a `Union`
+        // (e.g. `Intersection([Void, Union([Null, Bool])])` checked
+        // against `Union([Null, Bool])`) fell through to the plain
+        // `(_, Union(members)) => any(is_subtype(sub, m))` rule just
+        // below - decomposing the *target* Union's own members
+        // (`Null`/`Bool`) and asking whether the *whole, undecomposed*
+        // intersection satisfies either alone, which it doesn't
+        // (correctly - the intersection's other member, `Void`, isn't
+        // `Null` either) - never getting a chance to try the
+        // intersection's own member-projection instead (`sub_members.any
+        // (is_subtype(m, sup))`, which the generic `Intersection`-vs-`_`
+        // rule further down already handles correctly on its own, just
+        // never reached here because this more general `Union`-sup rule
+        // intercepts first). This arm tries both projections whenever
+        // both shapes are present at once, succeeding if either proves
+        // it - strictly additive (only turns a previously-wrong `false`
+        // into the mathematically-correct `true`, never the reverse).
+        (Type::Intersection(sub_members), Type::Union(sup_members)) => {
+            sub_members.iter().any(|m| is_subtype(m, sup))
+                || sup_members.iter().any(|s| is_subtype(sub, s))
+        }
         (Type::Union(members), _) => members.iter().all(|m| is_subtype(m, sup)),
         (_, Type::Union(members)) => members.iter().any(|m| is_subtype(sub, m)),
 
@@ -446,4 +519,15 @@ pub(crate) fn is_numeric_string_literal(s: &str) -> bool {
         !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit())
     });
     mantissa_ok && exponent_ok
+}
+
+/// Phase 75: mirrors real `ConstantStringType::isDecimalIntegerString`
+/// exactly - `(string) (int) $v === $v`, ported as a round-trip `i64`
+/// parse (PHP's own native int width on every platform this project
+/// targets) rather than reimplementing the sign/leading-zero grammar by
+/// hand, so the same edge cases (`"007"`, `"+1"`, `"-0"`, `""`, `"1.0"`)
+/// are excluded for the identical reason real PHP's int cast excludes
+/// them - a mismatched round trip, not a hand-maintained rule list.
+pub(crate) fn is_decimal_integer_string_literal(s: &str) -> bool {
+    s.parse::<i64>().is_ok_and(|n| n.to_string() == s)
 }

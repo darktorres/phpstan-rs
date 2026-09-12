@@ -237,3 +237,89 @@ fn interface_string_and_trait_string_check_the_real_class_kind() {
         &trait_string
     ));
 }
+
+// Phase 84: `accepts_at_configured_level`'s own level-aware leniency.
+
+#[test]
+fn accepts_at_configured_level_matches_is_assignable_when_never_configured() {
+    let r = build_registry("<?php");
+    let nullable_string = Type::Union(vec![Type::String, Type::Null]);
+    assert_eq!(r.configured_level, None);
+    assert_eq!(
+        r.accepts_at_configured_level(&nullable_string, &Type::String),
+        r.is_assignable(&nullable_string, &Type::String)
+    );
+    assert!(!r.accepts_at_configured_level(&nullable_string, &Type::String));
+}
+
+#[test]
+fn accepts_at_configured_level_matches_is_assignable_at_the_strict_threshold() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(8);
+    let nullable_string = Type::Union(vec![Type::String, Type::Null]);
+    assert!(!r.accepts_at_configured_level(&nullable_string, &Type::String));
+}
+
+// The load-bearing case (Phase 84's own found-and-fixed bug): a nullable-
+// typed actual value (`?string`, the single most common PHP nullability
+// idiom) accepted by a plain, non-nullable declared type below level 8 -
+// this must now succeed, where plain `is_assignable` (and a naive
+// "bail to is_assignable whenever `sup` is a Union too" fast path) both
+// reject it.
+#[test]
+fn a_nullable_actual_type_is_accepted_by_a_non_nullable_declared_type_below_level_eight() {
+    let mut r = build_registry("<?php");
+    let nullable_string = Type::Union(vec![Type::String, Type::Null]);
+    for level in 0..8 {
+        r.configured_level = Some(level);
+        assert!(
+            r.accepts_at_configured_level(&nullable_string, &Type::String),
+            "level {level} should accept a nullable actual type"
+        );
+    }
+}
+
+// The real, common shape every one of this phase's 8 call sites actually
+// sees: a nullable *declared* type (`sup = Union([String, Null])`, e.g. a
+// `?string`-typed parameter) accepting a plain non-nullable actual
+// argument - already true via plain `is_assignable`'s own unconditional
+// `.any()` arm, but must keep working once routed through the new
+// recursive Union-vs-Union-aware method instead of silently regressing.
+#[test]
+fn a_plain_actual_value_still_satisfies_a_nullable_declared_type() {
+    let mut r = build_registry("<?php");
+    let nullable_string = Type::Union(vec![Type::String, Type::Null]);
+    r.configured_level = Some(5);
+    assert!(r.accepts_at_configured_level(&Type::String, &nullable_string));
+}
+
+#[test]
+fn a_definite_null_actual_value_is_still_rejected_by_a_non_nullable_declared_type() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(5);
+    assert!(!r.accepts_at_configured_level(&Type::Null, &Type::String));
+}
+
+#[test]
+fn a_nullable_actual_type_is_not_accepted_by_a_definite_null_declared_type() {
+    let mut r = build_registry("<?php");
+    let nullable_string = Type::Union(vec![Type::String, Type::Null]);
+    r.configured_level = Some(5);
+    // Stripping Null out of `sub` must never happen when `sup` is itself
+    // bare `Type::Null` - a `?string` actual value still doesn't
+    // definitely satisfy a target that only ever accepts `null`.
+    assert!(!r.accepts_at_configured_level(&nullable_string, &Type::Null));
+}
+
+#[test]
+fn a_union_vs_union_pair_recurses_correctly_below_the_strict_threshold() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(5);
+    let nullable_string = Type::Union(vec![Type::String, Type::Null]);
+    assert!(r.accepts_at_configured_level(&nullable_string, &nullable_string));
+    let nullable_int = Type::Union(vec![Type::Int, Type::Null]);
+    // A nullable string's non-null member (`string`) doesn't satisfy a
+    // nullable int's declared type at all, even once Null is stripped
+    // from the actual side.
+    assert!(!r.accepts_at_configured_level(&nullable_string, &nullable_int));
+}

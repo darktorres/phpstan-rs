@@ -39,32 +39,40 @@ reasoning is needed verbatim.)
 
 - Piwigo frozen-corpus diagnostic count (`phpstan-rs.toml`-scoped,
   `/home/torres/piwigo17-frozen`) - the primary false-positive-hunt
-  metric - is 359 as of `c522416`/`860b2b3`, up from a 355 pre-batch
-  baseline (`264d910`) with every one of the 4 net new diagnostics
-  confirmed genuine (new `throws.unusedType`/type-precision findings
-  from the `0247b04`/`d1d1d61` phase-work batch, Phases 17, 36, 37, 39,
-  40, 42, 43, 48, 49, 50, 53, 61, 63, 64, 67, 69, 70, 71, 76, 77). That
-  batch's own corpus diff *has* now been run (both scoped and
-  `--no-composer` unscoped) and surfaced two real regressions, both
-  fixed: a `NameContext::use_map` cross-kind collision (Phase 48.1's
-  case-insensitive lookup let a `use function`/`use const` import
-  answer an unrelated class reference of the same lowercased name -
-  4602 false `staticMethod.notFound` diagnostics at its worst) and a
-  missing body-presence guard on `check_too_wide_throw_type` (flagged
-  every abstract/interface method's own `@throws` tag as unused).
-  Every run since is saved to `.corpus-runs/{scoped,unscoped}/
+  metric - is 342, down from a 343 pre-batch baseline (`6412b33`) after
+  a 14-item batch (Phases 17, 18, 19, 40, 45, 46, 48, 54, 67, 75, 77, 78,
+  83, 84 - see Done for each). The net *decrease* despite several brand-
+  new checks shipping is real: this batch's own corpus-diff pass found
+  and fixed six genuine, previously-latent bugs exposed by verifying the
+  new work at scale, several pre-existing (not introduced by this
+  batch) - a nullsafe-operator postfix chain (`$a?->b->c`) losing its
+  own inherited nullability past the first non-nullsafe link; `resolve_
+  pseudo` never recursing into a generic class reference's own type
+  arguments; `match`'s own result-type computation building a raw,
+  un-flattened `Type::Union` instead of reducing through `union_types`;
+  a multi-condition `match(true) { $a, $b => X }` arm getting zero
+  narrowing applied to its own body; real PCRE's own leading/trailing-
+  whitespace-tolerant delimiter detection; and `check_too_wide_return_
+  type`'s own boolean (not real PHPStan's trinary) actual-vs-declared
+  comparison flagging every declared member whenever the actual type
+  widened to `Mixed`. Phase 56 (the full grammar-level PHPDoc parser
+  rewrite) remains the one deliberately unattempted item from this
+  batch's own source plan - its own dedicated future session, given its
+  XL size and the whole plan's own explicit decision to sequence it
+  last. Every run is saved to `.corpus-runs/{scoped,unscoped}/
   <commit-hash>.txt` (gitignored, see that directory's own README) -
   check there before re-running an old commit to get a comparison
   snapshot. Re-verify against real PHPStan before citing an exact
   number either way - it drifts release to release even without new
   checks shipping.
-- Full Piwigo+`vendor/` corpus (~20,300 files, unscoped): 40,503
-  diagnostics as of `c522416`, the overwhelming majority genuine
-  findings in third-party code this project doesn't control. Re-run
-  before citing a number - it drifts as vendored dependencies and this
+- Full Piwigo+`vendor/` corpus (~20,200 files, unscoped): 40,459
+  diagnostics, the overwhelming majority genuine findings in third-party
+  code this project doesn't control - not re-verified line-by-line at
+  this scale (best-effort secondary coverage, per **Verification
+  approach**), only spot-checked per new-finding bucket. Re-run before
+  citing a number - it drifts as vendored dependencies and this
   project's own precision both change.
-- Test suite: 2694 unit tests, all passing (build/test/clippy/fmt
-  clean as of `c522416`).
+- Test suite: 3248 unit tests, all passing (build/test/clippy clean).
 
 ---
 
@@ -142,6 +150,76 @@ directly via `ClassInfo::from_decl` and passes it down), not whichever
 declaration happened to win the registry's single per-name slot -
 `registry/index.rs`'s own tiebreaking policy is unchanged, the fix is
 confined to the checker's own signature-selection step.
+
+**Symbol-existence pipeline: name-case checking, full coverage** (Phase
+48). `ClassCaseSensitivityCheck`'s own class-name-case half
+(`Registry::canonicalize_class_name_case`, a one-time O(classes)
+rewrite pass run right after indexing, before any ancestor-graph walk
+reads `extends`/`implements`/`uses`, plus `Registry::lookup_class`
+mirroring `lookup_function`'s case-insensitive-fallback shape) now
+covers every native-syntax class-name reference (`new`, `instanceof`, a
+static method/property/constant access, a `catch` clause, a class/enum
+declaration's own `extends`/`implements`/trait-`use`) and every PHPDoc-
+typed position too: function/method param and return types, property
+positions (including `@property`), `@method`/`@mixin`/`@phpstan-type`
+tag targets, property hooks' own `set()` parameter, `@phpstan-assert`-
+family tag targets, `@phpstan-require-extends`/`-implements`/`-sealed`
+RHS, and closure/arrow-fn literal param/return hints - the last four via
+a parallel traversal (`registry::name_context::collect_class_name_case_
+refs`, structurally identical to `resolve_names_in_type` but collecting
+`(raw, resolved)` pairs into a side list rather than rewriting the
+`Type` in place) run one step earlier in the parse pipeline, since this
+project's own type-parsing collapses each reference straight into a
+resolved `Type` with no per-reference raw spelling retained by the time
+any checker call site sees it. A *backfilled* (inherited-docblock)
+position deliberately never gets `case_refs` propagated - the raw text
+was written under an ancestor file's own `use` imports, not this file's
+`name_ctx`, so re-collecting against the descendant's own context would
+be actively wrong (different imports) and double-report; the ancestor's
+own declaration already ran the check once at its true owning file.
+Also fixed, the same corpus round: `Parser::take_name_segment`'s own
+keyword-as-identifier recovery reconstructed an identifier from the
+keyword's own canonical lowercase spelling rather than the original
+source bytes, so `class Enum { ... }` (a real, valid class literally
+named the same as the `enum` keyword, confirmed against `vendor/
+marc-mabe/php-enum`) silently corrupted its own declared name to `enum`
+well before any registry/case-checking logic ran. Fixed the way this
+project already fixes exactly this class of "stash a value out of band
+during lexing, thread it through a parallel channel" problem elsewhere
+(`Lexer::pending_return_type_override`, `Parser::spans`): a new `Lexer::
+pending_keyword_raw` captured at the keyword-token site, threaded
+through `tokenize_with_spans`'s widened return tuple into a new
+`Parser::keyword_raw` side channel `take_name_segment` consults instead
+of reconstructing from `Keyword::as_str()` - `Token`'s own shape and its
+167 existing match/construct sites across the codebase stay completely
+untouched.
+
+**Whole-project duplicate class-name detection** (Phase 83). New opt-in
+`check_duplicate_class_declarations` (off by default - see below) flags
+the same class/interface/trait/enum FQN declared unconditionally more
+than once project-wide, going beyond real PHPStan (whose own `Duplicate
+ClassDeclarationRule` only ever runs against a project's own configured
+`stubFiles:` list in an isolated validation pass, never against ordinary
+scanned files - this is `phpstan-rs` going stricter than real PHPStan by
+design, not porting an existing whole-project behavior, per this
+project's own "stricter than PHPStan is fine" convention). New
+`Registry::stub_paths`/`--stub-path` config-and-CLI concept (mirroring
+`scan_paths`/`--scan-dir`) designates a file/directory's class-like
+declarations as deliberate overrides (a vendored `Imagick.stub.php`,
+say) rather than genuine accidental duplicates - still loaded for type-
+resolution context exactly like `scan_paths`, just excluded from the new
+check's own counting. `src/project/duplicate_class_sites.rs`'s
+`DuplicateClassSites` is a straight port of the existing Phase 63
+`DuplicateFunctionSites` precedent to class-likes (same statement-only,
+skip-conditional-declarations walk; an anonymous class is structurally
+excluded for free, since `new class {...}` never reaches a `StmtKind::
+ClassDecl` this walker descends into), plus the one new `is_stub` field
+the function-side precedent didn't need. Ships opt-in, not unconditional
+like its function-side sibling: the one known corpus false-positive
+shape (a vendored built-in stub colliding with the real extension's own
+class) can only be defused once `stub_paths` is correctly populated,
+which every existing `phpstan-rs.toml` predates - flip the default once
+a project's own config migrates its stub-override paths there.
 
 ## Type system
 
@@ -287,6 +365,79 @@ previously under-reported (a dynamic array key genuinely built from
 more than one source type, e.g. `int|string`, is now visible as such
 project-wide instead of only the first-seen branch's own narrower key
 type).
+
+**String accessory case-tracking** (Phase 75). New `AccessoryKind`
+variants `LowercaseString`/`UppercaseString`/`DecimalIntegerString`
+(the latter implying `NumericString`/`LowercaseString`/`UppercaseString`/
+`NonEmptyString`, mirroring `AccessoryDecimalIntegerStringType`'s own
+real implications), produced by `strtolower`/`mb_strtolower`/
+`strtoupper`/`mb_strtoupper`/`lcfirst`/`ucfirst`/`mb_convert_case` (whose
+own force/keep-lowercase/uppercase composition, resolved from a
+constant `MB_CASE_*` mode argument, is real accessory-composition
+behavior, not a no-op the way `ucwords`/`mb_convert_kana` genuinely are).
+A new `resolve_concat_type` (a full port of real PHPStan's own
+`InitializerExprTypeResolver::resolveConcatType`) closes the feature's
+main real-world gap: concatenation previously never inferred `literal-
+string`/`non-falsy-string` at all, collapsing straight to plain `string`
+and silently undermining `literal-string`'s own SQL-injection-safety
+use case. `lowercase-string`/`uppercase-string`/`non-empty-lowercase-
+string`/`non-empty-uppercase-string` PHPDoc pseudo-types now route
+through the same real `Intersection([String, Accessory(_)])` machinery
+as `non-empty-string`/`numeric-string`, reversing an old downgrade-to-
+plain-`string` policy that predates having any producer to verify them
+against. A new `format_php_float` (`src/php_float_format.rs`) gives
+concat's own float-to-string coercion PHP's real, empirically-verified
+(live PHP 8.5) fixed-14-significant-digit `%G`-style algorithm, not a
+shortest-round-trip encoder (`(string)(0.1+0.2)` is `"0.3"`, not
+`"0.30000000000000004"` - that's `var_export()`'s own, different, code
+path). Declined, needing a wholly separate dynamic-array-key-narrowing
+consumer mechanism this codebase doesn't have: `AccessoryDecimalInteger
+StringType`'s own `inverse`/array-key-casting variant - its own future
+item, the same shape as the declined Mixed-provenance item below.
+
+**Level-aware type-acceptance** (Phase 84). `Registry::configured_level:
+Option<u8>` (the project's own `level`, `None` preserving today's
+always-strict behavior exactly) plus `Registry::accepts_at_configured_
+level` give `project.level` real teeth over argument/return/property-
+type strictness at 8 call sites, mirroring real PHPStan's own
+`RuleLevelHelper::accepts()`: below level 8, `Null` is stripped from an
+accepted Union before the check; below level 7, a Union comparison uses
+`.any()` instead of `.all()`. A real, severe bug caught before shipping:
+an earlier draft special-cased "`sup` is also a Union" as a bail-to-
+plain-`is_assignable` fast path, which would have silently disabled the
+whole feature for its single most common real-world trigger - every
+nullable declared type (`?string`, `?Foo`, ...) is represented as
+`Union([X, Null])` in this project, so `sup` being a Union is the
+*typical* case, not an edge one; fixed by giving the new method its own
+level-aware recursive counterpart to the existing Union-vs-Union
+cascade instead of bailing. Declined, needing infrastructure large and
+disconnected enough to be its own future phase: `checkExplicitMixed`/
+`checkImplicitMixed`/`checkBenevolentUnionTypes` (real level 9/10) -
+`Type::Mixed` carries no explicit-vs-implicit provenance to key them off.
+
+**Subtyping properties via proptest, and two real soundness bugs found
+by it** (Phase 19). `src/types/tests/subtyping_properties.rs`: a
+bounded-depth `Type` generator (`proptest::prop_recursive`) backing five
+properties - reflexivity, `Mixed` is top, `Never` is bottom, union
+injection, intersection projection. Transitivity is deliberately *not*
+asserted as a blanket property - a real, already-documented non-
+transitive chain (`ClassString(Foo) <: String <: ClassString(Bar)` while
+`ClassString(Foo) <: ClassString(Bar)` is false, a deliberate false-
+negative-avoiding design choice with its own existing test) would make a
+blanket property fail on a case this file's own author already reasoned
+through. Two real bugs the property suite surfaced, both fixed in the
+same pass their own regression landed (fails-then-fixed, not deferred):
+`Type::FloatLiteral(f64::NAN)` failed reflexivity (Rust's own `f64:
+PartialEq` makes `NAN != NAN`; real PHPStan's `ConstantFloatType::
+equals()` explicitly special-cases exactly this); and `is_subtype`'s
+existing arm ordering put a generic `(_, Type::Union(members))` arm
+*before* the generic `(Type::Intersection(members), _)` arm, so an
+`Intersection` containing a `Union` as one of its own members (e.g.
+`Intersection([Void, Union([Null, Bool])])`) checked against that same
+`Union` wrongly returned `false` instead of the mathematically-required
+`true` (the basic intersection-type law `A & B <: B`) - fixed by adding
+a new, more specific `(Intersection, Union)` arm ahead of both generic
+ones.
 
 ## Narrowing engine
 
@@ -874,6 +1025,182 @@ getIterableKeyType()`, each int-canonical key contributing its own real
 own - a real, previously-unsound gap this closes: `array{name: string}`
 (all-string-keyed) no longer silently satisfies `array<int, string>`.
 
+**Closure `use (...)` capture checks** (Phase 17). A by-value `use
+($typo)` capture of a variable never assigned anywhere in the outer
+scope now runs through the same undefined-variable machinery a direct
+read already gets (`variable.undefined`), at both real call sites
+(`ExprKind::Closure` and `check_closure_literal_with_param_overrides`).
+The full `InvalidLexicalVariablesInClosureUseRule` family lands in the
+same two loops: `use ($this)` (`closure.useThis`), `use ($_SERVER)`/any
+superglobal (`closure.useSuperGlobal`), and a capture name colliding
+with one of the closure's own parameters (`closure.useDuplicate`), all
+non-ignorable per real PHPStan's own `#[RegisteredRule(level: 0)]`.
+
+**PHPStan-API vendor-directory check, plus two adjacent bugs** (Phase
+40). `is_phpstan_code` (relocated `is_phpstan_namespace` into
+`registry.rs`, plus a new `Registry::phpstan_class_files` map populated
+at the two existing file-load call sites) ports real `ApiRuleHelper::
+isPhpStanCode`'s second half: a `PHPStan\*`-namespaced *caller* now also
+needs its target's declaring file to actually live under a `vendor/`
+directory before a same-namespace API-usage diagnostic fires - wired
+into the three consuming `report_*` helpers, not into `resolve_if_
+phpstan` itself (whose target-only namespace pre-filter also feeds a
+tenth call site, `check_instanceof_deprecated`, that real PHPStan runs
+unconditionally off a hardcoded attribute table with no `isPhpStanCode`
+involvement at all - gating it the same way would have been a new false
+negative). Two more real, pre-existing bugs found in the same file and
+fixed in the same pass: a bare `namespace PHPStan;` (no trailing
+backslash) failed `is_phpstan_namespace`'s own length guard, unlike real
+PHPStan's own special-cased exact match; and `ExprKind::StaticCall`'s
+own pre-filter gated on the *literally-written* class name's namespace
+before ever reaching the real declaring-class check one line later, so
+`MyNonPhpStanSubclass::inheritedPhpStanMethod()` (a non-`PHPStan\*`-
+namespaced subclass of a real PHPStan API class) never even reached the
+existing member check - fixed by resolving the real declaring class
+first and gating on *that*, matching real `ApiStaticCallRule`'s own
+single-check shape.
+
+**Too-wide return/property types, by-ref parameter checks, `@param-out`**
+(Phase 45). New `@param-out Type $name` PHPDoc tag support
+(`ParamSig::out_ty`) unlocks both halves of this item. 45A: `Checker::
+current_function_return_points`/`current_function_saw_explicit_return`
+(mirroring the existing `TooWideFunctionThrowTypeRule` port's own
+choke points) feed `check_too_wide_return_type`
+(`TooWideFunctionReturnTypehintRule`/`...MethodReturnTypehintRule`,
+`return.unusedType`, level 4, opt-in for protected/public non-final
+methods) and its property-assignment sibling (`property.unusedType`,
+private-only, including a separate static-property message variant). A
+real, load-bearing correction found via the test suite before this even
+reached corpus verification: real PHPStan's own `TooWideTypeCheck::
+narrowType` only ever acts when the declared type is literally a
+multi-member `UnionType` - a single, non-Union declared type (a bare
+`list<int>`, an `Intersection`, ...) must bail unchanged, not be treated
+as "one member to check," or it produces a redundant second diagnostic
+duplicating what `return.type` already reports. 45B: `Checker::current_
+function_by_ref_params` feeds `check_param_out_assignment`/`check_by_
+ref_value` (`parameterByRef.type`, level 3) on a direct `$byRefParam =
+expr;`/compound-assign, checked against `@param-out`'s widened type when
+present or the native declared type otherwise. Not built, disclosed:
+45C (`ParameterOutExecutionEndTypeRule`, unioning each by-ref
+parameter's exit-point values), 45D (too-wide by-ref narrowing), and
+destructuring/`foreach`-rebind coverage for 45B - see Pending. Two real,
+severe bugs the Piwigo corpus-verification pass itself found and fixed
+in the shared type-inference machinery 45A's own comparison depends on,
+neither specific to this item's own new code: (1) `checker::resolve::
+resolve_pseudo` never recursed into a generic class reference's own
+type arguments (`Type::Object(name, args)`) or a PHPDoc conditional
+type's nested positions, so `self`/`static`/`parent` written *inside* a
+generic argument (`SortEntry<self, string>`) never got resolved - a
+real, pre-existing bug (confirmed present in this project before this
+session), not something 45A introduced, just the first consumer to
+depend on the comparison being correct enough to expose it; (2)
+`check_too_wide_return_type`'s own actual-vs-declared comparison used a
+plain boolean `is_assignable`, where real PHPStan's own algorithm is
+trinary (`isSuperTypeOf(...)->no()` - only a *definite* no flags a
+member; `MixedType::isSubTypeOf` returns `Maybe` against anything else,
+which real PHPStan treats as "keep, don't flag") - so any return whose
+actual type widened to `Mixed` (an untyped Doctrine hydration result,
+`ReflectionMethod::invoke()`, an anonymous class's own untracked
+property, ...) got every declared member flagged as "never returned,"
+a systemic false positive across the entire unscoped corpus fixed by
+treating an actual `Mixed` member as automatically satisfying every
+declared member, matching the real trinary "Maybe" answer.
+
+**PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
+dependency (a new, first-ever C dependency, gated behind a `pcre-
+validate` Cargo feature defaulted on - `--no-default-features` keeps the
+crate building 100% pure Rust at the cost of only this one diagnostic),
+using the low-level `pcre2_compile_8` FFI entry point directly rather
+than the higher-level `pcre2` crate's safe `bytes::RegexBuilder` (which
+has no way to set PHP's `J`/`PCRE2_DUPNAMES` modifier - a real, legal
+pattern like `/(?<a>x)|(?<a>y)/J` would otherwise always report a false
+"duplicate capture group" compile error). `checker/preg_pattern_
+validity.rs` wires `regexp.pattern` (matching real PHPStan's own
+identifier, level 0/always-on) into all 8 real `preg_*` functions
+taking a pattern argument, including the array-of-patterns form for
+`preg_replace`/`preg_replace_callback`/`preg_filter` and the keyed-array
+form for `preg_replace_callback_array`. Also validates the no-closing-
+delimiter case (own wording, since PHP's own exact C-source text for it
+isn't vendored here to match verbatim) and PHP's own version-gated
+delimiter/modifier wording. A real, corpus-confirmed bug found and
+fixed during verification, in the shared `regex_groups::split_
+delimiters_and_modifiers` this check and the pre-existing capture-group
+scanner both depend on: real PHP's own `ext/pcre` skips leading
+whitespace before reading the delimiter character (and tolerates
+trailing whitespace after the modifiers) - confirmed live, `preg_split("
+/abc/x", ...)` (a literal leading space) compiles and runs fine. This
+isn't contrived: PHP's own flexible heredoc/nowdoc indentation stripping
+(7.3+) only removes whitespace common with the *closing marker's* own
+indentation, so a multi-line `/x`-flagged regex written with nested,
+readable indentation deeper than its own closing marker legitimately
+keeps literal leading spaces before its real delimiter - Symfony's own
+`OptionsResolver::splitOutsideParenthesis()` is exactly this shape, and
+was a real false positive before the fix.
+
+**`@internal`'s remaining PHPDoc/attribute surface, and `restricted_
+symbols`** (Phase 67). The `@internal` engine's `RestrictedClassNameUsage
+Extension`-equivalent coverage - previously member access, instantiation/
+instanceof/catch, and native param/return hints only - now also covers
+every PHPDoc-tag class-name position (`@var`, `@assert`, `@method`,
+`@mixin`, `@property`, `@phpstan-require-extends`/`-implements`/
+`-sealed`, `@template` bound/default) and attribute usage, reusing the
+exact threading network Phase 48's own `class.nameCase` work had just
+built for those same positions - plus the real member-is-internal
+exemptions (a static call/property/const access whose own *member* is
+itself internal). New, separate declarative `restricted_symbols` config
+(no CLI flag - a structured list doesn't fit one): bans a specific
+function/method/static-method/property/static-property/class-constant/
+class project-wide with a custom message, opt-in, mirroring the real
+`spaze/phpstan-disallowed-calls` package's own shape rather than real
+PHPStan core (which has no built-in implementation of this family at
+all - every real instance is a hand-written third-party extension).
+Case-sensitivity matches real PHP exactly: property/static-property/
+class-constant keys are case-sensitive, function/method/static-method/
+class keys are case-insensitive. The `Class` kind's own detection
+surface (instantiation, `instanceof`, `catch`, `extends`/`implements`,
+param/return type hints) reuses the identical `@internal`-engine
+threading above.
+
+**Class-specific `ReflectionMethod<T>`/`ReflectionProperty<T>` modeling**
+(Phase 77). A synthetic, stub-patched `@template-covariant TClass of
+object` (not present in real phpstorm-stubs, purely an internal
+enrichment on top of it - the same technique already used for
+`ReflectionClass<T>`'s own constructor binding) lets `ReflectionClass<T>
+::getMethod()`/`getMethods()`/`getProperty()`/`getProperties()` return
+`ReflectionMethod<T>`/`ReflectionProperty<T>` (propagating the
+*receiver's* own template) instead of the stub's bare, untemplated
+collections, and lets `ReflectionMethod<TClass>::getDeclaringClass()`/
+`ReflectionProperty<TClass>::getDeclaringClass()` hand back a properly
+`ReflectionClass<TClass>`. The new synthetic `TClass` is explicitly
+exempted from `missingType.generics` (`ReflectionMethod`/
+`ReflectionProperty` added to the same exemption list as `Traversable`/
+`Iterator`/etc.) - required, not optional: without it, every ordinary
+bare `ReflectionMethod $m` type hint anywhere (a return type, a param, a
+`@var`) would start producing a brand-new false positive at level 6+,
+since real PHPStan does not consider either of these two classes
+generic at all.
+
+**`DOMDocument::createElement()`/`SimpleXMLElement` validation** (Phase
+78). `checker/xml_name.rs`'s `is_valid_xml_name` implements the W3C XML
+1.0 `Name` production (colon-permissive - confirmed live against PHP
+8.5, `createElement('a:b')` succeeds, so this is the base `Name`
+grammar, not the namespace-restricted `NCName` one) validating
+`(new DOMDocument())->createElement($name)`'s single tag-name string
+argument before it would throw `DOMException` - structurally identical
+in shape to the already-solved `DateInterval` duration-spec grammar, not
+"full XML-content validation" the way ROADMAP originally, incorrectly,
+lumped it with SimpleXML's own item. `checker/xml_wellformedness.rs`
+adds a new, ordinary (non-optional, no C toolchain) `roxmltree`
+dependency - cheaper than the C dependency Phase 46 already accepts in
+this same pass - validating `new SimpleXMLElement($literal)`/
+`simplexml_load_string($literal)`'s own XML well-formedness; the latter
+gets the `argument.type` diagnostic only (it returns `false` on failure,
+never throws, so it never touches the `@throws`-tag/dynamic-throw-type
+family). Both wire into `dynamic_new_throw_type`/`dynamic_method_throw_
+type` for the `@throws`-tag consumer (`DOMException` for `createElement`,
+a plain `\Exception` for `SimpleXMLElement`'s constructor, confirmed
+live against PHP 8.5 - there's no dedicated SimpleXML exception class).
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -931,6 +1258,34 @@ call's incidental effect on an already-declared variable's type
 never does, so a read afterward still resolves to the variable's real
 declaration.
 
+**Fuzz testing infrastructure** (Phase 19). `cargo-fuzz` for the lexer/
+parser: `lex_parse` (primary target, mirroring production's exact
+`String::from_utf8_lossy`+lex+parse pipeline, including its own 64MiB
+worker-thread stack - libFuzzer's default ~8MiB main-thread stack would
+trivially and repeatedly rediscover an already-fixed stack-overflow bug,
+drowning out any new finding) and `token_stream_parse` (secondary,
+bypasses the lexer via `arbitrary`-derived `Token`/`Keyword`/
+`StringPart`, gated behind a new opt-in `fuzzing` Cargo feature so the
+main crate never pulls in `arbitrary` for ordinary builds), both seeded
+from this project's own already-vendored real-world PHP. Dev-only, an
+ongoing local workflow (`cargo +nightly fuzz run`), not a CI gate.
+
+**Extension API, Axis 1 + Axis 2** (Phase 18). Axis 1 (declarative,
+config-driven symbol restriction) is `restricted_symbols`, above. Axis
+2: a new public `ReflectionRule` trait (`src/reflection_rule.rs`) over
+already-latent-public reflection data (`Project::registry()`/
+`Registry.classes`/`.functions`, `Diagnostic`, `ast::{Stmt, Expr, ...}`
+were already `pub` with fully-`pub` fields, an accidental extension
+surface this formalizes rather than invents) - default no-op trait
+method bodies, `Project::run_reflection_rules` iterating every known
+class/function. Explicitly documented as *not* parity with real
+PHPStan's own `Rule<TNodeType>`: no inferred per-expression type, no
+flow-sensitive narrowing, no `Locals` visibility. Axis 3 Stage 1 (an
+internal `Vec<Box<dyn InternalRule>>` trait-object dispatch mechanism,
+proving the pattern for a future public `Rule<TNode>` equivalent) is
+also done - see Pending for Stage 2, gated on this Stage's own corpus
+diff (confirmed exactly clean).
+
 ---
 
 # Pending / partial
@@ -952,146 +1307,66 @@ incidental effect on an already-declared variable never does, on
 purpose (a read should resolve to where the variable was really
 declared, not every call that happened to touch it since).
 
-**18 - Extension/plugin API (PLANNED).** Deliberately last - premature
-before the rule/type-extension catalog is rich enough for a third party
-to want to extend.
+**18 - Extension/plugin API, Axis 3 Stage 2 (PARTIAL).** Split into 3
+axes: Axis 1 (declarative `restricted_symbols`) and Axis 2 (a public
+`ReflectionRule` trait over already-public reflection data) are fully
+done (see Done). Axis 3 (a flow-sensitive, AST-node-dispatched
+`Rule<TNode>` equivalent) is staged: Stage 1 - migrating `Method
+ThrowTypeCovarianceRule` off its hardcoded call site onto a real
+internal `Vec<Box<dyn InternalRule>>` trait-object dispatch mechanism -
+is done and its own mandatory full corpus diff came back exactly clean
+(a pure internal refactor, zero behavior change), which is what actually
+unblocks Stage 2 rather than assuming it. Stage 2 - exposing a public
+`trait Rule`/`Scope`-equivalent, now that Stage 1 has proven the
+dispatch pattern - is not yet built: still needs a public-API-stable
+`Scope` facade over `Checker`'s currently `pub(crate)`/module-private
+flow-sensitive state (`Locals`, `ProvenanceMap`, `GuardedMemberSet`) and
+a real per-node-kind injection point into `check_program`'s single-pass
+traversal, both real, disclosed engineering work rather than a size/
+demand call. Declined outright, not staged: any `dlopen`/`cdylib`
+dynamic-loading mechanism (no stable Rust ABI without a large separate
+FFI project) and a NEON registration syntax (no parser exists project-
+wide for NEON, already declined elsewhere for the same reason).
 
-**19 - Fuzz testing (NOT STARTED).** `arbitrary`+`cargo-fuzz` for the
-lexer/parser, `proptest` for `types.rs`'s subtyping logic. Dev-only.
-
-**40 - PHPStan-API-usage checks (PARTIAL, one gap left, low priority).**
-Done for instantiation, static calls, class-const fetches, `instanceof`,
-`extends`/`implements`/trait-use, and three general-purpose `Rules/Api/*`
-rules ROADMAP never separately tracked: `RuntimeReflectionFunctionRule`/
-`RuntimeReflectionInstantiationRule` (`phpstanApi.runtimeReflection` -
-`is_a()`/`class_parents()`/etc. and `Reflection*` instantiation inside a
-class implementing a `PHPStan\*` interface) and `OldPhpParser4ClassRule`
-(`phpParser.classRenamed` - a bare reference to one of ten renamed
-nikic/php-parser v4 class names), plus `PhpStanNamespaceIn3rdPartyPackageRule`
-(`phpstanApi.phpstanNamespace`, a `namespace PHPStan\...;` declaration
-whose nearest `composer.json` isn't named `phpstan/*` - the one rule of
-the four that needed a real file path on disk, via a new `composer::
-find_composer_package_name` upward walk). The `extends` mirror derives
-`phpstanApi.interface` (vs. `phpstanApi.class`) for an interface's own
-multi-parent `extends` list, matching real PHPStan's own
-`ApiInterfaceExtendsRule`/`ApiClassExtendsRule` split by declaring-node
-kind, including the class-only `PHPStan\Analyser\MutatingScope`
-extends-exemption; `instanceof`'s own class/interface/trait identifier
-distinction (`phpstanApi.{class,interface,trait}`) was already correct
-before this batch, confirmed by an existing passing test.
-
-Phase 40.C: `ApiMethodCallRule`'s general receiver-type inference (method
-calls) and `NodeConnectingVisitorAttributesRule` are done too, folded
-into the *main* `Checker` pass (`checker/expr.rs`'s own `MethodCall` arm)
-instead of `phpstan_api.rs`'s own previously-separate `Walker` - that
-pass's own existing `find_method_receiver` already computes a call's
-real declaring class via full general inference for an unrelated purpose
-(member resolution), recognizing every receiver shape (an arbitrary
-chained call, `$this->ownMethod()`, ...), not just a directly-typed
-parameter or `$this->prop->method()`. `Registry::phpstan_api_check_enabled`
-mirrors `Project`'s own identically-named field (set once from
-`composer::detect_phpstan_dependency`) so the main `Checker`, which only
-ever has `&Registry` in hand, can read it too. The old walker's own
-narrower version of both checks (`ParamTypes`/`class_prop_types`'s only
-real consumers) was retired.
-
-One real, pre-existing, already-disclosed limitation (not introduced by
-this fold-in, just newly *reachable* through it): `is_phpstan_namespace`
-is a namespace-prefix check only, unlike real PHPStan's own
-`ApiRuleHelper::isPhpStanCode`, which also confirms the declaring class's
-file actually lives under a `vendor/` directory - a third-party PHPStan
-*extension* package that (by convention, not uncommon) names its own
-rule classes under the literal `PHPStan\Rules\...` prefix will see its
-own internal `$this->ownMethod()` calls flagged as if they were real
-PHPStan core code, confirmed directly analyzing `vendor/phpstan-strict-
-rules` as a standalone target. Not a corpus regression for this
-project's own actual target (Piwigo has no `PHPStan\*`-namespaced code
-of its own, so `phpstan_api_check_enabled` never engages for it at all) -
-this project's registry still doesn't track a per-class declaring file
-path, the same reason this gap was already accepted, not built around,
-for every other check in this family.
-
-**45 - Declared-vs-actual-narrowest-type inference (PLANNED).** No
-mechanism compares a declared type against the narrowest type a body
-could actually produce. Splits into a return/property variant (unions
-every actual return/assignment against the declared type) and a
-by-reference-parameter variant. The by-ref half is only partly gated on
-`@param-out` tag support this project doesn't have: real PHPStan's
-`ParameterOutAssignedTypeRule`/`ParameterOutExecutionEndTypeRule` also
-apply, tag-independent, to an *ordinary* native by-ref parameter
-(`function f(int &$x)`) - checking every reassignment inside the body,
-and the parameter's value at every `return`/execution-end point, against
-its own declared native type. That tag-independent half needs no new
-tag concept, just per-function reassignment-site tracking; only the
-`@param-out`-specific widening (a documented, deliberately wider
-by-ref-exit type) needs the tag concept itself.
-
-**46 - PCRE pattern-validity checking (PLANNED).** No malformed-regex
-detection (`regex_groups.rs` only extracts structure, never validates).
-Needs a real `pcre2` binding - this project's first C dependency - since
-Rust's own `regex` crate is a different-enough flavor to give wrong
-answers on real PCRE patterns.
+**45 - Declared-vs-actual-narrowest-type inference (PARTIAL).** The
+return/property variant (45A) and the by-ref direct-assignment variant
+(45B, gated on new `@param-out` tag support) are both done - see Done.
+Not built: `ParameterOutExecutionEndTypeRule` (45C - unioning each
+by-ref parameter's value at every `return`/execution-end point against
+its declared/`@param-out` type) and `TooWideFunctionParameterOutTypeRule`/
+`TooWideMethodParameterOutTypeRule` (45D - too-wide narrowing for by-ref
+parameters), plus destructuring-target (`[$a, $byRef] = foo()`) and
+`foreach ($x as &$byRef)`-rebind coverage for the by-ref check 45B
+already builds for a plain `$x = ...`/`$x += ...` assignment. Also
+declined, a confirmed architectural wall rather than an effort call:
+cross-file trait-supplied property-assignment tracking for the property
+variant (45A's own property half) - `Checker::check_file` builds one
+fresh, single-use `Checker` per file, and `check_trait_methods` walks a
+host class's own inherited trait methods from *the trait's declaring
+file's* `Checker` instance, never the host's, so a write into the
+host-scoped `current_class_property_assign_types` accumulator made while
+checking the trait's file can never reach the host's own accumulator -
+the same blind spot `check_unused_private_members`'s own trait handling
+already has, for the identical reason (`flatten_traits` only ever clones
+method/property signatures into a host's `ClassInfo`, never trait body
+statements). A real structural fix needs either re-checking each trait's
+methods from within every host's own `Checker` instance, or a genuinely
+new two-pass (collect-then-consume) checking architecture - both out of
+this item's own scope, pinned with a regression test documenting the gap
+rather than silently missed.
 
 **48 - Symbol-existence pipeline, remaining stretch goals (PARTIAL).**
 The existence-check MVP, typed-class-constant validation, multi-
-namespace-per-file positional tracking, and a `use`-imported build-
-tool-mangled-prefix check (`class.prefixed`) are all done (see Done).
-`ClassCaseSensitivityCheck`'s own class-name-case half is now done too:
-`Registry::canonicalize_class_name_case` (a one-time O(classes)
-rewrite pass run right after indexing, before any ancestor-graph walk
-reads `extends`/`implements`/`uses`) plus `Registry::lookup_class`
-(mirroring `lookup_function`'s exact case-insensitive-fallback shape)
-fix the underlying resolution bug, and a new `class.nameCase`/
-`interface.nameCase`/`trait.nameCase`/`enum.nameCase` diagnostic
-(`checker::resolve::check_class_name_case`) flags a differently-cased
-reference. Phase 48.H widened its call sites from just a class/enum
-declaration's own `extends`/`implements`/trait-`use` to every native-
-syntax class-name reference: `new`, `instanceof`, a static method/
-property/constant access (`Foo::...`), and a `catch` clause - none of
-which needed new parser/registry plumbing (the raw, as-written text
-was already a bare AST string at each position). Every *PHPDoc-typed*
-position is done too now (a param/return/property hint, `@method`/
-`@mixin`/`@phpstan-type` tag target) - this project's own type-parsing
-pipeline collapses each reference straight into a resolved `Type` with
-no per-reference raw spelling retained anywhere by the time any
-checker call site sees it, so this needed a parallel traversal run one
-step earlier in the parse pipeline instead: `registry::name_context::
-collect_class_name_case_refs`, structurally identical to `resolve_
-names_in_type` but collecting `(raw, resolved)` pairs into a side list
-rather than rewriting the `Type` in place, run right after `mark_
-template_params` (so a real `@template` is never mistaken for a stray
-reference) and right before `resolve_names_in_type` destroys the
-pre-resolution spelling. `ParamSig::case_refs`/`FunctionSig::
-return_case_refs`/`PropertySig::case_refs`/`ClassInfo::mixin_case_refs`/
-`type_alias_case_refs` populate it at every real construction site;
-`Checker::check_type_class_name_case` is the pure fan-out consumer,
-re-running the unchanged `check_class_name_case` per pair. Deliberately
-excluded, disclosed: a *backfilled* (inherited-docblock) position never
-gets `case_refs` propagated (the raw text was written under an
-ancestor file's own `use` imports, not this file's `name_ctx` - a real
-cross-file-context hazard, not just noise); `@phpstan-assert`-family
-tags and a property hook's own `set()` parameter type would need the
-identical mechanism on a third/fourth struct, not attempted; a
-closure/arrow-fn literal's own param/return type hints use a simpler,
-separate mechanism (`resolve_type_hint`, no registry-field lifecycle
-needed) and aren't wired either. A real, corpus-confirmed pre-existing
-bug this wave's own corpus round surfaced for the first time (`vendor/
-marc-mabe/php-enum`'s own `MabeEnum\Enum` class - a real, valid, class
-literally named the same as the `enum` keyword): `Parser::
-take_name_segment`'s own keyword-as-identifier recovery
-(`Token::Keyword(kw) => kw.as_str().to_string()`) reconstructs a
-keyword-shaped identifier from the keyword's own canonical (always
-lowercase) spelling, not the original as-written source text - so
-`class Enum { ... }` parses with its own declared name silently
-corrupted to `enum`, well before any registry/case-checking logic ever
-runs. Not fixed here - `Token::Keyword` carries no raw source text at
-all today, so a proper fix means threading it through the lexer's own
-token representation, a foundational change with a much wider blast
-radius (symbol lookup, type resolution, hover, go-to-definition, not
-just case-checking) than this item's own scope; narrow real-world
-incidence (one file, one vendor package, across this project's entire
-verification corpus) don't justify attempting it opportunistically here.
-`ExistingClassesInPropertyHookTypehintsRule`'s
+namespace-per-file positional tracking, a `use`-imported build-
+tool-mangled-prefix check (`class.prefixed`), and the full `class.
+nameCase`/`interface.nameCase`/`trait.nameCase`/`enum.nameCase` family
+(every native-syntax and PHPDoc-typed position, including property
+hooks' own `set()` parameter, `@phpstan-assert`-family tag targets,
+`@phpstan-require-extends`/`-implements`/`-sealed` RHS, and closure/
+arrow-fn literal param/return hints) are all done (see Done), along with
+the real `Parser::take_name_segment` keyword-as-identifier case-
+corruption bug (`class Enum { ... }` silently renaming itself to `enum`)
+that family's own corpus round first surfaced. `ExistingClassesInPropertyHookTypehintsRule`'s
 existence-checking half is done (Phase 43 unblocked it); its other
 sub-checks (a template type not referenced in a parameter, an
 unresolvable native type, a native union type pre-PHP-8.0) turned out
@@ -1145,44 +1420,15 @@ built-in); a `@method` tag's own inline generic template syntax (zero
 corpus value, and this project's `@method`-tag parser has no
 template-syntax support to build on at all).
 
-Phase 54/77 follow-up: `new X(...)` now binds a generic class's own
-class-level `@template`s from the constructor's declared param types
-against the actual argument types (`infer_expr`'s `ExprKind::New` arm,
-`checker/expr.rs`) - the same `bind_template_param`/`TemplateBindings`
-primitive ordinary call-site inference already uses, just against a
-constructor instead of a function. `ReflectionClass<T>` itself needed a
-narrow, disclosed patch on top (`php_stubs::patch_reflection_class_
-constructor_template`): real phpstorm-stubs' own `@param
-class-string<T>|T $objectOrClass` never reaches `ParamSig::ty` for this
-one parameter (a real gap in the doc-merge pipeline for a native hint
-also carrying a `#[LanguageLevelTypeAware(...)]` attribute - confirmed
-not a problem with the general mechanism itself, which works correctly
-for the identical type shape on a project-local class with no such
-attribute). A template the constructor never binds stays erased
-(trimmed off the trailing end) rather than filled with `Mixed`, so the
-class's own `@template T = Default` fallback still applies -
-`bind_template_param` itself also gained a bound check rejecting a bare
-`T` (`@template T of object`) binding to a definite scalar argument
-(`new ReflectionClass($className)` from a plain `string` variable, not
-`Foo::class`), a real corpus find caught before landing. Disclosed
-residual: `new ReflectionClass('Foo')` - a bare string literal, not
-`Foo::class` - still won't bind `T` (`bind_template_param` has no arm
-treating a string literal's own *value* as a class-name reference). A
-second, separate, pre-existing gap this same corpus round exposed for
-the first time (since `new SortEntry(...)`-shaped code never produced a
-non-erased generic type argument to compare before): comparing a
-covariant generic object nested inside a `list<...>`/`non-empty-list<...>`
-type (both sides `Intersection([Array(...), Accessory(ArrayList)])`)
-against a differently-argued declared type incorrectly fails even when
-the object's own `@template-covariant` slot would make it a valid
-subtype at the bare (non-array-wrapped) level - confirmed via an
-isolated repro with zero `new`/inference involved (a plain `@var
-list<...>`-annotated local reproduces it identically), so this is a
-real, standalone `Intersection`-vs-`Intersection` assignability gap
-(`registry/assignability.rs`'s own `(Intersection(members), _) => .any`
-arm decomposing `sub` before `sup` ever gets a chance to be decomposed
-member-wise against it), not something constructor-argument binding
-itself got wrong - left as its own, separately-scoped follow-up.
+Phase 54/77 follow-up (now fully done, see Done): constructor-argument-
+driven class-level `@template` binding, including a bare-string-literal
+`new ReflectionClass('Foo')` form (not just `Foo::class`). The
+previously-disclosed `Intersection`-vs-`Intersection` covariant-generic-
+in-`list<>` gap was re-investigated and confirmed **not to reproduce**
+against current HEAD - the specific mechanism blamed (a generic `.any()`
+arm decomposing `sub` before `sup`) cannot occur for that shape at all,
+since the specific, textually-earlier `Intersection`-vs-`Intersection`
+arm has existed since Phase 14, predating the note that named it a gap.
 
 **56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
 a lenient, hand-rolled ad-hoc string tokenizer (not built on the
@@ -1195,62 +1441,47 @@ motivation is narrower: robustness of the general type-expression
 grammar itself (deeply nested generics/conditional types/complex
 intersections), not corpus-evidenced as a live gap today. Size: XL.
 
-**67 - `@internal` restricted-usage engine, remaining (PARTIAL).**
-Calls, property/constant access, instantiation, `instanceof`, `catch`,
-`extends`/`implements`/trait-use, both a named function/method's own
-*and* a closure/arrow-fn literal's own native param/return type-hints
-(`parameter.internal{Type}`/`return.internal{Type}`), first-class-
-callables (`$obj->method(...)`/`Foo::method(...)`, wired via `d4efb41`
-into the same `check_internal_method_call` an ordinary call already
-runs), and the implicit `__toString()` call an echo/print/string-cast/
-interpolation triggers (`Checker::check_implicit_tostring_usage`, real
-PHPStan's own `RestrictedUsageOfDeprecatedStringCastRule` - previously,
-incorrectly, bundled into this phase's own Declined list below as if it
-were unbuilt) are all covered (see Done). Declined, a verified genuine
-architectural mismatch rather than a scope trim: the separate, user-
-configured restricted-usage mechanism (`RestrictedClassConstantUsageRule`
-and eight further siblings - confirmed via exhaustive grep across
-`vendor/phpstan-src/src`, exactly five real implementations exist at all,
-all under `Rules/InternalTag/`, i.e. the `@internal` engine already built
-above) - real PHPStan's own family are bare extension-point interfaces
-with *zero* built-in implementation; every real instance is a hand-
-written third-party class registered via `services.neon`, and this
-project has no plugin-loading mechanism at all (Phase 18, deliberately
-last). A purely declarative alternative (a static `restricted_symbols:
-Vec<{kind, name, message}>` config list) would be a materially different
-feature shape, needing its own new phase if ever wanted.
-
-**75 - String accessory case-tracking (PLANNED).** No `Lowercase`/
-`Uppercase`/`DecimalIntegerString` accessory kinds; `strtolower()`/
-`strtoupper()` and friends don't produce case-tracked types. Literal-
-string is never inferred from concatenation, undermining the feature's
-main real-world use (SQL-injection-safety checking). Size: M.
+**67 - `@internal`/`restricted_symbols`, remaining (PARTIAL).** The
+`@internal` restricted-usage engine (calls, property/constant access,
+instantiation, `instanceof`, `catch`, `extends`/`implements`/trait-use,
+native param/return type-hints, first-class-callables, implicit
+`__toString()`, and now every PHPDoc-tag/attribute-usage class-name
+position too) and the declarative `restricted_symbols` config list (this
+phase's own answer to the separate, user-configured restricted-usage
+mechanism real PHPStan's third-party extensions implement) are both done
+- see Done. Declined, a genuine missing-prerequisite gap rather than a
+scope trim: the real `spaze/phpstan-disallowed-calls` package's own much
+larger allow/disallow-in filter DSL (~12 keys, attribute-*context*-
+matching beyond plain attribute *usage*) - no call-site-scope-path/
+attribute-context matching mechanism exists anywhere in this checker to
+build on yet, and its namespace/enum/superglobal/keyword-specific
+siblings are each a materially different detection shape needing its
+own separate investigation.
 
 **77 - Runtime-capability modeling, remaining (PARTIAL).** Most of the
-originally-scoped functions, plus `SimpleXMLElement`'s own magic-
-property type resolution, are done (see Done). `ReflectionClass<T>`'s
-own constructor-argument-driven binding is now built too (see Done,
-Phase 54/77 follow-up). Deeper reflection-class modeling beyond that -
-e.g. `getMethods()`/`getProperties()` returning real, class-specific
-`ReflectionMethod`/`ReflectionProperty` collections rather than the
-stub's own generic ones - remains unbuilt: needs genuinely new
-infrastructure this project doesn't have, with no corpus evidence of
-heavy usage to justify building it speculatively.
+originally-scoped functions, `SimpleXMLElement`'s own magic-property
+type resolution, `ReflectionClass<T>`'s own constructor-argument-driven
+binding, and class-specific `ReflectionMethod<T>`/`ReflectionProperty<T>`
+modeling (`getMethods()`/`getProperties()`/`getMethod()`/`getProperty()`
+now propagate the receiver's own `T` instead of returning the stub's
+generic, untemplated collections) are all done (see Done). Binding a
+*specific* member's own value type (a literal property/method name
+resolved at the type level for `getValue()`/`invoke()`) remains a
+further, separate stretch beyond what any real PHPStan extension does
+either - not attempted, not a disguised decline.
 
-**78 - DateTime/DOM/SimpleXML, remaining (PARTIAL, both items
-declined).** `DateInterval`'s own duration-string grammar,
-`DateTimeInterface::format()`/`DateInterval::format()` return-type
-wiring, `DateTimeInterface::diff()`'s `days: int` narrowing, and
-`SimpleXMLElement::asXML()`'s arity-dependent overload split are all
-done (see Done). The two remaining named items are both declined, not
-merely unscheduled - `DOMDocument`/`SimpleXMLElement` XML-content
-validation and `DateTime`'s relative-date-string parsing each need real
-PHP-runtime/XML-parser simulation this project has no way to do, and
-each decision is already made and recorded elsewhere: `checker/throws/
-dynamic.rs`'s own doc comment explicitly excludes the DOM/SimpleXML/
-DateTime-relative-string dynamic-throw-type extensions from its curated
-subset "already, separately declined under Phase 78 - this phase
-doesn't re-litigate that." No buildable code gap remains here.
+**78 - DateTime, remaining (PARTIAL, declined).** `DateInterval`'s own
+duration-string grammar, `DateTimeInterface::format()`/`DateInterval::
+format()` return-type wiring, `DateTimeInterface::diff()`'s `days: int`
+narrowing, `SimpleXMLElement::asXML()`'s arity-dependent overload split,
+`DOMDocument::createElement()`'s own W3C XML `Name`-grammar tag-name
+validation, and `SimpleXMLElement`/`simplexml_load_string()`'s own XML
+well-formedness validation are all done (see Done). Only `DateTime`'s
+relative-date-string parsing stays declined - it needs real PHP/ICU
+runtime simulation, not a formally-specified grammar any crate
+replicates (unlike XML well-formedness, which does have one). `checker/
+throws/dynamic.rs`'s own doc comment names this as the one remaining
+excluded dynamic-throw-type extension.
 
 **82 - Collector / cross-file aggregation architecture (RETIRED - real
 architecture built as a registry fixed point instead; see Phase 41,
@@ -1267,23 +1498,20 @@ collectors) turned out not to need this architecture either, and is
 also built (see Phase 15, Done). The remaining 5 collectors feed
 genuinely narrow, low-value, self-contained rules, none built.
 
-**83 - Whole-project duplicate class-name detection (PLANNED, low
-priority).** A genuine architectural conflict, not just low-priority:
-the registry's own "second unconditional declaration merges as a
-targeted stub override" behavior (needed for real corpus correctness)
-is indistinguishable, in this project's current design, from an
-accidental duplicate. Real PHPStan tells them apart via a `stubFiles`
-loading mechanism this project has no equivalent of - needs
-file-provenance tracking as a genuine new prerequisite. Size: XL, low
-value.
-
-**84 - `RuleLevelHelper`-equivalent tri-state type-acceptance
-architecture (PLANNED, low priority).** `is_assignable`/`is_subtype`
-return plain `bool`, no tri-state (`Yes`/`No`/`Maybe`)-with-reasons
-result. Re-evaluated as low-value: every "maybe" already resolves to a
-concrete answer somewhere in the match arms today, so the rewrite would
-touch every call site without changing any diagnostic's actual outcome.
-Size: XL, low-medium value.
+**84 - `RuleLevelHelper`-equivalent level-aware type-acceptance,
+remaining (PARTIAL).** `Registry::accepts_at_configured_level` (see
+Done) closes the real gap at its own 8 target call sites: `project.level`
+now genuinely modulates argument/return/property-type strictness
+(stripping `Null` below level 8, `.any()`-vs-`.all()` below level 7),
+including the level-8+-strict nullable-type case that was the feature's
+single most common real-world trigger. Declined, a change large and
+disconnected enough from this item's own 8-call-site scope to need its
+own future phase: `checkExplicitMixed`/`checkImplicitMixed`/
+`checkBenevolentUnionTypes` (real level 9/10) - `Type::Mixed` has no
+explicit-vs-implicit provenance field to key them off, and no
+`BenevolentUnionType` analogue exists at all; building either means
+threading provenance through every inference site that currently
+collapses to `Mixed`.
 
 ---
 

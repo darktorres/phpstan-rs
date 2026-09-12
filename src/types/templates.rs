@@ -86,6 +86,54 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMa
     }
 }
 
+/// Rewrites `arg_ty` so a string-literal argument occupying a
+/// `class-string<T>`-shaped position in `param_ty` is treated the way real
+/// PHPStan's own `ConstantStringType::isClassString()`/
+/// `getClassStringObjectType()` treats it: a literal naming a real,
+/// existing class binds a template exactly as well as an explicit
+/// `Foo::class` would (confirmed directly against `vendor/phpstan-src/src/
+/// Type/Constant/ConstantStringType.php:98-115`). Mirrors `bind_template_
+/// param`'s own structural recursion (`Array`/`ClassString`/`Union`) so a
+/// literal nested inside e.g. `class-string<T>[]` or `class-string<T>|null`
+/// is reached too. Kept as a separate preprocessing pass rather than
+/// folded into `bind_template_param` itself since only a caller with
+/// registry access can answer "is this string a real class name" - this
+/// module deliberately has none (see the module doc above). Deliberately
+/// does NOT touch a bare `TemplateParam` position (`T $x` with no
+/// `class-string<>` wrapper) - real PHPStan's own `isClassString()` check
+/// only ever fires where the declared type is actually class-string-
+/// shaped, so a bare-`T` param taking a plain string argument must keep
+/// binding `T` to the string itself, not silently reinterpret it as an
+/// object.
+pub fn promote_class_string_literals(
+    param_ty: &Type,
+    arg_ty: &Type,
+    resolve_class: &impl Fn(&str) -> Option<String>,
+) -> Type {
+    match (param_ty, arg_ty) {
+        (Type::ClassString(_), Type::StringLiteral(s)) => match resolve_class(s) {
+            Some(canonical) => Type::ClassString(Box::new(Type::Object(canonical, Vec::new()))),
+            None => arg_ty.clone(),
+        },
+        (Type::Array(_, inner_p), Type::Array(key, inner_a)) => Type::Array(
+            key.clone(),
+            Box::new(promote_class_string_literals(
+                inner_p,
+                inner_a,
+                resolve_class,
+            )),
+        ),
+        (Type::Union(members), _) => members
+            .iter()
+            .find_map(|m| {
+                let promoted = promote_class_string_literals(m, arg_ty, resolve_class);
+                (promoted != *arg_ty).then_some(promoted)
+            })
+            .unwrap_or_else(|| arg_ty.clone()),
+        _ => arg_ty.clone(),
+    }
+}
+
 /// Applies a set of template bindings through a type tree, replacing every
 /// `TemplateParam` with its bound type. Phase 54: a name left unbound now
 /// falls back to that template's own declared `@template T = Default`

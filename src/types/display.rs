@@ -145,6 +145,9 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
         AccessoryKind::NumericString => "numeric-string",
         AccessoryKind::ArrayList => "list",
         AccessoryKind::NonEmptyArray => "non-empty-array",
+        AccessoryKind::LowercaseString => "lowercase-string",
+        AccessoryKind::UppercaseString => "uppercase-string",
+        AccessoryKind::DecimalIntegerString => "decimal-int-string",
     }
 }
 
@@ -198,17 +201,40 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         };
     }
     if members.contains(&Type::String) {
-        return match (
-            has(AccessoryKind::NonEmptyString),
-            has(AccessoryKind::NonFalsyString),
-            has(AccessoryKind::LiteralString),
-            has(AccessoryKind::NumericString),
-        ) {
-            (_, true, false, false) => Some("non-falsy-string".to_string()),
-            (true, false, false, false) => Some("non-empty-string".to_string()),
-            (false, false, true, false) => Some("literal-string".to_string()),
-            (false, false, false, true) => Some("numeric-string".to_string()),
-            _ => None,
+        // Phase 75: a generic ordered-parts join, replacing the old fixed
+        // 4-tuple match - behavior-preserving for every existing
+        // singleton case (each still produces the exact same name it
+        // always did), but also correctly composes a combination none of
+        // those 4 tuples covered (e.g. `date('Y')`'s own real
+        // `non-empty-numeric-string`, silently mis-rendered via the raw
+        // `&`-joined fallback before this fix) and the two new case-
+        // tracking kinds this phase adds. No `VerbosityLevel` concept
+        // exists anywhere in this project (real PHPStan hides `lowercase`/
+        // `uppercase` unless asked for "precise" verbosity) - always
+        // showing every part is strictly more informative, in-bounds per
+        // "stricter than PHPStan is fine."
+        let mut parts: Vec<&str> = Vec::new();
+        if has(AccessoryKind::NonFalsyString) {
+            parts.push("non-falsy");
+        } else if has(AccessoryKind::NonEmptyString) {
+            parts.push("non-empty");
+        }
+        if has(AccessoryKind::LowercaseString) {
+            parts.push("lowercase");
+        } else if has(AccessoryKind::UppercaseString) {
+            parts.push("uppercase");
+        }
+        if has(AccessoryKind::DecimalIntegerString) {
+            parts.push("decimal-int");
+        } else if has(AccessoryKind::LiteralString) {
+            parts.push("literal");
+        } else if has(AccessoryKind::NumericString) {
+            parts.push("numeric");
+        }
+        return if parts.is_empty() {
+            None
+        } else {
+            Some(format!("{}-string", parts.join("-")))
         };
     }
     None

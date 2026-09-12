@@ -51,6 +51,23 @@ fn is_pure_call_result_unused_diagnostic(d: &Diagnostic) -> bool {
     )
 }
 
+/// Phase 45 (item 11, 45A): `TooWideFunctionReturnTypehintRule`'s own
+/// `return.unusedType` fires unconditionally for a plain function (no
+/// opt-in gate the way the method-side variant has) whenever a declared
+/// `Union` return-type member is never actually produced by the analyzed
+/// body - which describes a large share of this whole suite's own
+/// minimal fixtures (a `array|false`-declared helper whose trivial body
+/// only ever returns the array half, an `int|string`-declared one that
+/// only exercises one branch, ...), none of which were written with this
+/// check in mind. The identical `missingType.*`/`noop` problem above, for
+/// a third family - see `is_missing_typehint_diagnostic`'s own doc
+/// comment. A test that specifically wants to see this
+/// (`checker/tests/return_type_too_wide.rs`) uses `all_diagnostics_for`
+/// instead.
+fn is_too_wide_return_type_diagnostic(d: &Diagnostic) -> bool {
+    d.identifier == "return.unusedType"
+}
+
 pub(super) fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
     diagnostics_for_with(src, |_| {})
 }
@@ -61,7 +78,9 @@ pub(super) fn diagnostics_for_with(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = all_diagnostics_for_with(src, configure);
     diagnostics.retain(|d| {
-        !is_missing_typehint_diagnostic(d) && !is_pure_call_result_unused_diagnostic(d)
+        !is_missing_typehint_diagnostic(d)
+            && !is_pure_call_result_unused_diagnostic(d)
+            && !is_too_wide_return_type_diagnostic(d)
     });
     diagnostics
 }

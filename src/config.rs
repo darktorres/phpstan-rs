@@ -17,6 +17,8 @@
 //! check_deprecated_usage = false
 //! check_missing_checked_exceptions = false
 //! scan_paths = ["vendor/some-manual-extra"]
+//! stub_paths = ["phpstan-stubs/Imagick.stub.php"]
+//! check_duplicate_class_declarations = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -95,6 +97,10 @@ pub struct Config {
     /// own doc comment for why this defaults to `false` (unset), the same
     /// reason every other opt-in check above does.
     pub check_too_wide_throw_type_in_protected_and_public_methods: Option<bool>,
+    /// Phase 45 (item 11, 45A): the return-type analogue - see
+    /// `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`'s
+    /// own doc comment for why this defaults to `false` (unset).
+    pub check_too_wide_return_type_in_protected_and_public_methods: Option<bool>,
     /// Phase 42: opt-in `MethodThrowTypeCovarianceRule` - see
     /// `registry::Registry::check_method_throw_type_covariance`'s own
     /// doc comment for why this defaults to `false` (unset), the same
@@ -108,6 +114,37 @@ pub struct Config {
     /// See `ignore_errors::IgnoreErrorEntry`'s own doc comment for the
     /// exact field semantics.
     pub ignore_errors: Option<Vec<crate::ignore_errors::IgnoreErrorEntry>>,
+    /// Phase 67: a declarative, config-driven ban list -
+    /// `restricted_symbols::RestrictedSymbolEntry`'s own doc comment has
+    /// the full shape. Config-file-only, no CLI flag - a structured list
+    /// doesn't fit a boolean/string flag.
+    ///
+    /// ```toml
+    /// [[restricted_symbols]]
+    /// kind = "staticMethod"
+    /// class = "Legacy\\Db"
+    /// name = "query"
+    /// message = "use the Db\\Connection service instead"
+    /// ```
+    pub restricted_symbols: Option<Vec<crate::restricted_symbols::RestrictedSymbolEntry>>,
+    /// Phase 83: extra directories/files whose class-like declarations are
+    /// designated overrides (e.g. a vendored `Imagick.stub.php`) rather
+    /// than a genuine accidental duplicate - mirrors `scan_paths`'s own
+    /// shape exactly (a directory, walked, or a single file listed
+    /// directly), and is unioned into it at load time so a `stub_paths`
+    /// entry still loads for type-resolution context exactly as before.
+    /// The only consumer is `check_duplicate_class_declarations` below -
+    /// see `project::duplicate_class_sites::ClassDeclSite`'s own
+    /// `is_stub` field and `checker::duplicate_classes`'s own module doc
+    /// comment for why this distinction exists at all.
+    pub stub_paths: Option<Vec<PathBuf>>,
+    /// Phase 83: opt-in whole-project duplicate class-like-declaration
+    /// detection - see `registry::Registry::check_duplicate_class_
+    /// declarations`'s own doc comment for why this defaults to `false`
+    /// (unset), the same reason every other opt-in check above does, and
+    /// for why this one specifically needs `stub_paths` correctly
+    /// populated before it's safe to turn on for a real project.
+    pub check_duplicate_class_declarations: Option<bool>,
 }
 
 impl Config {

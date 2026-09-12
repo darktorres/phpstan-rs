@@ -35,7 +35,7 @@ fn calling_a_method_through_a_typed_parameter_on_a_non_api_class_is_flagged() {
         class Widget {
             public function getType() {}
         }
-        namespace PHPStan\Rules;
+        namespace App\Rules;
         class SomeRule {
             public function processNode(\PHPStan\FakeNs\Widget $scope) {
                 $scope->getType();
@@ -126,7 +126,7 @@ fn calling_a_method_through_a_promoted_property_on_a_non_api_class_is_flagged() 
         class Widget {
             public function getType() {}
         }
-        namespace PHPStan\Rules;
+        namespace App\Rules;
         class SomeRule {
             public function __construct(private \PHPStan\FakeNs\Widget $scope) {}
             public function processNode() {
@@ -151,7 +151,7 @@ fn calling_a_method_through_an_ordinary_typed_property_on_a_non_api_class_is_fla
         class Widget {
             public function getType() {}
         }
-        namespace PHPStan\Rules;
+        namespace App\Rules;
         class SomeRule {
             private \PHPStan\FakeNs\Widget $scope;
             public function processNode() {
@@ -200,7 +200,7 @@ fn the_check_is_silent_when_phpstan_api_check_enabled_is_off() {
         class Widget {
             public function getType() {}
         }
-        namespace PHPStan\Rules;
+        namespace App\Rules;
         class SomeRule {
             public function processNode(\PHPStan\FakeNs\Widget $scope) {
                 $scope->getType();
@@ -227,7 +227,7 @@ fn calling_a_method_through_a_chained_call_return_type_is_flagged() {
         class Widget {
             public function getType(): self { return $this; }
         }
-        namespace PHPStan\Rules;
+        namespace App\Rules;
         class SomeRule {
             public function processNode(\PHPStan\FakeNs\Widget $scope) {
                 $scope->getType()->getType();

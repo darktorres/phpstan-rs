@@ -18,6 +18,7 @@
 //! own abstract methods) that have nothing to do with what's under test
 //! here.
 use super::super::*;
+use super::helpers::without_missing_typehint_diagnostics;
 
 fn load_two_file_project(gate_enabled: bool, marker_doc: &str) -> Project {
     let mut project = Project::new();
@@ -64,6 +65,152 @@ fn enabling_the_gate_stays_quiet_once_the_base_class_is_tagged_api() {
     let project = load_two_file_project(true, "/** @api */\n        ");
     let d = project.check_file(&PathBuf::from("src/MyRule.php"));
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 40 follow-up: the vendor-directory half of `is_phpstan_code` -
+// only reachable through a real `Project`/`PathBuf` harness, since the
+// checker-level `Registry::build`-only test suite never has real paths
+// to populate `Registry::phpstan_class_files` from at all.
+
+#[test]
+fn a_phpstan_namespaced_caller_referencing_a_vendor_loaded_phpstan_class_is_flagged() {
+    // Mirrors real PHPStan's own dogfooding shape: a PHPStan extension
+    // package (e.g. phpstan-doctrine) is itself namespaced `PHPStan\*`
+    // and calls into real, vendor-loaded PHPStan internals.
+    //
+    // Deliberately uses a synthetic `ZzzPhase40TrinaryLogicMarker` name,
+    // not the real `PHPStan\TrinaryLogic` - that real class is already
+    // bundled (with a real `@api` tag) via `php_stubs::generated_stub_
+    // classes()`'s own unconditional `vendor/phpstan-src/src` merge into
+    // every `Project::new()`, so this test's own bare, `@api`-less
+    // re-declaration of it would *merge* onto the real one rather than
+    // stand alone (`registry::index::insert_built_decl`'s own documented
+    // "two unconditional declarations of the same name merge, permissive
+    // either-side-wins" convention for a non-analyzed/context file) -
+    // silently inheriting the real class's own `@api` status and making
+    // this test's own diagnostic never fire, for a reason unrelated to
+    // what it means to test. Same collision-avoidance reasoning this
+    // file's own third test already documents for `ZzzPhase40BaseMarker`.
+    let mut project = Project::new();
+    project.set_phpstan_api_check_enabled(true);
+    project
+        .load_file(
+            PathBuf::from("vendor/phpstan/phpstan/src/ZzzPhase40TrinaryLogicMarker.php"),
+            "<?php namespace PHPStan; class ZzzPhase40TrinaryLogicMarker { public static function check() {} }",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("src/Doctrine/MyRule.php"),
+            "<?php namespace PHPStan\\Doctrine; class MyRule { public function run() { \\PHPStan\\ZzzPhase40TrinaryLogicMarker::check(); } }",
+        )
+        .unwrap();
+    project.finish_loading();
+    let d = without_missing_typehint_diagnostics(
+        project.check_file(&PathBuf::from("src/Doctrine/MyRule.php")),
+    );
+    assert!(
+        d.iter().any(|x| x
+            .message
+            .contains("calling PHPStan\\ZzzPhase40TrinaryLogicMarker::check()")),
+        "diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_phpstan_namespaced_caller_referencing_a_sibling_phpstan_namespaced_class_is_not_flagged() {
+    // Same calling shape as above, but the target is a sibling of the
+    // caller's own package (not vendor-loaded) - real PHPStan's own
+    // `isPhpStanCode` correctly stays silent here (a PHPStan extension
+    // package calling its own internal helper).
+    let mut project = Project::new();
+    project.set_phpstan_api_check_enabled(true);
+    project
+        .load_file(
+            PathBuf::from("src/Doctrine/Bar.php"),
+            "<?php namespace PHPStan\\Doctrine; class Bar { public static function check() {} }",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("src/Doctrine/MyRule.php"),
+            "<?php namespace PHPStan\\Doctrine; class MyRule { public function run() { Bar::check(); } }",
+        )
+        .unwrap();
+    project.finish_loading();
+    let d = without_missing_typehint_diagnostics(
+        project.check_file(&PathBuf::from("src/Doctrine/MyRule.php")),
+    );
+    // This fixture's own `namespace PHPStan\Doctrine;` declaration is
+    // itself real, separate signal (`phpstanApi.phpstanNamespace`,
+    // unrelated to what this test means to exercise) - only the static-
+    // call-specific diagnostic is what "not flagged" refers to here.
+    assert!(
+        !d.iter().any(|x| x.identifier == "phpstanApi.method"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_static_call_to_an_inherited_phpstan_method_through_a_non_phpstan_subclass_is_flagged() {
+    // Phase 40 follow-up: real `ApiStaticCallRule` gates on the resolved
+    // method's *declaring* class, never the literally-written class
+    // name's own namespace - `MyNonPhpStanSubclass::inheritedMethod()`
+    // must still be flagged, even though the written class name
+    // (`MyNonPhpStanSubclass`) is itself `App`-namespaced.
+    let mut project = Project::new();
+    project.set_phpstan_api_check_enabled(true);
+    project
+        .load_file(
+            PathBuf::from("vendor/phpstan/phpstan/src/ZzzPhase40BaseMarker.php"),
+            "<?php namespace PHPStan\\Rules; class ZzzPhase40BaseMarker { public static function inheritedMethod() {} }",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("src/MyNonPhpStanSubclass.php"),
+            "<?php namespace App; class MyNonPhpStanSubclass extends \\PHPStan\\Rules\\ZzzPhase40BaseMarker {}",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("src/Caller.php"),
+            "<?php namespace App; class Caller { public function run() { MyNonPhpStanSubclass::inheritedMethod(); } }",
+        )
+        .unwrap();
+    project.finish_loading();
+    let d =
+        without_missing_typehint_diagnostics(project.check_file(&PathBuf::from("src/Caller.php")));
+    assert!(
+        d.iter().any(|x| x
+            .message
+            .contains("calling PHPStan\\Rules\\ZzzPhase40BaseMarker::inheritedMethod()")),
+        "diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_bare_namespace_phpstan_declaration_with_no_trailing_backslash_is_recognized() {
+    // Phase 40 follow-up: `is_phpstan_namespace`'s own bare-`PHPStan`
+    // (no trailing backslash) case, confirmed against real
+    // `ApiRuleHelperTest.php`'s own row for it.
+    let mut project = Project::new();
+    project.set_phpstan_api_check_enabled(true);
+    project
+        .load_file(
+            PathBuf::from("vendor/phpstan/phpstan/src/ZzzPhase40BareNsMarker.php"),
+            "<?php namespace PHPStan; class ZzzPhase40BareNsMarker {}",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("src/MyRule.php"),
+            "<?php namespace App; class MyRule extends \\PHPStan\\ZzzPhase40BareNsMarker {}",
+        )
+        .unwrap();
+    project.finish_loading();
+    let d = project.check_file(&PathBuf::from("src/MyRule.php"));
+    assert_eq!(d.len(), 1, "diagnostics: {d:?}");
 }
 
 /// Not a normal regression test (nothing in this project's own behavior

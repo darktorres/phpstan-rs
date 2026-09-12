@@ -334,6 +334,128 @@ fn patch_reflection_class_constructor_template(classes: &mut [(String, ClassInfo
     }
 }
 
+/// Phase 77: `ReflectionMethod`/`ReflectionProperty` are not generic in
+/// real phpstorm-stubs at all - unlike `ReflectionClass`'s own real `T`
+/// (patched just above), this synthesizes a brand-new `@template-covariant
+/// TClass of object` on both, purely as an internal enrichment, so that:
+/// - `ReflectionClass<T>::getMethod()`/`getMethods()`/`getProperty()`/
+///   `getProperties()` can propagate the receiver's own `T` into the
+///   returned reflector's new `TClass` slot instead of a bare, untemplated
+///   `ReflectionMethod`/`ReflectionProperty`;
+/// - `ReflectionMethod<TClass>::getDeclaringClass()`/
+///   `ReflectionProperty<TClass>::getDeclaringClass()` can hand it
+///   straight back as `ReflectionClass<TClass>` - both real stubs
+///   currently return a bare, untemplated `ReflectionClass`.
+///
+/// No new substitution engine work was needed for this: `checker::
+/// generics::substitute_class_templates`'s existing `substitute_scoped`
+/// already recurses through a returned `Type::Object`'s own type-argument
+/// list (Phase 54's own "mirrors `types::substitute_template`'s identical
+/// fix" arm) - the identical mechanism any ordinary fluent generic
+/// collection API (a `Collection<T>`-shaped method returning another
+/// `Collection<T>`) already relies on, confirmed by direct read before
+/// writing this patch rather than assumed.
+///
+/// Because this template doesn't exist in real PHPStan's own stubs at
+/// all, it must also be exempted from `missingType.generics`
+/// (`checker/missing_typehint.rs`'s own `SYNTHETIC_GENERIC_CLASS_NAMES`),
+/// since otherwise every ordinary bare `ReflectionMethod`/
+/// `ReflectionProperty` type hint anywhere (an extremely common shape:
+/// any reflection-based code, DI container, ORM metadata reader,
+/// attribute reader) would start getting flagged at level 6+ for a
+/// template this project invented, not one a user ever wrote or could
+/// satisfy.
+fn patch_reflection_method_and_property_templates(classes: &mut [(String, ClassInfo)]) {
+    for class_name in ["ReflectionMethod", "ReflectionProperty"] {
+        let Some((_, info)) = classes.iter_mut().find(|(name, _)| name == class_name) else {
+            continue;
+        };
+        if info.templates.iter().any(|t| t == "TClass") {
+            continue;
+        }
+        info.templates.push("TClass".to_string());
+        info.covariant_templates.insert("TClass".to_string());
+        info.template_bounds.insert(
+            "TClass".to_string(),
+            Type::Object("object".to_string(), Vec::new()),
+        );
+        let tp = TemplateParam {
+            name: "TClass".to_string(),
+            bound: Box::new(Type::Object("object".to_string(), Vec::new())),
+            variance: crate::types::Variance::Covariant,
+            scope: Some(class_name.to_string()),
+            default: None,
+        };
+        if let Some(m) = info.methods.get_mut("getDeclaringClass") {
+            m.return_type =
+                Type::Object("ReflectionClass".to_string(), vec![Type::TemplateParam(tp)]);
+        }
+    }
+
+    // `ReflectionClass`'s own `T` (real in phpstorm-stubs, already patched
+    // above) is what the 4 receiver-propagating methods below bind into
+    // the newly-added `TClass` slot - rebuild the same `TemplateParam`
+    // `patch_reflection_class_constructor_template` already builds for
+    // `T`, rather than reaching into that function's own local variable.
+    let Some(t_ty) = classes
+        .iter()
+        .find(|(name, _)| name == "ReflectionClass")
+        .and_then(|(_, info)| {
+            if !info.templates.iter().any(|t| t == "T") {
+                return None;
+            }
+            Some(Type::TemplateParam(TemplateParam {
+                name: "T".to_string(),
+                bound: Box::new(
+                    info.template_bounds
+                        .get("T")
+                        .cloned()
+                        .unwrap_or(Type::Mixed),
+                ),
+                variance: if info.covariant_templates.contains("T") {
+                    crate::types::Variance::Covariant
+                } else if info.contravariant_templates.contains("T") {
+                    crate::types::Variance::Contravariant
+                } else {
+                    crate::types::Variance::Invariant
+                },
+                scope: Some("ReflectionClass".to_string()),
+                default: info.template_defaults.get("T").cloned().map(Box::new),
+            }))
+        })
+    else {
+        return;
+    };
+
+    let Some((_, rc_info)) = classes
+        .iter_mut()
+        .find(|(name, _)| name == "ReflectionClass")
+    else {
+        return;
+    };
+    if let Some(m) = rc_info.methods.get_mut("getMethod") {
+        m.return_type = Type::Object("ReflectionMethod".to_string(), vec![t_ty.clone()]);
+    }
+    if let Some(m) = rc_info.methods.get_mut("getMethods") {
+        m.return_type = Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Object(
+                "ReflectionMethod".to_string(),
+                vec![t_ty.clone()],
+            )),
+        );
+    }
+    if let Some(m) = rc_info.methods.get_mut("getProperty") {
+        m.return_type = Type::Object("ReflectionProperty".to_string(), vec![t_ty.clone()]);
+    }
+    if let Some(m) = rc_info.methods.get_mut("getProperties") {
+        m.return_type = Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Object("ReflectionProperty".to_string(), vec![t_ty])),
+        );
+    }
+}
+
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
 pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
@@ -353,6 +475,7 @@ pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
             }
         }
         patch_reflection_class_constructor_template(&mut result);
+        patch_reflection_method_and_property_templates(&mut result);
         result
     });
     CACHE.clone()
