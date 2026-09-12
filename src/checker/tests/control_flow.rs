@@ -256,6 +256,64 @@ fn do_while_switch_and_static_var_bodies_are_all_checked() {
     );
 }
 
+// Real corpus find, one level deeper than the general loop-exit fix
+// (`Checker::converge_loop_body`'s own "drop names only introduced inside
+// the body" adjustment): a `do`-`while`'s own body always runs at least
+// once by construction (the condition is only ever checked *after* the
+// first pass), so a variable introduced only inside it must NOT be
+// dropped the way an ordinary `while`/`for`/`foreach` (which really can
+// run zero times) needs. `PageAssets::promoteLoadModes`'s own real corpus
+// shape - `do { $changed = false; ...; } while ($changed);` - was wrongly
+// flagged `variable.undefined` before this exemption.
+#[test]
+fn a_variable_introduced_inside_a_do_while_body_stays_defined_afterward() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $items): void {
+                do {
+                    $changed = false;
+                    foreach ($items as $item) {
+                        if ($item) {
+                            $changed = true;
+                        }
+                    }
+                } while ($changed);
+                echo $changed;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "variable.undefined"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Same exemption, same reasoning, for `for (;;)` (no condition at all -
+// see `check_for`'s own doc comment: "the body genuinely always executes
+// at least once").
+#[test]
+fn a_variable_introduced_inside_an_infinite_for_loop_stays_defined_after_a_break() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $items): void {
+                for (;;) {
+                    $found = null;
+                    foreach ($items as $item) {
+                        $found = $item;
+                        break;
+                    }
+                    break;
+                }
+                echo $found;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "variable.undefined"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn an_inline_var_tag_on_a_static_declaration_overrides_its_default_expression() {
     // Real corpus find (Piwigo's own `MessengerRoundTripTest::marker()`):

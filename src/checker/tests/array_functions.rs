@@ -2056,9 +2056,18 @@ fn array_values_on_a_non_list_array_is_never_flagged() {
 // via an isolated repro of `vendor/symfony/var-exporter/ProxyHelper.php`'s
 // own shape (a dynamic-key index-assignment inside a loop's `if`-branch,
 // then `continue`, plus its own fall-through path assigning a different
-// value type to the same array). Before the fix, this produced four
+// value type to the same array). Before that fix, this produced four
 // separate, redundant `array<...>` union members instead of one precise
 // `array<Foo|false>`.
+//
+// `array{}` is a further, later addition to the expected type (this
+// session's `LoopZeroIterations` fix): `$items` here is a plain `array`
+// parameter with no non-emptiness guarantee, so the loop may genuinely
+// run zero times - `$result` then stays `[]`, a real alternative real
+// PHPStan's own `ForeachHandler::processStmt` also merges back in
+// whenever `isIterableAtLeastOnce()` isn't a definite "yes" (confirmed
+// directly against `vendor/phpstan-src`'s own `mergeWith($scope->
+// filterByTruthyValue(...))` call for exactly this "maybe" case).
 #[test]
 fn dynamic_key_writes_across_an_if_continue_branch_and_its_fallthrough_merge_into_one_array_type() {
     let d = diagnostics_for(
@@ -2074,7 +2083,7 @@ fn dynamic_key_writes_across_an_if_continue_branch_and_its_fallthrough_merge_int
                     }
                     $result[$key] = false;
                 }
-                assertType('array<false|Foo>', $result);
+                assertType('array{}|array<false|Foo>', $result);
             }
         "#,
     );

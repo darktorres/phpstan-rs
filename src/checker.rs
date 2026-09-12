@@ -945,7 +945,7 @@ pub(crate) use assignment::{
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{
-    body_contains_yield, collect_exit_point_statements, collect_goto_targets,
+    LoopZeroIterations, body_contains_yield, collect_exit_point_statements, collect_goto_targets,
     exit_point_description, expr_contains_yield, generator_missing_return_type,
     generator_template_param, is_switch_break_equivalent, is_truthy_literal, merge_scopes,
     stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,

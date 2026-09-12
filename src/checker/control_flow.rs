@@ -64,6 +64,27 @@ pub(crate) fn is_switch_break_equivalent(stmt: &Stmt) -> bool {
     }
 }
 
+/// `converge_loop_body`'s own "could this loop have run zero times"
+/// parameter - see that function's doc comment for the real corpus false
+/// positives each variant fixes.
+pub(crate) enum LoopZeroIterations<'a> {
+    /// `do`-`while`/`for (;;)` - the body always runs at least once by
+    /// construction (no condition is ever checked *before* the first
+    /// pass), so the returned exit state is exactly the kept pass's own
+    /// `body_locals` (`continue_states` folded in) - no merge with
+    /// `entry` at all, for any variable.
+    Impossible,
+    /// `while`/`for`-with-a-condition/`foreach` - the condition/subject
+    /// is checked *before* the first iteration, so the exit state merges
+    /// with `entry` (a name only in `body_locals` is dropped, one in
+    /// both is unioned - `merge_scopes`'s own existing rule, reused
+    /// as-is). `subject_exempt` is a `foreach`'s own iterated subject,
+    /// when it's a bare `$variable` name - excluded from that merge
+    /// specifically (see `converge_loop_body`'s own doc comment on this
+    /// field for why a self-mutating `foreach` needs it kept out).
+    Possible { subject_exempt: Option<&'a str> },
+}
+
 impl<'a> Checker<'a> {
     /// The classic guard clause (`if ($x === null) { return; }`, or the
     /// less obvious `if (! $x instanceof Foo) { $this->fatalError(...); }`)
@@ -333,6 +354,21 @@ impl<'a> Checker<'a> {
         entry: &Locals,
         declared_return: Option<&Type>,
         label: &str,
+        // `while`/`for`/`foreach` can all genuinely run zero times (the
+        // condition/subject is checked *before* the first iteration) -
+        // `Possible` merges the exit state with `entry` accordingly (see
+        // the loop's own comment below for exactly how). A `do`-`while`/
+        // `for (;;)` is the one real exception: its own body always runs
+        // at least once by construction (no condition is ever checked
+        // *before* the first pass), so `check_do_while`/`check_for`'s own
+        // no-condition arm pass `Impossible` to skip that merge entirely -
+        // real corpus false positive this distinction fixes:
+        // `PageAssets::promoteLoadModes`'s own `do { $changed = false;
+        // ...; } while ($changed);` and `Symfony\Logger`'s own
+        // `LoggerTest` both rely on a body-only local staying defined
+        // afterward, which merging it away (as if the loop might never
+        // have run) wrongly flagged `variable.undefined`.
+        zero_iterations: LoopZeroIterations<'_>,
         mut run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str, usize),
     ) -> (Locals, Vec<Locals>) {
         const MAX_PASSES: usize = 3;
@@ -376,37 +412,48 @@ impl<'a> Checker<'a> {
                     exit_locals = merge_scopes(&exit_locals, state);
                 }
                 // A real, previously-live bug found and fixed this
-                // session, tried once as a blanket `merge_scopes(entry,
-                // exit_locals)` and reverted (see the git history on
-                // this exact line): that regressed the *other* real,
-                // already-disclosed trade-off `check_foreach`'s own doc
-                // comment describes (a `foreach` mutating its own
-                // subject array in place - `CalendarMonthly::
-                // buildMonthCalendar`'s own `$items[$day]['derivative']
-                // = ...;` - must never have its *already-transformed*
-                // shape re-widened back toward the stale pre-loop one
-                // `entry` still holds for that same variable; every key
-                // really iterated over gets the loop's own treatment,
-                // never the old one). The two concerns are different
-                // axes, so they get different treatment: a name that
-                // already existed before the loop (`$items`) keeps
-                // exactly `exit_locals`'s own value, untouched; a name
-                // introduced only *inside* the loop body (`$found` in
-                // `foreach ($items as $item) { $found = $item; }` -
-                // `UploadService::addUploadedFile`'s own real corpus
-                // shape, where a later `isset($file_path)` was wrongly
-                // reported "always exists") is dropped entirely - the
-                // same "can't assume it exists" rule `merge_scopes`'s
-                // own doc comment already applies to an ordinary
-                // if/else's own one-sided variable, just not reached
-                // for a loop until now.
-                let newly_introduced: Vec<String> = exit_locals
-                    .iter()
-                    .filter(|(name, _)| !entry.contains_key(name))
-                    .map(|(name, _)| name.clone())
-                    .collect();
-                for name in newly_introduced {
-                    exit_locals.remove(&name);
+                // session: a variable only ever assigned *inside* the
+                // loop body but genuinely tracked before it too (`$x =
+                // null; foreach (...) { $x = ...; }`) needs the *same*
+                // "maybe never touched" treatment as one introduced fresh
+                // inside the body - both must union with whatever `entry`
+                // already held for that name, not just adopt the body's
+                // own post-iteration value outright (tried as "keep
+                // pre-existing names exactly as `exit_locals` left them,
+                // only drop brand-new ones" first; real corpus find this
+                // undersized: `UploadService::addUploadedFile`'s own
+                // `$file_path = null; foreach (...) { $file_path =
+                // $row->path; }` pre-declares `$file_path`, so it's
+                // "already existing" by that narrower rule, silently
+                // losing its own real `null` possibility). `next_entry`
+                // (computed just above - `merge_scopes(entry,
+                // &body_locals)`, `continue_states` already folded in)
+                // already does exactly this for *every* name uniformly:
+                // union one present in both, drop one present only in
+                // `body_locals`.
+                //
+                // The one real exception - `LoopZeroIterations::Possible`'s
+                // own `subject_exempt`, a `foreach`'s own iterated subject
+                // when it's a bare `$variable` - is the *other* real,
+                // previously-live regression this whole feature already
+                // found and reverted once (see the git history on this
+                // exact line): a `foreach` mutating its own subject array
+                // in place (`CalendarMonthly::buildMonthCalendar`'s own
+                // `foreach ($items as $day => ...) { $items[$day]
+                // ['derivative'] = ...; }`) must never have its already-
+                // transformed shape re-widened back toward the stale
+                // pre-loop one `entry` still holds for that *same*
+                // variable - every key really iterated over gets the
+                // loop's own treatment, never the old one. Restored from
+                // `exit_locals`'s own (pre-union) value after the general
+                // union, rather than being excluded from it.
+                if let LoopZeroIterations::Possible { subject_exempt } = zero_iterations {
+                    let subject_override =
+                        subject_exempt.and_then(|name| exit_locals.get(name).cloned());
+                    exit_locals = next_entry;
+                    if let (Some(name), Some(ty)) = (subject_exempt, subject_override) {
+                        exit_locals.insert(name.to_string(), ty);
+                    }
                 }
                 return (exit_locals, break_states);
             }

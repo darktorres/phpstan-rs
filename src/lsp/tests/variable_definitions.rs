@@ -442,17 +442,18 @@ fn definition_on_a_variable_read_after_a_while_loop_offers_the_pre_loop_value_to
 }
 
 #[test]
-fn definition_on_a_variable_read_after_a_foreach_stays_a_scalar() {
-    // Real PHPStan-matching, corpus-verified checker behavior (Phase 29,
-    // `checker/stmt.rs`): unlike `while`/`for`, a `foreach`'s own body is
-    // deliberately *not* merged with the pre-loop state - a common real
-    // idiom relies on the loop variable's own post-loop type being
-    // trusted as if the loop body definitely ran at least once. This
-    // follow-up's own provenance tracking rides along the real checker,
-    // so it correctly inherits that same one-candidate answer rather
-    // than a hand-rolled heuristic's own (wrong, relative to the real
-    // checker) "every loop might run zero times" assumption.
-    let dir = TempDir::new("var_foreach_no_merge");
+fn definition_on_a_variable_read_after_a_foreach_offers_the_pre_loop_value_too() {
+    // Real, previously-live bug found and fixed this session
+    // (`Checker::converge_loop_body`, `checker/control_flow.rs`): a
+    // `foreach`, like `while`/`for`, can genuinely run zero times (an
+    // empty `$items`) - `$x = 0` (before the loop) is a real alternative
+    // to the loop body's own `$x = $item`, the same "may run zero times"
+    // merge `While`'s own analogous test just above already exercises.
+    // A prior fix attempt wrongly special-cased `foreach` as never
+    // merging with the pre-loop state at all (mirroring real corpus false
+    // positive `UploadService::addUploadedFile`, see
+    // `null_probes.rs`'s own test for that exact shape).
+    let dir = TempDir::new("var_foreach_merge");
     let src = "<?php function f(array $items) { $x = 0; foreach ($items as $item) { $x = $item; } return $x; }";
     let path = dir.write("a.php", src);
     let uri = path_to_uri(&path).to_string();
@@ -460,12 +461,8 @@ fn definition_on_a_variable_read_after_a_foreach_stays_a_scalar() {
 
     let messages = run(&dir, &[definition_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
-    assert!(
-        result.is_object(),
-        "expected a single Location object, got {result:?}"
-    );
-    let expected = lsp_pos(src, "$x = $item");
-    assert_eq!(result["range"]["start"]["character"], expected["character"]);
+    let locations = result.as_array().expect("expected an array of locations");
+    assert_eq!(locations.len(), 2);
 }
 
 #[test]

@@ -480,6 +480,28 @@ fn write_index_into(
     value_ty: Type,
 ) -> Option<Type> {
     match container_ty {
+        // A `Null` container is exactly the same "not really an array
+        // yet" case the top-level undefined-variable write already
+        // auto-vivifies from a fresh empty `ArrayShape` (real PHP does
+        // the identical auto-vivification for a null-valued offset, no
+        // warning at any error-reporting level) - delegating to that
+        // same empty-shape arm rather than bailing to `None` here.
+        // Without this, a nested write through a container whose
+        // current type is (or includes, via the `Union` arm below) a
+        // provable `Null` - e.g. a dynamic-key read off an empty
+        // `ArrayShape` (`index_result_type`'s own "empty shape, dynamic
+        // key reads `null`" arm) - silently failed the *entire* write,
+        // including every other union member, since `Union`'s own "all
+        // or nothing" bail (`?`) treated one member's `None` as the
+        // whole write being unrepresentable. Real corpus false negative
+        // this fixes: `CalendarMonthly::buildMonthCalendar`'s own
+        // `foreach ($items as $day => $data) { $items[$day]['derivative']
+        // = ...; }` - once a separate fix made `$items`'s own entry type
+        // genuinely a `Union` including this empty-shape-turned-`Null`
+        // alternative (the loop's own subject possibly never having run
+        // at all yet), this nested field write stopped updating
+        // `$items`'s tracked shape entirely.
+        Type::Null => write_index_into(&Type::ArrayShape(vec![]), idx, idx_ty, value_ty),
         Type::ArrayShape(fields) => match idx.and_then(literal_string_key) {
             Some(key) => {
                 let mut fields = fields.clone();

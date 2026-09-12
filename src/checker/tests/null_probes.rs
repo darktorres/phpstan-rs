@@ -52,6 +52,34 @@ fn isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_f
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// The exact real corpus shape (`UploadService::addUploadedFile`): the
+// variable is pre-declared `null` *before* the conditional/loop, not
+// introduced fresh inside it - a narrower first fix attempt ("keep a
+// pre-existing name exactly as the loop left it, only drop brand-new
+// names") wrongly special-cased this as "already defined", silently
+// losing the real `null` possibility the pre-loop declaration carries.
+#[test]
+fn isset_after_a_pre_declared_null_reassigned_only_inside_a_conditional_foreach_is_not_flagged() {
+    let d = null_probe_diagnostics(
+        r#"<?php
+            /** @param string[] $items */
+            function test(array $items, bool $cond): void {
+                $file_path = null;
+                if ($cond) {
+                    foreach ($items as $item) {
+                        $file_path = $item;
+                    }
+                }
+                if (! isset($file_path)) {
+                    return;
+                }
+                echo $file_path;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn isset_on_a_never_nullable_local_is_flagged() {
     let d = null_probe_diagnostics(

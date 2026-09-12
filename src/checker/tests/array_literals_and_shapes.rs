@@ -375,6 +375,49 @@ fn a_foreach_mutating_its_own_subject_array_keeps_the_post_loop_shape_precisely(
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// The exact real corpus shape (`CalendarMonthly::buildMonthCalendar`):
+// `$items` starts as a literal `[]`, gets built up by a *first* foreach
+// (over a separate array, so it may run zero times), and only *then* is
+// mutated in place by a *second* foreach over itself. This session's
+// `LoopZeroIterations` fix correctly makes the first foreach's own exit
+// state a real `Union` including the empty-shape alternative (the loop
+// might never run) - which means the second foreach's own entry for
+// `$items` is that same `Union`, not a bare `ArrayShape`/`Array`
+// anymore. `write_index_into`'s `Type::Union` arm requires *every*
+// member to accept the write or the whole write is silently dropped -
+// and its own empty-shape member reads back as `Type::Null` at a
+// dynamic key (`index_result_type`'s own "empty shape, dynamic key
+// reads null" arm), which `write_index_into` had no arm for at all
+// before this session's fix, bailing the entire nested write and
+// freezing `$items`'s tracked shape at its pre-second-loop state - a
+// real regression this exact test caught via corpus diff before this
+// fix landed.
+#[test]
+fn a_foreach_mutating_its_own_subject_array_that_a_prior_maybe_empty_loop_built_keeps_the_new_fields()
+ {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param int[] $rows */
+            function test(array $rows, string $file): void {
+                $items = [];
+                foreach ($rows as $period) {
+                    $items[$period] = ['nb_images' => 0];
+                }
+                foreach ($items as $day => $data) {
+                    $items[$day]['derivative'] = $file;
+                }
+                foreach ($items as $day => $data) {
+                    echo $data['derivative'];
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // Phase 12 Finding E: a real, pre-existing gap found by making
 // check_shape_key_access Union-aware and re-checking the real
 // corpus - PiwigoInfosSender::send's own $piwigoInfos becomes a real

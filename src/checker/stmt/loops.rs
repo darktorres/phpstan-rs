@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, body_contains_yield, is_truthy_literal, merge_scopes, stmt_contains_break,
-    stmt_contains_escaping_exit, union_types,
+    Checker, Locals, LoopZeroIterations, body_contains_yield, is_truthy_literal, merge_scopes,
+    stmt_contains_break, stmt_contains_escaping_exit, union_types,
 };
 use crate::types::Type;
 
@@ -80,6 +80,9 @@ impl<'a> Checker<'a> {
             &entry,
             declared_return,
             label,
+            LoopZeroIterations::Possible {
+                subject_exempt: None,
+            },
             |this, pass_locals, declared_return, label, _pass| {
                 this.in_condition_position = true;
                 this.check_expr(cond, pass_locals, label);
@@ -229,6 +232,12 @@ impl<'a> Checker<'a> {
             &entry,
             declared_return,
             label,
+            // A do-while's body always runs at least once by
+            // construction (the condition is only ever checked
+            // *after*) - see `converge_loop_body`'s own doc comment on
+            // this parameter for the real corpus false positive this
+            // exemption fixes.
+            LoopZeroIterations::Impossible,
             |this, pass_locals, declared_return, label, pass| {
                 if pass > 0 {
                     this.apply_narrowing(cond, pass_locals, true);
@@ -359,6 +368,9 @@ impl<'a> Checker<'a> {
                     &entry,
                     declared_return,
                     label,
+                    LoopZeroIterations::Possible {
+                        subject_exempt: None,
+                    },
                     |this, pass_locals, declared_return, label, _pass| {
                         for e in &cond[..cond.len() - 1] {
                             this.check_expr(e, pass_locals, label);
@@ -411,6 +423,11 @@ impl<'a> Checker<'a> {
                     &entry,
                     declared_return,
                     label,
+                    // `for (;;)` genuinely always executes at least
+                    // once (no condition to ever prevent the first
+                    // iteration) - same exemption as `do`-`while`, see
+                    // `converge_loop_body`'s own doc comment.
+                    LoopZeroIterations::Impossible,
                     |this, pass_locals, declared_return, label, _pass| {
                         this.check_stmt(body, pass_locals, declared_return, label);
                         for e in step {
@@ -539,6 +556,18 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
+        // A bare `$variable` subject that the body mutates in place via
+        // a nested write keyed by its own loop variable (`foreach
+        // ($items as $day => $data) { $items[$day]['derivative'] = ...;
+        // }`, confirmed in `CalendarMonthly::buildMonthCalendar`) must
+        // never have its already-transformed shape re-widened back
+        // toward the stale pre-loop one - `converge_loop_body`'s own
+        // `subject_exempt` keeps exactly this one name out of the
+        // "may run zero times" merge every other variable now gets.
+        let subject_exempt = match &subject.kind {
+            ExprKind::Variable(name) => Some(name.as_str()),
+            _ => None,
+        };
         let subject_ty = self.check_expr(subject, locals, label);
         // The loop variable(s) are a definition site, not a read -
         // bound (to the subject's known element type, when it's a
@@ -587,20 +616,14 @@ impl<'a> Checker<'a> {
                 .iterable_element_type(&subject_ty)
                 .unwrap_or((Type::Mixed, Type::Mixed)),
         };
-        // Phase 29: `Foreach` still checks its body once directly
-        // against the real `locals` (deliberately *not* also
-        // adopting `While`/`For`'s own separate "may run zero
-        // times" merge with the pre-loop state here - tried
-        // during this fix and reverted: a common, real idiom
-        // mutates the very same array a `foreach` iterates via a
-        // nested write keyed by the loop variable itself
-        // (`foreach ($items as $day => $data) { ...;
-        // $items[$day]['derivative'] = ...; }`, confirmed in
-        // `CalendarMonthly::buildMonthCalendar`) - unioning in the
-        // *pre-loop* shape as an "also possible" alternative there
-        // is actively wrong, since every key iterated over really
-        // does get the loop's own treatment, never the stale
-        // pre-loop one). What *was* missing, unconditionally: a
+        // Phase 29 (superseded by this session's `LoopZeroIterations`
+        // fix - see `converge_loop_body`'s own doc comment): `Foreach`
+        // now gets the same "may run zero times" merge with the
+        // pre-loop state `While`/`For` already had, for every variable
+        // *except* `subject_exempt` above - a bare `$variable` subject
+        // the body mutates in place via a nested write keyed by its own
+        // loop variable keeps its own post-body shape untouched, rather
+        // than being widened back with the stale pre-loop one. A
         // `break` reached anywhere in `body` had its own state
         // silently discarded from everything past the loop -
         // `always_terminates` correctly stops a break-ending
@@ -640,6 +663,7 @@ impl<'a> Checker<'a> {
             &entry,
             declared_return,
             label,
+            LoopZeroIterations::Possible { subject_exempt },
             |this, pass_locals, declared_return, label, _pass| {
                 if let Some(k) = key {
                     this.bind_simple_target(k, key_ty.clone(), pass_locals);
