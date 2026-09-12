@@ -314,6 +314,33 @@ fn a_variable_introduced_inside_an_infinite_for_loop_stays_defined_after_a_break
     );
 }
 
+// Real corpus false positive found while triaging the wider Piwigo corpus
+// (`UserSortField::parseOrderClause`): a `foreach` subject that's
+// *provably* non-empty (`explode()`'s own always-non-empty-list return,
+// confirmed against `vendor/phpstan-src`'s own `ExplodeFunctionDynamic
+// ReturnTypeExtension`) mirrors real PHPStan's `isIterableAtLeastOnce()->
+// yes()` case - it never runs zero times, so `LoopZeroIterations::
+// Impossible` applies, the same as do-while/for(;;), not `Possible`'s
+// merge-with-entry (which would otherwise spuriously reintroduce the
+// pre-loop `[]` as a live alternative even though every real iteration
+// provably replaces it).
+#[test]
+fn a_foreach_over_a_provably_non_empty_subject_never_merges_with_the_pre_loop_entry() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(string $order): void {
+                $clauses = [];
+                foreach (explode(',', $order) as $rawEntry) {
+                    $clauses[] = $rawEntry;
+                }
+                assertType('non-empty-list<string>', $clauses);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
 #[test]
 fn an_inline_var_tag_on_a_static_declaration_overrides_its_default_expression() {
     // Real corpus find (Piwigo's own `MessengerRoundTripTest::marker()`):

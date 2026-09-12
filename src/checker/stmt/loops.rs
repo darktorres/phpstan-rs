@@ -659,11 +659,33 @@ impl<'a> Checker<'a> {
         // that pass's body never touched.
         let entry = locals.clone();
         self.loop_depth += 1;
+        // Mirrors real PHPStan's own `ForeachHandler::processStmt`'s
+        // third, `isIterableAtLeastOnce()->yes()` branch (confirmed
+        // directly against `vendor/phpstan-src`): a subject that's
+        // *provably* non-empty (`explode()`'s own always-non-empty-list
+        // return, a non-empty `ArrayShape` literal, ...) never runs zero
+        // times, so it gets the exact same "no merge with the pre-loop
+        // entry at all" treatment `Impossible` already gives do-while/
+        // for(;;) - not `Possible`'s merge, which would otherwise widen
+        // back toward the stale pre-loop state even though every real
+        // iteration provably replaces it. Real corpus false positive
+        // this fixes: `UserSortField::parseOrderClause`'s own `foreach
+        // (explode(',', $order) as $rawEntry)` - `explode()` on a
+        // provably non-empty `$order` (an earlier guard clause already
+        // returns early on an empty one) is itself already a real
+        // `non-empty-list<string>`, so `$clauses` can never actually end
+        // up its own stale pre-loop `[]` - merging that back in produced
+        // a spurious `array{}` alternative in the return type.
+        let zero_iterations = if Self::is_known_non_empty_array(&subject_ty) {
+            LoopZeroIterations::Impossible
+        } else {
+            LoopZeroIterations::Possible { subject_exempt }
+        };
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
             declared_return,
             label,
-            LoopZeroIterations::Possible { subject_exempt },
+            zero_iterations,
             |this, pass_locals, declared_return, label, _pass| {
                 if let Some(k) = key {
                     this.bind_simple_target(k, key_ty.clone(), pass_locals);
