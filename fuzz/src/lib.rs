@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use phpstan_rs::project;
+use phpstan_rs::{project, types};
 
 // ROADMAP.md phase 19 ("Fuzz testing"): the lexer/parser pipeline must
 // never crash the process on adversarial input. `project::parse_file` is
@@ -69,5 +69,30 @@ fn run_one(source: &str) {
             eprintln!("unexpected panic in parse_file: {message}");
             std::process::abort();
         }
+    }
+}
+
+/// Runs `types::parse_type_string` (the PHPDoc type-string parser,
+/// `src/types/parse.rs`) on `source` on the same 64MiB worker stack as
+/// `guarded_parse` - a PHPDoc type string can nest arbitrarily deep
+/// (`array<array<array<...>>>`), and this parser has no `MAX_EXPR_DEPTH`-
+/// style guard the way the statement parser does, so an ordinary default
+/// thread stack would report "just ran out of stack" long before any
+/// real, interesting unbounded-recursion bug. Unlike `guarded_parse`,
+/// nothing is swallowed here: `parse_type_string` has no deliberate/known
+/// panic to allowlist (confirmed: no `panic!`/depth guard anywhere in
+/// `src/types/parse.rs`, `conditional.rs`, or `templates.rs`), so any
+/// panic caught is a genuine bug - `Thread::join`'s own `Result` already
+/// reports one without needing a manual `catch_unwind` here too.
+pub fn guarded_parse_type(source: String) {
+    let result = std::thread::Builder::new()
+        .stack_size(WORKER_STACK_SIZE)
+        .spawn(move || {
+            let _ = types::parse_type_string(&source);
+        })
+        .expect("failed to spawn fuzz worker thread")
+        .join();
+    if result.is_err() {
+        std::process::abort();
     }
 }

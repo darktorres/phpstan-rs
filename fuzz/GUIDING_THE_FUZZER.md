@@ -52,15 +52,17 @@ A second target, `structured_php`, complementing `lex_and_parse` (which
 stays as-is - pure-random-bytes "must never crash on garbage" coverage is
 still worth keeping on its own). Instead of raw bytes coerced into a
 `String`, it assembles a small `FuzzProgram` (`fuzz_targets/structured_php.rs`)
-out of a hand-written `Fragment` enum - `if`/`while`/`for`/`foreach`/
-`match`/`switch` wrapping a nested fragment, `function`/`class`/`enum`/
-`trait` declarations, assignments, closures/arrow-fns, attribute groups,
-literal/identifier leaves - each with `arbitrary`-driven randomized
-pieces (names, literals, operator choice), rendered into a single
-`"<?php\n"`-prefixed source string. Reaches real recursive nesting depth
-(exercising `Parser::enter_expr`'s `MAX_EXPR_DEPTH` guard through genuine
-structure) and always actually enters PHP mode, instead of relying on
-byte mutation to stumble onto a `<?php` prefix by chance.
+out of a hand-written `Fragment`/`Expr` enum pair - `if`/`while`/`for`/
+`foreach`/`match`/`switch` wrapping a nested fragment, `function`/`class`/
+`interface`/`trait`/`enum` declarations, assignments, closures/arrow-fns,
+attribute groups, named/spread call arguments, heredoc/nowdoc, nullsafe
+property/method access, PHP 8.1's first-class callable syntax
+(`foo(...)`), literal/identifier leaves - each with `arbitrary`-driven
+randomized pieces (names, literals, operator choice), rendered into a
+single `"<?php\n"`-prefixed source string. Reaches real recursive nesting
+depth (exercising `Parser::enter_expr`'s `MAX_EXPR_DEPTH` guard through
+genuine structure) and always actually enters PHP mode, instead of
+relying on byte mutation to stumble onto a `<?php` prefix by chance.
 
 Both targets share the same panic-handling/64MiB-worker-stack guard,
 factored into `fuzz/src/lib.rs`'s `guarded_parse` (see `lex_and_parse.rs`'s
@@ -68,3 +70,20 @@ own doc comment history for why that guard exists at all - the
 `MAX_EXPR_DEPTH` panic and the stack-overflow-below-it risk).
 
     cargo +nightly fuzz run structured_php -- -max_total_time=120
+
+## A third target: `parse_type_string`
+
+`types::parse_type_string` (`src/types/parse.rs`) is a separate
+recursive-descent parser over raw PHPDoc type strings - same
+untrusted-input risk shape as the lexer/parser, previously unfuzzed. It
+has no `MAX_EXPR_DEPTH`-style guard of its own (confirmed: no
+`panic!`/depth guard anywhere in `parse.rs`/`conditional.rs`/
+`templates.rs`), so a deeply nested type string
+(`array<array<array<...>>>`) is a real, legitimate stack-overflow risk
+worth fuzzing for - `fuzz/src/lib.rs::guarded_parse_type` still runs it on
+the same 64MiB worker stack `guarded_parse` uses (so a crash means real
+unbounded recursion, not just an ordinary small default stack), but
+swallows no panic message: unlike `guarded_parse`, there's no known,
+deliberate panic here to allowlist, so any panic is a genuine bug.
+
+    cargo +nightly fuzz run parse_type_string -- -max_total_time=120

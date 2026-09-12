@@ -32,6 +32,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "parse_type_string"
+path = "fuzz_targets/parse_type_string.rs"
+test = false
+doc = false
+bench = false
+
 [profile.release]
 debug = 1
 

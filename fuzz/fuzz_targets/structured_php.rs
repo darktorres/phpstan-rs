@@ -21,6 +21,33 @@ impl<'a> Arbitrary<'a> for Ident {
     }
 }
 
+/// One call argument - `name:` (a named argument, `postfix.rs`'s own
+/// `name:`-label handling) and `...` (a spread argument) are both real,
+/// separate call-argument shapes this parser recognizes alongside a bare
+/// positional one. A generated `spread` argument never also carries a
+/// `name` (real PHP doesn't allow combining them, and `render` just
+/// prioritizes `spread` when both happen to be generated) - a harmless
+/// generator simplification, not a grammar this project's own parser
+/// enforces here.
+#[derive(Debug, Arbitrary)]
+struct CallArg {
+    name: Option<Ident>,
+    spread: bool,
+    value: Expr,
+}
+
+impl CallArg {
+    fn render(&self, out: &mut String) {
+        if self.spread {
+            out.push_str("...");
+        } else if let Some(name) = &self.name {
+            out.push_str(name.0);
+            out.push_str(": ");
+        }
+        self.value.render(out);
+    }
+}
+
 /// Not a real expression grammar - a small pool of literal/operator/call
 /// ingredients, enough variety to exercise `parse_assignment`/
 /// `parse_coalesce`'s precedence-climbing chain with real, randomized
@@ -31,8 +58,24 @@ enum Expr {
     StringLit(Ident),
     Var(Ident),
     Binary(Box<Expr>, BinOp, Box<Expr>),
-    Call(Ident, Vec<Expr>),
+    Call(Ident, Vec<CallArg>),
     ArrayLit(Vec<Expr>),
+    // PHP 7.3+ flexible heredoc/nowdoc (`src/lexer/strings.rs::lex_heredoc`) -
+    // a real, separate lexer state machine from a plain double-quoted
+    // string, worth its own generated shape rather than only ever
+    // appearing as a hand-written seed.
+    Heredoc(Ident),
+    Nowdoc(Ident),
+    // `$obj?->prop` / `$obj?->method(...)` - `postfix.rs`'s own
+    // `Token::Arrow | Token::NullsafeArrow` chain, alongside the plain
+    // (non-nullsafe) `->` forms.
+    PropAccess(Box<Expr>, Ident, bool),
+    MethodCall(Box<Expr>, Ident, Vec<CallArg>, bool),
+    // `foo(...)` - PHP 8.1's first-class callable syntax
+    // (`postfix.rs:212`: a bare `...` immediately followed by `)`,
+    // distinct from a spread *argument*, which is `...` followed by a
+    // real expression).
+    FirstClassCallable(Ident),
 }
 
 #[derive(Debug, Arbitrary)]
@@ -108,6 +151,43 @@ impl Expr {
                     item.render(out);
                 }
                 out.push(']');
+            }
+            // A label alone on its own line, immediately followed by
+            // `;`/`,`/`)` with no leading whitespace, is what
+            // `lex_heredoc` requires to recognize the closing label -
+            // `EOT` here satisfies that unconditionally regardless of
+            // `id.0`'s own content.
+            Expr::Heredoc(id) => {
+                out.push_str("<<<EOT\n");
+                out.push_str(id.0);
+                out.push_str("\nEOT");
+            }
+            Expr::Nowdoc(id) => {
+                out.push_str("<<<'EOT'\n");
+                out.push_str(id.0);
+                out.push_str("\nEOT");
+            }
+            Expr::PropAccess(recv, prop, nullsafe) => {
+                recv.render(out);
+                out.push_str(if *nullsafe { "?->" } else { "->" });
+                out.push_str(prop.0);
+            }
+            Expr::MethodCall(recv, name, args, nullsafe) => {
+                recv.render(out);
+                out.push_str(if *nullsafe { "?->" } else { "->" });
+                out.push_str(name.0);
+                out.push('(');
+                for (i, arg) in args.iter().take(4).enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    arg.render(out);
+                }
+                out.push(')');
+            }
+            Expr::FirstClassCallable(name) => {
+                out.push_str(name.0);
+                out.push_str("(...)");
             }
         }
     }

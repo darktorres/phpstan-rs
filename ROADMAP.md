@@ -961,6 +961,24 @@ always its subtype (built from leaf-only types specifically, since a
 member that's itself a `Union` would hit a different, non-unconditional
 match arm first).
 
+Follow-up: `fuzz/GUIDING_THE_FUZZER.md` documents 4 ways to make
+`lex_and_parse`'s mutations land on more syntactically-interesting input
+(a bigger seed corpus, a libFuzzer dictionary built from this project's
+own token tables, `-max_len`/`-only_ascii`, and a structured `Arbitrary`
+generator instead of raw bytes) - all 4 done. Two more additions beyond
+that doc's own scope: a third target, `parse_type_string`, fuzzing
+`types::parse_type_string` (the PHPDoc type-string parser,
+`src/types/parse.rs`) directly - a separate recursive-descent parser over
+raw untrusted strings, same risk shape as the lexer/parser but previously
+unfuzzed, and with no `MAX_EXPR_DEPTH`-style guard of its own, so its
+`fuzz/src/lib.rs::guarded_parse_type` harness runs it on the same
+64MiB-stack worker `guarded_parse` uses but - unlike `guarded_parse` -
+swallows no panic message, since this parser has no deliberate/known one
+to allowlist. And `structured_php`'s own generator grew named/spread call
+arguments, heredoc/nowdoc, nullsafe property/method access, and PHP 8.1's
+first-class callable syntax (`foo(...)`). All three targets' bounded smoke
+runs (60-90s each) found no crashes.
+
 ---
 
 # Pending / partial
