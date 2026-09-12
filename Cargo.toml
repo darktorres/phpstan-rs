@@ -22,6 +22,7 @@ hotpath-alloc = ["hotpath/hotpath-alloc"]
 
 [dev-dependencies]
 criterion = "0.8.2"
+proptest = "1"
 
 [[bench]]
 name = "vendored_corpus"
