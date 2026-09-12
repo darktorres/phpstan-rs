@@ -155,5 +155,34 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   diagnostics lost their spurious `array{}` union member without the
   underlying finding disappearing, each for its own separate, unrelated
   reason). `CategoryService.php:1586`, `SiteUpdateSubController.php:505`
-  and `:717` all lost the `array{}` alternative - current baseline for
-  future diffs. Produced/stored in the `phpstan-rs-master2` worktree.
+  and `:717` all lost the `array{}` alternative. Produced/stored in the
+  `phpstan-rs-master2` worktree.
+- `3b8ca74` - post a 3-way parallel corpus-triage round (4 agents, each
+  working an isolated bucket of the remaining `argument.type`/
+  `return.type` findings in its own worktree, merged back cleanly with
+  no manual conflict resolution needed): (343 scoped). Net -7 full
+  removals plus 3 more diagnostics narrowed to a cleaner "given" type
+  without disappearing (their own root cause is separate/unrelated -
+  `ImageRepository.php:3573`, `ImageStdParamsTest.php:197`,
+  `UploadServiceTest.php:1359`). 11 real phpstan-rs bugs fixed across
+  the round: `in_array_target_type` bailing on a bare-`[]` haystack
+  element; `CompoundAssign`'s rebind step only handling a bare
+  `Variable` left side (`??=`/`+=` etc. on a property/index target
+  never updated the tracked type); `ReflectionClass::newInstanceArgs()`
+  returning nullable native `?object` instead of `T` (no phpstorm-stubs
+  tag, unlike its siblings); `array_intersect`/`array_diff` family not
+  handling a single spread argument (`array_merge` already did);
+  `Enum::cases()` returning a bare `array` instead of `list<static>`;
+  `array_key_exists()` narrowing being string-literal-key-only (now
+  also accepts an int-literal key); `assertIsResource()` narrowing
+  never actually stripping `false` (an assignability leniency bug); no
+  `str_repeat()` handling at all (now constant-folds small literals,
+  marks non-falsy when provable). The rest of the round's findings were
+  genuine (untyped sources, PHP's own numeric-string-key semantics, a
+  Symfony interface even real PHPStan can't narrow further) or newly-
+  documented instances of existing limitations (cross-variable-
+  correlation, dynamic-key narrowing) plus 3 new ones (dynamic-key
+  writes dropping list markers even when provably in-bounds; compound
+  `||`/`&&` condition-alias decomposition; `array_splice()`'s untracked
+  by-ref mutation) - current baseline for future diffs. Produced/stored
+  in the `phpstan-rs-master2` worktree.
