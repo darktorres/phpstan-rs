@@ -458,6 +458,29 @@ fn array_fill_and_array_fill_keys_infer_the_fill_value_s_type() {
     assert!(d.iter().all(|x| x.message.contains("needsStrings")));
 }
 
+// Real corpus false positive found while triaging the wider Piwigo
+// corpus (`BatchManagerGlobalPageRenderer::render`): matches real
+// PHPStan's own `ArrayFillFunctionReturnTypeExtension` (confirmed
+// directly against `vendor/phpstan-src`) - `array_fill()`'s own result
+// is `list`-accessory whenever the start index is provably `0`, and
+// `non-empty`-accessory whenever the count is provably `>= 1`, neither
+// of which this project tracked before (a bare `array<0>`, satisfying
+// neither `list<int>` nor a merged-in `array{}`'s absorption).
+#[test]
+fn array_fill_marks_list_and_non_empty_accessories_when_provable() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(int $n): void {
+                assertType('list<0>', array_fill(0, $n, 0));
+                assertType('non-empty-list<0>', array_fill(0, 5, 0));
+                assertType('array<0>', array_fill(2, $n, 0));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
 // Phase 73: array_fill_keys()'s own key-type precision - $keys' own
 // elements become the result's real keys, not the generic
 // unknown_array_key() default.

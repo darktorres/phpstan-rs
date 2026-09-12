@@ -1047,12 +1047,41 @@ impl<'a> Checker<'a> {
                 }
             }
             // Both fill every slot with the same, already-known $value -
-            // no closure or element-type binding needed at all.
+            // no closure or element-type binding needed at all. Real
+            // PHPStan's own `ArrayFillFunctionReturnTypeExtension`
+            // (confirmed directly in `vendor/phpstan-src`) also marks the
+            // result `list`-accessory whenever the start index is
+            // provably `0`, and `non-empty`-accessory whenever the count
+            // is provably `>= 1` - added here for the identical reason
+            // every other array-shaped builtin in this match already
+            // carries those markers when it can: a caller merging this
+            // result back with a loop's own pre-loop `[]` (this session's
+            // `LoopZeroIterations` fix) otherwise sees a needlessly bare
+            // `array<V>`, discarding real, statically-known precision.
             "array_fill" if args.len() == 3 => {
-                return Type::Array(
+                let base = Type::Array(
                     Box::new(Type::unknown_array_key()),
                     Box::new(self.infer_expr(&args[2].value, locals)),
                 );
+                let start_is_zero =
+                    matches!(self.infer_expr(&args[0].value, locals), Type::IntLiteral(0));
+                let count_is_non_empty = match self.infer_expr(&args[1].value, locals) {
+                    Type::IntLiteral(n) => n >= 1,
+                    Type::IntRange(Some(min), _) => min >= 1,
+                    _ => false,
+                };
+                let mut members = vec![base];
+                if start_is_zero {
+                    members.push(Type::Accessory(AccessoryKind::ArrayList));
+                }
+                if count_is_non_empty {
+                    members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                }
+                return if members.len() == 1 {
+                    members.pop().unwrap()
+                } else {
+                    Type::Intersection(members)
+                };
             }
             // Phase 73: `$keys`' own *elements* become the result's real
             // keys - `array_fill_keys(['a', 'b'], 0)` really is
