@@ -931,6 +931,36 @@ call's incidental effect on an already-declared variable's type
 never does, so a read afterward still resolves to the variable's real
 declaration.
 
+**Fuzz testing** (Phase 19). Dev-only, per the original plan - no CI
+wiring, just the two tools it named. `arbitrary`+`cargo-fuzz` against the
+lexer/parser pipeline: a new `fuzz/` crate (its own cargo-fuzz workspace)
+with one target, `lex_and_parse`, feeding an `Arbitrary`-derived `String`
+through `project::parse_file` - the same call every real entry point
+(`check.rs`/`check_project.rs`/`demo.rs`) already makes. Two known,
+deliberate panics below `parse_file` needed explicit handling so the
+fuzzer wouldn't immediately and permanently latch onto either as "the"
+finding: `Parser::enter_expr`'s `MAX_EXPR_DEPTH` guard (already documented
+at its own call site as "a normal, catchable error") and a real stack
+overflow *below* that guard on an ordinary-sized thread stack (confirmed
+via `check.rs`'s own doc comment: ~200-300 levels of nesting already
+overflows 8MiB in a debug build) - the harness runs `parse_file` on its
+own 64MiB-stack worker thread and swallows only the named depth-guard
+panic message, letting any other panic reach `std::process::abort()`
+directly so libFuzzer still reports it as a crash. Seeded with 4 small
+real PHP files from `vendor/phpstorm-stubs`; a bounded 120s smoke run
+(50457 executions) found no crashes. `proptest` against
+`types::is_subtype`: a new `src/types/tests/subtyping_properties.rs`,
+sibling to the existing hand-written `subtyping.rs`, with a small
+depth-bounded `Type` generator (`prop_recursive`, deliberately excluding
+`Conditional`/`TemplateParam`/`Callable` for now - each needs its own
+structural invariant to generate anything but vacuous cases) and four
+properties checked directly against `is_subtype`'s own match arms rather
+than assumed: `Mixed` is always a supertype, `Never` is always a subtype,
+every type is a subtype of itself, and a `Union`'s own literal member is
+always its subtype (built from leaf-only types specifically, since a
+member that's itself a `Union` would hit a different, non-unconditional
+match arm first).
+
 ---
 
 # Pending / partial
@@ -955,9 +985,6 @@ declared, not every call that happened to touch it since).
 **18 - Extension/plugin API (PLANNED).** Deliberately last - premature
 before the rule/type-extension catalog is rich enough for a third party
 to want to extend.
-
-**19 - Fuzz testing (NOT STARTED).** `arbitrary`+`cargo-fuzz` for the
-lexer/parser, `proptest` for `types.rs`'s subtyping logic. Dev-only.
 
 **40 - PHPStan-API-usage checks (PARTIAL, one gap left, low priority).**
 Done for instantiation, static calls, class-const fetches, `instanceof`,
