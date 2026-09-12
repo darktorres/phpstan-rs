@@ -1548,6 +1548,31 @@ section used to carry:
   arm properly resolving a `Union`/`Intersection` container instead of
   its own previous `check_expr`-only `_ => Mixed` fallback) stopped
   masking it behind `Mixed`.
+- `isset($arr[$dynamicKey])`/`array_key_exists($dynamicKey, $arr)` never
+  narrows the specific element's own value type (only `array_shape.rs`'s
+  own composite `narrowing_key` mechanism does, and only for a *literal*
+  string key - `narrowing.rs`'s own dispatch requires `Literal::String`
+  outright). A dynamic key is a real, common case this doesn't cover,
+  which the `LoopZeroIterations` fix (an array that might still be
+  genuinely empty is now correctly tracked as `array{}|array<K, V>`)
+  makes visible more often than before: reading `$arr[$dynamicKey]`
+  infers `V|null` regardless of a preceding guard, since the guard's own
+  narrowing never reaches this composite key. Confirmed live at
+  `RatingPageRenderer::render` (`isset($users[$rate_row->userId->value])`
+  guarding `$users[$rate_row->userId->value]` two lines later),
+  `Users\UserService::getBrowserLanguage` (`array_key_exists(
+  $accept_language_full, $languages_available)`), `Image\DerivativeImage
+  ::getAll` (a self-referential fallback read, no guard at all - the
+  `null` possibility here is genuinely unavoidable without cross-key
+  correlation, a different, harder problem than the narrowing gap the
+  other two examples share), and `Admin\CatPermPageRenderer::render`
+  (`$groups[$group_id]`, no guard). A real, buildable feature (extending
+  `array_value_type_for_key`'s own literal-key-only composite mechanism
+  to a narrowed dynamic key expression) - not attempted here, since it's
+  a materially larger change (tracking a *value*-keyed narrowing fact
+  rather than a *name*-keyed one) than a corpus-cleanup pass should take
+  on; each individual finding this produces is sound, not a false
+  positive to chase down case by case.
 
 ## Permanent design boundaries (not planned, by choice)
 

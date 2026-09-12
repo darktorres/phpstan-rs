@@ -587,6 +587,34 @@ fn count_greater_than_zero_narrows_to_non_empty_array() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive found while triaging the wider Piwigo
+// corpus (`SiteUpdateSubController::handle`): `upgrade_array_to_non_
+// empty` had no `Type::Union` arm at all, so a loop-built array whose
+// own type is a real `Union` including an empty-`ArrayShape`
+// alternative (this session's own `LoopZeroIterations` fix: the loop
+// might never have run, leaving the array at its pre-loop `[]`) fell
+// straight to `_ => ty.clone()`, silently *not* stripping that
+// alternative out even though `count($x) > 0` disproves it outright.
+#[test]
+fn count_greater_than_zero_narrows_a_union_with_an_empty_shape_alternative() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-array<int> $x */
+            function sink($x): void {}
+            function f(array $items): void {
+                $collected = [];
+                foreach ($items as $item) {
+                    $collected[] = $item;
+                }
+                if (count($collected) > 0) {
+                    sink($collected);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Real corpus find (Piwigo's own `ImageDerivativeController::
 // parseCustomParams`): `if (count($x) < 1) { neverReturns(); }` (a real,
 // `never`-typed early-exit idiom) proves the exact same "`$x` is non-

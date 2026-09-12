@@ -66,6 +66,35 @@ pub(crate) fn upgrade_array_to_non_empty(ty: &Type) -> Type {
             members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
             Type::Intersection(members)
         }
+        // A genuinely empty `ArrayShape` is a real contradiction once
+        // `count() > 0`/truthy is known - collapses to `Never` (the same
+        // "this branch is impossible" signal `narrow_type_excluding_
+        // falsy`'s own identical arm already uses) rather than staying
+        // unchanged, so a `Union` member that's provably empty gets
+        // dropped below instead of surviving as a spurious alternative.
+        Type::ArrayShape(fields) if fields.is_empty() => Type::Never,
+        // Found necessary by this session's `LoopZeroIterations` fix - a
+        // loop-built array whose own entry might still be its pre-loop
+        // `[]` is now a real `Union` including that empty-shape
+        // alternative, which a `count($x) > 0` guard immediately
+        // afterward should disprove entirely (dropped via the `Never`
+        // arm just above), not merely leave untouched by falling to
+        // `_ => ty.clone()`. Real corpus false positive this fixes:
+        // `SiteUpdateSubController::handle`'s own `if (count($to_delete)
+        // > 0) { ...; $this->categoryService->deleteCategories
+        // ($to_delete, ...); }`.
+        Type::Union(members) => {
+            let kept: Vec<Type> = members
+                .iter()
+                .map(upgrade_array_to_non_empty)
+                .filter(|m| *m != Type::Never)
+                .collect();
+            match kept.len() {
+                0 => Type::Never,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
         _ => ty.clone(),
     }
 }
