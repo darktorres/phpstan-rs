@@ -307,8 +307,31 @@ fn patch_reflection_class_constructor_template(classes: &mut [(String, ClassInfo
     };
     param.ty = Type::Union(vec![
         Type::ClassString(Box::new(Type::TemplateParam(tp.clone()))),
-        Type::TemplateParam(tp),
+        Type::TemplateParam(tp.clone()),
     ]);
+    // `ReflectionClass::newInstanceArgs()` is the one instance-producing
+    // method phpstorm-stubs (`vendor/phpstorm-stubs/Reflection/
+    // ReflectionClass.php`) doesn't document a `@return T` tag for at all
+    // - `newInstance()`/`newInstanceWithoutConstructor()` both already
+    // carry one, correctly resolving to `T` with no patch needed, but
+    // `newInstanceArgs()` is left at its bare native `?object` hint,
+    // matching the raw signature exactly (nothing to merge in). Real
+    // PHPStan gets its own more precise `@return T` here from a
+    // completely separate, PHPStan-specific bundled stub override
+    // (`vendor/phpstan-src/stubs/ReflectionClass.stub`, a different
+    // directory from the `vendor/phpstan-src/src/` runtime source this
+    // project already vendors for symbol resolution) that this project
+    // doesn't otherwise ingest - a small, targeted patch here, mirroring
+    // this same function's own constructor-param patch just above,
+    // matches this project's existing "hand-patch this one specific,
+    // confirmed ReflectionClass generic gap" precedent far better than
+    // standing up a second stub-source ingestion pipeline for one
+    // missing tag in one file. Real corpus false positive this fixes:
+    // `MailServiceTestTransportSwap::with`'s own `$reflClass->
+    // newInstanceArgs($args)` returning `T|null` instead of plain `T`.
+    if let Some(new_instance_args) = info.methods.get_mut("newInstanceArgs") {
+        new_instance_args.return_type = Type::TemplateParam(tp);
+    }
 }
 
 /// All classes generated from the vendored phpstorm-stubs sources, merged

@@ -2724,6 +2724,32 @@ fn reflection_class_from_a_plain_string_variable_leaves_t_erased_not_bound_to_st
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive found while triaging the wider Piwigo
+// corpus (`MailServiceTestTransportSwap::with`): unlike `newInstance()`/
+// `newInstanceWithoutConstructor()` (both already correctly `@return T`-
+// documented in phpstorm-stubs), `newInstanceArgs()` carries no such tag
+// there at all - only its bare native `?object` hint - so it fell
+// straight through to that nullable native type instead of resolving to
+// `T`. Real PHPStan gets its own more precise typing here from a
+// separate, PHPStan-bundled stub override this project doesn't
+// otherwise ingest; patched by hand in `php_stubs::patch_reflection_
+// class_constructor_template`, the same function that already patches
+// the constructor's own template-binding gap just above.
+#[test]
+fn reflection_class_new_instance_args_returns_its_own_template_not_a_nullable_object() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {}
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                assertType('Foo', $reflClass->newInstanceArgs([]));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // `interface-string`/`trait-string` real content verification - this
 // project is allowed to check more strictly than real PHPStan does (real
 // PHPStan gives these no distinguishing semantics from bare
