@@ -622,6 +622,18 @@ impl<'a> Checker<'a> {
             // returns `[0 => 10, 2 => 30]`, not re-sequenced - list-ness
             // never survives here either, the same "don't guess past
             // what's certain" leniency already established.
+            // A single spread argument (`array_intersect(...$arrays)`, a
+            // real corpus idiom - `SearchService::getRegularSearchResults`'s
+            // own `array_intersect(...array_values($imageIdsForFilter))`,
+            // reducing several parallel id-list filters down to one) has
+            // exactly one AST-level `Arg`, failing the plain `args.len() >=
+            // 2` gate below outright and falling all the way through to a
+            // bare `Mixed`/`array` fallback - unlike `array_merge`'s own
+            // sibling arm, which already unwraps a spread source one level
+            // to reach the arrays actually being merged. Mirrors that same
+            // unwrap here: the spread source's own *element* type stands in
+            // for "the first array argument" these functions already take
+            // every kept key/value pair's own type from verbatim.
             "array_intersect_key"
             | "array_intersect"
             | "array_intersect_assoc"
@@ -638,9 +650,16 @@ impl<'a> Checker<'a> {
             | "array_udiff"
             | "array_udiff_assoc"
             | "array_udiff_uassoc"
-                if args.len() >= 2 =>
+                if args.len() >= 2 || matches!(args, [a] if a.spread) =>
             {
-                let arr_ty = self.infer_expr(&args[0].value, locals);
+                let arr_ty = if let [a] = args
+                    && a.spread
+                {
+                    let spread_ty = self.infer_expr(&a.value, locals);
+                    Self::array_element_type(&spread_ty).unwrap_or(Type::Mixed)
+                } else {
+                    self.infer_expr(&args[0].value, locals)
+                };
                 if Self::is_array_like(&arr_ty) {
                     return strip_accessory_markers(arr_ty);
                 }

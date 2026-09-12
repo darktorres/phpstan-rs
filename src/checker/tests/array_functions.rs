@@ -588,6 +588,29 @@ fn array_diff_key_preserves_the_first_array_s_own_key_and_value_types() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive found while triaging the wider Piwigo
+// corpus (`SearchService::getRegularSearchResults`): a single spread
+// argument (`array_intersect(...$arrays)`) has exactly one AST-level
+// `Arg`, failing the plain `args.len() >= 2` gate outright and falling
+// all the way through to a bare `Mixed`/`array` fallback - unlike
+// `array_merge`'s own sibling arm, which already unwraps a spread
+// source one level to reach the arrays actually being merged/diffed/
+// intersected.
+#[test]
+fn array_intersect_and_array_diff_handle_a_single_spread_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, list<int>> $byKey */
+            function f(array $byKey): void {
+                assertType('array<int, int>', array_intersect(...array_values($byKey)));
+                assertType('array<int, int>', array_diff(...array_values($byKey)));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
 #[test]
 fn array_udiff_preserves_the_first_array_s_own_value_type() {
     // Only asserts the *return*-type shape this phase is about - a
