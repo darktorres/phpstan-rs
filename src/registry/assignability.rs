@@ -444,7 +444,28 @@ impl Registry {
             // genuinely-unresolvable alias name, `object` means exactly
             // "some real object instance" and a plain array/string/etc.
             // is correctly never one.
-            (_, Type::Object(name, _)) if name != "object" && !self.classes.contains_key(name) => {
+            //
+            // Also excludes `resource` - this project's own fixed
+            // pseudo-type sentinel for PHP's native resource type
+            // (`types::parse_type_string`'s own `"resource" =>
+            // Type::Object("resource", ...)` arm, reused verbatim by
+            // `assertIsResource`'s own narrowing target and `is_resource`'s
+            // own predicate type, among others - never a real, resolvable
+            // class name this leniency's own "can't verify, don't guess
+            // wrong" reasoning was written for). Without this exclusion,
+            // `is_assignable(Type::False, Object("resource"))` wrongly
+            // returned `true` (since `"resource"` is never a key in
+            // `self.classes` either), so `narrow_type_to`'s own `Union`
+            // arm kept a genuinely-impossible `False` member instead of
+            // stripping it - a real corpus false negative this fixes:
+            // `assertIsResource($proc)` (a real, common PHPUnit-assertion
+            // narrowing idiom, `apply_phpunit_assertion_narrowing`'s own
+            // dedicated arm) silently failed to narrow away `resource|
+            // false`'s own `false` member, unlike every sibling
+            // `assertIs*` narrowing target that isn't itself an `Object`.
+            (_, Type::Object(name, _))
+                if name != "object" && name != "resource" && !self.classes.contains_key(name) =>
+            {
                 true
             }
             _ => types::is_subtype(sub, sup),

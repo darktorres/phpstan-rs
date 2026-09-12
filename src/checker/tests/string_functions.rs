@@ -314,3 +314,30 @@ fn mb_convert_encoding_narrows_to_string_or_false_when_the_subject_is_a_string()
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Found while triaging the wider Piwigo corpus test suite
+// (`HtmlServiceTest`'s own `str_repeat(' ', 300)` fed into `toEndWith()`'s
+// own `non-empty-string`-typed parameter): this project had no
+// `str_repeat()` handling at all before this fix (a bare `string`,
+// matching the native stub). Real PHPStan's own
+// `StrRepeatFunctionReturnTypeExtension` (confirmed directly against
+// `vendor/phpstan-src`) constant-folds a small literal-input/literal-
+// count call outright, and otherwise still marks the result
+// `non-falsy-string` when the input is itself non-falsy and the count
+// is provably `>= 1`.
+#[test]
+fn str_repeat_folds_small_literals_and_marks_non_falsy_when_provable() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(int $n): void {
+                assertType('non-falsy-string', str_repeat(' ', 300));
+                assertType("'abab'", str_repeat('ab', 2));
+                assertType("''", str_repeat(' ', 0));
+                assertType('string', str_repeat(' ', $n));
+                assertType("''", str_repeat('', 5));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

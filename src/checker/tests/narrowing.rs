@@ -2115,6 +2115,41 @@ fn phpunit_assert_is_string_narrows_for_the_rest_of_the_block() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real, previously-live bug found while triaging the wider Piwigo corpus
+// test suite (`ImageStdParamsTest`/`UploadServiceTest`'s own
+// `spawnBackgroundLockHolder()` helper): `assertIsResource`'s own
+// narrowing target is a `Type::Object("resource", ...)` (this project's
+// fixed pseudo-type sentinel for PHP's native resource type, unlike
+// every sibling `assertIs*` target which narrows to a bare native type)
+// - `registry::is_assignable`'s own "an unresolved `@phpstan-type`-alias
+// object name, stay lenient" arm (`assignability.rs`) matched `resource`
+// too (it's never a key in `self.classes` either, exactly like a
+// genuinely-unresolvable alias), so `narrow_type_to`'s own `Union` arm
+// wrongly kept `Type::False` as "still possibly assignable to
+// `resource`" and never actually stripped it.
+#[test]
+fn phpunit_assert_is_resource_narrows_away_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            class TestCase {
+                public static function assertIsResource($actual): void {}
+            }
+            class MyTest extends TestCase {
+                /** @param resource $r */
+                private function needsResource($r): void {}
+                public function testX(): void {
+                    $output = fetch();
+                    self::assertIsResource($output);
+                    $this->needsResource($output);
+                }
+            }
+            /** @return resource|false */
+            function fetch() {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn phpunit_assert_not_false_narrows_a_resource_for_the_rest_of_the_block() {
     let d = diagnostics_for(

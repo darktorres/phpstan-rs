@@ -1396,6 +1396,45 @@ impl<'a> Checker<'a> {
                     Type::False,
                 ]);
             }
+            // Found while triaging the wider Piwigo corpus test suite:
+            // this project had no `str_repeat()` handling at all (a bare
+            // `string`, matching the native stub), while real PHPStan's
+            // own `StrRepeatFunctionReturnTypeExtension` (confirmed
+            // directly against `vendor/phpstan-src`) constant-folds a
+            // small literal-input/literal-count call outright, and
+            // otherwise still marks the result `non-falsy-string` when
+            // the input is itself non-falsy and the count is provably
+            // `>= 1`. Scoped to that same common, general case (not the
+            // extension's own further accessory tracking - literal-
+            // string/numeric-string/lowercase/uppercase propagation -
+            // real PHPStan's own value there rests on machinery
+            // (`isLiteralString`/`isNumericString`/...) this project
+            // doesn't otherwise track for plain strings). Real corpus
+            // false positive this fixes: `HtmlServiceTest`'s own
+            // `str_repeat(' ', 300)` fed into `toEndWith()`'s own
+            // `non-empty-string`-typed parameter.
+            "str_repeat" if args.len() == 2 => {
+                let input_ty = self.infer_expr(&args[0].value, locals);
+                let count_ty = self.infer_expr(&args[1].value, locals);
+                if matches!(count_ty, Type::IntLiteral(n) if n <= 0) {
+                    return Type::StringLiteral(String::new());
+                }
+                if let (Type::StringLiteral(s), Type::IntLiteral(n)) = (&input_ty, &count_ty)
+                    && *n >= 0
+                    && s.len().saturating_mul(*n as usize) < 100
+                {
+                    return Type::StringLiteral(s.repeat(*n as usize));
+                }
+                let count_is_at_least_one = matches!(count_ty, Type::IntLiteral(n) if n >= 1)
+                    || matches!(count_ty, Type::IntRange(Some(min), _) if min >= 1);
+                if count_is_at_least_one && is_non_falsy_string(&input_ty) {
+                    return Type::Intersection(vec![
+                        Type::String,
+                        Type::Accessory(AccessoryKind::NonFalsyString),
+                    ]);
+                }
+                return Type::String;
+            }
             // The vendored stub's own `@return string[]|false` reflects
             // PHP 7's behavior for an empty `$separator` - PHP 8+ throws a
             // `ValueError` there instead of returning `false` at all, so
