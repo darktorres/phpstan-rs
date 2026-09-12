@@ -1515,6 +1515,32 @@ fn a_while_loop_excluding_iterator_aggregate_narrows_traversable_to_iterator() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Real corpus false positive found while triaging the wider Piwigo
+// corpus (`PictureModifyPageRenderer::render`): `in_array_target_type`
+// required *every* haystack element to be a plain `ExprKind::Literal`,
+// so a haystack mixing literals with a bare empty-array literal (`[]`,
+// parsed as `ExprKind::ArrayLiteral`, not `Literal`) bailed the whole
+// function to `None` - silently narrowing *none* of the haystack's
+// values, not just the array one, even though `[]` is exactly as
+// statically provable a single exact type (`Type::ArrayShape(vec![])`)
+// as any scalar literal.
+#[test]
+fn in_array_strict_with_an_empty_array_literal_in_the_haystack_still_narrows() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsString(string $s): void {}
+            function f(array|string|null $raw): void {
+                if (! in_array($raw, [null, '0', '', []], true)) {
+                    if (! is_array($raw)) {
+                        needsString($raw);
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn in_array_strict_narrows_the_true_branch_to_the_haystacks_literal_union() {
     // Phase 33 Finding 2: CatPermSubmitRequest::fromArray's real

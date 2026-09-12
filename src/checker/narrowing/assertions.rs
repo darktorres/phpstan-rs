@@ -38,13 +38,21 @@ impl<'a> Checker<'a> {
     }
 
     /// The union of `in_array()`'s own haystack literal values, if every
-    /// element is a bare, unkeyed literal (`int`/`string`/`bool`/`null`) -
-    /// `None` if any element is a spread, a keyed entry, or anything other
-    /// than a syntactic literal, since this project has no way to prove a
-    /// non-literal haystack element's value statically. Reuses `infer_expr`
-    /// on each element rather than duplicating the `Literal -> Type`
-    /// mapping that already exists, verbatim, in `check_expr`'s and
-    /// `infer_expr`'s own `Literal` arms.
+    /// element is a bare, unkeyed literal (`int`/`string`/`bool`/`null`),
+    /// or a bare empty-array literal `[]` (just as statically provable a
+    /// single exact type, `Type::ArrayShape(vec![])`, as any scalar
+    /// literal - real corpus false positive this fixes:
+    /// `PictureModifyPageRenderer::render`'s own `! in_array($raw_tags_post,
+    /// [null, '0', '', []], true)`, whose 4th haystack element being a
+    /// non-`Literal` `ArrayLiteral` used to bail this whole function to
+    /// `None` - silently narrowing *none* of the other three, perfectly
+    /// literal, values either). `None` if any element is a spread, a
+    /// keyed entry, a non-empty array literal, or anything other than one
+    /// of those two provable shapes, since this project has no way to
+    /// prove any other haystack element's value statically. Reuses
+    /// `infer_expr` on each element rather than duplicating the `Literal
+    /// -> Type` mapping that already exists, verbatim, in `check_expr`'s
+    /// and `infer_expr`'s own `Literal` arms.
     pub(crate) fn in_array_target_type(
         &self,
         items: &[ArrayItem],
@@ -55,10 +63,11 @@ impl<'a> Checker<'a> {
             if item.spread || item.key.is_some() {
                 return None;
             }
-            if !matches!(item.value.kind, ExprKind::Literal(_)) {
-                return None;
-            }
-            let ty = self.infer_expr(&item.value, locals);
+            let ty = match &item.value.kind {
+                ExprKind::Literal(_) => self.infer_expr(&item.value, locals),
+                ExprKind::ArrayLiteral(inner) if inner.is_empty() => Type::ArrayShape(vec![]),
+                _ => return None,
+            };
             if !member_types.contains(&ty) {
                 member_types.push(ty);
             }
