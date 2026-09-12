@@ -146,5 +146,14 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   both `BatchManagerGlobalPageRenderer::render` findings (`.php:195` and
   `.php:443`) are now fully resolved - `array_fill(0, $n, 0)`'s own
   bare `array<0>` becomes `list<0>`, satisfying the `list<int>`-typed
-  sinks directly - current baseline for future diffs. Produced/stored
-  in the `phpstan-rs-master2` worktree.
+  sinks directly. Produced/stored in the `phpstan-rs-master2` worktree.
+- `ee71e82` - post the `count($x) > 0`-narrows-a-`Union` fix
+  (`upgrade_array_to_non_empty` gained a `Type::Union` arm, collapsing a
+  genuinely-empty `ArrayShape` member to `Never` and filtering it out -
+  it previously had no arm at all for a `Union`, silently leaving an
+  empty-shape alternative unstripped) (350 scoped, same count - three
+  diagnostics lost their spurious `array{}` union member without the
+  underlying finding disappearing, each for its own separate, unrelated
+  reason). `CategoryService.php:1586`, `SiteUpdateSubController.php:505`
+  and `:717` all lost the `array{}` alternative - current baseline for
+  future diffs. Produced/stored in the `phpstan-rs-master2` worktree.
