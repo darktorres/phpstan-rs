@@ -124,5 +124,18 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   scoped). Net -1 from `ce5b411`: removed
   `SiteUpdateSubController::handle`'s own `sync_meta`/`meta_all`/
   `meta_empty_overrides` `mixed`-leak (all 3 fields collapsed into one
-  `argument.type` diagnostic) - current baseline for future diffs.
-  Produced/stored in the `phpstan-rs-master2` worktree.
+  `argument.type` diagnostic). Produced/stored in the
+  `phpstan-rs-master2` worktree.
+- `0df31ed` - post the "provably non-empty foreach subject" fix
+  (`check_foreach` now passes `LoopZeroIterations::Impossible` instead
+  of `Possible` when `Self::is_known_non_empty_array` proves the
+  subject can't be empty - matching real PHPStan's own
+  `isIterableAtLeastOnce()->yes()` case) (352 scoped, same count -
+  three diagnostics lost their spurious `array{}` union member without
+  the underlying finding disappearing entirely). Fixed
+  `UserSortField::parseOrderClause`'s own `foreach (explode(',',
+  $order) as ...)` cleanly (the `array{}` member is fully gone);
+  `BatchManagerGlobalPageRenderer.php:195/443` and
+  `NotificationByMailSender.php:707` still show `array{}` (their own
+  subjects aren't provably non-empty) - current baseline for future
+  diffs. Produced/stored in the `phpstan-rs-master2` worktree.
