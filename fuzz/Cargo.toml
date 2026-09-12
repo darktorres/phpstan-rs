@@ -14,9 +14,20 @@ libfuzzer-sys = "0.4"
 [dependencies.phpstan-rs]
 path = ".."
 
+[lib]
+name = "phpstan_rs_fuzz"
+path = "src/lib.rs"
+
 [[bin]]
 name = "lex_and_parse"
 path = "fuzz_targets/lex_and_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "structured_php"
+path = "fuzz_targets/structured_php.rs"
 test = false
 doc = false
 bench = false
