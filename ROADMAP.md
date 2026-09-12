@@ -1536,6 +1536,18 @@ section used to carry:
   combinator (a refactor-timing call, not a missing-diagnostic gap -
   revisit once several more bespoke traverse/map functions accumulate
   and start visibly duplicating structural-recursion boilerplate).
+- A `foreach ($arr as &$v) { $v['key'] = ...; }` by-reference mutation
+  never updates `$arr`'s own tracked element shape - confirmed live
+  during a round of Piwigo corpus-findings triage
+  (`CategoryCatsRenderer::render`'s own `foreach ($infosOfImage as
+  &$info) { $info['src_image'] = ...; }`, adding a real field every
+  later read of that same element genuinely has, flagged
+  `shapeAccess.notFound` regardless). A real, buildable gap (real
+  PHPStan does track by-ref mutation), not attempted here - surfaced
+  only once a separate fix (`checker/expr.rs`'s `ExprKind::Index` read
+  arm properly resolving a `Union`/`Intersection` container instead of
+  its own previous `check_expr`-only `_ => Mixed` fallback) stopped
+  masking it behind `Mixed`.
 
 ## Permanent design boundaries (not planned, by choice)
 
@@ -1564,6 +1576,24 @@ section used to carry:
   (only a tag on a statement inside the body is) - a header tag would
   need to affect the loop body's own checking, and shipping that
   half-working was judged worse than not supporting it.
+- No cross-variable/parallel-structure correlation: two (or more)
+  separately-tracked values that a program's own real logic always
+  keeps in lockstep - most commonly two or more parallel dynamically-
+  keyed arrays populated together in one loop and read together in a
+  later one (`$counterByKey[$key]`/`$dateByKey[$key]`/... - confirmed
+  live at `ActivityRepository::findDailyActionCountsSince`,
+  `HistoryRepository::findGroupedCountsSince`,
+  `ImageRepository::findExtensionBreakdown`), or a discriminant
+  variable whose value implies another variable was already set in the
+  same branch (`AuthService::authKeyLogin`'s own `$valid_key ===
+  ConnectedWith::ApiKey` implying `$secret_key` is no longer `null`) -
+  aren't provably correlated by this checker (or, so far as confirmed
+  by reading `vendor/phpstan-src` for the identical shape, by real
+  PHPStan either - this is a genuinely hard, generally-unsolved static-
+  analysis problem, not a phpstan-rs-specific gap). Each individual
+  finding this produces is sound (a real, if practically-unreachable,
+  edge the checker can't rule out), not a false positive to chase down
+  case by case.
 - `new class(...) { ... }` (anonymous class) infers as plain `Mixed`,
   never a real `Object` type - confirmed, not just assumed, during a
   round of Piwigo corpus-findings triage: the parser gives *every*
