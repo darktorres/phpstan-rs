@@ -375,6 +375,39 @@ impl<'a> Checker<'a> {
                 for state in &continue_states {
                     exit_locals = merge_scopes(&exit_locals, state);
                 }
+                // A real, previously-live bug found and fixed this
+                // session, tried once as a blanket `merge_scopes(entry,
+                // exit_locals)` and reverted (see the git history on
+                // this exact line): that regressed the *other* real,
+                // already-disclosed trade-off `check_foreach`'s own doc
+                // comment describes (a `foreach` mutating its own
+                // subject array in place - `CalendarMonthly::
+                // buildMonthCalendar`'s own `$items[$day]['derivative']
+                // = ...;` - must never have its *already-transformed*
+                // shape re-widened back toward the stale pre-loop one
+                // `entry` still holds for that same variable; every key
+                // really iterated over gets the loop's own treatment,
+                // never the old one). The two concerns are different
+                // axes, so they get different treatment: a name that
+                // already existed before the loop (`$items`) keeps
+                // exactly `exit_locals`'s own value, untouched; a name
+                // introduced only *inside* the loop body (`$found` in
+                // `foreach ($items as $item) { $found = $item; }` -
+                // `UploadService::addUploadedFile`'s own real corpus
+                // shape, where a later `isset($file_path)` was wrongly
+                // reported "always exists") is dropped entirely - the
+                // same "can't assume it exists" rule `merge_scopes`'s
+                // own doc comment already applies to an ordinary
+                // if/else's own one-sided variable, just not reached
+                // for a loop until now.
+                let newly_introduced: Vec<String> = exit_locals
+                    .iter()
+                    .filter(|(name, _)| !entry.contains_key(name))
+                    .map(|(name, _)| name.clone())
+                    .collect();
+                for name in newly_introduced {
+                    exit_locals.remove(&name);
+                }
                 return (exit_locals, break_states);
             }
             self.diagnostics.truncate(diagnostics_before);

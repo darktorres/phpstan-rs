@@ -24,6 +24,34 @@ fn null_probe_diagnostics(src: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
+// Real, previously-live bug found and fixed this session
+// (`Checker::converge_loop_body`, `checker/control_flow.rs`): a variable
+// assigned only *inside* a loop body (never before it) was treated as
+// unconditionally defined afterward - the loop's own "ran zero times"
+// case, which real PHP always allows, was silently dropped from the
+// returned exit state. `isset()` right after such a loop (checking
+// exactly this - "did the loop actually find/set anything") is a common,
+// legitimate real idiom (`UploadService::addUploadedFile`'s own
+// identical shape) that was wrongly flagged "always exists".
+#[test]
+fn isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_flagged() {
+    let d = null_probe_diagnostics(
+        r#"<?php
+            /** @param string[] $items */
+            function test(array $items): void {
+                foreach ($items as $item) {
+                    $found = $item;
+                }
+                if (! isset($found)) {
+                    return;
+                }
+                echo $found;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn isset_on_a_never_nullable_local_is_flagged() {
     let d = null_probe_diagnostics(

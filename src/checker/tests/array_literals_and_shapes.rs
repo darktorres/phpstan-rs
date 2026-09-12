@@ -347,6 +347,34 @@ fn a_nested_write_through_a_dynamically_keyed_array_grows_its_element_shape() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// The real shape just above, one level closer to the actual corpus site:
+// the nested write happens *inside* a `foreach` that iterates the very
+// same array it mutates - `check_foreach`'s own doc comment discloses
+// this exact trade-off (tried merging the loop's exit state with its own
+// pre-loop snapshot once, reverted, since every key really iterated over
+// gets the loop's own treatment, never the stale pre-loop one). Guards
+// `Checker::converge_loop_body`'s own "drop only names introduced inside
+// the loop, never re-widen one that already existed" fix (this session)
+// from the other direction: a name already tracked before the loop must
+// keep exactly its post-loop type, not get unioned back with what it was
+// before.
+#[test]
+fn a_foreach_mutating_its_own_subject_array_keeps_the_post_loop_shape_precisely() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(array $items, string $file): void {
+                foreach ($items as $day => $data) {
+                    $items[$day]['derivative'] = $file;
+                }
+                foreach ($items as $day => $data) {
+                    echo $data['derivative'];
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Phase 12 Finding E: a real, pre-existing gap found by making
 // check_shape_key_access Union-aware and re-checking the real
 // corpus - PiwigoInfosSender::send's own $piwigoInfos becomes a real
