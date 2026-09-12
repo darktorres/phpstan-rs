@@ -1572,7 +1572,16 @@ section used to carry:
   a materially larger change (tracking a *value*-keyed narrowing fact
   rather than a *name*-keyed one) than a corpus-cleanup pass should take
   on; each individual finding this produces is sound, not a false
-  positive to chase down case by case.
+  positive to chase down case by case. `tools/p58/trace.php`'s own
+  `rootVariable($sourceCache[$templatePath], ...)`/`viewProperties(
+  $view)` (`$view` itself read from `$viewCache[$templatePath]`) are a
+  further, no-guard-at-all variant of the same underlying problem: both
+  caches are populated key-by-key in one loop, then read back by
+  dynamic key in a later one - the read can't know without cross-loop,
+  cross-key correlation (the same "parallel dynamically-keyed arrays"
+  shape this section's own first bullet already covers, just a cache
+  read one loop removed rather than two arrays in the same loop) that
+  this specific key was actually populated earlier.
 
 ## Permanent design boundaries (not planned, by choice)
 
