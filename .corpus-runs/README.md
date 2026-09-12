@@ -118,3 +118,11 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   `mixed`-leak imprecisions in Piwigo's own code, individually traced
   rather than assumed. Produced/stored in the `phpstan-rs-master2`
   worktree.
+- `d9b36bf` - post the `isset()`/`empty()`-as-a-value fix (both now
+  infer `bool` when read as a plain value, not just narrowed as a
+  condition - `call_fallback_return_type` had no arm for either) (352
+  scoped). Net -1 from `ce5b411`: removed
+  `SiteUpdateSubController::handle`'s own `sync_meta`/`meta_all`/
+  `meta_empty_overrides` `mixed`-leak (all 3 fields collapsed into one
+  `argument.type` diagnostic) - current baseline for future diffs.
+  Produced/stored in the `phpstan-rs-master2` worktree.
