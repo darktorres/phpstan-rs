@@ -717,3 +717,28 @@ fn equality_narrowing_gives_the_exact_case_singleton_type() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Real corpus false positive found while triaging the wider Piwigo
+// corpus (`HistorySearchController::__invoke`): real PHPStan's own
+// `functionMap.php` declares `UnitEnum::cases()` as `list<static>`
+// outright (`vendor/phpstan-src/resources/functionMap_php81delta.php`)
+// - this project's own synthesized signature for it was a bare,
+// unmarked `Array`, leaving `array_merge(['none'], SomeEnum::cases())`
+// (a real, common "build a full option list" idiom) unable to prove
+// list-ness for the merged result.
+#[test]
+fn cases_returns_a_real_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Suit {
+                case Hearts;
+                case Spades;
+            }
+            function f(): void {
+                assertType('list<Suit>', Suit::cases());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

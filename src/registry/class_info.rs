@@ -10,7 +10,7 @@ use crate::registry::function_sig::{
 use crate::registry::name_context::{
     NameContext, collect_class_name_case_refs, resolve_names_in_type,
 };
-use crate::types::{self, TemplateParam, Type};
+use crate::types::{self, AccessoryKind, TemplateParam, Type};
 
 mod attributes;
 mod tag_synthesis;
@@ -1160,18 +1160,26 @@ impl ClassInfo {
         // detection immediately flagged every single real
         // `Enum::cases()`/`::tryFrom()` call in the wild.
         let self_ty = Type::Object(fqn.clone(), Vec::new());
+        // Real PHPStan's own `functionMap.php` declares `UnitEnum::cases()`
+        // as `list<static>` outright (confirmed directly in
+        // `vendor/phpstan-src/resources/functionMap_php81delta.php`) - a
+        // bare, unmarked `Array` here left every caller's own result
+        // (`array_merge(['none'], HistoryImageType::cases())`, confirmed
+        // live at `HistorySearchController::__invoke`) unable to prove
+        // list-ness itself, a real corpus false positive.
+        let cases_return_ty = Type::Intersection(vec![
+            Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(self_ty.clone()),
+            ),
+            Type::Accessory(AccessoryKind::ArrayList),
+        ]);
         methods.insert(
             "cases".to_string(),
             FunctionSig {
                 params: Vec::new(),
-                return_type: Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(self_ty.clone()),
-                ),
-                return_type_native: Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(self_ty.clone()),
-                ),
+                return_type: cases_return_ty.clone(),
+                return_type_native: cases_return_ty,
                 // Fully authoritative built-in shapes, not from any real
                 // docblock - `true` so `flatten_phpdoc_inheritance` never
                 // treats a synthesized enum method as an inheritance

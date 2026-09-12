@@ -1724,6 +1724,43 @@ section used to carry:
   above that real PHPStan does special-case), so a per-token shape
   (`array{0: int, 1: string, 2: int}|string`) is correctly out of scope
   here too.
+- A dynamic-key write into a `list<T>`-marked container always drops
+  the `list`/`non-empty` accessory markers, even when the key
+  expression is *provably* in-bounds and sequential (a `for` loop's own
+  index, bounded by that same array's own `count()` a few lines
+  earlier) - already disclosed inline (`assignment.rs`'s own
+  `write_index_into`, "an arbitrary key could easily not be sequential")
+  but not previously cross-referenced here. Proving a specific dynamic
+  key stays in-bounds/sequential needs the same loop-index/array-length
+  correlation the "cross-variable/parallel-structure correlation"
+  boundary above already declines to model generically. Confirmed
+  corpus false positive this causes: `CalendarRenderer::render`'s own
+  `for ($i = 0; $i < count($page_chronology_date); $i++) {
+  $page_chronology_date[$i] = ...; }` degrades a `list<int|string>`
+  parameter to plain `array` by the time it's returned.
+- Compound `&&`/`||` decomposition (already declined, see the
+  `condition_alias_shape` doc comment in `narrowing.rs`) has a concrete
+  confirmed instance worth naming: `if ($a || $b) { if ($b) { ... }
+  else { /* here, $a must be true */ } }` - the outer `||`'s own truth,
+  combined with the inner condition's negation, implies the *other*
+  disjunct by disjunctive syllogism, a real, common idiom real PHPStan
+  handles via its own scope-narrowing but this project's narrower
+  `apply_narrowing` recursion doesn't attempt. Confirmed corpus false
+  positive: `MetadataService::getExifData`'s own `if ((bool) $exif ||
+  (bool) $exif2) { if ((bool) $exif2) { ... } else { /* $exif must be
+  truthy here */ $exif = ...; } }` - `$exif`'s own `false` possibility
+  (from `exif_read_data(): array|false`) stays live in the `else`.
+- `array_splice()`'s own by-reference mutation of its first argument
+  (inserting/removing elements in place - the entire reason a caller
+  usually calls it as a bare statement, discarding the return value)
+  isn't tracked at all; only the function's own *return* value (the
+  removed elements) is modeled. A caller relying on the mutated
+  variable's own new element type afterward sees it frozen at whatever
+  it was *before* the splice. Confirmed live at
+  `SearchService::qsearchGetTextTokenSearchSql`'s own `array_splice(
+  $values, count($values) - count($likeClauses), 0, [implode(' ',
+  $fts)]);` (inserting a string into a `$values` array `array_splice`'s
+  own return-value modeling never touches).
 
 ## Won't-port (real PHPStan features with no applicable Rust target)
 
