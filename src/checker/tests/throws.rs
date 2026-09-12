@@ -260,6 +260,44 @@ fn a_declared_throws_type_actually_thrown_is_not_flagged_too_wide() {
     );
 }
 
+// Real, previously-live bug found while tracing a real Piwigo corpus
+// false positive (`ConfigLoader::validateRequired`, whose own
+// `new ReflectionClass(...)` call contributes ReflectionException - a
+// declared throw type on that stub's own constructor - alongside the
+// method's own genuine, matching `throw`): `check_too_wide_throw_type`
+// used to call `is_assignable(actual, &declared)` directly, treating the
+// *whole* union of everything this body could ever throw as the "sub"
+// side - is_assignable's own (otherwise entirely correct) rule for a
+// `Union` in that position requires *every* member to satisfy the
+// supertype, so one single unrelated throw point anywhere in the body
+// was enough to make an otherwise genuinely-thrown declared type look
+// unused. The real question is "was `declared` thrown *somewhere*," not
+// "is everything this body throws covered by `declared`."
+#[test]
+fn a_declared_throws_type_actually_thrown_alongside_an_unrelated_one_is_not_flagged_too_wide() {
+    let d = diagnostics_for(
+        r#"<?php
+            class NeedleException extends \RuntimeException {}
+            class UnrelatedException extends \RuntimeException {}
+            /** @throws UnrelatedException */
+            function callee(): void {
+                throw new UnrelatedException('unrelated');
+            }
+            /** @throws NeedleException */
+            function f(bool $b): void {
+                if ($b) {
+                    callee();
+                }
+                throw new NeedleException('real');
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_declared_throws_type_never_thrown_anywhere_is_flagged_too_wide() {
     let d = diagnostics_for(
@@ -447,6 +485,43 @@ fn intdiv_by_a_non_literal_divisor_satisfies_a_division_by_zero_error_throws_tag
             /** @throws \DivisionByZeroError */
             function f(int $divisor): void {
                 intdiv(10, $divisor);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Same bug, same fix as intdiv's own pair of tests just above: a *valid*
+// literal DateInterval spec used to fall back to the constructor's own
+// generic stub-level @throws tag instead of correctly contributing
+// nothing, so a declared @throws Exception looked "used" even though this
+// exact call could never throw it.
+#[test]
+fn dateinterval_with_a_valid_literal_spec_satisfies_an_exception_throws_tag_check() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \Exception */
+            function f(): void {
+                new DateInterval('P1D');
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "throws.unusedType"),
+        "a valid literal spec can never throw, so the tag should still be unused: {d:?}"
+    );
+}
+
+#[test]
+fn dateinterval_with_an_invalid_literal_spec_satisfies_an_exception_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @throws \Exception */
+            function f(): void {
+                new DateInterval('garbage');
             }
         "#,
     );

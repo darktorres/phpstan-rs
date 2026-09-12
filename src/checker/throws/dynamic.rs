@@ -76,7 +76,24 @@ impl<'a> Checker<'a> {
                 let divisor = args.get(1)?;
                 match literal_int_value(divisor) {
                     Some(0) => Some(throwable("DivisionByZeroError")),
-                    Some(_) => None,
+                    // A real, previously-live bug found and fixed this
+                    // session: `None` here (this file's own established
+                    // "not recognized/no contribution" sentinel) was
+                    // indistinguishable, at every one of this function's
+                    // own call sites (`record_call_throw_point`), from
+                    // "this exact call shape isn't `intdiv` at all" - both
+                    // fell through to `intdiv`'s own generic stub-level
+                    // `@throws DivisionByZeroError`/`ArithmeticError` tag,
+                    // completely undoing the whole point of proving *this*
+                    // call, with a literal nonzero divisor, safe.
+                    // `Type::Void` is `record_call_throw_point`'s own
+                    // already-built "recognized, but definitely
+                    // contributes nothing - don't fall back to the sig"
+                    // sentinel (its own `if t != Type::Void { push(t); }
+                    // return;` already handles this correctly; nothing
+                    // there needed to change, only this file's own choice
+                    // of which "nothing" to return).
+                    Some(_) => Some(Type::Void),
                     None => Some(throwable("DivisionByZeroError")),
                 }
             }
@@ -151,8 +168,20 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 match &unwrap_grouping(&arg.value).kind {
+                    // Same bug, same fix as `intdiv`'s own identical
+                    // `Type::Void` sentinel just above: a *valid* literal
+                    // spec previously returned bare `None` here, silently
+                    // falling back to `DateInterval::__construct()`'s own
+                    // generic stub-level `@throws Exception`/
+                    // `DateMalformedIntervalStringException` tag - exactly
+                    // undoing this arm's own proof that *this* literal
+                    // spec can never throw.
                     ExprKind::Literal(Literal::String(spec)) => {
-                        (!is_valid_date_interval_spec(spec)).then(|| throwable("Exception"))
+                        if is_valid_date_interval_spec(spec) {
+                            Some(Type::Void)
+                        } else {
+                            Some(throwable("Exception"))
+                        }
                     }
                     _ => Some(throwable("Exception")),
                 }

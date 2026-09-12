@@ -115,10 +115,33 @@ impl<'a> Checker<'a> {
             .reduce(union_types);
         let members: Vec<Type> = flatten_union(throws).into_iter().cloned().collect();
         for declared in members {
-            let is_used = match &actual {
-                None => false,
-                Some(actual) => self.registry.is_assignable(actual, &declared),
-            };
+            // A real, previously-live bug found and fixed this session:
+            // this used to call `is_assignable(actual, &declared)`
+            // directly - correct when only one thing is ever thrown, but
+            // wrong the moment `actual` is a real `Union` of *several*
+            // distinct throw points (any call whose own signature
+            // documents a different, unrelated `@throws` type
+            // contributes one - `ReflectionClass`'s own constructor is a
+            // real corpus example, `Piwigo\Config\ConfigLoader::
+            // validateRequired`). `is_assignable`'s own `Union`-in-sub-
+            // position rule (correctly, for an ordinary assignability
+            // check) requires *every* member to satisfy the supertype -
+            // but this check's own real question is "was `declared`
+            // (or something it covers) thrown *anywhere* in this body,"
+            // not "is everything this body could ever throw covered by
+            // `declared`" - the latter wrongly demanded the *unrelated*
+            // throw point also satisfy `declared`, flagging a real,
+            // genuinely-thrown declared type as unused. Flattening
+            // `actual` the same way `throws` already is just above and
+            // checking each of its own members independently answers the
+            // real question: is there *some* actual throw point this
+            // declared type covers.
+            let is_used = actual
+                .as_ref()
+                .map(flatten_union)
+                .unwrap_or_default()
+                .into_iter()
+                .any(|a| self.registry.is_assignable(a, &declared));
             if is_used {
                 continue;
             }
