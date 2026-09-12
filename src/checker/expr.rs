@@ -4438,6 +4438,22 @@ impl<'a> Checker<'a> {
             // `PrintHandler::resolveType`, which returns `new
             // ConstantIntegerType(1)` unconditionally.
             ExprKind::Name(name) if name == "print" => Type::IntLiteral(1),
+            // `isset(...)`/`empty(...)` are real PHP language constructs
+            // that always evaluate to a real `bool` when read as a value
+            // (not just narrowed as a condition) - `is_language_construct`
+            // routes both away from ever resolving a real signature here
+            // (`sig` stays `None`, so this whole function is the only
+            // place their own call-expression type gets decided), and
+            // `self.infer_expr(callee, locals)` on the bare `Name` below
+            // has no special case for either, silently collapsing to
+            // `Mixed`. Real corpus false positive this fixes:
+            // `SiteUpdateSubController::handle`'s own `$sync_meta_value =
+            // isset($post['sync_meta']);` (a bare `isset()`, not gated
+            // behind a `&&` - which happened to mask this exact bug for
+            // its own sibling assignments by computing `&&`'s own result
+            // type independently of `isset`'s) fed into a docblock-typed
+            // `array{..., sync_meta: bool, ...}` shape a few lines later.
+            ExprKind::Name(name) if name == "isset" || name == "empty" => Type::Bool,
             _ => match self.infer_expr(callee, locals) {
                 Type::Callable(Some(sig)) => (*sig.return_type).clone(),
                 _ => Type::Mixed,

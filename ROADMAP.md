@@ -1586,8 +1586,16 @@ section used to carry:
   `ImageRepository::findExtensionBreakdown`), or a discriminant
   variable whose value implies another variable was already set in the
   same branch (`AuthService::authKeyLogin`'s own `$valid_key ===
-  ConnectedWith::ApiKey` implying `$secret_key` is no longer `null`) -
-  aren't provably correlated by this checker (or, so far as confirmed
+  ConnectedWith::ApiKey` implying `$secret_key` is no longer `null`;
+  `AlbumsPageRenderer::render`'s own `$order_by_date` implying
+  `$ref_dates` was set in the same `if`; `NotificationByMailSender::
+  sendMailNotifications`'s own `$nbmSendDetailedContent ? $news : null`
+  reusing the *identical* condition `$news`'s own assignment was gated
+  on, one line further down, which is this same unmodeled-correlation
+  gap even though it's the same variable rather than a separate one -
+  a ternary's own branches get no "which if-branch got me here"
+  definedness narrowing, only ordinary type narrowing) - aren't
+  provably correlated by this checker (or, so far as confirmed
   by reading `vendor/phpstan-src` for the identical shape, by real
   PHPStan either - this is a genuinely hard, generally-unsolved static-
   analysis problem, not a phpstan-rs-specific gap). Each individual
@@ -1624,7 +1632,13 @@ section used to carry:
   feature, not a general type-system gap. Confirmed corpus false
   positive this causes: `TagRepository::findCommonTags`'s own
   `$qb->getQuery()->getResult()` loop cascades `mixed` into every field
-  of the row shape it builds by hand from each result object.
+  of the row shape it builds by hand from each result object. The
+  identical gap, one API layer down: DBAL's own `Connection::
+  fetchAssociative()` (raw, unmapped row fetch) is natively
+  `array<string, mixed>|false`, no per-column typing at all - confirmed
+  at `NotificationByMailSenderTest::setUp`'s own
+  `$this->conn->fetchAssociative(...)` result assigned into a precisely
+  `array{check_key: string, ...}`-shaped property.
 - `array + array` (PHP's array-union operator, not arithmetic) always
   answers `Array(unknown_key, Mixed)` - already disclosed inline
   (`checker/expr.rs`'s own `BinOp::Add` arm doc comment) but not

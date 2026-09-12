@@ -872,3 +872,33 @@ fn phpstan_nsrt_float_increment_decrement_matches_real_assert_type() {
     );
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
+
+// Real, previously-live bug found while triaging the Piwigo corpus:
+// `isset(...)`/`empty(...)` are language constructs with no real
+// signature, so `call_fallback_return_type` (the only place their own
+// call-expression type gets decided, `is_language_construct` routing
+// them away from ever resolving one) had no arm for either, silently
+// collapsing both to `Mixed` when read as a plain value rather than
+// narrowed as a condition - real PHP always evaluates both to a real
+// `bool`. Real corpus false positive this fixes:
+// `SiteUpdateSubController::handle`'s own `$sync_meta_value =
+// isset($post['sync_meta']);` (assigned bare, unlike its sibling
+// `$display_info_value = isset(...) && $post['display_info'] === '1';`,
+// whose own `&&` computed a correct `bool` independently of `isset`'s
+// own type and so never surfaced this) feeding into a docblock-typed
+// `array{..., sync_meta: bool, ...}` shape a few lines later.
+#[test]
+fn isset_and_empty_infer_as_bool_when_read_as_a_plain_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(array $post): void {
+                $a = isset($post['x']);
+                assertType('bool', $a);
+                $b = empty($post['x']);
+                assertType('bool', $b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
