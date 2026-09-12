@@ -1629,8 +1629,33 @@ section used to carry:
   `$userAnonymous && $anonymousId !== $savedAnonymousId` implies
   `$savedAnonymousId` was set to a real, non-null value by the *outer*
   scope's own `if ($userAnonymous) { $savedAnonymousId = ... ?? ...; }`
-  before the closure even runs) - aren't provably correlated by this
-  checker (or, so far as confirmed
+  before the closure even runs. A related but distinct sub-case:
+  `condition_alias_shape` (`narrowing.rs`) deliberately scopes the
+  boolean-alias mechanism above to a *single* recognized condition shape
+  per assignment - a genuinely common idiom it doesn't cover is a
+  *compound* `&&`/`||` condition assigned to a flag variable, then
+  reused later (`$flag = $a === null || $a === 0; if (! $flag) { use
+  $a; }`) - confirmed at `CategoryService::createVirtualCategory`'s own
+  `$parentIdIsEmpty = $parentId === null || $parentId === 0;`,
+  `CategoryService::setCatStatusWithinTransaction`'s own
+  `$topCategoryHasParent = $topCategoryIdUppercat !== null &&
+  $topCategoryIdUppercat !== 0;` (two call sites, both reusing the
+  now-narrowed `$parentCatId`), `GalleryController::__invoke`'s own
+  `$slideshow_url_present = is_string($slideshow_url) && $slideshow_url
+  !== '' && $slideshow_url !== '0';`, and `PasswordController::
+  processVerificationCode`'s own `$skip_mail = ! $is_user_found ||
+  $email === null || $email === '';`. Another: a nullsafe call's own
+  result, once narrowed non-null, provably implies its *receiver* was
+  non-null too (`$x = $a?->b(); if ($x !== null) { /* $a is non-null
+  */ }`) - a sound, directly-derivable implication from `?->`'s own
+  short-circuit semantics rather than mere incidental program logic,
+  but still the same general "value assigned from an expression, later
+  condition on the assigned variable implies a fact about a different
+  expression" shape this project's own `ConditionalExpressionHolder`
+  slice doesn't reach - confirmed at `ActivityRepository::insertMany`'s
+  own `$column = $kind?->referenceColumn(); if ($column !== null &&
+  ...) { ...referentExists($kind, ...); }`) - aren't provably
+  correlated by this checker (or, so far as confirmed
   by reading `vendor/phpstan-src` for the identical shape, by real
   PHPStan either - this is a genuinely hard, generally-unsolved static-
   analysis problem, not a phpstan-rs-specific gap). Each individual
