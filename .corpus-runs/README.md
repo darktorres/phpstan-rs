@@ -137,5 +137,14 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   $order) as ...)` cleanly (the `array{}` member is fully gone);
   `BatchManagerGlobalPageRenderer.php:195/443` and
   `NotificationByMailSender.php:707` still show `array{}` (their own
-  subjects aren't provably non-empty) - current baseline for future
-  diffs. Produced/stored in the `phpstan-rs-master2` worktree.
+  subjects aren't provably non-empty). Produced/stored in the
+  `phpstan-rs-master2` worktree.
+- `2c09d79` - post the `array_fill()` list/non-empty accessory fix
+  (matches real PHPStan's own `ArrayFillFunctionReturnTypeExtension` -
+  `list`-marked when the start index is provably `0`, `non-empty`-marked
+  when the count is provably `>= 1`) (350 scoped). Net -2 from `0df31ed`:
+  both `BatchManagerGlobalPageRenderer::render` findings (`.php:195` and
+  `.php:443`) are now fully resolved - `array_fill(0, $n, 0)`'s own
+  bare `array<0>` becomes `list<0>`, satisfying the `list<int>`-typed
+  sinks directly - current baseline for future diffs. Produced/stored
+  in the `phpstan-rs-master2` worktree.
