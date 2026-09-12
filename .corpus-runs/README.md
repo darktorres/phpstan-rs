@@ -68,12 +68,25 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   moved, despite `min`/`max`/`array_find`-family/non-variable-`++`/`--`
   each touching 20-36 more call sites in `src/` alone - produced/stored
   in the `phpstan-rs-master2` worktree.
-- `069cff9` - post `#[ArrayShape(...)]` attribute support (348 scoped) -
-  current baseline for future diffs. Removed `ImageDerivativeController
-  Test.php`'s own `idcPixel()`/`imagecolorsforindex()` `return.type`
-  finding; correctly *added* one new, genuine `nullCoalesce.offset`
-  finding at `ImageBackend::getGraphicsLibrary` (`gd_info()['GD
-  Version'] ?? null` - `gd_info()`'s own `#[ArrayShape]` declares that
-  key unconditionally present, matching what real PHPStan would also
-  now report with the same precision) - produced/stored in the
+- `069cff9` - post `#[ArrayShape(...)]` attribute support (348 scoped).
+  Removed `ImageDerivativeControllerTest.php`'s own `idcPixel()`/
+  `imagecolorsforindex()` `return.type` finding; correctly *added* one
+  new, genuine `nullCoalesce.offset` finding at `ImageBackend::
+  getGraphicsLibrary` (`gd_info()['GD Version'] ?? null` -
+  `gd_info()`'s own `#[ArrayShape]` declares that key unconditionally
+  present, matching what real PHPStan would also now report with the
+  same precision) - produced/stored in the `phpstan-rs-master2`
+  worktree.
+- `e9bde62` - post the CategoryService `mixed`-leak fix (three layers:
+  empty-shape dynamic-key reads, `check_expr`'s own `Index`-read arm
+  unified with `index_result_type`, `advance_incdec_type`'s own `Union`
+  recursion) (360 scoped) - current baseline for future diffs. Net +12
+  from `069cff9`, all individually investigated (see ROADMAP.md's
+  "Known but not yet scheduled"/"Permanent design boundaries" - a
+  by-reference-`foreach`-mutation gap and the cross-variable-
+  correlation boundary, both newly cross-referenced from this run) -
+  1 genuine new true positive
+  (`UserService::searchCaseUsername`), 1 confirmed false positive from
+  that separate by-ref-foreach gap, 10 sound-but-imprecise cross-
+  variable-correlation findings. Produced/stored in the
   `phpstan-rs-master2` worktree.
