@@ -90,3 +90,31 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   that separate by-ref-foreach gap, 10 sound-but-imprecise cross-
   variable-correlation findings. Produced/stored in the
   `phpstan-rs-master2` worktree.
+- `dbfc5f0` - post the PHPDoc colon-in-description parsing fix
+  (`1471d7a`) and the `throws.unusedType` union-membership/`Type::Void`
+  sentinel fix (`dbfc5f0` itself) (348 scoped). Net -3 from `e9bde62`:
+  2 `missingType.iterableValue` findings on
+  `NotificationByMailSubController::doTimeoutTreatment` (the colon fix
+  let its own `@param array<string, mixed> $post: ...`-style docblock
+  tags finally register), 1 genuine `throws.unusedType` false positive
+  on `ConfigLoader::validateRequired` (the union-membership fix). No
+  separate snapshot exists for `1471d7a` alone - produced/stored in the
+  `phpstan-rs-master2` worktree.
+- `ce5b411` - post the `LoopZeroIterations` fix (`while`/`for`/`foreach`
+  all now merge their exit state with the pre-loop entry, matching real
+  PHPStan's own `ForeachHandler::processStmt` "maybe zero iterations"
+  merge - confirmed directly against `vendor/phpstan-src`) plus the
+  `write_index_into` `Type::Null` auto-vivification arm it exposed a
+  need for (353 scoped). Net +5 from `dbfc5f0`: the target
+  `UploadService::addUploadedFile` `isset.variable` false positive is
+  gone; a `CalendarMonthly::buildMonthCalendar` regression from an
+  earlier iteration of this same fix (2 `shapeAccess.notFound` false
+  positives) was found via this corpus diff and fixed before landing
+  (the `write_index_into` arm above); the remaining 8 new/changed
+  `argument.type`/`return.type` findings (`RatingPageRenderer`,
+  `CategoryService` x2, `CatPermPageRenderer`, `DerivativeImage`,
+  `UserService` x2, plus reordered union members on several more) are
+  genuine, sound consequences of the same fix surfacing pre-existing
+  `mixed`-leak imprecisions in Piwigo's own code, individually traced
+  rather than assumed. Produced/stored in the `phpstan-rs-master2`
+  worktree.
