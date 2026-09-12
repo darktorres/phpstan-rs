@@ -1,0 +1,1 @@
+(T is 'send' ? list<string> : list<int>)

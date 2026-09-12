@@ -1269,8 +1269,28 @@ drowning out any new finding) and `token_stream_parse` (secondary,
 bypasses the lexer via `arbitrary`-derived `Token`/`Keyword`/
 `StringPart`, gated behind a new opt-in `fuzzing` Cargo feature so the
 main crate never pulls in `arbitrary` for ordinary builds), both seeded
-from this project's own already-vendored real-world PHP. Dev-only, an
-ongoing local workflow (`cargo +nightly fuzz run`), not a CI gate.
+from this project's own already-vendored real-world PHP. Two more
+targets, independently developed and merged in alongside these: `structured_php`
+builds a small, hand-written `Arbitrary`-driven PHP-fragment generator
+(`if`/`while`/`match`/`class`/closures/named+spread arguments/heredoc/
+nullsafe access/first-class-callable syntax, each with randomized real
+pieces) instead of raw bytes, going through the heavier `project::
+parse_file` pipeline (`check-project`'s own path, a superset of
+`lex_parse`'s lighter `check`-command one) rather than a raw `Lexer`+
+`Parser` pair - reaches real recursive nesting depth through genuine
+structure and always actually enters PHP mode, rather than relying on
+byte mutation to stumble onto a `<?php` prefix by chance; `parse_type_string`
+fuzzes `types::parse_type_string` (the PHPDoc type-string parser)
+directly - a separate recursive-descent parser over raw untrusted
+strings, same risk shape as the lexer/parser but previously unfuzzed,
+with no `MAX_EXPR_DEPTH`-style guard of its own. A libFuzzer dictionary
+(`fuzz/php.dict`, built from this project's own token tables) is also
+available for `-dict=`. `token_stream_parse` found a real, still-open
+crash within the first few seconds of a smoke run merging this in: a
+synthetic `Token::InterpString` containing a `ComplexExpr` with garbage
+`Position` values causes a "deadly signal" (not a clean panic) - not yet
+root-caused. Dev-only, an ongoing local workflow (`cargo +nightly fuzz
+run`), not a CI gate.
 
 **Extension API, Axis 1 + Axis 2** (Phase 18). Axis 1 (declarative,
 config-driven symbol restriction) is `restricted_symbols`, above. Axis
