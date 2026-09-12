@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::token::StringPart;
 
 #[test]
 fn shell_exec_backtick_string_parses() {
@@ -56,4 +57,33 @@ fn quote_inside_complex_interpolation_does_not_end_the_string() {
             ..
         })
     ));
+}
+
+// Found by the fuzz/ workspace's own token_stream_parse target (feeds a
+// synthetic, Arbitrary-derived token stream straight into the parser,
+// bypassing the real lexer entirely - real PHP source can never produce
+// a ComplexExpr fragment_base this extreme, since no real file gets
+// remotely close to u32::MAX lines/columns, but the parser must still
+// not crash on one). `bias_position` (interpolation.rs) computed
+// `frag_base.col + pos.col - 1` with plain u32 arithmetic - a
+// `frag_base` this close to `u32::MAX` overflowed and panicked
+// ("attempt to add with overflow") instead of producing any position at
+// all. Exercised here through the real Parser::new/parse_program path
+// (not a private-helper unit test), matching exactly how the fuzz
+// target itself reaches it.
+#[test]
+fn a_complex_interpolation_fragment_with_an_extreme_base_position_does_not_panic() {
+    let extreme = Position {
+        line: u32::MAX,
+        col: u32::MAX,
+    };
+    let token = Token::InterpString(vec![StringPart::ComplexExpr("2".to_string(), extreme)]);
+    let span = Span {
+        start: extreme,
+        end: extreme,
+    };
+    let result = Parser::new(vec![(token, span, None)]).parse_program();
+    // Either outcome is fine - the only thing this test guards against is
+    // the arithmetic-overflow panic itself.
+    let _ = result;
 }

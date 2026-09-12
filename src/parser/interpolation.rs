@@ -55,15 +55,26 @@ impl Parser {
 /// anchor. Only the fragment's first line needs its column offset by
 /// `frag_base`'s own column - a `Position` past the first line already
 /// starts counting from column 1 on its own, real line.
+///
+/// Saturating, not plain, arithmetic: no real file gets remotely close
+/// to `u32::MAX` lines/columns (this project's own lexer comment notes
+/// a real, extreme corpus file's longest line at ~1.25 million
+/// characters, still far below it), but `token_stream_parse`'s own
+/// `Arbitrary`-derived `Position` values are unconstrained and found a
+/// real `attempt to add with overflow` panic here with a `frag_base`
+/// near `u32::MAX` - a synthetic-input-only reach today, not a real-file
+/// one, but a real, unguarded panic all the same, and a clamped (not
+/// wrapped or crashing) result is still an honest answer even in that
+/// physically-impossible tail case.
 fn bias_position(pos: Position, frag_base: Position) -> Position {
     if pos.line == 1 {
         Position {
             line: frag_base.line,
-            col: frag_base.col + pos.col - 1,
+            col: frag_base.col.saturating_add(pos.col.saturating_sub(1)),
         }
     } else {
         Position {
-            line: frag_base.line + pos.line - 1,
+            line: frag_base.line.saturating_add(pos.line.saturating_sub(1)),
             col: pos.col,
         }
     }
