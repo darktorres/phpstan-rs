@@ -3,3 +3,10 @@
 # per commit hash, so a before/after diff never needs rebuilding an old
 # commit just to re-run it. See .corpus-runs/README.md.
 /.corpus-runs/*/*.txt
+# cargo-fuzz's own build output, corpus growth, and crash artifacts - not
+# source. A handful of seed files under /fuzz/corpus/lex_and_parse/ are
+# deliberately committed anyway (git tracks them regardless of this
+# directory-wide ignore; only new/untracked mutations are excluded).
+/fuzz/target
+/fuzz/artifacts
+/fuzz/corpus/*

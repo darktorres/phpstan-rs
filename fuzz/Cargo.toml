@@ -1,0 +1,27 @@
+[package]
+name = "phpstan-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+
+[dependencies.phpstan-rs]
+path = ".."
+
+[[bin]]
+name = "lex_and_parse"
+path = "fuzz_targets/lex_and_parse.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1
+
+[workspace]
