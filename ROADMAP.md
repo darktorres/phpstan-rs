@@ -1619,8 +1619,18 @@ section used to carry:
   on, one line further down, which is this same unmodeled-correlation
   gap even though it's the same variable rather than a separate one -
   a ternary's own branches get no "which if-branch got me here"
-  definedness narrowing, only ordinary type narrowing) - aren't
-  provably correlated by this checker (or, so far as confirmed
+  definedness narrowing, only ordinary type narrowing;
+  `UploadService::addUploadedFile`'s own `isset($image_id)` re-checked a
+  second time, ~150 lines later, as a fresh `if`/`else` - the second
+  `else` branch reads `$dbnow` assuming the first `else` branch (the
+  same, unchanged condition) already set it, past the merge point where
+  this checker only sees "maybe null" left over from the *first*
+  if/else's own `if`-branch; `RateService::rate`'s own closure -
+  `$userAnonymous && $anonymousId !== $savedAnonymousId` implies
+  `$savedAnonymousId` was set to a real, non-null value by the *outer*
+  scope's own `if ($userAnonymous) { $savedAnonymousId = ... ?? ...; }`
+  before the closure even runs) - aren't provably correlated by this
+  checker (or, so far as confirmed
   by reading `vendor/phpstan-src` for the identical shape, by real
   PHPStan either - this is a genuinely hard, generally-unsolved static-
   analysis problem, not a phpstan-rs-specific gap). Each individual
