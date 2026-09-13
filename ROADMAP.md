@@ -1938,6 +1938,56 @@ section used to carry:
   shape are both structurally infeasible without embedding a PHP
   runtime or a SQL parser respectively - confirmed real PHPStan needs
   exactly that.
+- **A real, fully-diagnosed generics-substitution gap, not yet fixed**:
+  calling a generic interface's own templated method through a concrete
+  class that *itself directly re-declares/implements* that method (not
+  merely inherits it unedited) never substitutes the interface's own
+  `@template`, even when the concrete class's own `@implements
+  Interface<Concrete>` tag correctly binds it. Confirmed live -
+  `MessengerFactory::transport`'s own `(new DoctrineTransportFactory
+  ($registry))->createTransport(...)` call: `DoctrineTransportFactory`'s
+  own `@implements TransportFactoryInterface<DoctrineTransport>`
+  correctly binds `TransportFactoryInterface`'s own `@template-covariant
+  TTransport of TransportInterface`/`@return TTransport` to
+  `DoctrineTransport` (confirmed via `dumpType()` against a minimal,
+  structurally-identical repro: real PHPStan resolves the call to the
+  concrete `MyTransport`, not the interface's own bare native
+  `TransportInterface` return hint) - but this project infers the bare
+  interface-level `TransportInterface` instead, losing the fact that
+  `DoctrineTransport` (like the repro's own `MyTransport`) also
+  implements `MessageCountAwareInterface`, flagging a real corpus false
+  positive (`argument.type`/`return.type` expecting `Transport
+  Interface&MessageCountAwareInterface`).
+
+  Root cause, traced to the exact function: `checker/generics/
+  substitution.rs::substitute_class_templates`'s own fast path bails
+  (returns `sig.clone()` unmodified) whenever `owner` (from `lookup_
+  method_with_owner` - the class that *lexically* declares the resolved
+  method) has an empty `templates` list itself. That's correct when a
+  method is purely *inherited* unedited (`owner` really is the generic
+  ancestor, whose own templates the substitution needs), but wrong here:
+  `DoctrineTransportFactory` directly declares its own `createTransport()`
+  override (required, since it's implementing an interface method) so
+  `owner = "DoctrineTransportFactory"` - a class with *no* `@template` of
+  its own (its genericness comes entirely from its `@implements
+  Interface<T>` tag, a different mechanism) - even though the method's
+  own effective return type (via phpdoc-inheritance backfill from
+  `TransportFactoryInterface`'s own `@return TTransport`) contains a real
+  `TemplateParam` whose `scope` is `"TransportFactoryInterface"`, not
+  `"DoctrineTransportFactory"`. The fast path's own "`owner`'s templates
+  empty ⇒ nothing to substitute" assumption is simply false whenever a
+  method's own template comes from a *different* ancestor than the one
+  `lookup_method_with_owner` reports as the immediate declaring class.
+
+  Not fixed here: `substitute_class_templates` is called on "every
+  resolved method call/return-type lookup" project-wide per its own doc
+  comment - a real fix needs to bind against whichever ancestor(s) each
+  `TemplateParam` actually encountered in `sig` is itself `scope`d to
+  (potentially more than one distinct ancestor for a single signature),
+  not just `owner`, which is a genuine architecture change to a heavily
+  shared, already-perf-tuned function - correctly scoped as its own
+  future item, not a quick patch to rush under time pressure the way
+  this round's smaller stdlib-stub fixes were.
 - A long tail of smaller type-system precision gaps, triaged individually
   rather than as one bucket: no per-location type-inference caching
   architecture (a real PHPStan performance mechanism, not a correctness
