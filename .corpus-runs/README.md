@@ -186,3 +186,94 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   `||`/`&&` condition-alias decomposition; `array_splice()`'s untracked
   by-ref mutation) - current baseline for future diffs. Produced/stored
   in the `phpstan-rs-master2` worktree.
+- `967a13c` - PHASE_BACKLOG.md/TOP100_RESEARCH_NOTES.md doc-only commits
+  (top-100 Packagist `phpstan-extension` survey), zero `src/` change -
+  scoped 342/unscoped 40459, byte-identical diagnostic counts to
+  whatever the last real `src/`-changing commit before it was (only
+  line-ordering differed post-sort, a known non-determinism in
+  identical-file:line-diagnostic relative ordering, not a real change).
+- `4ee7617` - fixed two real bugs in `staticMethod.resultUnused`/
+  `method.resultUnused`, found by diffing this exact scoped run against
+  a real `vendor/bin/phpstan analyse` run on the same Piwigo checkout
+  (real PHPStan: zero relevant findings). (1) `is_transitively_pure` had
+  no exclusion for `void`-returning declarations - real PHPStan's own
+  `hasSideEffects()` unconditionally treats any non-constructor `void`
+  method/function as side-effecting regardless of body, confirmed
+  against the real installed `phpstan/phpstan` 2.2.8 phar directly, not
+  just the vendored reference source. (2) `PurityDependency::Method`/
+  `Function` lowercased the class/function name before storing it, but
+  `Registry::classes`/`functions` are keyed by whatever case the
+  declaration actually used - silently broke the transitive-purity
+  fixed point for any multi-hop dependency chain through an uppercase-
+  containing class name (nearly all of them). Scoped 342 -> 80 (exactly
+  the 262 false positives removed, nothing else moved); unscoped's only
+  two changed identifiers across 40k+ diagnostics: `method.resultUnused`
+  231 -> 91, `staticMethod.resultUnused` 319 -> 6.
+- `eeee436` - fixed two more real bugs, same corpus-diff methodology.
+  (1) `union_types` never dropped a redundant, genuinely-*empty*
+  `ArrayShape` (`array{}`) once a general `Array(key, val)` member was
+  already present in the same union (`array{}` is a subtype of *any*
+  `Array(key, val)`, vacuously) - real PHPStan's own `dumpType()`
+  confirms its post-loop type for a dynamic-key-built accumulator array
+  is the plain, unqualified general map, no `array{}` alternative
+  surviving at all; `index_result_type`'s own separately-correct empty-
+  shape-plus-dynamic-key `Null` rule was turning the leftover `array{}`
+  branch into a bogus `|null`. Fixed in `union_types` itself, not
+  `converge_loop_body`'s own merge algorithm (materially safer -
+  doesn't touch the symmetric `LoopZeroIterations::Possible` merge or
+  its `subject_exempt` carve-out at all). (2) `ReflectionFunctionAbstract
+  ::getParameters()`/`Exception`+`Error::getTrace()`/`debug_backtrace()`
+  all return a bare `array` in phpstorm-stubs with no refining PHPDoc,
+  while real PHPStan hardcodes a precise `list<T>` for each via its own
+  dynamic-return-type extensions - confirmed via `dumpType()` and
+  patched in `php_stubs.rs`. Scoped 80 -> 64 (16 false positives
+  removed cleanly); 4 new findings surfaced are independently confirmed
+  pre-existing, already-documented gaps (by-ref foreach array-mutation
+  tracking; an untriaged `int|string` key-imprecision cluster) reached
+  for the first time once an unrelated masking effect was removed, not
+  regressions - each isolated and verified individually before
+  concluding that. Unscoped 40006 -> 40017, entirely inside third-party
+  vendor code this project's own real `phpstan.neon` doesn't even scan
+  (Symfony YAML, PHP_CodeSniffer via symplify) - not chased down, no
+  real-PHPStan ground truth exists for that scope anyway - current
+  baseline for future diffs.
+- `d437438` - fixed `BinOp::Add`'s array-union arm, which used to
+  collapse straight to `Array(unknown_array_key(), Mixed)`
+  unconditionally regardless of both operands' own key/value types.
+  Traced directly to `$merged = $filters + $functions;` on two real
+  `array<string, callable>`-typed values (Latte's own `Engine::
+  getFilters()`/`getFunctions()`), making every `foreach ($merged as
+  $name => ...)`'s `$name` infer as `int|string` and cascading into real
+  `strtolower($name)`/`strtoupper($name)`/`renderMethod($name)` false
+  positives in `tools/phpstan/Latte/ShimClassGenerator.php`; the same
+  cause separately cost `FeedControllerTest.php`'s `[$headers, $body] =
+  explode(...) + ['', ''];` its own `$body` precision. Fixed to mirror
+  real PHPStan's own `InitializerExprTypeResolver::getPlusType`'s
+  general (non-constant-array) case: union both operands' key types and
+  both operands' value types via the existing `array_key_type`/
+  `array_element_type` helpers, preserving `ArrayList`/`NonEmptyArray`
+  accessories when the real algorithm would. Scoped 64 -> 59 (5 findings
+  removed cleanly, zero new false positives). Also investigated (not
+  built): the remaining 4-item `int|string` cluster left over from the
+  `eeee436` round (`BlockManager::apply`, `CategoryAvailableList
+  Controller::__invoke`, `SpecStructureTest`, `openapi-generate-input-
+  dto.php`'s `narrowingExpr()`) is now fully root-caused - real PHPStan's
+  `Type[]` PHPDoc-shorthand resolves to a `BenevolentUnionType`, not a
+  plain `Union`, and `RuleLevelHelper::accepts()` treats it specially
+  (confirmed via `dumpType()`: shown parenthesized, `(int|string)`, and
+  un-flagged against a `string`-typed parameter, vs. a plain `int|string`
+  union of the identical shape which *is* flagged). phpstan-rs has no
+  such marker anywhere, so every `Type[]`-shorthand-derived key type is
+  wrongly treated as a strict `Union` - a real, disclosed gap needing a
+  genuine `Union`-adjacent "benevolent" marker threaded through parsing,
+  the `+` operator, and every `is_assignable`/`accepts_at_configured_
+  level` call site that should respect it, correctly scoped to the same
+  future phase already reserved for `checkBenevolentUnionTypes`
+  (ROADMAP.md's Phase 84 entry), not attempted here. Unscoped: 40017 ->
+  40033 (all new findings verified inside third-party vendor code
+  outside Piwigo's own real `phpstan.neon` scan scope - genuine, newly-
+  surfaced precision improvements in vendor code the array `+` fix now
+  reveals rather than masks with `Mixed`, e.g. `league/uri`'s own
+  `Uri::fromComponents()` chain; not chased down, no real-PHPStan ground
+  truth exists for that scope anyway) - current baseline for future
+  diffs.
