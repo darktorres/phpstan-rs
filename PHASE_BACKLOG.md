@@ -987,6 +987,37 @@ attempt never used.
   needs the asymmetric one, and phpstan-rs could adopt it
   unconditionally (PHPStan carries a legacy BC flag phpstan-rs doesn't
   need to).
+
+  **Corpus-verified, much larger real impact than previously known, and
+  a live risk-mitigation already in place.** Real-PHPStan A/B testing
+  (a minimal `$counter = []; foreach ($keys as $k) { $counter[$k] = 1;
+  } ... $counter[$someKey] ...` reproduction, confirmed via `\PHPStan\
+  dumpType()` that real PHPStan's own post-loop type is the plain
+  `array<string, 1>`, no `array{}` alternative at all) proves this is
+  the single largest root cause behind the current scoped Piwigo
+  corpus's `argument.type`/`return.type` findings: **33 of 70 (47%)**
+  share this exact signature — a deliberate, repeated idiom throughout
+  this codebase ("parallel accumulator maps populated by one loop, read
+  by a second loop over one of the maps' own keys," each site's own
+  doc comment cross-references the pattern by name), hitting
+  `ActivityRepository`, `HistoryRepository`, `ImageRepository`,
+  `CategoryService`, `TagRepository`, `TagService`, `DerivativeImage`,
+  `SearchService`, `CatPermPageRenderer`, and `RatingPageRenderer`
+  repeatedly. This also corrects ROADMAP.md's own "Known but not yet
+  scheduled" entry blaming `isset()`/`array_key_exists()` dynamic-key
+  narrowing for 4-5 of these same sites — narrowing was never the real
+  cause (confirmed: an `array_key_exists()`-guarded read against an
+  *explicitly*-PHPDoc'd `array<K,V>` parameter already infers correctly
+  today, with zero gap) — the corruption happens one level upstream, in
+  the merge this item already targets. Regarding the documented past
+  regression: `LoopZeroIterations::Possible`'s own `subject_exempt`
+  field (added after that regression, carving the self-mutating-
+  iteratee case out of the general merge) looks like it already
+  neutralizes the specific danger an unconditional asymmetric join would
+  reintroduce — every reproduction built so far touches only a separate
+  local array, never the iterated subject itself, and none regress. Only
+  a real, careful re-verification (not an assumption either way) is
+  needed before landing an unconditional switch.
 - **O2 (medium).** Register each anonymous class under a real, stable
   synthetic name (`file:line[:index]`-keyed, mirroring real PHPStan's
   own `AnonymousClassNameHelper`) with a full independent registry

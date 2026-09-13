@@ -1798,40 +1798,83 @@ section used to carry:
   arm properly resolving a `Union`/`Intersection` container instead of
   its own previous `check_expr`-only `_ => Mixed` fallback) stopped
   masking it behind `Mixed`.
-- `isset($arr[$dynamicKey])`/`array_key_exists($dynamicKey, $arr)` never
+- **Corrected diagnosis (real-PHPStan-verified, supersedes this bullet's
+  own original text below the line).** This was originally attributed to
+  a missing feature - dynamic-key narrowing not reaching `isset()`/
+  `array_key_exists()`-guarded reads - and each finding it produces was
+  judged "sound, not a false positive." Direct A/B testing against the
+  real `phpstan/phpstan` 2.2.8 phar (the exact version this project's
+  own Piwigo target pins) proves that framing wrong: real PHPStan
+  reports **zero** findings for the minimal reproduction below, at any
+  guard style, confirmed via `\PHPStan\dumpType()` showing its own
+  post-loop type for the accumulator is the plain, unqualified
+  `array<string, 1>` - no `array{}` alternative survives the loop at
+  all, guard or no guard:
+  ```php
+  $counter = [];
+  foreach ($keys as $k) {
+      $counter[$k] = 1;
+  }
+  return new Foo($counter[$someKey]);  // real PHPStan: int. phpstan-rs: int|null.
+  ```
+  The real root cause is one level upstream of narrowing entirely: this
+  project's own `LoopZeroIterations::Possible` merge (`checker/
+  control_flow.rs`) does a *symmetric* union of the loop's pre-entry and
+  post-body states (`merge_scopes`'s ordinary rule) for `foreach`,
+  so an array built via a dynamic-key write inside the loop keeps a
+  literal `array{}` (empty) branch in its type even once the loop body
+  has run. `index_result_type`'s own real, separately-justified
+  "an empty shape + dynamic key -> `Null`" rule (`checker/expr.rs` -
+  itself a correct, deliberate fix for a *different* bug, mid-loop
+  auto-vivification during `++$counts[$c]`) then fires on that spurious
+  surviving branch, unioning a bogus `null` into an otherwise-correct
+  read - independent of whether a guard is present, which is why fixing
+  narrowing alone was never going to close this. This is the exact gap
+  already scoped as this file's own Phase 123 "O1" (foreach needs real
+  PHPStan's *asymmetric*, certainty-downgrading join, not a symmetric
+  union with the pre-loop entry) - not a separate feature to build.
+  O1's own past regression ("the self-mutating-iteratee idiom") is
+  already carved out by the existing `subject_exempt` mechanism
+  (`LoopZeroIterations::Possible`'s own second field, added after that
+  regression), so an asymmetric join for every *other* local no longer
+  touches the case that broke it - worth re-verifying directly before
+  building, not assuming either way.
+
+  Real corpus impact is far larger than four sites: a direct sweep of a
+  single scoped Piwigo corpus run found this exact signature in **33 of
+  70** `argument.type`/`return.type` findings (47%) - it's a deliberate,
+  repeated idiom throughout this codebase ("parallel accumulator maps
+  populated by one loop, read by a second loop over one of the maps' own
+  keys," each instance's own doc comment cross-references the pattern by
+  name), hitting `ActivityRepository`, `HistoryRepository`,
+  `ImageRepository`, `CategoryService`, `TagRepository`, `TagService`,
+  `DerivativeImage`, `SearchService`, `CatPermPageRenderer`, and
+  `RatingPageRenderer` repeatedly, not just the four originally cited
+  below.
+
+  ---
+
+  *Original text, kept for its own real corpus citations (each is an
+  instance of the corrected root cause above, not a separate case):*
+  `isset($arr[$dynamicKey])`/`array_key_exists($dynamicKey, $arr)` never
   narrows the specific element's own value type (only `array_shape.rs`'s
   own composite `narrowing_key` mechanism does, and only for a *literal*
   string key - `narrowing.rs`'s own dispatch requires `Literal::String`
-  outright). A dynamic key is a real, common case this doesn't cover,
-  which the `LoopZeroIterations` fix (an array that might still be
-  genuinely empty is now correctly tracked as `array{}|array<K, V>`)
-  makes visible more often than before: reading `$arr[$dynamicKey]`
-  infers `V|null` regardless of a preceding guard, since the guard's own
-  narrowing never reaches this composite key. Confirmed live at
-  `RatingPageRenderer::render` (`isset($users[$rate_row->userId->value])`
-  guarding `$users[$rate_row->userId->value]` two lines later),
-  `Users\UserService::getBrowserLanguage` (`array_key_exists(
-  $accept_language_full, $languages_available)`), `Image\DerivativeImage
-  ::getAll` (a self-referential fallback read, no guard at all - the
-  `null` possibility here is genuinely unavoidable without cross-key
-  correlation, a different, harder problem than the narrowing gap the
-  other two examples share), and `Admin\CatPermPageRenderer::render`
-  (`$groups[$group_id]`, no guard). A real, buildable feature (extending
-  `array_value_type_for_key`'s own literal-key-only composite mechanism
-  to a narrowed dynamic key expression) - not attempted here, since it's
-  a materially larger change (tracking a *value*-keyed narrowing fact
-  rather than a *name*-keyed one) than a corpus-cleanup pass should take
-  on; each individual finding this produces is sound, not a false
-  positive to chase down case by case. `tools/p58/trace.php`'s own
-  `rootVariable($sourceCache[$templatePath], ...)`/`viewProperties(
-  $view)` (`$view` itself read from `$viewCache[$templatePath]`) are a
-  further, no-guard-at-all variant of the same underlying problem: both
-  caches are populated key-by-key in one loop, then read back by
-  dynamic key in a later one - the read can't know without cross-loop,
-  cross-key correlation (the same "parallel dynamically-keyed arrays"
-  shape this section's own first bullet already covers, just a cache
-  read one loop removed rather than two arrays in the same loop) that
-  this specific key was actually populated earlier.
+  outright). Confirmed live at `RatingPageRenderer::render` (`isset(
+  $users[$rate_row->userId->value])` guarding `$users[$rate_row->userId
+  ->value]` two lines later), `Users\UserService::getBrowserLanguage`
+  (`array_key_exists($accept_language_full, $languages_available)`),
+  `Image\DerivativeImage::getAll` (a self-referential fallback read, no
+  guard at all), and `Admin\CatPermPageRenderer::render` (`$groups[
+  $group_id]`, no guard). `tools/p58/trace.php`'s own `rootVariable(
+  $sourceCache[$templatePath], ...)`/`viewProperties($view)` (`$view`
+  itself read from `$viewCache[$templatePath]`) are a further, no-guard
+  variant: both caches are populated key-by-key in one loop, then read
+  back by dynamic key in a later one - once O1 lands, this variant may
+  still need real cross-loop, cross-key correlation to close fully (a
+  genuinely harder problem than the single-loop accumulator shape above)
+  if the two loops aren't provably iterating the same key set - reassess
+  after O1, don't assume it's fully subsumed.
 
 ## Permanent design boundaries (not planned, by choice)
 
