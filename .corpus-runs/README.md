@@ -339,4 +339,22 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   revolt/event-loop) with zero new; 2 more sites' own wording simply
   updated (`int<0,max>` -> `int` in the message text) since they pass a
   genuinely nullable `int|null` argument, still correctly flagged either
-  way - not a regression - current baseline for future diffs.
+  way - not a regression.
+- `4de673e` - typed `proc_open()`'s own by-ref `$pipes` out-parameter
+  (previously falling to generic `Mixed` leniency) as `array<int,
+  resource>` - real PHPStan's own separate internal `vendor/phpstan-src/
+  stubs/core.stub` (a distinct, smaller bundle from phpstorm-stubs,
+  deliberately excluded from this project's own stub pipeline per
+  `build.rs`'s own exclusion comment) types it via `@template P of int`/
+  `@param-out array<P, resource> $pipes`, correlating the out-param's key
+  type to `$descriptor_spec`'s own literal keys (confirmed via
+  `dumpType()`: `array<1|2, resource>` for a `[1 => ..., 2 => ...]`
+  spec) - this fix doesn't chase that template-correlation precision (no
+  template-binding-through-`@param-out` consumer exists in this
+  codebase), just the generic-`Mixed` false positive, which already
+  satisfies the real corpus shape. This traces `usleep`'s own earlier
+  "broader, unconfirmed pattern" note to a real, concrete, disclosed
+  future item (documented in ROADMAP.md, not chased generally this
+  round). Scoped 54 -> 52 (both target findings removed cleanly, zero
+  new). Unscoped 38154 -> 38152 (the same 2 findings, zero new) -
+  current baseline for future diffs.
