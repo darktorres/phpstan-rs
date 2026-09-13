@@ -654,6 +654,37 @@ impl<'a> Checker<'a> {
             return;
         }
 
+        // A Piwigo/real-PHPStan corpus diff found a second, real, and
+        // narrower magic-method override real PHPStan's own reflection
+        // layer applies *unconditionally* (`PhpMethodFromParserNode
+        // Reflection`'s own constructor, confirmed by direct read) -
+        // unlike `MAGIC_METHODS_WITH_IMPLICIT_RETURN_TYPE` above, this one
+        // fires even when the source *does* write an explicit `: array`
+        // hint (`DerivativeParams::__serialize(): array { return [...]; }`
+        // - no `@return` PHPDoc at all): `__serialize()`'s own real return
+        // type is hardcoded to `array<mixed, mixed>` with *explicit*
+        // (not implicit) `mixed` key/value types - confirmed directly via
+        // `\PHPStan\dumpType()`-style verification (an ordinary, non-magic
+        // method with the identical bare `: array` hint and body *is*
+        // flagged; `__serialize()` never is). An explicit-mixed value type
+        // is exactly what `missingType.iterableValue` exists to require -
+        // it's satisfied unconditionally here, not merely absent a
+        // stricter one, so this exempts only that specific check (and its
+        // sibling `missingType.generics`, moot for a plain `Array` type
+        // either way), not the whole function. `__debuginfo()` gets the
+        // identical `array<mixed, mixed>|null` override in the same real
+        // source location - included here on the same confirmed evidence,
+        // not chased further without its own separate corpus hit.
+        if class_name.is_some()
+            && doc_return.is_none()
+            && matches!(
+                f.name.to_ascii_lowercase().as_str(),
+                "__serialize" | "__debuginfo"
+            )
+        {
+            return;
+        }
+
         let return_explicit_mixed = match sig {
             Some(s) => s.return_explicit_mixed_hint,
             None => has_explicit_mixed_nested_somewhere(native_return, doc_return),

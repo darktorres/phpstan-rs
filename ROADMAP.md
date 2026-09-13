@@ -569,6 +569,27 @@ declaring a plain `@return array{0: resource, 1: array<int, resource>}`)
 - the template-correlation precision gap is disclosed above, not chased
 here.
 
+**`__serialize()`/`__debugInfo()`'s own real, unconditional return-type
+override.** Real PHPStan's own reflection layer (`PhpMethodFromParser
+NodeReflection`'s constructor, confirmed by direct read) hardcodes these
+two magic methods' real return type to `array<mixed, mixed>` (`__debug
+Info()`: `array<mixed, mixed>|null`) with *explicit*, not implicit,
+`mixed` key/value types - unconditionally, even when the source itself
+writes an explicit `: array` hint with no `@return` tag at all, unlike
+`MAGIC_METHODS_WITH_IMPLICIT_RETURN_TYPE`'s own existing exemption
+(which only ever applies when *no* hint is written at all). An explicit-
+mixed value type is exactly what `missingType.iterableValue` exists to
+require, so it's unconditionally satisfied for these two - confirmed
+directly: an ordinary, non-magic method with the identical bare `:
+array` hint and body *is* flagged, `__serialize()` never is. Real corpus
+false positive fixed: `DerivativeParams::__serialize(): array { return
+[...]; }` (no `@return` tag) flagged `missingType.iterableValue`. Fixed
+with a second, narrower magic-method exemption in `checker/missing_
+typehint.rs`, scoped to only the iterable-value/generics checks (not the
+whole function, unlike the existing implicit-return-type exemption) -
+`missingType.return`'s own bare-Mixed check was never actually at risk
+either way, since neither method's real type is bare `Type::Mixed`.
+
 **Subtyping properties via proptest, and two real soundness bugs found
 by it** (Phase 19). `src/types/tests/subtyping_properties.rs`: a
 bounded-depth `Type` generator (`proptest::prop_recursive`) backing five

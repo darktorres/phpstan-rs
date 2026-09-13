@@ -578,6 +578,64 @@ fn constructor_with_no_return_type_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// A Piwigo/real-PHPStan corpus diff found `__serialize()`'s own real
+// return type is unconditionally hardcoded by real PHPStan's reflection
+// layer to `array<mixed, mixed>` with *explicit* mixed key/value types,
+// even when the source itself writes an explicit `: array` hint with no
+// `@return` tag - confirmed directly: an ordinary, non-magic method with
+// the identical bare `: array` hint and body *is* flagged (see below),
+// `__serialize()` never is.
+#[test]
+fn a_bare_array_hinted_serialize_method_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                public function __serialize(): array {
+                    return ['a' => 1, 'b' => 'x'];
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// `__debuginfo()` gets the identical real-PHPStan override
+// (`array<mixed, mixed>|null`), confirmed from the same source location.
+#[test]
+fn a_bare_array_hinted_debuginfo_method_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                public function __debugInfo(): array {
+                    return ['a' => 1];
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// An ordinary, non-magic method with the identical shape still gets
+// flagged - the exemption above is real-PHPStan-name-specific, not a
+// general "array literal return body" leniency.
+#[test]
+fn a_bare_array_hinted_ordinary_method_is_still_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                public function notMagic(): array {
+                    return ['a' => 1, 'b' => 'x'];
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "missingType.iterableValue"),
+        "expected missingType.iterableValue, got: {d:?}"
+    );
+}
+
 #[test]
 fn fully_typed_class_produces_no_missing_typehint_diagnostics() {
     let d = all_diagnostics_for(
