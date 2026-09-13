@@ -300,3 +300,23 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   59 -> 57 (both target findings removed cleanly, zero new false
   positives). Unscoped 40033 -> 40028 (5 more removed in third-party
   vendor code, zero new) - current baseline for future diffs.
+- `ee3500d` - corrected `function.duplicate` (Phase 63) from always-on to
+  opt-in, matching its real-PHPStan rule's own `#[ValidatesStubFiles]`-
+  only scope (real PHPStan never runs `DuplicateFunctionDeclarationRule`
+  against ordinary scanned project files at all, only a project's own
+  configured `stubFiles:` list) - the identical reasoning that already
+  made the class-side sibling check (`class.duplicate`, Phase 83) opt-in.
+  Real corpus false positive found: `C13yInternalTest`'s own `Unit`/
+  `Integration` suites each unconditionally declare an identically-named
+  top-level function (`c13yInternalTestCheckIntegrity`), never actually
+  loaded together in the same PHP process. New `Registry::check_
+  duplicate_function_declarations` (opt-in, default `false`), full
+  config/CLI/`Project`-setter wiring mirroring `check_duplicate_class_
+  declarations` exactly. Scoped 57 -> 55 (both target findings removed
+  cleanly, zero new). Unscoped 40028 -> 38168 (zero new; the false-
+  positive class turns out to be broad, not just the one test file -
+  `thecodingmachine/safe`'s own PHP-version-split generated stub
+  directories, e.g. `vendor/thecodingmachine/safe/generated/8.1/*.php`
+  vs. its `8.2`/`8.3`/... siblings, declare the identical function names
+  in every version directory, never co-loaded) - current baseline for
+  future diffs.
