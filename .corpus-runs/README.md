@@ -277,3 +277,26 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   `Uri::fromComponents()` chain; not chased down, no real-PHPStan ground
   truth exists for that scope anyway) - current baseline for future
   diffs.
+- `cad1fc1` - two more small stdlib precision gaps, same corpus-diff
+  round. `array_keys()`'s own key-type-propagation arm gated on `args.
+  len() == 1` only, so the real, common 2-/3-arg `$search_value`/
+  `$strict` form fell through to the bare stub's own useless `int[]|
+  string[]` answer (`UserService::searchCaseUsername`'s own `array_keys
+  ($byLower, $usernameLower, true)[0]` against a declared `string`
+  return type) - `$search_value`/`$strict` only ever narrow *which* keys
+  survive, never the key type itself (confirmed via `dumpType()`: real
+  PHPStan returns the identical `list<string>` for the 3-arg form that
+  it does for the bare 1-arg form), fixed by widening the guard to
+  `(1..=3).contains(&args.len())`. `array_filter()`'s own recognized-
+  callback-shape set was missing a real, common third case: a native
+  `is_string`/`is_int`/`is_float`/`is_bool`/`is_null` type-check
+  predicate (`TagService::buildTagList`'s own `array_filter
+  ($altNamesEvent->value, is_string(...))`, the first-class-callable
+  form, lost its own precision down to `mixed`) - confirmed via
+  `dumpType()` that real PHPStan narrows the retained element type to
+  exactly that type; new `is_type_check_filter_callback` recognizes the
+  first-class-callable form alongside the same arrow-fn/closure wrapping
+  shapes the existing `instanceof` recognizer already handles. Scoped
+  59 -> 57 (both target findings removed cleanly, zero new false
+  positives). Unscoped 40033 -> 40028 (5 more removed in third-party
+  vendor code, zero new) - current baseline for future diffs.
