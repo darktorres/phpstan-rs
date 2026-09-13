@@ -320,3 +320,23 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   vs. its `8.2`/`8.3`/... siblings, declare the identical function names
   in every version directory, never co-loaded) - current baseline for
   future diffs.
+- `6de5bc8` - patched `usleep()`'s own phpstorm-stubs-refined `int<0,
+  max>` parameter back to plain `int` (`php_stubs::patch_usleep`),
+  matching real PHPStan's own `functionMap.php` entry (plain `int`) -
+  confirmed via `dumpType()`/a real `vendor/bin/phpstan analyse` run that
+  neither an unconstrained `int` nor a literal `-5` is ever flagged, since
+  `NativeFunctionReflectionProvider` never consults phpstorm-stubs' own
+  PHPDoc for a `functionMap.php`-covered function. Real corpus false
+  positive fixed: `RegisterControllerTest::registerMaturedKey`'s own
+  `usleep((int) ($remainingSeconds * 1_000_000))` inside an `if
+  ($remainingSeconds > 0)` guard - this project has no float-range-
+  narrowing to prove the cast's own result is non-negative, moot once
+  `usleep`'s own parameter matches reality. Scoped 55 -> 54 (target
+  finding removed cleanly, zero new). Unscoped confirmed the same
+  pattern is real and broader than Piwigo alone: 38168 -> 38154, 15
+  identical `int<0,max>`-vs-plain-`int` false positives removed across
+  third-party vendor code (Symfony, Rector's bundled deps, phpbench,
+  revolt/event-loop) with zero new; 2 more sites' own wording simply
+  updated (`int<0,max>` -> `int` in the message text) since they pass a
+  genuinely nullable `int|null` argument, still correctly flagged either
+  way - not a regression - current baseline for future diffs.
