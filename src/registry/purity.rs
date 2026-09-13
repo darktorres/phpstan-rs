@@ -59,6 +59,7 @@ use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::is_superglobal;
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;
+use crate::types::Type;
 
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base
@@ -120,7 +121,7 @@ impl Registry {
             .par_iter()
             .filter_map(|name| {
                 let sig = &registry.functions[name];
-                if !purity_gate_passes(sig) {
+                if !purity_gate_passes(sig, false) {
                     return None;
                 }
                 let body = sig.body.clone()?;
@@ -145,7 +146,7 @@ impl Registry {
                 let mut per_class = Vec::new();
                 for method_name in method_names {
                     let sig = &registry.classes[class_name].methods[&method_name];
-                    if !purity_gate_passes(sig) {
+                    if !purity_gate_passes(sig, method_name.eq_ignore_ascii_case("__construct")) {
                         continue;
                     }
                     let Some(body) = sig.body.clone() else {
@@ -243,7 +244,38 @@ impl Registry {
 /// `@phpstan-assert`-family tag, no declared throw. Every one of this
 /// project's own `FunctionSig`s already carries exactly the fields
 /// needed to check this without re-deriving anything.
-fn purity_gate_passes(sig: &FunctionSig) -> bool {
+///
+/// **A real gap found and fixed by directly diffing against real
+/// PHPStan on the Piwigo corpus, not by re-reading the collector
+/// alone**: `PhpFunctionReflection::hasSideEffects()`/
+/// `PhpMethodReflection::hasSideEffects()`/`NativeFunctionReflection::
+/// hasSideEffects()` (all three, confirmed byte-identical in the exact
+/// `phpstan/phpstan` 2.2.8 phar Piwigo's own `composer.json` pins, not
+/// just the vendored reference source) unconditionally return
+/// `TrinaryLogic::createYes()` - definitely has side effects - for
+/// *any* non-constructor declaration with a `void` return type,
+/// regardless of its actual body. This is deliberate design, not an
+/// oversight: a `void` declaration's only possible reason to exist is
+/// its side effects, so PHPStan treats an empty-bodied `void` method as
+/// presumed-intentional future-extension scaffolding, never a "this
+/// does nothing" finding - confirmed empirically with a minimal
+/// standalone repro (`ConfigLoader::applyDefaults(): void {}` called as
+/// a bare statement produces zero PHPStan output at level 10 with
+/// bleeding-edge included). Before this fix, `is_transitively_pure`
+/// had no equivalent exclusion, so every void, empty/pure-bodied
+/// method/function got wrongly marked pure - the single largest
+/// false-positive source found in the whole Piwigo corpus (252 of 342
+/// scoped diagnostics, all `staticMethod.resultUnused`/
+/// `method.resultUnused` on `void`-returning stub/hook methods:
+/// Piwigo's own deliberately-empty `ConfigLoader::applyDefaults()`/
+/// `applyEnvOverrides()` boot-sequence placeholders, and `parent::
+/// setUp()`/`tearDown()`/`tearDownAfterClass()` calls into PHPUnit's
+/// own currently-empty base hooks). `is_constructor` mirrors the real
+/// gate's own explicit `getName() !== '__construct'` exemption
+/// (constructors can't syntactically declare a `void` return type, but
+/// a stray `@return void` PHPDoc tag on one is a real possibility this
+/// project's own `return_type` field doesn't otherwise guard against).
+fn purity_gate_passes(sig: &FunctionSig, is_constructor: bool) -> bool {
     // See `FunctionSig::is_stub`'s own doc comment - a vendored stub's
     // own body is always empty and never real; walking it would wrongly
     // "prove" every PHP builtin pure. Checked first, not that it matters
@@ -252,6 +284,9 @@ fn purity_gate_passes(sig: &FunctionSig) -> bool {
     // by-ref param, no assert tag, no declared throw, so without this
     // check it would sail straight through every other gate).
     if sig.is_stub {
+        return false;
+    }
+    if !is_constructor && sig.return_type == Type::Void {
         return false;
     }
     if sig.params.iter().any(|p| p.by_ref) {
@@ -411,10 +446,16 @@ fn expr_disqualifies(
                 {
                     return true;
                 }
-                if registry.lookup_function(name).is_none() {
+                // Canonical declared name, not `lname` - see
+                // `resolve_this_method_call`'s own doc comment for why
+                // storing a lowercased key here would silently break
+                // `dependency_is_pure`'s later exact lookup for any
+                // function whose real declared name isn't already
+                // all-lowercase.
+                let Some((canonical_name, _)) = registry.lookup_function_with_name(name) else {
                     return true;
-                }
-                deps.push(PurityDependency::Function(lname));
+                };
+                deps.push(PurityDependency::Function(canonical_name.to_string()));
                 return false;
             }
             true
@@ -497,6 +538,25 @@ fn property_write_target(e: &Expr) -> bool {
 /// `MethodCall` handling: usable only when the resolved method is
 /// non-overridable (private, final, on a final class, or `class` itself
 /// - `$this`'s own static type - is final).
+///
+/// **Real bug found and fixed, corpus-diff-driven**: this used to push
+/// `owner.to_ascii_lowercase()` - real PHPStan's own `methodKey()` does
+/// the same (`strtolower($className)`), but real PHPStan's own key
+/// encoding lowercases *both ends* consistently (construction and
+/// lookup alike), while this project's `self.classes`/`ClassInfo.
+/// methods` are keyed by whatever case each declaration actually used
+/// (PascalCase by PHP convention, confirmed by the dozens of plain,
+/// unlowercased `self.classes.get(class)` call sites throughout
+/// `hierarchy.rs`) - `owner`/`method` here already come straight out of
+/// `lookup_method_with_owner`, which by construction already resolved
+/// to exactly the canonical key `self.classes`/`.methods` use, so
+/// lowercasing them before storing broke every multi-hop dependency
+/// chain through any class name containing an uppercase letter (i.e.
+/// almost all of them) - `dependency_is_pure`'s later `self.classes.
+/// get(dep_class)` would silently miss, permanently stalling the fixed
+/// point for that dependency. Found while diffing phpstan-rs's own
+/// Piwigo corpus run against a real `vendor/bin/phpstan analyse` run on
+/// the same corpus, then isolated with a minimal standalone repro.
 fn resolve_this_method_call(
     class: &str,
     method: &str,
@@ -509,10 +569,7 @@ fn resolve_this_method_call(
     if !is_non_overridable(registry, class, &owner, method, sig) {
         return true;
     }
-    deps.push(PurityDependency::Method(
-        owner.to_ascii_lowercase(),
-        method.to_ascii_lowercase(),
-    ));
+    deps.push(PurityDependency::Method(owner.clone(), method.to_string()));
     false
 }
 
@@ -578,10 +635,7 @@ fn resolve_static_call(
     let Some((owner, _)) = resolved else {
         return true;
     };
-    deps.push(PurityDependency::Method(
-        owner.to_ascii_lowercase(),
-        method.to_ascii_lowercase(),
-    ));
+    deps.push(PurityDependency::Method(owner, method.to_string()));
     false
 }
 
@@ -594,14 +648,19 @@ fn resolve_static_call(
 /// overridability check - a `new` expression always targets exactly one
 /// concrete class, never ambiguous.
 fn resolve_new(target_class: &str, registry: &Registry, deps: &mut Vec<PurityDependency>) -> bool {
-    let Some(info) = registry.classes.get(target_class) else {
+    // `lookup_class`, not a plain `self.classes.get` - `target_class` is
+    // either an already-canonical `declaring_class` (the `self`/`static`
+    // case) or a literal name lifted verbatim from the AST (`new Foo()`),
+    // whose case may not match the declaring key exactly. Same fix
+    // rationale as `resolve_this_method_call`'s own doc comment.
+    let Some((owner, info)) = registry.lookup_class(target_class) else {
         return true;
     };
     if !info.methods.contains_key("__construct") {
         return true;
     }
     deps.push(PurityDependency::Method(
-        target_class.to_ascii_lowercase(),
+        owner.to_string(),
         "__construct".to_string(),
     ));
     false

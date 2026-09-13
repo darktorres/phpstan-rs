@@ -11,6 +11,47 @@ use super::helpers::*;
 
 #[test]
 fn a_bare_call_to_a_final_method_with_a_trivial_body_is_flagged() {
+    // Non-`void` return type deliberately - matches real PHPStan's own
+    // `hasSideEffects()`, which unconditionally treats *any* non-
+    // constructor `void`-returning declaration as having side effects
+    // regardless of body content (confirmed directly against the real
+    // `phpstan/phpstan` phar: an empty-bodied `void` method called bare
+    // produces zero diagnostics, level 10, bleeding-edge included) -
+    // this family only ever fires on a discarded non-`void` result.
+    let d = all_diagnostics_for(
+        r#"<?php
+            final class Foo {
+                public function noop(): int {
+                    return 1;
+                }
+            }
+            $f = new Foo();
+            $f->noop();
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.resultUnused"),
+        "got: {d:?}"
+    );
+}
+
+// Real PHPStan's own `hasSideEffects()` (`PhpMethodReflection`/
+// `PhpFunctionReflection`/`NativeFunctionReflection`, confirmed
+// byte-identical across all three in the real `phpstan/phpstan` 2.2.8
+// phar) unconditionally treats *any* non-constructor `void`-returning
+// declaration as having side effects, regardless of body - found by
+// diffing phpstan-rs's own scoped Piwigo corpus run against a real
+// `vendor/bin/phpstan analyse` run on the same corpus (real PHPStan:
+// zero relevant findings; phpstan-rs: 252 false-positive
+// `staticMethod.resultUnused`/`method.resultUnused` diagnostics, all on
+// `void`-returning empty/pure-bodied methods), then confirmed with a
+// minimal standalone repro against the real phar directly. A `void`
+// method/function/static method - even one with a byte-identical empty
+// body to a flagged non-`void` sibling - must never be flagged by this
+// whole diagnostic family; a `new.resultUnused` (constructor) case is
+// unaffected, since a constructor can't syntactically declare `void`.
+#[test]
+fn a_bare_call_to_a_void_method_with_a_trivial_body_is_never_flagged() {
     let d = all_diagnostics_for(
         r#"<?php
             final class Foo {
@@ -22,8 +63,41 @@ fn a_bare_call_to_a_final_method_with_a_trivial_body_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "method.resultUnused"),
-        "got: {d:?}"
+        !d.iter().any(|x| x.identifier == "method.resultUnused"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_bare_static_call_to_a_void_method_with_a_trivial_body_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            final class Foo {
+                public static function noop(): void {
+                }
+            }
+            Foo::noop();
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "staticMethod.resultUnused"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_bare_call_to_a_void_function_with_a_trivial_body_is_never_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            function noop(): void {
+            }
+            noop();
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.resultUnused"),
+        "unexpected diagnostics: {d:?}"
     );
 }
 
@@ -57,15 +131,24 @@ fn a_bare_call_to_a_private_method_with_a_trivial_body_is_flagged() {
     // public and on a non-final class (deliberately, to isolate the
     // private-method half of `is_non_overridable` from the final-class
     // half `a_bare_call_to_a_final_method_with_a_trivial_body_is_flagged`
-    // already covers) - it's transitively pure only because the *callee*,
-    // `helper()`, is private.
+    // already covers), so `$f->run()` itself is never flagged (`run()`
+    // is publicly overridable) - the diagnostic this test actually
+    // pins is on `$this->helper();` (a bare statement *inside* `run()`'s
+    // own body): `helper()` is directly, trivially pure (private, empty
+    // dependency list) regardless of any of `run()`'s own transitive-
+    // purity status, so this only ever exercises the private half of
+    // `is_non_overridable`. `run()` returns `int` (not `void`) purely
+    // so the fixture parses/type-checks cleanly - its own return type
+    // has no bearing on what this test actually pins.
     let d = all_diagnostics_for(
         r#"<?php
             class Foo {
-                public function run(): void {
+                public function run(): int {
                     $this->helper();
+                    return 1;
                 }
-                private function helper(): void {
+                private function helper(): int {
+                    return 1;
                 }
             }
             $f = new Foo();
@@ -83,10 +166,11 @@ fn a_method_calling_another_proven_pure_method_is_transitively_pure() {
     let d = all_diagnostics_for(
         r#"<?php
             final class Foo {
-                public function outer(): void {
-                    $this->inner();
+                public function outer(): int {
+                    return $this->inner();
                 }
-                public function inner(): void {
+                public function inner(): int {
+                    return 1;
                 }
             }
             $f = new Foo();
@@ -104,13 +188,14 @@ fn a_chain_of_three_levels_still_resolves() {
     let d = all_diagnostics_for(
         r#"<?php
             final class Foo {
-                public function a(): void {
-                    $this->b();
+                public function a(): int {
+                    return $this->b();
                 }
-                public function b(): void {
-                    $this->c();
+                public function b(): int {
+                    return $this->c();
                 }
-                public function c(): void {
+                public function c(): int {
+                    return 1;
                 }
             }
             $f = new Foo();
@@ -339,7 +424,8 @@ fn a_bare_static_call_to_a_pure_non_constructor_method_is_still_flagged() {
     let d = all_diagnostics_for(
         r#"<?php
             final class Foo {
-                public static function noop(): void {
+                public static function noop(): int {
+                    return 1;
                 }
             }
             Foo::noop();
