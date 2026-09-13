@@ -590,6 +590,73 @@ whole function, unlike the existing implicit-return-type exemption) -
 `missingType.return`'s own bare-Mixed check was never actually at risk
 either way, since neither method's real type is bare `Type::Mixed`.
 
+**A real generics-substitution gap, fully diagnosed and fixed.** Calling
+a generic interface's own templated method through a concrete class that
+*itself directly re-declares/implements* that method (not merely
+inherits it unedited) never substituted the interface's own `@template`,
+even when the concrete class's own `@implements Interface<Concrete>` tag
+correctly binds it. Confirmed live - `MessengerFactory::transport`'s own
+`(new DoctrineTransportFactory($registry))->createTransport(...)` call:
+`DoctrineTransportFactory`'s own `@implements TransportFactoryInterface
+<DoctrineTransport>` correctly binds `TransportFactoryInterface`'s own
+`@template-covariant TTransport of TransportInterface`/`@return
+TTransport` to `DoctrineTransport` in real PHPStan (confirmed via
+`dumpType()` against a minimal, structurally-identical repro) - this
+project inferred the bare interface-level `TransportInterface` instead,
+losing the fact that `DoctrineTransport` also implements
+`MessageCountAwareInterface`.
+
+Two real, distinct bugs, both needed for the fix to actually take
+effect (confirmed by testing each independently - fixing only one still
+left the corpus case broken):
+
+1. `checker/generics/substitution.rs::substitute_class_templates`'s own
+   fast path bailed whenever `owner` (from `lookup_method_with_owner` -
+   the class that *lexically* declares the resolved method) had an empty
+   `templates` list itself - correct when a method is purely *inherited*
+   unedited, but wrong when `owner` directly re-declares an interface
+   method (required, since it's implementing one) while the method's own
+   effective type still carries a `TemplateParam` scoped to that
+   interface, not to `owner`. Fixed: `owner` having no templates of its
+   own no longer means nothing to substitute - a new `signature_
+   references_any_template` cheap pre-check (gating the expensive path so
+   the overwhelmingly common non-generic case stays exactly as fast as
+   before) triggers a walk of `owner`'s *own* ancestors for one with a
+   real, non-empty concrete binding for whatever scope the signature's
+   own `TemplateParam`s actually reference, contributing a `(scope,
+   bindings)` pair per ancestor found - composed via a `fold`, so a
+   signature referencing templates from more than one distinct ancestor
+   is handled too, not just the single-scope case the fast path already
+   covered.
+2. Separately, `registry/resolve.rs`'s own docblock-inheritance backfill
+   pass never even let a class-scoped ancestor template reach `owner`'s
+   signature in the first place - `type_mentions_foreign_scoped_
+   template_param`'s own guard unconditionally refused backfilling any
+   template not scoped to the method itself, a deliberate, historically-
+   corpus-justified fix (this same file's own doc comment cites a real,
+   previously-confirmed Doctrine `ClassMetadataFactory`/`getAllMetadata()`
+   false positive from backfilling such a template *before* fix 1 above
+   existed, when nothing could ever resolve it afterward and it leaked
+   out unresolved). Fixed: replaced with `template_param_scopes_all_
+   safe_to_backfill`, allowing the backfill exactly when the class being
+   backfilled onto has a real, *non-empty* concrete binding for that
+   scope (computed once per class via `class_template_bindings`, not
+   merely "is this ancestor name reachable at all" - a real, existing
+   regression test caught that laxer version letting a still-genuinely-
+   unresolvable *erased* generic reference, no `<Concrete>` argument
+   anywhere, through, which fix 1 would then also fail to resolve, same
+   as before this whole round). A bare, erased `implements Container`
+   with no type argument still correctly refuses backfill and stays
+   `Mixed`, unchanged.
+
+Verified against 3 repros: the original `MessengerFactory`-shaped case,
+a `new X()->method()`-vs-variable-mediated-call pair (both work
+identically), and the exact historical Doctrine `ClassMetadataFactory`
+shape the backfill guard's own doc comment cites (now resolves
+correctly with both fixes together; verified broken with either fix
+alone). Full test suite green including the pre-existing regression
+test for the erased case.
+
 **Subtyping properties via proptest, and two real soundness bugs found
 by it** (Phase 19). `src/types/tests/subtyping_properties.rs`: a
 bounded-depth `Type` generator (`proptest::prop_recursive`) backing five
@@ -1938,56 +2005,6 @@ section used to carry:
   shape are both structurally infeasible without embedding a PHP
   runtime or a SQL parser respectively - confirmed real PHPStan needs
   exactly that.
-- **A real, fully-diagnosed generics-substitution gap, not yet fixed**:
-  calling a generic interface's own templated method through a concrete
-  class that *itself directly re-declares/implements* that method (not
-  merely inherits it unedited) never substitutes the interface's own
-  `@template`, even when the concrete class's own `@implements
-  Interface<Concrete>` tag correctly binds it. Confirmed live -
-  `MessengerFactory::transport`'s own `(new DoctrineTransportFactory
-  ($registry))->createTransport(...)` call: `DoctrineTransportFactory`'s
-  own `@implements TransportFactoryInterface<DoctrineTransport>`
-  correctly binds `TransportFactoryInterface`'s own `@template-covariant
-  TTransport of TransportInterface`/`@return TTransport` to
-  `DoctrineTransport` (confirmed via `dumpType()` against a minimal,
-  structurally-identical repro: real PHPStan resolves the call to the
-  concrete `MyTransport`, not the interface's own bare native
-  `TransportInterface` return hint) - but this project infers the bare
-  interface-level `TransportInterface` instead, losing the fact that
-  `DoctrineTransport` (like the repro's own `MyTransport`) also
-  implements `MessageCountAwareInterface`, flagging a real corpus false
-  positive (`argument.type`/`return.type` expecting `Transport
-  Interface&MessageCountAwareInterface`).
-
-  Root cause, traced to the exact function: `checker/generics/
-  substitution.rs::substitute_class_templates`'s own fast path bails
-  (returns `sig.clone()` unmodified) whenever `owner` (from `lookup_
-  method_with_owner` - the class that *lexically* declares the resolved
-  method) has an empty `templates` list itself. That's correct when a
-  method is purely *inherited* unedited (`owner` really is the generic
-  ancestor, whose own templates the substitution needs), but wrong here:
-  `DoctrineTransportFactory` directly declares its own `createTransport()`
-  override (required, since it's implementing an interface method) so
-  `owner = "DoctrineTransportFactory"` - a class with *no* `@template` of
-  its own (its genericness comes entirely from its `@implements
-  Interface<T>` tag, a different mechanism) - even though the method's
-  own effective return type (via phpdoc-inheritance backfill from
-  `TransportFactoryInterface`'s own `@return TTransport`) contains a real
-  `TemplateParam` whose `scope` is `"TransportFactoryInterface"`, not
-  `"DoctrineTransportFactory"`. The fast path's own "`owner`'s templates
-  empty ⇒ nothing to substitute" assumption is simply false whenever a
-  method's own template comes from a *different* ancestor than the one
-  `lookup_method_with_owner` reports as the immediate declaring class.
-
-  Not fixed here: `substitute_class_templates` is called on "every
-  resolved method call/return-type lookup" project-wide per its own doc
-  comment - a real fix needs to bind against whichever ancestor(s) each
-  `TemplateParam` actually encountered in `sig` is itself `scope`d to
-  (potentially more than one distinct ancestor for a single signature),
-  not just `owner`, which is a genuine architecture change to a heavily
-  shared, already-perf-tuned function - correctly scoped as its own
-  future item, not a quick patch to rush under time pressure the way
-  this round's smaller stdlib-stub fixes were.
 - A long tail of smaller type-system precision gaps, triaged individually
   rather than as one bucket: no per-location type-inference caching
   architecture (a real PHPStan performance mechanism, not a correctness

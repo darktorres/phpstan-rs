@@ -3022,6 +3022,52 @@ fn a_call_through_a_method_scoped_backfilled_template_binds_t_from_the_real_argu
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// A Piwigo/real-PHPStan corpus diff found a real, distinct gap from the
+// method-scoped case just above: `MessengerFactory::transport`'s own
+// `(new DoctrineTransportFactory($registry))->createTransport(...)` -
+// `DoctrineTransportFactory` re-declares (doesn't purely inherit)
+// `TransportFactoryInterface`'s own `createTransport()`, so `owner`
+// (whichever class `lookup_method_with_owner` reports) is
+// `DoctrineTransportFactory` itself, which declares no `@template` of
+// its own - its genericness comes entirely from its own `@implements
+// FactoryInterface15<Concrete>` tag. Confirmed via `dumpType()` against
+// real PHPStan that this correctly narrows to the concrete class. Fixed
+// via `registry::resolve::template_param_scopes_all_safe_to_backfill`
+// (a class-scoped ancestor template with a real concrete binding is now
+// backfilled, not refused) plus `checker::generics::substitution::
+// substitute_class_templates`'s own new ancestor-walk (resolves it at
+// call time using `owner`'s own concrete binding, not `owner`'s own -
+// empty - template list).
+#[test]
+fn a_call_through_a_class_scoped_template_binds_via_the_implementing_class_s_own_implements_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            interface Transport15 {}
+            interface CountAware15 {}
+            /** @template-covariant T of Transport15 */
+            interface FactoryInterface15 {
+                /** @return T */
+                public function create(): Transport15;
+            }
+            final class RealTransport15 implements Transport15, CountAware15 {}
+            /** @implements FactoryInterface15<RealTransport15> */
+            final class RealFactory15 implements FactoryInterface15 {
+                public function create(): Transport15 {
+                    return new RealTransport15();
+                }
+            }
+            function f(): Transport15&CountAware15 {
+                return (new RealFactory15())->create();
+            }
+            function g(): void {
+                assertType('RealTransport15', (new RealFactory15())->create());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_trait_string_parameter_rejects_a_plain_class_string() {
     let d = diagnostics_for(

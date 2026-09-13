@@ -70,31 +70,96 @@ impl<'a> Checker<'a> {
         type_args: &[Type],
         owner: &str,
     ) -> FunctionSig {
-        // Fast path: `owner`'s own `templates` list being empty
-        // guarantees `class_template_bindings` produces an empty binding
-        // map regardless of `type_args` (`Registry::class_template_
-        // bindings_rec`'s own `zip(owner.templates, type_args)` is always
-        // empty when the left side is), so every `substitute_scoped` call
-        // below would be a no-op walk that still clones the whole
-        // signature (every `ParamSig`, the return/throws/assert types) -
-        // skip straight to the already-owned `sig.clone()` instead. This
-        // is the overwhelmingly common case (a non-generic class), and
-        // `substitute_class_templates` runs on every resolved method
-        // call/return-type lookup (`checker/expr.rs`'s `MethodCall` arm,
-        // `expr/member_resolution.rs::method_call_return_type` and its
-        // own `Union`/`Intersection` recursion) - found via a
-        // perf-optimization investigation workflow, verified against
-        // this file's own real source before implementing.
+        // `(scope, bindings)` pairs to try, in order - almost always
+        // exactly one (`owner` itself, the overwhelmingly common case of
+        // a class directly declaring its own `@template`), occasionally
+        // more than one (see the `else` branch below), and empty for the
+        // overwhelmingly common non-generic case, the real fast path this
+        // whole structure exists to preserve (found via a perf-
+        // optimization investigation workflow, verified against this
+        // file's own real source before implementing) - `Registry::
+        // class_template_bindings_rec`'s own `zip(owner.templates,
+        // type_args)` is always empty when the left side is, so every
+        // `substitute_scoped` call below would be a no-op walk that still
+        // clones the whole signature (every `ParamSig`, the return/
+        // throws/assert types); bailing straight to `sig.clone()` instead
+        // skips that for real.
+        let mut scoped_bindings: Vec<(String, TemplateBindings)> = Vec::new();
+
         if self
             .registry
             .classes
             .get(owner)
-            .is_none_or(|c| c.templates.is_empty())
+            .is_some_and(|c| !c.templates.is_empty())
         {
+            scoped_bindings.push((
+                owner.to_string(),
+                self.class_template_bindings(class, type_args, owner),
+            ));
+        } else if signature_references_any_template(sig) {
+            // A real bug found via a Piwigo/real-PHPStan corpus diff:
+            // `owner` (the class `lookup_method_with_owner` says
+            // *lexically* declares this signature) can itself declare no
+            // `@template` at all, yet the signature it declares can still
+            // reference a template scoped to one of `owner`'s *own*
+            // ancestors - not through inheriting the method unedited (the
+            // case the fast path above already covers via `owner` being
+            // that ancestor directly), but through `owner` itself
+            // directly re-declaring/implementing a generic ancestor's own
+            // templated method (required, since it's implementing an
+            // interface method) while that method's own effective type -
+            // via ordinary docblock-inheritance backfill from the
+            // ancestor's own tag - still carries a `TemplateParam` scoped
+            // to that ancestor, not to `owner`. Confirmed live:
+            // `MessengerFactory::transport`'s own `(new
+            // DoctrineTransportFactory($registry))->createTransport(...)`
+            // - `DoctrineTransportFactory` declares no `@template` of its
+            // own, but its own `@implements TransportFactoryInterface
+            // <DoctrineTransport>` tag correctly binds
+            // `TransportFactoryInterface`'s own `@template-covariant
+            // TTransport`/`@return TTransport` to `DoctrineTransport` in
+            // real PHPStan (confirmed via `dumpType()`), lost here before
+            // this fix since `owner` ("DoctrineTransportFactory") itself
+            // has no templates, and the old fast path bailed on exactly
+            // that check alone.
+            //
+            // Each of `owner`'s own ancestors (not `class`'s - `owner`
+            // itself declares no template, so its OWN `@implements`/
+            // `@extends` type-argument list is what resolves any
+            // ancestor's template, independent of whatever the original
+            // call site's own `class`/`type_args` happen to be) that
+            // itself declares a real `@template` contributes its own
+            // `(scope, bindings)` pair - `class_template_bindings` already
+            // returns an empty map when `owner` doesn't actually reach
+            // that ancestor with a real type argument (an erased/bare
+            // reference), which the `is_empty()` filter below turns into
+            // "contributes nothing," not a wrongly-populated one.
+            for ancestor in self.registry.all_ancestor_names(owner) {
+                if !self
+                    .registry
+                    .classes
+                    .get(&ancestor)
+                    .is_some_and(|c| !c.templates.is_empty())
+                {
+                    continue;
+                }
+                let bindings = self.class_template_bindings(owner, &[], &ancestor);
+                if !bindings.is_empty() {
+                    scoped_bindings.push((ancestor, bindings));
+                }
+            }
+        }
+
+        if scoped_bindings.is_empty() {
             return sig.clone();
         }
-        let bindings = self.class_template_bindings(class, type_args, owner);
-        let subst = |ty: &Type| substitute_scoped(ty, &bindings, owner);
+        let subst = |ty: &Type| {
+            scoped_bindings
+                .iter()
+                .fold(ty.clone(), |acc, (scope, bindings)| {
+                    substitute_scoped(&acc, bindings, scope)
+                })
+        };
         FunctionSig {
             params: sig
                 .params
@@ -231,4 +296,44 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
         ),
         other => other.clone(),
     }
+}
+
+/// Whether `ty` contains a `TemplateParam` *anywhere*, regardless of its
+/// own `scope` - the cheap gate `substitute_class_templates`'s own
+/// inherited-ancestor-template fallback uses before paying for an
+/// `all_ancestor_names` graph walk, so an ordinary non-generic signature
+/// (the overwhelming majority) never reaches it. Mirrors `substitute_
+/// scoped`'s own exact recursive shape (same `Type` variants), since a
+/// template this doesn't look inside couldn't be substituted by that
+/// function either.
+fn type_references_template(ty: &Type) -> bool {
+    match ty {
+        Type::TemplateParam(_) => true,
+        Type::Array(key, inner) => type_references_template(key) || type_references_template(inner),
+        Type::ClassString(inner) => type_references_template(inner),
+        Type::Union(members) | Type::Intersection(members) => {
+            members.iter().any(type_references_template)
+        }
+        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
+            fields.iter().any(|(_, t, _)| type_references_template(t))
+        }
+        Type::Object(_, args) => args.iter().any(type_references_template),
+        _ => false,
+    }
+}
+
+/// Whether any param (its merged or native type, or `@param-out` type) or
+/// the return type (merged or native) of `sig` references a `TemplateParam`
+/// at all - `throws`/asserts aren't checked, matching the existing
+/// perf-sensitive fast path's own scope (a `@throws`/`@phpstan-assert`
+/// tag referencing an ancestor's own template with no matching param/
+/// return reference anywhere is not a real shape this project's own
+/// corpus work has found).
+fn signature_references_any_template(sig: &FunctionSig) -> bool {
+    sig.params.iter().any(|p| {
+        type_references_template(&p.ty)
+            || type_references_template(&p.ty_native)
+            || p.out_ty.as_ref().is_some_and(type_references_template)
+    }) || type_references_template(&sig.return_type)
+        || type_references_template(&sig.return_type_native)
 }

@@ -293,14 +293,48 @@ fn an_ancestors_template_parameterized_type_is_never_inherited() {
     );
 }
 
-// ROADMAP "Known but not yet scheduled" follow-up: unlike the
-// class-scoped `@template` case just above (which must stay refused,
-// unmodeled cross-inheritance binding), a `@template` declared directly
-// on the ancestor *method* itself is safe to backfill verbatim - real
-// corpus shape: `Doctrine\ORM\EntityManagerInterface::getReference()`
-// (`@template T of object`, `@param class-string<T> $entityName`,
-// `@return T|null`) backfilling cleanly onto `EntityManager::
-// getReference()`'s own wholly undocumented native signature.
+// Corrected sibling of the erased case just above, found via a Piwigo/
+// real-PHPStan corpus diff (`MessengerFactory::transport`'s own call
+// through `DoctrineTransportFactory`): a class-scoped `@template` *is*
+// safe to backfill verbatim after all, provided the descendant actually
+// supplies a real, concrete binding for it via `@implements
+// Ancestor<Concrete>` - `Registry::template_param_scopes_all_safe_to_
+// backfill`'s own doc comment has the full reasoning for why this is
+// safe now (a real, resolvable binding, not the still-unresolvable
+// erased case above) and why it wasn't when this guard was first added
+// (`checker::generics::substitution::substitute_class_templates`'s own
+// call-time fix, landed in the same round, is what makes it safe).
+#[test]
+fn an_ancestors_template_parameterized_type_is_inherited_when_a_concrete_binding_exists() {
+    let r = build_registry(
+        r#"<?php
+            /** @template T */
+            interface Container11 {
+                /** @return T */
+                public function get(): mixed;
+            }
+            final class Widget11 {}
+            /** @implements Container11<Widget11> */
+            class ConcreteContainer11 implements Container11 {
+                public function get(): mixed { return new Widget11(); }
+            }
+            "#,
+    );
+    let sig = &r.classes["ConcreteContainer11"].methods["get"];
+    assert!(
+        matches!(&sig.return_type, Type::TemplateParam(tp) if tp.scope.as_deref() == Some("Container11")),
+        "expected the ancestor's own scoped TemplateParam to backfill verbatim, got {:?}",
+        sig.return_type
+    );
+}
+
+// ROADMAP "Known but not yet scheduled" follow-up: a `@template` declared
+// directly on the ancestor *method* itself is safe to backfill verbatim
+// regardless of any class-level binding - real corpus shape: `Doctrine\
+// ORM\EntityManagerInterface::getReference()` (`@template T of object`,
+// `@param class-string<T> $entityName`, `@return T|null`) backfilling
+// cleanly onto `EntityManager::getReference()`'s own wholly undocumented
+// native signature.
 #[test]
 fn a_method_scoped_template_parameterized_type_is_inherited() {
     let r = build_registry(

@@ -710,6 +710,104 @@ impl Registry {
         }
     }
 
+    /// The narrower, corrected replacement for a bare `!type_mentions_
+    /// foreign_scoped_template_param(...)` check at this function's own 3
+    /// backfill call sites: a class-scoped template *is* safe to backfill
+    /// after all, provided `class_name` (the class the backfill would land
+    /// on, and therefore the `owner` a later call-site `lookup_method_
+    /// with_owner` will report) has a real, *non-empty* concrete binding
+    /// for that exact scope - `ancestor_bindings`, precomputed once per
+    /// `class_name` (not per-method; bindings don't depend on which
+    /// method is being backfilled) by the caller as `{ancestor name =>
+    /// class_template_bindings(class_name, [], ancestor)}` for every
+    /// `class_name` ancestor that itself declares a real `@template`.
+    /// This is deliberately stricter than "is the scope structurally one
+    /// of `class_name`'s ancestors at all" - a bare `implements Container`
+    /// with no `<Concrete>` type argument anywhere reaches `Container` as
+    /// an ancestor just as much as a real `@implements Container<Concrete>`
+    /// does, but `class_template_bindings` for that erased case returns
+    /// an *empty* map (`zip(Container.templates=["T"], type_args=[])`),
+    /// which must still refuse backfill - confirmed necessary by a real,
+    /// existing regression test (`an_ancestors_template_parameterized_
+    /// type_is_never_inherited`) that caught exactly this gap in an
+    /// earlier draft of this fix (checking ancestor *name* membership
+    /// alone let a still-genuinely-unresolvable erased template backfill
+    /// verbatim, where nothing would ever later replace it with anything,
+    /// not even `Mixed`, since `checker::generics::substitution::
+    /// substitute_class_templates`'s own new ancestor-walk correctly
+    /// finds no concrete binding for it either and skips it, unlike the
+    /// old blanket-refusal behavior this whole fix modifies).
+    ///
+    /// Once `class_template_bindings` genuinely does return something
+    /// non-empty for a scope (a real `@implements`/`@extends
+    /// Ancestor<Concrete>` tag), that's exactly the shape `substitute_
+    /// class_templates`'s own corpus-diff-driven fix now correctly
+    /// resolves at call time - no longer the dead end it used to be when
+    /// this guard's own doc comment above was written. Confirmed
+    /// directly: a repro structurally identical to that comment's own
+    /// cited Doctrine `ClassMetadataFactory`/`getAllMetadata()` shape (an
+    /// abstract class's own re-declared-not-purely-inherited method, its
+    /// own `@template T` referenced by an ancestor interface's docblock)
+    /// now correctly narrows once both this loosened guard *and* that
+    /// call-time fix are in place together - loosening this guard alone,
+    /// without that fix, would silently reintroduce the exact same bug
+    /// this function's own history already found once.
+    pub(crate) fn template_param_scopes_all_safe_to_backfill(
+        ty: &Type,
+        method_name: &str,
+        ancestor_bindings: &HashMap<String, HashMap<String, Type>>,
+    ) -> bool {
+        match ty {
+            Type::TemplateParam(tp) => {
+                tp.scope.as_deref() == Some(method_name)
+                    || tp
+                        .scope
+                        .as_deref()
+                        .is_some_and(|s| ancestor_bindings.get(s).is_some_and(|b| !b.is_empty()))
+            }
+            Type::Object(_, args) => args.iter().all(|a| {
+                Registry::template_param_scopes_all_safe_to_backfill(
+                    a,
+                    method_name,
+                    ancestor_bindings,
+                )
+            }),
+            Type::Array(key, inner) => {
+                Registry::template_param_scopes_all_safe_to_backfill(
+                    key,
+                    method_name,
+                    ancestor_bindings,
+                ) && Registry::template_param_scopes_all_safe_to_backfill(
+                    inner,
+                    method_name,
+                    ancestor_bindings,
+                )
+            }
+            Type::ClassString(inner) => Registry::template_param_scopes_all_safe_to_backfill(
+                inner,
+                method_name,
+                ancestor_bindings,
+            ),
+            Type::Union(members) | Type::Intersection(members) => members.iter().all(|m| {
+                Registry::template_param_scopes_all_safe_to_backfill(
+                    m,
+                    method_name,
+                    ancestor_bindings,
+                )
+            }),
+            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
+                fields.iter().all(|(_, t, _)| {
+                    Registry::template_param_scopes_all_safe_to_backfill(
+                        t,
+                        method_name,
+                        ancestor_bindings,
+                    )
+                })
+            }
+            _ => true,
+        }
+    }
+
     /// Whether backfilling `ancestor_ty` onto a position whose own native
     /// hint alone already resolves to `native_ty` is safe: `false` only
     /// when both sides are a concrete `Type::Object` naming *different*
@@ -826,6 +924,35 @@ impl Registry {
                     if ancestor_sig.visibility == Visibility::Private {
                         continue;
                     }
+                    // Once backfilled, this signature lives on
+                    // `class_name`'s own `methods` map - a later call-site
+                    // resolution (`lookup_method_with_owner(class_name,
+                    // method_name)`) reports `class_name` itself as
+                    // `owner`, so `class_name`'s own concrete binding for
+                    // each generic ancestor is exactly what `checker::
+                    // generics::substitution::substitute_class_templates`'s
+                    // own fix will resolve at call time later - computed
+                    // once per method (bindings don't depend on which
+                    // method's own signature is being backfilled, only on
+                    // `class_name` itself), not per backfill call site
+                    // below. See `template_param_scopes_all_safe_to_
+                    // backfill`'s own doc comment for why this must be the
+                    // real *resolved bindings*, not merely "is this
+                    // ancestor name reachable at all."
+                    let ancestor_bindings: HashMap<String, HashMap<String, Type>> = registry
+                        .all_ancestor_names(class_name)
+                        .into_iter()
+                        .filter(|a| {
+                            registry
+                                .classes
+                                .get(a)
+                                .is_some_and(|c| !c.templates.is_empty())
+                        })
+                        .map(|a| {
+                            let bindings = registry.class_template_bindings(class_name, &[], &a);
+                            (a, bindings)
+                        })
+                        .collect();
                     // Real PHPStan's own identical carve-out
                     // (`PhpDocInheritanceResolver::resolvePhpDocForMethod`:
                     // `$parentMethod->getName() !== '__construct' ||
@@ -893,9 +1020,10 @@ impl Registry {
                                         &ancestor_param.ty,
                                         &p.ty_native,
                                     )
-                                    && !Registry::type_mentions_foreign_scoped_template_param(
+                                    && Registry::template_param_scopes_all_safe_to_backfill(
                                         &ancestor_param.ty,
                                         method_name,
+                                        &ancestor_bindings,
                                     )
                                     && Registry::safe_to_backfill_object_type(
                                         &ancestor_param.ty,
@@ -923,9 +1051,10 @@ impl Registry {
                                         &ancestor_param.ty,
                                         &p.ty_native,
                                     )
-                                    && !Registry::type_mentions_foreign_scoped_template_param(
+                                    && Registry::template_param_scopes_all_safe_to_backfill(
                                         &ancestor_param.ty,
                                         method_name,
+                                        &ancestor_bindings,
                                     )
                                     && Registry::safe_to_backfill_object_type(
                                         &ancestor_param.ty,
@@ -958,9 +1087,10 @@ impl Registry {
                             &ancestor_sig.return_type,
                             &sig.return_type_native,
                         )
-                        && !Registry::type_mentions_foreign_scoped_template_param(
+                        && Registry::template_param_scopes_all_safe_to_backfill(
                             &ancestor_sig.return_type,
                             method_name,
+                            &ancestor_bindings,
                         )
                         && Registry::safe_to_backfill_object_type(
                             &ancestor_sig.return_type,
