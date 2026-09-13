@@ -81,6 +81,45 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         Some(base) => !present_bases.contains(&base),
         None => true,
     });
+    // Real bug found and fixed, corpus-diff-driven (Piwigo, verified
+    // against the real `phpstan/phpstan` phar via `\PHPStan\dumpType()`):
+    // a genuinely-empty `ArrayShape` (`array{}`) is a subtype of *any*
+    // `Array(key, val)` - vacuously, since an empty array satisfies "every
+    // key is `key`-typed, every value is `val`-typed" for every possible
+    // `key`/`val` - so keeping both as separate union members is exactly
+    // the same kind of redundant-literal-not-absorbed-into-its-own-base
+    // shape `literal_base_type` above already fixes for `Int`/`String`/
+    // `Bool`/`Float`, just for a variant `literal_base_type` can't express
+    // (its own absorbing base depends on *which* `Array(_, _)` member is
+    // already present, not a fixed, context-free mapping). Concretely:
+    // `$counter = []; foreach ($keys as $k) { $counter[$k] = 1; }` merges
+    // the loop's own zero-iteration entry state (`array{}`, from
+    // `LoopZeroIterations::Possible`'s own symmetric `merge_scopes`) with
+    // the body's own accumulated `array<string, 1>` - real PHPStan's own
+    // post-loop type (confirmed via `dumpType()`) is the *unqualified*
+    // `array<string, 1>`, no `array{}` alternative surviving at all, since
+    // it's already redundant once unioned with the general map. Without
+    // this, `index_result_type`'s own separately-correct "an empty shape
+    // plus a *dynamic* key reads `null`" rule (a real, deliberate fix for
+    // a *different* bug - mid-loop auto-vivification during
+    // `++$counts[$c]`) fired on the still-surviving empty-shape member,
+    // unioning a bogus `null` into an otherwise-precise `$counter[$key]`
+    // read - the single largest false-positive source found in a
+    // real-PHPStan-vs-phpstan-rs corpus diff (33 of 70 `argument.type`/
+    // `return.type` findings in one scoped Piwigo run shared this exact
+    // signature). Deliberately scoped to an *empty* shape only - a
+    // non-empty `ArrayShape` needs real field-by-field subtype checking
+    // against the specific `Array(key, val)` co-member to be absorbed
+    // safely, a real but separate, narrower feature this fix doesn't
+    // attempt. Does not affect a whole-variable reassignment merge like
+    // `$file_path = null; foreach (...) { $file_path = $row; }` -
+    // `Type::Null` is not a subtype of `Type::String`, so `string|null`
+    // is correctly still kept apart (confirmed against real PHPStan's own
+    // `dumpType()` output for that exact shape too).
+    let has_general_array = members.iter().any(|m| matches!(m, Type::Array(_, _)));
+    if has_general_array {
+        members.retain(|m| !matches!(m, Type::ArrayShape(fields) if fields.is_empty()));
+    }
     // Phase 68.3: two structurally different `Array(key, val)` members
     // never merged into one on their own before this - each stayed its
     // own separate union member instead of the single, precise

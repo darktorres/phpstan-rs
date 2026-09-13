@@ -1221,9 +1221,19 @@ fn an_unguarded_dynamic_key_write_still_infers_an_unknown_key_type() {
 // confirms the "union in, don't just keep unchanged" generalization
 // doesn't regress the already-tested nested-write behavior. Displays in
 // the same single-type-param shorthand as the unguarded case above,
-// since `int|string` is exactly `unknown_array_key()`; each `if` has no
-// `else`, so the "neither write happened yet" empty-shape branch
-// survives in the union too.
+// since `int|string` is exactly `unknown_array_key()`.
+//
+// Each `if` has no `else`, so the "neither write happened yet"
+// empty-shape branch is genuinely part of the merge - but `union_types`
+// now drops a redundant *empty* `ArrayShape` once a general `Array(key,
+// val)` member is also present in the same union (`array{}` is a
+// subtype of any `Array(key, val)` - vacuously, since an empty array
+// satisfies "every key/value is `key`/`val`-typed" for any `key`/`val`
+// at all), matching real PHPStan's own `dumpType()` output for the
+// identical shape (confirmed directly: no `array{}` alternative ever
+// survives once a general map is also possible) - real corpus false
+// positive this fixed, see `union_types`'s own doc comment for the full
+// story and corpus impact.
 #[test]
 fn successive_narrowed_dynamic_key_writes_union_the_container_s_key_type() {
     let d = diagnostics_for(
@@ -1240,7 +1250,7 @@ fn successive_narrowed_dynamic_key_writes_union_the_container_s_key_type() {
                 if (is_string($b['id'])) {
                     $arr[$b['id']] = $val;
                 }
-                assertType('array{}|array<string>', $arr);
+                assertType('array<string>', $arr);
             }
         "#,
     );

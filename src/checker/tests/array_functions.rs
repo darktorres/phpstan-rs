@@ -2106,14 +2106,26 @@ fn array_values_on_a_non_list_array_is_never_flagged() {
 // separate, redundant `array<...>` union members instead of one precise
 // `array<Foo|false>`.
 //
-// `array{}` is a further, later addition to the expected type (this
-// session's `LoopZeroIterations` fix): `$items` here is a plain `array`
-// parameter with no non-emptiness guarantee, so the loop may genuinely
-// run zero times - `$result` then stays `[]`, a real alternative real
-// PHPStan's own `ForeachHandler::processStmt` also merges back in
+// `$items` here is a plain `array` parameter with no non-emptiness
+// guarantee, so the loop may genuinely run zero times - `$result`'s own
+// merge does include `[]` (`array{}`) as a real alternative, real
+// PHPStan's own `ForeachHandler::processStmt` also merges it back in
 // whenever `isIterableAtLeastOnce()` isn't a definite "yes" (confirmed
 // directly against `vendor/phpstan-src`'s own `mergeWith($scope->
-// filterByTruthyValue(...))` call for exactly this "maybe" case).
+// filterByTruthyValue(...))` call for exactly this "maybe" case) -
+// **but** that merged-in `array{}` never survives as its own visible
+// union member once a general `Array(key, val)` member (`array<false|
+// Foo>` here) is also present: it's a redundant subtype (an empty array
+// vacuously satisfies "every key/value is `key`/`val`-typed" for *any*
+// `key`/`val`), and `union_types` now drops it the same way real
+// PHPStan's own `TypeCombinator::union()` does - confirmed directly via
+// `\PHPStan\dumpType()` against the real `phpstan/phpstan` phar for
+// this identical shape (`$counter = []; foreach (...) { $counter[$k] =
+// ...; }`'s own post-loop type is the unqualified `array<...>`, no
+// `array{}` alternative visible at all). This was a real corpus false
+// positive (33 of 70 `argument.type`/`return.type` findings in one
+// scoped Piwigo run shared this exact signature - see `union_types`'s
+// own doc comment for the full mechanism), not a display-only quirk.
 #[test]
 fn dynamic_key_writes_across_an_if_continue_branch_and_its_fallthrough_merge_into_one_array_type() {
     let d = diagnostics_for(
@@ -2129,7 +2141,60 @@ fn dynamic_key_writes_across_an_if_continue_branch_and_its_fallthrough_merge_int
                     }
                     $result[$key] = false;
                 }
-                assertType('array{}|array<false|Foo>', $result);
+                assertType('array<false|Foo>', $result);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Direct regression test for the real Piwigo corpus false positive
+// `union_types`'s own doc comment describes: a dynamic-key read against
+// an array built via dynamic-key writes inside a `foreach` (that might
+// run zero times) must not spuriously infer `|null`, since the merged
+// `array{}` alternative is a redundant subtype of the general
+// `Array(key, val)` the loop body actually produces - matches real
+// PHPStan's own `dumpType()` output for this identical shape, confirmed
+// directly against the real `phpstan/phpstan` phar.
+#[test]
+fn a_dynamic_key_read_after_a_foreach_populated_array_is_not_spuriously_nullable() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<string> $keys */
+            function f(array $keys, string $someKey): void {
+                $counter = [];
+                foreach ($keys as $k) {
+                    $counter[$k] = 1;
+                }
+                assertType('1', $counter[$someKey]);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Sibling case confirming the fix is genuinely scoped to a redundant
+// *empty-shape-vs-array* subtype relationship, not a blanket "loops
+// never keep their zero-iteration possibility" rule: a whole-variable
+// reassignment (not a dynamic-key write) must still keep its real
+// `|null` alternative, since `Null` is not a subtype of `String` -
+// matches real PHPStan's own `dumpType()` output for this identical
+// shape too (confirmed directly: `string|null`, not collapsed - this
+// project's own union member ordering displays it as `null|string`,
+// a cosmetic difference only).
+#[test]
+fn a_whole_variable_reassigned_inside_a_foreach_still_keeps_its_null_alternative() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<string> $rows */
+            function f(array $rows): void {
+                $file_path = null;
+                foreach ($rows as $row) {
+                    $file_path = $row;
+                }
+                assertType('null|string', $file_path);
             }
         "#,
     );

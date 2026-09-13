@@ -988,36 +988,70 @@ attempt never used.
   unconditionally (PHPStan carries a legacy BC flag phpstan-rs doesn't
   need to).
 
-  **Corpus-verified, much larger real impact than previously known, and
-  a live risk-mitigation already in place.** Real-PHPStan A/B testing
-  (a minimal `$counter = []; foreach ($keys as $k) { $counter[$k] = 1;
-  } ... $counter[$someKey] ...` reproduction, confirmed via `\PHPStan\
-  dumpType()` that real PHPStan's own post-loop type is the plain
-  `array<string, 1>`, no `array{}` alternative at all) proves this is
-  the single largest root cause behind the current scoped Piwigo
-  corpus's `argument.type`/`return.type` findings: **33 of 70 (47%)**
-  share this exact signature — a deliberate, repeated idiom throughout
-  this codebase ("parallel accumulator maps populated by one loop, read
-  by a second loop over one of the maps' own keys," each site's own
-  doc comment cross-references the pattern by name), hitting
-  `ActivityRepository`, `HistoryRepository`, `ImageRepository`,
-  `CategoryService`, `TagRepository`, `TagService`, `DerivativeImage`,
-  `SearchService`, `CatPermPageRenderer`, and `RatingPageRenderer`
-  repeatedly. This also corrects ROADMAP.md's own "Known but not yet
-  scheduled" entry blaming `isset()`/`array_key_exists()` dynamic-key
-  narrowing for 4-5 of these same sites — narrowing was never the real
-  cause (confirmed: an `array_key_exists()`-guarded read against an
-  *explicitly*-PHPDoc'd `array<K,V>` parameter already infers correctly
-  today, with zero gap) — the corruption happens one level upstream, in
-  the merge this item already targets. Regarding the documented past
-  regression: `LoopZeroIterations::Possible`'s own `subject_exempt`
-  field (added after that regression, carving the self-mutating-
-  iteratee case out of the general merge) looks like it already
-  neutralizes the specific danger an unconditional asymmetric join would
-  reintroduce — every reproduction built so far touches only a separate
-  local array, never the iterated subject itself, and none regress. Only
-  a real, careful re-verification (not an assumption either way) is
-  needed before landing an unconditional switch.
+  **UPDATE — the corpus-driven investigation below found the real fix
+  is narrower than this item's own original framing, and it has now
+  shipped; O1 itself (the general `converge_loop_body` merge algorithm)
+  was never touched and stays open on its own remaining merits, if any
+  survive after this.** Real-PHPStan A/B testing (a minimal `$counter =
+  []; foreach ($keys as $k) { $counter[$k] = 1; } ... $counter[$someKey]
+  ...` reproduction, confirmed via `\PHPStan\dumpType()` that real
+  PHPStan's own post-loop type is the plain `array<string, 1>`, no
+  `array{}` alternative at all) traced the actual defect one level
+  *below* the loop-merge algorithm this item names: `union_types`
+  itself never simplified a genuinely-*empty* `ArrayShape` (`array{}`)
+  away when a general `Array(key, val)` member was already present in
+  the same union — a plain, redundant-subtype absorption a sound type
+  system should already do unconditionally (an empty array vacuously
+  satisfies "every key/value is `key`/`val`-typed" for *any* `key`/
+  `val`), matching what real PHPStan's own `TypeCombinator::union()`
+  evidently already does. Fixed directly in `union_types`
+  (`checker/type_union.rs`) — **`converge_loop_body`'s own merge
+  algorithm needed no change at all**; the `array{}` branch is still
+  computed and unioned in exactly as before, it just no longer survives
+  as a separate, redundant member once a compatible general array is
+  also present. This is a materially safer fix than O1's own proposed
+  asymmetric-join redesign: it never touches the symmetric
+  `LoopZeroIterations::Possible` merge at all, so the documented past
+  regression (the self-mutating-iteratee idiom) and its own
+  `subject_exempt` carve-out are both completely unaffected — confirmed
+  by a dedicated regression test (`a_whole_variable_reassigned_inside_a_
+  foreach_still_keeps_its_null_alternative`) pinning that a *non*-array
+  redundant case (`Null` vs `String`, not a subtype relationship) still
+  keeps its full union, matching real PHPStan's own `dumpType()` output
+  for that shape too (`string|null`).
+
+  Real corpus impact, verified via a full before/after scoped+unscoped
+  Piwigo diff: **16 of 70** `argument.type`/`return.type` findings in
+  the scoped run were fully removed (`ActivityRepository`,
+  `HistoryRepository` ×4, `ImageRepository`, `CategoryService` ×2,
+  `DerivativeImage`, `SiteUpdateSubController`, `CatPermPageRenderer`,
+  `RatingPageRenderer`, `UserService::getBrowserLanguage` ×2, plus the
+  two Reflection/backtrace sites the sibling fix below independently
+  also fixes), and several more had their own `array{}`/`array{}|`
+  alternative stripped without the whole finding disappearing (their
+  own root cause is separate and unrelated - `SearchService` ×2,
+  `SectionPopulator`). This also corrects ROADMAP.md's own "Known but
+  not yet scheduled" entry blaming `isset()`/`array_key_exists()`
+  dynamic-key narrowing for several of these same sites — narrowing was
+  never the real cause (confirmed: an `array_key_exists()`-guarded read
+  against an *explicitly*-PHPDoc'd `array<K,V>` parameter already
+  infers correctly today, with zero gap) — the corruption happened one
+  level upstream, in the union-simplification gap fixed here.
+
+  **One real, disclosed trade-off found during verification, not a
+  regression this fix introduced**: the scoped diff also showed 4 new
+  findings (`ConfigurationSubController::processSizes` ×3,
+  `openApiOperations`'s own `narrowingExpr()` call ×1) that a byte-for-
+  byte isolated reproduction of each confirms were already latent,
+  independent of this fix — the *by-ref foreach array-mutation still
+  isn't tracked* gap (ROADMAP.md's own "Known but not yet scheduled",
+  now updated with this second corpus site) and the still-open
+  `int|string` array-key-type-imprecision cluster (untriaged, no phase
+  entry yet) were both simply reached for the first time once this fix
+  removed an unrelated masking effect elsewhere in the same merge
+  pipeline - the same "surfaced only once a separate fix stopped
+  masking it" pattern this project's own history already has several
+  instances of, not new bugs.
 - **O2 (medium).** Register each anonymous class under a real, stable
   synthetic name (`file:line[:index]`-keyed, mirroring real PHPStan's
   own `AnonymousClassNameHelper`) with a full independent registry

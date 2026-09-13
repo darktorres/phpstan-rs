@@ -55,7 +55,7 @@
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
-use crate::types::{TemplateParam, Type};
+use crate::types::{AccessoryKind, TemplateParam, Type};
 
 include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 
@@ -117,6 +117,19 @@ fn patch_array_multisort_by_ref(stubs: &mut [(String, FunctionSig)]) {
     }
 }
 
+/// `debug_backtrace()`'s own phpstorm-stubs signature is a bare native
+/// `array` (no refining PHPDoc tag) - real PHPStan hardcodes the same
+/// `list<array{function: string, ...}>` shape `Exception::getTrace()`
+/// shares (`backtrace_frame_list_type`, `patch_reflection_and_exception_
+/// list_types`'s own doc comment), confirmed via `\PHPStan\dumpType()`.
+fn patch_debug_backtrace(stubs: &mut [(String, FunctionSig)]) {
+    for (name, sig) in stubs.iter_mut() {
+        if name == "debug_backtrace" {
+            sig.return_type = backtrace_frame_list_type();
+        }
+    }
+}
+
 /// All signatures generated from the vendored phpstorm-stubs sources,
 /// merged (first occurrence wins). A few functions are declared more than
 /// once across the corpus (e.g. a version-conditional pair of signatures
@@ -152,6 +165,7 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
                 }
             }
             patch_array_multisort_by_ref(&mut result);
+            patch_debug_backtrace(&mut result);
             result
         });
     CACHE.clone()
@@ -456,6 +470,103 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(String, ClassI
     }
 }
 
+/// The PHP 8 `debug_backtrace()`/`Throwable::getTrace()`-shaped "trace
+/// frame" array: `list<array{function: string, line?: int, file?: string,
+/// class?: string, type?: '->'|'::', args?: list<mixed>, object?:
+/// object}>`, confirmed directly via `\PHPStan\dumpType()` against the
+/// real `phpstan/phpstan` phar (real PHPStan hardcodes this via its own
+/// dynamic-return-type extensions, not from either function's own bare
+/// `array`-returning stub text).
+fn backtrace_frame_list_type() -> Type {
+    let frame_shape = Type::ArrayShape(vec![
+        ("function".to_string(), Type::String, false),
+        ("line".to_string(), Type::Int, true),
+        ("file".to_string(), Type::String, true),
+        // A bare (non-generic) `class-string` is already plain `Type::
+        // String` in this project's own PHPDoc parser (`types/parse.rs`'s
+        // own `"class-string" => ... [] => Type::String`) - matched here
+        // for consistency, not a simplification specific to this patch.
+        ("class".to_string(), Type::String, true),
+        (
+            "type".to_string(),
+            Type::Union(vec![
+                Type::StringLiteral("->".to_string()),
+                Type::StringLiteral("::".to_string()),
+            ]),
+            true,
+        ),
+        (
+            "args".to_string(),
+            Type::Intersection(vec![
+                Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+                Type::Accessory(AccessoryKind::ArrayList),
+            ]),
+            true,
+        ),
+        (
+            "object".to_string(),
+            Type::Object("object".to_string(), Vec::new()),
+            true,
+        ),
+    ]);
+    Type::Intersection(vec![
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(frame_shape)),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ])
+}
+
+/// Two real, corpus-verified `list<T>` precision gaps found by diffing
+/// phpstan-rs's own scoped Piwigo corpus run against a real `vendor/
+/// bin/phpstan analyse` run on the same corpus and tracing the
+/// discrepancy to source: neither phpstorm-stubs nor this project's own
+/// `class_info.rs`/`php_stubs.rs` mark these two methods' return type
+/// with the `list` accessory at all (both are a bare native `array`,
+/// with no refining PHPDoc tag in phpstorm-stubs either), while real
+/// PHPStan's own dynamic-return-type extensions do - confirmed directly
+/// via `\PHPStan\dumpType()` against the real phar, not assumed from
+/// stub text alone.
+/// - `ReflectionFunctionAbstract::getParameters()` -> `list<
+///   ReflectionParameter>`. Real corpus false positive this fixes:
+///   `Piwigo\Tools\PhpStan\Latte\ShimClassGenerator::generate()`'s own
+///   `array_map(..., $reflection->getParameters())` result, expected as
+///   `list<string>` by `renderMethod()`'s own signature, inferred as
+///   bare `array<string>` without this.
+/// - `Exception`/`Error::getTrace()` -> the shared `backtrace_frame_
+///   list_type()` shape above. Real corpus false positive this fixes:
+///   `SensitiveParameterTest`'s own `sensitiveParameterTestTraceContains(
+///   $exception->getTrace(), ...)` calls (3 real sites), expecting
+///   exactly this shape.
+fn patch_reflection_and_exception_list_types(classes: &mut [(String, ClassInfo)]) {
+    if let Some((_, info)) = classes
+        .iter_mut()
+        .find(|(name, _)| name == "ReflectionFunctionAbstract")
+        && let Some(m) = info.methods.get_mut("getParameters")
+    {
+        m.return_type = Type::Intersection(vec![
+            Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(Type::Object("ReflectionParameter".to_string(), Vec::new())),
+            ),
+            Type::Accessory(AccessoryKind::ArrayList),
+        ]);
+    }
+    // Both `Exception`/`Error`'s own real phpstorm-stubs `getTrace()`
+    // declarations are `final` (confirmed directly - neither is ever
+    // overridden further down either hierarchy), so patching these two
+    // concrete classes directly, rather than the `Throwable` interface
+    // they both also implement, covers every real throwable via
+    // ordinary inheritance.
+    for class_name in ["Exception", "Error"] {
+        let Some((_, info)) = classes.iter_mut().find(|(name, _)| name == class_name) else {
+            continue;
+        };
+        let Some(m) = info.methods.get_mut("getTrace") else {
+            continue;
+        };
+        m.return_type = backtrace_frame_list_type();
+    }
+}
+
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
 pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
@@ -476,6 +587,7 @@ pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
         }
         patch_reflection_class_constructor_template(&mut result);
         patch_reflection_method_and_property_templates(&mut result);
+        patch_reflection_and_exception_list_types(&mut result);
         result
     });
     CACHE.clone()

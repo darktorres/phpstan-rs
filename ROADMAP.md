@@ -1797,7 +1797,27 @@ section used to carry:
   only once a separate fix (`checker/expr.rs`'s `ExprKind::Index` read
   arm properly resolving a `Union`/`Intersection` container instead of
   its own previous `check_expr`-only `_ => Mixed` fallback) stopped
-  masking it behind `Mixed`.
+  masking it behind `Mixed`. **A second, independent corpus site
+  confirms the same gap from a different angle**: `Configuration
+  SubController::processSizes` (`foreach ($pderivatives as $type =>
+  &$pderivative) { $pderivative['must_square'] = ...; ... }`, mutating
+  several keys to real `bool`/`int` literals) leaves `$pderivatives`'s
+  own tracked element type frozen at its pre-loop `@var array<string,
+  array<string, string|int|bool|null>>` declaration - a later, separate
+  `foreach ($pderivatives as $ptype => $prow) { new DerivativeSizeRow
+  (mustSquare: $prow['must_square'], ...) }` then infers `$prow[
+  'must_square']` as the full un-narrowed `string|int|bool|null` against
+  a `bool`-typed constructor parameter, `argument.type`. Found only
+  after the `union_types` fix below removed an unrelated masking effect
+  (a redundant `array{}` union member elsewhere in the same merge
+  pipeline) that had been silently absorbing this call's own complexity
+  before reaching this check - the same "surfaced once a separate fix
+  stopped masking it" pattern as the citation above, not a regression
+  the new fix itself introduced (confirmed: real PHPStan reports nothing
+  here either, and the identical mismatch reproduces in a minimal
+  isolated snippet with no loop or by-ref mutation involved at all,
+  purely from the plain declared-vs-narrower-actual type gap this
+  by-ref-tracking limitation leaves open).
 - **Corrected diagnosis (real-PHPStan-verified, supersedes this bullet's
   own original text below the line).** This was originally attributed to
   a missing feature - dynamic-key narrowing not reaching `isset()`/
