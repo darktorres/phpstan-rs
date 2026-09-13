@@ -417,6 +417,39 @@ disconnected enough to be its own future phase: `checkExplicitMixed`/
 `checkImplicitMixed`/`checkBenevolentUnionTypes` (real level 9/10) -
 `Type::Mixed` carries no explicit-vs-implicit provenance to key them off.
 
+**`array + array`'s key/value precision, found via a Piwigo/real-PHPStan
+corpus diff.** `BinOp::Add`'s array-union arm used to collapse straight
+to `Array(unknown_array_key(), Mixed)` unconditionally, discarding both
+operands' own key/value types entirely. Real impact traced directly:
+`$merged = $filters + $functions;` on two real `array<string,
+callable>`-typed values (Latte's own `Engine::getFilters()`/
+`getFunctions()`) made every `foreach ($merged as $name => ...)`'s
+`$name` infer as `int|string`, cascading into real `strtolower($name)`/
+`strtoupper($name)`/`renderMethod($name)` false positives in `tools/
+phpstan/Latte/ShimClassGenerator.php`; the same root cause separately
+cost `tests/Browser/FeedControllerTest.php`'s `[$headers, $body] =
+explode(...) + ['', ''];` its own `$body`'s precision, collapsing it to
+`mixed`. Fixed to mirror real PHPStan's own `InitializerExprTypeResolver
+::getPlusType`'s general (non-constant-array) case: key type is the
+union of both operands' iterable key types (via the existing
+`array_key_type`/`array_element_type` helpers this file's other array-
+consuming call sites already use), value type is the union of both
+operands' iterable value types, with `ArrayList`/`NonEmptyArray`
+accessories preserved matching real PHPStan's own `isList()->yes() &&
+isList()->yes()`/`isIterableAtLeastOnce()->yes()` rules. Scoped Piwigo
+diff: 5 findings removed cleanly, zero new false positives. Deliberately
+not ported: real PHPStan's own sibling *constant-array* branch (a
+`ConstantArrayTypeBuilder`-based per-offset merge preserving an exact
+literal `array{...}` shape when both operands are literal shapes) - a
+structurally different, genuinely intricate feature (an optional left-
+hand key's value is unioned with the right side's only when the key is
+*not* actually optional) left as a disclosed, sound-but-imprecise gap:
+`array{a: int} + array{b: string}` now falls back to the general
+`Array(key, val)` union case rather than a precise merged shape - still
+a real, provable supertype, just not maximally precise. Pinned by its
+own regression test (`adding_two_literal_shapes_loses_precise_keys_a_
+known_disclosed_gap`).
+
 **Subtyping properties via proptest, and two real soundness bugs found
 by it** (Phase 19). `src/types/tests/subtyping_properties.rs`: a
 bounded-depth `Type` generator (`proptest::prop_recursive`) backing five
@@ -1775,11 +1808,40 @@ section used to carry:
   confirmed false positive/negative; `static`/`$this` late binding has
   no attached calling class (a real architectural gap - no concrete
   corpus false positive/negative traced yet; watch for a fluent
-  base-class builder method chained through a subclass instance); no
-  `BenevolentUnionType` (structurally not needed today - this project's
-  own loose-comparison rule only fires on genuinely literal/constant
-  types, never an imprecise inferred `Union`, so there's no surface for
-  it to protect); `class-string<T>`'s own `instanceof`/sealed-hierarchy
+  base-class builder method chained through a subclass instance);
+  **corrected** - `BenevolentUnionType` genuinely is needed, this
+  entry's own prior claim was wrong. A Piwigo/real-PHPStan corpus diff
+  round confirmed a real, live gap: real PHPStan's own PHPDoc `Type[]`
+  array-shorthand resolution (`TypeNodeResolver::resolveArrayTypeNode`)
+  keys the result with a `BenevolentUnionType([Integer, String])`, not a
+  plain `Union` - and `RuleLevelHelper::accepts()` treats a Benevolent
+  union specially, skipping the strict per-member check a plain `Union`
+  gets. Verified directly, not assumed: a `@var Item[]` property read
+  via `foreach` and passed to a `string`-typed parameter produces *zero*
+  errors from real PHPStan (`dumpType()` even displays it distinctly,
+  parenthesized - `(int|string)` - vs. a plain-Union `int|string` shown
+  unparenthesized, which *does* get flagged against the same parameter).
+  This project's own `Type::unknown_array_key()` (`Union([Int, String])`,
+  used both for the identical `Type[]`-shorthand parse in `types/
+  parse.rs` and for the array-union `+` operator's own fallback key type)
+  has no such marker, so every one of these sites gets treated as a
+  strict `Union` - a confirmed source of real false positives: `Block
+  Manager::apply`'s `foreach ($this->display_blocks as $id => $block)`
+  (`@var DisplayBlock[]`) passing `$id` to `hideBlock(string $block_id)`;
+  `CategoryAvailableListController::__invoke`'s equivalent `$catId` case;
+  `SpecStructureTest`'s `strtoupper($key)` over an `openApiOperations()`-
+  shaped array; `openapi-generate-input-dto.php`'s `narrowingExpr()` call
+  - all four still open, all four now root-caused (previously listed as
+  an "untriaged `int|string` array-key-type-imprecision cluster" in
+  PHASE_BACKLOG's own Phase 123 O1 trade-off note). Not built this round:
+  a real fix needs a genuine `Type::Union`-adjacent "benevolent" marker
+  (a new variant or accessory) threaded through `Type[]`-shorthand
+  parsing, the array `+` operator's key-type fallback, and every
+  `is_assignable`/`accepts_at_configured_level` call site that should
+  respect it - comparable in size to Phase 84's own already-declined
+  `checkBenevolentUnionTypes` item, and naturally the same future phase
+  that item already reserves, not a new one.
+  `class-string<T>`'s own `instanceof`/sealed-hierarchy
   narrowing is unmodeled (no `is_a()`-with-narrowing or sealed-hierarchy
   pattern found in the corpus this round); no general `TypeCombinator`
   intersect/remove or generic recursive type-tree traverse/map
@@ -2021,16 +2083,6 @@ section used to carry:
   at `NotificationByMailSenderTest::setUp`'s own
   `$this->conn->fetchAssociative(...)` result assigned into a precisely
   `array{check_key: string, ...}`-shaped property.
-- `array + array` (PHP's array-union operator, not arithmetic) always
-  answers `Array(unknown_key, Mixed)` - already disclosed inline
-  (`checker/expr.rs`'s own `BinOp::Add` arm doc comment) but not
-  previously cross-referenced here. The real per-key result (every key
-  from the left operand, filling in any key only present on the right)
-  isn't something `Type::Array`/`Type::ArrayShape` can express
-  precisely today. Confirmed corpus false positive this causes:
-  `tests/Browser/FeedControllerTest.php`'s own `[$headers, $body] =
-  explode(...) + ['', ''];` losing `$body`'s own precision down to
-  `mixed`.
 - `token_get_all()` returns bare `array` - confirmed *not* a gap versus
   real PHPStan specifically (no dynamic-return-type extension for it
   exists in `vendor/phpstan-src` either, unlike the several functions

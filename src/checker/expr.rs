@@ -4064,16 +4064,80 @@ impl<'a> Checker<'a> {
                 }
                 // `+` on two arrays is PHP's array-union operator, not
                 // arithmetic - it keeps every key from the left operand,
-                // filling in any key only present on the right. The real
-                // per-key result type isn't something `Type::Array`/
-                // `Type::ArrayShape` can express precisely today, so
-                // `Array(Mixed)` is the honest answer.
+                // filling in any key only present on the right. This used
+                // to collapse straight to `array<array-key, mixed>`
+                // unconditionally, discarding both operands' own key/value
+                // types entirely - a real corpus false-positive source
+                // (found via a Piwigo/real-PHPStan corpus diff, "Cluster
+                // C"): `$merged = $filters + $functions;` on two real
+                // `array<string, callable>`-typed values (Latte's own
+                // `Engine::getFilters()`/`getFunctions()`, both
+                // `@return array<string, callable>`) made every `foreach
+                // ($merged as $name => ...)`'s `$name` infer as `int|
+                // string`, cascading into `strtolower($name)`/
+                // `strtoupper($name)`/etc. false positives project-wide.
+                // Real PHPStan's own `InitializerExprTypeResolver::
+                // getPlusType`'s general (non-constant-array) case computes
+                // the key type as the union of both operands' iterable key
+                // types (collapsing back to the shared type when they
+                // already agree, verified directly against real PHPStan's
+                // own source at
+                // `Reflection/InitializerExprTypeResolver.php:1600-1666`)
+                // and the value type as the union of both operands'
+                // iterable value types - mirrored here via the same
+                // `array_key_type`/`array_element_type` helpers this
+                // file's other array-consuming call sites already use.
+                // Deliberately NOT porting the *constant-array* branch
+                // just above that one in real PHPStan (a full
+                // `ConstantArrayTypeBuilder`-style per-offset merge that
+                // preserves an exact literal `array{...}` shape when both
+                // operands are literal shapes) - a real, disclosed
+                // precision gap for `array{a: int} + array{b: string}`-
+                // shaped operands (falls back to the general `Array(key,
+                // val)` union case below instead of a precise merged
+                // shape), not a soundness gap: the result is still a real,
+                // provably-correct supertype, just not maximally precise.
+                // That merge's own real semantics turn out to be
+                // genuinely intricate (an optional left-hand key's value
+                // is *not* unioned with the right side, only a
+                // *non*-optional one is, to account for key-type
+                // near-equality across the two constant arrays) - a
+                // separate, structurally different feature from this
+                // fix, not attempted here.
                 // Phase 14: `is_array_like` sees through a `list<T>`/
                 // `non-empty-array<T>`-typed operand too - without it, a
                 // `list<T> + list<T>` silently fell through to numeric
                 // addition instead of array union.
                 if Self::is_array_like(&lt) && Self::is_array_like(&rt) {
-                    return Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
+                    let key_ty = match (Self::array_key_type(&lt), Self::array_key_type(&rt)) {
+                        (Some(lk), Some(rk)) if lk == rk => lk,
+                        (Some(lk), Some(rk)) => union_types(lk, rk),
+                        (Some(k), None) | (None, Some(k)) => k,
+                        (None, None) => Type::unknown_array_key(),
+                    };
+                    let val_ty = union_types(
+                        Self::array_element_type(&lt).unwrap_or(Type::Mixed),
+                        Self::array_element_type(&rt).unwrap_or(Type::Mixed),
+                    );
+                    let mut result = Type::Array(Box::new(key_ty), Box::new(val_ty));
+                    let has_accessory = |ty: &Type, kind: AccessoryKind| matches!(ty, Type::Intersection(members) if members.contains(&Type::Accessory(kind)));
+                    let mut accessories = Vec::new();
+                    if has_accessory(&lt, AccessoryKind::ArrayList)
+                        && has_accessory(&rt, AccessoryKind::ArrayList)
+                    {
+                        accessories.push(Type::Accessory(AccessoryKind::ArrayList));
+                    }
+                    if has_accessory(&lt, AccessoryKind::NonEmptyArray)
+                        || has_accessory(&rt, AccessoryKind::NonEmptyArray)
+                    {
+                        accessories.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                    }
+                    if !accessories.is_empty() {
+                        let mut members = vec![result];
+                        members.extend(accessories);
+                        result = Type::Intersection(members);
+                    }
+                    return result;
                 }
                 if lt == Type::Float || rt == Type::Float {
                     return Type::Float;

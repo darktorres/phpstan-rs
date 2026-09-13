@@ -645,6 +645,109 @@ fn adding_two_list_typed_arrays_still_uses_array_union_not_numeric_addition() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// A Piwigo/real-PHPStan corpus diff found `+` on two arrays used to
+// collapse straight to `array<array-key, mixed>` unconditionally,
+// discarding both operands' own key type - `$filters + $functions` on
+// two real `array<string, callable>`-typed values (mirroring Latte's
+// own `Engine::getFilters()`/`getFunctions()`) made every `foreach
+// ($merged as $name => ...)`'s `$name` infer as `int|string`, cascading
+// into real false positives on `strtolower($name)`/`strtoupper($name)`/
+// any other string-only callee project-wide. Fixed to union both
+// operands' real key/value types (mirroring real PHPStan's own
+// `InitializerExprTypeResolver::getPlusType`'s general-array-case
+// formula), collapsing back to the shared key type when both operands
+// already agree, exactly as here.
+#[test]
+fn adding_two_string_keyed_arrays_keeps_the_shared_string_key_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, callable> $a
+             *  @param array<string, callable> $b
+             */
+            function f(array $a, array $b): void {
+                $merged = $a + $b;
+                assertType('array<string, callable>', $merged);
+                foreach ($merged as $name => $callable) {
+                    assertType('string', $name);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// When the two operands' key types genuinely differ, the result is the
+// real union of both - not silently widened all the way to the generic
+// `array-key`.
+#[test]
+fn adding_arrays_with_different_key_types_unions_them() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<int, string> $a
+             *  @param array<string, int> $b
+             */
+            function f(array $a, array $b): void {
+                // Key union is `int|string` - exactly `unknown_array_key()`
+                // - so the shorthand single-param `array<V>` display kicks
+                // in (matching `Type::Array`'s own existing display rule),
+                // same as any other array whose key type isn't known to be
+                // narrower than the default.
+                assertType('array<string|int>', $a + $b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// `list<T>`-ness survives `+` when both operands are provably lists -
+// mirrors real PHPStan's own `isList()->yes() && isList()->yes()`
+// accessory-preservation rule.
+#[test]
+fn adding_two_lists_preserves_list_ness() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<int> $a
+             *  @param list<int> $b
+             */
+            function f(array $a, array $b): void {
+                assertType('list<int>', $a + $b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Disclosed, accepted precision gap (not a soundness bug): two literal
+// `array{...}` shapes merged via `+` fall back to the general
+// `Array(key, val)` union case rather than a precise merged shape
+// preserving each individual key - real PHPStan's own constant-array
+// merge branch (`ConstantArrayTypeBuilder`-based, with real optional-key
+// nuance around when a left-hand value gets unioned with the right
+// side's) is a separate, structurally different feature, not ported
+// here. Still a sound, real supertype - just not maximally precise.
+#[test]
+fn adding_two_literal_shapes_loses_precise_keys_a_known_disclosed_gap() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $a = ['a' => 1];
+                $b = ['b' => 'x'];
+                // The key generalizes from the two distinct literal keys
+                // down to plain `string` (the real, disclosed precision
+                // loss this test pins) - but the *value* union still keeps
+                // each side's own literal type rather than widening it,
+                // since nothing here forces a wider value type.
+                assertType("array<string, 1|'x'>", $a + $b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
 #[test]
 fn array_element_type_callers_still_work_given_a_list_typed_argument() {
     let d = diagnostics_for(

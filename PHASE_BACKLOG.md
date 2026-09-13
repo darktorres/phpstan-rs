@@ -1045,13 +1045,31 @@ attempt never used.
   byte isolated reproduction of each confirms were already latent,
   independent of this fix — the *by-ref foreach array-mutation still
   isn't tracked* gap (ROADMAP.md's own "Known but not yet scheduled",
-  now updated with this second corpus site) and the still-open
-  `int|string` array-key-type-imprecision cluster (untriaged, no phase
-  entry yet) were both simply reached for the first time once this fix
-  removed an unrelated masking effect elsewhere in the same merge
-  pipeline - the same "surfaced only once a separate fix stopped
-  masking it" pattern this project's own history already has several
-  instances of, not new bugs.
+  now updated with this second corpus site) and the `int|string` array-
+  key-type-imprecision cluster were both simply reached for the first
+  time once this fix removed an unrelated masking effect elsewhere in
+  the same merge pipeline - the same "surfaced only once a separate fix
+  stopped masking it" pattern this project's own history already has
+  several instances of, not new bugs. **The `int|string` cluster is now
+  fully root-caused** (a follow-up round, not this one): real PHPStan's
+  own `Type[]` PHPDoc-shorthand resolution keys the result with a
+  `BenevolentUnionType([Integer, String])`, not a plain `Union` - and
+  `RuleLevelHelper::accepts()` treats a Benevolent union specially,
+  silently skipping the strict per-member check a plain `Union` gets
+  (confirmed directly: `dumpType()` even displays it distinctly,
+  parenthesized). This project's `Type::unknown_array_key()` has no such
+  marker, so every `Type[]`-shorthand-derived key type - and, separately,
+  the array `+` operator's own key-type fallback below - gets treated as
+  a strict `Union` instead, a confirmed source of real false positives
+  (`BlockManager::apply`, `CategoryAvailableListController::__invoke`,
+  `SpecStructureTest`, `openapi-generate-input-dto.php`'s
+  `narrowingExpr()` - see ROADMAP.md's own "Known but not yet scheduled"
+  entry for the full citation). Not built this round: a real fix needs a
+  genuine `Union`-adjacent "benevolent" marker threaded through parsing,
+  the `+` operator, and every `is_assignable`/`accepts_at_configured_
+  level` call site that should respect it - correctly the same future
+  phase this document's own Phase 84 entry already reserves for
+  `checkBenevolentUnionTypes`, not a new one.
 - **O2 (medium).** Register each anonymous class under a real, stable
   synthetic name (`file:line[:index]`-keyed, mirroring real PHPStan's
   own `AnonymousClassNameHelper`) with a full independent registry
