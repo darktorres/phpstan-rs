@@ -196,6 +196,28 @@ of reconstructing from `Keyword::as_str()` - `Token`'s own shape and its
 167 existing match/construct sites across the codebase stay completely
 untouched.
 
+**`function.duplicate` corrected from always-on to opt-in** (Phase 63
+follow-up, found via a Piwigo/real-PHPStan corpus diff). Real PHPStan's
+own `DuplicateFunctionDeclarationRule` is `#[ValidatesStubFiles]` -
+exactly like `DuplicateClassDeclarationRule` below - and never runs
+against ordinary scanned project files at all, only a project's own
+configured `stubFiles:` list in an isolated pass. Phase 63 originally
+shipped this project's own equivalent as an unconditional, always-on
+check on the mistaken premise that the real rule ran the same way
+project-wide; confirmed live via a real corpus false positive:
+`C13yInternalTest`'s own `Unit`/`Integration` suites each unconditionally
+declare an identically-named top-level function, never actually loaded
+together in the same PHP process - a case this checker (like real
+PHPStan) has no general way to rule out. Now gated behind `Registry::
+check_duplicate_function_declarations` (opt-in, default `false`, full
+config/CLI/`Project`-setter wiring chain mirroring `check_duplicate_
+class_declarations` below exactly), correcting the doc-comment
+mischaracterization in both `checker::duplicate_functions` and this
+entry. Still adds its own real, deliberate divergence from the real
+rule's own body once opted in: an added signature-difference check (the
+phpstorm-stubs `strtr` two-declaration overload split) - unaffected by
+this change.
+
 **Whole-project duplicate class-name detection** (Phase 83). New opt-in
 `check_duplicate_class_declarations` (off by default - see below) flags
 the same class/interface/trait/enum FQN declared unconditionally more

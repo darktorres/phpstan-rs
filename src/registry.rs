@@ -214,9 +214,23 @@ pub struct Registry {
     // against a real corpus before defaulting on. Same wiring chain as
     // the flags above.
     pub check_method_throw_type_covariance: bool,
+    // Phase 63/corrected: opts into `checker::duplicate_functions::check_
+    // duplicate_function_declarations`. Originally shipped unconditional,
+    // on the mistaken premise that real PHPStan's own `DuplicateFunction
+    // DeclarationRule` runs the same way project-wide - it doesn't: that
+    // rule is `#[ValidatesStubFiles]`, exactly like `DuplicateClass
+    // DeclarationRule` below, and never runs against ordinary scanned
+    // files at all. A live Piwigo/real-PHPStan corpus diff confirmed the
+    // real, structural false-positive this unsoundly produced: two
+    // unconditionally-declared same-named top-level functions in separate
+    // test files (`Unit`/`Integration` suites) that are never actually
+    // loaded in the same PHP process - a case this checker has no way to
+    // rule out in general, the identical reasoning that made the class-
+    // side check opt-in below. Now opt-in (default `false`), same wiring
+    // chain as the flags above.
+    pub check_duplicate_function_declarations: bool,
     // Phase 83: opts into `checker::duplicate_classes::check_duplicate_
-    // class_declarations` - unlike `duplicate_functions`'s own always-on
-    // equivalent, this one is opt-in (default `false`) because its one
+    // class_declarations` - opt-in (default `false`) because its one
     // known corpus false-positive shape (a vendored built-in stub
     // override, e.g. `Imagick.stub.php`, colliding with the real PHP
     // extension's own class) can only be defused by a project's `stub_

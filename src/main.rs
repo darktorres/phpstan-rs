@@ -128,6 +128,18 @@ enum Command {
         /// check_method_throw_type_covariance`'s own doc comment for why.
         #[arg(long)]
         check_method_throw_type_covariance: bool,
+        /// Enables opt-in whole-project duplicate top-level-function-
+        /// declaration detection (`function.duplicate`). Off by default:
+        /// real PHPStan's own `DuplicateFunctionDeclarationRule` is
+        /// `#[ValidatesStubFiles]` and never runs against ordinary
+        /// scanned files at all, so this checker has no general way to
+        /// rule out two same-named functions in separate files that are
+        /// never actually loaded together in the same PHP process (a
+        /// real corpus false positive this flag defaults off to avoid) -
+        /// see `registry::Registry::check_duplicate_function_
+        /// declarations`'s own doc comment.
+        #[arg(long)]
+        check_duplicate_function_declarations: bool,
         /// Enables opt-in whole-project duplicate class/interface/trait/
         /// enum-declaration detection (`class.duplicate`/etc.) - going
         /// beyond real PHPStan, which has no whole-project equivalent of
@@ -218,6 +230,7 @@ fn main() {
             check_too_wide_throw_type_in_protected_and_public_methods,
             check_too_wide_return_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
+            check_duplicate_function_declarations,
             check_duplicate_class_declarations,
             php_version,
             generate_baseline,
@@ -241,6 +254,7 @@ fn main() {
             check_too_wide_throw_type_in_protected_and_public_methods,
             check_too_wide_return_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
+            check_duplicate_function_declarations,
             check_duplicate_class_declarations,
             php_version,
             generate_baseline,

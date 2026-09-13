@@ -109,9 +109,10 @@ pub struct Project {
     decl_locations: DeclLocations,
     // Phase 63: every top-level function's own unconditional declaration
     // site(s) - always populated (no `retain_source` gate, unlike
-    // `decl_locations` above), since `check_duplicate_function_declarations`
-    // needs to run by default for `check-project`. See
-    // `DuplicateFunctionSites`'s own doc comment.
+    // `decl_locations` above), the same indexing-side/check-side split
+    // `duplicate_class_sites` below uses: its own gate is at the *check*
+    // side, `Registry::check_duplicate_function_declarations`, not the
+    // indexing side. See `DuplicateFunctionSites`'s own doc comment.
     duplicate_fn_sites: DuplicateFunctionSites,
     // Phase 83: the class-like counterpart to `duplicate_fn_sites` above -
     // always populated too (its own gate is at the *check* side,
@@ -269,6 +270,14 @@ impl Project {
     /// covariance`'s own doc comment for why this defaults to `false`.
     pub fn set_check_method_throw_type_covariance(&mut self, enabled: bool) {
         self.registry.check_method_throw_type_covariance = enabled;
+    }
+
+    /// Corrected from unconditional to opt-in - see `registry::Registry::
+    /// check_duplicate_function_declarations`'s own doc comment for the
+    /// real corpus false positive that motivated this. Same precedent as
+    /// `set_check_method_throw_type_covariance`.
+    pub fn set_check_duplicate_function_declarations(&mut self, enabled: bool) {
+        self.registry.check_duplicate_function_declarations = enabled;
     }
 
     /// Phase 83: opts the whole project's checking into `checker::
@@ -666,12 +675,14 @@ impl Project {
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.check_program(&file.ast);
         let mut diagnostics = checker.into_diagnostics();
-        diagnostics.extend(
-            checker::duplicate_functions::check_duplicate_function_declarations(
-                path,
-                &self.duplicate_fn_sites,
-            ),
-        );
+        if self.registry.check_duplicate_function_declarations {
+            diagnostics.extend(
+                checker::duplicate_functions::check_duplicate_function_declarations(
+                    path,
+                    &self.duplicate_fn_sites,
+                ),
+            );
+        }
         if self.registry.check_duplicate_class_declarations {
             diagnostics.extend(
                 checker::duplicate_classes::check_duplicate_class_declarations(

@@ -18,6 +18,7 @@
 //! check_missing_checked_exceptions = false
 //! scan_paths = ["vendor/some-manual-extra"]
 //! stub_paths = ["phpstan-stubs/Imagick.stub.php"]
+//! check_duplicate_function_declarations = false
 //! check_duplicate_class_declarations = false
 //! no_composer = false
 //! php_version = "8.1"
@@ -138,6 +139,11 @@ pub struct Config {
     /// `is_stub` field and `checker::duplicate_classes`'s own module doc
     /// comment for why this distinction exists at all.
     pub stub_paths: Option<Vec<PathBuf>>,
+    /// Corrected from unconditional to opt-in whole-project duplicate
+    /// function-declaration detection - see `registry::Registry::check_
+    /// duplicate_function_declarations`'s own doc comment for the real
+    /// corpus false positive that motivated this.
+    pub check_duplicate_function_declarations: Option<bool>,
     /// Phase 83: opt-in whole-project duplicate class-like-declaration
     /// detection - see `registry::Registry::check_duplicate_class_
     /// declarations`'s own doc comment for why this defaults to `false`

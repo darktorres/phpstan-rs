@@ -120,6 +120,7 @@ fn run_check_project(
     check_too_wide_throw_type_in_protected_and_public_methods: bool,
     check_too_wide_return_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
+    check_duplicate_function_declarations: bool,
     check_duplicate_class_declarations: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
@@ -165,6 +166,7 @@ fn run_check_project(
         check_too_wide_return_type_in_protected_and_public_methods,
     );
     project.set_check_method_throw_type_covariance(check_method_throw_type_covariance);
+    project.set_check_duplicate_function_declarations(check_duplicate_function_declarations);
     project.set_check_duplicate_class_declarations(check_duplicate_class_declarations);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
@@ -440,6 +442,7 @@ pub(crate) fn run_check_project_command(
     check_too_wide_throw_type_in_protected_and_public_methods: bool,
     check_too_wide_return_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
+    check_duplicate_function_declarations: bool,
     check_duplicate_class_declarations: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
@@ -529,6 +532,10 @@ pub(crate) fn run_check_project_command(
                 .unwrap_or(false);
     let check_method_throw_type_covariance = check_method_throw_type_covariance
         || config.check_method_throw_type_covariance.unwrap_or(false);
+    let check_duplicate_function_declarations = check_duplicate_function_declarations
+        || config
+            .check_duplicate_function_declarations
+            .unwrap_or(false);
     let check_duplicate_class_declarations = check_duplicate_class_declarations
         || config.check_duplicate_class_declarations.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
@@ -610,6 +617,7 @@ pub(crate) fn run_check_project_command(
         check_too_wide_throw_type_in_protected_and_public_methods,
         check_too_wide_return_type_in_protected_and_public_methods,
         check_method_throw_type_covariance,
+        check_duplicate_function_declarations,
         check_duplicate_class_declarations,
         configured_level,
         &stub_dirs,
