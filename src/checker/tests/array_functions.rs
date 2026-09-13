@@ -335,6 +335,31 @@ fn array_keys_infers_string_keys_from_a_known_array_shape() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// A Piwigo/real-PHPStan corpus diff found the 2-/3-arg `$search_value`/
+// `$strict` form fell through to the bare stub's own useless `int[]|
+// string[]` answer, since this arm used to gate on `args.len() == 1`
+// only - surfacing as a spurious `int|string` for every reader of the
+// result (`UserService::searchCaseUsername`'s own
+// `array_keys($byLower, $usernameLower, true)[0]` against a declared
+// `string` return type). `$search_value`/`$strict` only ever narrow
+// *which* keys survive, never the key type itself - confirmed via
+// `dumpType()` against real PHPStan, which returns the identical
+// `list<string>` for the 3-arg form here that it does for the bare
+// 1-arg form.
+#[test]
+fn array_keys_with_a_search_value_still_infers_the_real_key_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<string, string> $byLower */
+            function f(array $byLower, string $needle): string {
+                $found = array_keys($byLower, $needle, true);
+                return $found[0];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn array_keys_infers_int_keys_when_every_key_is_canonically_numeric() {
     let d = diagnostics_for(
@@ -1310,6 +1335,65 @@ fn array_filter_with_an_instanceof_callback_narrows_the_element_type() {
              */
             function f(array $x): array {
                 return array_filter($x, static fn (mixed $v): bool => $v instanceof TagId18);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A Piwigo/real-PHPStan corpus diff found `array_filter`'s own third
+// real recognized callback shape this project was missing: a native
+// `is_string`/`is_int`/`is_float`/`is_bool`/`is_null` type-check
+// predicate - `TagService::buildTagList`'s own `array_filter
+// ($altNamesEvent->value, is_string(...))` (the first-class-callable
+// form) lost its own precision down to `mixed`. Verified via
+// dumpType() that real PHPStan narrows the retained element type to
+// exactly that type, the same way an `instanceof`-shaped callback
+// already narrows to a class above.
+#[test]
+fn array_filter_with_a_first_class_callable_is_string_predicate_narrows_the_element_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<mixed> $x
+             *  @return array<string>
+             */
+            function f(array $x): array {
+                return array_filter($x, is_string(...));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The same predicate also narrows when spelled as an arrow-fn/closure
+// wrapper, matching the sibling instanceof-callback recognizer's own
+// coverage of both shapes.
+#[test]
+fn array_filter_with_an_is_int_arrow_fn_predicate_narrows_the_element_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<mixed> $x
+             *  @return array<int>
+             */
+            function f(array $x): array {
+                return array_filter($x, fn (mixed $v): bool => is_int($v));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_filter_with_an_is_bool_closure_predicate_narrows_the_element_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<mixed> $x
+             *  @return array<bool>
+             */
+            function f(array $x): array {
+                return array_filter($x, function (mixed $v): bool {
+                    return is_bool($v);
+                });
             }
         "#,
     );

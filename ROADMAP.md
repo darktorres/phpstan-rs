@@ -450,6 +450,33 @@ a real, provable supertype, just not maximally precise. Pinned by its
 own regression test (`adding_two_literal_shapes_loses_precise_keys_a_
 known_disclosed_gap`).
 
+**Two more small stdlib precision gaps, same corpus-diff round.**
+`array_keys()`'s own key-type-propagation arm used to gate on `args.len
+() == 1` only, so the real, common 2-/3-arg `$search_value`/`$strict`
+form fell through to the bare stub's own useless `int[]|string[]`
+answer - `UserService::searchCaseUsername`'s own `array_keys($byLower,
+$usernameLower, true)[0]` against a declared `string` return type.
+`$search_value`/`$strict` only ever narrow *which* keys survive, never
+the key type itself (confirmed via `dumpType()`: real PHPStan returns
+the identical `list<string>` for the 3-arg form that it does for the
+bare 1-arg form) - fixed by widening the same arm's guard to `(1..=3).
+contains(&args.len())`. `array_filter()`'s own recognized-callback-shape
+set was missing a real, common third case alongside its existing
+null-check and `instanceof`-check recognizers: a native `is_string`/
+`is_int`/`is_float`/`is_bool`/`is_null` type-check predicate -
+`TagService::buildTagList`'s own `array_filter($altNamesEvent->value,
+is_string(...))` (the first-class-callable form) lost its own precision
+down to `mixed`. Confirmed via `dumpType()` that real PHPStan narrows
+the retained element type to exactly that type; new `is_type_check_
+filter_callback` recognizes the first-class-callable form (the actual
+corpus shape) alongside the same arrow-fn/closure wrapping shapes the
+`instanceof` recognizer already handles. Deliberately scoped to the
+handful of `is_*` predicates with an exact, unambiguous 1:1 `Type`
+mapping already in this project (`is_array`/`is_object`/`is_callable`/
+`is_numeric`/`is_scalar`/`is_iterable` all narrow to something wider
+than a single `Type` variant - a real, disclosed gap, not attempted
+here).
+
 **Subtyping properties via proptest, and two real soundness bugs found
 by it** (Phase 19). `src/types/tests/subtyping_properties.rs`: a
 bounded-depth `Type` generator (`proptest::prop_recursive`) backing five

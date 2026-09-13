@@ -499,6 +499,12 @@ impl<'a> Checker<'a> {
                             let target = self.resolve_name_expr(class_name);
                             return narrow_array_element_type_to(self.registry, stripped, &target);
                         }
+                        // A native `is_string`/`is_int`/`is_float`/
+                        // `is_bool`/`is_null` type-check predicate -
+                        // verified via dumpType() to narrow the same way.
+                        if let Some(target) = is_type_check_filter_callback(&args[1].value) {
+                            return narrow_array_element_type_to(self.registry, stripped, &target);
+                        }
                     } else {
                         // No callback at all - real PHP's own default
                         // behavior, dropping every falsy element - is
@@ -1156,7 +1162,18 @@ impl<'a> Checker<'a> {
             // regardless of whether the input array's own keys were
             // already sequential - the same "always list<V>" shape
             // array_values() already gets above.
-            "array_keys" if args.len() == 1 => {
+            // Corpus find: this arm used to gate on `args.len() == 1`
+            // only, so the 2-/3-arg `$search_value`/`$strict` form fell
+            // through to the bare stub's own useless `int[]|string[]`
+            // answer, surfacing as a spurious `int|string` for every
+            // reader of the result (`UserService::searchCaseUsername`'s
+            // own `array_keys($byLower, $usernameLower, true)[0]` against
+            // a declared `string` return type). `$search_value`/`$strict`
+            // only ever narrow *which* keys survive, never the key type
+            // itself - confirmed via `dumpType()` against real PHPStan,
+            // which returns the identical `list<string>` for the 3-arg
+            // form here that it does for the bare 1-arg form.
+            "array_keys" if (1..=3).contains(&args.len()) => {
                 let arg_ty = self.infer_expr(&args[0].value, locals);
                 // Phase 50 follow-up: `array_key_type` now handles
                 // `ArrayShape` directly (a real union of each field's own
@@ -2179,6 +2196,70 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
         ExprKind::Closure { params, body, .. } => match (params.as_slice(), body.as_slice()) {
             ([p], [stmt]) => match &stmt.kind {
                 StmtKind::Return(Some(ret_expr)) => as_instanceof_class(ret_expr, &p.name),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A Piwigo/real-PHPStan corpus diff found `array_filter`'s own third
+/// real recognized callback shape this project was missing: a native
+/// `is_string`/`is_int`/`is_float`/`is_bool`/`is_null` type-check
+/// predicate (`TagService::buildTagList`'s own `array_filter
+/// ($altNamesEvent->value, is_string(...))`) - verified via `dumpType()`
+/// that real PHPStan narrows the retained element type to exactly that
+/// type, the same way `is_instanceof_filter_callback` above already
+/// narrows to a class. Deliberately scoped to the handful of PHP's
+/// `is_*` predicates with an exact, unambiguous 1:1 `Type` mapping
+/// already in this project (`is_array`/`is_object`/`is_callable`/
+/// `is_numeric`/`is_scalar`/`is_iterable` all narrow to something wider
+/// than a single `Type` variant - a real, disclosed gap, not attempted
+/// here). Recognizes the first-class-callable form (`is_string(...)`,
+/// the actual corpus shape) alongside the same arrow-fn/closure
+/// wrapping shapes `is_instanceof_filter_callback` already handles, for
+/// consistency - `fn ($v) => is_string($v)` and the equivalent
+/// single-statement closure.
+fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
+    fn type_for_predicate(name: &str) -> Option<Type> {
+        match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
+            "is_string" => Some(Type::String),
+            "is_int" | "is_integer" | "is_long" => Some(Type::Int),
+            "is_float" | "is_double" | "is_real" => Some(Type::Float),
+            "is_bool" => Some(Type::Bool),
+            "is_null" => Some(Type::Null),
+            _ => None,
+        }
+    }
+    fn as_predicate_call<'a>(body: &'a Expr, param: &str) -> Option<&'a str> {
+        match &body.kind {
+            ExprKind::Call(callee, args) => match (&callee.kind, args.as_slice()) {
+                (ExprKind::Name(name), [single_arg]) if is_var_named(&single_arg.value, param) => {
+                    Some(name.as_str())
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    match &e.kind {
+        ExprKind::FirstClassCallable(inner) => match &inner.kind {
+            ExprKind::Call(callee, args) if args.is_empty() => match &callee.kind {
+                ExprKind::Name(name) => type_for_predicate(name),
+                _ => None,
+            },
+            _ => None,
+        },
+        ExprKind::ArrowFn { params, body, .. } => match params.as_slice() {
+            [p] => as_predicate_call(body, &p.name).and_then(type_for_predicate),
+            _ => None,
+        },
+        ExprKind::Closure { params, body, .. } => match (params.as_slice(), body.as_slice()) {
+            ([p], [stmt]) => match &stmt.kind {
+                StmtKind::Return(Some(ret_expr)) => {
+                    as_predicate_call(ret_expr, &p.name).and_then(type_for_predicate)
+                }
                 _ => None,
             },
             _ => None,
