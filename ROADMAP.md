@@ -499,6 +499,36 @@ mapping already in this project (`is_array`/`is_object`/`is_callable`/
 than a single `Type` variant - a real, disclosed gap, not attempted
 here).
 
+**`usleep()`'s stub over-refined past what real PHPStan actually checks**
+(same corpus-diff family, a genuinely different mechanism from the
+others above). `usleep()`'s own phpstorm-stubs PHPDoc refines its native
+`int` parameter to `int<0,max>`, but real PHPStan's own `resources/
+functionMap.php` declares it as plain `int` - and confirmed directly
+(`dumpType()`/a real `vendor/bin/phpstan analyse` run at level 10 with
+`bleedingEdge.neon`) that neither an unconstrained `int` variable nor a
+literal `-5` argument is flagged at all. Root cause, traced directly in
+`vendor/phpstan-src`: `NativeFunctionReflectionProvider::
+findFunctionReflection` never consults phpstorm-stubs' own PHPDoc for
+any function `functionMap.php` already covers (the overwhelming
+majority of internal functions) - only PHPStan's own separate, much
+smaller internal `stubs/` bundle can refine such a signature further,
+and it has no entry for `usleep`. New `php_stubs::patch_usleep`
+(mirroring `patch_array_multisort_by_ref`'s own narrow, one-function,
+post-generation-patch shape exactly) resets the parameter back to plain
+`int`. Real corpus false positive fixed: `RegisterControllerTest::
+registerMaturedKey`'s own `usleep((int) ($remainingSeconds *
+1_000_000))` inside an `if ($remainingSeconds > 0)` guard - flagged
+because this project has no float-range-narrowing mechanism to prove the
+cast's own result is non-negative, a gap that's moot once `usleep`'s own
+parameter matches what real PHPStan actually checks against. Likely one
+instance of a broader, unconfirmed pattern (any `functionMap.php`-
+covered function whose phpstorm-stubs PHPDoc adds a refinement
+`functionMap.php` itself lacks could be equally unenforced by real
+PHPStan) - not chased further without more direct corpus evidence, the
+same narrow discipline the `array_multisort` precedent already
+established rather than reintroducing a whole stub-overlay system for a
+still-hypothetical wider gap.
+
 **Subtyping properties via proptest, and two real soundness bugs found
 by it** (Phase 19). `src/types/tests/subtyping_properties.rs`: a
 bounded-depth `Type` generator (`proptest::prop_recursive`) backing five

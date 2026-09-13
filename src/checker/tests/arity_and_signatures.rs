@@ -920,6 +920,31 @@ fn array_multisort_sort_flag_constants_interleaved_with_arrays_are_not_flagged()
     );
 }
 
+// A Piwigo/real-PHPStan corpus diff found `usleep()`'s own phpstorm-stubs
+// PHPDoc refines its native `int` parameter to `int<0,max>` - but real
+// PHPStan's own `functionMap.php` declares it as plain `int`, and
+// `NativeFunctionReflectionProvider` never consults phpstorm-stubs' own
+// PHPDoc for a function `functionMap.php` already covers (confirmed
+// directly via `dumpType()`/a real `vendor/bin/phpstan analyse` run:
+// neither an unconstrained `int` variable nor a literal `-5` is flagged).
+// `php_stubs::patch_usleep` corrects this the same narrow, one-function
+// way `patch_array_multisort_by_ref` above does.
+#[test]
+fn usleep_accepts_an_unbounded_int_not_just_a_provably_non_negative_one() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(int $x): void {
+                usleep($x);
+                usleep(-5);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "argument.type"),
+        "unexpected argument.type diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn passing_a_deeply_nested_nullsafe_chain_by_reference_is_still_flagged() {
     // The chain-walk needs to look past the immediate node - the

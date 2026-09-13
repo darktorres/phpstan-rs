@@ -130,6 +130,50 @@ fn patch_debug_backtrace(stubs: &mut [(String, FunctionSig)]) {
     }
 }
 
+/// `usleep()`'s own phpstorm-stubs PHPDoc refines its native `int`
+/// parameter to `int<0,max>` - real PHP's own C-level `arg_info` has no
+/// such refinement, so this is phpstorm-stubs' own text going further
+/// than the runtime signature itself, the same situation `patch_array_
+/// multisort_by_ref` above documents in general. Real PHPStan's own
+/// `resources/functionMap.php` declares `usleep` with a *plain* `int`
+/// parameter (no range) - and, confirmed directly via `\PHPStan\
+/// dumpType()`/a real `vendor/bin/phpstan analyse` run at level 10 with
+/// `bleedingEdge.neon`, neither an unconstrained `int` variable nor a
+/// literal `-5` passed to `usleep()` is flagged at all. `NativeFunction
+/// ReflectionProvider::findFunctionReflection` (`vendor/phpstan-src/src/
+/// Reflection/SignatureMap/NativeFunctionReflectionProvider.php`)
+/// explains why: any function `functionMap.php` already covers (the
+/// overwhelming majority of internal functions, `usleep` included) never
+/// even reaches phpstorm-stubs' own PHPDoc for its native parameter
+/// types - only PHPStan's own separate, much smaller internal `stubs/`
+/// bundle (a distinct resource from phpstorm-stubs) can refine a
+/// `functionMap.php`-covered signature further, and it has no entry for
+/// `usleep`. Real Piwigo corpus false positive this fixes:
+/// `RegisterControllerTest::registerMaturedKey`'s own `usleep((int)
+/// ($remainingSeconds * 1_000_000))` inside an `if ($remainingSeconds >
+/// 0)` guard - flagged here because this project has no float-range-
+/// narrowing mechanism to prove the cast's own result is non-negative,
+/// a gap that's moot once `usleep`'s own parameter is corrected to match
+/// what real PHPStan actually checks against.
+///
+/// This is likely one instance of a broader, unconfirmed pattern (any
+/// `functionMap.php`-covered function whose phpstorm-stubs PHPDoc adds a
+/// refinement `functionMap.php` itself doesn't have could be equally
+/// unenforced by real PHPStan) - not chased further without more direct
+/// corpus evidence, the same narrow, one-function-at-a-time discipline
+/// `patch_array_multisort_by_ref` above already established rather than
+/// reintroducing a whole stub-overlay system for a still-hypothetical
+/// wider gap.
+fn patch_usleep(stubs: &mut [(String, FunctionSig)]) {
+    for (name, sig) in stubs.iter_mut() {
+        if name == "usleep" {
+            for param in &mut sig.params {
+                param.ty = Type::Int;
+            }
+        }
+    }
+}
+
 /// All signatures generated from the vendored phpstorm-stubs sources,
 /// merged (first occurrence wins). A few functions are declared more than
 /// once across the corpus (e.g. a version-conditional pair of signatures
@@ -166,6 +210,7 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
             }
             patch_array_multisort_by_ref(&mut result);
             patch_debug_backtrace(&mut result);
+            patch_usleep(&mut result);
             result
         });
     CACHE.clone()
