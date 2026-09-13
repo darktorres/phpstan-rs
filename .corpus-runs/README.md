@@ -356,5 +356,21 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   "broader, unconfirmed pattern" note to a real, concrete, disclosed
   future item (documented in ROADMAP.md, not chased generally this
   round). Scoped 54 -> 52 (both target findings removed cleanly, zero
-  new). Unscoped 38154 -> 38152 (the same 2 findings, zero new) -
-  current baseline for future diffs.
+  new). Unscoped 38154 -> 38152 (the same 2 findings, zero new).
+- `a312f53` - exempted `__serialize()`/`__debugInfo()` from `missingType.
+  iterableValue` (and, as a bonus consequence of the exemption's own
+  placement before the bare-Mixed `missingType.return` check too, from
+  that check when hint-less) - real PHPStan's own reflection layer
+  (`PhpMethodFromParserNodeReflection`'s constructor) hardcodes both
+  methods' real return type to `array<mixed, mixed>` (`__debugInfo()`:
+  `|null`) with *explicit* mixed key/value types, unconditionally,
+  regardless of what the source itself writes. Confirmed directly: an
+  ordinary, non-magic method with the identical bare `: array` hint and
+  body is flagged, `__serialize()` never is. Real corpus false positive
+  fixed: `DerivativeParams::__serialize(): array { return [...]; }`.
+  Scoped 52 -> 51 (target finding removed cleanly, zero new). Unscoped:
+  a real, broad improvement - 38152 -> 38006, 146 findings removed
+  across third-party vendor code (`dasprid/enum`, `filp/whoops`,
+  `gettext/gettext`, and more, both `missingType.iterableValue` and the
+  hint-less `missingType.return` bonus case), zero new - current
+  baseline for future diffs.
