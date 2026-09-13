@@ -837,6 +837,45 @@ impl<'a> Checker<'a> {
                         locals.declare(matches_name.clone(), shape, matches_arg.span);
                     }
                 }
+                // A Piwigo/real-PHPStan corpus diff found `proc_open()`'s
+                // own by-ref `$pipes` out-parameter (its 3rd argument)
+                // left completely unspecialized, falling to `predefine_
+                // byref_or_unknown_args`'s generic `Mixed` leniency -
+                // real PHPStan types it via its own separate internal
+                // stub bundle (`vendor/phpstan-src/stubs/core.stub`,
+                // deliberately excluded from this project's own stub-
+                // generation pipeline - see `build.rs`'s own exclusion
+                // comment - a distinct resource from phpstorm-stubs this
+                // project doesn't ingest at all): `@template P of int`,
+                // `@param array<P, list<string>|resource> $descriptor_
+                // spec`, `@param-out array<P, resource> $pipes`. Real
+                // PHPStan actually correlates `$descriptor_spec`'s own
+                // literal keys into `P` (confirmed via `dumpType()`:
+                // `array<1|2, resource>` for a `[1 => ..., 2 => ...]`
+                // descriptor spec) - a real, disclosed precision gap this
+                // narrow fix doesn't chase (no template-binding-through-
+                // `@param-out` mechanism exists in this codebase to key
+                // off a *different* parameter's own literal keys), but a
+                // plain `array<int, resource>` is still exactly what real
+                // PHPStan's own corpus-evidenced case (`ImageStdParamsTest
+                // ::spawnBackgroundLockHolder`/`UploadServiceTest`'s
+                // identical helper, both declaring a plain `@return
+                // array{0: resource, 1: array<int, resource>}`) needs.
+                if resolved_name.as_deref() == Some("proc_open")
+                    && let Some(pipes_arg) = resolved.get(2).copied().flatten()
+                    && let ExprKind::Variable(pipes_name) = &pipes_arg.kind
+                {
+                    let shape = Type::Array(
+                        Box::new(Type::Int),
+                        Box::new(Type::Object("resource".to_string(), Vec::new())),
+                    );
+                    purge_stale_narrowing_for(locals, pipes_name);
+                    if locals.contains_key(pipes_name) {
+                        locals.insert(pipes_name.clone(), shape);
+                    } else {
+                        locals.declare(pipes_name.clone(), shape, pipes_arg.span);
+                    }
+                }
                 // Reuses the `resolved_name`/`sig` already resolved above
                 // - the same lookup `infer_expr`'s own `Call` arm would
                 // otherwise redundantly redo from scratch.

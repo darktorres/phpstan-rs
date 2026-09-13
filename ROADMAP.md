@@ -520,14 +520,54 @@ registerMaturedKey`'s own `usleep((int) ($remainingSeconds *
 1_000_000))` inside an `if ($remainingSeconds > 0)` guard - flagged
 because this project has no float-range-narrowing mechanism to prove the
 cast's own result is non-negative, a gap that's moot once `usleep`'s own
-parameter matches what real PHPStan actually checks against. Likely one
-instance of a broader, unconfirmed pattern (any `functionMap.php`-
-covered function whose phpstorm-stubs PHPDoc adds a refinement
-`functionMap.php` itself lacks could be equally unenforced by real
-PHPStan) - not chased further without more direct corpus evidence, the
-same narrow discipline the `array_multisort` precedent already
-established rather than reintroducing a whole stub-overlay system for a
-still-hypothetical wider gap.
+parameter matches what real PHPStan actually checks against.
+
+**Confirmed, not just hypothesized: a whole real resource this project
+doesn't ingest at all.** A follow-up corpus finding (`proc_open()`'s own
+by-ref `$pipes` out-parameter, below) traced the `usleep` gap's own
+"broader, unconfirmed pattern" note above to a real, concrete cause:
+`vendor/phpstan-src/stubs/` (note: not `phpstorm-stubs` - a completely
+separate, much smaller bundle PHPStan itself maintains, `core.stub`
+included) holds refined signatures for exactly this class of internal
+function, and `build.rs`'s own `PHPSTAN_SRC_SOURCES` collector
+deliberately excludes it (`stubs/` named directly in that exclusion's own
+comment, alongside `tests/`/`apigen/`/etc., on the reasoning that this
+project only needed the `PHPStan\Type\*`/`PHPStan\Rules\Rule`-style
+runtime classes from `vendor/phpstan-src/src`, not this differently-
+purposed `stubs/` directory). Ingesting it generally - a real, well-
+scoped future item, not attempted here - would need genuine new
+machinery beyond just adding a third source array: `core.stub` uses
+`@template P of int` / `@param-out array<P, resource> $pipes` to
+correlate a by-ref out-parameter's own key type to a *different*
+parameter's own literal keys at the call site, a template-binding-
+through-`@param-out` shape this project has no consumer for at all.
+Two narrow, one-function patches shipped instead this round (`usleep`,
+`proc_open` below), matching `array_multisort`'s own established
+discipline - not a decision to leave the general gap unaddressed
+indefinitely, but a real, disclosed, appropriately-scoped future item
+(would need: parsing `.stub` files as a real third stub source with
+precedence *over* phpstorm-stubs for overlapping functions; general
+template-binding through `@param-out`; and a caller-side "update this
+local's type after calling a function whose matched parameter has an
+`out_ty`" mechanism, since today's `@param-out` consumer only checks a
+function's *own* body against its own declared `out_ty`, never updates a
+caller's locals after an external call the way `preg_match`'s own
+special-cased `$matches` handling does).
+
+**`proc_open()`'s by-ref `$pipes` output, the corpus finding that traced
+the gap above.** Left completely unspecialized, falling to the generic
+`Mixed` leniency every unrecognized by-ref output gets. New special case
+in `checker/expr.rs`'s `ExprKind::Call` arm (mirroring `preg_match`'s own
+by-ref-`$matches`-shape special case immediately above it) sets `$pipes`
+to `array<int, resource>` after a `proc_open()` call - real PHPStan's own
+`array<P, resource>` (`P` bound from `$descriptor_spec`'s own literal
+keys, confirmed via `dumpType()`: `array<1|2, resource>` for a `[1 =>
+..., 2 => ...]` spec) is more precise, but a plain `array<int, resource>`
+already satisfies the real corpus shape (`ImageStdParamsTest::
+spawnBackgroundLockHolder`/`UploadServiceTest`'s identical helper, both
+declaring a plain `@return array{0: resource, 1: array<int, resource>}`)
+- the template-correlation precision gap is disclosed above, not chased
+here.
 
 **Subtyping properties via proptest, and two real soundness bugs found
 by it** (Phase 19). `src/types/tests/subtyping_properties.rs`: a

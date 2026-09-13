@@ -945,6 +945,33 @@ fn usleep_accepts_an_unbounded_int_not_just_a_provably_non_negative_one() {
     );
 }
 
+// A Piwigo/real-PHPStan corpus diff found `proc_open()`'s own by-ref
+// `$pipes` out-parameter (3rd argument) left completely unspecialized,
+// falling to the generic `Mixed` leniency every unknown by-ref output
+// gets - real PHPStan types it via its own separate internal stub bundle
+// (`vendor/phpstan-src/stubs/core.stub`, deliberately excluded from this
+// project's own stub pipeline) as `array<P, resource>`, `P` bound from
+// `$descriptor_spec`'s own key type. This fix doesn't chase that
+// template-binding precision (a plain `array<int, resource>`, matching
+// this exact corpus shape's own declared `@return array{0: resource, 1:
+// array<int, resource>}`), just the generic-`Mixed` false positive.
+#[test]
+fn proc_open_populates_pipes_as_an_int_keyed_resource_array() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return array{0: resource, 1: array<int, resource>} */
+            function spawn(array $cmd, array $descriptors): array {
+                $proc = proc_open($cmd, $descriptors, $pipes);
+                if ($proc === false) {
+                    throw new Exception('proc_open failed');
+                }
+                return [$proc, $pipes];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn passing_a_deeply_nested_nullsafe_chain_by_reference_is_still_flagged() {
     // The chain-walk needs to look past the immediate node - the
