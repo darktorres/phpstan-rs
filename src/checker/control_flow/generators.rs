@@ -13,15 +13,13 @@ use crate::types::Type;
 /// return value, so real PHPStan never checks either against the
 /// function's own declared `Generator`/`Iterator`/`Traversable` return
 /// type (only against a `@return Generator<...,...,...,TReturn>`
-/// docblock's 4th argument, if present - not modeled here, no corpus
-/// evidence for it).
+/// docblock's 4th argument, if present - not modeled here).
 pub(crate) fn body_contains_yield(stmts: &[Stmt]) -> bool {
     stmts.iter().any(stmt_contains_yield)
 }
 
-/// Phase 70: whether `ty` is a real PHP generator-compatible return type,
-/// mirroring real PHP's own engine-level check exactly (confirmed
-/// directly via `php`/`php -l`), which only needs *one* member of a
+/// Whether `ty` is a real PHP generator-compatible return type,
+/// mirroring real PHP's own engine-level check exactly, which only needs one member of a
 /// union to be `Traversable`-compatible, not all of them (`int|Generator`
 /// is genuinely accepted by real PHP, however misleading, and `iterable`
 /// itself is `array|Traversable` - the `array` half alone would
@@ -40,7 +38,7 @@ pub(crate) fn type_allows_generator_return(ty: &Type, registry: &Registry) -> bo
     }
 }
 
-/// Phase 61.B: whether a generator's own falls-off-the-end/bare-`return;`
+/// Whether a generator's own falls-off-the-end/bare-`return;`
 /// completeness check should still fire, and if so, against what -
 /// `None` means still fully exempt (no declared return type at all, or
 /// one with no useful `TReturn` precision: `Mixed`/`Void`, the
@@ -61,7 +59,7 @@ pub(crate) fn generator_missing_return_type(
     }
 }
 
-/// Phase 70.A: `ty`'s own binding for one of `Generator<TKey, TValue,
+/// `ty`'s own binding for one of `Generator<TKey, TValue,
 /// TSend, TReturn>`'s four template params (`param` is `"TSend"` or
 /// `"TReturn"`) - `Mixed` when `ty` isn't `Generator`-shaped at all (a
 /// bare `iterable`/`Iterator<K,V>` declaration, an unparameterized bare
@@ -90,7 +88,7 @@ pub(crate) fn generator_template_param(ty: &Type, registry: &Registry, param: &s
     }
 }
 
-/// Phase 70: an arrow function's own body is a single expression, not a
+/// An arrow function's own body is a single expression, not a
 /// `Vec<Stmt>` `body_contains_yield` above can walk - this is that same
 /// walk's expression-only counterpart (`any_expr_child` already stops at
 /// a nested `Closure`/`ArrowFn` boundary, the correct semantics here
@@ -98,8 +96,7 @@ pub(crate) fn generator_template_param(ty: &Type, registry: &Registry, param: &s
 /// a generator). Uses `any_expr_child` (non-allocating) rather than
 /// `expr_children`/`.into_iter().any()` - this runs on every function/
 /// method/closure body checked, a real, measured cost at that call
-/// volume; found and fixed via a perf-optimization investigation
-/// workflow.
+/// volume.
 pub(crate) fn expr_contains_yield(e: &Expr) -> bool {
     matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
         || any_expr_child(e, &mut expr_contains_yield)
@@ -151,7 +148,7 @@ fn stmt_contains_yield(stmt: &Stmt) -> bool {
 }
 
 impl<'a> Checker<'a> {
-    /// Phase 70.B: `YieldFromTypeRule`'s equivalent - up to five
+    /// `YieldFromTypeRule`'s equivalent - up to five
     /// diagnostics on one `yield from $inner` node, called right after
     /// `inner_ty` (the delegated generator/iterable's own type) is
     /// computed. All four type-comparison diagnostics are skipped when
@@ -197,8 +194,8 @@ impl<'a> Checker<'a> {
         // The remaining three comparisons only have anything real to
         // compare against for a delegated *Generator*-shaped value -
         // a plain `array`/other `Traversable` doesn't carry `TSend`, and
-        // its own key/value types (`Phase 70.C`, not yet built) aren't
-        // available here yet either. Don't guess past what's known.
+        // its own key/value types aren't available here yet either.
+        // Don't guess past what's known.
         let Type::Object(name, args) = inner_ty else {
             return;
         };
@@ -267,7 +264,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Phase 70.B: whether `ty` is definitely **not** iterable (`array|
+/// Whether `ty` is definitely not iterable (`array|
 /// Traversable`) - mirrors `thrown_value_not_throwable`'s own recursive
 /// shape (`checker/expr/member_resolution.rs`), but with `Union`
 /// deliberately flipped to "every member must fail" (not first-match) to
