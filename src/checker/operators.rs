@@ -1,4 +1,4 @@
-//! Phase 52: an operand-validity matrix for binary/unary/inc-dec
+//! An operand-validity matrix for binary/unary/inc-dec
 //! operators - unlocks `InvalidBinaryOperationRule` (`binaryOp.invalid`/
 //! `assignOp.invalid`), `InvalidComparisonOperationRule`
 //! (`equal.invalid`/`notEqual.invalid`/`smaller.invalid`/
@@ -21,9 +21,9 @@
 //! Deliberately diverges from real PHPStan in one respect for every
 //! check in this file: a `Union`'s own legality is "at least one member
 //! is legal" (matching `coercion.rs::union_coercion`'s own precedent),
-//! not real PHPStan's own "every member must be legal" - confirmed via
-//! `InvalidUnaryOperationRuleTest::testUnion` that real PHPStan *does*
-//! flag `~$union` for a `numeric-string|int|float`-typed `$union` unless
+//! not real PHPStan's own "every member must be legal": real PHPStan
+//! does flag `~$union` for a `numeric-string|int|float`-typed `$union`
+//! unless
 //! every member individually already passes `isString()`/`isInteger()`/
 //! `isFloat()`. This project's own type inference produces much wider,
 //! coarser unions than real PHPStan's (see this codebase's own
@@ -43,16 +43,15 @@ impl<'a> Checker<'a> {
     /// `SimpleXMLElement`/`GMP`/`BcMath\Number` numeric-castable objects
     /// `coercion.rs` already special-cases for `(float)`/`(string)` -
     /// never an array, a `resource`, a `class-string`, or any other
-    /// *registered* class. `Mixed`, an unresolvable class, and a PHPDoc
+    /// registered class. `Mixed`, an unresolvable class, and a PHPDoc
     /// type alias this project doesn't resolve (both surface as
     /// `Type::Object` with no matching registry entry - see
     /// `self.registry.classes.contains_key`) all fall through the
     /// catch-all, matching this project's usual "don't know, don't
-    /// guess" leniency: a real corpus check (`Composer\Pcre\Preg::
-    /// match`'s own `@phpstan-type int-mask<...>` alias, combined with a
-    /// real `mixed` flags parameter) found both cases wrongly flagged
-    /// before this arm learned to tell "confidently not a number-
-    /// castable object" apart from "not a real, known class at all."
+    /// guess" leniency - this arm must tell "confidently not a
+    /// number-castable object" apart from "not a real, known class at
+    /// all," or a PHPDoc type alias combined with a `mixed` parameter
+    /// would be wrongly flagged.
     pub(crate) fn is_number_operand(&self, ty: &Type) -> bool {
         match ty {
             Type::Array(..) | Type::ArrayShape(_) => false,
@@ -76,14 +75,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 81: whether `ty` is (or, inside a `Union`, could be) a real
+    /// Whether `ty` is (or, inside a `Union`, could be) a real
     /// instance of `class` - `is_subclass_of`'s own reflexive "a class is
     /// always its own subclass" covers the exact-name case too.
     ///
-    /// Real gap found and fixed this session (part of a broader sweep for
-    /// this project's own `Union`/`Intersection` anti-pattern): `Type::
-    /// Intersection` wasn't handled here at all - unlike `Union` ("could
-    /// be this member"), an `Intersection` value genuinely *is* every
+    /// `Type::Intersection` needs handling too, unlike `Union` ("could
+    /// be this member"): an `Intersection` value genuinely is every
     /// member simultaneously, so it's just as true an instance of `class`
     /// the moment any one member confirms it (the same "any" shape, for a
     /// different reason).
@@ -97,7 +94,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 81: the "other side" legality gate real PHPStan's own
+    /// The "other side" legality gate real PHPStan's own
     /// `GmpOperatorTypeSpecifyingExtension`/
     /// `BcMathNumberOperatorTypeSpecifyingExtension` share for their
     /// arithmetic operators - GMP/`BcMath\Number` can combine with an
@@ -118,7 +115,7 @@ impl<'a> Checker<'a> {
                 is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
             }
             Type::Object(name, _) => self.registry.is_subclass_of(name, class),
-            // Same real gap and fix as `type_is_instance_of` just above -
+            // Same reasoning as `type_is_instance_of` just above -
             // `Type::Intersection` needs the identical "any member" check.
             Type::Union(members) | Type::Intersection(members) => members
                 .iter()
@@ -127,10 +124,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 81: `GMP`/`BcMath\Number`'s own operator-overloading return
+    /// `GMP`/`BcMath\Number`'s own operator-overloading return
     /// type - `is_number_operand` above already establishes these two
-    /// classes as legal arithmetic/comparison operands (Phase 52); this
-    /// answers what the *result* actually is once legality is
+    /// classes as legal arithmetic/comparison operands; this
+    /// answers what the result actually is once legality is
     /// established, mirroring real PHPStan's own
     /// `GmpOperatorTypeSpecifyingExtension`/
     /// `BcMathNumberOperatorTypeSpecifyingExtension` (comparison operators
@@ -228,8 +225,8 @@ impl<'a> Checker<'a> {
         // check in `RuleLevelHelper::findTypeToCheckImplementation`,
         // which every one of these operator-specific callbacks sits
         // behind. Without this, `$mixedFlags | self::SOME_INT_MASK`
-        // (a real corpus shape) got wrongly flagged - `is_number_
-        // operand`'s own per-type leniency doesn't help here, since
+        // would be wrongly flagged - `is_number_operand`'s own per-type
+        // leniency doesn't help here, since
         // `Mixed | non-numeric-literal` fails *both* of `BitAnd`'s own
         // legal combinations even though either one might hold at
         // runtime.
@@ -257,16 +254,14 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 52 follow-up: `$x / 0`/`$x % 0` - a real, unconditional PHP
-    /// fatal error (`DivisionByZeroError`, confirmed directly via
-    /// `php -r`) whenever the divisor is *statically known* to be zero.
-    /// Real PHPStan's own equivalent (`BinaryOpHandler`, confirmed
-    /// directly) models this as a *throw point* (`DivisionByZeroError`
-    /// added to the expression's own inferred throw set), not an
-    /// `ErrorType`/`binaryOp.invalid`-style diagnostic - this project
-    /// has no general expression-level throw-point inference to feed
-    /// that into (Phase 42's own still-open "transitive throws across
-    /// the call graph" item), so this is a deliberate, disclosed
+    /// `$x / 0`/`$x % 0` - a real, unconditional PHP
+    /// fatal error (`DivisionByZeroError`) whenever the divisor is
+    /// statically known to be zero. Real PHPStan's own equivalent
+    /// (`BinaryOpHandler`) models this as a throw point
+    /// (`DivisionByZeroError` added to the expression's own inferred
+    /// throw set), not an `ErrorType`/`binaryOp.invalid`-style
+    /// diagnostic - this project has no general expression-level
+    /// throw-point inference to feed that into, so this is a deliberate
     /// adaptation: a dedicated diagnostic instead, under this project's
     /// own identifiers (`division.byZero`/`modulo.byZero`, not real
     /// PHPStan's own naming, since this isn't really the same mechanism)
@@ -403,7 +398,7 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 81: `~$gmp` is real, valid, GMP-overloaded syntax
+    /// `~$gmp` is real, valid, GMP-overloaded syntax
     /// (`GmpUnaryOperatorTypeSpecifyingExtension`'s own operator set
     /// includes `~`, unlike `BcMath\Number`'s equivalent extension, which
     /// doesn't overload `~` at all) - the free `is_bitwise_not_operand`
@@ -514,10 +509,7 @@ impl<'a> Checker<'a> {
     /// object counts as a "number" in its own right for this
     /// comparison) - extended one class further to `BcMath\Number` too,
     /// matching this project's own existing number-castable-class
-    /// precedent everywhere else in this file/`coercion.rs`. A real
-    /// corpus check (`NumberComparator::assertEquals` comparing a
-    /// `BcMath\Number` against a plain `int`) confirmed this matters in
-    /// practice, not just in theory.
+    /// precedent everywhere else in this file/`coercion.rs`.
     fn is_strictly_number(&self, ty: &Type) -> bool {
         is_subtype(ty, &Type::Union(vec![Type::Int, Type::Float]))
             || matches!(ty, Type::Object(name, _) if
@@ -550,11 +542,8 @@ impl<'a> Checker<'a> {
 /// `null`, and any object (including `SimpleXMLElement`/`GMP` - real
 /// `ObjectType` has no `toBitwiseNotType()` override of its own, unlike
 /// its `toNumber()`/`toInteger()`/`toFloat()`) are NOT legal here.
-/// Everything else - `Mixed` included - falls through to `true` (don't
-/// guess): a real corpus check (`InstallBootstrapTest::
-/// testBootSkipsTheErrorReportingIniChangeWhenDeploymentPolicyHasShow
-/// PhpErrorsDisabled`, `~$mixed`) confirmed a bare, unmatched `Mixed`
-/// needs the same leniency here as everywhere else in this file.
+/// Everything else - `Mixed` included - falls through to `true`, the
+/// same "don't guess" leniency this file applies everywhere else.
 fn is_bitwise_not_operand(ty: &Type) -> bool {
     match ty {
         Type::Bool | Type::True | Type::False | Type::Null => false,
@@ -584,16 +573,13 @@ fn is_object_or_null(ty: &Type) -> bool {
     match ty {
         Type::Null => true,
         Type::Object(name, _) => name != "resource",
-        // A `Union` is *definitely* object-or-null only when every
+        // A `Union` is definitely object-or-null only when every
         // member is (any other member could be the runtime value
         // instead); an `Intersection` value genuinely is every member at
-        // once, so *any single* member proving it is object-shaped is
+        // once, so any single member proving it is object-shaped is
         // enough - the opposite quantifier from `Union`, not the same
         // "any member" shape `type_is_instance_of`/
-        // `is_valid_overload_operand` just above needed. Real gap found
-        // and fixed this session (part of a broader sweep for this
-        // project's own `Union`/`Intersection` anti-pattern):
-        // `Intersection` wasn't handled here at all.
+        // `is_valid_overload_operand` just above needed.
         Type::Union(members) => members.iter().all(is_object_or_null),
         Type::Intersection(members) => members.iter().any(is_object_or_null),
         _ => false,
@@ -609,13 +595,12 @@ fn is_array_or_null(ty: &Type) -> bool {
         Type::Null => true,
         Type::Array(..) | Type::ArrayShape(_) => true,
         Type::Union(members) => members.iter().all(is_array_or_null),
-        // Real gap found and fixed this session: a real, common shape
-        // (`list<T>`/`non-empty-array<T>`, both `Intersection([Array(_),
-        // Accessory(_)])` - Phase 14) fell to the `_ => false` catch-all
-        // below entirely, meaning `$list < 5`-style comparisons against a
-        // `list<T>`-typed value were never flagged - the identical
-        // "any member proves it" reasoning `is_object_or_null` just above
-        // now uses.
+        // A common shape (`list<T>`/`non-empty-array<T>`, both
+        // `Intersection([Array(_), Accessory(_)])`) must not fall to
+        // the `_ => false` catch-all below, or `$list < 5`-style
+        // comparisons against a `list<T>`-typed value would never be
+        // flagged - the identical "any member proves it" reasoning
+        // `is_object_or_null` just above uses.
         Type::Intersection(members) => members.iter().any(is_array_or_null),
         _ => false,
     }
