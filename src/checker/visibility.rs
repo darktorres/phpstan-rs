@@ -1,13 +1,9 @@
-//! Phase 57: `public`/`private`/`protected` access-control enforcement -
-//! `PropertySig`/`FunctionSig` now carry a real `visibility` field (see
-//! their own doc comments), but nothing consulted it until this file.
-//! Real PHPStan's own identifiers: `property.private`/`property.protected`
-//! (`AccessPropertiesCheck`, shared by read and plain write - the
-//! asymmetric `private(set)`/`protected(set)` PHP 8.4 half this project
-//! doesn't model gets its own separate `assign.property{Private,Protected}Set`
-//! identifiers real PHPStan uses, not attempted here), `method.private`/
-//! `method.protected` (`MethodCallCheck`), `staticMethod.private`/
-//! `staticMethod.protected` (`StaticMethodCallCheck`).
+//! `public`/`private`/`protected` access-control enforcement, using
+//! `PropertySig`/`FunctionSig`'s `visibility` field. Uses
+//! `property.private`/`property.protected` (shared by read and plain
+//! write - the asymmetric `private(set)`/`protected(set)` PHP 8.4 half
+//! isn't modeled), `method.private`/`method.protected`, and
+//! `staticMethod.private`/`staticMethod.protected`.
 
 use crate::ast::{Expr, ExprKind, Literal, Visibility};
 use crate::checker::Checker;
@@ -40,31 +36,26 @@ struct StaticPrivateAccessCheck<'a> {
 }
 
 impl<'a> Checker<'a> {
-    /// Real PHP's own private/protected access-control rule, as far as
-    /// this project can practically check it: `Visibility::Public` is
-    /// always legal; `Private` only from within the exact declaring
-    /// class; `Protected` from within the declaring class or anywhere in
-    /// its inheritance chain. The direct check for `Protected` (checked
-    /// both directions - `current_class` a subclass of `owner`, or
-    /// `owner` a subclass of `current_class`) covers the common cases,
-    /// but real corpus verification found a real gap: `owner` is
-    /// whichever class's own lookup actually *resolved* the member (the
+    /// Real PHP's private/protected access-control rule, as far as this
+    /// project can practically check it: `Visibility::Public` is always
+    /// legal; `Private` only from within the exact declaring class;
+    /// `Protected` from within the declaring class or anywhere in its
+    /// inheritance chain. The direct check for `Protected` (checked both
+    /// directions - `current_class` a subclass of `owner`, or `owner` a
+    /// subclass of `current_class`) covers the common cases, but `owner`
+    /// is whichever class's lookup actually *resolved* the member (the
     /// nearest concrete override, for an inherited `abstract protected`
     /// one), not necessarily the ancestor that first declared it - two
     /// sibling subclasses of a common `abstract class Base { abstract
     /// protected function f(); }`, each independently overriding `f()`,
-    /// are still mutually protected-accessible in real PHP (real shape:
-    /// `Http1Driver`/`Http2Driver`, siblings under `AbstractHttpDriver`,
-    /// `Http1Driver::write()` calling `$this->http2Driver->write()`).
-    /// `member_name`/`is_method` is the fallback for exactly this case:
-    /// if `current_class`'s own hierarchy independently resolves a
-    /// member of the identical name (regardless of its own visibility -
-    /// finding *anything* there is enough to prove a shared ancestor
-    /// contract exists), access is allowed. Not perfectly precise (two
-    /// same-named, genuinely unrelated protected members in unconnected
-    /// hierarchies would also pass), but strictly more accurate than
-    /// the direct check alone, and consistent with this project's own
-    /// "don't guess toward a false positive" precedent elsewhere.
+    /// are still mutually protected-accessible in real PHP. `member_name`
+    /// is the fallback for exactly this case: if `current_class`'s
+    /// hierarchy independently resolves a member of the identical name
+    /// (regardless of its own visibility - finding anything there is
+    /// enough to prove a shared ancestor contract exists), access is
+    /// allowed. Not perfectly precise (two same-named, genuinely
+    /// unrelated protected members in unconnected hierarchies would also
+    /// pass), but strictly more accurate than the direct check alone.
     fn is_member_access_visible(
         &self,
         owner: &str,
@@ -90,11 +81,11 @@ impl<'a> Checker<'a> {
                             "property" | "staticProperty" => {
                                 self.registry.lookup_property(c, member_name).is_some()
                             }
-                            // Phase 57's own still-open item: a class
-                            // constant gets the identical sibling-shared-
-                            // ancestor fallback as property/method
-                            // access - a real constant can be overridden
-                            // per-subclass exactly like a method can.
+                            // A class constant gets the identical
+                            // sibling-shared-ancestor fallback as
+                            // property/method access - a real constant
+                            // can be overridden per-subclass exactly like
+                            // a method can.
                             "classConstant" => self.registry.lookup_const(c, member_name).is_some(),
                             _ => self.registry.lookup_method(c, member_name).is_some(),
                         }
@@ -142,26 +133,21 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 57 follow-up: `AccessPrivateConstantThroughStaticRule` - a
-    /// narrower, LSB-specific angle distinct from the ordinary visibility
-    /// check just above. `static::CONST` performs late static binding,
-    /// which can resolve to a *different* class at runtime than the one
-    /// lexically containing this code - unlike `self::CONST` (always the
-    /// literal declaring class), so a `private` constant reached this way
-    /// is unsafe even when access would otherwise be legal from here:
-    /// confirmed directly via `php -r` (`Base::make()` reading
-    /// `static::SECRET`, called through a `Child` that redeclares its own
-    /// `private const SECRET`, throws a real "Cannot access private
-    /// constant Child::SECRET" - the exact shape this rule exists to
-    /// catch ahead of time). Matches real PHPStan's own rule exactly,
-    /// including its one exemption: a `final` class can never have a
-    /// subclass at all, so `static::` there can never actually differ
-    /// from the literal declaring class - not unsafe, not flagged.
-    /// The caller (`ExprKind::StaticAccess`'s const-fetch arm in
-    /// `checker/expr.rs`) already confirmed the class-part is the literal
-    /// `static` keyword (not `self`, not `parent`, not a named class) and
-    /// that the constant is `private` before calling this - both
-    /// preconditions this function trusts rather than re-checks.
+    /// A narrower, LSB-specific angle distinct from the ordinary
+    /// visibility check just above. `static::CONST` performs late static
+    /// binding, which can resolve to a different class at runtime than
+    /// the one lexically containing this code - unlike `self::CONST`
+    /// (always the literal declaring class) - so a `private` constant
+    /// reached this way is unsafe even when access would otherwise be
+    /// legal from here: `Base::make()` reading `static::SECRET`, called
+    /// through a `Child` that redeclares its own `private const SECRET`,
+    /// throws a real "Cannot access private constant Child::SECRET".
+    /// Exempts a `final` class: it can never have a subclass, so
+    /// `static::` there can never actually differ from the literal
+    /// declaring class. The caller (`ExprKind::StaticAccess`'s const-fetch
+    /// arm in `checker/expr.rs`) already confirmed the class-part is the
+    /// literal `static` keyword and that the constant is `private` before
+    /// calling this.
     pub(crate) fn check_static_private_constant_access(
         &mut self,
         owner: &str,
@@ -181,16 +167,12 @@ impl<'a> Checker<'a> {
     }
 
     /// Same idea as `check_static_private_constant_access` just above,
-    /// for a `private` *static property* instead - a static property
-    /// shares the exact same late-static-binding unsafety (confirmed
-    /// directly via `php -r`: a subclass redeclaring the same `private
-    /// static` property makes `static::$prop`, read from inside the
-    /// *ancestor's* own method, throw a real "Cannot access private
-    /// property" error at the call site, the identical shape as the
-    /// constant case). Matches real PHPStan's own
-    /// `AccessPrivatePropertyThroughStaticRule`: same `final`-class
-    /// exemption, same unconditional-on-any-`static::$prop` trigger
-    /// regardless of whether a subclass actually redeclares it.
+    /// for a `private` static property instead - a static property
+    /// shares the same late-static-binding unsafety: a subclass
+    /// redeclaring the same `private static` property makes
+    /// `static::$prop`, read from inside the ancestor's own method,
+    /// throw a real "Cannot access private property" error at the call
+    /// site.
     pub(crate) fn check_static_private_property_access(
         &mut self,
         owner: &str,
@@ -211,13 +193,10 @@ impl<'a> Checker<'a> {
 
     /// Same idea as `check_static_private_constant_access`/
     /// `check_static_private_property_access` above, for a `private`
-    /// *static method call* instead (confirmed directly via `php -r`: a
-    /// subclass redeclaring the same `private static` method makes
-    /// `static::method()`, called from inside the *ancestor's* own
-    /// method, throw a real "Call to private method ... from scope ..."
-    /// error at the call site). Matches real PHPStan's own
-    /// `CallPrivateMethodThroughStaticRule`: same `final`-class exemption,
-    /// same unconditional-on-any-`static::method()` trigger.
+    /// static method call instead: a subclass redeclaring the same
+    /// `private static` method makes `static::method()`, called from
+    /// inside the ancestor's own method, throw a real "Call to private
+    /// method ... from scope ..." error at the call site.
     pub(crate) fn check_static_private_method_access(
         &mut self,
         owner: &str,
