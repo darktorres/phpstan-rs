@@ -1,5 +1,5 @@
-//! Phase 72 (a-i): `RegexGroupFallback`'s own tri-state fallback for a
-//! group whose body isn't exactly literal-enumerable.
+//! `RegexGroupFallback`'s own tri-state fallback for a group whose
+//! body isn't exactly literal-enumerable.
 
 use super::super::*;
 use super::helpers::fallbacks;

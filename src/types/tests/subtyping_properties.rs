@@ -1,8 +1,8 @@
-//! Phase 19 Part B: proptest-based subtyping properties for `types::
-//! is_subtype`. A bounded-depth `Type` generator (`prop_recursive` - the
-//! correct tool for a genuinely recursive ~20-variant enum, not a
-//! hand-rolled recursive fn), plus 5 properties, each evidenced by real
-//! reasoning about `is_subtype`'s own arms, not merely assumed to hold.
+//! Proptest-based subtyping properties for `types::is_subtype`. A
+//! bounded-depth `Type` generator (`prop_recursive` - the correct tool
+//! for a genuinely recursive ~20-variant enum, not a hand-rolled
+//! recursive fn), plus 5 properties, each evidenced by real reasoning
+//! about `is_subtype`'s own arms, not merely assumed to hold.
 //!
 //! Transitivity is deliberately NOT asserted as a blanket property: a
 //! real, existing, documented non-transitive chain (`ClassString(Foo) <:
@@ -60,11 +60,10 @@ fn any_type() -> impl Strategy<Value = Type> {
 }
 
 proptest! {
-    /// Every generated type is its own subtype - the property the real,
-    /// traced `f64::NAN` bug (see `is_subtype`'s own new arm) was found
-    /// through: before that fix, this failed for any `FloatLiteral(NAN)`
-    /// the generator produced, since `Type`'s plain structural
-    /// `PartialEq` makes `NAN != NAN`.
+    /// Every generated type is its own subtype - `is_subtype` needs a
+    /// dedicated arm for this, since `FloatLiteral(NAN)` would otherwise
+    /// fail under `Type`'s plain structural `PartialEq`, where
+    /// `NAN != NAN`.
     #[test]
     fn reflexivity(t in any_type()) {
         prop_assert!(types::is_subtype(&t, &t));

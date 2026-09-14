@@ -49,11 +49,10 @@ fn calling_a_method_from_a_transitively_used_trait_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 13 Finding E: a trait method calling $this->hostOnlyMethod()
-// is valid PHP (the trait's author expects any using class to
-// provide it) - checked standalone (current_class bound to the
-// trait's own FQN), this always false-positived as "undefined
-// method".
+// A trait method calling $this->hostOnlyMethod() is valid PHP (the
+// trait's author expects any using class to provide it) - checking it
+// standalone, with current_class bound to the trait's own FQN, would
+// wrongly flag it as "undefined method".
 #[test]
 fn a_trait_method_calling_a_host_only_method_is_not_flagged_when_the_host_declares_it() {
     let d = diagnostics_for(
@@ -93,17 +92,16 @@ fn a_trait_method_calling_a_host_only_method_is_flagged_for_a_sibling_host_missi
     assert!(d[0].message.contains("undefined method"), "got: {d:?}");
 }
 
-// Real corpus shape: symfony/cache's own `if (version_compare(phpversion(
-// 'redis'), '6.3.0', '>=')) { trait Redis63ProxyTrait { ... } }` -
-// `check_program`'s own top-level `StmtKind::ClassDecl` handling already
-// dispatches a trait through `check_trait_methods` (this same per-host
-// re-checking), but a trait declared *inside* a conditional block
-// reaches `check_stmt`'s own nested `StmtKind::ClassDecl` arm instead,
-// which used to check every trait method with `current_class` set to
-// the trait's own name unconditionally, regardless of `ClassKind` -
-// `$this->hostOnlyMethod()` (real shape: `initializeLazyObject()`,
-// provided by a sibling trait on the real host) was wrongly flagged as
-// undefined on the trait itself.
+// symfony/cache's own `if (version_compare(phpversion('redis'), '6.3.0',
+// '>=')) { trait Redis63ProxyTrait { ... } }`: a trait declared *inside*
+// a conditional block reaches `check_stmt`'s own nested
+// `StmtKind::ClassDecl` arm, not `check_program`'s top-level one - it
+// must still get the same per-host re-checking through
+// `check_trait_methods`, not `current_class` set to the trait's own
+// name unconditionally regardless of `ClassKind` (which would wrongly
+// flag `$this->hostOnlyMethod()`, real shape: `initializeLazyObject()`,
+// provided by a sibling trait on the real host, as undefined on the
+// trait itself).
 #[test]
 fn a_conditionally_declared_trait_still_checks_against_its_real_host() {
     let d = diagnostics_for(
@@ -119,29 +117,29 @@ fn a_conditionally_declared_trait_still_checks_against_its_real_host() {
             }
         "#,
     );
-    // Phase 15 item (2): the literal `if (true)` wrapping here (this
-    // test's own scenario shape - a conditionally-declared trait, e.g.
-    // real code's own `if (!trait_exists(...)) { trait Foo {...} }`
-    // idiom) now legitimately also gets its own `if.alwaysTrue` -
-    // unrelated to what this test actually checks (that the trait's own
-    // members still resolve against its real host), so it's excluded
-    // here rather than changing the fixture's own scenario shape.
+    // The literal `if (true)` wrapping here (this test's own scenario
+    // shape - a conditionally-declared trait, e.g. real code's own
+    // `if (!trait_exists(...)) { trait Foo {...} }` idiom) legitimately
+    // also gets its own `if.alwaysTrue`, unrelated to what this test
+    // actually checks (that the trait's own members still resolve
+    // against its real host), so it's excluded here rather than
+    // changing the fixture's own scenario shape.
     assert!(
         !d.iter().any(|x| x.identifier != "if.alwaysTrue"),
         "unexpected diagnostics: {d:?}"
     );
 }
 
-// ROADMAP "Known but not yet scheduled" follow-up: real corpus shape,
 // doctrine-orm's own `PersistentCollectionImplementation` (`if
 // (defined(Criteria::class . '::ASC')) { trait ... { public function
 // add(mixed $value): bool {...} } } else { trait ... { public function
-// add(mixed $value): void {...} } }`) - before this fix, `check_function`'s
-// own `lookup_own_signature` always re-fetched whichever branch won the
-// registry's single slot for the trait's name (`registry/index.rs`'s own
-// `or_insert_with`, first-indexed-wins, no tiebreak for classes/traits
-// at all), so the losing (here, `void`) branch's own body was wrongly
-// checked against the winning (`bool`) branch's return type.
+// add(mixed $value): void {...} } }`): `check_function`'s own
+// `lookup_own_signature` always re-fetches whichever branch won the
+// registry's single slot for the trait's name (`registry/index.rs`'s
+// own `or_insert_with`, first-indexed-wins, no tiebreak for
+// classes/traits at all) - the losing (here, `void`) branch's own body
+// must still be checked against its own return type, not the winning
+// (`bool`) branch's.
 #[test]
 fn a_trait_declared_twice_under_a_guard_checks_each_branch_against_its_own_signature() {
     let d = diagnostics_for(

@@ -7,10 +7,9 @@ use super::helpers::*;
 fn enum_gets_its_built_in_cases_and_backed_enum_gets_from_and_try_from() {
     // Real, built-in static methods every enum has from the language
     // itself (UnitEnum::cases(); BackedEnum::from()/tryFrom() only on
-    // a backed one) - none declared in source. The very first
-    // real-corpus check after shipping undefined-static-method
-    // detection flagged every single real Enum::cases()/::tryFrom()
-    // call in the wild before this was added.
+    // a backed one) - none declared in source, so undefined-static-
+    // method detection must know about them explicitly or it flags
+    // every real call to them.
     let d = diagnostics_for(
         r#"<?php
             enum Status: string {
@@ -62,7 +61,7 @@ fn enum_cases_are_recognized_by_static_access_and_a_bogus_case_is_flagged() {
 
 #[test]
 fn a_backed_enum_s_value_satisfies_a_matching_literal_union_parameter() {
-    // Phase 34 Finding C: Piwigo\Db\SortRenderer's real shape -
+    // Piwigo\Db\SortRenderer's real shape -
     // OrderByClause::__construct(string $column, 'ASC'|'DESC' $dir).
     let d = diagnostics_for(
         r#"<?php
@@ -196,12 +195,11 @@ fn phpstan_enum_sanity_flags_duplicate_backing_values() {
     assert!(dupes.iter().any(|x| x.message.contains("for case E")));
 }
 
-// ---- Phase 66: the rest of EnumSanityRule, generic rejection, and
-// generic-bound wiring - all confirmed directly against real `php -l`
-// (constructor/destructor/magic-method/redeclaration/backing-type/
-// case-value shapes) or matched against real PHPStan's own
-// EnumTemplateTypeRule (Serializable and @template aren't PHP parse
-// errors, just real-PHPStan-flagged design errors).
+// ---- The rest of EnumSanityRule, generic rejection, and generic-bound
+// wiring - constructor/destructor/magic-method/redeclaration/
+// backing-type/case-value shapes are real PHP parse errors;
+// Serializable and @template are real-PHPStan-flagged design errors
+// (EnumTemplateTypeRule), not PHP parse errors.
 
 #[test]
 fn an_enum_constructor_is_flagged() {
@@ -516,11 +514,11 @@ fn an_enum_with_no_template_tag_is_never_flagged_as_generic() {
     );
 }
 
-// Phase 79: a specific enum case's own singleton type - `Suit::Hearts`'s
-// real static type is `Suit::Hearts`, not the coarse `Suit` every case
-// used to collapse to - and `->name`/`->value` on a case fetched this
-// way narrow to their own exact literal rather than the enum-wide
-// generic string/union-of-every-case's-value.
+// A specific enum case's own singleton type - `Suit::Hearts`'s real
+// static type is `Suit::Hearts`, not the coarser `Suit` - and
+// `->name`/`->value` on a case fetched this way narrow to their own
+// exact literal rather than the enum-wide generic
+// string/union-of-every-case's-value.
 
 #[test]
 fn a_case_fetch_has_its_own_singleton_type() {
@@ -718,14 +716,12 @@ fn equality_narrowing_gives_the_exact_case_singleton_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive found while triaging the wider Piwigo
-// corpus (`HistorySearchController::__invoke`): real PHPStan's own
-// `functionMap.php` declares `UnitEnum::cases()` as `list<static>`
-// outright (`vendor/phpstan-src/resources/functionMap_php81delta.php`)
-// - this project's own synthesized signature for it was a bare,
-// unmarked `Array`, leaving `array_merge(['none'], SomeEnum::cases())`
-// (a real, common "build a full option list" idiom) unable to prove
-// list-ness for the merged result.
+// Real PHPStan's own `functionMap.php` declares `UnitEnum::cases()` as
+// `list<static>` outright
+// (`vendor/phpstan-src/resources/functionMap_php81delta.php`), not a
+// bare, unmarked `Array` - needed so `array_merge(['none'],
+// SomeEnum::cases())` (a real, common "build a full option list"
+// idiom) can prove list-ness for the merged result.
 #[test]
 fn cases_returns_a_real_list() {
     let d = diagnostics_for(

@@ -60,11 +60,9 @@ impl Parser {
 /// to `u32::MAX` lines/columns (this project's own lexer comment notes
 /// a real, extreme corpus file's longest line at ~1.25 million
 /// characters, still far below it), but `token_stream_parse`'s own
-/// `Arbitrary`-derived `Position` values are unconstrained and found a
-/// real `attempt to add with overflow` panic here with a `frag_base`
-/// near `u32::MAX` - a synthetic-input-only reach today, not a real-file
-/// one, but a real, unguarded panic all the same, and a clamped (not
-/// wrapped or crashing) result is still an honest answer even in that
+/// `Arbitrary`-derived `Position` values are unconstrained, and a
+/// `frag_base` near `u32::MAX` must not panic - a clamped (not wrapped
+/// or crashing) result is still an honest answer even in that
 /// physically-impossible tail case.
 fn bias_position(pos: Position, frag_base: Position) -> Position {
     if pos.line == 1 {
