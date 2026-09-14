@@ -6,10 +6,9 @@ use phpstan_rs::{output, project};
 /// `phpstan-rs incremental-bench <dir> [<file-to-touch>]` - loads every
 /// .php file under `dir` into a `Project` (a full load, timed), then
 /// re-parses and re-checks just one file via `Project::update_file` (the
-/// incremental path, also timed) and reports both, to make the whole
-/// point of Phase 7's incremental-analysis work concrete: an edit to one
-/// file costs O(that file), not O(the project). Picks the first file in
-/// directory-walk order when none is named explicitly.
+/// incremental path, also timed) and reports both, to make concrete that
+/// an edit to one file costs O(that file), not O(the project). Picks the
+/// first file in directory-walk order when none is named explicitly.
 pub(crate) fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
     let mut files = Vec::new();
     project::collect_php_files(dir, &mut files);
