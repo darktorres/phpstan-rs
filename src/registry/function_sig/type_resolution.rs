@@ -60,21 +60,19 @@ pub(crate) fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) ->
     } else {
         ty
     };
-    // Phase 23/Phase 32 Finding I: phpstorm-stubs' own `@return`/`@param`
-    // doc comments commonly predate a later PHP version's native-signature
-    // tightening - real shape: `imagecreatefromstring`'s native return hint
-    // was updated to `GdImage|false` for PHP 8's GD object migration, but
-    // its `@return resource|GdImage|false` doc comment above it was never
-    // revised (Phase 23's own motivating case); `imagesx`/`imagesy`'s
-    // native `int` similarly dropped `false` without their `@return
-    // int|false` doc ever catching up. PHP enforces a native type hint
-    // identically at runtime, so when one is present and real, it's
-    // authoritative about what's *possible* - any docblock member
-    // incompatible with it can never actually happen, whatever a stale
-    // comment claims. `resource` and `false` aren't the only members that
-    // can go stale this way, so rather than hardcoding a check per member
-    // (as this project's own first attempt at `false` did, before finding
-    // this generalization instead), `reconcile_with_native` tests
+    // phpstorm-stubs' own `@return`/`@param` doc comments commonly
+    // predate a later PHP version's native-signature tightening - e.g.
+    // `imagecreatefromstring`'s native return hint was updated to
+    // `GdImage|false` for PHP 8's GD object migration, but its `@return
+    // resource|GdImage|false` doc comment above it was never revised;
+    // `imagesx`/`imagesy`'s native `int` similarly dropped `false`
+    // without their `@return int|false` doc ever catching up. PHP
+    // enforces a native type hint identically at runtime, so when one is
+    // present and real, it's authoritative about what's *possible* - any
+    // docblock member incompatible with it can never actually happen,
+    // whatever a stale comment claims. `resource` and `false` aren't the
+    // only members that can go stale this way, so rather than
+    // hardcoding a check per member, `reconcile_with_native` tests
     // "incompatible" precisely via `is_subtype`.
     //
     // Excludes `object` specifically - real code (this project's own
@@ -125,21 +123,20 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
 /// marker with strictly less information than a real, present native
 /// type already carries - left as `Callable`, it can wrongly *lose* to
 /// the native type in an unrelated later comparison that only sees this
-/// resolved signature, not the native hint that produced it (real
-/// corpus regression: `Doctrine\Common\Collections\ReadableCollection::
-/// exists(Closure $p)`'s own `@phpstan-param Closure(TKey, T):bool $p`
-/// resolved to bare `Callable` instead of the exactly-known native
-/// `Closure`, making a subclass's own identically-typed override look
-/// like an illegal narrowing purely because the *ancestor's* resolved
-/// type had lost precision the child's never did). Substitutes the
+/// resolved signature, not the native hint that produced it - e.g. a
+/// method's own `@phpstan-param Closure(TKey, T):bool $p` resolving to
+/// bare `Callable` instead of the exactly-known native `Closure` would
+/// make a subclass's own identically-typed override look like an
+/// illegal narrowing purely because the ancestor's resolved type had
+/// lost precision the child's never did. Substitutes the
 /// native type's own concrete counterpart back in whenever there is
 /// one - a plain class-typed native, or (when native itself is
 /// nullable) its sole non-null member - leaving `Callable` alone
 /// otherwise (an untyped-native `callable $p`, or one this project
 /// still can't say anything more precise about).
 fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
-    // Phase 53: only the bare marker is "coarse" in the sense this
-    // function exists to fix - a real parsed `Closure(...)`/
+    // Only the bare marker is "coarse" in the sense this function
+    // exists to fix - a real parsed `Closure(...)`/
     // `callable(...)` shape (`Some(sig)`) is already a genuine
     // refinement in its own right and shouldn't be thrown away in favor
     // of a plain native class type.
@@ -168,30 +165,22 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 }
 
 /// Whether a docblock-derived member `m` could still be real given
-/// `native_ty` - found necessary the hard way, via a full corpus re-check
-/// after first shipping this as a bare `is_subtype(m, native_ty)` call:
-/// for anything except a named class/interface (`Type::Object`),
-/// `is_subtype` gives a reliable, hierarchy-independent answer (scalar/
-/// array/... subtyping never depends on an unverified class
-/// relationship). For an `Object`, this project has no class hierarchy
-/// to consult at the point `resolve_type` runs (`FunctionSig::from_decl`
-/// is still building the very registry a real lookup would need,
-/// long before one exists) - `is_subtype`'s own Object handling is
-/// name-equality only, so treating that as "incompatible" wrongly
-/// discarded a real, common shape: a doc type naming an actual subclass
-/// of a more generic native return hint (real corpus regression:
-/// Doctrine-repository-typed services declaring a native
-/// `EntityRepository` return with a doc type naming the real concrete
-/// repository subclass, e.g. `ActivityRepository` - is_subtype couldn't
-/// see the inheritance, so the doc's own more-precise type was wrongly
-/// dropped in favor of the generic base class). Scoped back to exactly
-/// the one class-name case this project *can* prove reliably (Phase 23's
-/// own original, narrower finding: a literal `resource` doc member
-/// against a native hint that no longer mentions it) - any other class
-/// name is always kept, since "doc names a real subclass" and "doc is
-/// simply stale" can't be told apart without the hierarchy this function
-/// doesn't have, and silently guessing wrong here is worse than not
-/// generalizing past what's actually provable.
+/// `native_ty`. A bare `is_subtype(m, native_ty)` call is reliable for
+/// anything except a named class/interface (`Type::Object`), where
+/// `is_subtype`'s own Object handling is name-equality only: this
+/// project has no class hierarchy to consult at the point `resolve_type`
+/// runs (`FunctionSig::from_decl` is still building the very registry a
+/// real lookup would need, long before one exists), so treating a
+/// hierarchy mismatch as "incompatible" would wrongly discard a common
+/// shape - a doc type naming an actual subclass of a more generic native
+/// return hint (e.g. a native `EntityRepository` return with a doc type
+/// naming the real concrete repository subclass). Scoped back to exactly
+/// the one class-name case this project can prove reliably: a literal
+/// `resource` doc member against a native hint that no longer mentions
+/// it - any other class name is always kept, since "doc names a real
+/// subclass" and "doc is simply stale" can't be told apart without the
+/// hierarchy this function doesn't have, and silently guessing wrong
+/// here is worse than not generalizing past what's actually provable.
 // A native `void` return hint admits no value at all - not even a named
 // class or callable, both otherwise deliberately trusted (see the
 // `Object`/`Callable` arms below) since this function usually can't
@@ -201,14 +190,12 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 // permissiveness below ever gets a chance to wrongly keep a doc member
 // real PHPStan would always discard in favor of the native `void`
 // (`TypehintHelper::decideType`'s own `$type->isSuperTypeOf($phpDocType)`
-// is unconditionally `no()` for `VoidType`). Real corpus false positive
-// this fixes: `PhpParser\NodeVisitor::enterNode()`'s own `@return
-// null|int|Node|Node[]` doc backfilling straight through a native `void`
-// override two ancestors down (`NodeVisitorAbstract::enterNode()`'s own
-// untyped, undocumented passthrough in between) - the `Node` member
-// survived via the `Object => true` rule below with nothing to stop it,
-// wrongly demanding a real `Node` return from a function whose own,
-// authoritative native signature is `void`.
+// is unconditionally `no()` for `VoidType`). Without this, an inherited
+// `@return null|int|Node|Node[]` doc could backfill straight through a
+// native `void` override further up the hierarchy - the `Node` member
+// would survive via the `Object => true` rule below with nothing to
+// stop it, wrongly demanding a real `Node` return from a function whose
+// own, authoritative native signature is `void`.
 //
 // `Type::Never` is exempted from this exclusion - real PHPStan special-
 // cases it identically (`TypehintHelper::decideType`'s own `if
@@ -242,39 +229,36 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // narrower value than the generic Object case can safely give
         // here, this early in the pipeline).
         Type::Object(_, _) => true,
-        // Phase 60 corpus find: a PHPStan/Psalm callable-shape doc member
-        // (`Closure(int): string`) degrades to plain `Type::Callable` at
-        // parse time (`types::parse_type_atom`'s own documented
-        // simplification - no per-parameter/return signature is tracked)
-        // - the same information loss `Object`'s own case just above
-        // already has to work around, just one layer earlier. Without
-        // this, `is_subtype(Callable, Closure)` (correctly `false` in
-        // general - not every callable is a `Closure` instance) wrongly
-        // read as "the doc member can't be right," discarding it even
-        // when the native hint is exactly `Closure` - a real corpus
-        // false positive: `Psl\Dict\filter()`'s own `null|Closure
-        // $predicate` parameter, documented as `(Closure(Tv): bool)|null`,
-        // resolved to bare `null` once the `Closure(...)`-shaped member
-        // was filtered out, in turn making Phase 60's `nullCoalesce`
-        // check wrongly flag `$predicate ??= ...` as "always null."
+        // A PHPStan/Psalm callable-shape doc member (`Closure(int):
+        // string`) degrades to plain `Type::Callable` at parse time
+        // (`types::parse_type_atom`'s own documented simplification - no
+        // per-parameter/return signature is tracked) - the same
+        // information loss `Object`'s own case just above already has to
+        // work around, just one layer earlier. Without this,
+        // `is_subtype(Callable, Closure)` (correctly `false` in general -
+        // not every callable is a `Closure` instance) would wrongly read
+        // as "the doc member can't be right," discarding it even when
+        // the native hint is exactly `Closure` (e.g. a `null|Closure
+        // $predicate` parameter documented as `(Closure(Tv): bool)|null`
+        // resolving to bare `null` once the `Closure(...)`-shaped member
+        // is filtered out).
         Type::Callable(_) => true,
-        // Phase 74 corpus find: an array's own *key* type was checked
-        // against `native_ty` via the same full `is_subtype` as every
-        // other member, including its key - fine for a concrete key
-        // (`array<string, int>`'s `string` really is a subtype of
-        // `int|string`), but this function runs *before*
+        // An array's own *key* type must not be checked against
+        // `native_ty` the same way every other member is - fine for a
+        // concrete key (`array<string, int>`'s `string` really is a
+        // subtype of `int|string`), but this function runs before
         // `mark_template_params` ever gets a chance to substitute a
         // `@template`-bound key placeholder (`array<TKey, TValue>`,
         // `TKey` still a bare, unresolved `Object("TKey", [])` at this
         // point) - `is_subtype(Object("TKey", []), int|string)` is
-        // correctly `false` for an arbitrary class, so the *entire*
-        // array member was discarded in favor of the bare native
-        // `array`, silently losing `TValue` too even though it would
-        // have resolved to a perfectly legitimate template param one
+        // correctly `false` for an arbitrary class, so checking the key
+        // would discard the entire array member in favor of the bare
+        // native `array`, silently losing `TValue` too even though it
+        // would resolve to a perfectly legitimate template param one
         // step later. A native `array` hint carries no key information
         // to contradict in the first place (PHP's own type system has
-        // no generics), so this only ever checks the *value* side
-        // against native's own - the key is always trusted as-is.
+        // no generics), so this only ever checks the value side against
+        // native's own - the key is always trusted as-is.
         Type::Array(_, elem) => match native_ty {
             Type::Array(_, native_elem) => member_possible_given_native(elem, native_elem),
             _ => types::is_subtype(m, native_ty),
@@ -282,7 +266,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // Same reasoning as the plain `Type::Array` arm just above, for
         // `list<T>`/`non-empty-array<T>`/`non-empty-list<T>`'s own real
         // `Intersection([Array(key, elem), Accessory(_), ...])`
-        // representation (Phase 14) - an accessory marker never affects
+        // representation - an accessory marker never affects
         // whether the member is "possible" given a bare native `array`
         // hint (which states nothing about list-ness/non-emptiness
         // either), so this only needs to find the `Array` member inside
