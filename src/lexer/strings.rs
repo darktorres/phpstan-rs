@@ -6,25 +6,22 @@ impl<'a> Lexer<'a> {
         self.pos += 1; // opening '
         // Batches contiguous non-escape byte runs via `push_str` +
         // `from_utf8_lossy` instead of pushing one byte at a time (which
-        // also silently corrupted any multi-byte UTF-8 character in the
-        // literal - `b as char` reinterprets each raw byte as its own
-        // Latin-1 codepoint - a real, independently-confirmed bug, not
-        // just a perf issue). `from_utf8_lossy`, not `.unwrap()`: real
+        // would also silently corrupt any multi-byte UTF-8 character in
+        // the literal - `b as char` reinterprets each raw byte as its own
+        // Latin-1 codepoint). `from_utf8_lossy`, not `.unwrap()`: real
         // PHP source can contain non-UTF-8 bytes, matching every other
-        // byte-range conversion already in this file. Found and fixed
-        // via a perf-optimization investigation workflow.
+        // byte-range conversion already in this file.
         //
         // No `with_capacity` hint here (unlike `scan_interpolated`'s
         // `literal` buffer, which sizes to its own already-extracted
         // run's length): the only cheap upper bound available at this
-        // point is `self.src.len() - self.pos`, the size of the *entire
-        // rest of the file* rather than of this one string - a real
-        // regression this session's own final wall-clock A/B caught (peak
-        // RSS jumped from ~4.6GB to ~7.1GB checking Drupal, since most
-        // single-quoted literals are short but sit early in large files).
-        // Finding the string's real length upfront would need its own
-        // pre-scan, not worth it for what's normally a short literal -
-        // let `String::new()` grow via ordinary amortized doubling.
+        // point is `self.src.len() - self.pos`, the size of the entire
+        // rest of the file rather than of this one string, which can
+        // blow up peak memory on a large file with many short early
+        // literals. Finding the string's real length upfront would need
+        // its own pre-scan, not worth it for what's normally a short
+        // literal - let `String::new()` grow via ordinary amortized
+        // doubling.
         let mut s = String::new();
         let mut run_start = self.pos;
         while self.pos < self.src.len() && self.peek() != b'\'' {
