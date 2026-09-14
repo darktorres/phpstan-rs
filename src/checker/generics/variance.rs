@@ -6,18 +6,16 @@ use crate::token::Span;
 use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
-    /// Phase 10.5's variance-enforcement half, rewritten in Phase 54 to
-    /// really compose variance through nested generics instead of the
-    /// original flat "found anywhere in an input/output type at all"
-    /// check: a class's own `@template-covariant T` may only appear in
+    /// Variance-enforcement: composes variance through nested generics
+    /// rather than a flat "found anywhere in an input/output type at
+    /// all" check - a class's own `@template-covariant T` may only appear in
     /// one of its methods' *output* positions (covariance is only sound
     /// if nothing can ever hand a `T` back *into* the generic container,
     /// the way `Collection<Cat>` being usable where `Collection<Animal>`
     /// is expected relies on only ever reading a value out, never
     /// writing one in); `@template-contravariant T` is the mirror image,
     /// restricted to *input* positions only. A plain, un-annotated
-    /// `@template T` (invariant, the only kind Phase 10 modeled at all)
-    /// is unrestricted, same as always.
+    /// `@template T` (invariant) is unrestricted, same as always.
     ///
     /// "Position" is no longer just "which half of the signature" - a
     /// nested generic argument slot composes with (and can flip) the
@@ -37,12 +35,7 @@ impl<'a> Checker<'a> {
     /// Checks method params/return types only - a property's own single
     /// type needs different position logic entirely (`Position::Out` when
     /// write access is restricted, `Position::Inv` otherwise, not a
-    /// param/return split), see `check_property_variances` below (Phase
-    /// 43). This doc comment used to say properties weren't checked
-    /// because "this project doesn't track `readonly` at all yet" - stale
-    /// since Phase 57 added `PropertySig::is_readonly`/`write_visibility`;
-    /// corrected as part of building that check rather than left
-    /// contradicted by the current code.
+    /// param/return split), see `check_property_variances` below.
     pub(crate) fn check_variance(
         &mut self,
         sig: &FunctionSig,
@@ -62,15 +55,13 @@ impl<'a> Checker<'a> {
         }
         self.walk_variance(&sig.return_type, Position::Out, class_name, &mut violations);
 
-        // Sorted-and-deduped before reporting: the same `T` can now
+        // Sorted-and-deduped before reporting: the same `T` can
         // legitimately be reached more than once (once per parameter, or
-        // more than once within a single nested type), and this project
-        // has already been bitten once this phase by a `HashMap`/
-        // `HashSet` iteration order silently varying a diagnostic's
-        // position between runs (see `check_class_generic_bounds`'s own
-        // fix) - a plain `Vec` built via one deterministic left-to-right
-        // walk sidesteps that class of bug entirely, so sorting here is
-        // only about de-duplicating repeat visits, not fixing ordering.
+        // more than once within a single nested type). A plain `Vec`
+        // built via one deterministic left-to-right walk avoids any
+        // `HashMap`/`HashSet` iteration-order instability, so sorting
+        // here is only about de-duplicating repeat visits, not fixing
+        // ordering.
         violations.sort();
         violations.dedup();
         for message in violations {
@@ -78,9 +69,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 54: `VarianceCheck::checkParametersAcceptor`'s own
-    /// declaration-validity half (confirmed by direct read,
-    /// `vendor/phpstan-src`) - a call-argument-binding function/method
+    /// `VarianceCheck::checkParametersAcceptor`'s own
+    /// declaration-validity half - a call-argument-binding function/method
     /// `@template` has no subclass relationship at all for covariance/
     /// contravariance to describe (that concept only makes sense for a
     /// class/interface's own type parameter, bound once at instantiation
@@ -88,9 +78,9 @@ impl<'a> Checker<'a> {
     /// `-contravariant` on a function or method's own tag is always an
     /// authoring mistake. Runs unconditionally, including for `__construct`
     /// and private methods (unlike `check_variance` above, whose own
-    /// position-based half real PHPStan skips for both) - confirmed by
-    /// direct read: real PHPStan's own `$isPrivate` early return sits
-    /// *after* this exact check in `checkParametersAcceptor`. Re-parses
+    /// position-based half real PHPStan skips for both) - real
+    /// PHPStan's own `$isPrivate` early return sits after this exact
+    /// check in `checkParametersAcceptor`. Re-parses
     /// `f.doc_comment` fresh rather than reading back through `FunctionSig`
     /// (which has no persisted raw template-variance list of its own, the
     /// same reason `current_function_template_params` re-derives from
@@ -108,10 +98,9 @@ impl<'a> Checker<'a> {
         // Cheap substring pre-filter before the real docblock::parse below
         // - this runs unconditionally on every checked function/method,
         // and the overwhelming majority declare no `@template-covariant`/
-        // `-contravariant` tag at all. Found via a perf-optimization
-        // investigation workflow. All 4 spellings must be checked -
-        // `@phpstan-template-covariant`/`-contravariant` are real,
-        // corpus-confirmed aliases `docblock::parse` treats identically
+        // `-contravariant` tag at all. All 4 spellings must be checked -
+        // `@phpstan-template-covariant`/`-contravariant` are real
+        // aliases `docblock::parse` treats identically
         // via its own "strip `phpstan-`, same arm" normalization.
         let has_variance_tag = f.doc_comment.as_deref().is_some_and(|d| {
             d.contains("@template-covariant")
@@ -153,7 +142,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 43: `PropertyVarianceRule`, ported directly from
+    /// `PropertyVarianceRule`, ported directly from
     /// `vendor/phpstan-src/src/Rules/Generics/PropertyVarianceRule.php` -
     /// a property has one type, not a param/return pair, so this is a new
     /// sibling of `check_variance` above rather than a caller of it,
@@ -169,8 +158,7 @@ impl<'a> Checker<'a> {
     /// a property with hooks where none of them is `set` (get-only, so
     /// nothing can ever write through it either) - `Position::Inv`
     /// otherwise. `readonly`-by-PHPDoc isn't checked (this project has no
-    /// such tracking at all - see ROADMAP.md's Phase 36 entry, a
-    /// pre-existing, disclosed scope boundary this doesn't newly narrow).
+    /// such tracking at all).
     ///
     /// One real, disclosed wording imprecision: `walk_variance`'s own
     /// violation messages are worded for the method-parameter case
@@ -215,8 +203,8 @@ impl<'a> Checker<'a> {
                 self.report(fqn.to_string(), message, p.span, 6, "generics.variance");
             }
         }
-        // Phase 43.2: a promoted constructor property (readonly or
-        // hooked or neither) is never variance-checked without this -
+        // A promoted constructor property (readonly or
+        // hooked or neither) must be variance-checked too -
         // real PHPStan's own `PropertyVarianceRule` runs over a
         // `ClassPropertyNode` built uniformly for plain and promoted
         // shapes, so this project's own variance walk should too.
@@ -265,7 +253,7 @@ impl<'a> Checker<'a> {
     /// unchanged - only an `Object`'s own type-argument slots can flip or
     /// force it, via `Registry::effective_slot_variance`.
     ///
-    /// Phase 54: uses `effective_slot_variance`, not the class's bare
+    /// Uses `effective_slot_variance`, not the class's bare
     /// declared variance alone - a call-site variance marker written on
     /// this exact argument (`Collection<covariant T>`) overrides
     /// `Collection`'s own declared slot variance for this composition,
@@ -302,22 +290,17 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
-            // Phase 54: a call-site variance sentinel isn't a real nested
-            // class with its own slot to look up - the *enclosing* call
-            // (the arm just below, one level up) already read the
-            // override and composed `pos` accordingly before ever
-            // recursing into this node. Without this dedicated arm, the
-            // generic `Object(class, args)` case below would instead try
+            // A call-site variance sentinel isn't a real nested class
+            // with its own slot to look up - the enclosing call (the arm
+            // just below, one level up) already read the override and
+            // composed `pos` accordingly before ever recursing into this
+            // node. Without this dedicated arm, the generic
+            // `Object(class, args)` case below would instead try
             // `effective_slot_variance("$$covariant", 0, ...)`, which
             // always returns `None` (`"$$covariant"` is never a
             // registered class) - silently stopping the walk right here,
             // so a real violation nested inside the wrapped type would
-            // never be found, for the wrong reason. Confirmed the hard
-            // way via this project's own revert-verification: a
-            // deliberately broken wiring test still passed, because this
-            // exact silent-stop already produced the same "no violation
-            // found" result independent of whether the override was
-            // ever consulted at all.
+            // never be found, for the wrong reason.
             Type::Object(class, _)
                 if matches!(
                     class.as_str(),
@@ -350,10 +333,10 @@ impl<'a> Checker<'a> {
                     self.walk_variance(t, pos, class_name, violations);
                 }
             }
-            // A real, previously-missing case: `object{...}`'s own field
-            // types were never walked for declaration-soundness either -
-            // a covariant/contravariant template nested inside one
-            // (`object{value: T}`) went unchecked.
+            // `object{...}`'s own field types must be walked for
+            // declaration-soundness too, or a covariant/contravariant
+            // template nested inside one (`object{value: T}`) would go
+            // unchecked.
             Type::ObjectShape(fields) => {
                 for (_, t, _) in fields {
                     self.walk_variance(t, pos, class_name, violations);
@@ -364,7 +347,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Phase 54: a position within a type expression, for `Checker::
+/// A position within a type expression, for `Checker::
 /// walk_variance`'s own real per-position variance composition -
 /// `Position::In` for a parameter type (real PHPStan's "negative"/input
 /// polarity), `Position::Out` for a return type ("positive"/output
