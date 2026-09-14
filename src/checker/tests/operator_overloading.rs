@@ -1,7 +1,7 @@
-//! Phase 81: `GMP`/`BcMath\Number` operator-overloading return-type
-//! precision (`GmpOperatorTypeSpecifyingExtension`,
+//! `GMP`/`BcMath\Number` operator-overloading return-type precision
+//! (`GmpOperatorTypeSpecifyingExtension`,
 //! `BcMathNumberOperatorTypeSpecifyingExtension`, and their unary
-//! counterparts) - distinct from `operator_validity.rs`'s own Phase 52
+//! counterparts) - distinct from `operator_validity.rs`'s own
 //! operand-*legality* matrix, which already recognizes these two classes
 //! as legal operands but doesn't refine the *result* type.
 
@@ -139,13 +139,10 @@ fn bcmath_number_does_not_overload_the_bitwise_operators() {
 
 #[test]
 fn bcmath_number_does_not_overload_bitnot_either() {
-    // Real bug found while writing this phase's own GMP tests: the
-    // pre-existing `is_bitwise_not_operand` unconditionally rejected
-    // every `Type::Object`, including GMP - flagging real, valid `~$gmp`
-    // syntax as `unaryOp.invalid`. Fixed via a thin `Checker`-method
-    // wrapper (`bitnot_operand_is_valid`) that adds the one GMP
-    // exception; `BcMath\Number` genuinely doesn't overload `~` at all,
-    // so it must still be flagged.
+    // `is_bitwise_not_operand` unconditionally rejects every
+    // `Type::Object`; the `bitnot_operand_is_valid` wrapper adds the one
+    // GMP exception. `BcMath\Number` genuinely doesn't overload `~` at
+    // all, so it must still be flagged.
     let d = diagnostics_for(
         r#"<?php
             function f(\BcMath\Number $n): void {

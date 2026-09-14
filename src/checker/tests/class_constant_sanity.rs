@@ -50,9 +50,8 @@ fn an_enum_constant_named_class_is_flagged() {
 }
 
 // `ClassConstantRule`'s own typed-constant half (PHP 8.3's `const TYPE
-// NAME = value;`) - confirmed directly via `php -l` as a real,
-// unconditional fatal error ("Cannot use string as value for class
-// constant Foo::BAD of type int").
+// NAME = value;`) - a real, unconditional fatal error ("Cannot use
+// string as value for class constant Foo::BAD of type int").
 
 #[test]
 fn a_typed_constant_whose_value_mismatches_its_declared_type_is_flagged() {
@@ -121,10 +120,10 @@ fn a_typed_enum_constant_whose_value_mismatches_its_declared_type_is_flagged() {
 
 #[test]
 fn a_typed_constant_assigned_an_unresolved_global_constant_is_never_flagged() {
-    // Real corpus find: `DEBUG_BACKTRACE_IGNORE_ARGS` (a real PHP
-    // builtin int constant this project has no global-constant table
-    // for at all) reads as `Mixed`, not a genuinely `mixed`-typed value -
-    // don't guess wrong on it, the same leniency established elsewhere.
+    // `DEBUG_BACKTRACE_IGNORE_ARGS` (a real PHP builtin int constant
+    // this project has no global-constant table for) reads as `Mixed`,
+    // not a genuinely `mixed`-typed value - don't guess wrong on it, the
+    // same leniency established elsewhere.
     let d = diagnostics_for(
         r#"<?php
             class Foo {
@@ -161,9 +160,8 @@ fn a_typed_constant_referencing_another_constant_is_checked_via_full_inference()
     );
 }
 
-// Phase 65 follow-up: `final const`/typed-constant PHP-version gating,
-// plus `final private const`'s own unconditional modifier conflict -
-// all confirmed directly via `php -l`/`php -r`.
+// `final const`/typed-constant PHP-version gating, plus `final private
+// const`'s own unconditional modifier conflict.
 
 #[test]
 fn a_final_constant_below_php_8_1_is_flagged() {

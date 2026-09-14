@@ -7,16 +7,14 @@ use super::helpers::*;
 fn a_class_named_enum_is_accepted_as_a_parameter_type_hint() {
     // `enum` is only reserved as a declaration keyword at statement
     // position - as a type hint it's an ordinary (if unusually named)
-    // class reference. Found via bulk-running this project's checker
-    // against the vendored phpstan-src corpus (nsrt/bug-4213.php uses
-    // exactly this shape).
+    // class reference (real shape: vendored phpstan-src's own
+    // nsrt/bug-4213.php).
     //
-    // Phase 48 item 6: `take_name_segment` used to reconstruct a
-    // keyword-shaped identifier from `Keyword::as_str()`'s own canonical
-    // lowercase spelling, silently corrupting this source's real
-    // capitalization - fixed via the `Lexer::pending_keyword_raw`/
-    // `Parser::keyword_raw` out-of-band channel, so this now correctly
-    // keeps the identifier's own declared case.
+    // `take_name_segment` must keep the identifier's own declared case,
+    // via the `Lexer::pending_keyword_raw`/`Parser::keyword_raw`
+    // out-of-band channel - reconstructing it from `Keyword::as_str()`'s
+    // canonical lowercase spelling would corrupt the source's real
+    // capitalization.
     let program = parse("<?php function f(Enum ...$enums): void {}");
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a FunctionDecl, got {:?}", program[0].kind);
@@ -28,10 +26,9 @@ fn a_class_named_enum_is_accepted_as_a_parameter_type_hint() {
 #[test]
 fn qualified_name_with_keyword_segment_parses() {
     // `Enum` here is a namespace segment, not the `enum` declaration
-    // keyword - PHP's keywords are mostly "semi-reserved". Phase 48 item
-    // 6's own fix (see the sibling test above) means this now keeps its
-    // real declared case throughout the qualified name, not just a
-    // bare, unqualified reference.
+    // keyword - PHP's keywords are mostly "semi-reserved". Its real
+    // declared case must be kept throughout the qualified name (see the
+    // sibling test above), not just for a bare, unqualified reference.
     let program = parse("<?php use Piwigo\\Common\\Enum\\AlbumSortOrder;");
     let StmtKind::Use(imports) = &program[0].kind else {
         panic!("expected Use");

@@ -1,16 +1,13 @@
-//! Phase 46: wires `pcre_validate::validate_pattern` into every real
-//! PHP builtin that takes a PCRE pattern literal at argument 0 - real
+//! Wires `pcre_validate::validate_pattern` into every real PHP builtin
+//! that takes a PCRE pattern literal at argument 0, mirroring real
 //! PHPStan's own `RegularExpressionPatternRule::extractPatterns`
-//! (`#[RegisteredRule(level: 0)]`, always-on, not opt-in - see that
-//! module's own doc comment for why this project mirrors that instead of
-//! the usual 9-field opt-in-check precedent). `identifier: "regexp.
-//! pattern"` reuses real PHPStan's own spelling.
+//! (`#[RegisteredRule(level: 0)]`, always-on, not opt-in).
+//! `identifier: "regexp.pattern"` reuses real PHPStan's own spelling.
 //!
 //! `preg_grep`'s own `$pattern` is always a plain string in real PHP/
-//! PHPStan - it has no array form, unlike its 3 siblings just below -
-//! confirmed directly against `RegularExpressionPatternRule::
-//! extractPatterns`, which only puts `preg_replace`/`preg_replace_
-//! callback`/`preg_filter` in its own array-of-patterns group.
+//! PHPStan - it has no array form, unlike its 3 siblings just below;
+//! only `preg_replace`/`preg_replace_callback`/`preg_filter` take the
+//! array-of-patterns form.
 
 use crate::ast::{Arg, Expr, ExprKind, Literal};
 use crate::checker::Checker;

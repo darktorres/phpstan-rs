@@ -70,8 +70,8 @@ fn a_var_tag_widening_the_assigned_value_is_never_flagged() {
     );
 }
 
-// Real corpus find (Piwigo's own `Piwigo\Category\CategoryRepository::
-// findAvailableList`): `/** @var list<array<string, mixed>> $rows */
+// Piwigo's own `Piwigo\Category\CategoryRepository::findAvailableList`:
+// `/** @var list<array<string, mixed>> $rows */
 // $rows = $qb->getQuery()->getArrayResult();` - Doctrine's own
 // `getArrayResult()` returns a bare, imprecise `array`, and the whole
 // point of writing an inline `@var` here is to *refine* that into a

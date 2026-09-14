@@ -101,22 +101,19 @@ fn moderately_nested_unary_still_parses() {
 #[should_panic(expected = "expression nested too deeply")]
 fn pathologically_nested_unary_fails_cleanly_instead_of_overflowing_the_stack() {
     // php-src's Zend/tests/stack_limit/stack_limit_013.phpt is exactly
-    // this shape (~7700 levels) - it's designed to test the real
-    // engine's own stack-depth guard, and used to take this parser's
-    // process down with an uncatchable stack overflow instead of a
-    // normal parse error.
+    // this shape (~7700 levels), designed to test the real engine's own
+    // stack-depth guard; parsing it must produce a normal parse error,
+    // not an uncatchable stack overflow.
     //
-    // Runs on its own thread with an explicit, generous stack size -
-    // mirrors `main.rs::run_check`'s own `WORKER_STACK_SIZE` fix for
-    // the identical root cause, rather than depending on whatever stack
-    // size the test harness's own thread happens to have. A debug
-    // build's much larger per-frame stack usage through `parse_unary`'s
-    // own recursive descent means even the parser's own
-    // `MAX_EXPR_DEPTH = 1000` guard can physically exhaust a small
-    // default thread stack before its own counter ever gets a chance
-    // to trip - exactly the class of crash this test exists to catch.
-    // Re-raises the inner thread's own panic payload so `#[should_
-    // panic]` still sees the real message.
+    // Runs on its own thread with an explicit, generous stack size,
+    // matching `main.rs::run_check`'s own `WORKER_STACK_SIZE`, rather
+    // than depending on whatever stack size the test harness's own
+    // thread happens to have - a debug build's much larger per-frame
+    // stack usage through `parse_unary`'s own recursive descent means
+    // even the parser's own `MAX_EXPR_DEPTH = 1000` guard can physically
+    // exhaust a small default thread stack before its own counter ever
+    // gets a chance to trip. Re-raises the inner thread's own panic
+    // payload so `#[should_panic]` still sees the real message.
     let nested = "~".repeat(8000);
     let source = format!("<?php $x = {nested}1;");
     let result = std::thread::Builder::new()

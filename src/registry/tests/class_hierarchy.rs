@@ -232,14 +232,11 @@ fn trait_methods_and_properties_are_flattened_in() {
 
 #[test]
 fn trait_flattening_works_across_namespaced_classes() {
-    // Every existing trait-flattening test uses bare (non-namespaced)
-    // PHP - exactly the blind spot that let a real Phase 7
-    // invalidation regression through undetected (a bare-name lookup
-    // silently found nothing once real code's names became FQNs).
-    // flatten_traits iterates self.classes (FQN-keyed) and resolves
-    // each class's own `uses` list (also FQN, via ClassInfo::from_decl's
-    // ctx.resolve) to look trait method/property tables up by - both
-    // sides need to actually agree for this to find anything at all.
+    // `flatten_traits` iterates `self.classes` (FQN-keyed) and resolves
+    // each class's own `uses` list (also FQN, via `ClassInfo::from_decl`'s
+    // `ctx.resolve`) to look trait method/property tables up by - both
+    // sides need to actually agree for this to find anything at all, so
+    // this must be tested with namespaced (not bare) PHP.
     let r = build_registry(
         r#"<?php
             namespace App;
@@ -264,12 +261,10 @@ fn trait_flattening_works_across_namespaced_classes() {
 
 #[test]
 fn trait_flattening_also_works_for_enums_not_just_classes() {
-    // Coverage measurement found ClassInfo::from_enum_decl's `uses`
-    // closure (resolving an enum's own `use SomeTrait;`) had zero
-    // test executions - enums can use traits in real PHP, and
-    // flatten_traits/lookup_method don't distinguish a class's
-    // ClassInfo from an enum's, but nothing had actually proven an
-    // enum's trait methods flatten in correctly until now.
+    // Enums can use traits in real PHP, and `flatten_traits`/
+    // `lookup_method` don't distinguish a class's `ClassInfo` from an
+    // enum's - covers `ClassInfo::from_enum_decl`'s `uses` closure
+    // (resolving an enum's own `use SomeTrait;`).
     let r = build_registry(
         r#"<?php
             trait Greets {

@@ -1,9 +1,9 @@
-//! Phase 78: `DateTimeInterface::format()`/`DateInterval::format()`
-//! return-type wiring, `DateTimeInterface::diff()` narrowing, and
+//! `DateTimeInterface::format()`/`DateInterval::format()` return-type
+//! wiring, `DateTimeInterface::diff()` narrowing, and
 //! `SimpleXMLElement::asXML()`'s real arity-dependent overload split -
-//! all verified directly against real PHPStan source
-//! (`DateFunctionReturnTypeHelper`, `DateIntervalFormatReturnTypeHelper`,
-//! `SimpleXMLElementAsXMLMethodReturnTypeExtension`).
+//! mirroring real PHPStan's `DateFunctionReturnTypeHelper`,
+//! `DateIntervalFormatReturnTypeHelper`, and
+//! `SimpleXMLElementAsXMLMethodReturnTypeExtension`.
 
 use super::helpers::*;
 
@@ -181,9 +181,8 @@ fn datetime_diff_result_is_still_a_real_dateinterval() {
 }
 
 // SimpleXMLElement::asXML() - exactly one argument (a filename) returns
-// bool; zero arguments returns string|false. (The design doc's own
-// paraphrase had this backwards - verified directly against real
-// PHPStan's own SimpleXMLElementAsXMLMethodReturnTypeExtension source.)
+// bool; zero arguments returns string|false (real PHPStan's own
+// SimpleXMLElementAsXMLMethodReturnTypeExtension).
 
 #[test]
 fn simplexmlelement_asxml_with_no_arguments_is_string_or_false() {

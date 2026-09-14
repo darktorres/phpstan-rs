@@ -1,5 +1,5 @@
-//! Phase 63: a single class/interface/trait/enum body literally
-//! redeclaring the same constant/enum-case/property/method name twice -
+//! A single class/interface/trait/enum body literally redeclaring the
+//! same constant/enum-case/property/method name twice -
 //! `DuplicateDeclarationHelper`'s own core case.
 
 use super::helpers::*;
@@ -236,11 +236,11 @@ fn a_non_promoted_constructor_parameter_is_never_treated_as_a_property() {
     );
 }
 
-// Real corpus find: phpstorm-stubs represents "this member's own shape
-// changed across PHP versions" by declaring the same conceptual member
-// twice, once per era - a real bug (an actual copy-paste duplicate)
-// never has two *different* signatures for the "same" declaration,
-// since it's definitionally the same one twice.
+// phpstorm-stubs represents "this member's own shape changed across PHP
+// versions" by declaring the same conceptual member twice, once per era
+// - a real bug (an actual copy-paste duplicate) never has two
+// *different* signatures for the "same" declaration, since it's
+// definitionally the same one twice.
 #[test]
 fn two_methods_of_the_same_name_but_different_param_types_are_not_flagged() {
     let d = diagnostics_for(

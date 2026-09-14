@@ -140,8 +140,7 @@ fn a_mixin_never_overrides_a_real_own_declaration() {
 
 #[test]
 fn a_method_tag_never_shadows_a_same_named_real_trait_method() {
-    // Real corpus bug found via corpus verification: `pestphp/pest-
-    // plugin-arch`'s own `Blueprint` tags `@method void
+    // `pestphp/pest-plugin-arch`'s own `Blueprint` tags `@method void
     // assertDoesNotDependOn(Layer $target, Layer $dependency)` while also
     // `use`-ing a trait that really implements it, under different
     // parameter names. `@method` synthesis has to run *after* trait
@@ -171,10 +170,9 @@ fn a_method_tag_never_shadows_a_same_named_real_trait_method() {
 
 #[test]
 fn a_purely_magic_method_tag_on_an_interface_is_never_required_of_implementors() {
-    // Real corpus bug found via corpus verification: Tracy's own
-    // `IBarPanel`, `@method ?string getAgentInfo()` - a magic-`__call`
-    // capability hint, never a real requirement (real PHP has no way to
-    // even express "this interface method is optional").
+    // Tracy's own `IBarPanel`, `@method ?string getAgentInfo()` - a
+    // magic-`__call` capability hint, never a real requirement (real PHP
+    // has no way to even express "this interface method is optional").
     let d = diagnostics_for(
         r#"<?php
             /** @method ?string getAgentInfo() */
