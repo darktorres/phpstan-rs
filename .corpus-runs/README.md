@@ -372,5 +372,40 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   a real, broad improvement - 38152 -> 38006, 146 findings removed
   across third-party vendor code (`dasprid/enum`, `filp/whoops`,
   `gettext/gettext`, and more, both `missingType.iterableValue` and the
-  hint-less `missingType.return` bonus case), zero new - current
-  baseline for future diffs.
+  hint-less `missingType.return` bonus case), zero new.
+- `1709383` then `2906486` - a real generics-substitution gap
+  (`MessengerFactory::transport`'s own call through
+  `DoctrineTransportFactory`, full diagnosis in ROADMAP.md's own Done
+  entry): a class-scoped ancestor `@template` never substituted through
+  the implementing class's own `@implements Interface<Concrete>` tag
+  when that class *re-declares* the method itself (not merely inherits
+  it unedited). `1709383`'s own first attempt (call-time resolution in
+  `substitute_class_templates` + a loosened backfill guard) fixed the
+  target case but introduced a real, confirmed regression: a raw,
+  unresolved `TemplateParam` (literally e.g. `"TNodeType"`) leaking into
+  diagnostics whenever a signature was read to check its *own declaring
+  class's own method body* rather than through an external call -
+  caught via the *unscoped* corpus diff (`Composer\Pcre\PHPStan\
+  InvalidRegexPatternRule::processNode`'s own `$node`, implementing real
+  PHPStan's own `Rule<TNodeType>`), not the scoped one (Piwigo has no
+  such shape). `2906486` fixed it properly: resolve a class-scoped
+  ancestor template *eagerly*, at backfill time
+  (`Registry::substitute_class_scoped_ancestor_templates`), matching
+  real PHPStan's own mechanism exactly, not merely checking a binding is
+  *available* and deferring substitution to whichever call path happens
+  to read the signature next. Scoped 51 -> 50 both times (target finding
+  removed cleanly, zero new, at every step - Piwigo's own corpus never
+  had the shape the regression needed to manifest). Unscoped:
+  `1709383`'s own diff was 507 removed/58 added; `2906486`'s corrected
+  diff is 445 removed/43 added, and the specific "`TNodeType`-shaped
+  leak" pattern (`class.notFound`/`argument.type` naming a bare template
+  name as if it were a real type) that motivated the correction is
+  completely gone from the 43 remaining additions. The remaining
+  additions were spot-checked, not chased to zero: some are genuine new
+  precision (Doctrine ORM's own real generic bindings now resolving);
+  one confirmed sample (`cyclonedx/cyclonedx-library`'s own
+  `TNormalizedBom`) is a pre-existing, unrelated gap - a Psalm-only
+  `@psalm-type` alias tag this project (like real PHPStan itself) has no
+  reason to resolve, reached for the first time now that a class-scoped
+  ancestor template argument gets parsed/used at all, not a defect in
+  this fix - current baseline for future diffs.
