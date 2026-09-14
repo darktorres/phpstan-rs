@@ -1,21 +1,13 @@
 use crate::types::{AccessoryKind, Type};
 
-/// Whether `fields` (an `ArrayShape`'s own field list) is a
-/// *definite* list - canonical-int-key-sequential from zero *and* no
-/// optional field followed by a later, non-optional one. Shared by three
-/// call sites (this file, `checker/expr/array_ops.rs`'s `is_list_like`,
-/// `checker/calls/format_string.rs`'s `vsprintf`/`vprintf` arg-count
-/// check) so each field's own `optional` flag is honored consistently:
-/// per real PHPStan's own `ConstantArrayTypeBuilder` algorithm,
-/// `array{0: int, 1?: string, 2: int}` is genuinely `Maybe`-a-list (if
-/// the optional field 1 is truly absent at runtime, the remaining keys
-/// `{0, 2}` aren't list-sequential at all). Staying on this project's
-/// own established false-
-/// negative-favoring side (a `Maybe` counts as "not a definite list"
-/// here, not "close enough") - once an optional field is seen, every
-/// field after it must also be optional (a trailing run of optional
-/// fields is fine; an optional field immediately followed by a required
-/// one is exactly the case that makes the "list" claim unsound).
+/// Whether `fields` (an `ArrayShape`'s field list) is a *definite* list,
+/// canonical-int-key-sequential from zero *and* no optional field
+/// followed by a later, non-optional one. Per real PHPStan's own
+/// `ConstantArrayTypeBuilder` algorithm, `array{0: int, 1?: string, 2:
+/// int}` is only `Maybe`-a-list, since an absent optional field 1 would
+/// leave the remaining keys `{0, 2}` non-sequential - a `Maybe` counts
+/// as "not a definite list" here, the project's false-negative-favoring
+/// default.
 pub(crate) fn shape_fields_are_list_like(fields: &[(String, Type, bool)]) -> bool {
     let mut seen_optional = false;
     for (i, (k, _, optional)) in fields.iter().enumerate() {
@@ -30,31 +22,21 @@ pub(crate) fn shape_fields_are_list_like(fields: &[(String, Type, bool)]) -> boo
     true
 }
 
-/// The aggregate key type real PHPStan's own `ConstantArrayType::
+/// The aggregate key type real PHPStan's `ConstantArrayType::
 /// getIterableKeyType()` reports for a shape - the union of each *real*
-/// field's own key kind (the `"..."` unsealed-tail sentinel contributes
-/// nothing, same reasoning as `Checker::array_key_type`'s own identical
-/// skip, `checker/expr/array_ops.rs`). Standalone here (not `checker`-
-/// scoped) so `registry::assignability`/this module's own `is_subtype`
-/// can compare an `ArrayShape`'s real key type against a `Type::Array`'s
-/// declared one, so `array{name: string}` (an all-string-keyed shape) is
-/// not wrongly assignable to `array<int, string>`. `Type::Never` for a
-/// shape with no real fields
-/// at all (every field is `"..."`, or the list is empty) - vacuously a
-/// subtype of any key type via `is_subtype`'s own existing
-/// `(Never, _) => true` arm just below, so callers need no special case.
+/// field's key kind (the `"..."` unsealed-tail sentinel contributes
+/// nothing). Lets `registry::assignability`/`is_subtype` compare an
+/// `ArrayShape`'s real key type against a `Type::Array`'s declared one,
+/// so `array{name: string}` isn't wrongly assignable to
+/// `array<int, string>`. `Type::Never` for a shape with no real fields
+/// (vacuously a subtype of any key type via the `(Never, _) => true` arm
+/// below).
 ///
-/// An int-canonical key contributes its own real `Type::IntLiteral`, not
-/// the bare `Type::Int` widening - needed so, e.g., `array{0: ...}` (a
-/// real, known-non-negative literal `0` key) doesn't wrongly fail against
-/// an `array<int<0, max>, ...>`-typed parameter
-/// (a real shape, e.g. Doctrine DBAL's own `executeStatement`/several of
-/// Piwigo's own local `fetchCount`-style helpers) purely because `Type::
-/// Int` isn't a confirmed subtype of `int<0, max>` (it could be
-/// negative), even though the one concrete key actually written always
-/// is. `IntLiteral -> IntRange` subtyping already exists (`is_subtype`'s
-/// own arm just below this function) - this only needed the literal
-/// itself preserved, not new subtyping logic.
+/// An int-canonical key contributes its own `Type::IntLiteral`, not the
+/// bare `Type::Int` widening - needed so `array{0: ...}` doesn't wrongly
+/// fail against an `array<int<0, max>, ...>`-typed parameter (`Type::Int`
+/// isn't a confirmed subtype of `int<0, max>`, even though the one
+/// concrete key written always is non-negative).
 pub(crate) fn shape_key_type(fields: &[(String, Type, bool)]) -> Type {
     let mut key_types: Vec<Type> = Vec::new();
     for (key, _, _) in fields.iter().filter(|(k, _, _)| k != "...") {
@@ -73,23 +55,20 @@ pub(crate) fn shape_key_type(fields: &[(String, Type, bool)]) -> Type {
     }
 }
 
-/// Is every value described by `sub` also described by `sup`? This is the
-/// same relation PHPStan calls `isSuperTypeOf` (inverted) - the thing every
-/// "does this assignment/return/argument type-check" question reduces to.
-/// Class hierarchy isn't modeled yet, so `Object` subtyping is name-equality
-/// only; self/parent/static are accepted against any `Object` as a
-/// placeholder until a class-context resolver exists.
+/// Is every value described by `sub` also described by `sup`? The same
+/// relation PHPStan calls `isSuperTypeOf` (inverted). Class hierarchy
+/// isn't modeled yet, so `Object` subtyping is name-equality only;
+/// self/parent/static are accepted against any `Object` as a placeholder
+/// until a class-context resolver exists.
 /// Whether `a`/`b` should be treated as the identical type for union
 /// deduplication - ordinary `==` for everything except a `list<T>`/
 /// `non-empty-list<T>` pair, which can be structurally unequal (a
 /// literal `Type::Int` key vs. the generic `unknown_array_key()`
-/// sentinel - see the `is_subtype` `Intersection`-vs-`Intersection` list
-/// arm's own doc comment for why both exist) while still being the same
-/// type PHPStan-visibly. Without this, `union_types` would keep both as
-/// separate members whenever a docblock-declared `list<T>` and a
-/// runtime-inferred one of the same element type meet in one union,
-/// printing a duplicate `list<int>|list<int>` (real shape:
-/// `SearchService::getRegularSearchResults()`).
+/// sentinel - see `is_subtype`'s `Intersection`-vs-`Intersection` list
+/// arm) while still the same type PHPStan-visibly. Without this,
+/// `union_types` would print a duplicate `list<int>|list<int>` whenever
+/// a docblock-declared `list<T>` and a runtime-inferred one of the same
+/// element type meet in one union.
 pub(crate) fn types_equal_for_union(a: &Type, b: &Type) -> bool {
     if a == b {
         return true;
@@ -131,21 +110,15 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::FloatLiteral(a), Type::FloatLiteral(b)) if a.is_nan() && b.is_nan() => true,
         (a, b) if a == b => true,
 
-        // A shaped callable is always compatible with a bare
-        // marker, in both directions - deliberately lenient, matching
-        // this file's own established "can't verify, don't guess wrong"
-        // pattern one screen down (`ClassString`/`String` interchange-
-        // ability). Two *different* shapes are also declared
-        // unconditionally compatible rather than attempting real
+        // A shaped callable is always compatible with a bare marker,
+        // and two *different* shapes are unconditionally compatible with
+        // each other - deliberately lenient, since real
         // contravariant-parameter/covariant-return comparison
-        // (`CallableTypeHelper::isParametersAcceptorSuperTypeOf`'s own
-        // job in real PHPStan) - reproducing that correctly needs
-        // variance machinery this project deliberately declines to
-        // build. This means a
-        // parsed callable shape is only ever used *forward* (describing
-        // what happens when a value is invoked) and never *backward* (to
-        // reject an assignment) - the single biggest false-positive-
-        // avoidance call in this whole sub-item.
+        // (`CallableTypeHelper::isParametersAcceptorSuperTypeOf`) needs
+        // variance machinery this project declines to build. A parsed
+        // callable shape is thus only ever used *forward* (describing
+        // what happens when invoked), never *backward* (to reject an
+        // assignment).
         (Type::Callable(Some(_)), Type::Callable(None)) => true,
         (Type::Callable(None), Type::Callable(Some(_))) => true,
         (Type::Callable(Some(_)), Type::Callable(Some(_))) => true,
@@ -210,20 +183,16 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::StringLiteral(s), Type::Accessory(AccessoryKind::DecimalIntegerString)) => {
             is_decimal_integer_string_literal(s)
         }
-        // Real containment between kinds: every non-falsy string is
-        // non-empty; no other pair implies another.
+        // Every non-falsy string is non-empty; no other pair implies
+        // another.
         (
             Type::Accessory(AccessoryKind::NonFalsyString),
             Type::Accessory(AccessoryKind::NonEmptyString),
         ) => true,
-        // Mirrors real `AccessoryDecimalIntegerStringType`'s own
-        // (non-inverse) `isNumericString`/`isLowercaseString`/
-        // `isUppercaseString` (all `TrinaryLogic::createYes()`,
-        // `AccessoryDecimalIntegerStringType.php:364-397`) and
-        // `isNonEmptyString` (`:374-377`) - a decimal integer string
-        // (`"0"`, `"123"`, `"-1"`) is always also numeric, "lowercase" and
-        // "uppercase" (it has no letters to fail either check), and
-        // non-empty.
+        // A decimal integer string (`"0"`, `"123"`, `"-1"`) is always
+        // also numeric, "lowercase" and "uppercase" (no letters to fail
+        // either check), and non-empty (mirrors real
+        // `AccessoryDecimalIntegerStringType`).
         (
             Type::Accessory(AccessoryKind::DecimalIntegerString),
             Type::Accessory(
@@ -240,66 +209,41 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
             shape_fields_are_list_like(fields)
         }
 
-        // An unbound template parameter is a placeholder, not a real type.
-        // Call sites should have already substituted it away
-        // (checker::infer_call_return_type); these are the safety net for
-        // wherever that doesn't happen.
+        // An unbound template parameter is a placeholder; call sites
+        // should have already substituted it away
+        // (checker::infer_call_return_type) - this is the safety net.
         //
-        // Used as `sub` (the actual/source side), this is bound-aware
-        // rather than an unconditional escape hatch - whatever `T`
-        // ultimately gets instantiated to is guaranteed to satisfy its
-        // own declared bound (real PHPStan's own upper-bound semantics),
-        // so `T` is a subtype of `sup` exactly when its bound is. An
-        // undeclared bound is `Mixed`, and `is_subtype(Mixed, sup)` is
-        // *not* generally true (only when `sup` is `Mixed` too, via the
-        // very first arm above) - so the extremely common bound-free
-        // `@template T` gets an explicit, separate `true` here.
+        // Used as `sub`, bound-aware rather than an unconditional escape
+        // hatch: `T` is a subtype of `sup` exactly when its bound is
+        // (real PHPStan's own upper-bound semantics). An undeclared
+        // bound is `Mixed`, and `is_subtype(Mixed, sup)` isn't generally
+        // true, so bound-free `@template T` gets an explicit `true`.
         //
-        // Placed deliberately *before* the `(_, Union(members))` arm
-        // below, not just after the ordinary early arms: that arm's own
+        // Placed *before* the `(_, Union(members))` arm below: that arm's
         // "is `sub` a subtype of *any one* union member" splitting is
-        // wrong for a `TemplateParam` whose own bound is *itself* a union
-        // (`@template TKey of array-key`, i.e. bound `int|string`) - it
-        // recursed into `is_subtype(TemplateParam(TKey), Int)` and
-        // `is_subtype(TemplateParam(TKey), String)` *separately*, each
-        // one correctly false (`int|string` isn't a subtype of `Int`
-        // alone, nor of `String` alone), concluding the *whole* check
-        // failed even though `TKey`'s own bound is exactly the target
-        // union as a whole. Real corpus shape: doctrine/collections' own
-        // `Collection<TKey, T>` self-reference inside its own `map()`/
-        // `filter()`/`partition()` methods' `@phpstan-return` tags,
-        // where `TKey` (this same class's own template, correctly bound
-        // to `array-key`) is passed right back as the argument satisfying
-        // that identical bound - `generics.templateBound` would otherwise
-        // wrongly fire as if `TKey` didn't satisfy its own declared bound
-        // at all.
+        // wrong when a `TemplateParam`'s own bound is *itself* a union
+        // (`@template TKey of array-key`) - it would check
+        // `is_subtype(TemplateParam(TKey), Int)` and `...String)`
+        // *separately* (both false) instead of recognizing `TKey`'s bound
+        // as exactly the target union as a whole (real shape:
+        // doctrine/collections' `Collection<TKey, T>` self-reference in
+        // its own `map()`/`filter()`/`partition()` `@phpstan-return`
+        // tags).
         (Type::TemplateParam(tp), _) => {
             matches!(*tp.bound, Type::Mixed) || is_subtype(&tp.bound, sup)
         }
-        // An unresolved `Conditional` - either it
-        // leaked into a position `types::conditional::resolve_conditional`
-        // never runs against (a `@param`/`@var` tag, since `parse_type_
-        // string` is shared across every tag kind, not scoped to
-        // `@return` only, or a `return` *statement*'s own compliance
-        // check against its declaring function's signature, which has no
-        // call-site argument to resolve the subject against at all), or
-        // resolution ran but the subject was left unbound/`Mixed`. Falls
-        // back to the eager `Union([if_true, if_false])` comparison -
-        // literally builds that `Union` and delegates to `is_subtype`
-        // again, rather than hand-rolling a narrower
-        // `is_subtype(sub, if_true) || is_subtype(sub, if_false)`-style
-        // check: that narrower form would reject a `sub` that's *itself*
-        // a `Union` straddling both branches (e.g.
-        // `list<string>|list<X>`, entirely valid piecewise) unless the
-        // *whole* union happened to fit in just one branch alone -
-        // delegating to the real `Union`-vs-`Union` rule two arms below
-        // (`.all` over `sub`'s own members, `.any` against the
-        // reconstructed branch set) is what correctly allows that.
-        // Placed *before* the `Union` arms below, not after: `sub`/`sup`
-        // must be able to reach this arm however they're nested (a
-        // `Conditional` buried inside a real `Union`, or vice versa)
-        // before either generic `Union` arm gets a chance to consume the
-        // match first.
+        // An unresolved `Conditional` - either it leaked into a
+        // position `resolve_conditional` never runs against (a
+        // `@param`/`@var` tag, or a `return` statement's own compliance
+        // check, which has no call-site argument to resolve against), or
+        // the subject was left unbound/`Mixed`. Falls back to the eager
+        // `Union([if_true, if_false])`, delegating to `is_subtype` rather
+        // than a narrower `is_subtype(sub, if_true) ||
+        // is_subtype(sub, if_false)` check, which would wrongly reject a
+        // `sub` that's itself a `Union` straddling both branches (e.g.
+        // `list<string>|list<X>`). Placed *before* the `Union` arms
+        // below so a `Conditional` nested inside a `Union` (or vice
+        // versa) still reaches this arm.
         (
             Type::Conditional {
                 if_true, if_false, ..
@@ -318,26 +262,15 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
             sub,
             &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
         ),
-        // `A & B <: B` is a basic law of intersection types that must hold
-        // unconditionally, but with only the two generic rules below
-        // (and the identical pair further down for `Intersection`), an
-        // `Intersection` whose own member happens to *be* a `Union`
-        // (e.g. `Intersection([Void, Union([Null, Bool])])` checked
-        // against `Union([Null, Bool])`) fell through to the plain
-        // `(_, Union(members)) => any(is_subtype(sub, m))` rule just
-        // below - decomposing the *target* Union's own members
-        // (`Null`/`Bool`) and asking whether the *whole, undecomposed*
-        // intersection satisfies either alone, which it doesn't
-        // (correctly - the intersection's other member, `Void`, isn't
-        // `Null` either) - never getting a chance to try the
-        // intersection's own member-projection instead (`sub_members.any
-        // (is_subtype(m, sup))`, which the generic `Intersection`-vs-`_`
-        // rule further down already handles correctly on its own, just
-        // never reached here because this more general `Union`-sup rule
-        // intercepts first). This arm tries both projections whenever
-        // both shapes are present at once, succeeding if either proves
-        // it - strictly additive (only turns a previously-wrong `false`
-        // into the mathematically-correct `true`, never the reverse).
+        // `A & B <: B` must hold unconditionally, but the generic
+        // `(_, Union(members)) => any(is_subtype(sub, m))` rule below
+        // would decompose the *target* union's members and ask whether
+        // the whole, undecomposed intersection satisfies either alone
+        // (e.g. `Intersection([Void, Union([Null, Bool])])` against
+        // `Union([Null, Bool])` - correctly false either way alone),
+        // never trying the intersection's own member-projection instead.
+        // This arm tries both projections, succeeding if either proves
+        // it - strictly additive.
         (Type::Intersection(sub_members), Type::Union(sup_members)) => {
             sub_members.iter().any(|m| is_subtype(m, sup))
                 || sup_members.iter().any(|s| is_subtype(sub, s))
@@ -345,41 +278,28 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::Union(members), _) => members.iter().all(|m| is_subtype(m, sup)),
         (_, Type::Union(members)) => members.iter().any(|m| is_subtype(sub, m)),
 
-        // An intersection-vs-intersection pair needs its own rule, not
-        // just the two generic ones below composed together: `sub`
-        // satisfies `sup` as a whole only if it satisfies *every* one of
-        // `sup`'s own members (checked via `is_subtype(sub, m)`, which
-        // still correctly uses "any one of sub's own members satisfies
-        // this single target" for each). Without this, e.g.
-        // `non-falsy-string` (`Intersection([String, NonFalsyString])`)
-        // failed to prove itself a subtype of `non-empty-string`
-        // (`Intersection([String, NonEmptyString])`) even though every
-        // non-falsy string genuinely is non-empty: the generic `(sub is
-        // Intersection) => any(...)` rule alone only checks whether one
-        // *bare* member of `sub` satisfies the whole `sup` intersection,
-        // never whether `sub`'s own combination does.
-        // A `list<T>`/`non-empty-list<T>` pair needs its own rule ahead
-        // of the generic one below: this project builds the exact same
-        // `list<T>` shape two different ways that both stay internally
-        // consistent on their own but disagree structurally - a
-        // docblock-parsed one (`parse_type_string`'s `"list"` arm) uses a
-        // literal `Type::Int` key (needed so stripping the list marker
-        // later, e.g. `array_diff()`'s own result, still shows a known
-        // `array<int, T>` rather than collapsing to a keyless `array<T>`
-        // - verified via dumpType()), while every runtime-inferred one
-        // (`array_values()`, `sort()`, ...) uses the generic
-        // `unknown_array_key()` sentinel instead (deliberately, per
-        // `upgrade_array_to_list`'s own doc comment - a list's key is
-        // always int *by definition*, so encoding it twice was judged
-        // redundant). The generic `Array` key check below is directionally
-        // asymmetric between the two (`is_subtype(unknown_array_key(),
-        // Int)` is false, `is_subtype(Int, unknown_array_key())` is true),
-        // so without this a real runtime `list<int>` failed to satisfy an
-        // otherwise-identical docblock-declared `list<int>` parameter/
-        // return type - corpus-verified via `SearchService::
-        // getRegularSearchResults()`'s own real return-type mismatch.
-        // Keys are skipped entirely here (both are provably int either
-        // way); only the element type and `NonEmptyArray` need comparing.
+        // An intersection-vs-intersection pair needs its own rule:
+        // `sub` satisfies `sup` as a whole only if it satisfies *every*
+        // one of `sup`'s members - the generic `(sub is Intersection) =>
+        // any(...)` rule alone only checks whether one *bare* member of
+        // `sub` satisfies the whole `sup` intersection, never whether
+        // `sub`'s own combination does (e.g. `non-falsy-string` proving
+        // itself a subtype of `non-empty-string`).
+        //
+        // A `list<T>`/`non-empty-list<T>` pair also needs its own rule:
+        // this project builds the same `list<T>` shape two different
+        // ways - a docblock-parsed one uses a literal `Type::Int` key
+        // (so stripping the list marker later still shows a known
+        // `array<int, T>`, not a keyless `array<T>`), while a
+        // runtime-inferred one (`array_values()`, `sort()`, ...) uses the
+        // generic `unknown_array_key()` sentinel (a list's key is always
+        // int by definition, so encoding it twice is redundant - see
+        // `upgrade_array_to_list`). The generic `Array` key check below
+        // is directionally asymmetric between the two, so without this a
+        // real runtime `list<int>` would fail to satisfy an
+        // otherwise-identical docblock-declared `list<int>` type. Keys
+        // are skipped here (both are provably int either way); only the
+        // element type and `NonEmptyArray` need comparing.
         (Type::Intersection(sub_members), Type::Intersection(sup_members))
             if sub_members.contains(&Type::Accessory(AccessoryKind::ArrayList))
                 && sup_members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
@@ -404,13 +324,10 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::Intersection(members), _) => members.iter().any(|m| is_subtype(m, sup)),
         (_, Type::Intersection(members)) => members.iter().all(|m| is_subtype(sub, m)),
 
-        // A key-type check alongside the existing value-type
-        // one - `array<int, T>` is not a subtype of `array<string, T>`.
-        // The common "don't know the real key" case (`Type::
-        // unknown_array_key()`, `int|string`) still passes here via the
-        // ordinary `Union` subtype rule above, so this is additive
-        // precision, not a new source of false positives against the
-        // vast majority of call sites that haven't proven a narrower key.
+        // A key-type check alongside the value-type one - `array<int, T>`
+        // is not a subtype of `array<string, T>`. The common "don't know
+        // the real key" case (`unknown_array_key()`, `int|string`) still
+        // passes via the ordinary `Union` subtype rule above.
         (Type::Array(ka, a), Type::Array(kb, b)) => is_subtype(ka, kb) && is_subtype(a, b),
 
         // `class-string<T>` stays freely interchangeable with plain
