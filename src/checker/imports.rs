@@ -4,15 +4,14 @@ use crate::DiagnosticBuilder;
 use crate::ast::*;
 use crate::checker::{Checker, class_kind_identifier};
 
-/// Phase 48 follow-up/48.G: real PHPStan's own `INTERNAL_CLASS_PREFIXES`
+/// Real PHPStan's own `INTERNAL_CLASS_PREFIXES`
 /// (`ClassForbiddenNameCheck`), transcribed - a Rector/PHP-Scoper/PHPUnit-
 /// PHAR/Box-prefixed vendor class name almost always leaked into a
 /// reference by mistake. `pub(crate)` so `checker::resolve.rs`'s own
-/// `check_type_class_names_exist` (Phase 48.G's own pipeline-wide
-/// widening - every one of that function's ~18 call sites, not just the
-/// `use`-import site this module's own `check_use_class_imports` already
-/// covered) can share the identical list rather than drifting out of
-/// sync with a second copy.
+/// `check_type_class_names_exist` (every one of that function's call
+/// sites, not just the `use`-import site this module's own
+/// `check_use_class_imports` already covers) can share the identical
+/// list rather than drifting out of sync with a second copy.
 pub(crate) const INTERNAL_CLASS_PREFIXES: &[(&str, &str)] = &[
     ("PHPStan", "_PHPStan_"),
     ("Rector", "RectorPrefix"),
@@ -22,9 +21,8 @@ pub(crate) const INTERNAL_CLASS_PREFIXES: &[(&str, &str)] = &[
 ];
 
 impl<'a> Checker<'a> {
-    /// Phase 48 (+ follow-up): real PHPStan's own `ExistingNamesInUseRule`,
-    /// confirmed directly against `vendor/phpstan-src`, only ever
-    /// existence-checks the `use function foo;` and `use const FOO;`
+    /// Real PHPStan's own `ExistingNamesInUseRule`
+    /// only ever existence-checks the `use function foo;` and `use const FOO;`
     /// forms - a plain, class-shaped `use Foo;` goes through
     /// `ClassNameCheck::checkClassNames` with a `null` usage location,
     /// which (per its own source) only runs case-sensitivity/
@@ -95,9 +93,7 @@ impl<'a> Checker<'a> {
     /// not opt-in: PHP constants are case-sensitive at the language
     /// level, so there's no "resolves fine but wrong case" scenario the
     /// way there is for a function/class name, and real PHPStan has no
-    /// `constant.nameCase` concept at all (confirmed directly against
-    /// `ExistingNamesInUseRule::checkConstants` - no name-case branch
-    /// exists there, full stop). Backed by `Registry::global_constants`,
+    /// `constant.nameCase` concept at all. Backed by `Registry::global_constants`,
     /// populated for every project-level `const`/`define()` declaration
     /// (`registry/index.rs`'s `build_declarations_with_context`) *and*
     /// every real built-in/extension constant the vendored phpstorm-
@@ -134,7 +130,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48 follow-up, `ClassForbiddenNameCheck`: a `use`-imported
+    /// `ClassForbiddenNameCheck`: a `use`-imported
     /// class-shaped name matching one of a small, fixed set of internal
     /// build-tool-mangled prefixes (transcribed from real PHPStan's own
     /// `INTERNAL_CLASS_PREFIXES`) almost always means a Rector/PHP-Scoper/
@@ -151,18 +147,13 @@ impl<'a> Checker<'a> {
     /// deliberately NOT built here: unlike `check_use_function_imports`'s
     /// sibling `function.nameCase` check (opt-in, since real PHPStan's
     /// own `checkFunctionNameCase` config defaults `false` at every
-    /// level), the class case-check's own gating flag defaults *active*
+    /// level), the class case-check's own gating flag defaults active
     /// in real PHPStan - but this project's own class-name resolution
     /// does already have a real case-insensitive fallback
-    /// (`Registry::lookup_class`, `registry/hierarchy.rs`, Phase 48.1),
-    /// contrary to an earlier reading of this comment (correction:
-    /// verified directly against current source). `class.nameCase`
-    /// itself is already built and wired at other class-reference sites
-    /// project-wide (`checker/resolve.rs`'s `check_type_class_names_
-    /// exist` pipeline) - whether a `use`-import site specifically still
-    /// needs its own dedicated wiring, or is already covered end to end
-    /// through that shared pipeline, is a separate question this scope
-    /// trim doesn't resolve.
+    /// (`Registry::lookup_class`, `registry/hierarchy.rs`).
+    /// `class.nameCase` itself is already built and wired at other
+    /// class-reference sites project-wide (`checker/resolve.rs`'s
+    /// `check_type_class_names_exist` pipeline).
     pub(crate) fn check_use_class_imports(&mut self, program: &[Stmt]) {
         for stmt in program {
             let StmtKind::Use(imports) = &stmt.kind else {
@@ -192,15 +183,15 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 63 follow-up, `UsedNamesRule`: a same-file, case-insensitive
+    /// `UsedNamesRule`: a same-file, case-insensitive
     /// collision between a class-like declaration's own name and a
     /// `use`-imported (class-shaped only - `use function`/`use const`
     /// are exempt, matching real PHPStan's own `shouldBeIgnored`) alias,
     /// in either direction - `use Foo\Bar; class Bar {}` and `class Bar
     /// {} use Foo\Bar;` are both real, unconditional PHP fatal errors
     /// ("Cannot declare class Bar because the name is already in use"/
-    /// "Cannot use Foo\Bar as Bar because the name is already in use"),
-    /// confirmed directly via `php -l`. A single left-to-right pass over
+    /// "Cannot use Foo\Bar as Bar because the name is already in use").
+    /// A single left-to-right pass over
     /// `program`'s own top-level statements, mirroring `check_program`'s
     /// own identical positional `namespace`-tracking walk exactly (a
     /// `use`/class-like declaration is only ever legal at file top
