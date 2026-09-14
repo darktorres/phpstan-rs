@@ -578,20 +578,15 @@ fn parse_type_atom(s: &str) -> Type {
         return Type::StringLiteral(inner.to_string());
     }
 
-    // A real, documented PHPStan/Psalm convention, the same idea as the
-    // quoted-string case just above: a bare integer literal as one
-    // member of a union (`1|2|3`, a common way to constrain a value to a
-    // fixed set of integers - log levels, status codes, mode flags, ...)
-    // means "exactly this integer value," not a class reference -
-    // without this it fell through to the generic-class branch below and
-    // became a bogus `Type::Object("1", [])`, rejecting every value
-    // (including genuinely valid ones) regardless of `is_subtype`'s own
-    // otherwise-correct `IntLiteral`/`Union` handling.
+    // Same idea as the quoted-string case just above: a bare integer
+    // literal as one member of a union (`1|2|3`, constraining a value to
+    // a fixed set - log levels, status codes, mode flags, ...) means
+    // "exactly this integer value," not a class reference.
     if let Ok(n) = s.parse::<i64>() {
         return Type::IntLiteral(n);
     }
-    // Mirrors the int-literal case just above, for a real
-    // float literal (`1.5|2.5`) - checked after the int case so an
+    // Mirrors the int-literal case just above, for a real float
+    // literal (`1.5|2.5`) - checked after the int case so an
     // integer-looking string is still caught as `IntLiteral` first.
     if let Ok(f) = s.parse::<f64>() {
         return Type::FloatLiteral(f);
@@ -608,18 +603,13 @@ fn parse_type_atom(s: &str) -> Type {
         array_depth += 1;
     }
 
-    // Real, serious corpus find (nikic/php-parser's own `@param
-    // array{int, string, string}[] $patches`): `try_parse_array_shape`/
-    // `try_parse_object_shape` are only ever tried once, at the very top
-    // of this function, against the *original*, un-stripped `s` - a
-    // shape wrapped in the `[]`-array-shorthand suffix just stripped
-    // above (`array{...}[]`, `object{...}[]`) never ends with the shape's
-    // own closing `}` at that point (it ends with `[]`), so both checks
-    // correctly declined, and the shape was never re-attempted against
-    // the *reduced* string afterward - falling straight through to the
-    // generic class-name branch far below and mangling the shape's own
-    // literal text into a bogus, namespace-qualified "class name" (this
-    // exact corpus case: `PhpParser\Lexer\array{int, string, string}`).
+    // `try_parse_array_shape`/`try_parse_object_shape` are only tried
+    // once, at the top of this function, against the *original*,
+    // un-stripped `s` - a shape wrapped in the `[]`-array-shorthand
+    // suffix just stripped above (`array{...}[]`) doesn't end with the
+    // shape's own closing `}` at that point, so it needs re-attempting
+    // against the *reduced* string here too (real shape: nikic/php-parser's
+    // own `@param array{int, string, string}[] $patches`).
     if array_depth > 0
         && let Some(shape) = try_parse_array_shape(s).or_else(|| try_parse_object_shape(s))
     {
@@ -630,21 +620,15 @@ fn parse_type_atom(s: &str) -> Type {
         return ty;
     }
 
-    // PHPDoc/PHPStan's own `OffsetAccessType` syntax -
-    // `SomeShape['key']` (a bare/unquoted key works too, e.g. an int
-    // key) extracts one key's own value type out of whatever `SomeShape`
-    // resolves to. Checked *after* the `[]`-array-shorthand loop just
-    // above (which only ever strips a genuinely *empty* bracket, so it
-    // can't have consumed this) - `SomeShape['key'][]` still parses
-    // correctly this way: the trailing empty `[]` is stripped first
-    // (`array_depth = 1`), leaving exactly `SomeShape['key']` for this
-    // check to resolve, then wrapped back into an array below like any
-    // other array-shorthand result. Deliberately not specially
-    // recursive for a chained `Foo['a']['b']`: `s.rfind('[')` finds the
-    // *last* bracket pair first (`['b']`), leaving `base_part` as
-    // `"Foo['a']"` - recursing into `parse_type_string` for that
-    // naturally resolves the inner `['a']` the identical way on its own
-    // next call, one bracket peeled per level.
+    // PHPDoc/PHPStan's own `OffsetAccessType` syntax - `SomeShape['key']`
+    // extracts one key's value type out of whatever `SomeShape` resolves
+    // to. Checked *after* the `[]`-array-shorthand loop above (which
+    // only strips a genuinely *empty* bracket), so `SomeShape['key'][]`
+    // still parses correctly. Not specially recursive for a chained
+    // `Foo['a']['b']`: `s.rfind('[')` finds the *last* bracket pair
+    // first, leaving `base_part` as `"Foo['a']"` - recursing into
+    // `parse_type_string` resolves the inner `['a']` on its own next
+    // call, one bracket peeled per level.
     if s.ends_with(']')
         && let Some(open) = s.rfind('[')
     {
@@ -661,19 +645,14 @@ fn parse_type_atom(s: &str) -> Type {
         }
     }
 
-    // `(A|B)[]`/`(A&B)[]` - a parenthesized union/intersection wrapped in
-    // the same array-shorthand syntax, needed whenever the element type
-    // itself isn't a single bare name (`@param (string|int)[] $keys`,
-    // a real, common PHPDoc idiom - PHPStan's own array-shorthand grammar
-    // requires the parens here since `A|B[]` alone would ambiguously read
-    // as `A|(B[])`). Recurses into `parse_type_string`, not `parse_type_
-    // atom` - the inner content can have its own top-level union/
-    // intersection that needs `split_top_level`'s own handling, which
-    // this function never does itself (its caller, `parse_type_string`,
-    // already owns that). Without this, the whole parenthesized text -
-    // parens, pipe, and all - fell through to the generic class-name
-    // branch below and got nonsensically namespace-qualified as if
-    // `"(string|int)"` were a real class name.
+    // `(A|B)[]`/`(A&B)[]` - a parenthesized union/intersection wrapped
+    // in array-shorthand syntax, needed whenever the element type isn't
+    // a single bare name (`@param (string|int)[] $keys` - PHPStan's own
+    // grammar requires the parens here since `A|B[]` alone would
+    // ambiguously read as `A|(B[])`). Recurses into `parse_type_string`,
+    // not `parse_type_atom`, since the inner content can have its own
+    // top-level union/intersection needing `split_top_level`'s
+    // handling, which only the caller owns.
     if array_depth > 0
         && let Some(inner) = s.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
     {
@@ -689,17 +668,14 @@ fn parse_type_atom(s: &str) -> Type {
     let bare = original.trim_start_matches('\\');
     let mut ty = if bare.contains("::") {
         // A class-constant-reference type (`self::RFC_*`, `Foo::BAR`,
-        // PHPStan's own wildcard-constant convention) isn't a class name
-        // at all, even though it's shaped like one syntactically -
-        // resolving it for real would mean looking up the named
-        // constant('s value) on the referenced class, which this project
-        // doesn't model. Left as `Mixed` (never flagged) rather than
-        // falling through to the generic-class branch below, which used
-        // to treat the whole string - including the "self"/class part -
-        // as a literal class name, then (once namespace resolution
-        // existed) nonsensically namespace-qualified it: real example,
-        // monolog/monolog's own `@param self::RFC_* $rfc` became
-        // `Monolog\Handler\self::RFC*`.
+        // PHPStan's own wildcard-constant convention) isn't a class name,
+        // even though it's shaped like one syntactically - resolving it
+        // for real would mean looking up the named constant on the
+        // referenced class, which this project doesn't model. Left as
+        // `Mixed` rather than falling through to the generic-class
+        // branch below, which would otherwise namespace-qualify it as a
+        // literal class name (real shape: monolog/monolog's own
+        // `@param self::RFC_* $rfc`).
         Type::Mixed
     } else {
         parse_type_keyword_or_class(bare, original, &generic_args)
