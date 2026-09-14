@@ -1,4 +1,4 @@
-//! Phase 58: this project's `MissingTypehintCheck`-equivalent (real
+//! This project's `MissingTypehintCheck`-equivalent (real
 //! PHPStan's own `src/Rules/MissingTypehintCheck.php`, consumed by six
 //! level-6 rules: `MissingPropertyTypehintRule`,
 //! `MissingClassConstantTypehintRule`, `MissingMethodParameterTypehintRule`,
@@ -9,40 +9,27 @@
 //! element type, and a bare reference to a class with its own required
 //! `@template`s given no type arguments.
 //!
-//! Deliberately narrower than real PHPStan in two ways, both confirmed
-//! against the real source before being dropped rather than guessed:
+//! Deliberately narrower than real PHPStan in two ways:
 //!
-//! - **No closure/arrow-fn call site.** The roadmap phase text's own intro
-//!   paragraph lists "closure, arrow-fn" among the declaration kinds this
-//!   phase covers, and cites `src/checker/expr.rs`'s closure-literal
-//!   checking sites as a needed call site - but real PHPStan has no
-//!   `MissingClosureParameterTypehintRule`/equivalent at all (confirmed via
-//!   `grep -rl "RegisteredRule(level: 6)"` across
-//!   `vendor/phpstan-src/src/Rules/`: exactly the six rules named above,
-//!   none closure-shaped), and the *same* phase text's own "Unlocks" list
-//!   names exactly those six rules - none of them closures. Real PHPStan
-//!   deliberately doesn't nag on a closure/arrow-fn's own untyped
-//!   parameters (they're routinely inferred from context, e.g.
+//! - **No closure/arrow-fn call site.** Real PHPStan has no
+//!   `MissingClosureParameterTypehintRule`/equivalent at all: exactly the
+//!   six rules named above are registered at level 6, none closure-shaped.
+//!   Real PHPStan deliberately doesn't nag on a closure/arrow-fn's own
+//!   untyped parameters (they're routinely inferred from context, e.g.
 //!   `array_map`'s callback), so inventing that check here would be new,
-//!   false-positive-prone behavior with no real rule to model it on -
-//!   exactly the kind of stale roadmap detail this project's own
-//!   conventions say to correct rather than follow. The five call sites
-//!   the roadmap's own audit notes describe (`check_program` for
-//!   properties/consts, `check_function` for every param/return, shared
-//!   between plain functions and methods) already account for all six
-//!   rules with no closure call site needed.
+//!   false-positive-prone behavior with no real rule to model it on.
 //!
 //! - **No `missingType.callable` ("callable has no signature") check.**
 //!   Real PHPStan gates this sub-check behind `checkMissingCallableSignature`,
 //!   `false` by default in its own `conf/config.neon` - real PHPStan
 //!   itself doesn't run this check on an ordinary project either. More
 //!   fundamentally, this project's own `types::parse_type_string` collapses
-//!   both a bare `callable`/`Closure` *and* a signature-carrying
+//!   both a bare `callable`/`Closure` and a signature-carrying
 //!   `callable(int): string`/`Closure(self): T` down to the exact same
 //!   `Type::Callable` at parse time (see its own doc comment) - there is no
 //!   way to tell "genuinely signature-less" apart from "had a signature
 //!   PHPDoc wrote out" once a `Type` exists, so implementing this
-//!   sub-check here would flag *every* callable-typed declaration in the
+//!   sub-check here would flag every callable-typed declaration in the
 //!   project uniformly, a systematic false-positive generator this
 //!   project's own stated philosophy treats as seriously as a missed
 //!   detection.
@@ -73,7 +60,7 @@ const MISSING_ITERABLE_VALUE_TYPE_TIP: &str =
 pub(crate) const ITERABLE_GENERIC_CLASS_NAMES: [&str; 4] =
     ["Traversable", "Iterator", "IteratorAggregate", "Generator"];
 
-/// Phase 77: `ReflectionMethod`/`ReflectionProperty` carry a `TClass`
+/// `ReflectionMethod`/`ReflectionProperty` carry a `TClass`
 /// `@template` this project's own `php_stubs::patch_reflection_method_
 /// and_property_templates` synthesizes internally (neither is generic in
 /// real phpstorm-stubs, and real PHPStan itself never flags a bare
@@ -85,8 +72,7 @@ pub(crate) const SYNTHETIC_GENERIC_CLASS_NAMES: [&str; 2] =
 
 /// Method names PHP (and real PHPStan's own `PhpMethodReflection::
 /// getReturnType`) give an implicit, non-`mixed` return type even when the
-/// source writes no `: T` hint at all - confirmed directly from that
-/// method's own source rather than guessed. This project's `FunctionSig`
+/// source writes no `: T` hint at all. This project's `FunctionSig`
 /// doesn't replicate that reflection-level substitution (a hint-less
 /// declaration's `return_type` defaults to plain `Mixed` regardless of
 /// which method it is), so without this exemption every ordinary,
@@ -205,14 +191,13 @@ fn text_mentions_mixed(text: &str) -> bool {
 /// covers - see its own doc comment for why a substring/whole-word check
 /// is the right (and only practical) level of precision here.
 ///
-/// `pub(crate)` (Phase 88) - `registry::function_sig::FunctionSig::
+/// `pub(crate)` - `registry::function_sig::FunctionSig::
 /// from_decl` calls this too, to compute `ParamSig::explicit_mixed_hint`/
-/// `FunctionSig::return_explicit_mixed_hint` once, from *this*
+/// `FunctionSig::return_explicit_mixed_hint` once, from this
 /// declaration's own text, at the same time it resolves `ty`/
 /// `return_type` - see those fields' own doc comments for why a fresh
-/// per-check re-derivation (this function's only use before Phase 88)
-/// isn't enough once a type can be *inherited* from a different
-/// declaration's own docblock.
+/// per-check re-derivation isn't enough once a type can be inherited
+/// from a different declaration's own docblock.
 pub(crate) fn has_explicit_mixed_nested_somewhere(
     native_hint: Option<&str>,
     doc_type: Option<&str>,
@@ -236,9 +221,8 @@ pub(crate) fn has_explicit_mixed_nested_somewhere(
 /// `explicit_mixed` suppresses a finding whose own element type is
 /// `Mixed` when the source text actually spelled `mixed` out explicitly
 /// (e.g. `array<string, mixed>`) - real PHPStan's own `$iterableValue
-/// instanceof MixedType && !$iterableValue->isExplicitMixed()` guard,
-/// confirmed directly against `vendor/phpstan-src/src/Rules/
-/// MissingTypehintCheck.php`. Writing `mixed` explicitly is a common,
+/// instanceof MixedType && !$iterableValue->isExplicitMixed()` guard.
+/// Writing `mixed` explicitly is a common,
 /// deliberate idiom for "I don't know/care about the element type, and
 /// I don't want this rule to nag about it" - unlike a bare `array` (no
 /// generic arguments at all), which real PHPStan still flags exactly as
@@ -274,7 +258,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
             // `list<V>`/`non-empty-array<V>`/`non-empty-list<V>` - the
             // only shapes this project's own `parse_type_keyword_or_class`
             // ever builds as `Intersection([Array(V), Accessory(_), ...])`
-            // (Phase 14) - found by locating the `Array` member directly
+            // - found by locating the `Array` member directly
             // rather than re-checking which `AccessoryKind` rides along
             // with it.
             if let Some(inner) = members.iter().find_map(|m| match m {
@@ -536,25 +520,19 @@ impl<'a> Checker<'a> {
     /// e.g. a genuinely untyped `...$args`'s own per-argument `mixed`
     /// behind a already-array-shaped `Type::Array(Mixed)`).
     ///
-    /// `sig` (Phase 88) is the same `Option<&FunctionSig>` `check_function`
+    /// `sig` is the same `Option<&FunctionSig>` `check_function`
     /// itself already looked up - when present, its `ParamSig::
     /// explicit_mixed_hint`/`FunctionSig::return_explicit_mixed_hint`
-    /// (computed once in `from_decl`, from *whichever* declaration's
+    /// (computed once in `from_decl`, from whichever declaration's
     /// docblock `ty`/`return_type` actually came from - this declaration's
     /// own, or an ancestor's via `Registry::flatten_phpdoc_inheritance`)
     /// are used instead of re-deriving "was `mixed` written explicitly"
-    /// from `f`'s own raw text. Re-deriving from `f` alone was correct
-    /// before Phase 87 could exist (a type only ever came from this exact
-    /// declaration's own docblock), but silently misses every inherited
-    /// `array<string, mixed>`/nested-`mixed` type since - real corpus
-    /// false positive this fixes: every `ExposesPageData`/
-    /// `UrlServiceInterface`/... implementor and test double that
-    /// correctly has no docblock of its own, relying on the interface's.
+    /// from `f`'s own raw text: re-deriving from `f` alone would silently
+    /// miss every inherited `array<string, mixed>`/nested-`mixed` type
+    /// on a class implementing an interface with no docblock of its own.
     /// `sig` is only ever `None` for an anonymous class (never indexed
     /// into the registry - see `lookup_own_signature`'s own doc comment),
-    /// where the text-based fallback below still applies exactly as
-    /// before Phase 88 - a separate, already-tracked gap (`ROADMAP.md`'s
-    /// "anonymous class's own PHPDoc never parsed").
+    /// where the text-based fallback below still applies.
     pub(crate) fn check_missing_function_typehints(
         &mut self,
         f: &FunctionDecl,
@@ -569,8 +547,7 @@ impl<'a> Checker<'a> {
         // return "was there an explicit `mixed` somewhere" verdict this
         // function would otherwise re-derive by re-parsing the identical
         // raw docblock text again here - a real, measured cost at
-        // `check_function`'s own call volume (found and fixed via a
-        // perf-optimization investigation workflow). Skip the full parse
+        // `check_function`'s own call volume. Skip the full parse
         // whenever `sig` already covers every param (`resolved_params`
         // and `sig.params` are always built 1:1 from the same `f.params`,
         // so `sig.is_some()` alone is enough - see `lookup_own_signature`'s
@@ -654,27 +631,23 @@ impl<'a> Checker<'a> {
             return;
         }
 
-        // A Piwigo/real-PHPStan corpus diff found a second, real, and
-        // narrower magic-method override real PHPStan's own reflection
-        // layer applies *unconditionally* (`PhpMethodFromParserNode
-        // Reflection`'s own constructor, confirmed by direct read) -
+        // A second, narrower magic-method override real PHPStan's own
+        // reflection layer applies unconditionally
+        // (`PhpMethodFromParserNodeReflection`'s own constructor) -
         // unlike `MAGIC_METHODS_WITH_IMPLICIT_RETURN_TYPE` above, this one
-        // fires even when the source *does* write an explicit `: array`
-        // hint (`DerivativeParams::__serialize(): array { return [...]; }`
-        // - no `@return` PHPDoc at all): `__serialize()`'s own real return
-        // type is hardcoded to `array<mixed, mixed>` with *explicit*
-        // (not implicit) `mixed` key/value types - confirmed directly via
-        // `\PHPStan\dumpType()`-style verification (an ordinary, non-magic
-        // method with the identical bare `: array` hint and body *is*
-        // flagged; `__serialize()` never is). An explicit-mixed value type
-        // is exactly what `missingType.iterableValue` exists to require -
-        // it's satisfied unconditionally here, not merely absent a
-        // stricter one, so this exempts only that specific check (and its
-        // sibling `missingType.generics`, moot for a plain `Array` type
-        // either way), not the whole function. `__debuginfo()` gets the
-        // identical `array<mixed, mixed>|null` override in the same real
-        // source location - included here on the same confirmed evidence,
-        // not chased further without its own separate corpus hit.
+        // fires even when the source does write an explicit `: array`
+        // hint with no `@return` PHPDoc at all: `__serialize()`'s own
+        // real return type is hardcoded to `array<mixed, mixed>` with
+        // explicit (not implicit) `mixed` key/value types (an ordinary,
+        // non-magic method with the identical bare `: array` hint and
+        // body is flagged; `__serialize()` never is). An explicit-mixed
+        // value type is exactly what `missingType.iterableValue` exists
+        // to require - it's satisfied unconditionally here, not merely
+        // absent a stricter one, so this exempts only that specific
+        // check (and its sibling `missingType.generics`, moot for a
+        // plain `Array` type either way), not the whole function.
+        // `__debuginfo()` gets the identical `array<mixed, mixed>|null`
+        // override in the same real source location.
         if class_name.is_some()
             && doc_return.is_none()
             && matches!(
