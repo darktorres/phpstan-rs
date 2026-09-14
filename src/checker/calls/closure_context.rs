@@ -9,9 +9,9 @@ impl<'a> Checker<'a> {
     /// Checks a closure/arrow-fn literal's body with `$this` seeded to
     /// `this_ty` instead of whatever (if anything) the enclosing scope's
     /// own `locals` would otherwise provide - used by `Closure::bind`/
-    /// `->bindTo()` (Finding 49) and Pest's own file-scoped `$this`
-    /// binding, all of which rebind `$this` independently of where the
-    /// closure was lexically declared. A clone of `locals`, not a
+    /// `->bindTo()` and Pest's file-scoped `$this` binding, all of which
+    /// rebind `$this` independently of where the closure was lexically
+    /// declared. A clone of `locals`, not a
     /// mutation of it: the seeded `$this` (and anything the closure's
     /// own body binds) must not leak back into the caller's real scope,
     /// matching how `ExprKind::Closure`'s own ordinary handling already
@@ -50,27 +50,24 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 53: `array_map`'s own contextual parameter-type injection -
-    /// checks a closure/arrow-fn literal argument's own *body* with each
-    /// unhinted parameter bound to the matching entry of `param_
-    /// overrides` (the mapped array's own element type) instead of the
-    /// `Mixed` an unhinted parameter otherwise gets, catching a real bug
-    /// inside the callback itself (e.g. calling an undefined method on
-    /// the mapped element) - something `infer_closure_return_with_
-    /// param_overrides` (return-type inference only, `&self`, no
-    /// `report(...)` access) can never surface a diagnostic for. A
-    /// parameter with its own declared type hint keeps that hint -
-    /// contextual inference only fills in what's otherwise `Mixed`,
-    /// mirroring real PHPStan's own precedence (a declared type is
-    /// always authoritative over an inferred one). Mirrors the ordinary
-    /// `ExprKind::Closure`/`ArrowFn` arms in `check_expr` almost
-    /// verbatim - the override is the only real difference - so a bug
-    /// fixed there needs the same fix reflected here. Scoped to the same
-    /// shape `infer_closure_return_with_param_overrides` already
-    /// restricts itself to: `false` (falls back to the caller's own
-    /// plain `check_expr`) whenever the override count doesn't exactly
-    /// match the closure/arrow-fn's own parameter count, or any
-    /// parameter is variadic or by-ref.
+    /// `array_map`'s contextual parameter-type injection - checks a
+    /// closure/arrow-fn literal argument's body with each unhinted
+    /// parameter bound to the matching entry of `param_overrides` (the
+    /// mapped array's element type) instead of the `Mixed` an unhinted
+    /// parameter otherwise gets, catching a real bug inside the callback
+    /// itself - something `infer_closure_return_with_param_overrides`
+    /// (return-type inference only, `&self`, no `report(...)` access)
+    /// can never surface a diagnostic for. A parameter with its own
+    /// declared type hint keeps that hint, mirroring real PHPStan's
+    /// precedence (a declared type is always authoritative over an
+    /// inferred one). Mirrors the ordinary `ExprKind::Closure`/`ArrowFn`
+    /// arms in `check_expr` almost verbatim - a bug fixed there needs
+    /// the same fix reflected here. Scoped to the same shape
+    /// `infer_closure_return_with_param_overrides` already restricts
+    /// itself to: `false` (falls back to the caller's plain
+    /// `check_expr`) whenever the override count doesn't exactly match
+    /// the closure/arrow-fn's parameter count, or any parameter is
+    /// variadic or by-ref.
     pub(crate) fn check_closure_literal_with_param_overrides(
         &mut self,
         closure_expr: &Expr,
@@ -178,8 +175,8 @@ impl<'a> Checker<'a> {
                 }
                 let mut closure_locals: Locals = locals.fresh_scope();
                 for u in uses {
-                    // Phase 17 follow-up: see the identical fix's own
-                    // comment at `checker::expr`'s `ExprKind::Closure` arm.
+                    // See the identical fix's own comment at
+                    // `checker::expr`'s `ExprKind::Closure` arm.
                     if u.name == "this" {
                         self.report_builder(
                             DiagnosticBuilder::new(
@@ -306,8 +303,7 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     collect_goto_targets(body),
                 );
-                // Phase 42 Sub-item A: see `checker/expr.rs`'s own
-                // `Closure` arm's identical comment.
+                // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_unannotated_call =
                     std::mem::take(&mut self.current_function_has_unannotated_call);
@@ -337,7 +333,7 @@ impl<'a> Checker<'a> {
                     }
                     let mutated = closure_locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     if !locals.contains_key(&u.name) {
-                        // Phase 17: see the identical fix's own comment at
+                        // See the identical fix's own comment at
                         // `checker::expr`'s `ExprKind::Closure` arm.
                         locals.declare(u.name.clone(), mutated, u.span);
                         if self.probe_span.get() == Some(u.span) {

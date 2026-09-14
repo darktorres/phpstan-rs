@@ -5,9 +5,9 @@ use crate::token::Span;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
-    /// Phase 12 item 3 / Phase 69: validates a `sprintf`/`printf`/
-    /// `fprintf`/`vsprintf`/`vprintf` call's format string against the
-    /// arguments actually passed - only when the format string is a
+    /// Validates a `sprintf`/`printf`/`fprintf`/`vsprintf`/`vprintf`
+    /// call's format string against the arguments actually passed - only
+    /// when the format string is a
     /// literal (mirrors `check_shape_key_access`'s own "only a literal,
     /// never a dynamic value" precedent). `fprintf`'s format string is
     /// its *second* argument (`fprintf(resource $stream, string
@@ -68,12 +68,11 @@ impl<'a> Checker<'a> {
     /// already-resolved (type, span-to-report-at) pairs, so this itself
     /// doesn't care whether they came from real positional call
     /// arguments or a `vsprintf`/`vprintf` array literal's own fields.
-    /// Tries a purely-sequential parse first (`parse_format_specifiers`,
-    /// unchanged from Phase 12), then a purely-positional one
-    /// (`parse_positional_format_specifiers`, Phase 69) - a format
-    /// string mixing the two styles satisfies neither and is silently
-    /// skipped, the same "don't guess" leniency each parser already has
-    /// on its own.
+    /// Tries a purely-sequential parse first (`parse_format_specifiers`),
+    /// then a purely-positional one (`parse_positional_format_specifiers`).
+    /// A format string mixing the two styles satisfies neither and is
+    /// silently skipped, the same "don't guess" leniency each parser
+    /// already has on its own.
     fn check_format_placeholders(
         &mut self,
         name: &str,
@@ -189,19 +188,17 @@ impl<'a> Checker<'a> {
 /// count once positions can repeat or skip), an unknown specifier
 /// character, or a malformed/truncated `%` sequence. `%b`/`%c`/`%d`/`%e`/
 /// `%E`/`%f`/`%F`/`%g`/`%G`/`%o`/`%s`/`%u`/`%x`/`%X` are real PHP
-/// specifier characters (confirmed against the language's own
-/// documented format). `%h`/`%H` (locale-independent decimal-point float
-/// formatting) are real too, but only from PHP 8.0 on (`PhpFeature::
-/// PrintfHhSpecifier`) - accepted unless a configured target version is
-/// confidently older, matching this project's "no target configured,
-/// don't restrict" convention.
+/// specifier characters. `%h`/`%H` (locale-independent decimal-point
+/// float formatting) are real too, but only from PHP 8.0 on
+/// (`PhpFeature::PrintfHhSpecifier`) - accepted unless a configured
+/// target version is confidently older, matching this project's "no
+/// target configured, don't restrict" convention.
 /// One slot `parse_format_specifiers` consumes an argument for, in the
 /// order it appears in the format string. `Width`/`Precision` come from
-/// a literal `*` sub-placeholder (Phase 69) - real, if undocumented, PHP:
+/// a literal `*` sub-placeholder - real, if undocumented, PHP:
 /// `sprintf("%*d", 5, 42)` pads to width 5, consuming its own argument
-/// *before* the specifier's own value argument; `sprintf("%.*f", 2, pi)`
-/// does the same for precision. Verified directly against a live `php`
-/// binary (both forms, and `%*.*f` combining both).
+/// before the specifier's own value argument; `sprintf("%.*f", 2, pi)`
+/// does the same for precision (`%*.*f` combines both).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FormatSlot {
     Width,
@@ -285,18 +282,16 @@ fn is_strict_int(ty: &Type) -> bool {
     matches!(ty, Type::Int | Type::IntLiteral(_))
 }
 
-/// Phase 69: same job as `parse_format_specifiers` just above, but for a
-/// format string using only *positional* specifiers (`%1$s`, `%2$d`,
-/// ...) - real, common PHP for reordering arguments in localized message
-/// strings. Returns `None` on anything not confidently understood, the
-/// same "don't guess" standard `parse_format_specifiers` already holds
-/// itself to - crucially including a format string that mixes a
-/// positional specifier with an ordinary, unnumbered one. Real PHP's own
-/// interaction between the two is genuinely quirky (confirmed directly:
-/// `sprintf('%1$s-%s-%2$s', 'a', 'b', 'c')` produces `"a-a-b"`, not
-/// `"a-b-c"` - the unnumbered specifier does *not* pick up wherever the
-/// positional ones left off), quirky enough that guessing at it risks a
-/// wrong answer worse than staying silent.
+/// Same job as `parse_format_specifiers` just above, but for a format
+/// string using only positional specifiers (`%1$s`, `%2$d`, ...) - real,
+/// common PHP for reordering arguments in localized message strings.
+/// Returns `None` on anything not confidently understood, crucially
+/// including a format string that mixes a positional specifier with an
+/// ordinary, unnumbered one. Real PHP's interaction between the two is
+/// genuinely quirky (`sprintf('%1$s-%s-%2$s', 'a', 'b', 'c')` produces
+/// `"a-a-b"`, not `"a-b-c"` - the unnumbered specifier does not pick up
+/// wherever the positional ones left off), quirky enough that guessing
+/// at it risks a wrong answer worse than staying silent.
 ///
 /// Returns one entry per 0-based argument *position* referenced by
 /// *some* specifier, up to the highest position seen - a "gap" position
@@ -407,10 +402,8 @@ pub(crate) fn parse_positional_format_specifiers(
 /// PHPStan's own explicit "consistency with phpstan-strict-rules" carve-out
 /// there.
 pub(crate) fn format_specifier_accepts(spec: char, arg_ty: &Type, strict: bool) -> bool {
-    // Phase 14: `Checker::is_array_like` also recognizes a `list<T>`/
-    // `non-empty-array<T>`-typed argument (a real `Intersection` now) -
-    // without it, this silently stopped catching the exact real bug it
-    // exists to catch for any refined-array argument.
+    // `Checker::is_array_like` also recognizes a `list<T>`/
+    // `non-empty-array<T>`-typed argument (an `Intersection`).
     match spec {
         'b' | 'c' | 'd' | 'o' | 'u' | 'x' | 'X' => {
             if strict {

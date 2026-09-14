@@ -5,7 +5,7 @@ use crate::token::Span;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
-    /// Phase 37: the statement half of real PHPStan's own
+    /// The statement half of real PHPStan's own
     /// `CallToFunctionStatementWithNoDiscardRule`/
     /// `CallToMethodStatementWithNoDiscardRule`/
     /// `CallToStaticMethodStatementWithNoDiscardRule` - a bare call
@@ -13,9 +13,9 @@ impl<'a> Checker<'a> {
     /// as a whole statement, with its return value neither assigned,
     /// returned, nor otherwise consumed, is flagged when the resolved
     /// function/method's own signature carries PHP 8.5's `#[\NoDiscard]`
-    /// marker (`FunctionSig::no_discard`, Phase 37's own registry-side
-    /// half). Called once per `StmtKind::Expression`, on the statement's
-    /// own top-level expression only - a `NoDiscard` call anywhere else
+    /// marker (`FunctionSig::no_discard`). Called once per
+    /// `StmtKind::Expression`, on the statement's own top-level
+    /// expression only - a `NoDiscard` call anywhere else
     /// (an argument, the right side of `=`, one operand of a larger
     /// expression) already has its result consumed by whatever it's
     /// nested inside, so it's not this rule's concern at all. Real
@@ -56,10 +56,6 @@ impl<'a> Checker<'a> {
             }
             ExprKind::MethodCall(recv, method, _, _) => {
                 let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::Null);
-                // Real bug found and fixed this session: this used to
-                // require `recv_ty` to be literally `Type::Object`,
-                // silently skipping the check for a `Union`/
-                // `Intersection` receiver.
                 let Some((owner, sig)) = self.find_method_owner(&recv_ty, method) else {
                     return;
                 };
@@ -99,16 +95,13 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 71: `RandomIntParametersRule`, narrowed to its plain-
-    /// literal-arguments case (real PHPStan's own version also handles
-    /// an `IntegerRangeType`-typed argument - this project has no such
-    /// type, so a non-literal argument is silently skipped, the usual
-    /// "don't guess" leniency). Confirmed directly via `php`:
-    /// `random_int(10, 1)` throws a real, unconditional `ValueError` at
-    /// call time ("Argument #1 ($min) must be less than or equal to
-    /// argument #2 ($max)") whenever `$min` is greater than `$max` -
-    /// `$min == $max` is fine (a degenerate but legal single-value
-    /// range).
+    /// `RandomIntParametersRule`, narrowed to its plain-literal-arguments
+    /// case (real PHPStan's own version also handles an
+    /// `IntegerRangeType`-typed argument - this project has no such
+    /// type, so a non-literal argument is silently skipped). Real PHP:
+    /// `random_int(10, 1)` throws an unconditional `ValueError` at call
+    /// time whenever `$min` is greater than `$max` - `$min == $max` is
+    /// fine (a degenerate but legal single-value range).
     pub(crate) fn check_random_int_call(&mut self, args: &[Arg], locals: &Locals, label: &str) {
         if args.len() < 2 {
             return;
@@ -130,18 +123,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 71: `DefineParametersRule` - `define()`'s own third
-    /// `$case_insensitive` argument stopped doing anything as of PHP
-    /// 8.0 (case-insensitive constants were removed entirely), confirmed
-    /// directly via `php`: `define("FOO", 1, true)` on PHP 8.5 emits
-    /// "Argument #3 ($case_insensitive) is ignored since declaration of
-    /// case-insensitive constants is no longer supported" as a real
-    /// runtime `E_WARNING` - the exact message text real PHPStan's own
-    /// rule uses. Gated on `Registry::php_version` being configured *and*
-    /// at least 8.0 (matching real PHPStan's own version-aware
-    /// behavior): with no configured version, this project has nothing
-    /// to check against, matching every other `PhpFeature`-gated rule's
-    /// own "unset means unconfigured, stay silent" convention.
+    /// `DefineParametersRule` - `define()`'s third `$case_insensitive`
+    /// argument stopped doing anything as of PHP 8.0 (case-insensitive
+    /// constants were removed entirely); real PHP emits "Argument #3
+    /// ($case_insensitive) is ignored since declaration of
+    /// case-insensitive constants is no longer supported" as a runtime
+    /// `E_WARNING` - the exact message text real PHPStan's rule uses.
+    /// Gated on `Registry::php_version` being configured and at least
+    /// 8.0: with no configured version, this project has nothing to
+    /// check against, matching every other `PhpFeature`-gated rule's
+    /// "unset means unconfigured, stay silent" convention.
     pub(crate) fn check_define_third_argument(&mut self, args: &[Arg], span: Span, label: &str) {
         let Some(version) = self.registry.php_version else {
             return;
