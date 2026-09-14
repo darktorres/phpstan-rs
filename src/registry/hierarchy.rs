@@ -142,7 +142,7 @@ impl Registry {
 
     /// Every real class/enum that ends up composing `trait_fqn`, walking
     /// past any intermediate *trait* user rather than stopping at direct
-    /// `uses` alone (Phase 13 Finding E) - `flatten_traits` merges a used
+    /// `uses` alone - `flatten_traits` merges a used
     /// trait's own methods into the *user's* method map, never the other
     /// way around, so a trait used only by another trait (`trait B { ... }
     /// trait A { use B; } class X { use A; }`) still needs `B` checked
@@ -403,7 +403,7 @@ impl Registry {
 
     /// Same as `lookup_method`, but also returns the declaring ancestor's
     /// name - needed wherever a caller goes on to do class-level generic
-    /// substitution (Phase 10.5's `checker::class_template_bindings`),
+    /// substitution (`checker::class_template_bindings`),
     /// since a `@template` name is scoped to the class that declares it,
     /// not globally unique - substituting an inherited method/property's
     /// `TemplateParam`s correctly requires knowing which ancestor's own
@@ -435,15 +435,15 @@ impl Registry {
         Some((owner.clone(), sig))
     }
 
-    /// Phase 64 Item 4: faithful port of real PHPStan's own
-    /// `MethodPrototypeFinder::findPrototype` priority order (confirmed by
-    /// reading the full method) - used **only** by `check_one_method_
+    /// A faithful port of real PHPStan's own
+    /// `MethodPrototypeFinder::findPrototype` priority order - used
+    /// **only** by `check_one_method_
     /// override`'s own Liskov-compatibility ancestor lookup, not a
     /// replacement for `lookup_ancestor_method_with_owner`'s other call
     /// sites (runtime-dispatch/purity questions, a different question
-    /// than "what governs override compatibility"). Real PHP bug this
-    /// project's own plain `extends.iter().chain(implements.iter())` walk
-    /// above had, confirmed live: an *immediately*-implemented interface's
+    /// than "what governs override compatibility"). A plain
+    /// `extends.iter().chain(implements.iter())` walk would get this
+    /// wrong: an *immediately*-implemented interface's
     /// own native declaration always wins over an `extends` parent's
     /// (checked first here, opposite of the old order), and a used
     /// trait's own **abstract** declaration wins over the `extends`
@@ -554,15 +554,15 @@ impl Registry {
         None
     }
 
-    /// Phase 64 follow-up: whether `class` directly `use`s a trait that
+    /// Whether `class` directly `use`s a trait that
     /// declares a method named `method` *abstract* - used only by
     /// `#[\Override]`-attribute checking, which needs to treat
     /// implementing a *trait's own* abstract method as a real override
-    /// too (confirmed directly via `php -r`: a class implementing a
-    /// trait's own `abstract protected function twist()` with
-    /// `#[\Override]` is real, legal PHP - a genuine corpus false
-    /// positive: `Psl\RandomSequence\MersenneTwisterSequence::twist()`
-    /// overrides `Internal\MersenneTwisterTrait`'s own abstract
+    /// too: a class implementing a trait's own
+    /// `abstract protected function twist()` with `#[\Override]` is
+    /// real, legal PHP (real shape:
+    /// `Psl\RandomSequence\MersenneTwisterSequence::twist()`
+    /// overriding `Internal\MersenneTwisterTrait`'s own abstract
     /// declaration this exact way). Deliberately checks the trait's own
     /// `abstract_methods` set, not merely "does the trait have a method
     /// of this name at all" - a trait supplying a *concrete* method the
@@ -593,13 +593,13 @@ impl Registry {
         })
     }
 
-    /// Phase 64 follow-up: whether `class`'s own `extends`/`implements`
+    /// Whether `class`'s own `extends`/`implements`
     /// ancestor chain includes a name this project's registry has no
     /// declaration for at all, at any depth - used only by
     /// `#[\Override]`-attribute checking, which must never confidently
     /// claim "no matching parent method exists" when the real reason
     /// nothing was found is a missing dependency rather than a genuine
-    /// absence (a genuine corpus false positive: `CycloneDX\Composer\
+    /// absence (real shape: `CycloneDX\Composer\
     /// Plugin implements ... Composer\Plugin\PluginInterface` and
     /// `CycloneDX\Composer\_internal\MakeBom\Command extends Composer\
     /// Command\BaseCommand` - neither vendored anywhere in this project's
@@ -641,7 +641,7 @@ impl Registry {
         false
     }
 
-    /// Phase 64's own still-open property-override half: same idea as
+    /// Same idea as
     /// `lookup_ancestor_method_with_owner` just above, but walking only
     /// `extends` - real PHP interfaces can't declare properties at all,
     /// so there's no `implements` side to check (`precompute_member_
@@ -699,7 +699,7 @@ impl Registry {
         None
     }
 
-    /// Phase 64 Item 3: `find_final_ancestor_method`'s property-side
+    /// `find_final_ancestor_method`'s property-side
     /// mirror - PHP 8.4's own `final` property modifier. Walks only
     /// `extends`, same reasoning as the method version (properties have
     /// no `implements`/interface side at all, and this project doesn't
@@ -732,7 +732,7 @@ impl Registry {
         None
     }
 
-    /// Phase 42 (`MethodThrowTypeCovarianceRule`): every interface
+    /// Every interface (used by `MethodThrowTypeCovarianceRule`)
     /// anywhere in `class`'s own transitive ancestry (its own `implements`,
     /// any ancestor class's own `implements`, and any of those
     /// interfaces' own `extends` chain) that itself declares `method` -
@@ -890,11 +890,11 @@ impl Registry {
     }
 
     /// Same as `lookup_const`, but also returns the declaring ancestor's
-    /// name - Phase 67 needs it to know *which* class's own `@internal`
-    /// tag (if any) actually governs a `Class::CONST` access, the same
-    /// way `lookup_method_with_owner`/`lookup_property_with_owner`
-    /// already do for their own members; Phase 57's own still-open item
-    /// (constant visibility enforcement) needs it the identical way too.
+    /// name - the `@internal`-usage check needs it to know *which*
+    /// class's own `@internal` tag (if any) actually governs a
+    /// `Class::CONST` access, the same way
+    /// `lookup_method_with_owner`/`lookup_property_with_owner` already
+    /// do for their own members.
     pub fn lookup_const_with_owner(
         &self,
         class: &str,
@@ -905,7 +905,7 @@ impl Registry {
         Some((owner.clone(), sig))
     }
 
-    /// Phase 79: a backed enum case's own literal backing value, if this
+    /// A backed enum case's own literal backing value, if this
     /// checker was able to prove one (see `ClassInfo::enum_case_values`'s
     /// own doc comment) - not hierarchy-walked, since an enum can't
     /// extend anything for a case to inherit from in the first place.
@@ -913,7 +913,7 @@ impl Registry {
         self.classes.get(class)?.enum_case_values.get(case)
     }
 
-    /// Phase 79: the matching case (if any, and if provable) for a
+    /// The matching case (if any, and if provable) for a
     /// literal argument passed to a backed enum's own `::from()`/
     /// `::tryFrom()` - a reverse lookup over `enum_case_value` above,
     /// since PHP itself only stores value -> case at runtime, never the
@@ -926,7 +926,7 @@ impl Registry {
             .map(|(name, _)| name.as_str())
     }
 
-    /// Phase 71 corpus find: real PHP function calls are case-
+    /// Real PHP function calls are case-
     /// insensitive (`STRTOLOWER()`/`strtolower()`/`StrToLower()` all
     /// resolve to the exact same builtin, and the same is true of a
     /// user-declared function under whatever case its own call site
@@ -963,7 +963,7 @@ impl Registry {
             .map(|(k, v)| (k.as_str(), v))
     }
 
-    /// Phase 48.1: `lookup_function`'s own class-side mirror - real PHP
+    /// `lookup_function`'s own class-side mirror - real PHP
     /// resolves class/interface/trait/enum names case-insensitively too,
     /// the same rationale `lookup_function`'s own doc comment already
     /// gives for functions. Returns the *canonical* declared key
