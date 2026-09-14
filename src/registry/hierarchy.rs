@@ -728,14 +728,11 @@ impl Registry {
                 continue;
             };
             if info.kind == ClassKind::Interface {
-                // A purely magic `@method` tag (`FunctionSig::is_magic`'s
-                // own doc comment - real corpus false positive this
-                // excludes: Tracy's own `IBarPanel`, `@method ?string
-                // getAgentInfo()`) documents a capability, not a
-                // requirement - real PHP itself has no way to even
-                // express "this interface method is optional," so an
-                // interface's own *real*, textually-declared methods are
-                // still all unconditionally required exactly as before.
+                // A purely magic `@method` tag (see `FunctionSig::is_magic`)
+                // documents a capability, not a requirement - real PHP
+                // has no way to express "this interface method is
+                // optional," so an interface's real, textually-declared
+                // methods are still all unconditionally required.
                 required.extend(
                     info.methods
                         .iter()
@@ -756,16 +753,14 @@ impl Registry {
 
     /// A required method (see `required_abstract_methods`) counts as
     /// implemented only if *some* reachable ancestor provides a concrete
-    /// one - not necessarily the *closest* ancestor with any entry at
-    /// all. Deliberately doesn't reuse `lookup_method_with_owner`'s
+    /// one, not necessarily the *closest* ancestor with any entry.
+    /// Deliberately doesn't reuse `lookup_method_with_owner`'s
     /// closest-match BFS: a class can `implements Throwable` directly
-    /// (graph-adjacent) while its real concrete `getCode()` etc. only
-    /// live two hops further up an `extends` chain (e.g. `BaseException`
-    /// -> real `Exception`) - the closest *node* with any entry for the
-    /// name is the interface's own bodyless declaration, even though a
-    /// real implementation is reachable elsewhere. So this walks the
-    /// whole ancestor graph looking for any concrete match, rather than
-    /// stopping at the first node that merely mentions the name at all.
+    /// while its real concrete `getCode()` etc. only live two hops
+    /// further up an `extends` chain (`BaseException` -> real
+    /// `Exception`) - the closest node with any entry is the
+    /// interface's own bodyless declaration, even though a real
+    /// implementation is reachable elsewhere.
     pub fn has_concrete_implementation(&self, class: &str, method: &str) -> bool {
         let mut seen = HashSet::new();
         let mut stack = vec![class.to_string()];
@@ -876,13 +871,11 @@ impl Registry {
         })
     }
 
-    /// `lookup_function`'s own canonical-name-returning sibling, mirroring
-    /// `lookup_class`'s identical `(&str, &Info)` shape - `FunctionSig`
-    /// carries no `name` field of its own (unlike `ClassInfo`, whose own
-    /// declared name a caller can't otherwise recover once a case-
-    /// insensitive fallback match has happened), so `check_function_name_
-    /// case`'s own `function.nameCase` diagnostic needs this to report
-    /// the real declared casing rather than just presence.
+    /// `lookup_function`'s canonical-name-returning sibling, mirroring
+    /// `lookup_class`'s `(&str, &Info)` shape - `FunctionSig` carries no
+    /// `name` field, so `check_function_name_case`'s
+    /// `function.nameCase` diagnostic needs this to report the real
+    /// declared casing rather than just presence.
     pub(crate) fn lookup_function_with_name(&self, name: &str) -> Option<(&str, &FunctionSig)> {
         if let Some((k, v)) = self.functions.get_key_value(name) {
             return Some((k.as_str(), v));
@@ -893,26 +886,21 @@ impl Registry {
             .map(|(k, v)| (k.as_str(), v))
     }
 
-    /// `lookup_function`'s own class-side mirror - real PHP
-    /// resolves class/interface/trait/enum names case-insensitively too,
-    /// the same rationale `lookup_function`'s own doc comment already
-    /// gives for functions. Returns the *canonical* declared key
-    /// alongside the info so a caller can rebind its own local variable
-    /// to it (a fresh-per-check-time lookup, not a structural registry
-    /// field - see `canonicalize_class_name_case`'s own doc comment for
-    /// why those two need different treatment).
+    /// `lookup_function`'s class-side mirror - real PHP resolves
+    /// class/interface/trait/enum names case-insensitively too. Returns
+    /// the *canonical* declared key alongside the info so a caller can
+    /// rebind its own local variable to it (a fresh-per-check-time
+    /// lookup, not a structural registry field - see
+    /// `canonicalize_class_name_case` for why those two need different
+    /// treatment).
     ///
-    /// The case-mismatch fallback used to be a full linear scan of every
-    /// registered class with a case-insensitive comparison on each - real
-    /// cost on a case-mismatched *or* genuinely unresolved name (this
-    /// project's own leniency elsewhere already documents the latter as
-    /// common in real corpora), since `check_type_class_names_exist` calls
-    /// this once per parameter and once per return type on every function
-    /// checked. `self.classes_lowercase` (built once alongside
-    /// `canonicalize_class_name_case`'s own identical map, see that
-    /// field's own doc comment) turns it into one `HashMap` lookup plus
-    /// one more exact `get` for the resolved canonical key. Found and
-    /// fixed via a perf-optimization investigation workflow.
+    /// The case-mismatch fallback uses `self.classes_lowercase` (built
+    /// once alongside `canonicalize_class_name_case`'s identical map) to
+    /// turn what would otherwise be a full linear scan on every
+    /// case-mismatched or unresolved name into one `HashMap` lookup plus
+    /// one exact `get` - real cost given
+    /// `check_type_class_names_exist` calls this once per parameter and
+    /// once per return type on every function checked.
     pub fn lookup_class(&self, name: &str) -> Option<(&str, &ClassInfo)> {
         if let Some((k, v)) = self.classes.get_key_value(name) {
             return Some((k.as_str(), v));
