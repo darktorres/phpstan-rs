@@ -3,9 +3,9 @@
 //! `autoload_classmap.php`/`autoload_psr4.php`/`autoload_namespaces.php`/
 //! `autoload_files.php`) to discover `vendor/` files and directories worth
 //! loading for type-resolution context - without reporting diagnostics on
-//! them. This is the "load for context, don't report" path split real
-//! PHPStan gets from its own `paths:` vs. Composer-autoloader split (see
-//! `ROADMAP.md`'s Phase 13 note this replaces).
+//! them. This mirrors real PHPStan's `paths:` vs. Composer-autoloader
+//! split: load vendor code for context, but only report on the project's
+//! own files.
 //!
 //! Deliberately reads the generated autoloader files Composer's own
 //! `ClassLoader` reads at runtime, rather than re-implementing PSR-4
@@ -69,15 +69,12 @@ pub fn discover_vendor_context(project_dir: &Path) -> ComposerContext {
 
     // Composer's own bootstrap loader class - unlike every other file
     // this function discovers, it's never listed in any of the generated
-    // autoload maps at all (it's what *runs* them, a real chicken-and-
-    // egg case: `vendor/autoload.php` requires it directly, before the
-    // classmap/PSR-4 mechanisms it reads even exist). Present
-    // unconditionally whenever `vendor/composer/` exists at all, so
-    // always worth loading for context - real code occasionally
-    // constructs it directly for its own plugin/dynamic-autoloading
-    // needs (confirmed live: Piwigo's own `PluginRegistry`/
-    // `ThemeRegistry`, registering each installed plugin's own PSR-4
-    // mapping via a fresh `new ClassLoader()`).
+    // autoload maps at all (it's what *runs* them: `vendor/autoload.php`
+    // requires it directly, before the classmap/PSR-4 mechanisms it
+    // reads even exist). Present unconditionally whenever
+    // `vendor/composer/` exists at all, so always worth loading for
+    // context - real code occasionally constructs it directly for its
+    // own plugin/dynamic-autoloading needs.
     let class_loader = composer_dir.join("ClassLoader.php");
     if class_loader.is_file() {
         ctx.files.push(class_loader);
@@ -87,28 +84,18 @@ pub fn discover_vendor_context(project_dir: &Path) -> ComposerContext {
 
 /// Detects whether the Composer project rooted at `project_dir` declares a
 /// `require`/`require-dev` dependency on `phpstan/phpstan` or
-/// `phpstan/extension-installer` - the gate Phase 40's own PHPStan-API-
-/// usage check (`checker::phpstan_api`) needs before it's ever correct to
-/// run: flagging `PHPStan\*` references as "not covered by the backward
-/// compatibility promise" only makes sense for a project that actually
-/// consumes `phpstan/phpstan` as a library. Mirrors this project's own
-/// Pest-config-detection precedent (Phase 21's directory-scoped `Pest.php`
-/// gating) - a real-file signal in the analyzed project decides whether a
-/// framework-specific check is even relevant, rather than running it
-/// unconditionally everywhere.
+/// `phpstan/extension-installer` - the gate the PHPStan-API-usage check
+/// (`checker::phpstan_api`) needs before it's correct to run: flagging
+/// `PHPStan\*` references as "not covered by the backward compatibility
+/// promise" only makes sense for a project that actually consumes
+/// `phpstan/phpstan` as a library.
 ///
-/// Unlike `discover_vendor_context` above, this actually parses
-/// `composer.json`'s contents via `serde_json` (already a real dependency,
-/// via `lsp.rs`'s own JSON-RPC framing and `baseline.rs`'s stored-baseline
-/// format) - the first thing in this module to do so; every other
-/// function here only ever reads the generated `vendor/composer/
-/// autoload_*.php` files Composer itself writes, never the hand-authored
-/// `composer.json` a project's own author wrote. A missing file, an
-/// unreadable one, or JSON that doesn't parse (or doesn't have the shape
-/// expected - `require`/`require-dev` missing or not an object) all
-/// degrade to `false`, the same "broken input means no signal, not a
-/// crash" reasoning `discover_vendor_context` already applies throughout
-/// this module.
+/// Unlike `discover_vendor_context` above, this parses `composer.json`'s
+/// contents via `serde_json`; every other function here only reads the
+/// generated `vendor/composer/autoload_*.php` files Composer itself
+/// writes, never the hand-authored `composer.json`. A missing file, an
+/// unreadable one, or JSON that doesn't parse (or doesn't have the
+/// expected shape) all degrade to `false`.
 pub fn detect_phpstan_dependency(project_dir: &Path) -> bool {
     let Ok(bytes) = std::fs::read(project_dir.join("composer.json")) else {
         return false;
@@ -126,21 +113,15 @@ pub fn detect_phpstan_dependency(project_dir: &Path) -> bool {
     })
 }
 
-/// Phase 40.6: walks upward from `from_dir` (a directory, not a file - a
-/// caller with a file path needs to pass its own `.parent()`) looking for
-/// the nearest `composer.json` and returns its own `"name"` field, if
-/// present and a string - `PhpStanNamespaceIn3rdPartyPackageRule`'s own
-/// "which package owns this file" question
-/// (`vendor/phpstan-src/src/Rules/Api/PhpStanNamespaceIn3rdPartyPackageRule
-/// .php`'s own `findComposerJsonContents`, ported almost verbatim). No
-/// `composer.json` at this level recurses to the parent directory,
-/// stopping once the filesystem root is reached (`Path::parent()`
-/// returning `None` there ends the recursion for free). A `composer.json`
-/// that *does* exist but fails to read or parse as JSON, or has no
-/// `"name"` string field, returns `None` immediately without walking any
-/// further up - matching real PHPStan's own behavior exactly (its own
-/// `JsonException`/`CouldNotReadFileException` catch blocks return `null`
-/// from that one call, they don't retry a parent directory either).
+/// Walks upward from `from_dir` (a directory, not a file - a caller with
+/// a file path needs to pass its own `.parent()`) looking for the
+/// nearest `composer.json` and returns its own `"name"` field, if present
+/// and a string - "which package owns this file". No `composer.json` at
+/// this level recurses to the parent directory, stopping once the
+/// filesystem root is reached (`Path::parent()` returning `None` there
+/// ends the recursion for free). A `composer.json` that does exist but
+/// fails to read or parse as JSON, or has no `"name"` string field,
+/// returns `None` immediately without walking any further up.
 pub(crate) fn find_composer_package_name(from_dir: &Path) -> Option<String> {
     if !from_dir.is_dir() {
         return None;
