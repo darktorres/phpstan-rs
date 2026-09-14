@@ -27,7 +27,7 @@ pub enum AssertTarget {
     /// `$this->propName` - a single-level property access on the
     /// receiver.
     ThisProp(String),
-    /// Phase 48.C: `$name` shaped exactly like a bare parameter
+    /// `$name` shaped exactly like a bare parameter
     /// reference, but `name` doesn't match any of this declaration's own
     /// parameters - real PHPStan's own `parameter.notFound` ("Assert
     /// references unknown parameter $name."). Carries no narrowing
@@ -36,7 +36,7 @@ pub enum AssertTarget {
     /// report the real authoring mistake this almost always is (a typo,
     /// or a stale tag left behind after a parameter rename).
     NotFound(String),
-    /// Phase 48.C: any other target shape this project doesn't model at
+    /// Any other target shape this project doesn't model at
     /// all (a method-call target, an array-index/nested-chain target,
     /// ...) - real PHPStan's own `assert.unknownExpr` ("Assert
     /// references unknown %s."). Carries the original raw target text
@@ -50,15 +50,15 @@ pub struct AssertInfo {
     pub negated: bool,
     pub ty: Type,
     pub target: AssertTarget,
-    // Phase 48 follow-up (item 6b): shares the exact same type-resolution
-    // pipeline as every other declared type on this same declaration,
-    // which already collects `case_refs` - this one never did.
+    // Shares the exact same type-resolution pipeline as every other
+    // declared type on this same declaration, which already collects
+    // `case_refs`.
     pub case_refs: Vec<(String, String)>,
 }
 
 /// Classifies `tag.target`'s own raw text into a real `AssertTarget` -
-/// always succeeds now (Phase 48.C): a target this project doesn't model
-/// at all, or a bare `$name` not matching any real parameter, still
+/// always succeeds: a target this project doesn't model at all, or a
+/// bare `$name` not matching any real parameter, still
 /// produces a real `AssertTarget` variant (`Unknown`/`NotFound`) rather
 /// than being silently dropped, so the checker can report real PHPStan's
 /// own `assert.unknownExpr`/`parameter.notFound` for it. `param_names` is
@@ -90,10 +90,10 @@ fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
 }
 
 /// Resolves every `@phpstan-assert`-family tag on `doc` into a real
-/// `AssertInfo` list - every tag produces one entry now (Phase 48.C: an
-/// unrecognized target no longer drops the tag, see `AssertTarget`'s own
-/// doc comment), so callers that only care about applying real narrowing
-/// must match on `target` themselves and skip `NotFound`/`Unknown`.
+/// `AssertInfo` list - every tag produces one entry, an unrecognized
+/// target never drops the tag (see `AssertTarget`'s own doc comment), so
+/// callers that only care about applying real narrowing must match on
+/// `target` themselves and skip `NotFound`/`Unknown`.
 /// Shares the exact same type-resolution pipeline (`mark_template_params`
 /// then `resolve_names_in_type`) every other declared type on this same
 /// declaration already goes through.
