@@ -27,13 +27,11 @@ impl<'a> Checker<'a> {
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.find_property_owner(m, prop)),
-            // Real bug found and fixed this session: `narrow_instanceof_
-            // true` always puts the narrower, just-`instanceof`-checked
-            // type *last* in an `Intersection` - see `property_access_
-            // type`'s own doc comment for the real corpus trace that
-            // found this. Reversed so that narrower type's own
-            // declaration (if any) is preferred over the broader original
-            // type's.
+            // `narrow_instanceof_true` always puts the narrower,
+            // just-`instanceof`-checked type last in an `Intersection` -
+            // see `property_access_type`'s own doc comment. Reversed so
+            // that narrower type's own declaration (if any) is
+            // preferred over the broader original type's.
             Type::Intersection(members) => members
                 .iter()
                 .rev()
@@ -43,11 +41,10 @@ impl<'a> Checker<'a> {
     }
 
     /// `find_property_owner`'s own method counterpart, used by
-    /// `checker::calls::check_no_discard_statement` - real bug found and
-    /// fixed this session, the identical gap: a `#[\NoDiscard]`-marked
+    /// `checker::calls::check_no_discard_statement`: a `#[\NoDiscard]`-marked
     /// method called through a `Union`/`Intersection` receiver (a value
-    /// narrowed via `instanceof` from an unrelated interface) used to be
-    /// silently skipped, since the receiver's own type had to be
+    /// narrowed via `instanceof` from an unrelated interface) must not
+    /// be silently skipped just because the receiver's own type isn't
     /// literally `Type::Object`.
     pub(crate) fn find_method_owner(
         &self,
@@ -60,7 +57,7 @@ impl<'a> Checker<'a> {
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.find_method_owner(m, method)),
-            // Same real bug and fix as `find_property_owner` just above.
+            // Same reasoning as `find_property_owner` just above.
             Type::Intersection(members) => members
                 .iter()
                 .rev()
@@ -70,18 +67,14 @@ impl<'a> Checker<'a> {
     }
 
     /// `find_method_owner`'s own sibling, used by `ExprKind::
-    /// FirstClassCallable`'s own `MethodCall` arm: returns the *concrete
-    /// receiver class actually queried* alongside the signature, not the
+    /// FirstClassCallable`'s own `MethodCall` arm: returns the concrete
+    /// receiver class actually queried alongside the signature, not the
     /// (possibly different, inherited-from) declaring owner - late static
     /// binding needs the real runtime receiver a `self`/`static` pseudo-
-    /// return type resolves against, the same reasoning the pre-existing
-    /// single-`Object` code already relied on (it used the receiver's own
-    /// class for exactly this, via a plain `lookup_method`, never
-    /// `_with_owner`). Real bug found and fixed this session: this call
-    /// site required the receiver's own type to be literally `Type::
-    /// Object` too, silently skipping the check for a `Union`/
-    /// `Intersection` receiver, the same anti-pattern found and fixed
-    /// project-wide.
+    /// return type resolves against, via a plain `lookup_method`, never
+    /// `_with_owner`. Must not require the receiver's own type to be
+    /// literally `Type::Object` - a `Union`/`Intersection` receiver
+    /// needs the same treatment.
     pub(crate) fn find_method_receiver_class(
         &self,
         base_ty: &Type,
@@ -98,7 +91,7 @@ impl<'a> Checker<'a> {
                 .map(|m| self.find_method_receiver_class(m, method))
                 .find(|(sig, _)| sig.is_some())
                 .unwrap_or((None, None)),
-            // Same real bug and fix as `find_property_owner`'s own doc
+            // Same reasoning as `find_property_owner`'s own doc
             // comment above.
             Type::Intersection(members) => members
                 .iter()
@@ -117,34 +110,28 @@ impl<'a> Checker<'a> {
     /// project's usual "don't guess" leniency - an unmodeled member
     /// anywhere in a `Union`/`Intersection` makes the whole thing
     /// unconfirmed, not a guess either way). Used by both `StmtKind::
-    /// Throw` (`checker/stmt.rs`) and `ExprKind::Throw` just below - real
-    /// bug found and fixed this session, the same shape as `PropertyAccess`'s
-    /// own: both call sites used to require the thrown value's own type
-    /// to be literally `Type::Object`, silently skipping the check for a
-    /// `Union`/`Intersection` - a value narrowed via `instanceof` from an
+    /// Throw` (`checker/stmt.rs`) and `ExprKind::Throw` just below -
+    /// must not require the thrown value's own type to be literally
+    /// `Type::Object`: a value narrowed via `instanceof` from an
     /// unrelated interface, then thrown, is exactly as real a shape here
-    /// as it was for property access. A `Union` member fails if *any one*
+    /// as it was for property access. A `Union` member fails if any one
     /// of them isn't Throwable (the runtime value could be that one); an
-    /// `Intersection` fails only if *every* member is confirmed non-
+    /// `Intersection` fails only if every member is confirmed non-
     /// Throwable (any single Throwable member is enough to satisfy
     /// `throw`) - mirrors `member_confirmed_missing`'s own identical
     /// Union/Intersection asymmetry exactly.
     ///
-    /// `class_name_exists` is checked *first*, same as `StmtKind::Try`'s
-    /// own multi-catch handling a few hundred lines up (`Finding 57`'s own
-    /// comment there) - `is_subclass_of` silently treats a name the
-    /// registry has no entry for as "not a subclass of Throwable",
-    /// indistinguishable from a real, known, non-Throwable class. Real
-    /// bug this exact guard fixes, found via the Union case above newly
-    /// making an existing multi-catch `throw $e;` reachable at all: real
-    /// PHP multi-catch binds a real union type, and a caught interface
-    /// that happens to live in an unresolvable/unscanned vendored
-    /// package (`RectorPrefix202608\Symfony\Component\Messenger\Exception\
-    /// UnrecoverableExceptionInterface` - a PHP-Scoper-prefixed name this
-    /// project's vendor scan never actually indexes a declaration for,
-    /// confirmed directly - not merely assumed) was wrongly reported as
-    /// not implementing `Throwable`, even though the real, unprefixed
-    /// interface genuinely does.
+    /// `class_name_exists` is checked first, same as `StmtKind::Try`'s
+    /// own multi-catch handling a few hundred lines up - `is_subclass_of`
+    /// silently treats a name the registry has no entry for as "not a
+    /// subclass of Throwable", indistinguishable from a real, known,
+    /// non-Throwable class. This guard matters for real PHP multi-catch,
+    /// which binds a real union type: a caught interface that happens to
+    /// live in an unresolvable/unscanned vendored package (e.g. a
+    /// PHP-Scoper-prefixed name this project's vendor scan never indexes
+    /// a declaration for) must not be reported as not implementing
+    /// `Throwable`, even though the real, unprefixed interface genuinely
+    /// does.
     pub(crate) fn thrown_value_not_throwable(&self, ty: &Type) -> Option<String> {
         match ty {
             Type::Object(class, _) => (self.class_name_exists(class)
@@ -165,13 +152,13 @@ impl<'a> Checker<'a> {
     }
 
     /// `find_property_owner`'s own richer sibling, used by `checker::
-    /// assignment::check_property_assignment` - real bug found and fixed
-    /// this session, the identical shape as the read-side one just above:
-    /// the write side matched `Type::Object` directly too, silently
-    /// skipping *every* one of its checks (readonly, visibility,
+    /// assignment::check_property_assignment`, the identical shape as the
+    /// read-side one just above: the write side must not match
+    /// `Type::Object` directly, silently skipping every one of its checks
+    /// (readonly, visibility,
     /// `@internal`/`@deprecated`, and the assigned value's own type) for
-    /// a `Union`/`Intersection`-typed target. Also returns the *matching
-    /// member's own* class/type-args (not just the ultimate declaring
+    /// a `Union`/`Intersection`-typed target. Also returns the matching
+    /// member's own class/type-args (not just the ultimate declaring
     /// owner) - `class_template_bindings` needs the receiver's own real
     /// generic parameterization to substitute correctly up to whichever
     /// ancestor actually declares the property, the same relationship
@@ -193,7 +180,7 @@ impl<'a> Checker<'a> {
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.find_property_receiver(m, prop)),
-            // Same real bug and fix as `find_property_owner`'s own doc
+            // Same reasoning as `find_property_owner`'s own doc
             // comment above.
             Type::Intersection(members) => members
                 .iter()
@@ -204,30 +191,28 @@ impl<'a> Checker<'a> {
     }
 
     /// `find_property_receiver`'s own method counterpart, used by
-    /// `check_expr`'s own `MethodCall` arm - real bug found and fixed
-    /// this session: that arm's own `recv_class` extraction (a plain
-    /// "first Object/EnumCase member, regardless of whether it actually
-    /// declares the method" pick, kept as-is purely to gate whether the
-    /// existence-check block below even runs at all) was *also* being
-    /// used to resolve the method's own real signature, owner, argument-
-    /// type checking, visibility/`@internal`/`@deprecated`, the Doctrine
-    /// query special case, and the final return type - all of which need
-    /// a member that actually declares the method, in the correct
-    /// (`Intersection` reversed) order, exactly like `find_method_owner`/
-    /// `method_call_return_type` already get right. Returns an owned,
-    /// already-class-template-substituted `FunctionSig` (unlike
-    /// `find_method_owner`'s borrowed one) so the caller can freely call
-    /// further `&mut self` methods afterward.
+    /// `check_expr`'s own `MethodCall` arm: `recv_class` extraction (a
+    /// plain "first Object/EnumCase member, regardless of whether it
+    /// actually declares the method" pick, kept as-is purely to gate
+    /// whether the existence-check block below even runs at all) must
+    /// not also be used to resolve the method's own real signature,
+    /// owner, argument-type checking, visibility/`@internal`/
+    /// `@deprecated`, the Doctrine query special case, and the final
+    /// return type - all of which need a member that actually declares
+    /// the method, in the correct (`Intersection` reversed) order,
+    /// exactly like `find_method_owner`/`method_call_return_type`
+    /// already get right. Returns an owned, already-class-template-
+    /// substituted `FunctionSig` (unlike `find_method_owner`'s borrowed
+    /// one) so the caller can freely call further `&mut self` methods
+    /// afterward.
     ///
     /// Substitution happens right here, inline in the leaf arms, rather
-    /// than as a separate step the caller applies afterward - the caller
-    /// used to clone `sig` here and then have `substitute_class_
-    /// templates`'s own non-generic fast path clone it *again*, fully
-    /// discarding the first clone. Mirrors `method_call_return_type`'s
-    /// own already-correct "substitute once, right after the lookup"
-    /// shape. Found and fixed via a perf-optimization investigation
-    /// workflow; `substitute_class_templates` alone measured at 6.07s/
-    /// 596K calls (Symfony), 6.55s/742K calls (Drupal).
+    /// than as a separate step the caller applies afterward - a separate
+    /// step would clone `sig` here and then have
+    /// `substitute_class_templates`'s own non-generic fast path clone it
+    /// again, fully discarding the first clone. Mirrors
+    /// `method_call_return_type`'s own already-correct "substitute once,
+    /// right after the lookup" shape.
     pub(crate) fn find_method_receiver(
         &self,
         base_ty: &Type,
@@ -260,33 +245,21 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Real bug found and fixed this session: both `check_expr`'s and
-    /// `infer_expr`'s own `PropertyAccess` arms matched `base_ty` against
-    /// `Object`/`EnumCase`/`ObjectShape` directly, with no `Union`/
-    /// `Intersection` arm at all - falling to the `_ => Type::Mixed`
-    /// catch-all discarded every bit of type information whenever the
-    /// base's own type happened to be a `Union`/`Intersection` (a real,
-    /// common shape: `narrow_instanceof_true`'s own deliberate design
-    /// intersects an unrelated-looking `instanceof` target with the
-    /// original type - see its own doc comment - and a plain `A|B`
-    /// property/parameter type is exactly as common). Recurses through
-    /// both, trying each member in turn and keeping the first real
-    /// (non-`Mixed`) answer - correct for an `Intersection` (the property
-    /// only needs to exist on *one* member) and a reasonable, consistent
-    /// best-effort for a `Union` (matches this project's own general
-    /// "fewer false positives over more precision" bias elsewhere, e.g.
-    /// `MethodCall`'s own identical `Union`/`Intersection` receiver-class
-    /// extraction just above). Real corpus false positive this fixes:
-    /// `PhpParser\Node\Stmt\ClassMethod::$stmts` (a real, docblock-typed
-    /// `Node\Stmt[]|null` property) resolving to bare `Mixed` the moment
-    /// its receiver was narrowed via `instanceof` from the `PhpParser\
-    /// Node` interface - `PhpParser`'s own AST hierarchy routes every
-    /// concrete node type through an interface this way, not a common
-    /// base *class*, so this shape was never rare there. See the `Union`/
-    /// `Intersection` arms below for the real distinction between them
-    /// (added in a later refinement) - initially both used the same
-    /// "first real answer wins" shortcut, correct for `Intersection` but
-    /// an avoidable imprecision for `Union`.
+    /// Both `check_expr`'s and `infer_expr`'s own `PropertyAccess` arms
+    /// must not match `base_ty` against `Object`/`EnumCase`/`ObjectShape`
+    /// directly with no `Union`/`Intersection` arm - falling to the
+    /// `_ => Type::Mixed` catch-all would discard every bit of type
+    /// information whenever the base's own type happens to be a
+    /// `Union`/`Intersection` (a common shape: `narrow_instanceof_true`'s
+    /// own deliberate design intersects an unrelated-looking `instanceof`
+    /// target with the original type - see its own doc comment - and a
+    /// plain `A|B` property/parameter type is exactly as common).
+    /// Recurses through both, trying each member in turn - correct for
+    /// an `Intersection` (the property only needs to exist on one
+    /// member) and a reasonable, consistent best-effort for a `Union`
+    /// (matches this project's own general "fewer false positives over
+    /// more precision" bias elsewhere). See the `Union`/`Intersection`
+    /// arms below for the real distinction between them.
     pub(crate) fn property_access_type(&self, base_ty: &Type, prop: &str) -> Type {
         match base_ty {
             Type::Object(class, type_args) => self
@@ -298,7 +271,7 @@ impl<'a> Checker<'a> {
                     self.resolve_pseudo(&resolved, class)
                 })
                 .unwrap_or_else(|| {
-                    // Phase 77-A: `SimpleXMLElementClassPropertyReflectionExtension`'s
+                    // `SimpleXMLElementClassPropertyReflectionExtension`'s
                     // real-PHPStan equivalent - every undeclared property
                     // on `SimpleXMLElement` (or a subclass) is magically
                     // readable via `__get`, resolving to the *actual*
@@ -332,14 +305,11 @@ impl<'a> Checker<'a> {
                 .find(|(name, _, _)| name == prop)
                 .map(|(_, ty, _)| ty.clone())
                 .unwrap_or(Type::Mixed),
-            // Real refinement made this session, while adding the
-            // identical `Union`/`Intersection` handling to `infer_expr`'s
-            // own `MethodCall` arm below (`method_call_return_type`): an
-            // `Intersection` value genuinely *is* every member type
+            // An `Intersection` value genuinely is every member type
             // simultaneously, so the first member whose declaration
             // actually resolves the property names its one real type
             // (no other member could disagree without the source itself
-            // being contradictory). A `Union` value is only *one* of its
+            // being contradictory). A `Union` value is only one of its
             // members at a time, so the honest answer is the union of
             // whichever members' own declarations resolve at all, not
             // just the first - `A|B` where `A::$prop: int` and `B::
@@ -349,25 +319,19 @@ impl<'a> Checker<'a> {
             // incomplete, per-member answer rather than collapsing back
             // to `Mixed`.
             //
-            // A second real bug found and fixed this session, in the
-            // `Intersection` arm specifically: `narrow_instanceof_true`
-            // (`checker/narrowing.rs`) always builds `Intersection(vec![
-            // original_type, target_type])` - the pre-existing, broader
-            // type first, the just-checked, narrower `instanceof` target
-            // last. Searching members in that same (forward) order means
-            // a same-named property declared on *both* the broader
-            // original type and the narrower target - a real, if rare,
-            // shape confirmed via a real corpus false positive
-            // (`Rector\Php54\...\RemoveZeroBreakContinueRector`'s own
-            // `$staticType instanceof ConstantIntegerType`, where a
-            // shared `PHPStan\Type\Type`-family property/method the
-            // narrower type itself overrides was found on the *broader*
-            // interface first) - would resolve to the broader type's own
+            // In the `Intersection` arm specifically: `narrow_instanceof_
+            // true` (`checker/narrowing.rs`) always builds
+            // `Intersection(vec![original_type, target_type])` - the
+            // pre-existing, broader type first, the just-checked,
+            // narrower `instanceof` target last. Searching members in
+            // that same (forward) order would mean a same-named property
+            // declared on both the broader original type and the
+            // narrower target resolves to the broader type's own
             // less-specific declaration instead of the narrower,
-            // presumably-intended one. Reversed: the narrower type is
-            // always checked first, which is never wrong (a class's own
-            // `lookup_property_with_owner` already walks its full
-            // ancestor chain, so this can only ever find a *more*
+            // presumably-intended one. Reversed instead: the narrower
+            // type is always checked first, which is never wrong (a
+            // class's own `lookup_property_with_owner` already walks its
+            // full ancestor chain, so this can only ever find a more
             // specific answer, or fall through to the broader type
             // exactly as before when the narrower one doesn't have it).
             Type::Intersection(members) => members
@@ -389,28 +353,20 @@ impl<'a> Checker<'a> {
     }
 
     /// `infer_expr`'s own `ExprKind::MethodCall` return-type resolution -
-    /// extracted so it can recurse through `Union`/`Intersection`. Real
-    /// bug found and fixed this session, the highest-impact instance of
-    /// this project's own `Union`/`Intersection` anti-pattern found so
-    /// far: this used to be inlined directly into the `MethodCall` arm
-    /// with no `Union`/`Intersection` case at all, silently collapsing
-    /// *any* method call's own return type to `Type::Mixed` whenever the
-    /// receiver was one - unlike `check_expr`'s own separate `MethodCall`
-    /// arm, which already extracts a representative class from `Union`/
-    /// `Intersection` for its own diagnostic purposes. `infer_expr` is
-    /// the core type-*inference* path (used whenever a method call's
-    /// result type needs computing without also running full
-    /// diagnostics, e.g. as a sub-expression of a larger one), so this
-    /// was reachable far more often than any of this session's other
-    /// fixes in this same family. `Intersection` keeps "first member
-    /// whose declaration actually resolves wins" (the value genuinely is
-    /// every member simultaneously, so any one real declaration names its
-    /// one true type); `Union` unions every resolving member's own return
-    /// type together instead, matching `property_access_type`'s own
-    /// identical, more-correct distinction (a `Union` value is only ever
-    /// *one* of its members at a time, so calling the same method name on
-    /// two different possible runtime types can genuinely return two
-    /// different types).
+    /// extracted so it can recurse through `Union`/`Intersection`, rather
+    /// than silently collapsing any method call's own return type to
+    /// `Type::Mixed` whenever the receiver is one. `infer_expr` is the
+    /// core type-inference path (used whenever a method call's result
+    /// type needs computing without also running full diagnostics, e.g.
+    /// as a sub-expression of a larger one). `Intersection` keeps "first
+    /// member whose declaration actually resolves wins" (the value
+    /// genuinely is every member simultaneously, so any one real
+    /// declaration names its one true type); `Union` unions every
+    /// resolving member's own return type together instead, matching
+    /// `property_access_type`'s own identical, more-correct distinction
+    /// (a `Union` value is only ever one of its members at a time, so
+    /// calling the same method name on two different possible runtime
+    /// types can genuinely return two different types).
     pub(crate) fn method_call_return_type(
         &self,
         recv_ty: &Type,
@@ -422,7 +378,7 @@ impl<'a> Checker<'a> {
             Type::Object(class, _) if is_doctrine_query_get_result(self, class, method) => {
                 doctrine_query_result_list_type()
             }
-            // Phase 78: `DateTimeInterface::format()`'s own already-
+            // `DateTimeInterface::format()`'s own already-
             // shipped `date()` format-character table applies verbatim -
             // real, substantial corpus usage (dozens of literal
             // `->format('...')` sites). Falls back to the stub's own
@@ -438,7 +394,7 @@ impl<'a> Checker<'a> {
                     .and_then(|fmt| date_format_return_type(&fmt))
                     .unwrap_or(Type::String)
             }
-            // Phase 78: `DateInterval::format()`'s own hand-rolled
+            // `DateInterval::format()`'s own hand-rolled
             // specifier table - see `date_interval_format_return_type`'s
             // own doc comment for why the zero-valued representative
             // substitution is genuinely sound (not just an
@@ -451,7 +407,7 @@ impl<'a> Checker<'a> {
                     .and_then(|fmt| date_interval_format_return_type(&fmt))
                     .unwrap_or(Type::String)
             }
-            // Phase 78: `DateTimeInterface::diff()` narrows the stub's own
+            // `DateTimeInterface::diff()` narrows the stub's own
             // plain `DateInterval` return type to also carry a real,
             // always-int `days` property - mirrors real PHPStan's own
             // tiny stub-file override (this project deliberately never
@@ -466,7 +422,7 @@ impl<'a> Checker<'a> {
                     Type::ObjectShape(vec![("days".to_string(), Type::Int, false)]),
                 ])
             }
-            // Phase 78: `SimpleXMLElement::asXML()`'s real 0-arg/1-arg
+            // `SimpleXMLElement::asXML()`'s real 0-arg/1-arg
             // overload split (verified against real PHPStan's own
             // `SimpleXMLElementAsXMLMethodReturnTypeExtension`, whose
             // arity check is the *opposite* direction the design doc's
@@ -491,7 +447,7 @@ impl<'a> Checker<'a> {
                 .map(|(owner, sig)| {
                     // Class-level substitution (Collection<User>'s own
                     // `T`, or an inherited method's owner-level `T` via
-                    // Phase 10.5) runs first, then infer_call_return_
+                    // does) runs first, then infer_call_return_
                     // type's existing per-call-argument binding handles
                     // any template the *method itself* separately
                     // declares - the two are independent parameter scopes
@@ -502,7 +458,7 @@ impl<'a> Checker<'a> {
                     self.resolve_pseudo(&resolved, class)
                 })
                 .unwrap_or(Type::Mixed),
-            // Phase 79: an enum case is a real instance of its enum for
+            // An enum case is a real instance of its enum for
             // method-call purposes (see `member_confirmed_missing`'s
             // identical `EnumCase` arm) - no real template-args list to
             // carry through, same as every other synthesized enum-
@@ -516,14 +472,12 @@ impl<'a> Checker<'a> {
                     self.resolve_pseudo(&resolved, &owner)
                 })
                 .unwrap_or(Type::Mixed),
-            // Real bug found and fixed this session, the exact same
-            // shape as `property_access_type`'s own identical fix (see
-            // its own doc comment for the full real corpus trace): the
-            // narrower, just-`instanceof`-checked type is always the
-            // *last* member `narrow_instanceof_true` puts into an
-            // `Intersection`, so members must be searched in reverse to
-            // prefer its own (possibly overriding) signature over the
-            // broader original type's.
+            // The same shape as `property_access_type`'s own
+            // identical handling: the narrower, just-`instanceof`-checked
+            // type is always the last member `narrow_instanceof_true`
+            // puts into an `Intersection`, so members must be searched
+            // in reverse to prefer its own (possibly overriding)
+            // signature over the broader original type's.
             Type::Intersection(members) => members
                 .iter()
                 .rev()
