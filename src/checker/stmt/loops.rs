@@ -116,30 +116,26 @@ impl<'a> Checker<'a> {
         );
         self.loop_depth -= 1;
         if is_truthy_literal(cond) {
-            // The condition can never itself become false (a
-            // literal `while (true)`/`while (1)`), so the *only*
-            // way to reach code after this loop at all is via a
-            // `break` somewhere in the body - neither the "may
-            // run zero times" merge below nor the "reaching here
-            // means cond went false" narrowing after it applies:
-            // this loop always runs at least once, and never
-            // exits any other way. `is_truthy_literal` is the
-            // same check `always_terminates`'s own `While` arm
-            // already uses for the identical reasoning, one level
-            // up (a break-less `while (true) {...}` never lets
-            // control reach past it at all). Real corpus false
-            // positive this fixes: `while (true) { $x = ...;
-            // break; } return $x;` - the old unconditional
-            // zero-iteration merge below discarded `$x` from
-            // every representative state that reached the
-            // `break`, leaving it looking undefined afterward.
+            // The condition can never itself become false (a literal
+            // `while (true)`/`while (1)`), so the *only* way to reach
+            // code after this loop is via a `break` somewhere in the
+            // body - neither the "may run zero times" merge below nor
+            // the "reaching here means cond went false" narrowing after
+            // it applies. `is_truthy_literal` is the same check
+            // `always_terminates`'s own `While` arm uses one level up.
+            // Must fold every `break`-reached state together instead of
+            // merging against the pre-loop `locals` (which the
+            // unconditional zero-iteration merge below would otherwise
+            // do), or `while (true) { $x = ...; break; } return $x;`
+            // would discard `$x` from every representative state that
+            // reached the `break`, leaving it looking undefined
+            // afterward.
             //
-            // Folds every `break`-reached state together, seeded
-            // by the first rather than the (semantically
-            // meaningless here) pre-loop `locals` - with none at
-            // all, `locals` is left as its own pre-loop state, a
-            // safe fallback for what's genuinely unreachable code
-            // anyway (an infinite loop with no escape).
+            // Seeded by the first `break`-reached state rather than the
+            // (semantically meaningless here) pre-loop `locals` - with
+            // none at all, `locals` is left as its own pre-loop state, a
+            // safe fallback for what's genuinely unreachable code anyway
+            // (an infinite loop with no escape).
             let mut states = break_states.into_iter();
             if let Some(first) = states.next() {
                 let mut merged = first;
@@ -183,31 +179,24 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         // The first pass has nothing to narrow going in - the
-        // condition is only evaluated after the body has already
-        // run once. Every *re*-convergence pass (`pass > 0`) is
-        // different: reaching it at all means the previous pass's
-        // own trailing `cond` evaluated true (that's the only way
-        // a do-while body runs again), so the "continue" half of
-        // `cond`'s own narrowing is a real, provable fact at that
-        // pass's entry - the same narrowing a `while` loop's own
-        // convergence closure already applies unconditionally on
-        // every pass (its condition sits at the *start* of the
-        // body instead), just shifted here to skip pass 0.
-        //
-        // Real corpus bug this fixes (`Latte\Essential\
-        // CachingIterator::__construct`'s `do { $iterator =
-        // $iterator->getIterator(); } while (!$iterator instanceof
-        // \Iterator);`): without this, pass 2's own entry widens
-        // `$iterator` all the way back to the un-narrowed
-        // `Traversable` (the union of pass 1's `IteratorAggregate`
-        // entry and its own post-body `Traversable` exit), and
-        // `$iterator->getIterator()` isn't a real `Traversable`
-        // method - a false `method.notFound`. Applying `!$iterator
-        // instanceof \Iterator`'s own true-branch narrowing here
-        // subtracts `Iterator` back out first (`narrow_type_
-        // excluding`'s existing `Traversable`-minus-`Iterator`
-        // special case), correctly re-narrowing to
-        // `IteratorAggregate` instead.
+        // condition is only evaluated after the body has already run
+        // once. Every *re*-convergence pass (`pass > 0`) is different:
+        // reaching it at all means the previous pass's trailing `cond`
+        // evaluated true (the only way a do-while body runs again), so
+        // the "continue" half of `cond`'s narrowing is a real, provable
+        // fact at that pass's entry - the same narrowing a `while`
+        // loop's convergence closure applies unconditionally on every
+        // pass, just shifted here to skip pass 0. Needed for real shape
+        // `Latte\Essential\CachingIterator::__construct`'s
+        // `do { $iterator = $iterator->getIterator(); } while
+        // (!$iterator instanceof \Iterator);`: without it, pass 2's
+        // entry would widen `$iterator` all the way back to the
+        // un-narrowed `Traversable`, and `$iterator->getIterator()`
+        // isn't a real `Traversable` method - applying `!$iterator
+        // instanceof \Iterator`'s true-branch narrowing subtracts
+        // `Iterator` back out first (`narrow_type_excluding`'s
+        // `Traversable`-minus-`Iterator` special case), correctly
+        // re-narrowing to `IteratorAggregate` instead.
         let entry = locals.clone();
         self.loop_depth += 1;
         let (body_locals, break_states) = self.converge_loop_body(
@@ -215,10 +204,9 @@ impl<'a> Checker<'a> {
             declared_return,
             label,
             // A do-while's body always runs at least once by
-            // construction (the condition is only ever checked
-            // *after*) - see `converge_loop_body`'s own doc comment on
-            // this parameter for the real corpus false positive this
-            // exemption fixes.
+            // construction (the condition is only checked *after*) -
+            // see `converge_loop_body`'s own doc comment on this
+            // parameter.
             LoopZeroIterations::Impossible,
             |this, pass_locals, declared_return, label, pass| {
                 if pass > 0 {
@@ -227,26 +215,24 @@ impl<'a> Checker<'a> {
                 this.check_stmt(body, pass_locals, declared_return, label);
             },
         );
-        // A do-while's body always runs at least once - the
-        // converged result replaces `locals` directly, the same
-        // "no zero-iterations merge" choice this arm already made.
+        // A do-while's body always runs at least once - the converged
+        // result replaces `locals` directly, no zero-iterations merge
+        // needed.
         *locals = body_locals;
         self.in_condition_position = true;
-        // `loop_depth` deliberately stays incremented one
-        // statement longer than While's own arm needs it to -
-        // real corpus false positive this fixes (Symfony's own
+        // `loop_depth` deliberately stays incremented one statement
+        // longer than While's arm needs it to: this trailing check of
+        // the loop's own condition is *itself* still evaluating a
+        // loop-carried variable's post-convergence type, exactly as
+        // approximate as any pass inside the loop -
+        // `check_constant_numeric_comparison`/`check_constant_loose_
+        // comparison`'s own `self.loop_depth > 0` guard needs to see it
+        // still incremented here (real shape: Symfony's own
         // `LoggerTest`'s `do { ...; $attempts++; } while ((...) &&
-        // $attempts < 150);`): this trailing check of the loop's
-        // own condition is *itself* still evaluating a loop-
-        // carried variable's post-convergence type, exactly as
-        // approximate as any pass inside the loop - `check_
-        // constant_numeric_comparison`/`check_constant_loose_
-        // comparison`'s own `self.loop_depth > 0` guard (`checker/
-        // expr.rs`) needs to see it still incremented here, or
-        // `$attempts`'s own convergence-bounded range (this
-        // project's 3-pass approximation reaches nowhere near the
-        // real 150) makes `$attempts < 150` look unconditionally,
-        // wrongly provable.
+        // $attempts < 150);` - without it, `$attempts`'s
+        // convergence-bounded range, nowhere near the real 150, would
+        // make `$attempts < 150` look unconditionally, wrongly
+        // provable).
         self.check_expr(cond, locals, label);
         self.loop_depth -= 1;
         // `DoWhileLoopConstantConditionRule`: real
