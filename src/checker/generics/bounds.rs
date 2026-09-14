@@ -315,48 +315,39 @@ impl<'a> Checker<'a> {
     ///
     /// Also covers `@use Trait<Arg, ...>` (a `use`
     /// clause's own generic arguments) - real PHPStan's own
-    /// `UsedTraitsRule` is a separate rule (triggered per `TraitUse`
-    /// statement node, with its own trait-name-mismatch diagnostics this
-    /// project doesn't replicate), but its actual bound/arity/call-site-
-    /// variance checking is the identical `GenericObjectTypeCheck`/
-    /// `GenericAncestorsCheck` machinery this function already runs for
-    /// `extends`/`implements` - folding it in here, the same way this function
-    /// already unifies `extends`+`implements` for enums, avoids a third
-    /// near-duplicate call site for what's ultimately the same check.
+    /// `UsedTraitsRule` is a separate rule, but its actual
+    /// bound/arity/call-site-variance checking is the identical
+    /// `GenericObjectTypeCheck`/`GenericAncestorsCheck` machinery this
+    /// function already runs for `extends`/`implements` - folding it in
+    /// here avoids a third near-duplicate call site for what's
+    /// ultimately the same check.
     pub(crate) fn check_ancestor_generic_bounds(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        // `extends_args`/`implements_args` store just the argument list,
-        // not paired with the parent/interface's own name - re-pair each
-        // one into a real `Object(class, args)` here, or
-        // `check_generic_bounds` has no class to look bounds up against
-        // at all (it would just see the *arguments* as if they were the
-        // generic reference themselves). Neither the parent name nor an
-        // interface name carries its own span in the AST, so both use the
-        // declaration's own span - imprecise. but still real.
-        // Each entry pairs a type to check with whether it's also safe to
-        // arity-check - see the `extends` case just below for the one
-        // case where it isn't.
+        // `extends_args`/`implements_args` store just the argument
+        // list, not paired with the parent/interface's own name -
+        // re-pair each one into a real `Object(class, args)` here, or
+        // `check_generic_bounds` has no class to look bounds up against.
+        // Neither name carries its own span in the AST, so both use the
+        // declaration's span. Each entry pairs a type to check with
+        // whether it's also safe to arity-check - see the `extends` case
+        // below for the one case where it isn't.
         let mut types_to_check: Vec<(Type, bool)> = Vec::new();
-        // Real corpus false positive (Symfony's own `ServiceCollectionInterface`,
-        // which `extends ServiceProviderInterface, \Countable,
-        // \IteratorAggregate` with *two* of those three carrying their own
-        // `@extends ...<Args>` tag): `extends_args` is a flat, un-keyed
-        // `Vec<Type>` (unlike `implements_args`, already a real `HashMap`)
-        // - real PHP interfaces can `extends` more than one parent, each
-        // with its own independent argument list, but this field has no
-        // way to keep more than one ancestor's own arguments apart, so
-        // multiple `@extends<...>` tags parse into one conflated list.
-        // Harmless for `check_generic_bounds`'s own tolerant, `zip`-based
-        // bound-checking (an extra/misattributed argument is simply never
-        // looked at), but `check_generic_reference_arity`'s own
-        // exact-count comparison is far more sensitive to it - only
-        // trustworthy when there's exactly one `extends` target to begin
-        // with, the one case `extends_args` is actually guaranteed to
-        // belong to. `check_generic_bounds_and_arity`'s own `check_arity`
-        // flag is how this one call site opts out of the arity check its
-        // own pervasive default would otherwise now also run.
+        // `extends_args` is a flat, un-keyed `Vec<Type>` (unlike
+        // `implements_args`, a real `HashMap`) - real PHP interfaces can
+        // `extends` more than one parent, each with its own independent
+        // argument list, but this field can't keep more than one
+        // ancestor's arguments apart, so multiple `@extends<...>` tags
+        // parse into one conflated list (real shape: Symfony's own
+        // `ServiceCollectionInterface`, which `extends
+        // ServiceProviderInterface, \Countable, \IteratorAggregate` with
+        // two of those three carrying their own tag). Harmless for
+        // `check_generic_bounds`'s tolerant, `zip`-based bound-checking,
+        // but `check_generic_reference_arity`'s exact-count comparison
+        // is only trustworthy when there's exactly one `extends` target
+        // - `check_generic_bounds_and_arity`'s `check_arity` flag is how
+        // this call site opts out of that check.
         if let Some(parent) = info.extends.first() {
             let parent_ty = Type::Object(parent.clone(), info.extends_args.clone());
             types_to_check.push((parent_ty, info.extends.len() == 1));
@@ -371,12 +362,10 @@ impl<'a> Checker<'a> {
             let iface_ty = Type::Object(iface.clone(), info.implements_args[iface].clone());
             types_to_check.push((iface_ty, true));
         }
-        // `@use Trait<Arg, ...>` - a `HashMap` just
-        // like `implements_args`, each trait keyed independently (no
-        // `extends_args`-style conflation risk: a class can `use` more
-        // than one generic trait, but PHP requires one `@use` tag per
-        // trait, each naming its own trait explicitly), so every entry is
-        // as safe to arity-check as an interface is.
+        // `@use Trait<Arg, ...>` - a `HashMap` like `implements_args`,
+        // each trait keyed independently (no `extends_args`-style
+        // conflation risk: PHP requires one `@use` tag per trait), so
+        // every entry is as safe to arity-check as an interface is.
         let mut trait_names: Vec<&String> = info.uses_args.keys().collect();
         trait_names.sort();
         for trait_name in trait_names {
@@ -391,32 +380,25 @@ impl<'a> Checker<'a> {
         self.check_cross_path_interface_conflicts(fqn, span);
     }
 
-    /// `GenericObjectTypeCheck`'s own arity/well-
-    /// formedness half (`generics.lessTypes`/`.moreTypes`, confirmed
-    /// directly against `vendor/phpstan-src`) - a genuinely different
-    /// rule than `check_generic_bounds`'s own bound-checking, which
-    /// silently truncates via `zip` (an extra argument beyond `info.
-    /// templates.len()` is simply never looked at) rather than flagging
-    /// the mismatch itself. Called pervasively from
-    /// `check_generic_bounds_and_arity` - every generic type reference
-    /// anywhere (a property type, a param/return hint, an `extends`/
-    /// `implements` argument, ...) - matching real PHPStan's own
-    /// `IncompatiblePhpDocTypeCheck`, the shared engine behind every one
-    /// of those positions, which calls `GenericObjectTypeCheck` the same
-    /// way. Every template with its own `@template T = Default`
-    /// (`template_defaults`) is optional - only a template with *no*
-    /// default is "required" for `lessTypes` purposes. Real PHPStan's own
-    /// third case,
-    /// `generics.notGeneric` (a reference supplying args to a class
-    /// with *no* templates at all), is deliberately not built here: this
-    /// project can't always tell "genuinely not generic" apart from
-    /// "this project's own template-tag parsing has a gap for this
-    /// class," and misfiring on the latter across *every* `extends`/
-    /// `implements` in the corpus is a real, broad false-positive risk
-    /// the narrower arity-only checks below don't share (`0 < args.len()`
-    /// on a class with zero known templates would already be caught as
-    /// `moreTypes` instead, at the same, more conservative confidence
-    /// level as any other class here).
+    /// `GenericObjectTypeCheck`'s own arity/well-formedness half
+    /// (`generics.lessTypes`/`.moreTypes`) - a genuinely different rule
+    /// than `check_generic_bounds`'s bound-checking, which silently
+    /// truncates via `zip` (an extra argument beyond
+    /// `info.templates.len()` is never looked at) rather than flagging
+    /// the mismatch. Called pervasively from
+    /// `check_generic_bounds_and_arity`, matching real PHPStan's
+    /// `IncompatiblePhpDocTypeCheck`. Every template with its own
+    /// `@template T = Default` (`template_defaults`) is optional - only
+    /// a template with *no* default is "required" for `lessTypes`
+    /// purposes. Real PHPStan's third case, `generics.notGeneric` (a
+    /// reference supplying args to a class with *no* templates at all),
+    /// is deliberately not built here: this project can't always tell
+    /// "genuinely not generic" apart from "this project's own
+    /// template-tag parsing has a gap for this class," and misfiring on
+    /// the latter across *every* `extends`/`implements` in the corpus is
+    /// a broad false-positive risk the narrower arity-only checks below
+    /// don't share (`0 < args.len()` on a class with zero known
+    /// templates is already caught as `moreTypes` instead).
     fn check_generic_reference_arity(&mut self, ty: &Type, label: &str, span: Span) {
         let Type::Object(class, args) = ty else {
             return;
@@ -427,44 +409,34 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class) else {
             return;
         };
-        // Real corpus false positive (Piwigo's own custom `phpstan-stubs/
-        // LatteCachingIterator.stub.php`, its own extensive comment
-        // explains why: Latte's `CachingIterator` retroactively "restores"
-        // generics onto real PHP's own `\CachingIterator`, whose actual
-        // phpstorm-stubs declaration carries zero `@template` tags at
-        // all, via `@extends \CachingIterator<TKey, TValue, Iterator<TKey,
-        // TValue>>` alone): a referenced class with *no* declared
-        // templates at all is real PHPStan's own `generics.notGeneric`
-        // territory - a different check, already deliberately not built
-        // (see this file's own `check_generic_reference_arity` doc
-        // comment) precisely because this project's own `@template`-tag
-        // parsing can have a real gap for a class whose only template
-        // declaration lives on the *referencing* side, not this one -
-        // "genuinely non-generic" and "this project just doesn't see its
-        // templates" are indistinguishable from here, so this stays
-        // silent rather than guess.
+        // A referenced class with *no* declared templates at all is
+        // real PHPStan's own `generics.notGeneric` territory - a
+        // different check, deliberately not built (see this function's
+        // doc comment) since "genuinely non-generic" and "this project's
+        // `@template`-tag parsing has a gap for this class" (real shape:
+        // Piwigo's own custom `phpstan-stubs/LatteCachingIterator.stub.php`,
+        // where Latte's `CachingIterator` retroactively "restores"
+        // generics onto real PHP's own `\CachingIterator` via
+        // `@extends \CachingIterator<TKey, TValue, Iterator<TKey, TValue>>`
+        // alone) are indistinguishable from here.
         if info.templates.is_empty() {
             return;
         }
-        // Real, hardcoded parse-time special case (`PhpDoc\TypeNodeResolver
-        // ::resolveGenericTypeNode`, confirmed directly against
-        // `vendor/phpstan-src`) for four built-in names specifically:
-        // `Traversable`/`Iterator`/`IteratorAggregate<V>` pads a single
-        // given argument into `<mixed, V>` before this check ever runs,
-        // and `Generator<V>`/`Generator<K, V>` pads to the full `<K, V,
-        // mixed, mixed>` shape - neither ever reaches `lessTypes`, even
-        // though this project's own `template_defaults` has (correctly)
-        // recorded no real `@template ... = Default` for any of their
-        // four template names. This project doesn't model that
-        // resolution-time padding itself (it would need touching every
-        // consumer of a short-form reference to these names, not just
-        // this one check), so this narrowly special-cases the exact same
-        // argument counts real PHPStan's own hardcoded list treats as
-        // pre-padded, rather than risk a real, common false positive on
-        // `@return \Generator<int, string>` (verified directly: a real,
-        // installed `phpstan/phpstan` flags neither this nor a bare
-        // `Traversable<V>`, but does still flag `Generator<int, string,
-        // bool>` - three args isn't one of its own padded shapes either).
+        // Real PHPStan hardcodes a parse-time special case
+        // (`PhpDoc\TypeNodeResolver::resolveGenericTypeNode`) for four
+        // built-in names: `Traversable`/`Iterator`/`IteratorAggregate<V>`
+        // pads a single given argument into `<mixed, V>` before this
+        // check ever runs, and `Generator<V>`/`Generator<K, V>` pads to
+        // the full `<K, V, mixed, mixed>` shape - neither ever reaches
+        // `lessTypes`, even though `template_defaults` correctly records
+        // no `@template ... = Default` for any of their four template
+        // names. This project doesn't model that resolution-time padding
+        // itself, so this narrowly special-cases the exact same argument
+        // counts real PHPStan's hardcoded list treats as pre-padded
+        // (real `phpstan/phpstan` flags neither `@return
+        // \Generator<int, string>` nor a bare `Traversable<V>`, but does
+        // flag `Generator<int, string, bool>` - three args isn't one of
+        // its padded shapes).
         let is_pre_padded_short_form = (args.len() == 1
             && ITERABLE_GENERIC_CLASS_NAMES.contains(&class.as_str()))
             || (args.len() == 2 && class == "Generator");
