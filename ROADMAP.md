@@ -2349,18 +2349,65 @@ section used to carry:
   as a known "empty" fact, upgrading the narrowed variable to its own
   non-empty-array accessory the same way `count($x) > 0` already does -
   not a new mechanism, an additional recognized shape in an existing one.
-  Not attempted here. `SearchService::getQuickSearchResultsNoCache`'s own
-  `findImageIdsForRegularSearch(...)` argument (a separate, `[...$a,
-  ...$b]`-spread-built `$params`, expecting `list`, given `non-empty-
-  array|non-empty-array<int>`) and four `SiteUpdateSubController`
-  findings (`int|string`-vs-`int`/`list<int>` mismatches on values
-  threaded through `$db_fulldirs`/`$insert`/`$category_up`, built across
-  several hundred lines of dynamic-key array construction) were
-  triaged but not root-caused this round - a simplified reproduction of
-  the visible `[...$a, ...$b]` spread-merge shape did *not* reproduce the
-  list-ness loss, so the real trigger is something this project's own
-  narrower repro didn't capture; needs its own dedicated trace before
-  either can be scoped as a fix.
+  Not attempted here.
+- **The 4 `SiteUpdateSubController` `int|string`-vs-`int`/`list<int>`
+  findings are not a separate gap - they're another instance of the
+  benevolent-`int|string`-array-key-union item above, reached through
+  `array_flip()` instead of directly.** `$db_fulldirs` starts as
+  `CategoryService::getFulldirs()`'s own `@return string[]` - a `Type[]`-
+  shorthand return, whose *key* type is exactly the "benevolent"
+  `int|string` union the item above already names - then gets
+  `array_flip()`'d, swapping keys and values, so the benevolent marker
+  moves from the *key* position into the *value* position. Confirmed via
+  `\PHPStan\dumpType()` against a faithful reproduction (a `string[]`-
+  returning function, `array_flip()`, then reading a value against an
+  `int`-only parameter): real PHPStan's own dumped type is `array<string,
+  (int|string)>` - the parenthesized benevolent form, same as the item
+  above - and passing that value where `int` is expected produces **zero**
+  errors. `$to_delete[]`/`$category_up[]`/`storageCategoryId: $db_fulldirs
+  [$dirname]` all read values straight out of this same flipped array (or
+  out of `$insert['id_uppercat']`, itself assigned from a value read out
+  of it) - once the benevolent-union marker above is built, it needs to
+  additionally survive `array_flip()`'s own key/value swap (and, more
+  generally, any other place this project moves a key type into a value
+  position or vice versa) for all 4 of these findings to resolve for
+  free, with no separate fix of their own.
+- **A real, confirmed bug in the "degraded" (non-`ArrayShape`) path of a
+  spread array literal (`[...$a, ...$b]`): it uses the wrong test for
+  whether a spread source keeps the result list-shaped.** Found
+  investigating `SearchService::getQuickSearchResultsNoCache`'s own
+  `$params = [...$params, ...$ids]` (`$ids` sourced from `qsearchEval()`'s
+  own `@return array<int, int>`) - flagged `argument.type` against
+  `findImageIdsForRegularSearch`'s `list`-typed parameter. Confirmed via
+  `\PHPStan\dumpType()` against a faithful minimal reproduction (a
+  function declared `@return array<int, int>` - deliberately *not*
+  `list<int>` - spread into an accumulator, once unconditionally and once
+  inside an `if`): real PHPStan reports **zero** errors; swapping the
+  source's own declared type to `@return list<int>` doesn't change the
+  outcome (still zero errors) - but swapping it to `@return array<string,
+  int>` correctly *does* produce the same `argument.type` error phpstan-rs
+  gives today. Root-caused directly in `checker::expr::array_ops::
+  infer_spread_array_literal_type`'s own "degraded" branch: `if !Self::
+  is_list_like(&value_ty) { list_safe = false; }` gates purely on whether
+  the spread *source* already carries the `ArrayList` accessory - but
+  real PHP's own spread semantics (already correctly described in this
+  same function's own doc comment, just not applied to this branch) always
+  renumber a source's *integer* keys sequentially into the result,
+  regardless of whether those keys were already sequential in the source;
+  only *string* keys are ever preserved verbatim (and only a string key
+  can break the result's own list-ness). `is_list_like` answers "is this
+  array itself provably a list" - the right question for most of its
+  other callers, but the wrong one here: the real question a spread needs
+  answered is "does this source have any possible *string* key at all,"
+  which only fails for a plain int-keyed `Type::Array` (`is_list_like`'s
+  own `_ => false` catch-all wrongly answers this the same as a
+  string-keyed one). A real fix: replace (or supplement) the `is_list_
+  like` check in this one branch with one that inspects the source's own
+  key type directly (via `array_key_type`) and only sets `list_safe =
+  false` when that key type could genuinely include `String` - an
+  `ArrayShape` source already takes the separate, non-degraded branch
+  above it and isn't affected either way. Scoped, well-understood, not
+  attempted here.
 - `UploadService::addUploadedFile`'s own `$dbnow` - **root-caused, not
   simply "unresolved"**: a bisection of the real file (a temporary,
   immediately-reverted edit confirmed byte-identical via `md5sum` before
