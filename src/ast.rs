@@ -1,16 +1,9 @@
 use crate::token::Span;
 
 /// One `Name(args)` entry inside an attribute group
-/// (`#[Name(args), ...]`). `name` is the raw (possibly
-/// namespaced/backslashed) class name exactly as `parse_qualified_name`
-/// reads it, resolved against the
-/// enclosing file's `use` imports the same way any other class-name
-/// reference is (by the checker, not here - this node is deliberately as
-/// dumb as `ClassConst`/`Param`, just structure). `args` reuses the exact
-/// same `Arg` shape a real call's argument list uses (named arguments and
-/// `...spread` included) - an attribute's own arguments are simply an
-/// argument list applied to its constructor at compile time, real PHP's
-/// own grammar doesn't distinguish the two syntactically at all.
+/// (`#[Name(args), ...]`). `name` is the raw class name as written,
+/// resolved by the checker (not here). `args` reuses `Arg`'s call-argument
+/// shape, since PHP's grammar doesn't distinguish the two.
 #[derive(Debug, Clone)]
 pub struct Attribute {
     pub name: String,
@@ -75,11 +68,9 @@ pub enum StmtKind {
     FunctionDecl(FunctionDecl),
     ClassDecl(ClassDecl),
     Namespace(String),
-    // Every import a `use` statement brings in - a plain `use A, B;` list
-    // and a group `use Foo\{A, B as C};` (each member's path prefixed
-    // with the group path) both expand to one `UseImport` per name here,
-    // rather than keeping only the first the way an earlier, unconsumed
-    // version of this variant did.
+    // Every import a `use` statement brings in - a plain `use A, B;`
+    // list and a group `use Foo\{A, B as C};` both expand to one
+    // `UseImport` per name here.
     Use(Vec<UseImport>),
     // Top-level `const NAME = value, ...;`, distinct from a class's own
     // consts (ClassConst is reused for the shape, since it's identical).
@@ -299,21 +290,13 @@ pub struct UseImport {
     pub path: String,
     pub alias: Option<String>,
     // Which of PHP's three `use`-import namespaces this member belongs
-    // to (`use Foo;` vs `use function foo;` vs `use const FOO;`) - needed
-    // because only a class-shaped and function-shaped import are ever
-    // existence-checkable against this project's own registry (a plain
-    // `use Foo;` isn't checked for existence at all, matching real
-    // PHPStan's own `ExistingNamesInUseRule`, which only ever calls
-    // `checkClassNames` with a `null` usage location for the class case,
-    // i.e. only case-sensitivity/forbidden-name checking, never a
-    // `hasClass` existence check; a class reference is only ever
-    // existence-checked at the point it's actually *used*, not merely
-    // imported). `use const` existence is deliberately left unchecked
-    // here too - this project has no project-wide global-constant
-    // registry to check it against at all (`ast::StmtKind::GlobalConst`
-    // is currently only used to *infer a value's type*, not indexed into
-    // any name table), and PHP's own huge, extension-dependent built-in
-    // constant surface makes a half-built one worse than none.
+    // to (`use Foo;` vs `use function foo;` vs `use const FOO;`) - a
+    // plain `use Foo;` isn't checked for existence at all, matching real
+    // PHPStan's own `ExistingNamesInUseRule` (a class reference is only
+    // existence-checked where it's actually *used*, not merely
+    // imported). `use const` existence is also left unchecked - this
+    // project has no project-wide global-constant registry to check it
+    // against.
     pub kind: UseKind,
 }
 
@@ -408,17 +391,11 @@ pub struct ClassDecl {
     // `use TraitA, TraitB;` inside the class body.
     pub uses: Vec<String>,
     pub uses_spans: Vec<Span>,
-    // The doc comment of the `use` *statement* each `uses` entry came from
-    // (not the class's own, separate `doc_comment` below) - same index,
-    // same shape as `uses_spans`. All names from one `use A, B;` statement
-    // share the same entry (real PHP allows only one doc comment per
-    // statement, however many trait names it lists). Needed for `@use
-    // Trait<Args>`: real PHPStan resolves that tag from the `TraitUse`
-    // statement's own doc comment specifically (`vendor/phpstan-src`'s
-    // own `TemplateObjectType`:
-    // `/** @use TemplateTypeTrait<ObjectType> */` sits directly above
-    // `use TemplateTypeTrait;`, not on the class's own separate
-    // top-of-class docblock).
+    // The doc comment of the `use` *statement* each `uses` entry came
+    // from (not the class's own, separate `doc_comment` below) - same
+    // index/shape as `uses_spans`. Needed for `@use Trait<Args>`: real
+    // PHPStan resolves that tag from the `TraitUse` statement's own doc
+    // comment, not the class's top-of-class docblock.
     pub uses_doc_comments: Vec<Option<String>>,
     // `use A, B { B::hello as helloB; }` - each `as`-clause that
     // introduces a new name for an existing trait method (a
@@ -490,20 +467,11 @@ pub struct TraitAlias {
     pub alias: String,
 }
 
-/// One argument in a call's own argument list (`Call`/`New`/`MethodCall`/
-/// `DynamicMethodCall`/`StaticCall`/`NewAnonymousClass` all hold
-/// `Vec<Arg>`, not a bare `Vec<Expr>`), since a call's real
-/// argument-to-parameter mapping depends on more than just each
-/// argument's own written order: `name` is
-/// `Some("matches")` for a named argument (`matches: $m`), letting a
-/// resolver match it against the right declared parameter regardless of
-/// where it appears among the arguments (real PHP itself doesn't require
-/// named arguments to appear in declaration order); `spread` is `true`
-/// for `...$args` - once true, every argument at or after this one in the
-/// call can't be resolved to a specific declared parameter at all (the
-/// unpacked array's real contents aren't known statically). The
-/// overwhelmingly common case (`name: None, spread: false`) is a plain
-/// positional argument, unchanged in meaning from a bare `Expr`.
+/// One argument in a call's own argument list - `name` is
+/// `Some("matches")` for a named argument (`matches: $m`), which real PHP
+/// allows out of declaration order; `spread` is `true` for `...$args`,
+/// after which no later argument can be resolved to a specific declared
+/// parameter (the unpacked array's contents aren't known statically).
 #[derive(Debug, Clone)]
 pub struct Arg {
     pub name: Option<String>,
@@ -514,14 +482,9 @@ pub struct Arg {
 /// One element of an `ExprKind::ArrayLiteral` (`[...]`) - `key` is
 /// `Some(...)` for a `key => value` pair, `None` for a plain positional
 /// element. `spread` is `true` for `...$other` (PHP's own array-unpacking
-/// syntax inside a literal, not the same construct as a call's own
-/// spread argument even though it shares the same `...` token) -
-/// per-element shape inference (`infer_expr`'s `ArrayLiteral` arm)
-/// needs to know this to avoid treating a spread
-/// element's own expression as if it were meant to occupy one specific
-/// key: real PHP inserts a variable number of the spread value's own
-/// elements at that point, shifting every subsequent positional key by
-/// an amount this checker has no way to know statically.
+/// syntax) - a spread inserts an unknown number of elements, shifting
+/// every subsequent positional key by an amount this checker can't know
+/// statically.
 #[derive(Debug, Clone)]
 pub struct ArrayItem {
     pub key: Option<Expr>,
