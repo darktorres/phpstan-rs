@@ -6,12 +6,11 @@ use crate::types::{AccessoryKind, Type, is_subtype};
 
 impl<'a> Checker<'a> {
     /// The actual variable-binding side effect of an assignment - lives in
-    /// `check_expr` (called from *every* place an assignment expression can
+    /// `check_expr` (called from every place an assignment expression can
     /// appear: a bare expression statement, a `for` init/step, a `while`
     /// condition, ...) rather than a separate pass triggered only for
-    /// top-level expression statements, which is exactly what let `for ($j
-    /// = 0; ...)`'s `$j` go unbound (and then misfire as "undefined") until
-    /// this was caught.
+    /// top-level expression statements, so `for ($j = 0; ...)`'s `$j`
+    /// gets bound.
     /// Checks an assignment's own left-hand side for whatever isn't a
     /// pure "definition site" - a plain variable (or nested variable,
     /// recursing through any level of `[$a, $b] = ...`-style
@@ -19,8 +18,7 @@ impl<'a> Checker<'a> {
     /// expression and a `PropertyAccess`'s own base still are. Shared
     /// between the top-level assignment target and every nested
     /// destructuring element, so `[[$a, $b], $c] = $nested;` doesn't
-    /// wrongly check `$a`/`$b` as reads of not-yet-defined variables the
-    /// way only handling one level of nesting used to.
+    /// wrongly check `$a`/`$b` as reads of not-yet-defined variables.
     pub(crate) fn check_assignment_target(
         &mut self,
         target: &Expr,
@@ -53,39 +51,29 @@ impl<'a> Checker<'a> {
             // own inferred shape is only what's known so far, not a
             // sealed contract the array can never grow past).
             //
-            // Phase 12 (unplanned follow-on): a *nested* write
-            // (`$piwigoInfos['updates'][] = [...]`, target itself an
-            // `Index` whose own base is *another* `Index`) used to route
-            // that inner `base` through `check_expr` too - correct for the
-            // single-level case (the base there is the real container
-            // being read, e.g. a bare `$piwigoInfos`), but wrong one level
-            // deeper: `$piwigoInfos['updates']` is itself part of *this
-            // same* write's own path, not a value being read, so it must
-            // not be checked via `check_shape_key_access` either - real,
-            // previously-masked bug, only surfaced once Finding E's own
-            // `Union`-awareness made `check_shape_key_access` actually
-            // inspect a `Union`-typed `$piwigoInfos` instead of bailing on
-            // it outright. Recursing through `check_assignment_target`
-            // itself for an `Index` base (instead of `check_expr`)
-            // generalizes this over any nesting depth, the same way
-            // `bind_assignment_target`'s own `Index` arm already does for
-            // the write side.
+            // A nested write (`$piwigoInfos['updates'][] = [...]`,
+            // target itself an `Index` whose base is another `Index`)
+            // must recurse through `check_assignment_target` for that
+            // inner base too, not `check_expr`: `$piwigoInfos['updates']`
+            // is itself part of this same write's path, not a value
+            // being read, so `check_shape_key_access` must not run on it
+            // either. Generalizes over any nesting depth, the same way
+            // `bind_assignment_target`'s `Index` arm does for the write
+            // side.
             ExprKind::Index(base, idx) => {
                 match &base.kind {
                     ExprKind::Index(..) => self.check_assignment_target(base, locals, label),
                     // Same reasoning as the top-level `Variable` arm
                     // above, one level down: `$x[] = ...`/`$x['key'] =
-                    // ...` as `$x`'s very first use is real PHP's own
-                    // silent array auto-vivification (confirmed directly
-                    // via `php -d error_reporting=E_ALL -r` - no warning
-                    // at any level), not a read of an already-defined
-                    // `$x` - routing it through `check_expr` here wrongly
-                    // flagged it as `variable.undefined`. Whether `$x`
-                    // already holds a non-array-compatible type is a
-                    // separate, not-yet-checked question this project's
-                    // usual "don't guess" leniency already leaves alone
-                    // for the write side (`bind_assignment_target`'s own
-                    // identical `Index` arm).
+                    // ...` as `$x`'s very first use is real PHP's silent
+                    // array auto-vivification, not a read of an
+                    // already-defined `$x` - routing it through
+                    // `check_expr` here would wrongly flag it as
+                    // `variable.undefined`. Whether `$x` already holds a
+                    // non-array-compatible type is a separate,
+                    // not-yet-checked question, matching this project's
+                    // "don't guess" leniency for the write side
+                    // (`bind_assignment_target`'s identical `Index` arm).
                     ExprKind::Variable(_) => {}
                     _ => {
                         self.check_expr(base, locals, label);
@@ -117,41 +105,40 @@ impl<'a> Checker<'a> {
     /// resolved for a plain `Type::Array` source - every target gets the
     /// source's homogeneous element type, or Mixed for anything else.
     pub(crate) fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
-        // Phase 22: keep any existing `narrowing_key` entry for this
-        // exact property-chain/literal-index-chain expression in sync
-        // with a real assignment - `apply_narrowing`'s own synthetic key
-        // format is a separate slot in the same `Locals` map (see
-        // `narrowing_key`'s own doc comment), and without this,
-        // reassigning a property/element a prior condition already
-        // narrowed left the *old* narrowed value sitting under that key
-        // forever - a real, common idiom this broke: `if ($this->entries
-        // === null) { $this->entries = [...]; } return $this->entries;`,
-        // where `infer_expr`'s own "check narrowed key first" fast path
-        // kept reading back the stale `null` from the condition check
-        // instead of the real, newly-assigned array. Redundant with (but
-        // harmless alongside) the `Variable` arm below, which does the
-        // same insert under the identical key for that one case.
+        // Keep any existing `narrowing_key` entry for this exact
+        // property-chain/literal-index-chain expression in sync with a
+        // real assignment - `apply_narrowing`'s synthetic key format is
+        // a separate slot in the same `Locals` map (see `narrowing_key`'s
+        // doc comment): without this, reassigning a property/element a
+        // prior condition already narrowed would leave the old narrowed
+        // value sitting under that key forever (`if ($this->entries ===
+        // null) { $this->entries = [...]; } return $this->entries;`,
+        // where `infer_expr`'s "check narrowed key first" fast path
+        // would read back the stale `null` instead of the newly-assigned
+        // array). Redundant with (but harmless alongside) the `Variable`
+        // arm below, which does the same insert under the identical key
+        // for that one case.
         if let Some(key) = narrowing_key(lhs) {
-            // Phase 33 Finding 5: also drop any *deeper* stale entry
-            // rooted at this exact key (`"key->prop"`, `"key[lit]"`) or
-            // that used `key` as a variable subscript elsewhere
-            // (`"other[$key]"`) - real invalidation-on-reassignment,
-            // generalized over any `narrowing_key` shape (bare variable,
-            // property chain, or index chain), not just a bare variable.
+            // Also drops any deeper stale entry rooted at this exact
+            // key (`"key->prop"`, `"key[lit]"`) or that used `key` as a
+            // variable subscript elsewhere (`"other[$key]"`) - real
+            // invalidation-on-reassignment, generalized over any
+            // `narrowing_key` shape (bare variable, property chain, or
+            // index chain), not just a bare variable.
             purge_stale_narrowing_for(locals, &key);
             locals.insert(key, ty.clone());
         }
         match &lhs.kind {
-            // Phase 17 follow-up: the one real "this variable is now
-            // bound to a fresh value" site in this whole function - a
-            // plain assignment (`$x = ...`) or, recursing, each leaf of a
-            // list-destructuring target (`[$a, $b] = ...`) - `lhs.span`
-            // is already exactly the right span either way, since this
+            // The one real "this variable is now bound to a fresh
+            // value" site in this whole function - a plain assignment
+            // (`$x = ...`) or, recursing, each leaf of a list-
+            // destructuring target (`[$a, $b] = ...`) - `lhs.span` is
+            // already exactly the right span either way, since this
             // recursion re-enters with `item.value` (each destructuring
-            // leaf's own real `Expr`, own real span) for the latter case.
+            // leaf's own real `Expr`, own real span) for the latter
+            // case.
             ExprKind::Variable(name) => {
-                // Phase 17 follow-up: see `Checker::probe_hit_at`'s own
-                // doc comment.
+                // See `Checker::probe_hit_at`'s doc comment.
                 self.probe_hit_at(lhs.span, &ty);
                 locals.declare(name.clone(), ty, lhs.span);
             }
@@ -180,11 +167,10 @@ impl<'a> Checker<'a> {
                         self.bind_assignment_target(&item.value, element_ty, locals);
                     }
                 }
-                // Phase 14: `Self::array_element_type` also sees through
-                // an `Intersection`-wrapped `list<T>`/`non-empty-
-                // array<T>` - without it, destructuring one
-                // (`[$a, $b] = $listTypedVar`) silently lost its real
-                // element type down to `Mixed`.
+                // `Self::array_element_type` also sees through an
+                // `Intersection`-wrapped `list<T>`/`non-empty-array<T>` -
+                // without it, destructuring one (`[$a, $b] = $listTypedVar`)
+                // would lose its real element type down to `Mixed`.
                 Type::Array(..) | Type::Intersection(_) => {
                     let element_ty = Self::array_element_type(&ty).unwrap_or(Type::Mixed);
                     for item in items {
@@ -197,39 +183,23 @@ impl<'a> Checker<'a> {
                     }
                 }
             },
-            // Finding 48's own follow-on: `$x['newKey'] = $value;` adds a
-            // real key to `$x`'s own tracked shape when `$x` already
-            // holds a known one (most commonly, from an earlier `$x = []`
-            // or `$x = ['a' => 1]` literal) - without this, an array
-            // literal's own new precision made the extremely common
-            // "start from a literal, build it up one key at a time"
-            // idiom look like every later read was accessing a key the
-            // shape could never have, since the shape itself never grew
-            // past its own starting literal. Only updates a *known*
-            // shape already sitting in `locals` under a bare variable
-            // name; anything else (a property chain, a variable with a
-            // not-yet-known type) is left alone, matching this project's
-            // usual "don't guess" scope.
+            // `$x['newKey'] = $value;` adds a real key to `$x`'s
+            // tracked shape when `$x` already holds a known one (most
+            // commonly, from an earlier `$x = []` or `$x = ['a' => 1]`
+            // literal) - without this, an array literal's new precision
+            // would make the common "start from a literal, build it up
+            // one key at a time" idiom look like every later read was
+            // accessing a key the shape could never have. Only updates a
+            // known shape already sitting in `locals` under a bare
+            // variable name; anything else (a property chain, a variable
+            // with a not-yet-known type) is left alone.
             //
-            // Phase 22 Finding 2's own follow-on: a *nested* write
-            // (`$items[$day]['derivative'] = $derivative;` - `base` is
-            // itself an `Index`, not a bare `Variable`) used to be
-            // silently ignored entirely, which interacted badly with
-            // Finding 2's own widening - a real corpus example
-            // (`CalendarMonthly::buildMonthCalendar`) builds `$items` via
-            // `$items[(int) $row->period] = [...]` (Finding 2 widens this
-            // to `Type::Array`), then adds more fields per-element via
-            // `$items[$day]['derivative'] = ...`/`['file'] = ...` -
-            // ignoring those nested writes meant `$items[$day]`'s
-            // inferred element type stayed frozen at the *initial*
-            // literal's own fields, so reading `$items[$day]['derivative']`
-            // afterward was flagged as a genuinely new false positive,
-            // not present before Finding 2's own widening made `$items`
-            // precise enough to check in the first place. Handled by
-            // recursing: compute `base`'s own current type, work out its
-            // new type as if `base[idx] = ty` had just happened to it,
-            // then bind *that* back onto `base` - which lands in this
-            // same arm again if `base` itself is another `Index`,
+            // A nested write (`$items[$day]['derivative'] = $derivative;` -
+            // `base` is itself an `Index`, not a bare `Variable`) is
+            // handled by recursing: compute `base`'s current type, work
+            // out its new type as if `base[idx] = ty` had just happened
+            // to it, then bind that back onto `base` - which lands in
+            // this same arm again if `base` itself is another `Index`,
             // correctly handling any nesting depth.
             ExprKind::Index(base, idx) => {
                 // Computed once here (not inside `write_index_into`
@@ -243,46 +213,37 @@ impl<'a> Checker<'a> {
                 match &base.kind {
                     ExprKind::Variable(name) => {
                         // A write through an as-yet-undefined variable
-                        // (`$x[] = 1;`/`$x['key'] = 1;` as `$x`'s very first
-                        // use) is real PHP's own array auto-vivification -
-                        // silently creates a fresh `[]` and writes into it,
-                        // no warning at any error-reporting level (confirmed
-                        // directly via `php -d error_reporting=E_ALL -r`).
-                        // Previously bailed out here entirely, leaving `$x`
-                        // permanently undefined for every later read - a
-                        // real corpus `variable.undefined` false positive.
-                        // Starting `write_index_into` from a fresh empty
-                        // `ArrayShape` reuses its own existing "a real append
-                        // onto a provably list-like container (an empty
-                        // shape included) stays a real, now-non-empty list"
-                        // rule, so `$x[] = 1;` alone correctly infers
+                        // (`$x[] = 1;`/`$x['key'] = 1;` as `$x`'s very
+                        // first use) is real PHP's array auto-
+                        // vivification - silently creates a fresh `[]`
+                        // and writes into it, no warning at any error-
+                        // reporting level. Starting `write_index_into`
+                        // from a fresh empty `ArrayShape` reuses its
+                        // existing "a real append onto a provably
+                        // list-like container (an empty shape included)
+                        // stays a real, now-non-empty list" rule, so
+                        // `$x[] = 1;` alone correctly infers
                         // `non-empty-list<int>`, not just `array`.
                         //
-                        // A superglobal (`$_SERVER['PHP_SELF'] = ...;`, a
-                        // real, common test-setup idiom) must NOT go through
-                        // this same fresh-empty-shape path even though it's
-                        // also typically absent from `locals` - unlike an
-                        // ordinary local, a superglobal already has a real,
-                        // much wider shape PHP itself populates before the
-                        // script ever runs, so treating this write as if it
-                        // were the array's *first* key would wrongly narrow
-                        // it down to only the key(s) a test happens to write
-                        // locally - a real corpus regression this fix's own
-                        // first version introduced, caught via corpus diff
-                        // before shipping (`tests/Unit/Core/
-                        // PageFilterHelperTest.php` writing `$_SERVER[
-                        // 'SCRIPT_FILENAME']` then separately reading the
-                        // real, pre-existing `$_SERVER['PHP_SELF']` - flagged
-                        // as accessing a key the freshly-narrowed shape could
-                        // never have). `superglobal_default_type` already
+                        // A superglobal (`$_SERVER['PHP_SELF'] = ...;`)
+                        // must NOT go through this same fresh-empty-shape
+                        // path even though it's also typically absent
+                        // from `locals` - unlike an ordinary local, a
+                        // superglobal already has a real, much wider
+                        // shape PHP populates before the script ever
+                        // runs, so treating this write as if it were the
+                        // array's first key would wrongly narrow it down
+                        // to only the key(s) a test happens to write
+                        // locally. `superglobal_default_type` already
                         // exists for exactly this "read before any real
                         // assignment appears in locals" case - reused
                         // verbatim rather than re-deriving it.
-                        // Phase 17 follow-up: was `name` genuinely undefined
-                        // before this write? A superglobal never really is
-                        // (PHP populates it before the script runs, even
-                        // though it's typically absent from `locals` too) -
-                        // only a real local's own first `$x[...] = ...`
+                        //
+                        // Was `name` genuinely undefined before this
+                        // write? A superglobal never really is (PHP
+                        // populates it before the script runs, even
+                        // though it's typically absent from `locals`
+                        // too) - only a real local's first `$x[...] = ...`
                         // write is this variable's true declaration site.
                         let was_defined = locals.contains_key(name);
                         let current = locals.get(name).cloned().unwrap_or_else(|| {
@@ -320,9 +281,8 @@ impl<'a> Checker<'a> {
     pub(crate) fn bind_simple_target(&self, target: &Expr, ty: Type, locals: &mut Locals) {
         if let ExprKind::Variable(name) = &target.kind {
             purge_stale_narrowing_for(locals, name);
-            // Phase 17 follow-up: real rebind - `target` is a `foreach`
-            // key's own bare `$var` expression (its only caller), a real
-            // declaration site.
+            // Real rebind - `target` is a `foreach` key's bare `$var`
+            // expression (its only caller), a real declaration site.
             self.probe_hit_at(target.span, &ty);
             locals.declare(name.clone(), ty, target.span);
         }
@@ -336,15 +296,13 @@ impl<'a> Checker<'a> {
     /// possibly-undefined-index warning, a different (and noisier) check
     /// this prototype doesn't attempt.
     ///
-    /// Phase 12 Finding E: also handles a `Type::Union` of `ArrayShape`s
-    /// (e.g. `preg_match`'s own `$matches`, unioned with an empty shape
-    /// for the no-match case) - present in *any* member is enough not to
-    /// flag, generalizing the same per-shape `optional`-field leniency
-    /// above across the whole `Union` rather than only within one shape.
-    /// A member that isn't an `ArrayShape` at all (`Mixed`, or anything
-    /// else) means "don't know" for at least part of the type, so the
-    /// whole check backs off, the same leniency already granted a single
-    /// unknown array type.
+    /// Also handles a `Type::Union` of `ArrayShape`s (e.g. `preg_match`'s
+    /// `$matches`, unioned with an empty shape for the no-match case) -
+    /// present in any member is enough not to flag, generalizing the
+    /// same per-shape `optional`-field leniency across the whole `Union`
+    /// rather than only within one shape. A member that isn't an
+    /// `ArrayShape` at all means "don't know" for at least part of the
+    /// type, so the whole check backs off.
     pub(crate) fn check_shape_key_access(
         &mut self,
         base: &Expr,
@@ -370,11 +328,11 @@ impl<'a> Checker<'a> {
         if shapes.is_empty() || shapes.len() != members.len() {
             return;
         }
-        // An unsealed shape (`is_unsealed_shape`'s own doc comment) may
-        // carry the key even though it isn't one of its declared fields
-        // - the same "any union member could plausibly have it" leniency
-        // this check already extends to a key genuinely declared on only
-        // *one* arm of the union, just for a different reason.
+        // An unsealed shape (`is_unsealed_shape`'s doc comment) may
+        // carry the key even though it isn't one of its declared fields -
+        // the same "any union member could plausibly have it" leniency
+        // this check extends to a key genuinely declared on only one arm
+        // of the union, just for a different reason.
         if shapes.iter().any(|fields| {
             fields.iter().any(|(name, _, _)| *name == key) || is_unsealed_shape(fields)
         }) {
@@ -417,12 +375,9 @@ pub(crate) fn is_superglobal(name: &str) -> bool {
 /// "unknown/could be anything") broke `$_SESSION ??= [];` specifically:
 /// `widen_coalesce_result`'s own "keep the left side's real array type
 /// instead of collapsing to the empty-shape fallback" rule only fires
-/// for an already-known `Type::Array`, so a `Mixed` left side collapsed
-/// `??=`'s result to the literal `array{}`, then flagged the very next
-/// `unset($_SESSION['some_key'])` as targeting a key that provably
-/// doesn't exist. Scoped to exactly the real declared type: `Array(Mixed)`
-/// for the eight always-array superglobals, `Int` for `argc` (never `[]`
-/// in the stub at all).
+/// for an already-known `Type::Array`. Scoped to exactly the real declared
+/// type: `Array(Mixed)` for the always-array superglobals, `Int` for
+/// `argc` (never `[]` in the stub at all).
 pub(crate) fn superglobal_default_type(name: &str) -> Type {
     match name {
         "argc" => Type::Int,
@@ -455,14 +410,9 @@ pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
 /// `container_ty` doesn't carry enough shape information to update
 /// precisely - left alone, matching this project's usual "don't guess"
 /// scope.
-/// Maps `idx_ty` (a dynamic key expression's own already-narrowed
-/// inferred type) to a definite array key type for a write - `Type::Int`/
-/// `Type::String` when `idx_ty` is confidently one or the other (an
-/// `is_int()`/`is_string()`-family guard already narrowed it, the same
-/// benefit an ordinary variable read already gets via `infer_expr`),
-/// `unknown_array_key()` otherwise - today's existing default for
-/// anything else (`Mixed`, a float/bool PHP would coerce, or a union
-/// straddling both kinds), never a wrong guess.
+/// Maps `idx_ty` to a definite array key type for a write - `Type::Int`/
+/// `Type::String` when `idx_ty` is confidently one or the other, otherwise
+/// `unknown_array_key()` rather than a wrong guess.
 fn dynamic_write_key_type(idx_ty: &Type) -> Type {
     if is_subtype(idx_ty, &Type::Int) {
         Type::Int
@@ -480,27 +430,12 @@ fn write_index_into(
     value_ty: Type,
 ) -> Option<Type> {
     match container_ty {
-        // A `Null` container is exactly the same "not really an array
-        // yet" case the top-level undefined-variable write already
-        // auto-vivifies from a fresh empty `ArrayShape` (real PHP does
-        // the identical auto-vivification for a null-valued offset, no
-        // warning at any error-reporting level) - delegating to that
-        // same empty-shape arm rather than bailing to `None` here.
-        // Without this, a nested write through a container whose
-        // current type is (or includes, via the `Union` arm below) a
-        // provable `Null` - e.g. a dynamic-key read off an empty
-        // `ArrayShape` (`index_result_type`'s own "empty shape, dynamic
-        // key reads `null`" arm) - silently failed the *entire* write,
-        // including every other union member, since `Union`'s own "all
-        // or nothing" bail (`?`) treated one member's `None` as the
-        // whole write being unrepresentable. Real corpus false negative
-        // this fixes: `CalendarMonthly::buildMonthCalendar`'s own
-        // `foreach ($items as $day => $data) { $items[$day]['derivative']
-        // = ...; }` - once a separate fix made `$items`'s own entry type
-        // genuinely a `Union` including this empty-shape-turned-`Null`
-        // alternative (the loop's own subject possibly never having run
-        // at all yet), this nested field write stopped updating
-        // `$items`'s tracked shape entirely.
+        // `Null` is the same "not really an array yet" case a top-level
+        // undefined-variable write already auto-vivifies from a fresh
+        // empty `ArrayShape` (real PHP auto-vivifies a null-valued offset
+        // too) - delegate rather than bail, so a `Union` member that's
+        // provably `Null` doesn't sink the whole write via `Union`'s
+        // "all or nothing" `?`.
         Type::Null => write_index_into(&Type::ArrayShape(vec![]), idx, idx_ty, value_ty),
         Type::ArrayShape(fields) => match idx.and_then(literal_string_key) {
             Some(key) => {
@@ -515,15 +450,11 @@ fn write_index_into(
                 let widened = fields.iter().fold(value_ty, |acc, (_, field_ty, _)| {
                     union_types(acc, field_ty.clone())
                 });
-                // A real append (`$arr[] = value`, `idx` itself absent -
-                // not merely a dynamic, non-literal key) onto a container
-                // that was already provably list-like (including a
-                // freshly-empty shape, `[]`) always assigns the next
-                // sequential int key, so the result stays a real,
-                // now-provably-non-empty list - verified via dumpType().
-                // A dynamic key write falls through this same branch (it
-                // isn't a literal string key either) but must NOT get the
-                // marker - an arbitrary key could easily not be
+                // A real append (`idx` absent) onto an already list-like
+                // container always assigns the next sequential int key,
+                // so the result stays a list, now provably non-empty. A
+                // dynamic key write falls through this same branch but
+                // must not get the marker - an arbitrary key need not be
                 // sequential.
                 if idx.is_none() && Checker::is_list_like(container_ty) {
                     Some(Type::Intersection(vec![
@@ -532,11 +463,6 @@ fn write_index_into(
                         Type::Accessory(AccessoryKind::NonEmptyArray),
                     ]))
                 } else {
-                    // A genuinely dynamic (non-literal) key - `idx` being
-                    // `Some` here (a bare append onto a non-list-like
-                    // shape, `idx.is_none()`, still falls back to
-                    // `unknown_array_key()` below, since there's no key
-                    // expression to have narrowed in the first place).
                     let key_ty = idx
                         .and(idx_ty)
                         .map(dynamic_write_key_type)
@@ -545,28 +471,13 @@ fn write_index_into(
                 }
             }
         },
-        // Already widened past a literal shape (by an earlier append/
-        // dynamic-key write) - no single key to grow precisely anymore,
-        // so a write at *any* key (literal or not: once homogeneous,
-        // every element shares one type regardless) merges into the
-        // shared element type instead of being ignored outright. Without
-        // this, a nested write through an already-widened container
-        // (`$items[(int) $row->period] = [...]` widening `$items`, then
-        // `$items[$day]['derivative'] = ...` writing through it) stayed
-        // silently untracked, leaving `$items[$day]`'s inferred type
-        // frozen at its *initial* shape and producing a real false
-        // positive once that initial shape was read back with a field
-        // only ever added by the untracked nested write.
-        // Phase 50 (+ follow-up): the container's own existing key type is
-        // unioned with a confidently-narrowed dynamic key's own type
-        // (`Type::Int`/`Type::String`, from a preceding `is_int()`/
-        // `is_string()`-family guard on the key expression) rather than
-        // kept unconditionally unchanged - a sound generalization, not a
-        // behavior regression: `union_types(existing_key,
-        // unknown_array_key())` collapses right back to
-        // `unknown_array_key()` (a no-op) whenever there's no narrowed
-        // key type to contribute, which is every case this arm used to
-        // handle before this follow-up.
+        // Already widened past a literal shape - no single key to grow
+        // precisely anymore, so a write at any key merges into the
+        // shared element type instead of being ignored. The container's
+        // existing key type is unioned with a confidently-narrowed
+        // dynamic key's type rather than kept unconditionally unchanged;
+        // `union_types(existing_key, unknown_array_key())` collapses
+        // back to `unknown_array_key()` when there's nothing to narrow.
         Type::Array(key, inner) => {
             let key_ty = match idx.and(idx_ty).map(dynamic_write_key_type) {
                 Some(new_key_ty) => union_types((**key).clone(), new_key_ty),
@@ -577,23 +488,11 @@ fn write_index_into(
                 Box::new(union_types(value_ty, (**inner).clone())),
             ))
         }
-        // Phase 12 Finding E: a real, pre-existing gap found by making
-        // `check_shape_key_access` `Union`-aware and re-checking the real
-        // corpus - a container whose type is a `Union` (e.g. two
-        // differently-shaped `ArrayShape`s merged across an `if`/`else`,
-        // confirmed live in `PiwigoInfosSender::send`) fell straight to
-        // the `_ => None` "don't guess" bail below, silently *not*
-        // updating any member - so a later read through the same
-        // now-stale `Union` (e.g. a nested write's own "does this key
-        // already exist" check) saw a key that was written one line
-        // earlier as still missing. Previously invisible because
-        // `check_shape_key_access` used to bail on any `Union` outright,
-        // before Finding E's own generalization started actually
-        // checking one; not fixing this here would leave a real,
-        // newly-surfaced false positive live. Update every member the
-        // same way, bailing (via `?`) if any single one can't be
-        // updated, same conservative "all or nothing" spirit as
-        // everywhere else in this function.
+        // A container typed as a `Union` (e.g. differently-shaped
+        // `ArrayShape`s merged across an `if`/`else`) must update every
+        // member the same way, bailing via `?` if any one can't be -
+        // otherwise a later read through the same `Union` sees a key
+        // written one line earlier as still missing.
         Type::Union(members) => {
             let mut updated = Vec::with_capacity(members.len());
             for m in members {
@@ -606,17 +505,12 @@ fn write_index_into(
                     .unwrap_or(Type::Mixed),
             )
         }
-        // Phase 14: a `list<T>`/`non-empty-array<T>`-typed container is a
-        // real `Intersection([Array(T), Accessory(_)])` now - without
-        // this arm it fell to the `_ => None` bail below, leaving the
-        // container's own tracked type stale after a write instead of
-        // widening it the same way a plain `Array(T)` already does. A
-        // dynamic-key write drops any `Accessory` marker on the result -
-        // an arbitrary key can't preserve a list's own sequential-key
-        // guarantee generically, the same reasoning `array_filter`'s own
-        // marker-stripping fix uses - but a real append (`idx` absent)
-        // onto an already-list-marked container keeps it a list, now
-        // provably non-empty (verified via dumpType()).
+        // A `list<T>`/`non-empty-array<T>` container is an
+        // `Intersection([Array(T), Accessory(_)])`. A dynamic-key write
+        // drops any `Accessory` marker - an arbitrary key can't preserve
+        // a list's sequential-key guarantee - but a real append (`idx`
+        // absent) onto an already-list-marked container keeps it a list,
+        // now provably non-empty.
         Type::Intersection(members) => {
             let inner = members.iter().find_map(Checker::array_element_type)?;
             let widened = union_types(value_ty, inner);
@@ -638,30 +532,15 @@ fn write_index_into(
     }
 }
 
-/// A literal string's own text - or, since Phase 72, a *statically-
-/// foldable* `.`-concatenation of nothing but literal strings (and
-/// parenthesized groupings of the same), folded into one owned value
-/// (e.g. `'/^' . 'abc' . '$/'` folds to `/^abc$/`). `None` for anything
-/// that isn't fully foldable this way (a variable anywhere in the chain,
-/// a non-string literal, ...) - unlike `literal_string_key`, this
-/// doesn't also accept/stringify an int literal, since a format string
-/// is never legitimately written as a bare number. Returns `Cow` rather
-/// than `&str` only because a folded `Concat` needs a freshly-built
-/// owned `String`; the common single-literal case still borrows,
-/// allocation-free, exactly as before this phase.
-///
-/// Deliberately narrower than "fold every constant expression" - a
-/// concatenation with a *variable* operand (even one a caller's own
-/// local-type tracking might know to be a literal-typed value, e.g.
-/// `'/^' . $prefix . '$/'`) is never resolved here, since this function
-/// only ever sees the raw `Expr`, with no access to inferred types or
-/// `Locals`. (An earlier draft of this phase's own roadmap text cited
-/// exactly that shape as the motivating example, which turns out to
-/// describe a different, not-yet-implemented feature - inferred-type-
-/// aware folding - not the *purely syntactic* constant folding this
-/// function performs, mirroring `composer.rs`'s own pre-existing
-/// `eval_concat` precedent for the same "recursively fold a literal-only
-/// concatenation chain" idea.)
+/// A literal string's text, or a statically-foldable `.`-concatenation of
+/// nothing but literal strings (and parenthesized groupings of the same),
+/// folded into one owned value. `None` for anything not fully foldable
+/// this way (a variable anywhere in the chain, a non-string literal) -
+/// unlike `literal_string_key`, this doesn't also accept an int literal,
+/// since a format string is never legitimately written as a bare number.
+/// Purely syntactic: a concatenation with a variable operand is never
+/// resolved here even if a caller's type tracking knows it's a literal
+/// value, since this function only sees the raw `Expr`.
 pub(crate) fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => Some(std::borrow::Cow::Borrowed(s.as_str())),
