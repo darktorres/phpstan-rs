@@ -39,9 +39,8 @@ fn strip_namespace_relative_prefix(name: &str) -> Option<&str> {
 /// relative references both apply) to a fully-qualified one, so two
 /// unrelated classes with the same short name in different namespaces get
 /// different registry keys instead of colliding - see the extensive
-/// comment on this in `checker.rs`'s module doc for why that matters (a
-/// name collision used to silently corrupt an unrelated class's method
-/// table). Built once per file (from its own `namespace`/`use`
+/// comment on this in `checker.rs`'s module doc for why that matters.
+/// Built once per file (from its own `namespace`/`use`
 /// statements) and shared by `Registry::index` (for extends/implements/
 /// type hints) and `Checker` (for expression-level references like
 /// `new Foo()`) - both need to agree on exactly the same resolution or
@@ -52,7 +51,7 @@ pub(crate) struct NameContext {
     // Short name (or `as Alias`) -> (the full path it was imported from,
     // which of PHP's three `use`-namespaces it belongs to). The kind is
     // load-bearing, not decorative - see `add_uses`'s own doc comment for
-    // the real corpus regression that came from ever conflating them.
+    // why conflating them is unsafe.
     use_map: HashMap<String, (String, UseKind)>,
 }
 
@@ -61,27 +60,16 @@ impl NameContext {
     /// declarations, applying whichever `namespace` statement comes
     /// *last* in the file to every declaration, regardless of where each
     /// one actually appears - a real, if rare, inaccuracy: real PHP
-    /// genuinely allows *more than one* semicolon-style `namespace Foo;`
-    /// in a single file (each one switches the active namespace for
-    /// everything that follows, until the next one - not a "one per
-    /// file" rule, whatever an earlier version of this comment claimed;
-    /// confirmed the hard way via a real corpus file, `jetbrains/
-    /// phpstorm-stubs`' own `relay/Cluster.php`, which declares `namespace
-    /// Relay;` for its own `Cluster` class and then a later, empty
-    /// `namespace Relay\Cluster;` for the rest of the file - this
-    /// whole-file scan wrongly resolved `Cluster`'s own self-referencing
-    /// return type as `Relay\Cluster\Cluster` instead of `Relay\Cluster`,
-    /// a real false-positive `class.notFound`, not merely a missed
-    /// diagnostic as `Checker::check_program`'s own doc comment,
-    /// intentionally accepting *this exact* imprecision, assumes).
-    /// `registry::build_declarations`'s sibling, positional
-    /// `ctx.set_namespace` walk gets this right, and so now does
-    /// `Checker::check_program`'s own main per-statement loop (fixed
-    /// once this got found) - this whole-file `build` function itself is
-    /// kept only for a few genuinely position-independent, whole-file
-    /// questions that `check_program` still uses it for (see its own
-    /// call sites' doc comments), where "last namespace wins" was never
-    /// actually the bug to begin with.
+    /// genuinely allows more than one semicolon-style `namespace Foo;` in
+    /// a single file, each one switching the active namespace for
+    /// everything that follows until the next one, not a "one per file"
+    /// rule. `registry::build_declarations`'s sibling, positional
+    /// `ctx.set_namespace` walk gets this right, and so does
+    /// `Checker::check_program`'s own main per-statement loop - this
+    /// whole-file `build` function itself is kept only for a few
+    /// genuinely position-independent, whole-file questions that
+    /// `check_program` still uses it for (see its own call sites' doc
+    /// comments), where "last namespace wins" is not a problem.
     pub(crate) fn build(stmts: &[Stmt]) -> NameContext {
         let mut ctx = NameContext::default();
         for stmt in stmts {
@@ -105,7 +93,7 @@ impl NameContext {
         self.use_map.clear();
     }
 
-    /// Phase 67: the current file's own namespace, empty for the global
+    /// The current file's own namespace, empty for the global
     /// namespace - consumed by `checker::internal_usage`'s own root-
     /// namespace comparison. Every other reader of namespace state goes
     /// through `declared_name`/`resolve` instead; this is the one call
@@ -115,7 +103,7 @@ impl NameContext {
         &self.namespace
     }
 
-    /// Phase 48.2: whether `first_segment` (a reference's own first `\`-
+    /// Whether `first_segment` (a reference's own first `\`-
     /// separated segment, as written in source) matched a real *class*-
     /// kind `use`-import in this file - lets a caller skip the `class.
     /// nameCase` family of checks for exactly this case, matching real
@@ -131,8 +119,8 @@ impl NameContext {
         )
     }
 
-    /// Phase 48.1: `use_map`'s own keys are stored lowercased - real PHP
-    /// resolves a `use`-imported class/interface/trait/enum name (and a
+    /// `use_map`'s own keys are stored lowercased - real PHP resolves a
+    /// `use`-imported class/interface/trait/enum name (and a
     /// `use function` one) case-insensitively, the same rationale
     /// `Registry::lookup_function`'s own doc comment already gives.
     /// Unlike `lookup_function`'s exact-then-fallback-scan shape, a
@@ -151,19 +139,13 @@ impl NameContext {
     /// against this map at all (see `UseImport::kind`'s own doc comment).
     ///
     /// `import.kind` is stored alongside the path (not discarded) and
-    /// consulted by every reader below - real corpus false positive
-    /// caught live: PHPUnit's own `Framework/TestCase.php` declares both
-    /// `use function assert;` (the global `assert()` function) and
-    /// `extends Assert` (`PHPUnit\Framework\Assert`, same namespace, no
-    /// `use` needed for it at all) in the same file. Before the kind was
-    /// tracked, the case-insensitive lookup below let the *function*
-    /// import for `assert` answer a *class* reference to `Assert` (`"assert"
-    /// == "assert"` post-lowercasing), resolving `extends Assert` to the
-    /// bare global-function name `"assert"` instead of `PHPUnit\Framework\
-    /// Assert` - silently severing the entire `TestCase`-`Assert`
-    /// inheritance link and turning every `self::assertSame(...)`-shaped
-    /// call across the whole corpus's test suite into a false
-    /// `staticMethod.notFound`.
+    /// consulted by every reader below: a file can declare `use function
+    /// assert;` (the global `assert()` function) and separately
+    /// `extends Assert` (an unrelated class in the same namespace,
+    /// needing no `use` of its own) - without tracking the kind, a
+    /// case-insensitive lookup would let the *function* import for
+    /// `assert` answer a *class* reference to `Assert`, silently
+    /// severing that inheritance link.
     pub(crate) fn add_uses(&mut self, imports: &[UseImport]) {
         for import in imports {
             let path = strip_leading_backslash(&import.path);
@@ -201,11 +183,11 @@ impl NameContext {
     }
 
     /// `resolve`'s own real implementation, parameterized by which of
-    /// PHP's three `use`-namespaces a match must belong to - see `add_uses`'s
-    /// own doc comment for the real corpus regression this parameter
-    /// exists to prevent (a class-shaped reference must never resolve
-    /// through a `use function`/`use const` import sharing the same bare
-    /// name, and vice versa).
+    /// PHP's three `use`-namespaces a match must belong to - see
+    /// `add_uses`'s own doc comment for why this parameter exists: a
+    /// class-shaped reference must never resolve through a `use
+    /// function`/`use const` import sharing the same bare name, and vice
+    /// versa.
     fn resolve_as(&self, name: &str, kind: UseKind) -> String {
         if let Some(fq) = name.strip_prefix('\\') {
             return fq.to_string();
@@ -214,18 +196,14 @@ impl NameContext {
         // `Keyword::try_from_str` lowercasing before it's ever compared,
         // then a literal `\`) is a real, distinct PHP construct - not an
         // ordinary qualified reference to a symbol literally named
-        // "namespace" - meaning "resolve `foo` against the *current*
+        // "namespace" - meaning "resolve `foo` against the current
         // namespace only, never via a `use`-import and never falling
         // back to the global namespace the way an unqualified function
-        // call otherwise would." Without this, `take_name_segment`
-        // parsing the bare keyword as an ordinary name segment left the
-        // literal word "namespace" sitting in the string past this
-        // point, and falling through to `declared_name(name)` below
-        // re-qualified the *whole* thing against the current namespace
-        // a second time - a real corpus false positive
-        // (`php-standard-library`/Psl's own house style, 663 real call
-        // sites): `Psl\Str\namespace\chunk()` instead of the real
-        // `Psl\Str\chunk`.
+        // call otherwise would." Without this, falling through to
+        // `declared_name(name)` below with the literal word "namespace"
+        // still in the string re-qualifies the whole thing against the
+        // current namespace a second time, e.g. `Psl\Str\namespace\
+        // chunk()` instead of the real `Psl\Str\chunk`.
         if let Some(rest) = strip_namespace_relative_prefix(name) {
             return self.declared_name(rest);
         }
@@ -310,8 +288,8 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         Type::Object(name, args) if name == "$$interface" || name == "$$trait" => {
             Type::Object(name, args)
         }
-        // Phase 80 follow-up: `"$$valueof"` (`types::parse_type_keyword_or_class`'s
-        // own `value-of<T>`-on-a-class/enum sentinel, `Type::Object("$$valueof",
+        // `"$$valueof"` (`types::parse_type_keyword_or_class`'s own
+        // `value-of<T>`-on-a-class/enum sentinel, `Type::Object("$$valueof",
         // [Type::Object(name, [])])`) is a marker, not a class reference
         // itself - resolved later by `Registry::resolve_deferred_value_of`
         // once real class/enum data exists - but unlike `object`/
@@ -322,14 +300,13 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // to resolve `"$$valueof"` itself as if it were a genuine (and
         // nonsensical) class reference.
         //
-        // Phase 54: `"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`
+        // `"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`
         // (`types::parse_generic_arg`'s own call-site variance sentinels)
-        // need the exact same treatment, for the exact same reason - a
-        // real corpus fixture inside any `namespace` block would
-        // otherwise mangle e.g. `"$$covariant"` into `App\$$covariant`
-        // before `Registry::effective_slot_variance` ever gets a chance
-        // to recognize it, the identical class of bug Phase 80's own
-        // `"$$valueof"` regression test found.
+        // need the exact same treatment, for the exact same reason: a
+        // fixture inside any `namespace` block would otherwise mangle
+        // e.g. `"$$covariant"` into `App\$$covariant` before
+        // `Registry::effective_slot_variance` ever gets a chance to
+        // recognize it.
         Type::Object(name, args)
             if matches!(
                 name.as_str(),
@@ -372,19 +349,18 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .map(|(k, t, opt)| (k, resolve_names_in_type(t, ctx), opt))
                 .collect(),
         ),
-        // A real, previously-missing case: `object{...}`'s own field
-        // types were never resolved at all - a genuine class reference
-        // nested inside one (`object{repo: SomeRepository}`) stayed
-        // unqualified inside a namespaced file instead of being
-        // correctly resolved.
+        // `object{...}`'s own field types need resolving too - a genuine
+        // class reference nested inside one
+        // (`object{repo: SomeRepository}`) must not stay unqualified
+        // inside a namespaced file.
         Type::ObjectShape(fields) => Type::ObjectShape(
             fields
                 .into_iter()
                 .map(|(k, t, opt)| (k, resolve_names_in_type(t, ctx), opt))
                 .collect(),
         ),
-        // Phase 53: mirrors `mark_template_params`/`substitute_type_aliases`'s
-        // own equivalent arms - a class reference inside a `Closure(...)`
+        // Mirrors `mark_template_params`/`substitute_type_aliases`'s own
+        // equivalent arms - a class reference inside a `Closure(...)`
         // shape's own param/return types needs the same namespace
         // resolution as anywhere else.
         Type::Callable(Some(sig)) => Type::Callable(Some(std::sync::Arc::new(CallableSig {
@@ -400,12 +376,11 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .collect(),
             return_type: Box::new(resolve_names_in_type((*sig.return_type).clone(), ctx)),
         }))),
-        // Phase 80 follow-up: mirrors `mark_template_params`/`substitute_
-        // type_aliases`'s own identical new arms - a real class reference
-        // inside one of a conditional return type's own branches
-        // (Doctrine DBAL's own `DriverManager::getConnection()`, e.g.
-        // `Connection` in `@phpstan-return (... ? T : Connection)`) needs
-        // the same namespace resolution as anywhere else.
+        // Mirrors `mark_template_params`/`substitute_type_aliases`'s own
+        // identical arms - a real class reference inside one of a
+        // conditional return type's own branches (e.g. `Connection` in
+        // `@phpstan-return (... ? T : Connection)`) needs the same
+        // namespace resolution as anywhere else.
         Type::Conditional {
             subject,
             target,
@@ -423,8 +398,8 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
     }
 }
 
-/// Phase 48 follow-up (item 7a): the read-only, `(raw, resolved)`-
-/// collecting sibling of `resolve_names_in_type` just above - same
+/// The read-only, `(raw, resolved)`-collecting sibling of
+/// `resolve_names_in_type` just above - same
 /// recursive shape, same sentinel skip-list, but pushes into `out`
 /// instead of rewriting `ty` in place. `class.nameCase` for a PHPDoc-typed
 /// position needs the pre-resolution *spelling* (`ctx.is_use_imported`'s
