@@ -1,4 +1,4 @@
-//! Phase 67: the `@internal` restricted-usage engine, gated behind
+//! The `@internal` restricted-usage engine, gated behind
 //! `Registry::check_internal_usage` (default off - see its own doc
 //! comment). Mirrors real PHPStan's own `RestrictedInternal*UsageExtension`
 //! family (`vendor/phpstan-src/src/Rules/InternalTag/`): a symbol tagged
@@ -14,18 +14,17 @@
 //! class-constant read (both a constant's own individual `@internal` tag
 //! and its declaring class's), instantiation (`new Foo()`), `instanceof`,
 //! a `catch` clause's own caught type, `extends`/`implements`/trait-use,
-//! a named function/method's own *and* a closure/arrow-fn literal's own
+//! a named function/method's own and a closure/arrow-fn literal's own
 //! native param/return type hints, first-class-callables, the implicit
 //! `__toString()` call an echo/print/string-cast/interpolation triggers,
-//! and (Phase 67 follow-up) every PHPDoc-tag-typed position real
+//! and every PHPDoc-tag-typed position real
 //! `RestrictedInternalClassNameUsageExtension` also covers (`@var`/
 //! `@assert`/`@method`/`@mixin`/`@property`/`@phpstan-require-extends`/
 //! `@phpstan-require-implements`/`@phpstan-sealed`/`@template` bound-and-
-//! default) via `check_type_internal_usage`, reusing Phase 48's own
-//! `case_refs` threading network. Not covered: attribute usage (real
-//! PHPStan's own extension checks this too, but no case-tracking
-//! plumbing exists for attribute-usage positions in this project yet -
-//! see ROADMAP.md's own Phase 67 entry).
+//! default) via `check_type_internal_usage`, reusing the `case_refs`
+//! threading network. Not covered: attribute usage (real PHPStan's own
+//! extension checks this too, but no case-tracking plumbing exists for
+//! attribute-usage positions in this project yet).
 
 use crate::ast::{ClassKind, FunctionDecl, Param};
 use crate::checker::Checker;
@@ -225,11 +224,10 @@ impl<'a> Checker<'a> {
         self.report(label.to_string(), message, span, 0, &identifier);
     }
 
-    /// `RestrictedInternalClassConstantUsageExtension` - Phase 67 follow-
-    /// up: a constant's own individual `@internal` tag is now tracked too
-    /// (previously blocked on `ConstSig` not existing at all; now that it
-    /// does, added directly), mirroring `check_internal_property_access`'s
-    /// identical "own tag OR declaring class's tag" convention exactly.
+    /// `RestrictedInternalClassConstantUsageExtension`: a constant's
+    /// own individual `@internal` tag is tracked too, mirroring
+    /// `check_internal_property_access`'s identical "own tag OR
+    /// declaring class's tag" convention exactly.
     pub(crate) fn check_internal_class_constant_access(
         &mut self,
         owner: &str,
@@ -286,7 +284,7 @@ impl<'a> Checker<'a> {
     /// instantiation (`new Foo()`) - one of the several
     /// `ClassNameUsageLocation` variants that extension covers
     /// (`extends`/`implements`/param-and-return-type-hints/first-class-
-    /// callables aren't checked here - see ROADMAP.md).
+    /// callables aren't checked here).
     pub(crate) fn check_internal_instantiation(&mut self, class: &str, span: Span, label: &str) {
         self.check_internal_class_name_usage(class, "Instantiation of", "new", span, label);
     }
@@ -318,13 +316,13 @@ impl<'a> Checker<'a> {
     /// nothing to check beyond the class's own `is_internal` bit), so real
     /// PHPStan's own per-location message text differs only in its leading
     /// verb phrase and identifier prefix - both threaded in by the caller.
-    /// Phase 67 follow-up: `RestrictedInternalClassNameUsageExtension`'s
+    /// `RestrictedInternalClassNameUsageExtension`'s
     /// own PHPDoc-tag-position coverage (`@var`/`@assert`/`@method`/
     /// `@mixin`/`@property`/`@phpstan-require-extends`/`@phpstan-require-
     /// implements`/`@phpstan-sealed`/`@template` bound-and-default) - real
     /// PHPStan checks `@internal` at every position a class name can
     /// appear, not just the native-syntax positions the rest of this file
-    /// covers. Reuses Phase 48's own `case_refs` threading network
+    /// covers. Reuses the `case_refs` threading network
     /// (`collect_class_name_case_refs`, populated once at registry-build
     /// time for exactly these same positions for a *different* check,
     /// `class.nameCase`) instead of building new call-site plumbing -
@@ -378,15 +376,11 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 67 sub-item A: `RestrictedInternalClassNameUsageExtension`'s
-    /// `extends`/`implements`/trait-use half - the whole engine's own
-    /// ROADMAP-named "still open" gap, narrower in one direction
-    /// (first-class-callables already covered, see `checker/expr.rs`'s
-    /// `ExprKind::FirstClassCallable` arm) and wider in another
-    /// (`use SomeTrait;` is covered by the identical real-PHPStan
-    /// mechanism - `ExistingClassInTraitUseRule` feeding the same shared
-    /// `ClassNameCheck` - but wasn't named in the roadmap text at all).
-    /// Mirrors `check_class_references_exist`'s own shape exactly: same
+    /// `RestrictedInternalClassNameUsageExtension`'s
+    /// `extends`/`implements`/trait-use half (`use SomeTrait;` is covered
+    /// by the identical real-PHPStan mechanism -
+    /// `ExistingClassInTraitUseRule` feeding the same shared
+    /// `ClassNameCheck`). Mirrors `check_class_references_exist`'s own shape exactly: same
     /// already-resolved `ClassInfo::extends`/`implements`/`uses` fields,
     /// same whole-class-declaration span, same two call sites
     /// (`check_class_references_exist` doesn't run for a nested/
@@ -487,14 +481,13 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 67 Item B: `param`/`return` native type-hints for the
+    /// `param`/`return` native type-hints for the
     /// `@internal` class-name-usage check - operates on each param's and
-    /// the return's *native* type-hint text only (`resolve_type_hint`,
+    /// the return's native type-hint text only (`resolve_type_hint`,
     /// not the docblock-merged type any `sig`-based lookup would give),
     /// matching real PHPStan's own `FunctionDefinitionCheck` exactly
     /// (there is no `ClassNameUsageLocation` for a `@param`/`@return`
-    /// PHPDoc tag's own type at all - confirmed by reading the full
-    /// constant list). Named functions/methods only - see
+    /// PHPDoc tag's own type at all). Named functions/methods only - see
     /// `check_internal_param_and_return_types_raw` for the shared core
     /// this and the closure/arrow-fn call sites both delegate to.
     pub(crate) fn check_internal_param_and_return_types(
