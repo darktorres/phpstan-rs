@@ -15,60 +15,48 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         // The condition's own constant-condition check (and,
-        // transitively, any standalone check reached while checking
-        // it, like `BooleanNot`/`BooleanAnd`/`BooleanOr`) must run
-        // against the converged fixed point, not just once against
-        // the pre-loop entry `locals` before `converge_loop_body` ever
-        // runs - otherwise, e.g., `$end = false; while (!$end) {
-        // ...; $end = true; ... }`
-        // (`Piwigo\Admin\Extensions\CoreUpdateService::upgradeTo`)
-        // - `$end`'s pre-loop type is exactly `false`, so `!$end`
-        // looks unconditionally `true` even though the loop body
-        // can reassign it. Confirmed directly against real
-        // PHPStan's own `WhileHandler::processStmt`: it re-
-        // evaluates the condition at the top of *every*
-        // convergence pass (discarding all but the last with a
-        // no-op node callback), and only the FINAL, fully-
-        // converged pass's walk of the condition ever reaches the
-        // real rule-invoking callback. Moving the condition check
-        // inside `converge_loop_body`'s own closure reproduces
-        // that exactly for free: every pass but the kept one
+        // transitively, any standalone check reached while checking it,
+        // like `BooleanNot`/`BooleanAnd`/`BooleanOr`) must run against
+        // the converged fixed point, not just once against the pre-loop
+        // entry `locals` before `converge_loop_body` runs - otherwise,
+        // e.g., `$end = false; while (!$end) { ...; $end = true; ... }`
+        // (`Piwigo\Admin\Extensions\CoreUpdateService::upgradeTo`):
+        // `$end`'s pre-loop type is exactly `false`, so `!$end` looks
+        // unconditionally `true` even though the loop body can reassign
+        // it. Mirrors real PHPStan's own `WhileHandler::processStmt`,
+        // which re-evaluates the condition at the top of *every*
+        // convergence pass and only lets the FINAL, fully-converged
+        // pass's walk reach the real rule-invoking callback. Moving the
+        // condition check inside `converge_loop_body`'s own closure
+        // reproduces that for free, since every pass but the kept one
         // already has its diagnostics discarded via
         // `converge_loop_body`'s own `diagnostics.truncate`.
         let skip_always_true = stmt_contains_break(body)
             || stmt_contains_escaping_exit(body)
             || body_contains_yield(std::slice::from_ref(body))
             || declared_return == Some(&Type::Never);
-        // Real bug found and fixed this session, on top of the
-        // one above: moving the diagnostic-bearing condition
-        // check into the convergence closure means it now only
-        // ever runs against per-pass *copies* of the entry
-        // (`pass_locals`), never mutating the real `locals`
-        // directly the way a single up-front call used to. A
-        // real PHP `while`'s own condition always runs at least
-        // once, unconditionally, regardless of how many times the
-        // body itself iterates - so a variable *the condition
-        // itself* assigns (`while (($x = f()) !== null) {...}`,
-        // a real, common idiom) must be treated as unconditionally
-        // defined afterward, unlike anything only the *body*
-        // conditionally defines. Without this, `merge_scopes`
-        // dropped it entirely (present in the loop's own exit
-        // state but never in the real pre-loop `locals` it gets
-        // merged against). Confirmed directly against real
-        // PHPStan's own `WhileHandler::processStmt`: it also does
-        // a quiet, non-diagnostic evaluation of the condition
-        // against the real pre-loop scope first (its own
-        // `$condResult`/`$condScope`, built with a `NoopNodeCallback`),
-        // strictly separate from the later diagnostic-bearing
-        // walk against the converged state - replicated here by
-        // running `check_expr` once for real (to bind any
-        // assignment side effect into `locals`) and discarding
-        // whatever it reported, since the real diagnostics come
-        // from the convergence-aware walk below. Real corpus
-        // false positive this fixes: `Symfony\Component\
+        // On top of the above: moving the diagnostic-bearing condition
+        // check into the convergence closure means it only runs against
+        // per-pass *copies* of the entry (`pass_locals`), never mutating
+        // the real `locals` directly. A real PHP `while`'s condition
+        // always runs at least once, unconditionally, regardless of how
+        // many times the body iterates - so a variable *the condition
+        // itself* assigns (`while (($x = f()) !== null) {...}`, a real,
+        // common idiom, real shape: `Symfony\Component\
         // DependencyInjection\Compiler\AbstractRecursivePass::
-        // getConstructor`'s `while ((null === $class = $definition
-        // ->getClass()) && $definition instanceof ChildDefinition)`.
+        // getConstructor`) must be treated as unconditionally defined
+        // afterward, unlike anything only the *body* conditionally
+        // defines - otherwise `merge_scopes` would drop it entirely
+        // (present in the loop's exit state but never in the real
+        // pre-loop `locals` it gets merged against). Mirrors real
+        // PHPStan's own `WhileHandler::processStmt`, which does a quiet,
+        // non-diagnostic evaluation of the condition against the real
+        // pre-loop scope first, strictly separate from the later
+        // diagnostic-bearing walk against the converged state -
+        // replicated here by running `check_expr` once for real (to
+        // bind any assignment side effect into `locals`) and discarding
+        // whatever it reported, since the real diagnostics come from the
+        // convergence-aware walk below.
         let diagnostics_before = self.diagnostics.len();
         self.check_expr(cond, locals, label);
         self.diagnostics.truncate(diagnostics_before);
@@ -86,18 +74,15 @@ impl<'a> Checker<'a> {
                 this.check_expr(cond, pass_locals, label);
                 // `WhileLoopAlwaysFalseConditionRule`/
                 // `WhileLoopAlwaysTrueConditionRule`: real
-                // inferred-type trust (`inferred_constant_
-                // condition`), matching real PHPStan's own design -
-                // see `check_if`'s own doc
-                // comment. `alwaysFalse` has no exclusions,
-                // matching real PHPStan's own rule exactly.
-                // `alwaysTrue` is gated the same way real
-                // PHPStan's own `WhileLoopAlwaysTrueConditionRule`
-                // is (confirmed directly against `vendor/
-                // phpstan-src`): skipped when the loop is
-                // breakless (`stmt_contains_break` - this
-                // project's own already-existing, deliberately
-                // conservative "any break anywhere" check, reused
+                // inferred-type trust (`inferred_constant_condition`),
+                // matching real PHPStan's own design - see `check_if`.
+                // `alwaysFalse` has no exclusions, matching real
+                // PHPStan's rule exactly. `alwaysTrue` is gated the
+                // same way real PHPStan's own
+                // `WhileLoopAlwaysTrueConditionRule` is: skipped when
+                // the loop is breakless (`stmt_contains_break` - this
+                // project's own deliberately conservative "any break
+                // anywhere" check, reused
                 // rather than re-deriving real PHPStan's own more
                 // precise per-level break/`continue N` analysis -
                 // a narrow, disclosed simplification, see
