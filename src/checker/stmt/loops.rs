@@ -656,25 +656,16 @@ impl<'a> Checker<'a> {
         // ['x'] = ...; }`) aliases into `subject`'s own underlying
         // storage - a key/field the body writes into `$item` is really
         // being written into whatever slot of `$subject` that iteration
-        // is currently pointing at, so it belongs in `$subject`'s own
-        // tracked element type for code reached after the loop, not just
-        // `$item`'s own (already-converged, but otherwise discarded)
-        // type. Scoped to the same "bare-variable subject, homogeneous
-        // element type" shape `array_element_type` above already commits
-        // to for binding the loop variable in the first place - real
-        // corpus false positive this fixes: `CategoryCatsRenderer::
+        // is pointing at, so it belongs in `$subject`'s tracked element
+        // type for code reached after the loop, not just `$item`'s own
+        // (otherwise discarded) type (real shape: `CategoryCatsRenderer::
         // render`'s own `foreach ($infosOfImage as &$info) { $info
         // ['src_image'] = new SrcImage(...); }`, where a later
-        // `$infosOfImage[$id]['src_image']` read (through a fresh `??`-
-        // defaulted dynamic-key lookup, past the loop) was flagged
-        // `shapeAccess.notFound` because `$infosOfImage`'s own tracked
-        // element type never picked up the field the loop unconditionally
-        // adds to every element. Unioned with the pre-loop element type
-        // (never narrower, so this can only add precision, never produce
-        // a new false positive) rather than replacing it outright - sound
-        // even when the loop body's own field-widening turns out to be
-        // conditional in some other caller shape this project hasn't
-        // seen yet.
+        // `$infosOfImage[$id]['src_image']` read past the loop was
+        // wrongly flagged `shapeAccess.notFound`). Unioned with the
+        // pre-loop element type rather than replacing it outright, so
+        // this can only add precision, never produce a new false
+        // positive.
         if by_ref
             && let ExprKind::Variable(subject_name) = &subject.kind
             && let Some(old_element_ty) = Self::array_element_type(&subject_ty)
@@ -690,14 +681,12 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Rebuilds `ty` with its own homogeneous element type replaced by
+/// Rebuilds `ty` with its homogeneous element type replaced by
 /// `new_elem`, recursing through `Union`/`Intersection` the same way
-/// `array_element_type` itself already looks through them to find one -
-/// leaves an `ArrayShape` (each field its own, independently meaningful
-/// type, not a single "the element type" to overwrite) and anything else
-/// `array_element_type` wouldn't have matched in the first place
-/// completely untouched, matching this fix's own deliberately narrow
-/// scope (see `check_foreach`'s own call site above).
+/// `array_element_type` looks through them to find one - leaves an
+/// `ArrayShape` (each field its own, independently meaningful type, not
+/// a single "the element type" to overwrite) and anything else
+/// untouched.
 fn replace_array_element_type(ty: &Type, new_elem: &Type) -> Type {
     match ty {
         Type::Array(key, _) => Type::Array(key.clone(), Box::new(new_elem.clone())),
