@@ -2221,40 +2221,170 @@ section used to carry:
   combinator (a refactor-timing call, not a missing-diagnostic gap -
   revisit once several more bespoke traverse/map functions accumulate
   and start visibly duplicating structural-recursion boilerplate).
-- A `foreach ($arr as &$v) { $v['key'] = ...; }` by-reference mutation
-  never updates `$arr`'s own tracked element shape - confirmed live
-  during a round of Piwigo corpus-findings triage
-  (`CategoryCatsRenderer::render`'s own `foreach ($infosOfImage as
-  &$info) { $info['src_image'] = ...; }`, adding a real field every
-  later read of that same element genuinely has, flagged
-  `shapeAccess.notFound` regardless). A real, buildable gap (real
-  PHPStan does track by-ref mutation), not attempted here - surfaced
-  only once a separate fix (`checker/expr.rs`'s `ExprKind::Index` read
-  arm properly resolving a `Union`/`Intersection` container instead of
-  its own previous `check_expr`-only `_ => Mixed` fallback) stopped
-  masking it behind `Mixed`. **A second, independent corpus site
-  confirms the same gap from a different angle**: `Configuration
-  SubController::processSizes` (`foreach ($pderivatives as $type =>
-  &$pderivative) { $pderivative['must_square'] = ...; ... }`, mutating
-  several keys to real `bool`/`int` literals) leaves `$pderivatives`'s
-  own tracked element type frozen at its pre-loop `@var array<string,
-  array<string, string|int|bool|null>>` declaration - a later, separate
-  `foreach ($pderivatives as $ptype => $prow) { new DerivativeSizeRow
-  (mustSquare: $prow['must_square'], ...) }` then infers `$prow[
-  'must_square']` as the full un-narrowed `string|int|bool|null` against
-  a `bool`-typed constructor parameter, `argument.type`. Found only
-  after the `union_types` fix below removed an unrelated masking effect
-  (a redundant `array{}` union member elsewhere in the same merge
-  pipeline) that had been silently absorbing this call's own complexity
-  before reaching this check - the same "surfaced once a separate fix
-  stopped masking it" pattern as the citation above, not a regression
-  the new fix itself introduced (confirmed: real PHPStan reports nothing
-  here either, and the identical mismatch reproduces in a minimal
-  isolated snippet with no loop or by-ref mutation involved at all,
-  purely from the plain declared-vs-narrower-actual type gap this
-  by-ref-tracking limitation leaves open).
-- **Corrected diagnosis (real-PHPStan-verified, supersedes this bullet's
-  own original text below the line).** This was originally attributed to
+- **The `foreach ($arr as &$v) { $v['key'] = ...; }` case where `$arr`'s
+  own element type is already a real `ArrayShape` is done** - see Done's
+  own entry (`CategoryCatsRenderer::render`'s `$infosOfImage`/`$info
+  ['src_image']`). **The `ConfigurationSubController::processSizes`
+  instance below this line remains open, and is now known to be a
+  genuinely different, larger gap than the one just fixed - not simply
+  an unbuilt instance of the same mechanism**, confirmed by direct
+  `\PHPStan\dumpType()` verification rather than assumed: `$pderivatives`
+  carries an explicit `@var array<string, array<string, string|int|bool
+  |null>>` annotation - a *uniform*, unshaped `Array(K, V)`, not an
+  `ArrayShape` with named fields at all. The by-ref-widening fix just
+  shipped structurally cannot help here (there is no per-field slot to
+  narrow in a uniform array type); real PHPStan's own answer for this
+  exact shape - confirmed via `dumpType()` against a faithful minimal
+  reproduction of the loop (`$row['must_square'] = (...)`, then reading
+  `$row['must_square']` back after the loop) - is a precisely-typed
+  `bool`, obtained through a different, more general mechanism entirely:
+  PHPStan's own `ExpressionTypeHolder` (see `vendor/phpstan-src`'s own
+  architecture notes) tracks a flow type keyed by the *exact expression*
+  (`$pderivative['must_square']`), independent of - and able to be
+  strictly narrower than - whatever the container variable's own overall
+  declared/tracked type says. This project has no equivalent: an
+  array-index-fetch expression is only ever resolved through its
+  *container's* own tracked type, never given its own independent,
+  flow-narrowable identity the way a plain variable already has. A real
+  fix needs a new per-offset (not per-variable) entry in `Locals` -
+  keyed by `(container name, literal key)` or similar - consulted by
+  `ExprKind::Index` reads before falling back to the container's own
+  general element type, updated by exactly the same assignment sites
+  that already update a plain variable's own `Locals` entry. Materially
+  bigger than the by-ref-widening fix already shipped: needs its own
+  key-collision/invalidation story (the offset's own cached type must be
+  purged whenever the *container* is reassigned wholesale, aliased, or
+  passed by reference elsewhere) that a plain-variable `Locals` entry
+  never had to solve. Not attempted here.
+- **A real, confirmed bug in `resolve_type`/`reconcile_with_native`: a
+  PHPDoc type that only refines *one member* of a native union type
+  silently discards every other native member instead of keeping it
+  alongside the refinement.** Found investigating a scoped Piwigo corpus
+  false positive (`PictureModifyInteractionTest`'s own `$page->keys
+  ($inputSelector, 'Enter')`, third-party `Pest\Browser\Api\Concerns\
+  InteractsWithElements::keys(string $selector, array|string $keys)`,
+  whose own docblock narrows to `@param array<int, string> $keys` -
+  itself contradicted by that method's own body, `is_array($keys) ?
+  $keys : [$keys]`, which only makes sense if a plain string really is
+  still accepted). Confirmed via `\PHPStan\dumpType()` against the real
+  method: PHPStan's own effective type for `$keys` is `array<int,
+  string>|string` - the `array` alternative refined, the untouched
+  `string` alternative kept verbatim, not dropped. Root-caused directly
+  in `vendor/phpstan-src/src/Type/TypehintHelper.php::decideType`: real
+  PHPStan's own per-native-union-member merge keeps whichever original
+  members the docblock type doesn't disprove, alongside the refined one.
+  `resolve_type`'s own doc comment states the opposite design
+  intentionally ("a docblock type is trusted as the complete picture and
+  otherwise fully replaces the native hint") and `reconcile_with_native`
+  implements exactly that: it only ever *filters down* the docblock
+  type's own member list (dropping a docblock member the native type
+  can't produce), it never adds back a native union member the docblock
+  simply never mentioned at all. For an ordinary single-type native hint
+  (`string`, `?Foo`, ...) this distinction is invisible - there's only
+  one native "member" to reconcile against either way, and the design
+  intent (docblock replaces, doesn't merely refine) is exactly right.
+  It only diverges from real PHPStan for a **native union** where the
+  docblock names a real subtype of *one specific member* while staying
+  silent about the rest - confirmed to matter today because it's exactly
+  the phpstorm-stubs-style pattern this project already special-cases
+  elsewhere (`imagecreatefromstring`'s stale `@return resource|GdImage
+  |false`), just from the opposite direction (docblock *narrower* than
+  native, not *wider*/stale). A real fix: when `native_ty` is a `Union`,
+  `reconcile_with_native` needs to also union in whichever native members
+  `doc_ty` doesn't itself cover (i.e. aren't a subtype of any surviving
+  doc member) - mirroring `decideType`'s own per-member keep-or-refine
+  logic - rather than just filtering the doc type's own member list.
+  Scoped, well-understood, not attempted here.
+- **A closure literal's own `Type::Closure`/`Callable` signature uses its
+  bare declared return-type hint, not its more precise inferred body
+  return type - unlike an ordinary named function/method, which already
+  gets the more careful native/PHPDoc reconciliation above.** Found
+  investigating `DbMaintenanceRepositoryTest`'s own `array_map(static fn
+  (OptionallyQualifiedName $name): string => $name->getUnqualifiedName()
+  ->getValue(), ...)` passed to `OptionallyQualifiedName::unquoted
+  (non-empty-string $unqualifiedName, ...)` - flagged `argument.type`
+  because the closure's own declared `: string` return hint is plain
+  `string`, even though `Identifier::getValue()` (what the body actually
+  returns) is itself `non-empty-string`. Confirmed via `\PHPStan\
+  dumpType()` against a faithful minimal reproduction: real PHPStan
+  infers the closure literal's own type as `Closure(Name): non-empty-
+  string` - using the body's own more precise inferred return type, not
+  the bare `: string` hint - so `array_map()`'s own result element type
+  correctly comes out `non-empty-string` too. A real, well-scoped gap:
+  wherever this project currently builds a `Type::Closure`/`Callable`
+  signature for a closure/arrow-fn *literal* (as opposed to an ordinary
+  named function/method, which already goes through `resolve_type`'s own
+  native/PHPDoc reconciliation), it needs to also fold in the body's own
+  inferred return type when that's a real subtype of the declared hint -
+  the same "prefer the more precise, still-compatible answer" principle
+  already applied elsewhere in this codebase, just missing at this one
+  specific site (closure-literal signature construction). Not attempted
+  here - the exact call site(s) building a closure literal's own
+  `Type::Closure` weren't inventoried this round.
+- **`$x !== []` (and presumably `$x != []`) isn't recognized as proving
+  `$x` non-empty, unlike `count($x) > 0`, which already is.** Found
+  investigating `SearchService::getRegularSearchResults`'s own `if
+  ($imageIdsForFilter !== []) { if (count($imageIdsForFilter) > 1) {
+  ...; } else { $first = reset($imageIdsForFilter); $items = array_map
+  (intval(...), $first); } }` - flagged `argument.type`/`return.type`
+  because `reset()`'s own existing "provably non-empty excludes `false`"
+  precision (`checker/expr/builtin_calls.rs`'s `array_pointer_result`,
+  Phase 74) never fires: nothing marks `$imageIdsForFilter`'s own tracked
+  type as non-empty from the `!== []` guard alone, so `reset()` still
+  returns `T|false`, and `array_map()` over a `T|false` argument can't
+  stay `list<T>` - it degrades toward a generic `array`, which is what
+  actually produces the observed `list<int>|array` mismatch two levels
+  up. Confirmed via `\PHPStan\dumpType()` against a faithful minimal
+  reproduction of the exact shape (the outer `!== []` guard, the nested
+  `count() > 1`/`else` split, `reset()`, `array_map(intval(...), ...)`):
+  real PHPStan's own answer for both `reset()`'s result and the final
+  `array_map()` result is a clean `list<int>`, confirming the `!== []`
+  guard alone is what real PHPStan uses to exclude the empty case here -
+  the `count() > 1`/`else` split only decides *how many* elements, never
+  *whether* there's at least one. A real, well-scoped narrowing addition:
+  `apply_narrowing`'s existing equality-narrowing arm (`checker/
+  narrowing/assertions.rs::apply_equality_narrowing`, the same one
+  `$x === null`/`$x !== null` already goes through) needs a case
+  recognizing an empty-array-literal `[]` on either side of `===`/`!==`
+  as a known "empty" fact, upgrading the narrowed variable to its own
+  non-empty-array accessory the same way `count($x) > 0` already does -
+  not a new mechanism, an additional recognized shape in an existing one.
+  Not attempted here. `SearchService::getQuickSearchResultsNoCache`'s own
+  `findImageIdsForRegularSearch(...)` argument (a separate, `[...$a,
+  ...$b]`-spread-built `$params`, expecting `list`, given `non-empty-
+  array|non-empty-array<int>`) and four `SiteUpdateSubController`
+  findings (`int|string`-vs-`int`/`list<int>` mismatches on values
+  threaded through `$db_fulldirs`/`$insert`/`$category_up`, built across
+  several hundred lines of dynamic-key array construction) were
+  triaged but not root-caused this round - a simplified reproduction of
+  the visible `[...$a, ...$b]` spread-merge shape did *not* reproduce the
+  list-ness loss, so the real trigger is something this project's own
+  narrower repro didn't capture; needs its own dedicated trace before
+  either can be scoped as a fix.
+- `UploadService::addUploadedFile`'s own `$dbnow` (`$dbnow = null;` at
+  the top of a `try` block, reassigned to a real `string` unconditionally
+  inside the "new photo" `else` branch, then read ~200 lines later still
+  inside that same branch) carries a spurious `null` possibility at the
+  point it's passed to `ImageInsertRow::__construct(dateAvailable:
+  $dbnow, ...)` - confirmed live in the corpus, but **not reproduced**
+  in several faithful simplified attempts (a plain if/else with the same
+  assign-then-use shape; the same shape plus an intervening `do`-`while`
+  loop that never touches `$dbnow`; the same shape through a named-
+  argument constructor call). The real trigger is something specific to
+  the surrounding ~250-line method this project's own simplified repros
+  didn't capture - needs a dedicated bisection of the real file (not
+  attempted here, to avoid editing the frozen corpus checkout even
+  temporarily) rather than another guessed reproduction shape.
+- `NotificationByMailSender::sendMailNotifications`'s own `return
+  $returnList;` (`return.type` against a conditional return type keyed
+  on `$action === 'send'`) accumulates its final value across several
+  `if`/`else` branches, each themselves keyed on a mix of `$action` and
+  other flags - structurally similar to the discriminant-implies-shape
+  correlation family (see "Permanent design boundaries" below), but
+  compounded with this project's own conditional-return-type resolution
+  needing to pick the *right* branch's contribution based on `$action`'s
+  literal value specifically, not just union everything together. Not
+  reduced to a minimal reproduction this round.
   a missing feature - dynamic-key narrowing not reaching `isset()`/
   `array_key_exists()`-guarded reads - and each finding it produces was
   judged "sound, not a false positive." Direct A/B testing against the
