@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DocBlock {
     pub params: HashMap<String, String>,
-    // Phase 45 (item 11): `@param-out Type $name` - the widened type a
+    // `@param-out Type $name` - the widened type a
     // by-ref parameter's own value is guaranteed to hold once the
     // function returns (real PHPStan's own way of documenting a by-ref
     // "output" parameter beyond what its native type alone commits to).
@@ -37,10 +37,10 @@ pub struct DocBlock {
     // positional binding - see `registry::ClassInfo::templates`).
     pub templates: Vec<String>,
     // `@template T of Bound` - the bound text for whichever of `templates`
-    // above declared one (Phase 10.5's bound-enforcement half). A `T` with
+    // above declared one (the bound-enforcement half of `@template T of Bound`). A `T` with
     // no `of` clause simply has no entry here.
     pub template_bounds: HashMap<String, String>,
-    // `@template T = Default` (Phase 54) - the default-type text for
+    // `@template T = Default` - the default-type text for
     // whichever of `templates` above declared one, used when an "erased"
     // reference (fewer type arguments than declared, including a bare
     // one with none at all) leaves this name unbound instead of falling
@@ -48,9 +48,7 @@ pub struct DocBlock {
     // has no entry here, same shape as `template_bounds` just above.
     pub template_defaults: HashMap<String, String>,
     // Names from `templates` above additionally declared
-    // `@template-covariant`/`@template-contravariant` (Phase 10.5's
-    // variance half) - a name absent from both stays invariant, this
-    // project's only behavior before Phase 10.5 and still the default.
+    // `@template-covariant`/`@template-contravariant` (the variance half of `@template-covariant`/`@template-contravariant`) - a name absent from both stays invariant, this project's default.
     pub covariant_templates: HashSet<String>,
     pub contravariant_templates: HashSet<String>,
     // Names of `@param`s tagged `[optional]` - a real, longstanding PHP
@@ -62,7 +60,7 @@ pub struct DocBlock {
     pub optional_params: HashSet<String>,
     // `@extends Parent<Arg, ...>` - fixes (some of) the parent class's own
     // `@template` names for every instance of this class, regardless of
-    // whether this class is itself generic (Phase 10.5). At most one is
+    // whether this class is itself generic. At most one is
     // meaningful (a class has a single native `extends`), so the last one
     // seen wins, matching every other single-valued tag here.
     pub extends: Option<String>,
@@ -71,7 +69,7 @@ pub struct DocBlock {
     // kept (each one names which interface it applies to via its own
     // leading type name).
     pub implements: Vec<String>,
-    // `@use Trait<Arg, ...>` (Phase 54) - same idea as `implements`, but
+    // `@use Trait<Arg, ...>` - same idea as `implements`, but
     // for a generic trait named in this class's own `use` statement(s). A
     // class can `use` more than one trait at once, so every tag is kept.
     pub uses: Vec<String>,
@@ -80,7 +78,7 @@ pub struct DocBlock {
     // `__set`, declared on a class's own docblock rather than a real
     // field. A class can declare many, so every tag is kept.
     pub properties: Vec<PropertyTag>,
-    // Phase 40: real PHPStan's own backward-compatibility-promise marker
+    // Real PHPStan's own backward-compatibility-promise marker
     // - a class/interface/trait tagged `@api` is safe for a third-party
     // extension author to reference; anything else may change in a minor
     // version with no notice. Consumed by `checker::phpstan_api`, gated
@@ -98,7 +96,7 @@ pub struct DocBlock {
     // "api-do-not-implement" arm) so a docblock that only ever writes the
     // longer tag alone still counts as covered for a plain reference.
     pub api_do_not_implement: bool,
-    // Phase 67: `@internal` - marks a class/interface/trait/enum,
+    // `@internal` - marks a class/interface/trait/enum,
     // function, method, or property as usable only from within its own
     // declaring "root" (top-level) namespace, the common Composer-
     // package-as-top-level-namespace convention. Consumed by
@@ -106,9 +104,7 @@ pub struct DocBlock {
     // `Registry::check_internal_usage` (default off, matching real
     // PHPStan's own `featureToggles.internalTag: false` - this rule
     // family isn't part of any of the standard level 0-10 rule sets
-    // either, same non-default posture Phase 62's own
-    // `check_uninitialized_properties` already established a precedent
-    // for).
+    // either).
     pub internal: bool,
     // `@phpstan-consistent-constructor` - a class-level bare marker (no
     // value, same shape as `@api`/`@internal` above): every subclass's
@@ -141,7 +137,7 @@ pub struct DocBlock {
     // just the constructor) isn't modeled - a real, disclosed precision
     // gap, low corpus value for a rare tag variant.
     pub readonly: bool,
-    // Phase 41 follow-up: `@phpstan-immutable` - class-level only (real
+    // `@phpstan-immutable` - class-level only (real
     // PHPStan never recognizes this tag on a property, unlike `readonly`
     // just above). `ClassReflection::isImmutable()` treats this OR
     // `@phpstan-readonly` on the class identically; `readonly` above
@@ -149,7 +145,7 @@ pub struct DocBlock {
     // `from_enum_decl` compute `is_immutable` as `immutable || readonly`
     // rather than duplicating that OR here.
     pub immutable: bool,
-    // Phase 64: `@final` (also `@phpstan-final`, recognized for free via
+    // `@final` (also `@phpstan-final`, recognized for free via
     // the same "second pass strips `phpstan-`, same arm" mechanism
     // `readonly` above already uses) - a bare marker (no value, same
     // shape as `@internal`) declaring a method/property `final` without
@@ -169,7 +165,7 @@ pub struct DocBlock {
     // `certain`/`maybe`-graded) purity model.
     pub pure: bool,
     pub impure: bool,
-    // Phase 39: `@deprecated` on a class/interface/trait/enum, function,
+    // `@deprecated` on a class/interface/trait/enum, function,
     // method, property, or class constant - `None` when the tag isn't
     // present at all; `Some(message)` when it is, where `message` is
     // everything after the tag name, trimmed (`Some(String::new())` for
@@ -188,7 +184,7 @@ pub struct DocBlock {
     // of core `phpstan/phpstan` at all, but a separate, opt-in Composer
     // package, `phpstan/phpstan-deprecation-rules`).
     pub deprecated: Option<String>,
-    // Phase 42's own self-contained first slice: `@throws Type[,
+    // `@throws Type[,
     // description]` on a function/method - the checked-exception type a
     // caller should be prepared for. A function can (and often does)
     // document more than one, one per line, so every tag is kept (same
@@ -279,7 +275,7 @@ pub struct DocBlock {
     // be indexed yet at `ClassInfo::from_decl` time, the identical
     // ordering problem `type_imports` already has).
     pub mixins: Vec<String>,
-    // Phase 36: `@param-immediately-invoked-callable $name`/
+    // `@param-immediately-invoked-callable \$name`/
     // `@param-later-invoked-callable $name` (also the `@phpstan-`-prefixed
     // spellings, for free via this module's own "second pass strips
     // `phpstan-`" normalization) - merged into one map keyed by parameter
@@ -292,7 +288,7 @@ pub struct DocBlock {
     // a confirmed, disclosed architectural mismatch this project doesn't
     // model (see that function's own doc comment).
     pub param_immediately_invoked_callable: HashMap<String, bool>,
-    // Phase 36: `@param-closure-this Type $name` - the type `$this`
+    // `@param-closure-this Type \$name` - the type `\$this`
     // becomes inside a `Closure`-typed parameter's own literal argument,
     // when one is passed. Declaration-time validity (does `$name` exist,
     // is its native type actually `Closure`-compatible) and the runtime
@@ -528,7 +524,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             }
             "return" => {
                 let ty = take_type_token(rest);
-                // Phase 80 follow-up: conditional return types (`($param
+                // Conditional return types (`(\$param
                 // is Foo ? Bar : Baz)`, real PHPStan syntax Doctrine
                 // DBAL's own `DriverManager::getConnection()` uses) used
                 // to be deliberately excluded here (`!ty.starts_with
@@ -766,7 +762,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     block.mixins.push(ty.to_string());
                 }
             }
-            // Phase 40: see `DocBlock::api`/`api_do_not_implement`'s own
+            // See `DocBlock::api`/`api_do_not_implement`'s own
             // doc comments. Neither tag takes an argument, so `rest` is
             // never consulted - unlike every other arm above.
             "api" => {
@@ -776,7 +772,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 block.api = true;
                 block.api_do_not_implement = true;
             }
-            // Phase 67: see `DocBlock::internal`'s own doc comment. Same
+            // See `DocBlock::internal`'s own doc comment. Same
             // no-argument shape as `@api` just above.
             "internal" => {
                 block.internal = true;
@@ -799,7 +795,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             "impure" => {
                 block.impure = true;
             }
-            // Phase 39: see `DocBlock::deprecated`'s own doc comment.
+            // See `DocBlock::deprecated`'s own doc comment.
             // Unlike `@api`/`@internal`, this tag *does* usually take a
             // free-text argument (the deprecation reason) - kept
             // verbatim, trimmed, rather than discarded the way a no-
@@ -834,7 +830,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
 }
 
 /// Parses `@template`'s own body: `T` alone, `T of Bound`, `T = Default`
-/// (Phase 54), or `T of Bound = Default` with both together, in that
+/// or `T of Bound = Default` with both together, in that
 /// order - real PHPStan's own grammar always writes the bound (when
 /// present) before the default. Either a bound or a default can itself be
 /// a union (`T of Foo|Bar`, `T = Foo|Bar`), so both go through
@@ -880,7 +876,7 @@ fn parse_template_tag(rest: &str) -> Option<(String, Option<String>, Option<Stri
 fn take_type_token(s: &str) -> &str {
     let mut depth = 0i32;
     let mut quote: Option<char> = None;
-    // Phase 53: true from the moment a `)` brings `depth` back to 0 *and*
+    // True from the moment a `)` brings `depth` back to 0 *and*
     // a `:` genuinely follows it (skipping whitespace) - a `Closure(...):
     // ReturnType`/`callable(...): ReturnType` shape's own trailing return
     // type sits outside the parens, separated from them by this `:`, and
@@ -1072,7 +1068,7 @@ fn parse_method_tag_param(p: &str) -> Option<MethodTagParam> {
 /// prefix itself stripped, matching every other tag-name comparison in
 /// this file. `@phpstan-all-methods-pure`/`-impure` (a real, if rare,
 /// class-level purity-tag pair this project's own `apply_tag` doesn't
-/// otherwise parse - Phase 41's own transitive-purity slice never needed
+/// otherwise parse - the transitive-purity slice never needed
 /// a declared-intent tag, only computed purity) are kept in this list
 /// purely so a real, valid use of either doesn't get wrongly flagged as
 /// unknown - not a claim that this project consumes them for anything.
