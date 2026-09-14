@@ -1830,14 +1830,12 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
     }
 }
 
-/// A Piwigo/real-PHPStan corpus diff found `array_filter`'s own third
-/// real recognized callback shape this project was missing: a native
-/// `is_string`/`is_int`/`is_float`/`is_bool`/`is_null` type-check
-/// predicate (`TagService::buildTagList`'s own `array_filter
-/// ($altNamesEvent->value, is_string(...))`) - verified via `dumpType()`
-/// that real PHPStan narrows the retained element type to exactly that
-/// type, the same way `is_instanceof_filter_callback` above narrows to a
-/// class. Deliberately scoped to the handful of PHP's `is_*` predicates
+/// A native `is_string`/`is_int`/`is_float`/`is_bool`/`is_null`
+/// type-check predicate passed as `array_filter`'s own callback (e.g.
+/// `array_filter($values, 'is_string')`) narrows the retained element
+/// type to exactly that type, the same way `is_instanceof_filter_callback`
+/// above narrows to a class. Deliberately scoped to the handful of PHP's
+/// `is_*` predicates
 /// with an exact, unambiguous 1:1 `Type` mapping already in this project
 /// (`is_array`/`is_object`/`is_callable`/`is_numeric`/`is_scalar`/
 /// `is_iterable` all narrow to something wider than a single `Type`
@@ -2230,11 +2228,10 @@ fn strip_type_member(ty: Type, target: &Type) -> Type {
 }
 
 /// Whether `e` is (or bitwise-ORs together, to any depth) a `Name`
-/// resolving to `JSON_THROW_ON_ERROR` - real corpus shapes include both a
-/// bare `JSON_THROW_ON_ERROR` and a multi-flag chain
+/// resolving to `JSON_THROW_ON_ERROR` - real code commonly writes either
+/// a bare `JSON_THROW_ON_ERROR` or a multi-flag chain
 /// (`JSON_HEX_TAG | JSON_HEX_AMP | ... | JSON_THROW_ON_ERROR`). Tolerates
-/// a leading-backslash global name (`\JSON_THROW_ON_ERROR`), seen as-is
-/// in the corpus.
+/// a leading-backslash global name (`\JSON_THROW_ON_ERROR`) too.
 fn contains_json_throw_on_error(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == "JSON_THROW_ON_ERROR",
