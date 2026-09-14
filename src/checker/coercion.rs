@@ -1,4 +1,4 @@
-//! Phase 51: `Type` coercion validity - real PHPStan's own `Type::
+//! `Type` coercion validity - real PHPStan's own `Type::
 //! toInteger()`/`toFloat()`/`toString()` surface, condensed to what
 //! `InvalidCastRule`/`EchoRule` actually need: "is this cast/context
 //! legal, and if so what does it produce." Every scalar, `null`, `array`
@@ -42,15 +42,14 @@ impl<'a> Checker<'a> {
                 Some(Type::Int)
             }
             Type::Object(..) => None,
-            // Real gap found and fixed this session (part of a broader
-            // sweep for this project's own `Union`/`Intersection` anti-
-            // pattern): `Type::Intersection` fell to the permissive `_ =>
-            // Some(Type::Int)` catch-all below, meaning `(int) $x` on an
-            // intersection of two genuinely non-castable objects (e.g.
-            // `Countable&ArrayAccess`) was never flagged - `union_coercion`
-            // already tries each member and unions whichever are legal,
-            // the identical reasoning applies here (if any member offers
-            // a legal cast path, the real value trivially supports it).
+            // `Type::Intersection` must not fall to the permissive
+            // `_ => Some(Type::Int)` catch-all below, or `(int) $x` on
+            // an intersection of two genuinely non-castable objects
+            // (e.g. `Countable&ArrayAccess`) would never be flagged -
+            // `union_coercion` tries each member and unions whichever
+            // are legal, the identical reasoning applies here (if any
+            // member offers a legal cast path, the real value trivially
+            // supports it).
             Type::Union(members) | Type::Intersection(members) => {
                 union_coercion(members, |m| self.type_to_integer(m))
             }
@@ -71,7 +70,7 @@ impl<'a> Checker<'a> {
                 Some(Type::Float)
             }
             Type::Object(..) => None,
-            // Same real gap and fix as `type_to_integer` just above.
+            // Same reasoning as `type_to_integer` just above.
             Type::Union(members) | Type::Intersection(members) => {
                 union_coercion(members, |m| self.type_to_float(m))
             }
@@ -119,7 +118,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Union(members) => union_coercion(members, |m| self.type_to_string(m)),
-            // Same real gap and fix as `type_to_integer`/`type_to_float`
+            // Same reasoning as `type_to_integer`/`type_to_float`
             // above, for a non-array-shaped intersection specifically -
             // the array-shaped case is already handled by its own arm
             // above, matched first.
@@ -190,8 +189,7 @@ impl<'a> Checker<'a> {
     /// Real PHPStan's `PrintRule` (`print.nonString`) - unlike
     /// `check_echo_validity`, `print` only ever has one operand, so real
     /// PHPStan's own message has no `#%d` position number at all
-    /// (confirmed directly against `vendor/phpstan-src`'s own
-    /// `PrintRule::processNode`, which interpolates the type description
+    /// (`PrintRule::processNode` interpolates the type description
     /// straight into `"Parameter %s of print..."` with no separate
     /// position argument - not a typo to "fix" into echo's shape).
     pub(crate) fn check_print_validity(&mut self, expr_ty: &Type, span: Span, label: &str) {
@@ -261,11 +259,11 @@ pub(crate) fn to_bitwise_not(ty: &Type) -> Option<Type> {
 
 /// A union's own cast validity: real PHPStan's `UnionType::toInteger()`/
 /// etc. combine each member's own result via `TypeCombinator`, and
-/// `InvalidCastRule` only flags when the *combined* result is exactly
+/// `InvalidCastRule` only flags when the combined result is exactly
 /// `ErrorType` - which only happens when every single member's own cast
 /// was illegal (a union with even one legal member produces a real,
-/// mixed-but-not-purely-`ErrorType` result). Mirrors Phase 50's own
-/// `invalid_array_key_description` union handling for the identical
+/// mixed-but-not-purely-`ErrorType` result). Mirrors
+/// `invalid_array_key_description`'s own union handling for the identical
 /// reason: no tri-state "possibly invalid" grading to fall back on, so
 /// "confidently illegal" is the only case worth flagging.
 fn union_coercion(members: &[Type], f: impl Fn(&Type) -> Option<Type>) -> Option<Type> {
