@@ -328,24 +328,22 @@ impl<'a> Checker<'a> {
                     .map(|(k, t, opt)| (k.clone(), self.resolve_pseudo(t, defining_class), *opt))
                     .collect(),
             ),
-            // A real, previously-missing case: `object{...}`'s own field
-            // types never got `self`/`static`/`parent` resolved either.
+            // `object{...}`'s own field types also need
+            // `self`/`static`/`parent` resolved.
             Type::ObjectShape(fields) => Type::ObjectShape(
                 fields
                     .iter()
                     .map(|(k, t, opt)| (k.clone(), self.resolve_pseudo(t, defining_class), *opt))
                     .collect(),
             ),
-            // Real, corpus-confirmed bug: a generic class's own template
-            // arguments (`SortEntry<self, string>` - `Object("SortEntry",
-            // [SelfRef, String])`) never got `self`/`static`/`parent`
-            // resolved inside the argument list, only ever at the top
-            // level. Left unresolved, a `list<SortEntry<self, string>>`
-            // declared return type's `self` never matches the concrete
-            // class an actual returned `SortEntry<UserSortField, string>`
-            // carries, so any comparison keyed on the resolved type (e.g.
-            // `check_too_wide_return_type`'s own `is_assignable` check)
-            // wrongly concludes the declared member is never produced.
+            // A generic class's own template arguments
+            // (`SortEntry<self, string>` - `Object("SortEntry",
+            // [SelfRef, String])`) need `self`/`static`/`parent`
+            // resolved inside the argument list too, not just at the top
+            // level - otherwise a `list<SortEntry<self, string>>`
+            // declared return type's `self` would never match the
+            // concrete class an actual returned
+            // `SortEntry<UserSortField, string>` carries.
             Type::Object(name, args) => Type::Object(
                 name.clone(),
                 args.iter()
@@ -373,25 +371,20 @@ impl<'a> Checker<'a> {
     }
 
     /// The "does this name actually resolve" primitive: `name` is a
-    /// real class/interface/trait/enum this checker's own `Registry`
+    /// real class/interface/trait/enum this checker's `Registry`
     /// indexed, or one of the small, fixed set of native type-hint
-    /// keywords this project's own `types::parse_type_keyword_or_class`
-    /// deliberately encodes as `Type::Object` despite not being a real
-    /// class reference at all - mirrors `is_type_fully_known`'s (
-    /// `checker/generics.rs`) identical `"object"` exemption, plus
-    /// `resolve_names_in_type`'s (`registry/name_context.rs`) own
-    /// `"Traversable"`/`"resource"` exemptions, so a plain `object`/
-    /// `resource`-typed parameter or a namespaced file's `iterable`
-    /// (desugared to `array|Traversable`) never gets flagged as an
-    /// unresolvable class the way a genuine typo would. `"class@anonymous"`
-    /// is this project's own fixed, literal synthetic name for EVERY
-    /// anonymous class (`parser/classes.rs`'s own `ClassDecl::name` for
-    /// one, confirmed never unique per-instance) - deliberately never
-    /// indexed into the registry at all (see `ExprKind::NewAnonymousClass`'s
-    /// own comment), so a `self`/`static`-typed return inside an anonymous
-    /// class's own body (`resolve_pseudo` resolving `static` to exactly
-    /// this name) would otherwise always read as an unresolvable class,
-    /// on the most ordinary possible body.
+    /// keywords `types::parse_type_keyword_or_class` deliberately
+    /// encodes as `Type::Object` despite not being a real class
+    /// reference (mirrors `is_type_fully_known`'s identical `"object"`
+    /// exemption, plus `resolve_names_in_type`'s
+    /// `"Traversable"`/`"resource"` exemptions), so a plain
+    /// `object`/`resource`-typed parameter or `iterable` (desugared to
+    /// `array|Traversable`) never gets flagged as an unresolvable class.
+    /// `"class@anonymous"` is this project's fixed, literal synthetic
+    /// name for every anonymous class, deliberately never indexed into
+    /// the registry - without this exemption, a `self`/`static`-typed
+    /// return inside an anonymous class's own body would always read as
+    /// an unresolvable class.
     pub(crate) fn class_name_exists(&self, name: &str) -> bool {
         matches!(
             name,
@@ -401,32 +394,27 @@ impl<'a> Checker<'a> {
 
     /// `ClassCaseSensitivityCheck`'s equivalent, covering every
     /// *native-syntax* class-name reference: a class/enum declaration's
-    /// own `extends`/`implements`/trait-`use` references (which already
-    /// carry a per-item span, `ClassDecl::extends_spans`/
-    /// `implements_spans`/`uses_spans`), an attribute reference, `new`,
-    /// `instanceof`, a static method call/property/constant access
-    /// (`Foo::...`), and a `catch` clause. Each of those needs no new
-    /// parser/registry plumbing at all - the raw, as-written text is
-    /// already sitting in the AST as a bare `String`/`ExprKind::Name`
-    /// field, just never read for this purpose - unlike a *PHPDoc-typed*
-    /// position (a param/return/property type hint, `@method`/`@mixin`/
-    /// `@phpstan-type` tag target), where this project's own type-parsing
-    /// pipeline collapses every reference straight into a resolved `Type`
-    /// with no per-reference raw spelling retained anywhere by the time
-    /// any checker call site sees it - that needs a parallel traversal
-    /// run one step earlier in the parse pipeline instead
-    /// (`registry::collect_class_name_case_refs`) to
-    /// preserve it; see `check_type_class_name_case` just below, this
-    /// function's own fan-out consumer for that PHPDoc-typed case.
-    /// Skips a `use`-imported reference (real PHPStan's own default
-    /// `checkImportedClassNameCase: false`) and a built-in stub class
-    /// (`checkInternalClassCaseSensitivity: false`) - both
-    /// unconditionally, matching real PHPStan's own non-bleeding-edge
-    /// default config exactly. `raw` is the reference exactly as written
-    /// in source (needed fresh here, not `ClassInfo::extends`/etc., which
+    /// own `extends`/`implements`/trait-`use` references, an attribute
+    /// reference, `new`, `instanceof`, a static method
+    /// call/property/constant access (`Foo::...`), and a `catch` clause,
+    /// where the raw, as-written text is already sitting in the AST as a
+    /// bare `String`/`ExprKind::Name` field, unlike a
+    /// *PHPDoc-typed* position (a param/return/property type hint,
+    /// `@method`/`@mixin`/`@phpstan-type` tag target), where this
+    /// project's type-parsing pipeline collapses every reference
+    /// straight into a resolved `Type` with no per-reference raw
+    /// spelling retained - that needs a parallel traversal run earlier
+    /// in the parse pipeline instead
+    /// (`registry::collect_class_name_case_refs`); see
+    /// `check_type_class_name_case` below, this function's fan-out
+    /// consumer for that PHPDoc-typed case. Skips a `use`-imported
+    /// reference and a built-in stub class, matching real PHPStan's own
+    /// non-bleeding-edge default config
+    /// (`checkImportedClassNameCase`/`checkInternalClassCaseSensitivity`
+    /// both `false`). `raw` is the reference exactly as written in
+    /// source (needed fresh here, not `ClassInfo::extends`/etc., which
     /// `Registry::canonicalize_class_name_case` already rewrites to
-    /// canonical case at registry-build time - there would be nothing
-    /// left to compare against a "real declared case" from that field).
+    /// canonical case at registry-build time).
     pub(crate) fn check_class_name_case(&mut self, fqn: &str, raw: &str, span: Span) {
         let mut segments = raw.trim_start_matches('\\').splitn(2, '\\');
         let first_segment = segments.next().unwrap_or(raw);
@@ -452,21 +440,18 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `class.nameCase` for a PHPDoc-typed
-    /// position (a param/return/property type hint, `@method`/`@mixin`/
-    /// `@phpstan-type` tag target) - the gap `check_class_name_case`'s
-    /// own doc comment above names as "a genuinely bigger, still-open
-    /// undertaking." Pure fan-out over `case_refs` (`(raw, resolved)`
-    /// pairs from `collect_class_name_case_refs`, populated once at
-    /// registry-build time) - re-runs the *unchanged* `check_class_name_
-    /// case` per pair rather than duplicating its own `is_use_imported`/
-    /// built-in-stub-skip/`lookup_class` logic. Every reference nested
-    /// inside one param/return/property's own type (e.g. both class names
-    /// in `array<Foo, Bar>`) is reported at the *same* `span` - this
-    /// project's PHPDoc parsing keeps no per-reference span within a
-    /// docblock's own type text, only the position of the type token as a
-    /// whole, a real, disclosed imprecision shared with every other
-    /// PHPDoc-typed diagnostic this project reports.
+    /// `class.nameCase` for a PHPDoc-typed position (a
+    /// param/return/property type hint, `@method`/`@mixin`/
+    /// `@phpstan-type` tag target). Pure fan-out over `case_refs`
+    /// (`(raw, resolved)` pairs from `collect_class_name_case_refs`,
+    /// populated once at registry-build time) - re-runs the *unchanged*
+    /// `check_class_name_case` per pair rather than duplicating its
+    /// `is_use_imported`/built-in-stub-skip/`lookup_class` logic. Every
+    /// reference nested inside one param/return/property's type (e.g.
+    /// both class names in `array<Foo, Bar>`) is reported at the *same*
+    /// `span`, since this project's PHPDoc parsing keeps no
+    /// per-reference span within a docblock's type text, only the
+    /// position of the type token as a whole.
     pub(crate) fn check_type_class_name_case(
         &mut self,
         case_refs: &[(String, String)],
