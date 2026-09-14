@@ -10,10 +10,8 @@ pub(super) fn parse(src: &str) -> Vec<Stmt> {
 
 /// Slices `src` by a `Span`'s own 1-indexed line/char-column positions
 /// (`Position`'s own doc comment: columns count UTF-8 *characters*, not
-/// bytes) - the same convention every real AST span uses, so a test can
-/// assert a Phase 17 span actually covers the identifier text it claims
-/// to, not just that it exists. Single-line spans only (every case this
-/// project's own span-carrying declarations need to test is one).
+/// bytes) - lets a test assert a span actually covers the identifier
+/// text it claims to, not just that it exists. Single-line spans only.
 pub(super) fn text_at(src: &str, span: Span) -> String {
     assert_eq!(
         span.start.line, span.end.line,

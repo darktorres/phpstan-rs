@@ -1,4 +1,4 @@
-//! Phase 40.6: `find_composer_package_name`'s own upward-walk, used by
+//! `find_composer_package_name`'s own upward-walk, used by
 //! `checker::phpstan_api::PhpStanNamespaceIn3rdPartyPackageRule`.
 
 use super::super::*;

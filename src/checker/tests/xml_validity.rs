@@ -1,4 +1,4 @@
-//! Phase 78: `DOMDocument::createElement()`'s tag-name validation and
+//! `DOMDocument::createElement()`'s tag-name validation and
 //! `SimpleXMLElement`/`simplexml_load_string()`'s well-formedness
 //! validation.
 

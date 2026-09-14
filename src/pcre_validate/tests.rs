@@ -1,5 +1,5 @@
 //! Every case here was checked against a live PHP 8.5 interpreter
-//! (`php -r`) before being pinned - see this module's own doc comment.
+//! (`php -r`) - see this module's own doc comment.
 
 use super::validate_pattern;
 

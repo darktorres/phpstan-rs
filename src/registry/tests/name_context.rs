@@ -1,5 +1,5 @@
-//! `collect_class_name_case_refs` (Phase 48 follow-up, item 7a) - the
-//! read-only, pair-collecting sibling of `resolve_names_in_type`.
+//! `collect_class_name_case_refs` - the read-only, pair-collecting
+//! sibling of `resolve_names_in_type`.
 
 use super::super::*;
 use crate::ast::Stmt;

@@ -1,8 +1,7 @@
-//! Phase 78 (partial slice): `DateInterval`'s own ISO-8601 duration-
-//! string constructor validation. Every case here was confirmed
-//! directly against real `php` (8.5) before being encoded - see
-//! `src/checker/date_interval.rs`'s own module doc for the full
-//! grammar-derivation notes.
+//! `DateInterval`'s own ISO-8601 duration-string constructor
+//! validation. Every case here was checked directly against real `php`
+//! (8.5) - see `src/checker/date_interval.rs`'s own module doc for the
+//! full grammar-derivation notes.
 
 use super::helpers::*;
 

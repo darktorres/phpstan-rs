@@ -1,7 +1,7 @@
-//! Phase 71 Item 1: `call_user_func(_array)` argument re-checking, scoped
-//! to the two statically-resolvable callable shapes - a string-literal
-//! function name, and a two-element array literal naming a class/object
-//! plus a literal method name.
+//! `call_user_func(_array)` argument re-checking, scoped to the two
+//! statically-resolvable callable shapes - a string-literal function
+//! name, and a two-element array literal naming a class/object plus a
+//! literal method name.
 
 use super::helpers::*;
 

@@ -1,6 +1,5 @@
 //! Every case here was checked against a live PHP 8.5 interpreter
-//! (`php -r 'echo (string) $v;'`) before being pinned - see this module's
-//! own doc comment.
+//! (`php -r 'echo (string) $v;'`) - see this module's own doc comment.
 
 use super::format_php_float;
 

@@ -1,8 +1,8 @@
-//! Phase 17's additive span fields: `name_span`/`type_hint_span`/
-//! `extends_spans`/etc. - each must point at exactly the identifier text
-//! it claims to, not just exist. `helpers::text_at` slices the original
-//! source by a span to check that directly, rather than trusting the
-//! span's own byte-range math is right just because it compiles.
+//! Span fields like `name_span`/`type_hint_span`/`extends_spans`/etc. -
+//! each must point at exactly the identifier text it claims to, not just
+//! exist. `helpers::text_at` slices the original source by a span to
+//! check that directly, rather than trusting the span's own byte-range
+//! math is right just because it compiles.
 
 use super::super::*;
 use super::helpers::*;

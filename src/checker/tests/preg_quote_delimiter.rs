@@ -1,5 +1,5 @@
-//! Phase 71 Item 3: `preg_quote()` delimiter cross-checking against the
-//! actual pattern delimiter of a concatenated regex pattern.
+//! `preg_quote()` delimiter cross-checking against the actual pattern
+//! delimiter of a concatenated regex pattern.
 
 use super::helpers::*;
 
