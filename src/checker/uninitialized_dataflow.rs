@@ -1,85 +1,57 @@
-//! Phase 62's own remaining, harder half: real, per-constructor "was this
-//! property definitely assigned *by this exact point*" dataflow -
-//! `checker/uninitialized.rs`'s own existing check answers only "is this
-//! property assigned *anywhere at all*", deliberately (see that module's
-//! own doc comment for why). This module is purely additive to it: a
-//! property this module ever reports on is always one the existing check
-//! already knows genuinely gets initialized somewhere - the question here
-//! is only ever "was it read too early on some real path."
+//! Real, per-constructor "was this property definitely assigned *by this
+//! exact point*" dataflow - `checker/uninitialized.rs`'s existing check
+//! answers only "is this property assigned *anywhere at all*". This
+//! module is purely additive to it: a property this module ever reports
+//! on is always one the existing check already knows genuinely gets
+//! initialized somewhere - the question here is only "was it read too
+//! early on some real path."
 //!
 //! Modeled as a small, standalone dataflow over a single new domain -
-//! "which of this class's own directly-declared, qualifying properties are
-//! known-initialized by this point" - deliberately *not* built on the main
-//! checker's own `Locals`/`merge_scopes`/`converge_loop_body` (see this
-//! module's own git history/the Phase 62 plan for why an earlier attempt
-//! at reusing `Locals` directly was reverted: this walker is intentionally
-//! separate from the main checker's own `check_stmt`/`check_expr`
-//! traversal, so coupling this state onto the shared struct would only
-//! have forced every one of its existing field-literals to account for a
-//! field they never use, for no real benefit).
+//! "which of this class's own directly-declared, qualifying properties
+//! are known-initialized by this point" - deliberately not built on the
+//! main checker's own `Locals`/`merge_scopes`/`converge_loop_body`: this
+//! walker is intentionally separate from the main checker's traversal,
+//! so coupling this state onto the shared struct would only force every
+//! existing field-literal to account for a field it never uses.
 //!
-//! **`unset($this->prop)` is modeled**, and genuinely removes `prop` from
-//! the current state - a real corpus find (guzzlehttp/psr7's own
-//! `LazyOpenStream::__construct`, which unsets a just-declared property
-//! specifically to force `__get()` on next access) disproved an earlier,
-//! untested assumption here that this shape was "vanishingly rare."
-//! `unset` itself is never a read either, matching `checker/expr.rs`'s
-//! own identical exemption for ordinary narrowing.
+//! **`unset($this->prop)` is modeled**, and genuinely removes `prop`
+//! from the current state (e.g. a constructor unsetting a just-declared
+//! property specifically to force `__get()` on next access). `unset`
+//! itself is never a read either, matching `checker/expr.rs`'s identical
+//! exemption for ordinary narrowing.
 //!
 //! **Loops, and why `unset` complicates them**: without `unset`, this
 //! domain only ever *grows* (a monotonic union), which would make the
-//! *worst case* reachable through a `while`/`for`/`foreach` loop (which
-//! might run zero times) always exactly the state *before* the loop -
-//! every state reachable after 1, 2, ... iterations would be a superset
-//! of it. With `unset` now real, that's no longer quite true in general
-//! (a property could be unset on some iteration), so each of these three
-//! loop kinds intersects the zero-iteration state with the state after
-//! walking the body *once* - exact for the overwhelmingly common
-//! monotonic case (the intersection changes nothing there), and still
-//! sound for a *single* iteration unsetting something. A disclosed,
-//! deliberate simplification for the narrower, compound case of a
-//! *second or later* iteration unsetting something the first iteration
-//! didn't (a real fixed point, `converge_loop_body`-style, would be
-//! needed to close that gap) - out of this whole feature's own "don't
-//! guess past the common, provable case" scope, and errs in this
-//! project's own already-established safe direction (could only miss a
-//! real premature-access finding in that one narrow shape, never invent
-//! a false one). `do`/`while` needs none of this: its body runs at least
-//! once, so the state *after* walking it exactly once (no zero-iteration
-//! case exists to intersect against) is the correct, exact answer
-//! regardless.
+//! worst case reachable through a `while`/`for`/`foreach` loop (which
+//! might run zero times) always exactly the state before the loop. With
+//! `unset` now real, that's no longer quite true in general (a property
+//! could be unset on some iteration), so each of these three loop kinds
+//! intersects the zero-iteration state with the state after walking the
+//! body once - exact for the common monotonic case, and still sound for
+//! a single iteration unsetting something. A second-or-later iteration
+//! unsetting something the first iteration didn't would need a real
+//! fixed point to close that gap; this is out of scope and errs safe
+//! (could only miss a real premature-access finding, never invent a
+//! false one). `do`/`while` needs none of this: its body runs at least
+//! once, so the state after walking it exactly once is the exact answer.
 //!
-//! **A disclosed simplification, unlike the above**: `switch`/`match`
-//! arms are treated as mutually-exclusive alternatives intersected
-//! together (matching `merge_scopes`'s own "only what every branch
-//! guarantees" rule), *not* real PHP `switch` fallthrough between
-//! adjacent cases with no `break` - a real, rarer shape this module
-//! doesn't attempt, erring in this project's own already-established safe
-//! direction (fewer flags, not more; see `checker/uninitialized.rs`'s own
-//! doc comment for the identical precedent).
+//! **A disclosed simplification**: `switch`/`match` arms are treated as
+//! mutually-exclusive alternatives intersected together (matching
+//! `merge_scopes`'s "only what every branch guarantees" rule), not real
+//! PHP `switch` fallthrough between adjacent cases with no `break`.
 //!
-//! **A genuine, disclosed, un-fixed limitation** (real corpus find:
-//! Symfony `Process::__construct` -> `setInput()` -> `isRunning()`):
-//! `isRunning()` guards its own real logic behind `if (self::
-//! STATUS_STARTED !== $this->status) { return false; }` - a value-level
-//! fact about an *unrelated* property this module has no way to know
-//! (it tracks property *initialization*, never arbitrary property
-//! *values* - building that would mean re-implementing the main
-//! checker's own `Locals`/narrowing engine inside this deliberately
-//! standalone module, Design ##1's own architectural boundary). Reached
-//! from the constructor before the process has actually started,
-//! `$this->status` can't really *be* `STATUS_STARTED` yet, so the guard
-//! always takes the safe branch in practice - but this module,
-//! correctly conservative about a value it can't evaluate, considers
-//! both branches possible and flags a read past the guard that's
-//! genuinely never reachable at runtime. A depth cap on absorption was
-//! tried and reverted: it also broke a *different*, definitely-safe real
-//! shape found in the very same investigation (Monolog's own
-//! `RotatingFileHandler::__construct` -> `setFilenameFormat()` ->
-//! `setDateFormat()`, an ordinary two-level unconditional-initialization
-//! chain with nothing value-gated about it at all) - trading one real
-//! false-positive class for another isn't a real fix, so this one stays
-//! open, disclosed, rather than band-aided.
+//! **A genuine, un-fixed limitation**: a guard like `if (self::
+//! STATUS_STARTED !== $this->status) { return false; }` depends on a
+//! value-level fact about an unrelated property this module has no way
+//! to know (it tracks property *initialization*, never arbitrary
+//! property *values*). Reached before the guarded state can actually
+//! hold, the guard always takes the safe branch in practice, but this
+//! module, correctly conservative about a value it can't evaluate,
+//! considers both branches possible and can flag a read past the guard
+//! that's never reachable at runtime. A depth cap on absorption was
+//! tried and reverted: it also broke an ordinary two-level unconditional-
+//! initialization chain with nothing value-gated about it - trading one
+//! false-positive class for another isn't a real fix.
 
 use std::collections::HashSet as StdHashSet;
 use std::sync::Arc;
@@ -93,12 +65,9 @@ use crate::token::Span;
 use crate::types::Type;
 
 /// Bare property names known-initialized on every path reaching a given
-/// point - see this module's own doc comment for why a small, dedicated
-/// type is used here rather than the main checker's own `Locals`.
-/// Mirrors `checker.rs`'s own `ProvenanceSet` type alias exactly (same
-/// persistent-set instantiation), for the identical reason: O(1)-clone
-/// semantics at every branch point, without this module needing its own
-/// copy of that reasoning.
+/// point. Mirrors `checker.rs`'s `ProvenanceSet` type alias (same
+/// persistent-set instantiation) for O(1)-clone semantics at every
+/// branch point.
 type PropertyInitState =
     imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 
@@ -111,23 +80,18 @@ struct PropertyInitCtx<'a, 'b> {
     /// for the whole walk. `$this->method()`/`static::` always resolve
     /// against this (real PHP virtual/late-static-binding dispatch),
     /// never against whatever class the currently-recursed-into method
-    /// body happens to be declared on - see `walk_expr`'s own
-    /// `MethodCall`/`StaticCall` arms, where the distinction is actually
-    /// made.
+    /// body happens to be declared on.
     checked_class: String,
-    /// Qualifying property names the *existing* `class_ever_assigns_property`
+    /// Qualifying property names the existing `class_ever_assigns_property`
     /// heuristic already confirms are genuinely assigned somewhere in this
     /// class's own body - the only names this walker ever reports on.
     candidates: StdHashSet<String>,
     /// `(declaring class FQN, lowercase method name)` pairs currently
     /// being recursed into, for the whole top-level walk - a re-entrant
     /// call while already visiting contributes nothing further rather
-    /// than recursing infinitely. A real, disclosed, sound-but-incomplete
-    /// simplification versus a full fixed point over the whole call graph:
-    /// can only under-approximate absorption (miss a guarantee a genuine
-    /// cycle would provide), never over-approximate it - see the Phase 62
-    /// plan's own "Cross-method absorption" section for the full
-    /// reasoning.
+    /// than recursing infinitely. Sound but incomplete versus a full
+    /// fixed point over the whole call graph: can only under-approximate
+    /// absorption, never over-approximate it.
     visiting: StdHashSet<(String, String)>,
     /// Every `(property name, read span)` found reachable from the
     /// constructor's own call graph, before it's known-initialized on
@@ -136,14 +100,10 @@ struct PropertyInitCtx<'a, 'b> {
 }
 
 impl<'a> Checker<'a> {
-    /// Phase 62's premature-access half - see this module's own doc
-    /// comment. Additive to `check_uninitialized_properties`: only ever
-    /// reports on a property that check already confirms is genuinely
-    /// assigned somewhere, never a property that check itself already
-    /// flagged as globally uninitialized (this project's own deliberately
-    /// lenient "never initialized" verdict, kept exactly as-is - see the
-    /// Phase 62 plan's own "A real design choice, not a narrowing"
-    /// section for why).
+    /// Additive to `check_uninitialized_properties`: only ever reports on
+    /// a property that check already confirms is genuinely assigned
+    /// somewhere, never a property that check itself already flagged as
+    /// globally uninitialized.
     pub(crate) fn check_premature_property_access(&mut self, fqn: &str, c: &ClassDecl) {
         if !self.registry.check_uninitialized_properties {
             return;
@@ -210,12 +170,9 @@ fn is_this(e: &Expr) -> bool {
 
 /// Whether `e` evaluates to the very same object `$this` refers to -
 /// either literally `$this`, or a fluent method call chain rooted in
-/// `$this` where every link's own declared return type is `self`/
-/// `static` (real PHP's own fluent-setter convention: `public function
-/// setX(...): self { $this->x = ...; return $this; }`). Recurses
-/// through any chain depth (`$this->a()->b()->c()`), matching the same
-/// "don't stop at one level" instinct `checker/assignment.rs`'s own
-/// destructuring recursion already has for a different shape. A method
+/// `$this` where every link's declared return type is `self`/`static`
+/// (`public function setX(...): self { $this->x = ...; return $this; }`).
+/// Recurses through any chain depth (`$this->a()->b()->c()`). A method
 /// whose return type resolves to anything else (or isn't found at all)
 /// stops the chain - the call itself is still walked normally by the
 /// caller, just never treated as a further `$this`-rooted absorption
@@ -243,17 +200,12 @@ fn is_probe_call(callee: &Expr) -> bool {
 /// Walks an `isset()`/`empty()`/bare-`??`-quieted expression - real PHP
 /// never throws the "must not be accessed before initialization" error
 /// for a property found anywhere in the chain being *tested* this way,
-/// however deep (`checker/expr.rs`'s own `check_expr_quiet_root` is the
-/// established precedent for this same real-PHP semantics; not reused
-/// directly, since this module doesn't share that function's own
-/// `Locals`-based traversal - mirrors its *effect* only). Recurses
-/// through `PropertyAccess`/`DynamicPropertyAccess`/`Index` - the shapes
-/// that make up a probed chain (`$this->a->b['c']`) - without ever
-/// registering a premature-read finding for a `$this->prop` found along
-/// it; an index/key expression *embedded* inside the chain
+/// however deep. Recurses through `PropertyAccess`/`DynamicPropertyAccess`/
+/// `Index`, the shapes that make up a probed chain (`$this->a->b['c']`),
+/// without ever registering a premature-read finding for a `$this->prop`
+/// found along it; an index/key expression embedded inside the chain
 /// (`$this->arr[$this->k]`) still gets the ordinary, non-quiet walk via
-/// `walk_expr` - only the chain actually being tested is quiet, not
-/// every expression reachable from it.
+/// `walk_expr` - only the chain actually being tested is quiet.
 fn walk_quiet_probe(
     e: &Expr,
     mut state: PropertyInitState,
@@ -290,25 +242,17 @@ fn walk_stmts(
 }
 
 /// A conservative, syntax-only check (no type inference, unlike the main
-/// checker's own `always_terminates`) for whether a statement
-/// unconditionally exits the enclosing method - `Return`/`Throw`/
-/// `Break`/`Continue` directly, a `Block` containing one anywhere (not
-/// just as its last statement, matching `control_flow.rs`'s own
-/// `always_terminates` "any statement, however early" logic), or an
-/// `If` where *both* branches do (a bare `if` with no `else` can never
-/// qualify - the "condition false" path always falls through). Used
-/// only to decide whether a branch's own resulting state should be
-/// excluded from a merge, matching `checker/stmt.rs`'s own established
-/// "a branch that always terminates doesn't get to vote on what's true
-/// afterward" precedent for ordinary narrowing. Deliberately narrower
-/// than a full `always_terminates` (no `Type::Never`-returning-call
-/// detection, no `Switch`/`Try` exhaustiveness, since either needs a
-/// real `Locals`/`infer_expr` this standalone module doesn't have) -
-/// this module's own established "don't guess past the common, provable
-/// case" scope; a call proven to never return, or a switch/try that
-/// exhaustively terminates every arm, is a real, rarer gap this
-/// simplification accepts, in the project's own safe direction (could
-/// only miss a real finding downstream of one, never invent a false
+/// checker's `always_terminates`) for whether a statement unconditionally
+/// exits the enclosing method - `Return`/`Throw`/`Break`/`Continue`
+/// directly, a `Block` containing one anywhere (not just as its last
+/// statement), or an `If` where both branches do (a bare `if` with no
+/// `else` can never qualify - the "condition false" path always falls
+/// through). Used only to decide whether a branch's resulting state
+/// should be excluded from a merge. Narrower than a full
+/// `always_terminates` (no `Type::Never`-returning-call detection, no
+/// `Switch`/`Try` exhaustiveness, since either needs a real
+/// `Locals`/`infer_expr` this standalone module doesn't have) - errs
+/// safe (could only miss a real finding downstream, never invent a false
 /// one).
 fn stmt_definitely_terminates(stmt: &Stmt) -> bool {
     match &stmt.kind {
@@ -354,15 +298,12 @@ fn walk_stmt(
             then_branch,
             else_branch,
         } => {
-            // A branch that unconditionally exits the method (a real
-            // corpus find: Symfony `Process::isRunning`/`updateStatus`,
-            // both an `if (...) { return ...; }` guard-clause with no
-            // `else`) doesn't get to vote on what's true afterward -
-            // matching `checker/stmt.rs`'s own established precedent for
-            // ordinary narrowing (see `stmt_definitely_terminates`'s own
-            // doc comment). Without this, code placed *after* such a
-            // guard was wrongly analyzed as if it could also run on the
-            // path the guard itself already ruled out.
+            // A branch that unconditionally exits the method (an
+            // `if (...) { return ...; }` guard-clause with no `else`)
+            // doesn't get to vote on what's true afterward - otherwise
+            // code placed after such a guard would be wrongly analyzed as
+            // if it could also run on the path the guard already ruled
+            // out.
             let state_after_cond = walk_expr(cond, state, ctx, declaring_class);
             let then_terminates = stmt_definitely_terminates(then_branch);
             let then_state = walk_stmt(then_branch, state_after_cond.clone(), ctx, declaring_class);
@@ -383,11 +324,8 @@ fn walk_stmt(
             }
         }
         // `while`/`for`/`foreach` may run their own body zero times - see
-        // this module's own doc comment for why intersecting the
-        // zero-iteration state with the one-iteration state is the
-        // exact, sound answer (not a fixed point, and not simply
-        // "whatever's true before the loop" outright, now that `unset`
-        // is modeled - see that doc comment for why).
+        // the module doc comment for why intersecting the zero-iteration
+        // state with the one-iteration state is the exact, sound answer.
         StmtKind::While { cond, body } => {
             let state_after_cond = walk_expr(cond, state, ctx, declaring_class);
             let one_pass = walk_stmt(body, state_after_cond.clone(), ctx, declaring_class);
@@ -420,8 +358,7 @@ fn walk_stmt(
         }
         // `do ... while` runs its own body at least once - unlike the
         // three loop kinds above, the state after walking it exactly
-        // once is the real, exact answer (see this module's own doc
-        // comment), not a lower bound that a fixed point could improve.
+        // once is the exact answer, not a lower bound.
         StmtKind::DoWhile { body, cond } => {
             state = walk_stmt(body, state, ctx, declaring_class);
             walk_expr(cond, state, ctx, declaring_class)
@@ -447,13 +384,10 @@ fn walk_stmt(
             catches,
             finally,
         } => {
-            // Matches `checker/stmt.rs`'s own existing `StmtKind::Try`
-            // handling exactly (verified directly, not assumed): each
-            // catch clause starts from a *clone of the try body's own
-            // completed end state*, not a conservative "could have
-            // thrown before any statement" entry - a real, deliberate,
-            // already-shipped choice this project makes for ordinary
-            // narrowing too.
+            // Matches `checker/stmt.rs`'s existing `StmtKind::Try`
+            // handling: each catch clause starts from a clone of the try
+            // body's completed end state, not a conservative "could have
+            // thrown before any statement" entry.
             let try_end = walk_stmts(body, state, ctx, declaring_class);
             let mut branch_states = vec![try_end.clone()];
             for c in catches {
@@ -471,10 +405,7 @@ fn walk_stmt(
         // Every other statement kind either carries no expression this
         // module cares about (`Break`/`Continue`/`Global`/`Goto`/`Label`/
         // `InlineHtml`/`Return(None)`) or is a nested declaration this
-        // module deliberately doesn't descend into, matching
-        // `ast_walk::stmt_children`'s own documented boundary
-        // (`FunctionDecl`/`ClassDecl`/`EnumDecl`/`Namespace`/`Use`/
-        // `GlobalConst`).
+        // module deliberately doesn't descend into.
         _ => state,
     }
 }
@@ -497,12 +428,11 @@ fn walk_expr(
             state = walk_expr(rhs, state, ctx, declaring_class);
             assign_target(lhs, state, ctx, declaring_class)
         }
-        // `??=`'s own isset-based left check never throws even when
-        // genuinely uninitialized (`checker/uninitialized.rs`'s own doc
-        // comment has the real-PHP verification) - never a premature-read
-        // site (quiet-probed, exactly like bare `??`/`isset()` below, not
-        // an ordinary read), and always leaves the property initialized
-        // afterward, exactly like a plain assignment.
+        // `??=`'s isset-based left check never throws even when genuinely
+        // uninitialized - never a premature-read site (quiet-probed,
+        // exactly like bare `??`/`isset()` below), and always leaves the
+        // property initialized afterward, exactly like a plain
+        // assignment.
         ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
             state = walk_quiet_probe(lhs, state, ctx, declaring_class);
             state = walk_expr(rhs, state, ctx, declaring_class);
@@ -515,36 +445,28 @@ fn walk_expr(
             state = walk_expr(lhs, state, ctx, declaring_class);
             walk_expr(rhs, state, ctx, declaring_class)
         }
-        // Bare `??` (not `??=`): a real corpus find (Symfony Process's
-        // own `updateStatus()`, `$this->processInformation['running'] ??
-        // true`) - its own left side is exactly as quiet as `isset()`'s
-        // own argument (real PHP: `??`'s left-hand check is defined in
-        // terms of `isset()`), for the *whole* probed chain, not just a
-        // bare top-level property.
+        // Bare `??` (not `??=`): its left side is exactly as quiet as
+        // `isset()`'s argument (real PHP: `??`'s left-hand check is
+        // defined in terms of `isset()`), for the whole probed chain, not
+        // just a bare top-level property.
         ExprKind::Binary(BinOp::Coalesce, lhs, rhs) => {
             state = walk_quiet_probe(lhs, state, ctx, declaring_class);
             walk_expr(rhs, state, ctx, declaring_class)
         }
         // `isset($this->prop)`/`empty($this->prop)` - same quiet-probe
-        // exemption as `??`'s own left side (real PHP defines `??` in
-        // terms of `isset()`), and neither one ever initializes anything.
+        // exemption as `??`'s left side, and neither one ever initializes
+        // anything.
         ExprKind::Call(callee, args) if is_probe_call(callee) => {
             for a in args {
                 state = walk_quiet_probe(&a.value, state, ctx, declaring_class);
             }
             state
         }
-        // `unset($this->prop)` is neither a read nor an initializer -
-        // real PHP semantics (confirmed against a real corpus shape,
-        // guzzlehttp/psr7's own `LazyOpenStream::__construct`, which
-        // does exactly this to force `__get()` on next access): `unset`
-        // never throws regardless of the property's current init state,
-        // the same established exemption `check_expr`'s own identical
-        // `unset`-recognition (`checker/expr.rs`) already carries for
-        // ordinary narrowing. Genuinely removes the property afterward
-        // (matching real semantics: a typed property, once unset, is
-        // uninitialized again) - `state.without` rather than leaving it
-        // untouched.
+        // `unset($this->prop)` is neither a read nor an initializer:
+        // `unset` never throws regardless of the property's current init
+        // state, matching `check_expr`'s identical `unset`-recognition
+        // (`checker/expr.rs`). Genuinely removes the property afterward
+        // (a typed property, once unset, is uninitialized again).
         ExprKind::Call(callee, args) if is_unset_call(callee) => {
             for a in args {
                 if let ExprKind::PropertyAccess(base, name, _) = &a.value.kind
@@ -563,20 +485,16 @@ fn walk_expr(
                 state = walk_expr(&a.value, state, ctx, declaring_class);
             }
             // `resolves_to_this`, not a bare `is_this` receiver check: a
-            // real corpus find (Monolog's own `SlackRecord::__construct`)
-            // chains fluent setters (`$this->setChannel(...)->setUsername(...)
-            // ->includeContextAndExtra(...)`) - every call after the first
-            // has a `MethodCall` as its own receiver, not literally `$this`,
-            // even though it evaluates to the very same object (a
-            // `: self`/`: static`-returning fluent setter). Missing this
-            // meant every assignment past the first link in the chain was
-            // never absorbed at all.
+            // fluent setter chain (`$this->setChannel(...)
+            // ->setUsername(...)->includeContextAndExtra(...)`) has a
+            // `MethodCall` as the receiver for every call after the
+            // first, not literally `$this`, even though it evaluates to
+            // the same object (a `: self`/`: static`-returning setter).
             if resolves_to_this(recv, ctx) {
                 // Virtual dispatch: always against `checked_class` (the
                 // original, most-derived class), never `declaring_class`
                 // (whatever class the currently-recursed-into method body
-                // happens to live on) - see `PropertyInitCtx::checked_class`'s
-                // own doc comment.
+                // happens to live on).
                 let checked_class = ctx.checked_class.clone();
                 state = absorb(&checked_class, name, state, ctx);
             }
@@ -587,10 +505,8 @@ fn walk_expr(
                 state = walk_expr(&a.value, state, ctx, declaring_class);
             }
             // Only the three pseudo-keywords are resolved - a literal
-            // class name (`Foo::bar()`) is out of this module's own
-            // disclosed scope (see the Phase 62 plan's "Cross-method
-            // absorption" section: "resolving to a real method on the
-            // *same class*").
+            // class name (`Foo::bar()`) is out of scope, since this
+            // walker only resolves to a real method on the same class.
             let target = if class_name.eq_ignore_ascii_case("parent") {
                 // `parent::` is lexical, not virtual: it always means
                 // "the immediate parent of whichever class the *current*
@@ -603,12 +519,9 @@ fn walk_expr(
                 // `self::` is also lexical (no late static binding),
                 // unlike `static::` below - real PHP resolves it against
                 // the class the code is written in, walking that class's
-                // own ancestors from there, not `checked_class`'s.
-                // Deliberately not distinguishing an actual subclass
-                // override further down `checked_class`'s own chain (a
-                // rare, disclosed simplification - see this module's own
-                // module-level doc comment for the project's established
-                // "safe direction" precedent).
+                // own ancestors from there, not `checked_class`'s. Doesn't
+                // distinguish an actual subclass override further down
+                // `checked_class`'s own chain.
                 ctx.checker
                     .registry
                     .lookup_method_with_owner(declaring_class, name)
@@ -633,26 +546,18 @@ fn walk_expr(
 }
 
 /// A `$this->prop = ...`-shaped assignment target marks `prop` as
-/// known-initialized from here on and is never itself a "read" (matching
-/// `checker/assignment.rs`'s own `check_assignment_target`, which the
-/// same distinction already exists for, for ordinary narrowing - same
-/// source, mirrored deliberately rather than reused, per this module's
-/// own "standalone, not built on the main checker's own traversal"
-/// design). Also mirrors that function's own `ArrayLiteral` handling: a
-/// real corpus find (Symfony's own `WrappedListener::__construct`,
-/// `[$this->name, $this->callableRef] = $this->parseListener(...)`)
-/// list-destructures directly into two properties - treating the whole
-/// left side as an ordinary expression (this module's original shape)
+/// known-initialized from here on and is never itself a "read" (mirrors
+/// `checker/assignment.rs`'s `check_assignment_target`). Also mirrors
+/// that function's `ArrayLiteral` handling: a list-destructure like
+/// `[$this->name, $this->callableRef] = ...` assigns two properties at
+/// once; treating the whole left side as an ordinary expression would
 /// wrongly read both as still-uninitialized at the very point they were
-/// being assigned. Recurses through any nesting depth, matching
-/// `check_assignment_target`'s own identical recursion; an item's own
-/// `key` expression (`['k' => $x] = ...`) is a real read, not a target,
-/// and is left to fall through to the ordinary expression walk exactly
-/// as `check_assignment_target` also leaves it untouched. Any other
-/// shape (`$x = ...`, `$this->arr[$k] = ...`, ...) isn't a tracked
-/// property write, but its own base/index subexpressions may still
-/// contain reads/calls worth walking - handled by falling through to the
-/// ordinary expression walk.
+/// being assigned. Recurses through any nesting depth; an item's `key`
+/// expression (`['k' => $x] = ...`) is a real read, not a target, and is
+/// left to fall through to the ordinary expression walk. Any other shape
+/// (`$x = ...`, `$this->arr[$k] = ...`, ...) isn't a tracked property
+/// write, but its base/index subexpressions may still contain reads/
+/// calls worth walking.
 fn assign_target(
     lhs: &Expr,
     mut state: PropertyInitState,
@@ -687,15 +592,12 @@ fn absorb(
     absorb_resolved(resolved, method_name, state, ctx)
 }
 
-/// Recursively walks into an already-resolved call target's own body,
-/// seeded with the caller's current state as its own entry set, sharing
-/// the same `ctx` - the call site's own state becomes the called method's
-/// own exit state, i.e. calling into a method absorbs whatever it's
-/// proven to guarantee. A target with no real body to walk (abstract, an
-/// interface method, or simply unresolvable - `resolved` is `None`)
-/// contributes nothing: the caller's own state passes through unchanged,
-/// the same conservative "don't know, don't guess" default this project
-/// uses everywhere else.
+/// Recursively walks into an already-resolved call target's body, seeded
+/// with the caller's current state as its entry set, sharing the same
+/// `ctx` - calling into a method absorbs whatever it's proven to
+/// guarantee. A target with no real body to walk (abstract, an interface
+/// method, or simply unresolvable) contributes nothing: the caller's
+/// state passes through unchanged.
 fn absorb_resolved(
     resolved: Option<(String, &FunctionSig)>,
     method_name: &str,
