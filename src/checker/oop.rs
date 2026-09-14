@@ -22,11 +22,11 @@ pub(crate) use attributes::{
 };
 
 impl<'a> Checker<'a> {
-    /// Finding 46's class-level half: extending a class declared `final`
-    /// is a real, unconditional fatal error in PHP at class-declaration
-    /// time, regardless of whether the subclass overrides anything at
-    /// all. The method-level half (overriding a `final` *method*) lives
-    /// in `check_method_overrides`, sharing that function's own
+    /// Extending a class declared `final` is a real, unconditional
+    /// fatal error in PHP at class-declaration time, regardless of
+    /// whether the subclass overrides anything at all. The method-level
+    /// half (overriding a `final` method) lives in
+    /// `check_method_overrides`, sharing that function's own
     /// per-method ancestor walk instead of a second one here.
     pub(crate) fn check_final_class_extension(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
@@ -49,25 +49,20 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48: the class/enum-declaration-level half of the "does this
-    /// name actually resolve" existence pipeline - every `extends`
-    /// target (a class's single parent, or an interface's own possibly-
-    /// multiple parent interfaces), every `implements` target, and every
-    /// `use`d trait. Unlike `check_final_class_extension`'s identical
-    /// `info.extends.get(0)`-only walk (which only needs the *first*
+    /// The class/enum-declaration-level half of the "does this name
+    /// actually resolve" existence pipeline - every `extends` target (a
+    /// class's single parent, or an interface's possibly-multiple parent
+    /// interfaces), every `implements` target, and every `use`d trait.
+    /// Unlike `check_final_class_extension`'s identical
+    /// `info.extends.get(0)`-only walk (which only needs the first
     /// parent to check finality, since a class can only ever have one),
-    /// this checks every entry - an interface's own `extends A, B;` is
-    /// real, valid PHP with more than one target. Operates purely on the
-    /// already-indexed, already name-resolved `ClassInfo` (`info.extends`/
-    /// `implements`/`uses` are fully-qualified names by the time
-    /// `Registry::index` builds them - see `class_info.rs`'s own
-    /// `ctx.resolve(s)` calls), so this needs no raw `ClassDecl`/
-    /// `EnumDecl` at all and covers both uniformly from one call site.
-    /// Deliberately existence-only, not kind-compatibility (a class
-    /// `implements`-ing another class instead of an interface is a real,
-    /// separate PHPStan rule this phase doesn't attempt) - matches the
-    /// scope every other `Existing*Rule` this phase's own roadmap entry
-    /// lists shares.
+    /// this checks every entry - an interface's `extends A, B;` is real,
+    /// valid PHP with more than one target. Operates purely on the
+    /// already-indexed, already name-resolved `ClassInfo`, so this needs
+    /// no raw `ClassDecl`/`EnumDecl` at all and covers both uniformly
+    /// from one call site. Deliberately existence-only, not kind-
+    /// compatibility (a class `implements`-ing another class instead of
+    /// an interface is a separate PHPStan rule this doesn't attempt).
     pub(crate) fn check_class_references_exist(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
@@ -95,11 +90,11 @@ impl<'a> Checker<'a> {
                     format!("{fqn} implements unknown interface {iface}"),
                     span,
                     0,
-                    // Real PHPStan's own `ExistingClassesInClassImplementsRule`
-                    // identifier for this exact message shape - confirmed
-                    // directly against `vendor/phpstan-src`, not guessed
-                    // (unlike `extends`/trait-use just above/below, which
-                    // really do share the generic `class.notFound`).
+                    // Mirrors real PHPStan's
+                    // `ExistingClassesInClassImplementsRule` identifier
+                    // for this message shape (unlike `extends`/trait-use
+                    // above/below, which share the generic
+                    // `class.notFound`).
                     "interface.notFound",
                 );
             }
@@ -111,39 +106,35 @@ impl<'a> Checker<'a> {
                     format!("{fqn} uses unknown trait {used_trait}"),
                     span,
                     0,
-                    // Real PHPStan's own `ExistingClassInTraitUseRule`
-                    // identifier - confirmed against `vendor/phpstan-src`.
+                    // Mirrors real PHPStan's `ExistingClassInTraitUseRule`
+                    // identifier.
                     "trait.notFound",
                 );
             }
         }
     }
 
-    /// Phase 48.4: `MethodTagCheck`'s equivalent - a `@method` tag's own
+    /// Mirrors real PHPStan's `MethodTagCheck` - a `@method` tag's
     /// parameter/return types are already resolved into a real
     /// `FunctionSig` (`ClassInfo::method_tags`) but never existence-
     /// checked. Pure reuse of `check_type_class_names_exist` - no new
-    /// existence machinery. `methodTag.trait` (the type resolves but is a
-    /// trait, invalid there) is deliberately not built - no analog exists
-    /// anywhere else in this project for any typehint location, matching
-    /// this phase's own established "existence only" scope.
+    /// existence machinery. `methodTag.trait` (the type resolves but is
+    /// a trait, invalid there) is deliberately not built - no analog
+    /// exists anywhere else in this project for any typehint location.
     pub(crate) fn check_method_tag_types(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
         // `Registry::resolve_method_tags` drains `ClassInfo::method_tags`
-        // into `info.methods` before this checker pass ever runs (a
-        // registry-build-time step, so this class's own `@method` tags
-        // are already merged and indistinguishable there from a real
-        // declared method by name alone) - `FunctionSig::is_magic` is
-        // the one field `method_tag_sig` sets that a real declared
-        // method's own `FunctionSig::from_decl` never does, so it's the
-        // correct filter here instead of the (always-empty, by this
-        // point) `method_tags` field itself. Also matches enum
-        // `cases()`/`from()`/`tryFrom()` (the *other* `is_magic: true`
-        // producer) harmlessly - their own synthesized types never
-        // reference an unresolvable class, so nothing here ever fires
-        // for them.
+        // into `info.methods` before this checker pass runs, so this
+        // class's `@method` tags are already merged and indistinguishable
+        // there from a real declared method by name alone.
+        // `FunctionSig::is_magic` is the one field `method_tag_sig` sets
+        // that a real declared method's `FunctionSig::from_decl` never
+        // does, so it's the correct filter here. Also matches enum
+        // `cases()`/`from()`/`tryFrom()` (the other `is_magic: true`
+        // producer) harmlessly - their synthesized types never reference
+        // an unresolvable class.
         for (name, sig) in info.methods.iter().filter(|(_, sig)| sig.is_magic) {
             for param in &sig.params {
                 self.check_type_class_names_exist(
@@ -152,8 +143,7 @@ impl<'a> Checker<'a> {
                     span,
                     fqn,
                 );
-                // Phase 48 follow-up (item 7d): `class.nameCase` for this
-                // `@method`-tag parameter.
+                // `class.nameCase` for this `@method`-tag parameter.
                 self.check_type_class_name_case(&param.case_refs, fqn, span);
                 self.check_type_internal_usage(&param.case_refs, fqn, span);
             }
@@ -168,14 +158,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48.5: `MixinCheck`'s equivalent - `@mixin Type` is already
+    /// Mirrors real PHPStan's `MixinCheck` - `@mixin Type` is already
     /// resolved to a bare FQN string (`ClassInfo::mixins`) and consumed
-    /// for its real semantic effect (the mixin's own methods/properties
-    /// become available on the host class), but its own existence was
-    /// never separately checked - an unresolvable `@mixin` target
-    /// silently contributed nothing instead of surfacing a real typo.
+    /// for its real semantic effect (the mixin's methods/properties
+    /// become available on the host class), but its own existence needs
+    /// checking too - an unresolvable `@mixin` target would otherwise
+    /// silently contribute nothing instead of surfacing a real typo.
     /// `mixin.nonObject`/`mixin.trait` are deliberately not built, same
-    /// disclosed-but-not-attempted nuance as `check_method_tag_types`.
+    /// scope as `check_method_tag_types`.
     pub(crate) fn check_mixin_types(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
@@ -191,32 +181,28 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        // Phase 48 follow-up (item 7d): `class.nameCase` for an `@mixin`
-        // target - `check_mixin_types` doesn't route through
-        // `check_type_class_names_exist` at all (its own bare
-        // `class_name_exists` check just above), so this is a genuinely
-        // new, parallel loop rather than a rewire of an existing one.
+        // `class.nameCase` for an `@mixin` target - `check_mixin_types`
+        // doesn't route through `check_type_class_names_exist` at all
+        // (its bare `class_name_exists` check above), so this is a
+        // parallel loop rather than a rewire of an existing one.
         self.check_type_class_name_case(&info.mixin_case_refs, fqn, span);
         self.check_type_internal_usage(&info.mixin_case_refs, fqn, span);
     }
 
-    /// Phase 48.B: `RequireExtendsCheck`/`RequireImplementsDefinitionTraitRule`'s
-    /// full declaration-validity family, not just the existence half -
-    /// `@phpstan-require-extends`/`-implements`'s own RHS is re-parsed
-    /// directly from `c`'s own doc comment (rather than read back from
-    /// `ClassInfo::require_extends`/`require_implements`, which is
-    /// already flattened across every tag into one combined `Vec<String>`
-    /// of only the successfully-extracted object class names - exactly
-    /// the information a `.nonObject`/`.duplicate` check needs to tell
-    /// apart from "no tag at all"), mirroring real PHPStan's own
-    /// `getObjectClassNames()`/`RequireExtendsTag` resolution pipeline.
-    /// The interface-vs-class/final-class refinements this replaces are
-    /// confirmed by direct read of both real rules; the RHS's own
-    /// case-sensitivity re-check (`ClassNameCheck::checkClassNames`,
-    /// real PHPStan's own final step once a target resolves cleanly) is
-    /// deliberately not built here - that's Phase 48.H's own dedicated
-    /// `class.nameCase` pipeline-wide expansion, not re-litigated per tag
-    /// family.
+    /// Mirrors real PHPStan's `RequireExtendsCheck`/
+    /// `RequireImplementsDefinitionTraitRule`'s full declaration-validity
+    /// family, not just the existence half - `@phpstan-require-extends`/
+    /// `-implements`'s RHS is re-parsed directly from `c`'s own doc
+    /// comment (rather than read back from `ClassInfo::require_extends`/
+    /// `require_implements`, which is already flattened across every tag
+    /// into one combined `Vec<String>` of only the successfully-
+    /// extracted object class names - exactly the information a
+    /// `.nonObject`/`.duplicate` check needs to tell apart from "no tag
+    /// at all"), mirroring real PHPStan's `getObjectClassNames()`/
+    /// `RequireExtendsTag` resolution pipeline. The RHS's own case-
+    /// sensitivity re-check is deliberately not built here - that's the
+    /// dedicated `class.nameCase` pipeline-wide expansion, not
+    /// re-litigated per tag family.
     pub(crate) fn check_require_tag_types(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(doc) = c.doc_comment.as_deref().map(docblock::parse) else {
             return;
@@ -354,16 +340,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48.B: `SealedDefinitionClassRule`/`SealedDefinitionTraitRule`'s
-    /// full declaration-validity family - see `check_require_tag_types`'s
-    /// own identical doc comment for why the RHS is re-parsed directly
-    /// from the declaration's own doc comment rather than read back from
-    /// the already-flattened `ClassInfo::sealed`. Takes scalars rather
-    /// than a whole `&ClassDecl` (mirroring `check_get_hook`/`check_set_
-    /// hook`'s own established precedent for exactly this reason) since
-    /// `@phpstan-sealed`'s own `sealed.onEnum` check needs a real
-    /// `StmtKind::EnumDecl` call site too - `EnumDecl` and `ClassDecl` are
-    /// different AST types with no shared struct to borrow fields from.
+    /// Mirrors real PHPStan's `SealedDefinitionClassRule`/
+    /// `SealedDefinitionTraitRule`'s full declaration-validity family -
+    /// see `check_require_tag_types`'s identical doc comment for why the
+    /// RHS is re-parsed directly from the declaration's own doc comment
+    /// rather than read back from the already-flattened
+    /// `ClassInfo::sealed`. Takes scalars rather than a whole
+    /// `&ClassDecl` since `@phpstan-sealed`'s `sealed.onEnum` check needs
+    /// a real `StmtKind::EnumDecl` call site too - `EnumDecl` and
+    /// `ClassDecl` are different AST types with no shared struct to
+    /// borrow fields from.
     pub(crate) fn check_sealed_tag_types(
         &mut self,
         fqn: &str,
@@ -418,16 +404,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48.6: `LocalTypeAliasesCheck`'s existence half - a
-    /// `@phpstan-type Name TypeExpr` alias's own RHS is already resolved
+    /// Mirrors real PHPStan's `LocalTypeAliasesCheck` existence half - a
+    /// `@phpstan-type Name TypeExpr` alias's RHS is already resolved
     /// (`ClassInfo::type_aliases`) but never existence-checked. Only the
-    /// alias-RHS half is built here, not `@phpstan-import-type`'s own
-    /// `from Class` existence: that class is very commonly only reachable
-    /// via Composer autoloading this project's own registry may
-    /// legitimately have no data for in a partial-analysis run - the same
-    /// leniency this project already accepts for generic bounds
-    /// (`resolve.rs`'s own doc comment), deliberately not re-litigated
-    /// here for a second tag family.
+    /// alias-RHS half is built here, not `@phpstan-import-type`'s
+    /// `from Class` existence: that class is commonly only reachable via
+    /// Composer autoloading this registry may legitimately have no data
+    /// for in a partial-analysis run.
     pub(crate) fn check_type_alias_types(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
@@ -439,9 +422,8 @@ impl<'a> Checker<'a> {
                 span,
                 fqn,
             );
-            // Phase 48 follow-up (item 7d): `class.nameCase` for this
-            // alias's own RHS - looked up by the same key already in
-            // scope here.
+            // `class.nameCase` for this alias's RHS - looked up by the
+            // same key already in scope here.
             if let Some(case_refs) = info.type_alias_case_refs.get(name) {
                 self.check_type_class_name_case(case_refs, fqn, span);
                 self.check_type_internal_usage(case_refs, fqn, span);
@@ -449,15 +431,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Finding 58: two traits used by the same class declaring the same
-    /// property (with a genuinely different type) or method (with a
-    /// genuinely different signature) is a real, unconditional PHP fatal
-    /// error at class-declaration time unless the class explicitly
-    /// resolves the conflict (`insteadof`/`as` - Finding 30's own
-    /// `resolved_trait_conflicts`, tracked regardless of whether this
-    /// project models exactly which trait `insteadof` picked). Compares
-    /// only pairs of *different* traits - a name declared by just one
-    /// used trait is never a conflict, no matter what it looks like.
+    /// Two traits used by the same class declaring the same property
+    /// (with a genuinely different type) or method (with a genuinely
+    /// different signature) is a real, unconditional PHP fatal error at
+    /// class-declaration time unless the class explicitly resolves the
+    /// conflict (`insteadof`/`as` - `resolved_trait_conflicts`, tracked
+    /// regardless of whether this project models exactly which trait
+    /// `insteadof` picked). Compares only pairs of different traits - a
+    /// name declared by just one used trait is never a conflict.
     pub(crate) fn check_trait_conflicts(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
@@ -507,15 +488,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 65: `class` is reserved for `ClassName::class` name-fetching,
-    /// so declaring a class constant by that name is a real,
-    /// unconditional PHP fatal error, confirmed directly against real
-    /// PHP's own message: a class constant must not be called `class`,
-    /// since it's reserved for class name fetching. Shared between
-    /// `check_method_declaration_sanity`'s own two call sites' const
-    /// lists (a `ClassDecl`'s `consts` and an `EnumDecl`'s) rather than
-    /// living inside that function itself - unrelated to methods, and
-    /// enums route through a params-less call there already.
+    /// `class` is reserved for `ClassName::class` name-fetching, so
+    /// declaring a class constant by that name is a real, unconditional
+    /// PHP fatal error. Shared between `check_method_declaration_sanity`'s
+    /// two call sites' const lists (a `ClassDecl`'s `consts` and an
+    /// `EnumDecl`'s) rather than living inside that function itself -
+    /// unrelated to methods.
     pub(crate) fn check_reserved_class_constant_name(&mut self, fqn: &str, consts: &[ClassConst]) {
         for c in consts {
             if c.name == "class" {
@@ -533,17 +511,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `InvalidPHPStanDocTagRule` (`phpDoc.phpstanTag`) - a `@phpstan-*`
-    /// tag real PHPStan doesn't recognize at all (a real, common way to
-    /// catch a typo, e.g. `@phpstan-parm`, silently doing nothing instead
-    /// of what was intended). Scoped to a class's own docblock plus
-    /// every one of its methods'/properties'/consts' - real PHPStan's own
-    /// rule additionally covers arbitrary statement-level and function-
-    /// level docblocks (`check_unknown_phpstan_tags_on` is called
-    /// separately for top-level functions, `check_function`'s own call
-    /// site) - a bare statement's own inline docblock isn't covered, a
-    /// disclosed scope trim (lower value: `@phpstan-*` tags are
-    /// overwhelmingly declaration-level in practice).
+    /// Mirrors real PHPStan's `InvalidPHPStanDocTagRule`
+    /// (`phpDoc.phpstanTag`) - a `@phpstan-*` tag real PHPStan doesn't
+    /// recognize at all (catches a typo, e.g. `@phpstan-parm`, that
+    /// would otherwise silently do nothing). Scoped to a class's own
+    /// docblock plus every one of its methods'/properties'/consts' -
+    /// `check_unknown_phpstan_tags_on` is called separately for
+    /// top-level functions (`check_function`'s call site) - a bare
+    /// statement's own inline docblock isn't covered, since
+    /// `@phpstan-*` tags are overwhelmingly declaration-level in
+    /// practice.
     pub(crate) fn check_unknown_phpstan_tags_in_class(&mut self, fqn: &str, c: &ClassDecl) {
         self.check_unknown_phpstan_tags_on(fqn, c.doc_comment.as_deref(), c.name_span);
         for m in &c.methods {
@@ -561,9 +538,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// See `check_unknown_phpstan_tags_in_class`'s own doc comment - the
+    /// See `check_unknown_phpstan_tags_in_class`'s doc comment - the
     /// one-declaration-at-a-time worker both that function and
-    /// `check_function`'s own top-level-function call site share.
+    /// `check_function`'s top-level-function call site share.
     pub(crate) fn check_unknown_phpstan_tags_on(
         &mut self,
         label: &str,
@@ -584,36 +561,29 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `ClassConstantRule`'s own typed-constant half: PHP 8.3's
-    /// `const TYPE NAME = value;` syntax declares a real, unconditional
-    /// native type for the constant - checked here the same "does the
-    /// literal value actually satisfy the declared type" way a typed
-    /// property's own default value already is (see `check_missing_
-    /// property_typehints`'s sibling checks), matching real PHPStan's
-    /// own `classConstant.value` identifier exactly. Untyped (`const
-    /// NAME = value;`, the overwhelming majority) constants have nothing
-    /// to check here - their own `@var`-doc-refined type (a *separate*,
-    /// already-existing mechanism, `ConstSig::ty`'s own construction in
-    /// `class_info.rs`) is never enforced this strictly against real
-    /// PHPStan's own convention either (`classConstant.phpDocType`, not
-    /// attempted here). `self.infer_expr`, not the registry's own
-    /// already-resolved `ConstSig.ty`, so a value referencing another
-    /// constant/enum case gets this checker's full expression inference
-    /// rather than only ever seeing `infer_const_type`'s narrower
-    /// literal-only view.
+    /// Mirrors real PHPStan's `ClassConstantRule` typed-constant half:
+    /// PHP 8.3's `const TYPE NAME = value;` syntax declares a real,
+    /// unconditional native type for the constant - checked here the
+    /// same "does the literal value actually satisfy the declared type"
+    /// way a typed property's default value already is, matching real
+    /// PHPStan's `classConstant.value` identifier. Untyped (`const NAME
+    /// = value;`, the overwhelming majority) constants have nothing to
+    /// check here. `self.infer_expr`, not the registry's already-
+    /// resolved `ConstSig.ty`, so a value referencing another constant/
+    /// enum case gets this checker's full expression inference rather
+    /// than only ever seeing `infer_const_type`'s narrower literal-only
+    /// view.
     pub(crate) fn check_typed_class_constant_values(&mut self, fqn: &str, consts: &[ClassConst]) {
         if !consts.iter().any(|c| c.type_hint.is_some()) {
             return;
         }
-        // `self::OTHER_CONST` inside a const's own value (a real, common
-        // idiom - confirmed live: without this, `resolve_static_class_
-        // name("self")` had no defining class to resolve against here,
-        // silently reading every `self::`-qualified value as `Mixed` and
-        // producing a real false positive against `int DERIVED =
-        // self::BASE;`) needs `current_class` set the same way `check_
-        // function` sets it for a method body - this call site runs
-        // outside any method, so it's otherwise left at whatever it was
-        // (typically `None` here).
+        // `self::OTHER_CONST` inside a const's own value needs
+        // `current_class` set the same way `check_function` sets it for
+        // a method body: without it, `resolve_static_class_name("self")`
+        // has no defining class to resolve against here, silently
+        // reading every `self::`-qualified value as `Mixed`. This call
+        // site runs outside any method, so it's otherwise left at
+        // whatever it was (typically `None` here).
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
         for c in consts {
@@ -623,13 +593,12 @@ impl<'a> Checker<'a> {
             let declared_ty = self.resolve_type_hint(Some(raw_hint));
             let value_ty = self.infer_expr(&c.value, &Locals::default());
             // `Type::Mixed` here almost always means "this checker
-            // couldn't resolve it" (an unrecognized global constant -
-            // this project has no such table at all, confirmed live:
-            // `DEBUG_BACKTRACE_IGNORE_ARGS`, a real PHP builtin, reads as
-            // `Mixed`), not a genuinely `mixed`-typed value - the same
-            // "don't guess wrong on Mixed" leniency `check_method_
-            // overrides`'s own parameter-narrowing check already applies
-            // for the identical reason.
+            // couldn't resolve it" (an unrecognized global constant,
+            // e.g. `DEBUG_BACKTRACE_IGNORE_ARGS`, a real PHP builtin,
+            // reads as `Mixed`), not a genuinely `mixed`-typed value -
+            // the same "don't guess wrong on Mixed" leniency
+            // `check_method_overrides`'s parameter-narrowing check
+            // applies for the identical reason.
             if value_ty == Type::Mixed {
                 continue;
             }
@@ -649,23 +618,18 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
     }
 
-    /// Phase 65 follow-up: three small, independent PHP-version/modifier-
-    /// consistency checks on a class constant's own declaration, all
-    /// confirmed directly via `php -l`/`php -r` and matching real
-    /// PHPStan's own identifiers exactly:
+    /// Three small, independent PHP-version/modifier-consistency checks
+    /// on a class constant's declaration, matching real PHPStan's
+    /// identifiers:
     ///
     /// `classConstant.finalNotSupported` (`FinalConstantRule`) - `final
     /// const` needs PHP 8.1+; `classConstant.finalPrivate`
     /// (`FinalPrivateConstantRule`) - a `private` constant can never be
-    /// `final` too, since nothing outside its own declaring class could
-    /// ever see it to override in the first place (real PHP's own exact
-    /// wording: "Private constant Foo::X cannot be final as it is not
-    /// visible to other classes") - unconditional, no PHP-version gate at
-    /// all; `classConstant.nativeTypeNotSupported`
+    /// `final` too, since nothing outside its declaring class could ever
+    /// see it to override in the first place - unconditional, no
+    /// PHP-version gate; `classConstant.nativeTypeNotSupported`
     /// (`NativeTypedClassConstantRule`) - a typed constant (`const TYPE
-    /// NAME = value;`) needs PHP 8.3+. All three reuse `PhpFeature`
-    /// variants (`FinalClassConstants`/`NativeTypedClassConstants`)
-    /// Phase 38 already defined but never wired to anything.
+    /// NAME = value;`) needs PHP 8.3+.
     pub(crate) fn check_class_constant_modifiers(&mut self, fqn: &str, consts: &[ClassConst]) {
         let version = self.registry.php_version;
         for c in consts {
@@ -718,11 +682,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 65: a batch of small, independent method-declaration
-    /// boolean-flag-combination checks real PHP enforces unconditionally
-    /// at compile time, all confirmed directly against real `php -l` -
-    /// this project's own parser is deliberately more lenient than the
-    /// real engine (it has to tolerate parsing code that might never
+    /// A batch of small, independent method-declaration boolean-flag-
+    /// combination checks real PHP enforces unconditionally at compile
+    /// time - this project's parser is deliberately more lenient than
+    /// the real engine (it has to tolerate parsing code that might never
     /// actually run), so nothing else would catch any of these before
     /// that code runs and fatals for real.
     ///
@@ -745,11 +708,9 @@ impl<'a> Checker<'a> {
             // `method.abstract`: an abstract method inside a non-
             // abstract, non-interface, non-trait class/enum - real PHP:
             // "Class Foo declares abstract method bar() and must
-            // therefore be declared abstract." An enum's own built-in
-            // `cases()`/`from()`/`tryFrom()` are exempt, matching real
-            // PHPStan's own identical exemption (they're the one shape
-            // an enum's abstract method declaration legitimately
-            // re-states rather than violates).
+            // therefore be declared abstract." An enum's built-in
+            // `cases()`/`from()`/`tryFrom()` are exempt, mirroring real
+            // PHPStan's identical exemption.
             if m.is_abstract
                 && !is_class_abstract
                 && matches!(kind, ClassKind::Class | ClassKind::Enum)
@@ -782,16 +743,15 @@ impl<'a> Checker<'a> {
             // `private` - nothing could ever provide the required
             // implementation, since a `private` method isn't visible to
             // (and so can't be overridden by) a subclass at all. Only
-            // meaningful where an abstract method is legal to declare
-            // in the first place (an abstract class or an interface);
-            // elsewhere it's already `method.abstract`'s own concern,
-            // and traits are exempt for the same reason as above. Every
+            // meaningful where an abstract method is legal to declare in
+            // the first place (an abstract class or an interface);
+            // elsewhere it's already `method.abstract`'s concern, and
+            // traits are exempt for the same reason as above. Every
             // interface method is implicitly abstract regardless of the
-            // literal `abstract` keyword - real PHP actually *forbids*
-            // writing that keyword on one at all ("Interface method
-            // Foo::bar() must not be abstract", confirmed directly), so
-            // `m.is_abstract` alone would never observe this shape;
-            // `kind == ClassKind::Interface` stands in for it here.
+            // literal `abstract` keyword - real PHP actually forbids
+            // writing that keyword on one at all, so `m.is_abstract`
+            // alone would never observe this shape; `kind ==
+            // ClassKind::Interface` stands in for it here.
             if (m.is_abstract || kind == ClassKind::Interface)
                 && m.visibility == Visibility::Private
                 && kind != ClassKind::Trait
@@ -811,12 +771,12 @@ impl<'a> Checker<'a> {
                     .non_ignorable(),
                 );
             }
-            // `method.finalPrivate`: real PHP only *warns* here (not a
-            // fatal error, confirmed directly), since a `final` on a
-            // `private` method is pointless rather than contradictory -
-            // a private method is never overridden by anything, `final`
-            // or not. `__construct` is deliberately exempt, matching
-            // real PHPStan's own identical exemption - a private final
+            // `method.finalPrivate`: real PHP only warns here (not a
+            // fatal error), since a `final` on a `private` method is
+            // pointless rather than contradictory - a private method is
+            // never overridden by anything, `final` or not.
+            // `__construct` is deliberately exempt, mirroring real
+            // PHPStan's identical exemption - a private final
             // constructor is a real, common, legitimate singleton-
             // pattern idiom, not the "forgot final does nothing here"
             // mistake this check otherwise exists to catch.
@@ -836,9 +796,9 @@ impl<'a> Checker<'a> {
             // `method.visibility`: every interface method is implicitly
             // `public` - real PHP: "Access type for interface method
             // Foo::bar() must be public." Reuses the exact same
-            // identifier Phase 64's own override-visibility-narrowing
-            // check uses, matching real PHPStan's own deliberate
-            // choice to share it between both shapes.
+            // identifier the override-visibility-narrowing check uses,
+            // matching real PHPStan's deliberate choice to share it
+            // between both shapes.
             if kind == ClassKind::Interface && m.visibility != Visibility::Public {
                 self.report_builder(
                     DiagnosticBuilder::new(
@@ -873,14 +833,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Finding 45: a concrete class must provide a real implementation of
-    /// every abstract method it inherits (from a parent class, an
-    /// implemented interface, or a directly-`use`d trait) - real PHP
-    /// raises a fatal error at declaration time otherwise, independent of
-    /// whether anything ever calls the missing method. Interfaces,
-    /// traits, and abstract classes are themselves exempt (a class that
-    /// legitimately leaves a method unimplemented is required to declare
-    /// itself `abstract`, and one that does is not itself required to be
+    /// A concrete class must provide a real implementation of every
+    /// abstract method it inherits (from a parent class, an implemented
+    /// interface, or a directly-`use`d trait) - real PHP raises a fatal
+    /// error at declaration time otherwise, independent of whether
+    /// anything ever calls the missing method. Interfaces, traits, and
+    /// abstract classes are themselves exempt (a class that legitimately
+    /// leaves a method unimplemented is required to declare itself
+    /// `abstract`, and one that does is not itself required to be
     /// complete).
     pub(crate) fn check_class_completeness(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
@@ -922,54 +882,37 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Finding 50: an overriding method's signature must stay
-    /// Liskov-compatible with the method it overrides - a parameter type
-    /// may only be widened or kept the same (accepting more is safe),
-    /// never narrowed; a return type may only be narrowed or kept the
-    /// same (promising more is safe), never widened. Real PHP enforces
-    /// this unconditionally at class-declaration time. Deliberately
-    /// scoped to concrete parameter/return type mismatches only, not
-    /// generic type-argument variance within an overridden signature -
-    /// this project's own `is_assignable` is already lenient there by
-    /// design (guessing wrong in either direction is worse than not
-    /// checking), and that leniency is the right call here too.
-    ///
-    /// Also covers Finding 46's method-level half: overriding a method
-    /// declared `final` anywhere in the ancestor chain, sharing this same
-    /// per-method loop since both checks need the same "does this
-    /// override collide with an ancestor's declaration" walk.
-    /// `@phpstan-require-extends`/`@phpstan-require-implements`'s own
-    /// consumer half - real PHPStan's `RequireExtendsRule`/
-    /// `RequireImplementsRule`, transcribed (confirmed directly). For
-    /// every interface/trait `fqn` transitively pulls in at all
-    /// (`Registry::all_ancestor_names`, both `extends`/`implements` for
-    /// interfaces and `uses` for traits - both real rules are exactly
-    /// this transitive) that declares one of these tags, `fqn` itself
-    /// must satisfy it (`is_subclass_of`, since both "extend" and
-    /// "implement" here mean "be a subtype of," not "declare directly").
+    /// `@phpstan-require-extends`/`@phpstan-require-implements`'s
+    /// consumer half, mirroring real PHPStan's `RequireExtendsRule`/
+    /// `RequireImplementsRule`. For every interface/trait `fqn`
+    /// transitively pulls in (`Registry::all_ancestor_names`, both
+    /// `extends`/`implements` for interfaces and `uses` for traits -
+    /// both real rules are exactly this transitive) that declares one of
+    /// these tags, `fqn` itself must satisfy it (`is_subclass_of`, since
+    /// both "extend" and "implement" here mean "be a subtype of," not
+    /// "declare directly").
     pub(crate) fn check_require_tags(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
         // Real PHPStan registers both consuming rules for `InClassNode`
-        // only - a *trait* declaration gets its own separate `InTraitNode`
-        // instead (confirmed directly, real PHPStan's own architecture),
-        // so a trait is never itself "the checked class" here, only ever
-        // an ancestor consulted for classes that use it. Without this, a
-        // trait using another require-tagged trait would always wrongly
-        // fail its own check - a trait can't `extends`/`implements`
-        // anything at all, so `is_subclass_of`/membership would never be
-        // satisfiable for one regardless of what any real using class
-        // eventually does.
+        // only - a trait declaration gets its own separate `InTraitNode`
+        // instead, so a trait is never itself "the checked class" here,
+        // only an ancestor consulted for classes that use it. Without
+        // this, a trait using another require-tagged trait would always
+        // wrongly fail its own check - a trait can't `extends`/
+        // `implements` anything, so `is_subclass_of`/membership would
+        // never be satisfiable for one regardless of what any real
+        // using class eventually does.
         if info.kind == ClassKind::Trait {
             return;
         }
         // Real PHP: a checked class that is itself an interface is
         // exempt from require-extends (an interface can't `extends` a
-        // concrete class the way a class does) - confirmed directly,
-        // `RequireExtendsRule`'s own top-level guard. Interfaces can't
-        // `use` traits at all, so require-implements never has anything
-        // to check for one either way - no separate guard needed for it.
+        // concrete class the way a class does), mirroring
+        // `RequireExtendsRule`'s top-level guard. Interfaces can't `use`
+        // traits at all, so require-implements never has anything to
+        // check for one either way.
         let is_interface = info.kind == ClassKind::Interface;
         for ancestor_fqn in self.registry.all_ancestor_names(fqn) {
             let Some(ancestor_info) = self.registry.classes.get(&ancestor_fqn) else {
@@ -1013,37 +956,31 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `@phpstan-sealed`'s own consumer half - real PHPStan's
-    /// `AllowedSubTypesRule`, transcribed (confirmed directly: this is
-    /// the actual enforcement mechanism, not - as the tag's own name
-    /// might suggest - a standalone "illegal extends" rule of its own;
-    /// `@phpstan-sealed`'s own value feeds a generic `AllowedSubTypes
-    /// ClassReflectionExtension` extension point this project doesn't
-    /// otherwise need). Checked against *immediate* parents only (unlike
-    /// `check_require_tags` above) - a sealed hierarchy's own allowlist
+    /// `@phpstan-sealed`'s consumer half, mirroring real PHPStan's
+    /// `AllowedSubTypesRule` - the actual enforcement mechanism, not (as
+    /// the tag's name might suggest) a standalone "illegal extends" rule
+    /// of its own. Checked against immediate parents only (unlike
+    /// `check_require_tags` above) - a sealed hierarchy's allowlist
     /// enumerates the complete, direct child set, not every transitive
     /// descendant.
     ///
-    /// Real PHPStan's own `getAllowedSubTypes` additionally allows a
+    /// Real PHPStan's `getAllowedSubTypes` additionally allows a
     /// concrete (non-abstract) sealed class its own name for free, with
     /// no need to list itself - not modeled here, since that self-entry
     /// can only ever matter to this rule if the checked class were
-    /// literally its own parent (impossible), confirmed directly by
-    /// tracing through `AllowedSubTypesRule`'s own loop: the self-entry
-    /// exists for `getAllowedSubTypes`'s *other* consumers (type-
-    /// narrowing exhaustiveness over a sealed hierarchy, `ObjectType`/
-    /// `StaticType`), a separate, much larger feature this project
-    /// doesn't attempt.
+    /// literally its own parent (impossible). The self-entry exists for
+    /// `getAllowedSubTypes`'s other consumers (type-narrowing
+    /// exhaustiveness over a sealed hierarchy), a separate, much larger
+    /// feature this project doesn't attempt.
     pub(crate) fn check_sealed_hierarchy(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
         // Same `InClassNode`-only registration as `check_require_tags`
         // above - a trait is never itself the checked class. Real
-        // PHPStan's own `AllowedSubTypesRule` also never consults `uses`
-        // at all (only `extends`/immediate `implements`), so a trait
-        // being sealed is never actually enforced there either way - not
-        // a gap this exemption introduces on its own.
+        // PHPStan's `AllowedSubTypesRule` also never consults `uses` at
+        // all (only `extends`/immediate `implements`), so a trait being
+        // sealed is never actually enforced there either way.
         if info.kind == ClassKind::Trait {
             return;
         }
@@ -1074,14 +1011,14 @@ pub(crate) fn visibility_word(v: &Visibility) -> &'static str {
     }
 }
 
-/// Finding 58's own notion of "two trait methods with the same name are
-/// genuinely incompatible, not just written slightly differently" -
-/// deliberately narrow (exact param count and exact per-position/return
-/// type equality) rather than a real Liskov-style compatibility check:
-/// this is comparing two *unrelated* trait declarations with no
-/// inheritance relationship between them at all, so there's no
-/// contravariance/covariance direction to apply - only "are these the
-/// same signature" makes sense here.
+/// Whether two trait methods with the same name are genuinely
+/// incompatible, not just written slightly differently - deliberately
+/// narrow (exact param count and exact per-position/return type
+/// equality) rather than a real Liskov-style compatibility check: this
+/// is comparing two unrelated trait declarations with no inheritance
+/// relationship between them, so there's no contravariance/covariance
+/// direction to apply - only "are these the same signature" makes sense
+/// here.
 pub(crate) fn signatures_compatible(a: &FunctionSig, b: &FunctionSig) -> bool {
     if a.params.len() != b.params.len() {
         return false;
