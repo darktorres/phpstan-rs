@@ -1,56 +1,39 @@
-//! Phase 41/82's transitive-purity half: a registry-build-time fixed
-//! point over the whole project's own call graph, deciding which
+//! The transitive-purity half: a registry-build-time fixed point over
+//! the whole project's own call graph, deciding which
 //! functions/methods/constructors are provably effect-free - either
 //! directly (an empty/pure-arithmetic body) or transitively (every call
 //! they make resolves to something *else* already proven effect-free).
 //!
-//! **The real architecture, and why it isn't a `Collector`**: real
-//! PHPStan's own `PossiblyPureCallTransitivePurityResolver` (read in
-//! full from `vendor/phpstan-src`) is the actual algorithm behind this -
-//! a plain, monotonic fixed point over a dependency graph, no different
-//! in kind from what this module builds. Its own `Collector`/
-//! `CollectedDataNode` wrapping exists only to get each file's own
-//! contribution back from PHPStan's *parallel worker processes* to one
-//! place - a problem this project's single-process, whole-project
-//! `Registry` doesn't have (see ROADMAP.md's Phase 82 entry for the
-//! full finding). The proper equivalent here is a pass run once,
-//! immediately after every class is indexed - the same placement
-//! `flatten_phpdoc_inheritance`/`resolve_deferred_value_of` already
-//! established for "needs the whole project visible first" passes.
+//! **The real architecture**: a plain, monotonic fixed point over a
+//! dependency graph, run once, immediately after every class is
+//! indexed - the same placement `flatten_phpdoc_inheritance`/
+//! `resolve_deferred_value_of` already established for "needs the whole
+//! project visible first" passes.
 //!
-//! **A real, disclosed precision restriction from that same
-//! architecture choice**: real PHPStan's own call-target resolution
-//! (`resolveCall`, for `MethodCall`/`StaticCall` specifically) depends
-//! on a live, fully-inferred `Scope` (`$scope->getType($expr->var)`) -
-//! machinery that belongs to this project's own per-file `Checker`,
-//! which doesn't exist yet at `Registry::build` time (confirmed by
-//! reading the real source directly, not assumed - see the Phase 62
-//! plan's own Design ##0 for the identical constraint hit once already,
-//! for a different reason). So this module only ever resolves a call
-//! whose target is knowable *without* type inference: `$this->method()`
-//! (virtual dispatch against the enclosing class), `self::`/`static::`/
-//! `parent::method()` (lexical/virtual resolution against the enclosing
-//! class - the exact same shapes `checker/uninitialized_dataflow.rs`
-//! already resolves, for the identical reason), `new self()`/`new
-//! static()`/`new LiteralClassName()`, and a plain function call by
-//! name. Any other call shape (through a local variable, a property, a
-//! parameter, another call's own return value) is treated exactly like
-//! real PHPStan's own "unknown callee" case already is - unconditionally
-//! unresolvable, disqualifying the whole declaration. A real precision
-//! loss relative to real PHPStan (a legitimately pure method reached
-//! only through a non-`$this` receiver is missed), never a soundness
-//! one (never marks something pure real PHPStan wouldn't) - the same
-//! "favor false negatives over false positives" direction this project
-//! has held throughout, not scope cut for effort's sake.
+//! **A disclosed precision restriction**: real call-target resolution
+//! for `MethodCall`/`StaticCall` depends on a live, fully-inferred
+//! `Scope` - machinery that belongs to this project's own per-file
+//! `Checker`, which doesn't exist yet at `Registry::build` time. So this
+//! module only ever resolves a call whose target is knowable without
+//! type inference: `$this->method()` (virtual dispatch against the
+//! enclosing class), `self::`/`static::`/`parent::method()`
+//! (lexical/virtual resolution against the enclosing class - the exact
+//! same shapes `checker/uninitialized_dataflow.rs` already resolves,
+//! for the identical reason), `new self()`/`new static()`/`new
+//! LiteralClassName()`, and a plain function call by name. Any other
+//! call shape (through a local variable, a property, a parameter,
+//! another call's own return value) is treated as unconditionally
+//! unresolvable, disqualifying the whole declaration - a precision loss
+//! (a legitimately pure method reached only through a non-`$this`
+//! receiver is missed), never a soundness one, matching this project's
+//! "favor false negatives over false positives" direction throughout.
 //!
 //! Every disqualifying-construct trigger condition and identifier below
 //! (`echo`/`die`/`exit`/`propertyAssign`/`propertyAssignByRef`/
 //! `propertyUnset`/`include`/`require`/`print`/`eval`/`superglobal`/
 //! `yield`/`yieldFrom`/`static`/`global`/`betweenPhpTags`/
-//! `staticPropertyAccess`) was read directly from `vendor/phpstan-src`'s
-//! own `Analyser/ImpurePoint.php` and its real construction sites
-//! throughout `Analyser/ExprHandler/`/`Analyser/StmtHandler/`, not
-//! guessed from the identifier names alone.
+//! `staticPropertyAccess`) mirrors real PHPStan's own impure-point
+//! taxonomy.
 
 use rayon::prelude::*;
 
@@ -91,18 +74,16 @@ impl Registry {
     /// Populates `purity_dependencies` on every function/method this
     /// project's own registry has a real body for - gated the same way
     /// real PHPStan's own `*WithoutImpurePointsCollector`s gate before
-    /// ever calling `resolveDependencies` (read directly, not guessed):
-    /// no by-reference parameter (a real, disclosed simplification of
-    /// real PHPStan's own `createsNewVariable()` distinction - see the
-    /// gating check below for why treating *every* by-ref parameter as
-    /// disqualifying is the safe direction here), no
-    /// `@phpstan-assert`-family tag, and no declared throw. This
-    /// project has no `@phpstan-pure`/`@phpstan-impure`/`hasSideEffects`
-    /// annotation surface at all (a separate, not-yet-built Phase 41
-    /// sub-piece), so unlike real PHPStan's own gate, nothing here is
-    /// ever pre-disqualified by an existing annotation - every
-    /// declaration starts "maybe pure" until its own body says
-    /// otherwise.
+    /// ever calling `resolveDependencies`: no by-reference parameter (a
+    /// disclosed simplification of real PHPStan's own
+    /// `createsNewVariable()` distinction - see the gating check below
+    /// for why treating every by-ref parameter as disqualifying is the
+    /// safe direction here), no `@phpstan-assert`-family tag, and no
+    /// declared throw. This project has no `@phpstan-pure`/
+    /// `@phpstan-impure`/`hasSideEffects` annotation surface at all, so
+    /// unlike real PHPStan's own gate, nothing here is ever
+    /// pre-disqualified by an existing annotation - every declaration
+    /// starts "maybe pure" until its own body says otherwise.
     /// `classify_body` only ever *reads* the registry (resolving
     /// `$this`/`self`/`parent`/`static`/plain-function call targets, see
     /// its own doc comment) - the write
@@ -239,38 +220,24 @@ impl Registry {
     }
 }
 
-/// Real PHPStan's own pre-`resolveDependencies` gate (`*WithoutImpurePointsCollector::
-/// processNode`, read directly): no by-reference parameter, no
-/// `@phpstan-assert`-family tag, no declared throw. Every one of this
-/// project's own `FunctionSig`s already carries exactly the fields
-/// needed to check this without re-deriving anything.
+/// Real PHPStan's own pre-`resolveDependencies` gate: no by-reference
+/// parameter, no `@phpstan-assert`-family tag, no declared throw. Every
+/// one of this project's own `FunctionSig`s already carries exactly the
+/// fields needed to check this without re-deriving anything.
 ///
-/// **A real gap found and fixed by directly diffing against real
-/// PHPStan on the Piwigo corpus, not by re-reading the collector
-/// alone**: `PhpFunctionReflection::hasSideEffects()`/
-/// `PhpMethodReflection::hasSideEffects()`/`NativeFunctionReflection::
-/// hasSideEffects()` (all three, confirmed byte-identical in the exact
-/// `phpstan/phpstan` 2.2.8 phar Piwigo's own `composer.json` pins, not
-/// just the vendored reference source) unconditionally return
-/// `TrinaryLogic::createYes()` - definitely has side effects - for
-/// *any* non-constructor declaration with a `void` return type,
-/// regardless of its actual body. This is deliberate design, not an
-/// oversight: a `void` declaration's only possible reason to exist is
-/// its side effects, so PHPStan treats an empty-bodied `void` method as
-/// presumed-intentional future-extension scaffolding, never a "this
-/// does nothing" finding - confirmed empirically with a minimal
-/// standalone repro (`ConfigLoader::applyDefaults(): void {}` called as
-/// a bare statement produces zero PHPStan output at level 10 with
-/// bleeding-edge included). Before this fix, `is_transitively_pure`
-/// had no equivalent exclusion, so every void, empty/pure-bodied
-/// method/function got wrongly marked pure - the single largest
-/// false-positive source found in the whole Piwigo corpus (252 of 342
-/// scoped diagnostics, all `staticMethod.resultUnused`/
-/// `method.resultUnused` on `void`-returning stub/hook methods:
-/// Piwigo's own deliberately-empty `ConfigLoader::applyDefaults()`/
-/// `applyEnvOverrides()` boot-sequence placeholders, and `parent::
-/// setUp()`/`tearDown()`/`tearDownAfterClass()` calls into PHPUnit's
-/// own currently-empty base hooks). `is_constructor` mirrors the real
+/// Real PHPStan's own `hasSideEffects()` unconditionally returns
+/// "definitely has side effects" for any non-constructor declaration
+/// with a `void` return type, regardless of its actual body. This is
+/// deliberate design, not an oversight: a `void` declaration's only
+/// possible reason to exist is its side effects, so PHPStan treats an
+/// empty-bodied `void` method as presumed-intentional future-extension
+/// scaffolding, never a "this does nothing" finding. Without an
+/// equivalent exclusion, `is_transitively_pure` would wrongly mark
+/// every void, empty/pure-bodied method/function pure - a real
+/// false-positive source, e.g. `void`-returning stub/hook methods like
+/// deliberately-empty boot-sequence placeholders, or `parent::setUp()`/
+/// `tearDown()`/`tearDownAfterClass()` calls into PHPUnit's own
+/// currently-empty base hooks. `is_constructor` mirrors the real
 /// gate's own explicit `getName() !== '__construct'` exemption
 /// (constructors can't syntactically declare a `void` return type, but
 /// a stray `@return void` PHPDoc tag on one is a real possibility this
@@ -520,11 +487,10 @@ fn expr_disqualifies(
 /// property is an observable side effect regardless of which object).
 /// Also recognizes a property reached through any depth of array-index
 /// nesting (`$this->arr[] = $x;`/`$this->arr[$k] = $x;`/
-/// `$this->matrix[$i][$j] = $x;`) - a real corpus find (Piwigo's own
-/// `PageState::addError()`, `$this->errors[] = $message;`): the
-/// underlying property is still being mutated, through the exact same
-/// reference, whether the assignment target is written as a bare
-/// `PropertyAccess` or an `Index` chain ending in one.
+/// `$this->matrix[$i][$j] = $x;`): the underlying property is still
+/// being mutated, through the exact same reference, whether the
+/// assignment target is written as a bare `PropertyAccess` or an
+/// `Index` chain ending in one.
 fn property_write_target(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
@@ -539,24 +505,16 @@ fn property_write_target(e: &Expr) -> bool {
 /// non-overridable (private, final, on a final class, or `class` itself
 /// - `$this`'s own static type - is final).
 ///
-/// **Real bug found and fixed, corpus-diff-driven**: this used to push
-/// `owner.to_ascii_lowercase()` - real PHPStan's own `methodKey()` does
-/// the same (`strtolower($className)`), but real PHPStan's own key
-/// encoding lowercases *both ends* consistently (construction and
-/// lookup alike), while this project's `self.classes`/`ClassInfo.
+/// `owner`/`method` must be pushed exactly as returned by
+/// `lookup_method_with_owner`, without lowercasing: unlike real
+/// PHPStan's own key encoding (which lowercases both construction and
+/// lookup consistently), this project's `self.classes`/`ClassInfo.
 /// methods` are keyed by whatever case each declaration actually used
-/// (PascalCase by PHP convention, confirmed by the dozens of plain,
-/// unlowercased `self.classes.get(class)` call sites throughout
-/// `hierarchy.rs`) - `owner`/`method` here already come straight out of
-/// `lookup_method_with_owner`, which by construction already resolved
-/// to exactly the canonical key `self.classes`/`.methods` use, so
-/// lowercasing them before storing broke every multi-hop dependency
-/// chain through any class name containing an uppercase letter (i.e.
-/// almost all of them) - `dependency_is_pure`'s later `self.classes.
-/// get(dep_class)` would silently miss, permanently stalling the fixed
-/// point for that dependency. Found while diffing phpstan-rs's own
-/// Piwigo corpus run against a real `vendor/bin/phpstan analyse` run on
-/// the same corpus, then isolated with a minimal standalone repro.
+/// (PascalCase by PHP convention). Lowercasing before storing would
+/// break every multi-hop dependency chain through any class name
+/// containing an uppercase letter - `dependency_is_pure`'s later
+/// `self.classes.get(dep_class)` would silently miss, permanently
+/// stalling the fixed point for that dependency.
 fn resolve_this_method_call(
     class: &str,
     method: &str,
@@ -666,14 +624,12 @@ fn resolve_new(target_class: &str, registry: &Registry, deps: &mut Vec<PurityDep
     false
 }
 
-/// Phase 41 follow-up: one real, resolved `ImpurePoint` occurrence
-/// (`vendor/phpstan-src/src/Analyser/ImpurePoint.php`'s own `identifier`/
-/// `description`/`isCertain()`, read directly from its real construction
-/// sites throughout `Analyser/{Expr,Stmt}Handler/*.php`, not guessed from
-/// the identifier names alone) - the diagnostic-only sibling of `stmt_
-/// disqualifies`/`expr_disqualifies` above (see `collect_impure_points`'s
-/// own doc comment for why it's a genuinely separate, non-short-
-/// circuiting walk rather than a repurposing of those two).
+/// One real, resolved `ImpurePoint` occurrence, mirroring real
+/// PHPStan's own `identifier`/`description`/`isCertain()` shape - the
+/// diagnostic-only sibling of `stmt_disqualifies`/`expr_disqualifies`
+/// above (see `collect_impure_points`'s own doc comment for why it's a
+/// genuinely separate, non-short-circuiting walk rather than a
+/// repurposing of those two).
 pub(crate) struct ImpurePointOccurrence {
     pub(crate) span: Span,
     pub(crate) identifier: &'static str,
@@ -723,32 +679,24 @@ pub(crate) struct ImpurePointOccurrence {
 ///   this project's own `resolve_new` doesn't itself distinguish which
 ///   of the three specifically failed.
 ///
-/// A real, corpus-confirmed precision gap (`vendor/php-standard-library`'s
-/// `Psl` package, extremely heavy `@pure` tag usage - 335 files flagged out
-/// of 467 using the tag): `possiblyImpure.functionCall`/`.methodCall`/`.new`
-/// fire for *any* call this walk's own `resolved` check can't prove targets
-/// a known declaration - which, exactly like `resolve_static_call`/
-/// `resolve_this_method_call`/`resolve_new` above (deliberately reused
-/// as-is, not widened, per this doc comment's own "don't touch the boolean
-/// classifier" rule), only recognizes `self::`/`static::`/`parent::` and
-/// `$this->` receivers, never a literal class name (`Color::ansi256(...)`)
-/// or an arbitrary object receiver - confirmed directly against real
-/// PHPStan's own `StaticCallHandler.php`/`SimpleImpurePoint::
-/// createFromVariant`, which resolves a literal-class-name static call (and
-/// any receiver's method call) the same way and only emits an `ImpurePoint`
-/// when the *resolved* target's own reflection says it has side effects -
-/// this project has no equivalent "resolve arbitrary target, then ask if
-/// pure" step. A `namespace\foo()`-relative function call compounds this
-/// further - a real, pre-existing, *unrelated* name-resolution gap
-/// (confirmed via the corpus: `namespace\Psl\invariant_violation()` already
-/// misresolves to `function.notFound` even without this phase's changes)
+/// A precision gap on heavy `@pure`-tag usage: `possiblyImpure.
+/// functionCall`/`.methodCall`/`.new` fire for any call this walk's own
+/// `resolved` check can't prove targets a known declaration - which,
+/// exactly like `resolve_static_call`/`resolve_this_method_call`/
+/// `resolve_new` above (deliberately reused as-is, not widened, per this
+/// doc comment's own "don't touch the boolean classifier" rule), only
+/// recognizes `self::`/`static::`/`parent::` and `$this->` receivers,
+/// never a literal class name (`Color::ansi256(...)`) or an arbitrary
+/// object receiver - this project has no "resolve arbitrary target, then
+/// ask if pure" step. A `namespace\foo()`-relative function call
+/// compounds this further, a pre-existing, unrelated name-resolution gap
 /// that also defeats the plain `registry.lookup_function` check in the
 /// `Call` arm below. None of this is a regression - the exact same
-/// resolution narrowness already silently capped `is_transitively_pure`
-/// before this phase; this walk just gives it a voice for once-invisible
-/// cases. Real follow-up, not attempted here: widen call-target resolution
-/// (both here and in `resolve_static_call`/`resolve_this_method_call`, to
-/// stay consistent) to a literal class name and an arbitrary receiver type,
+/// resolution narrowness already silently capped `is_transitively_pure`;
+/// this walk just gives it a voice for once-invisible cases. Real
+/// follow-up, not attempted here: widen call-target resolution (both
+/// here and in `resolve_static_call`/`resolve_this_method_call`, to stay
+/// consistent) to a literal class name and an arbitrary receiver type,
 /// and fix `namespace\`-relative call-name resolution generally.
 pub(crate) fn collect_impure_points(
     body: &[Stmt],
@@ -851,15 +799,12 @@ fn collect_expr_impure_points(
         // `Foo::EnumCase`) - only a leading `$` (`checker/expr.rs`'s own
         // `ExprKind::StaticAccess` arm uses this identical test to tell a
         // property from a constant) means an actual, mutable static
-        // property read. A bare constant/enum-case name is immutable - real
-        // PHPStan's own `NodeScopeResolver` never emits an `ImpurePoint` for
-        // a `ClassConstFetch` at all (confirmed directly: no such call site
-        // exists in `NodeScopeResolver.php`), so flagging one here would be
-        // a real, actively-mislabeled false positive ("static property
-        // access" on something that isn't one), not just an imprecision -
-        // caught via the corpus (`Psl\Ansi\Cursor\back()`'s own
-        // `ControlSequenceIntroducerKind::CursorBack` enum-case read).
-        // `stmt_disqualifies`/`expr_disqualifies`'s own identical `Static
+        // property read. A bare constant/enum-case name is immutable -
+        // real PHPStan's own `NodeScopeResolver` never emits an
+        // `ImpurePoint` for a `ClassConstFetch` at all, so flagging one
+        // here would be an actively-mislabeled false positive ("static
+        // property access" on something that isn't one), not just an
+        // imprecision. `stmt_disqualifies`/`expr_disqualifies`'s own identical `Static
         // Access(_, _) => true` arm has this same conflation - deliberately
         // left as-is there (this function's own doc comment already
         // explains why that file isn't touched), so it's a real, disclosed,
