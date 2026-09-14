@@ -437,22 +437,11 @@ fn offset_access_type(base: &Type, key: &str) -> Type {
     }
 }
 
-/// Whether `key_part` (the text before a candidate `:` inside an
-/// `array{...}` field) actually looks like a shape key - a bare
-/// identifier (hyphen included: `Translator::toDictionaryEntry`'s real
-/// `@return array{..., plural-forms: string, ...}`, gettext's own
-/// dictionary-key convention, is unquoted in real code and was already
-/// accepted before this project ever validated key shape at all - a
-/// real regression, caught by the full corpus re-check, not assumed
-/// safe), an integer, or a quoted string, optionally `?`-suffixed - as
-/// opposed to being part of a *positional* field's own type text that
-/// merely happens to contain a colon (a callable-shape return type,
-/// `Closure(int): string`). See `try_parse_array_shape`'s own call site.
 /// `key-of<array{foo: string, 5: int}>`'s own per-field answer - a
-/// shape's own field name is always stored as a plain `String` (see
-/// `ArrayShape`'s own doc comment), the same way a real array literal's
-/// keys are canonicalized, so a field name that parses as an integer
-/// names an int key, matching PHP's own key-canonicalization rule.
+/// shape's field name is always stored as a plain `String` (see
+/// `ArrayShape`'s doc comment), so a field name that parses as an
+/// integer names an int key, matching PHP's own key-canonicalization
+/// rule.
 fn shape_key_literal(name: &str) -> Type {
     match canonical_int_key(name) {
         Some(n) => Type::IntLiteral(n),
@@ -461,23 +450,14 @@ fn shape_key_literal(name: &str) -> Type {
 }
 
 /// Real PHP's own array-key canonicalization rule for a string key,
-/// confirmed against real PHPStan's `ConstantStringType::toArrayKey()`
-/// (itself just native PHP's own `key([$s => null])` behavior): `Some(n)`
-/// exactly when `key` is a "canonical decimal integer" string - an
-/// optional single leading `-`, no leading zero unless the whole value is
-/// literally `"0"`, `"-0"` itself excluded (`(string)(int)"-0"` is `"0"`,
-/// not `"-0"`, so it fails PHP's own real round-trip test), and the value
-/// fits in `i64` (PHP's own platform integer range on any 64-bit build) -
-/// `None` otherwise (stays a string key). `str::parse::<i64>()` alone is
-/// **not** sufficient for this: it happily accepts a leading zero
-/// (`"01".parse::<i64>() == Ok(1)`) and `"-0"`, both of which real PHP
-/// does *not* canonicalize - a real, confirmed bug this function fixes in
-/// what used to be each of its own two callers' bare `.parse::<i64>()`
-/// call directly, not just in `checker::expr::is_canonical_int_key`
-/// (`checker/expr.rs`, that function's own real call sites), which
-/// shared the identical bug via its own, entirely separate implementation
-/// (no leading-zero/magnitude handling at all) before both were unified
-/// here.
+/// mirroring `ConstantStringType::toArrayKey()`: `Some(n)` exactly when
+/// `key` is a "canonical decimal integer" string - an optional single
+/// leading `-`, no leading zero unless the whole value is literally
+/// `"0"`, `"-0"` itself excluded (`(string)(int)"-0"` is `"0"`, not
+/// `"-0"`), and the value fits in `i64`. `None` otherwise (stays a
+/// string key). Plain `str::parse::<i64>()` is **not** sufficient: it
+/// happily accepts a leading zero (`"01".parse::<i64>() == Ok(1)`) and
+/// `"-0"`, both of which real PHP does *not* canonicalize.
 pub(crate) fn canonical_int_key(key: &str) -> Option<i64> {
     let (negative, digits) = match key.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -496,6 +476,13 @@ pub(crate) fn canonical_int_key(key: &str) -> Option<i64> {
     Some(if negative { -value } else { value })
 }
 
+/// Whether `key_part` (the text before a candidate `:` inside an
+/// `array{...}` field) actually looks like a shape key - a bare
+/// identifier (hyphen included: gettext's own `plural-forms`-style
+/// dictionary-key convention), an integer, or a quoted string,
+/// optionally `?`-suffixed - as opposed to being part of a *positional*
+/// field's own type text that merely happens to contain a colon (a
+/// callable-shape return type, `Closure(int): string`).
 fn looks_like_shape_key(key_part: &str) -> bool {
     let key_part = key_part.strip_suffix('?').unwrap_or(key_part).trim();
     if key_part.is_empty() {
@@ -560,20 +547,13 @@ fn parse_type_atom(s: &str) -> Type {
 
     // PHPStan/Psalm's callable-shape syntax: `Closure(ParamType, ...):
     // ReturnType` or `callable(...): ReturnType` - describes a callable
-    // value's own signature, not a generic type-argument list (only
-    // `<...>` is one, per `split_generic_args`) and not a real class
-    // name despite `Closure(...)` superficially resembling one. Real
-    // corpus shape: Doctrine DBAL's own `@param Closure(self):T $func` -
-    // without this, the whole literal string `"Closure(self):T"` fell
-    // through to the generic class-name branch below and got mangled
-    // into a bogus, namespace-qualified "class name" (`Doctrine\DBAL\
-    // Closure(self):T`). Stripped of a leading `\` first - real corpus
-    // code commonly spells this fully qualified (`@param \Closure
-    // (CancelledException) $cb`, amphp/amp's own convention throughout),
-    // which otherwise defeated this exact check (`"\closure(...".starts_
-    // with("closure(")` is false), falling through to the generic-class
-    // branch and mangling into a bogus `Type::Object("Closure
-    // (CancelledException)", [])`.
+    // value's signature, not a generic type-argument list (only `<...>`
+    // is one) or a real class name, despite superficially resembling
+    // one (real shape: Doctrine DBAL's own
+    // `@param Closure(self):T $func`, which would otherwise get mangled
+    // into a bogus namespace-qualified "class name"). Stripped of a
+    // leading `\` first, since real corpus code commonly spells this
+    // fully qualified (amphp/amp's own convention throughout).
     let stripped = s.trim_start_matches('\\');
     let lower = stripped.to_ascii_lowercase();
     if lower.starts_with("closure(")
