@@ -37,8 +37,8 @@ pub struct Parser {
     // access throughout this file (there are many) keeps working
     // unchanged.
     pub(crate) spans: Vec<Span>,
-    // Phase 48 follow-up (item 6): parallel to `tokens`/`spans` the same
-    // way - `keyword_raw[i]` is `Some(original spelling)` when
+    // Parallel to `tokens`/`spans` the same way - `keyword_raw[i]` is
+    // `Some(original spelling)` when
     // `tokens[i]` is a `Token::Keyword`, `None` otherwise (including for
     // every non-keyword token). Lets `take_name_segment` recover a
     // keyword-shaped identifier's true declared-name case without

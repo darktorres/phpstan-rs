@@ -82,37 +82,26 @@ impl Parser {
     ///
     /// This is the reusable "did an assignment operator follow this
     /// operand" half of that logic, factored out of `parse_assignment_
-    /// inner`'s own top-level case so `parse_equality`/`parse_
-    /// relational` (Phase 85) and `parse_logical_and`/`parse_logical_or`
-    /// (found later, via the exact same corpus-false-positive pattern -
-    /// symfony/console's own `Application.php`, `$e instanceof
+    /// inner`'s own top-level case so `parse_equality`/`parse_relational`
+    /// and `parse_logical_and`/`parse_logical_or` (`$e instanceof
     /// CommandNotFoundException && $namespace = $this->findNamespace(
     /// $name)`) can apply it to their own RHS the moment it's parsed,
     /// before wrapping it in the outer `Binary` node - exactly mirroring
     /// how real PHP's grammar treats assignment as available at that
     /// operand position, not only at the very top of the whole
-    /// expression. An earlier version of this comment claimed real PHP's
-    /// own precedence table "doesn't uniformly allow this everywhere,"
-    /// singling out `&&` by name as an example of an operator this
-    /// wasn't extended to - confirmed wrong the same way this project's
-    /// own `NameContext::build` doc comment was about multi-namespace
-    /// files: `php -r '$e=true; if ($e && $x = "hi") { echo $x; }'`
+    /// expression: `php -r '$e=true; if ($e && $x = "hi") { echo $x; }'`
     /// prints `hi`, and `$x` stays genuinely unset when `$e` is falsy
     /// (real short-circuiting, not eager evaluation) - so `&&`/`||` get
     /// the identical treatment `==`/`<` already had. `parse_additive`
     /// (`+`/`-`/`.`) and the cast arm of `parse_unary_inner` (`(int)`/
-    /// etc.) later got the same fix too, via a real corpus
-    /// `variable.undefined` false positive - confirmed the identical
-    /// idiom generalizes to these as well (`php -r '$v=0; $r="x".$v="y";
-    /// var_dump($r,$v);'` prints `string(3) "xy"` and `$v` becomes
-    /// `"y"`, i.e. `"x" . ($v = "y")`). The bitwise `|`/`^`/`&` operators
-    /// show the identical quirk when spot-tested directly via `php -r`
-    /// too (real PHP's grammar allows a bare assignment as an operand
-    /// essentially everywhere, not just at these specific precedence
-    /// levels) - deliberately still left unextended here, since there's
-    /// no corpus evidence calling for it the way every operator above
-    /// had, and this project's own convention is to extend on
-    /// evidence, not on a grammar property alone.
+    /// etc.) also need this: the identical idiom generalizes there too
+    /// (`php -r '$v=0; $r="x".$v="y"; var_dump($r,$v);'` prints
+    /// `string(3) "xy"` and `$v` becomes `"y"`, i.e. `"x" . ($v = "y")`).
+    /// The bitwise `|`/`^`/`&` operators show the identical quirk when
+    /// spot-tested directly via `php -r` too (real PHP's grammar allows a
+    /// bare assignment as an operand essentially everywhere, not just at
+    /// these specific precedence levels) - left unextended here without
+    /// evidence calling for it.
     pub(crate) fn parse_assignment_tail(
         &mut self,
         lhs: Expr,
@@ -205,21 +194,16 @@ impl Parser {
         while self.eat(&Token::PipePipe) {
             let rhs_start = self.current_pos();
             let rhs = self.parse_logical_and()?;
-            // Phase 85 follow-up: `$e instanceof Foo || $x = fn()` - a
-            // real, confirmed PHP idiom (`php -r` proves `$x` really is
-            // assigned whenever the right side actually runs, exactly
-            // like `false === $x = fn()` already gets via `parse_
-            // assignment_tail`'s own doc comment) that this project's
-            // own naive precedence-table reading previously assumed
-            // real PHP didn't extend to `&&`/`||` - it does. Without
-            // this, `$e instanceof CommandNotFoundException && $namespace
-            // = $this->findNamespace($name)` (symfony/console's own
-            // `Application.php`) parsed as the nonsensical `($e
-            // instanceof CommandNotFoundException && $namespace) =
+            // `$e instanceof Foo || $x = fn()` - `php -r` proves `$x`
+            // really is assigned whenever the right side actually runs,
+            // exactly like `false === $x = fn()` already gets via
+            // `parse_assignment_tail`'s own doc comment. Without this,
+            // `$e instanceof CommandNotFoundException && $namespace =
+            // $this->findNamespace($name)` parses as the nonsensical
+            // `($e instanceof CommandNotFoundException && $namespace) =
             // $this->findNamespace($name)`, leaving `$namespace` looking
             // completely unassigned to every later use inside the `if`
-            // body (a real, corpus-found `variable.undefined` false
-            // positive).
+            // body.
             let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(
                 ExprKind::Binary(BinOp::Or, Box::new(lhs), Box::new(rhs)),
@@ -235,8 +219,7 @@ impl Parser {
         while self.eat(&Token::AmpAmp) {
             let rhs_start = self.current_pos();
             let rhs = self.parse_bit_or()?;
-            // See `parse_logical_or`'s own identical fix just above -
-            // same real idiom, same confirmed-via-`php -r` fix.
+            // See `parse_logical_or`'s own identical fix just above.
             let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(
                 ExprKind::Binary(BinOp::And, Box::new(lhs), Box::new(rhs)),
@@ -300,8 +283,8 @@ impl Parser {
             self.skip();
             let rhs_start = self.current_pos();
             let rhs = self.parse_relational()?;
-            // Phase 85: `false === $x = fn()` - see `parse_assignment_
-            // tail`'s own doc comment.
+            // `false === $x = fn()` - see `parse_assignment_tail`'s own
+            // doc comment.
             let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
@@ -322,8 +305,8 @@ impl Parser {
             self.skip();
             let rhs_start = self.current_pos();
             let rhs = self.parse_pipe()?;
-            // Phase 85: `0 > $x = fn()` - see `parse_assignment_tail`'s
-            // own doc comment.
+            // `0 > $x = fn()` - see `parse_assignment_tail`'s own doc
+            // comment.
             let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
@@ -380,11 +363,10 @@ impl Parser {
             let rhs = self.parse_multiplicative()?;
             // See `parse_logical_or`'s own identical fix (and `parse_
             // assignment_tail`'s own doc comment) - the same real-PHP
-            // "assignment as a bare operand" idiom extends here too,
-            // confirmed directly (`php -r '$v=0; $r="x".$v="y";
-            // var_dump($r,$v);'` prints `string(3) "xy"` and `$v`
-            // becomes `"y"`, i.e. `"x" . ($v = "y")`). Real corpus find:
-            // a top-10-bucket `variable.undefined` scoping round.
+            // "assignment as a bare operand" idiom extends here too:
+            // `php -r '$v=0; $r="x".$v="y"; var_dump($r,$v);'` prints
+            // `string(3) "xy"` and `$v` becomes `"y"`, i.e.
+            // `"x" . ($v = "y")`.
             let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
             lhs = self.expr(ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)), start);
         }
@@ -410,15 +392,12 @@ impl Parser {
 
     /// `!` binds *looser* than `instanceof` in real PHP's own precedence
     /// table (`!$x instanceof Y` means `!($x instanceof Y)`, not
-    /// `(!$x) instanceof Y`) - a real, previously-wrong precedence bug
-    /// this project's negation used to get backwards by folding `!` into
-    /// the same tighter-than-instanceof level as `~`/casts/`++`/`--`/`@`
-    /// (which genuinely do bind tighter than `instanceof` and stay in
-    /// `parse_unary_inner` unchanged). Confirmed via a real guard clause
-    /// (`if (! $x instanceof Y) { ... }`) that never actually narrowed
-    /// `$x` because of this - `apply_narrowing`'s `Unary(Not, Instanceof)`
-    /// pattern never matched, since the old parse produced
-    /// `Instanceof(Unary(Not, $x), Y)` instead.
+    /// `(!$x) instanceof Y`) - kept as its own production, separate from
+    /// the tighter-than-instanceof level `~`/casts/`++`/`--`/`@` share in
+    /// `parse_unary_inner`. `apply_narrowing`'s `Unary(Not, Instanceof)`
+    /// pattern depends on this: `if (! $x instanceof Y) { ... }` only
+    /// narrows `$x` when the parse produces `Unary(Not, Instanceof($x,
+    /// Y))`, not `Instanceof(Unary(Not, $x), Y)`.
     pub(crate) fn parse_not(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         if self.eat(&Token::Bang) {
@@ -426,18 +405,18 @@ impl Parser {
             let operand = self.parse_not()?;
             // The same real-PHP "assignment as a bare operand" grammar
             // quirk `parse_assignment_tail`'s own doc comment describes
-            // for `==`/`&&`/`||`, confirmed via `php -r '$x=0; $r=!$x=5;
-            // var_dump($r,$x);'` printing `bool(false) int(5)` - `!$x =
+            // for `==`/`&&`/`||`: `php -r '$x=0; $r=!$x=5;
+            // var_dump($r,$x);'` prints `bool(false) int(5)` - `!$x =
             // expr` parses as `!($x = expr)`, not `(!$x) = expr`. Must run
             // here, at the point `!` actually binds, rather than relying
             // on an enclosing `&&`/`||`/comparison's own fix further up
             // the chain: by the time control gets there, `!` has already
             // wrapped the bare variable, so their fix would see `Unary(
             // Not, $var)` - not a valid assignment target - as its own
-            // "lhs" and misassign into it. A corpus-verified idiom
-            // (`plupload`'s `upload.php`: `if (!is_dir($targetDir) ||
-            // !$dir = opendir($targetDir))`) that left `$dir` looking
-            // undefined to every later `readdir($dir)` without this.
+            // "lhs" and misassign into it. A common idiom
+            // (`if (!is_dir($targetDir) || !$dir = opendir($targetDir))`)
+            // that leaves `$dir` looking undefined to every later
+            // `readdir($dir)` without this.
             let operand = self.parse_assignment_tail(operand, operand_start)?;
             return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, Box::new(operand)), start));
         }

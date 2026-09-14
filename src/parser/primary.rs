@@ -341,8 +341,8 @@ impl Parser {
                 // extra parameter through 3 more functions for.
                 self.parse_closure_like(true)?
             }
-            // Phase 37: `#[Attr] function () {}` / `#[Attr] static fn()
-            // => ...` - a closure/arrow function preceded by its own
+            // `#[Attr] function () {}` / `#[Attr] static fn() => ...` -
+            // a closure/arrow function preceded by its own
             // attribute group(s), the only expression-position shape real
             // PHP allows one on at all. `parse_closure_like`/
             // `parse_closure`/`parse_arrow_fn` build the node with an

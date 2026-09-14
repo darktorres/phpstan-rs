@@ -28,10 +28,9 @@ impl Parser {
     }
 
     /// `new [#[Attr]...] [readonly] class(args) [extends X] [implements Y,
-    /// ...] { ... }`. Real PHP does allow an attribute group here (confirmed
-    /// directly against the PHP manual's own `new #[ExampleAttribute] class
-    /// () {}` example, and against a real corpus file that uses exactly this
-    /// shape) - attributes precede any `readonly`/`final`/`abstract`
+    /// ...] { ... }`. Real PHP does allow an attribute group here (see
+    /// the PHP manual's own `new #[ExampleAttribute] class () {}`
+    /// example) - attributes precede any `readonly`/`final`/`abstract`
     /// modifier, the same order `parse_statement`'s own leading-attributes
     /// handling already establishes for every other declaration. Reuses
     /// parse_class_body for the `{ ... }` part, the same as a named
@@ -167,8 +166,8 @@ impl Parser {
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let member_start = self.current_pos();
-            // Phase 37: `#[Attr]` groups precede everything else about a
-            // member (even its visibility/`static`/... modifiers) - parsed
+            // `#[Attr]` groups precede everything else about a member
+            // (even its visibility/`static`/... modifiers) - parsed
             // before `take_doc_comment` reads through to whatever's next,
             // via a wrapper that re-keys a preceding doc comment so it's
             // still found there unchanged.
@@ -466,11 +465,10 @@ impl Parser {
         while !self.check(&Token::RBrace) && !self.at_eof() {
             // The trait name before `::` can be fully qualified
             // (`\Some\Trait::method insteadof ...`, a real, valid PHP
-            // shape - found via bulk-running this project's checker
-            // against the vendored phpstan-src corpus) - `parse_qualified_
-            // name` handles that and degrades to a single bare segment
-            // for the (far more common) unqualified-trait or bare-method
-            // case identically to the plain `expect_ident` this replaced.
+            // shape) - `parse_qualified_name` handles that and degrades
+            // to a single bare segment for the (far more common)
+            // unqualified-trait or bare-method case identically to a
+            // plain `expect_ident`.
             let first = self.parse_qualified_name();
             let (trait_name, method) = if self.eat(&Token::DoubleColon) {
                 (Some(first), self.expect_ident()?)
@@ -513,8 +511,8 @@ impl Parser {
         // `trait` a caller's dispatch matched on) rather than by a caller
         // - both of this function's call sites in parse_statement would
         // otherwise need their own, easy-to-forget take_doc_comment call,
-        // and it needs the enclosing class's own `@template` (Phase 10 -
-        // class-level generics), which was never captured at all before.
+        // and it needs the enclosing class's own `@template` (class-level
+        // generics).
         let start = self.current_pos();
         let doc_comment = self.take_doc_comment();
         let mut is_abstract = false;

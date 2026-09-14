@@ -10,8 +10,8 @@ impl Parser {
         // a declaration's own span includes them - matches how `start`
         // already includes a class's own `abstract`/`final` modifiers.
         let start = self.current_pos();
-        // Phase 37: only a function/class/interface/trait/enum
-        // declaration below ever actually attaches these (each such arm
+        // Only a function/class/interface/trait/enum declaration below
+        // ever actually attaches these (each such arm
         // assigns `attrs` onto the node it builds) - every other
         // statement shape just drops them on the floor, the same lenient
         // "consume and ignore" treatment this parser already gives other
@@ -168,12 +168,12 @@ impl Parser {
             }
             Token::Keyword(Keyword::Use) => {
                 self.skip();
-                // `use function foo;` / `use const BAR;` - Phase 48 needs
-                // to tell these apart from a plain class-shaped `use Foo;`
-                // (only a function/class import is ever existence-
-                // checkable against this project's own registry - see
+                // `use function foo;` / `use const BAR;` need to be told
+                // apart from a plain class-shaped `use Foo;` (only a
+                // function/class import is ever existence-checkable
+                // against this project's own registry - see
                 // `UseImport::kind`'s own doc comment), so the marker is
-                // now captured instead of merely skipped past.
+                // captured instead of merely skipped past.
                 let default_kind = if self.eat(&Token::Keyword(Keyword::Function)) {
                     UseKind::Function
                 } else if self.eat(&Token::Keyword(Keyword::Const)) {

@@ -223,13 +223,12 @@ impl Parser {
                 let Token::Keyword(kw) = self.take_token() else {
                     unreachable!()
                 };
-                // Phase 48 follow-up (item 6): a real vendored class can
-                // be literally named the same as a PHP keyword
-                // (`marc-mabe/php-enum`'s own `MabeEnum\Enum`) - use the
-                // original source spelling when we have it, falling back
-                // to the keyword's own canonical (always-lowercase) form
-                // only if it's somehow missing (shouldn't happen for a
-                // real lexer-produced token stream).
+                // A real vendored class can be literally named the same
+                // as a PHP keyword - use the original source spelling
+                // when we have it, falling back to the keyword's own
+                // canonical (always-lowercase) form only if it's somehow
+                // missing (shouldn't happen for a real lexer-produced
+                // token stream).
                 Some(
                     self.keyword_raw
                         .get(idx)
@@ -262,7 +261,7 @@ impl Parser {
         s
     }
 
-    /// Phase 17: `parse_qualified_name`, plus the span it occupied - kept
+    /// `parse_qualified_name`, plus the span it occupied - kept
     /// as a thin wrapper rather than changing `parse_qualified_name`'s own
     /// signature, which has ~30 existing call sites that have no use for
     /// the span. Used only at the smaller set of call sites (`extends`/
@@ -278,8 +277,8 @@ impl Parser {
         (name, span)
     }
 
-    /// Phase 37: parses zero or more consecutive `#[Name(args), ...]`
-    /// attribute groups sitting at the current position - real PHP allows
+    /// Parses zero or more consecutive `#[Name(args), ...]` attribute
+    /// groups sitting at the current position - real PHP allows
     /// several bracket groups back-to-back on one declaration
     /// (`#[A] #[B(1)]`, equivalent to the single group `#[A, B(1)]`), so
     /// this loops rather than parsing just one. Returns an empty `Vec`
