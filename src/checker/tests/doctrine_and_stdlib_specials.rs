@@ -729,10 +729,15 @@ fn idate_with_an_uncovered_format_character_keeps_todays_int_or_false() {
 
 #[test]
 fn pathinfo_with_one_argument_infers_the_real_array_shape() {
+    // `dirname` is optional here (not `dirname: string`) - matching real
+    // PHPStan's own `PathinfoFunctionDynamicReturnTypeExtension`, which
+    // only marks it unconditionally present when `$path`'s own type is
+    // provably `non-empty-string` (see the two tests below for that
+    // half). A plain, unrefined `string $path` doesn't prove that.
     let d = diagnostics_for(
         r#"<?php
             /**
-             * @return array{dirname: string, basename: string, extension?: string, filename: string}
+             * @return array{dirname?: string, basename: string, extension?: string, filename: string}
              */
             function f(string $path) {
                 return pathinfo($path);
@@ -740,6 +745,43 @@ fn pathinfo_with_one_argument_infers_the_real_array_shape() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn pathinfo_with_a_provably_non_empty_string_path_makes_dirname_required() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param non-empty-string $path
+             * @return array{dirname: string, basename: string, extension?: string, filename: string}
+             */
+            function f($path) {
+                return pathinfo($path);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn pathinfo_on_a_plain_string_argument_does_not_flag_dirname_as_always_set() {
+    // Real Piwigo corpus false positive: `ImageExtImagick::write`'s own
+    // `isset(pathinfo($path)['dirname'])` guard on a plain `string`-typed
+    // `$path` was wrongly flagged `isset.offset` ("always exists").
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $path): void {
+                $info = pathinfo($path);
+                if (isset($info['dirname'])) {
+                    echo $info['dirname'];
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "isset.offset"),
+        "got: {d:?}"
+    );
 }
 
 #[test]

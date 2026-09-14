@@ -1747,25 +1747,42 @@ impl<'a> Checker<'a> {
             // unconditionally `array` (the 2-arg `$flags` overload is
             // `array|string`) - real PHPStan's own
             // `PathinfoFunctionDynamicReturnTypeExtension` gives the
-            // 1-arg form a real shape (`dirname`/`basename`/`filename`
-            // always present, `extension` only when the path actually has
-            // one - simplified here to always-optional, since this
-            // project has no way to know a literal path has a dot in it)
-            // and narrows the 2-arg form down to plain `string` for a
-            // literal single-component `PATHINFO_*` flag (everything but
+            // 1-arg form a real shape: `basename`/`filename` always
+            // present, `extension` only when the path actually has one
+            // (simplified here to always-optional, since this project has
+            // no way to know a literal path has a dot in it), and -
+            // confirmed by direct read, not the "always present" this
+            // comment previously (wrongly) claimed - `dirname` itself is
+            // ALSO only unconditionally present when `$path`'s own type is
+            // provably `non-empty-string` (`!$pathType->isNonEmptyString()
+            // ->yes()` as the field's own `$optional` argument); otherwise
+            // it's optional too, since an empty `$path` makes `dirname`
+            // read back as `'.'` - the very definition of a non-empty
+            // string, not an absent offset - which does not contradict a
+            // plain `string`-typed argument's own key being genuinely
+            // *unprovable* either way. Real Piwigo corpus false positive
+            // this fixes: `ImageExtImagick::write`'s own
+            // `isset(pathinfo($path)['dirname'])` guard on a plain
+            // `string`-typed `$path` was flagged `isset.offset` ("always
+            // exists") when real PHPStan would not (its own dirname-
+            // optionality check plainly returns optional for an unproven
+            // `string`). Narrows the 2-arg form down to plain `string` for
+            // a literal single-component `PATHINFO_*` flag (everything but
             // `PATHINFO_ALL`, which gets the same array shape as the 1-arg
             // form). A non-literal `$flags` keeps today's `array|string`
             // union, unchanged.
             "pathinfo" if args.len() == 1 => {
-                return pathinfo_array_shape();
+                let path_ty = self.infer_expr(&args[0].value, locals);
+                return pathinfo_array_shape(&path_ty);
             }
             "pathinfo" if args.len() == 2 => {
                 if let ExprKind::Name(flag_name) = &args[1].value.kind {
+                    let path_ty = self.infer_expr(&args[0].value, locals);
                     return match flag_name.trim_start_matches('\\') {
                         "PATHINFO_DIRNAME" | "PATHINFO_BASENAME" | "PATHINFO_EXTENSION"
                         | "PATHINFO_FILENAME" => Type::String,
-                        "PATHINFO_ALL" => pathinfo_array_shape(),
-                        _ => Type::Union(vec![pathinfo_array_shape(), Type::String]),
+                        "PATHINFO_ALL" => pathinfo_array_shape(&path_ty),
+                        _ => Type::Union(vec![pathinfo_array_shape(&path_ty), Type::String]),
                     };
                 }
             }
@@ -3081,17 +3098,20 @@ pub(crate) fn date_interval_format_return_type(format: &str) -> Option<Type> {
     Some(Type::Intersection(members))
 }
 
-/// `pathinfo($path)`'s own real 1-arg array shape - `dirname`/`basename`/
-/// `filename` always present, `extension` only when the path actually has
-/// a dot in it (simplified here to always-optional: this project has no
-/// way to know from `$path`'s own `Type` alone whether a literal path
-/// contains one, unlike real PHPStan's own `isNonEmptyString()`-driven
-/// `dirname`-optionality check, which this project mirrors for the same
-/// reason on that field too - see the 1-arg match arm above referencing
-/// this function).
-fn pathinfo_array_shape() -> Type {
+/// `pathinfo($path)`'s own real 1-arg array shape - `basename`/`filename`
+/// always present, `extension` only when the path actually has a dot in
+/// it (simplified here to always-optional: this project has no way to
+/// know from `$path`'s own `Type` alone whether a literal path contains
+/// one). `dirname` mirrors real PHPStan's own `isNonEmptyString()`-driven
+/// optionality check exactly (see the 1-arg match arm above referencing
+/// this function) rather than being simplified the same way: unlike
+/// `extension`, `path_ty` being provably `non-empty-string` really is
+/// enough on its own to prove `dirname` present, with no further runtime
+/// fact (like where a dot falls) needed.
+fn pathinfo_array_shape(path_ty: &Type) -> Type {
+    let dirname_optional = !string_type_has_accessory(path_ty, AccessoryKind::NonEmptyString);
     Type::ArrayShape(vec![
-        ("dirname".to_string(), Type::String, false),
+        ("dirname".to_string(), Type::String, dirname_optional),
         ("basename".to_string(), Type::String, false),
         ("extension".to_string(), Type::String, true),
         ("filename".to_string(), Type::String, false),

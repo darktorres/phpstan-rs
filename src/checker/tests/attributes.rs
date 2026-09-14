@@ -1303,16 +1303,34 @@ fn an_attribute_reference_with_correct_case_is_never_flagged_for_case() {
 }
 
 // phpstorm-stubs' own `#[ArrayShape(["key" => "type", ...])]` attribute -
-// a Piwigo corpus false positive found this was silently ignored, so a
-// stub function like `imagecolorsforindex()` (bare `array`-typed, its own
-// real shape only ever expressed through this attribute) always returned
-// `Mixed` element types. Matched by short name only, case-insensitively,
-// the same as the real `NoDiscard`/`Override` attributes this project
-// already recognizes this way - see `is_array_shape_attribute_name`'s own
-// doc comment.
-
+// a JetBrains/PhpStorm IDE-inspection convention, not something real
+// PHPStan ever reads: confirmed by a direct grep of the vendored
+// `vendor/phpstan-src/src/` tree, zero occurrences of "ArrayShape"
+// anywhere in it. A prior fix (justified as "real PHPStan reads this
+// attribute directly to recover a precise array shape") was never
+// actually verified against real PHPStan's own source and was wrong -
+// this project used to graft the attribute's own shape onto a bare
+// `array`/`array|X` return type unconditionally, for *any* function or
+// method carrying an attribute literally named `ArrayShape` (own project
+// code included, not just the vendored stub corpus), which is stricter
+// than real PHPStan is anywhere. Real corpus false positives this caused
+// once traced against real PHPStan's own bundled `resources/
+// functionMap.php` (the actual source real PHPStan uses for these
+// functions' native signatures - `NativeFunctionReflectionProvider`
+// returns a `functionMap.php`-based reflection before phpstorm-stubs'
+// own attributes are ever reachable): Piwigo's own `ImageBackend::
+// getGraphicsLibrary` (`gd_info()['GD Version'] ?? null` flagged
+// `nullCoalesce.offset` - `functionMap.php` gives `gd_info` a bare
+// `array`, no shape at all) and `ImageExtImagick::write` (`pathinfo($path)
+// ['dirname']` in an `isset()` flagged `isset.offset` - `functionMap.php`
+// gives `pathinfo` bare `array|string`, likewise no shape). See
+// `php_stubs.rs`'s own `patch_functionmap_array_shapes` for the narrow,
+// per-function replacement: a hand-verified allowlist of the stub
+// functions `functionMap.php` really does give a precise shape to,
+// keyed off that file's own type text rather than phpstorm-stubs' own
+// (never-consulted-by-real-PHPStan) attribute.
 #[test]
-fn array_shape_attribute_refines_a_bare_array_return_type() {
+fn an_arrayshape_named_attribute_on_an_ordinary_function_is_inert() {
     let d = diagnostics_for(
         r#"<?php
             #[\Attribute]
@@ -1329,36 +1347,8 @@ fn array_shape_attribute_refines_a_bare_array_return_type() {
         "#,
     );
     assert!(
-        d.iter()
-            .any(|x| x.identifier == "argument.type"
-                && x.message.contains("expects string, int given")),
-        "got: {d:?}"
+        !d.iter().any(|x| x.identifier == "argument.type"),
+        "an #[ArrayShape] attribute must not refine a return type - real \
+         PHPStan never reads it, for a stub or ordinary function alike: {d:?}"
     );
-}
-
-#[test]
-fn array_shape_attribute_preserves_a_false_failure_union_member() {
-    // Real vendored shape: `imagecolorsforindex()` declares both
-    // `#[ArrayShape(...)]` and `@return array|false` - the attribute must
-    // only refine the `array` half, never silently drop the real `false`
-    // failure case a caller might still need to check for.
-    let d = diagnostics_for(
-        r#"<?php
-            #[\Attribute]
-            class ArrayShape { public function __construct(array $shape) {} }
-            /** @return array|false */
-            #[ArrayShape(["red" => "int"])]
-            function pixel(): array|false {
-                return ['red' => 1];
-            }
-            function f(): void {
-                $p = pixel();
-                if ($p === false) {
-                    return;
-                }
-                echo $p['red'];
-            }
-        "#,
-    );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }

@@ -945,6 +945,33 @@ fn usleep_accepts_an_unbounded_int_not_just_a_provably_non_negative_one() {
     );
 }
 
+// A Piwigo/real-PHPStan corpus diff found a much broader instance of the
+// same `functionMap.php`-supersedes-phpstorm-stubs pattern `usleep()`
+// above already fixed: phpstorm-stubs' own `#[ArrayShape(...)]` attribute
+// (a JetBrains/PhpStorm IDE-inspection convention, never read by real
+// PHPStan at all - confirmed by a direct grep of `vendor/phpstan-src/src/`,
+// zero occurrences anywhere) was being consumed as if it were something
+// real PHPStan derives a precise array shape from, for any function or
+// method carrying it. `gd_info()`'s own real `functionMap.php` entry is
+// bare `array` (no shape at all) - `php_stubs::patch_functionmap_array_
+// shapes` corrects this the same narrow, `functionMap.php`-verified way
+// `patch_usleep`/`patch_debug_backtrace` already do, for every function
+// this investigation actually checked.
+#[test]
+fn gd_info_stays_a_bare_array_not_a_fixed_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                $v = gd_info()['GD Version'] ?? null;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "nullCoalesce.offset"),
+        "unexpected nullCoalesce.offset diagnostics: {d:?}"
+    );
+}
+
 // A Piwigo/real-PHPStan corpus diff found `proc_open()`'s own by-ref
 // `$pipes` out-parameter (3rd argument) left completely unspecialized,
 // falling to the generic `Mixed` leniency every unknown by-ref output

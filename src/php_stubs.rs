@@ -55,7 +55,7 @@
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
-use crate::types::{AccessoryKind, TemplateParam, Type};
+use crate::types::{self, AccessoryKind, TemplateParam, Type};
 
 include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 
@@ -174,6 +174,201 @@ fn patch_usleep(stubs: &mut [(String, FunctionSig)]) {
     }
 }
 
+/// The broader, previously-"unconfirmed" pattern `patch_usleep`'s own doc
+/// comment names above, now confirmed and closed with direct evidence
+/// rather than chased further speculatively: phpstorm-stubs' own
+/// `#[ArrayShape(["key" => "type", ...])]` attribute (a JetBrains/
+/// PhpStorm IDE-inspection convention) is never read by real PHPStan at
+/// all - confirmed by a direct grep of the vendored `vendor/phpstan-src/
+/// src/` tree, zero occurrences of "ArrayShape" anywhere in it, for any
+/// function or method, stub-covered or not. A prior version of this
+/// project's stub-generation pipeline (`registry::function_sig::from_decl`)
+/// grafted that attribute's own shape onto any bare `array`/`array|X`
+/// return type unconditionally, on the mistaken premise that real PHPStan
+/// reads it directly - producing an over-precise shape for every one of
+/// the ~85 real occurrences across the vendored phpstorm-stubs corpus,
+/// regardless of what real PHPStan's own bundled `resources/
+/// functionMap.php` (the actual source real PHPStan uses for a stub
+/// function's native signature - `NativeFunctionReflectionProvider`
+/// returns a `functionMap.php`-based reflection before phpstorm-stubs' own
+/// attributes are ever reachable) says for that same function. Two real
+/// Piwigo corpus false positives this caused, both traced directly to
+/// `functionMap.php` giving the function a bare, unshaped type while the
+/// (never-consulted-by-real-PHPStan) attribute gave phpstan-rs a precise
+/// one: `ImageBackend::getGraphicsLibrary`'s own `gd_info()['GD Version']
+/// ?? null` (`nullCoalesce.offset` - `functionMap.php`'s own `'gd_info' =>
+/// ['array']` has no shape at all) and `ImageExtImagick::write`'s own
+/// `isset(pathinfo($path)['dirname'])` (`isset.offset` - `functionMap.php`'s
+/// own `'pathinfo' => ['array|string', ...]`, likewise bare).
+///
+/// `pathinfo()` itself needed a patch here too, for a reason distinct from
+/// (and additional to) removing the attribute mechanism: unlike every
+/// other function checked here, its own phpstorm-stubs docblock *also*
+/// carries a genuine, machine-parseable `@return string|array{dirname:
+/// string, basename: string, extension: string, filename: string}` type
+/// tag, independent of its `#[ArrayShape(...)]` attribute - so the
+/// ordinary docblock-parsing pipeline alone (nothing attribute-specific)
+/// would still produce the same over-precise *native signature* even
+/// after the attribute mechanism was removed. Confirmed no sibling case
+/// exists by checking every other function this patch covers for a real
+/// `array{` shape tag of its own (all bare prose), not assumed. This
+/// doesn't actually close the real Piwigo corpus false positive, though -
+/// `checker::expr::builtin_calls::pathinfo_array_shape`'s own dedicated
+/// call-site special case (mirroring real PHPStan's own
+/// `PathinfoFunctionDynamicReturnTypeExtension`, a real dynamic-return-
+/// type extension, not a `functionMap.php`-vs-attribute precision
+/// question at all) unconditionally overrides whatever this bare-signature
+/// patch gives `pathinfo` for every ordinary call - see that function's
+/// own doc comment for the actual fix (a real, separate `dirname`-
+/// optionality bug in that call-site special case, not this one).
+///
+/// The fix removed the general (wrong) mechanism entirely - see `registry::
+/// function_sig::from_decl`'s own history - rather than special-casing
+/// individual functions to *suppress* it, since the mechanism's own
+/// premise never held for any function. This patch restores real
+/// precision only where `functionMap.php` genuinely gives one, transcribed
+/// directly from that file's own type text (not from phpstorm-stubs' own
+/// attribute, which several of these disagree with in the details - e.g.
+/// `imagecolorsforindex`'s own real shape uses `int<0, 255>`/`int<0, 127>`
+/// ranges, not the attribute's plain `int`) - the same one-function-at-a-
+/// time, `functionMap.php`-verified discipline `patch_debug_backtrace`/
+/// `patch_usleep` already established, just covering every function this
+/// investigation actually checked rather than the single one direct
+/// corpus evidence first surfaced. Every function `functionMap.php` itself
+/// leaves bare (`gd_info`, `pathinfo`, and the many others `#[ArrayShape]`
+/// used to over-refine) intentionally gets no patch at all here - bare is
+/// the correct, real-PHPStan-matching answer for those, not an oversight.
+/// Not ported: `date_sun_info` (`functionMap.php`'s own type wraps its
+/// shape in a `__benevolent<...>` marker this project's type-string parser
+/// doesn't model - a distinct, narrower gap, not chased here);
+/// `opcache_get_configuration` (`functionMap.php` does give it a real,
+/// deeply-nested shape, but one large enough that hand-transcribing it
+/// here risked a silent typo for essentially no real corpus payoff -
+/// left bare rather than risk shipping a subtly-wrong shape unverified);
+/// and every method-only occurrence of `#[ArrayShape]` (`Imagick`/
+/// `PDOStatement`/`Phar`/`SQLite3`, ~22 sites) - `functionMap.php` only
+/// ever covers top-level functions, never methods, and none of these
+/// classes have a real PHPStan-bundled dynamic-return-type extension
+/// either, so bare (whatever the native/PHPDoc return type already
+/// resolves to) is already the correct real-PHPStan-matching answer for
+/// all of them too.
+fn patch_functionmap_array_shapes(stubs: &mut [(String, FunctionSig)]) {
+    let date_parse_shape = types::parse_type_string(
+        "array{year: int|false, month: int|false, day: int|false, hour: int|false, \
+         minute: int|false, second: int|false, fraction: float|false, warning_count: int, \
+         warnings: string[], error_count: int, errors: string[], is_localtime: bool, \
+         zone_type?: int|bool, zone?: int|bool, is_dst?: bool, tz_abbr?: string, tz_id?: string, \
+         relative?: array{year: int, month: int, day: int, hour: int, minute: int, second: int, \
+         weekday?: int, weekdays?: int, first_day_of_month?: bool, last_day_of_month?: bool}}",
+    );
+    let posix_pw_shape = types::parse_type_string(
+        "array{name: string, passwd: string, uid: int, gid: int, gecos: string, dir: string, \
+         shell: string}|false",
+    );
+    let getimagesize_shape = types::parse_type_string(
+        "array{0: 0|positive-int, 1: 0|positive-int, 2: int, 3: string, mime: string, \
+         channels?: int, bits?: int}|false",
+    );
+    let patches: &[(&str, &Type)] = &[
+        (
+            "imagecolorsforindex",
+            &types::parse_type_string(
+                "array{red: int<0, 255>, green: int<0, 255>, blue: int<0, 255>, \
+                 alpha: int<0, 127>}",
+            ),
+        ),
+        (
+            "getdate",
+            &types::parse_type_string(
+                "array{seconds: int<0, 59>, minutes: int<0, 59>, hours: int<0, 23>, \
+                 mday: int<1, 31>, wday: int<0, 6>, mon: int<1, 12>, year: int, \
+                 yday: int<0, 365>, weekday: \"Monday\"|\"Tuesday\"|\"Wednesday\"|\"Thursday\"| \
+                 \"Friday\"|\"Saturday\"|\"Sunday\", month: \"January\"|\"February\"|\"March\"| \
+                 \"April\"|\"May\"|\"June\"|\"July\"|\"August\"|\"September\"|\"October\"| \
+                 \"November\"|\"December\", 0: int}",
+            ),
+        ),
+        ("date_parse", &date_parse_shape),
+        ("date_parse_from_format", &date_parse_shape),
+        (
+            "date_get_last_errors",
+            &types::parse_type_string(
+                "array{warning_count: 0|positive-int, warnings: list<string>, \
+                 error_count: 0|positive-int, errors: list<string>}|false",
+            ),
+        ),
+        (
+            "timezone_location_get",
+            &types::parse_type_string(
+                "array{country_code: string, latitude: float, longitude: float, \
+                 comments: string}|false",
+            ),
+        ),
+        (
+            "session_get_cookie_params",
+            &types::parse_type_string(
+                "array{lifetime: 0|positive-int, path: non-falsy-string, domain: string, \
+                 secure: bool, httponly: bool, \
+                 samesite: 'None'|'Lax'|'Strict'|'none'|'lax'|'strict'}",
+            ),
+        ),
+        ("posix_getpwnam", &posix_pw_shape),
+        ("posix_getpwuid", &posix_pw_shape),
+        (
+            "localeconv",
+            &types::parse_type_string(
+                "array{decimal_point: string, thousands_sep: string, int_curr_symbol: string, \
+                 currency_symbol: string, mon_decimal_point: string, mon_thousands_sep: string, \
+                 positive_sign: string, negative_sign: string, int_frac_digits: int, \
+                 frac_digits: int, p_cs_precedes: int, p_sep_by_space: int, n_cs_precedes: int, \
+                 n_sep_by_space: int, p_sign_posn: int, n_sign_posn: int, grouping: list<int>, \
+                 mon_grouping: array<int, int>}",
+            ),
+        ),
+        ("getimagesizefromstring", &getimagesize_shape),
+        ("getimagesize", &getimagesize_shape),
+        (
+            "stream_context_get_params",
+            &types::parse_type_string("array{notification: string, options: array<mixed>}"),
+        ),
+        (
+            "stream_get_meta_data",
+            &types::parse_type_string(
+                "array{timed_out: bool, blocked: bool, eof: bool, unread_bytes: int, \
+                 stream_type: string, wrapper_type: string, wrapper_data: mixed, mode: string, \
+                 seekable: bool, uri?: string, mediatype?: string, base64?: bool, \
+                 crypto?: array{protocol: string, cipher_name: string, cipher_bits: int, \
+                 cipher_version: string, alpn_protocol?: string}}",
+            ),
+        ),
+        (
+            "error_get_last",
+            &types::parse_type_string(
+                "?array{type: int, message: string, file: string, line: int}",
+            ),
+        ),
+        (
+            "proc_get_status",
+            &types::parse_type_string(
+                "array{command: string, pid: int, running: bool, signaled: bool, stopped: bool, \
+                 exitcode: int, termsig: int, stopsig: int}|false",
+            ),
+        ),
+        (
+            "time_nanosleep",
+            &types::parse_type_string(
+                "array{seconds: 0|positive-int, nanoseconds: 0|positive-int}|bool",
+            ),
+        ),
+        ("pathinfo", &types::parse_type_string("array|string")),
+    ];
+    for (name, sig) in stubs.iter_mut() {
+        if let Some((_, shape)) = patches.iter().find(|(n, _)| n == name) {
+            sig.return_type = (*shape).clone();
+        }
+    }
+}
+
 /// All signatures generated from the vendored phpstorm-stubs sources,
 /// merged (first occurrence wins). A few functions are declared more than
 /// once across the corpus (e.g. a version-conditional pair of signatures
@@ -211,6 +406,7 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
             patch_array_multisort_by_ref(&mut result);
             patch_debug_backtrace(&mut result);
             patch_usleep(&mut result);
+            patch_functionmap_array_shapes(&mut result);
             result
         });
     CACHE.clone()
