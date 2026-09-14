@@ -377,8 +377,8 @@ impl Registry {
 
     /// Same as `lookup_method_with_owner`, but starts the walk at
     /// `class`'s own parents rather than `class` itself - used for
-    /// override-compatibility checking (Finding 50), which needs the
-    /// signature a method is overriding, not the overriding one itself.
+    /// override-compatibility checking, which needs the signature a
+    /// method is overriding, not the overriding one itself.
     pub fn lookup_ancestor_method_with_owner(
         &self,
         class: &str,
@@ -394,38 +394,31 @@ impl Registry {
 
     /// A faithful port of real PHPStan's own
     /// `MethodPrototypeFinder::findPrototype` priority order - used
-    /// **only** by `check_one_method_
-    /// override`'s own Liskov-compatibility ancestor lookup, not a
-    /// replacement for `lookup_ancestor_method_with_owner`'s other call
-    /// sites (runtime-dispatch/purity questions, a different question
-    /// than "what governs override compatibility"). A plain
+    /// **only** by `check_one_method_override`'s Liskov-compatibility
+    /// ancestor lookup, not a replacement for
+    /// `lookup_ancestor_method_with_owner`'s other call sites
+    /// (runtime-dispatch/purity questions). A plain
     /// `extends.iter().chain(implements.iter())` walk would get this
-    /// wrong: an *immediately*-implemented interface's
-    /// own native declaration always wins over an `extends` parent's
-    /// (checked first here, opposite of the old order), and a used
-    /// trait's own **abstract** declaration wins over the `extends`
-    /// parent too when no immediate interface declares the method (the
-    /// old walk never consulted a trait's own abstract declaration for
-    /// this purpose at all - only as a completely separate boolean for
-    /// the `#[Override]`-fatal check, `trait_declares_abstract_method`
-    /// just above).
+    /// wrong: an *immediately*-implemented interface's own native
+    /// declaration always wins over an `extends` parent's, and a used
+    /// trait's **abstract** declaration wins over the `extends` parent
+    /// too when no immediate interface declares the method.
+    ///
     /// Returns `(owner, sig, check_visibility)` - `check_visibility` is
     /// `false` **only** for a trait-abstract-sourced prototype (step 2
     /// below), mirroring real `MethodPrototypeFinder::findPrototype`'s
-    /// own three-element-tuple return exactly (confirmed by reading the
-    /// full method, not assumed): its interface branch and its `extends`-
-    /// parent branch both return `true` for this flag, but its trait
-    /// branch explicitly returns `false`. This matters because real PHP
-    /// itself does **not** enforce visibility-widening compatibility
-    /// between a trait's own `abstract` method declaration and the
-    /// concrete method that fulfills it (confirmed live: `trait T {
-    /// abstract protected function f(); } class C { use T; private
-    /// function f() {} }` compiles with no error) - a real, unconditional
-    /// fatal error for the interface/extends cases, but not this one.
-    /// Confirmed real corpus false positive without this distinction:
-    /// Symfony's own `AmpResponse::schedule()` (`private`) fulfilling
-    /// `TransportResponseTrait`'s own `abstract protected static function
-    /// schedule()`.
+    /// three-element-tuple return: its interface and `extends`-parent
+    /// branches both return `true`, but its trait branch returns
+    /// `false`. This matters because real PHP does **not** enforce
+    /// visibility-widening compatibility between a trait's `abstract`
+    /// method declaration and the concrete method that fulfills it
+    /// (`trait T { abstract protected function f(); } class C { use T;
+    /// private function f() {} }` compiles with no error) - a real,
+    /// unconditional fatal error for the interface/extends cases, but
+    /// not this one (real shape: Symfony's own
+    /// `AmpResponse::schedule()` (`private`) fulfilling
+    /// `TransportResponseTrait`'s own
+    /// `abstract protected static function schedule()`).
     pub fn find_method_signature_prototype(
         &self,
         class: &str,
@@ -434,22 +427,19 @@ impl Registry {
         let info = self.classes.get(class)?;
         // 1. Immediately-implemented interfaces - walks each interface's
         //    *own* ancestor chain too (`lookup_method_with_owner`, not a
-        //    bare `.methods.get`), not just its own direct declaration:
-        //    confirmed real corpus false positive otherwise (Piwigo's own
+        //    bare `.methods.get`), not just its own direct declaration
+        //    (real shape: Piwigo's own
         //    `ExtensionInterface extends SubscriberInterface`, where
         //    `subscribedEvents()` is declared only on the *grandparent*
-        //    interface - a class `implements ExtensionInterface` alone
-        //    still genuinely overrides it, and real PHPStan doesn't fail
-        //    to see that either).
+        //    interface).
         for iface in &info.implements {
             if let Some((owner, sig)) = self.lookup_method_with_owner(iface, method) {
                 return Some((owner, sig, true));
             }
         }
-        // 2. A used trait's own abstract declaration (this project doesn't
-        //    gate override-compatibility checks on a configured PHP
-        //    version elsewhere in this file either, so unconditional here
-        //    too - real PHPStan's own equivalent gate,
+        // 2. A used trait's own abstract declaration - unconditional,
+        //    matching this file's other override-compatibility checks
+        //    (real PHPStan's own equivalent gate,
         //    `supportsAbstractTraitMethods`, is PHP 8.0+, a bar every
         //    realistic target version already clears).
         for used in &info.uses {
@@ -472,17 +462,17 @@ impl Registry {
         None
     }
 
-    /// `@phpstan-consistent-constructor`'s own ancestor walk - real
-    /// PHPStan's `ConsistentConstructorHelper::findConsistentConstructor`,
-    /// transcribed (confirmed directly, `vendor/phpstan-src`): starting at
-    /// `class`'s own *parent* (not `class` itself - matches the real
-    /// rule's own call site, which already has the child's own method in
-    /// hand and is looking for what it's being held *to*), walks up
-    /// `extends` until an ancestor tagged `@phpstan-consistent-constructor`
-    /// is found, returning that ancestor's own `__construct` - or `None`
-    /// if the chain ends (or cycles - bounded by `self.classes.len()`,
-    /// same guard `Registry::flatten_traits`'s own cycle protection uses)
-    /// with no tagged ancestor at all, meaning no check applies, real
+    /// `@phpstan-consistent-constructor`'s own ancestor walk,
+    /// transcribed from real PHPStan's
+    /// `ConsistentConstructorHelper::findConsistentConstructor`: starting
+    /// at `class`'s own *parent* (not `class` itself - the real rule's
+    /// call site already has the child's own method in hand and is
+    /// looking for what it's being held *to*), walks up `extends` until
+    /// an ancestor tagged `@phpstan-consistent-constructor` is found,
+    /// returning that ancestor's own `__construct` - or `None` if the
+    /// chain ends (or cycles - bounded by `self.classes.len()`, same
+    /// guard `Registry::flatten_traits`'s cycle protection uses) with no
+    /// tagged ancestor at all, meaning no check applies, real
     /// PHP's own default.
     ///
     /// Deliberately doesn't synthesize a zero-parameter dummy constructor
