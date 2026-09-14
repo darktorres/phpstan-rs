@@ -28,16 +28,13 @@ fn parse_version(s: &str) -> Option<(u32, u32)> {
 /// `LanguageLevelTypeAware(['V.V' => 'TYPE', ...], default: 'TYPE')`
 /// attribute's raw text (including its own `#[...` wrapper - callers
 /// don't need to trim it first, only `default:`'s presence and the
-/// quoted pairs before it matter). This project's own established
-/// "assume the modern/open-ended interpretation" precedent (already used
-/// for `#[PhpStormStubsElementAvailable]`'s closed-range parameter
-/// dropping) - real code being checked is running some real, current PHP
-/// version, so the highest-versioned declared type is the one actually
-/// in effect. A version key that fails to parse as `major.minor` is
-/// skipped, not fatal to the rest of the scan. Falls back to `default:`'s
-/// own value only when no version pair parsed at all (shouldn't happen -
-/// every real occurrence has at least one - but `default:` is always
-/// present regardless, confirmed against the full vendored corpus).
+/// quoted pairs before it matter). Assumes the modern/open-ended
+/// interpretation: real code being checked is running some real, current
+/// PHP version, so the highest-versioned declared type is the one
+/// actually in effect. A version key that fails to parse as
+/// `major.minor` is skipped, not fatal to the rest of the scan. Falls
+/// back to `default:`'s own value only when no version pair parsed at
+/// all.
 fn extract_modern_type(raw: &str) -> Option<String> {
     let (array_part, default_part) = match raw.find("default:") {
         Some(idx) => (&raw[..idx], Some(&raw[idx + "default:".len()..])),
@@ -84,14 +81,13 @@ pub(crate) fn append_return_type_override(doc: &str, override_ty: &str) -> Strin
     }
 }
 
-/// Phase 32 Finding B: the parameter-position sibling of
-/// `append_return_type_override` - splices a fresh `@param <override>
-/// $<name>` line into `doc` right before its closing `*/`, so
-/// `resolve_type`'s own "docblock wins" priority (each `@param` tag
-/// matched by name, last one wins - see `docblock::parse`'s
-/// `HashMap::insert`) makes the modernization override win over a stale
-/// legacy `@param` tag for the same parameter, without touching
-/// `resolve_type`'s general priority rule at all.
+/// The parameter-position sibling of `append_return_type_override` -
+/// splices a fresh `@param <override> $<name>` line into `doc` right
+/// before its closing `*/`, so `resolve_type`'s "docblock wins" priority
+/// (each `@param` tag matched by name, last one wins) makes the
+/// modernization override win over a stale legacy `@param` tag for the
+/// same parameter, without touching `resolve_type`'s general priority
+/// rule at all.
 pub(crate) fn append_param_type_override(doc: &str, name: &str, override_ty: &str) -> String {
     match doc.rfind("*/") {
         Some(idx) => format!(
@@ -103,8 +99,8 @@ pub(crate) fn append_param_type_override(doc: &str, name: &str, override_ty: &st
     }
 }
 
-/// Phase 37: the index one past the last token in `tokens` that isn't
-/// part of a trailing, complete `#[Attr(...)]` group - zero or more such
+/// The index one past the last token in `tokens` that isn't part of a
+/// trailing, complete `#[Attr(...)]` group - zero or more such
 /// groups are skipped back over, in case several are stacked
 /// (`#[Pure] #[LanguageLevelTypeAware(...)]`, the real phpstorm-stubs
 /// `substr()` shape this exists for). Depth-counts backward the same way
@@ -158,8 +154,8 @@ impl<'a> Lexer<'a> {
     /// closed-range, no-default `$arrays` one, side by side with the
     /// modern variadic `array ...$arrays`, both meant to represent the
     /// same conceptual parameter across two PHP-version eras, never both
-    /// present on one real install. A plain attribute skip (this project's
-    /// treatment of every other attribute, none of which carry
+    /// present on one real install. A plain attribute skip (this
+    /// project's treatment of every other attribute, none of which carry
     /// information any checker feature here consumes) would leave that
     /// superseded parameter in the token stream as an ordinary,
     /// permanently-required one, miscounting the function's real minimum
@@ -181,10 +177,7 @@ impl<'a> Lexer<'a> {
     /// shape: `DateTimeImmutable::__construct`'s `to: '8.2'`/`from:
     /// '8.3'` pair) is checked before attempting the parameter-fragment
     /// scan at all, via `upcoming_is_function_declaration` - see
-    /// `skip_whole_versioned_declaration`'s own doc comment for that
-    /// case (Round 15 of the Piwigo corpus cleanup - previously left
-    /// completely untouched, wrongly letting a superseded declaration's
-    /// return type merge into the modern one's).
+    /// `skip_whole_versioned_declaration`'s own doc comment for that case.
     pub(crate) fn skip_stub_availability_attribute(&mut self) {
         self.pos += "#[PhpStormStubsElementAvailable(".len();
         let attr_args_start = self.pos;
@@ -210,18 +203,16 @@ impl<'a> Lexer<'a> {
         if !is_closed_range {
             return;
         }
-        // Round 15 of the Piwigo corpus cleanup: this same attribute also
-        // gates a *whole* function/method declaration (real shape:
-        // `version_compare()`'s own two full declarations, one
-        // `to: '7.4'` returning `int|bool|null`, one `from: '8.0'`
-        // returning `int|bool`; `DateTimeImmutable::__construct`'s
-        // `to: '8.2'`/`from: '8.3'` pair) - previously left completely
-        // untouched (this function's own doc comment used to document
-        // that as deliberate), so both declarations reached the parser
-        // as ordinary, unconditional signatures and got unioned together
-        // by the registry's own "second unconditional declaration merges
-        // onto the first" real-overload handling, wrongly reintroducing
-        // the pre-8.0 `null` return into a target this project otherwise
+        // This same attribute also gates a *whole* function/method
+        // declaration (real shape: `version_compare()`'s own two full
+        // declarations, one `to: '7.4'` returning `int|bool|null`, one
+        // `from: '8.0'` returning `int|bool`; `DateTimeImmutable::
+        // __construct`'s `to: '8.2'`/`from: '8.3'` pair). Left untouched,
+        // both declarations would reach the parser as ordinary,
+        // unconditional signatures and get unioned together by the
+        // registry's "second unconditional declaration merges onto the
+        // first" real-overload handling, wrongly reintroducing the
+        // pre-8.0 `null` return into a target this project otherwise
         // always treats as PHP 8.0+. A closed range (`to:` - superseded
         // on the modern PHP version this project models) gating a whole
         // declaration should leave no trace at all, the same principle
@@ -411,15 +402,12 @@ impl<'a> Lexer<'a> {
             // syntax like `TYPE[]`), an injected parameter override
             // becomes real *native* type-hint tokens, consumed by the
             // parser's native `parse_type_hint` - which has no notion of
-            // `[]` shorthand at all. Real corpus proof this isn't
-            // hypothetical: `strip_tags()`'s own `#[LanguageLevelTypeAware(
-            // ["7.4" => "string[]|string|null"], ...)]` parameter crashed
-            // the parser outright before this guard existed. None of this
-            // pass's diagnosed parameter cases (`finfo`, `GdFont|int`,
-            // `PgSql\Connection`) use `[]` shorthand, so skipping this
-            // shape entirely - falling back to today's existing "leave it
-            // alone" behavior - costs nothing evidenced, and is far safer
-            // than guessing at a native-hint-compatible rewrite.
+            // `[]` shorthand at all: `strip_tags()`'s own
+            // `#[LanguageLevelTypeAware(["7.4" => "string[]|string|null"],
+            // ...)]` parameter would crash the parser outright without
+            // this guard. Skipping this shape entirely (falling back to
+            // the existing "leave it alone" behavior) is far safer than
+            // guessing at a native-hint-compatible rewrite.
             if !override_ty.contains(['[', ']']) {
                 let tokens: Vec<Token> = Lexer::new_in_php(&override_ty)
                     .tokenize()
@@ -429,7 +417,7 @@ impl<'a> Lexer<'a> {
                 if !tokens.is_empty() {
                     self.pending_param_type_tokens = Some(tokens.clone());
                 }
-                // Finding B: also queue a doc-splice fallback, keyed by the
+                // Also queue a doc-splice fallback, keyed by the
                 // parameter's own name - a no-op if there's no enclosing
                 // doc comment to find, but the only way to beat a
                 // competing legacy `@param` tag for this same name when

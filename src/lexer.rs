@@ -26,64 +26,62 @@ pub struct Lexer<'a> {
     // itself skips whitespace *and* lexes in one call.
     last_token_start: usize,
     // `line_col_at`'s incremental cache: the last byte offset it was
-    // asked to convert, and the `Position` that came out. Real, not
-    // theoretical, motivation: a naive "recount every character from the
-    // line's own start" implementation is O(line length) *per call* -
-    // fine for ordinary code, but a real file in this project's own
-    // Piwigo/vendor test corpus (`amphp/hpack`'s generated Huffman lookup
-    // table) has a single line 1.25 million characters long. With
-    // thousands of tokens on that one line, the naive approach is a real
-    // O(line length x tokens on it) blowup - measured hanging for
-    // minutes on a file that used to check in well under a second.
-    // `tokenize_with_spans` calls `line_col_at` with strictly increasing
-    // byte offsets (its whole point is a linear scan forward), so caching
-    // the last conversion and only counting the *delta* since then turns
-    // the pathological line back into O(line length) total, not squared -
-    // and it's never wrong, only sometimes not the fast path: a request
-    // for an earlier byte offset, or one on a different line, still gets
-    // a fully correct (just not delta-accelerated) recomputation.
+    // asked to convert, and the `Position` that came out. Needed because
+    // a naive "recount every character from the line's own start"
+    // implementation is O(line length) *per call* - fine for ordinary
+    // code, but a real file (a generated Huffman lookup table) can have a
+    // single line over a million characters long, and thousands of
+    // tokens on that one line turns the naive approach into a real
+    // O(line length x tokens on it) blowup. `tokenize_with_spans` calls
+    // `line_col_at` with strictly increasing byte offsets (its whole
+    // point is a linear scan forward), so caching the last conversion and
+    // only counting the delta since then turns the pathological line back
+    // into O(line length) total, not squared - and it's never wrong, only
+    // sometimes not the fast path: a request for an earlier byte offset,
+    // or one on a different line, still gets a fully correct (just not
+    // delta-accelerated) recomputation.
     pos_cache: (usize, Position),
-    // Phase 24: set by `skip_language_level_type_aware_attribute` when it
-    // finds a return-type-gating `#[LanguageLevelTypeAware(...)]` -
+    // Set by `skip_language_level_type_aware_attribute` when it finds a
+    // return-type-gating `#[LanguageLevelTypeAware(...)]` -
     // `tokenize_with_spans` checks this right after the `next_token()`
     // call that set it (before pushing that call's own token) and, if
     // set, rewrites the immediately-preceding `Token::DocComment` to
     // carry the modern type instead of the stub's stale one.
     pending_return_type_override: Option<String>,
-    // Phase 24: the parameter-gating sibling of the field above - set
-    // when the attribute instead gates a parameter (`finfo_file`'s
+    // The parameter-gating sibling of the field above - set when the
+    // attribute instead gates a parameter (`finfo_file`'s
     // `#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')]
     // $finfo`). `tokenize_with_spans` inserts these as real synthetic
     // tokens right before the upcoming `$name` token, since a parameter
     // has no docblock tag guaranteed to exist for it the way a function's
     // one-per-signature `@return` line does.
     pending_param_type_tokens: Option<Vec<Token>>,
-    // Phase 32 Finding B: `pending_param_type_tokens` alone loses to a
-    // competing legacy `@param` docblock tag (`resolve_type` treats a
-    // matching doc tag as authoritative over the native hint) - real
-    // shape: `ini_set`'s `@param string $value` next to a native
+    // `pending_param_type_tokens` alone loses to a competing legacy
+    // `@param` docblock tag (`resolve_type` treats a matching doc tag as
+    // authoritative over the native hint) - real shape: `ini_set`'s
+    // `@param string $value` next to a native
     // `#[LanguageLevelTypeAware(['8.1' => 'string|int|float|bool|null'],
     // default: 'string')] $value`. Set alongside
     // `pending_param_type_tokens` to (parameter name, override type);
     // `tokenize_with_spans` searches `tokens` backward for the nearest
     // enclosing `Token::DocComment` and splices a fresh `@param` line onto
     // it - mirroring `pending_return_type_override`'s own `@return`
-    // splice, but needing its own field since a parameter override, unlike
-    // a return override, isn't found immediately after the doc comment
-    // that owns it (other parameters/attributes/commas sit in between),
-    // so the backward search can only happen where `tokens` itself lives -
-    // `tokenize_with_spans`'s own loop, not this lexer's inner methods.
+    // splice, but needing its own field since a parameter override,
+    // unlike a return override, isn't found immediately after the doc
+    // comment that owns it (other parameters/attributes/commas sit in
+    // between), so the backward search can only happen where `tokens`
+    // itself lives - `tokenize_with_spans`'s own loop, not this lexer's
+    // inner methods.
     pending_param_doc_override: Option<(String, String)>,
-    // Phase 48 follow-up (item 6): the just-lexed keyword's own original
-    // source-text spelling, stashed out of band the same way the three
-    // `pending_*` fields above already do for unrelated data -
-    // `Token::Keyword` itself carries only the keyword's canonical
-    // (always-lowercase) spelling, never the raw bytes, so a keyword-
-    // shaped identifier (`class Enum { ... }`, a real vendored class
-    // literally named the same as the `enum` keyword) would otherwise
-    // have its true declared-name case lost the moment it's lexed.
-    // `tokenize_with_spans` reads this right after each `next_token()`
-    // call, exactly like `last_token_start` above.
+    // The just-lexed keyword's own original source-text spelling, stashed
+    // out of band the same way the three `pending_*` fields above already
+    // do for unrelated data - `Token::Keyword` itself carries only the
+    // keyword's canonical (always-lowercase) spelling, never the raw
+    // bytes, so a keyword-shaped identifier (`class Enum { ... }`, a real
+    // vendored class literally named the same as the `enum` keyword)
+    // would otherwise have its true declared-name case lost the moment
+    // it's lexed. `tokenize_with_spans` reads this right after each
+    // `next_token()` call, exactly like `last_token_start` above.
     pending_keyword_raw: Option<String>,
 }
 
@@ -160,12 +158,11 @@ impl<'a> Lexer<'a> {
 
     /// Converts an absolute byte offset into a 1-indexed line/column -
     /// `col` counts UTF-8 *characters* from the line's own start, not raw
-    /// bytes (a real, demonstrated need: real PHP source, including this
-    /// project's own real-corpus test fixtures, has multi-byte UTF-8
-    /// inside actual code, not just comments - a byte-offset column would
-    /// silently overshoot the true character position on every such
-    /// line). The extra decoding cost is bounded to one line's own
-    /// prefix, not the whole file.
+    /// bytes: real PHP source has multi-byte UTF-8 inside actual code,
+    /// not just comments, so a byte-offset column would silently
+    /// overshoot the true character position on every such line. The
+    /// extra decoding cost is bounded to one line's own prefix, not the
+    /// whole file.
     fn line_idx_at(&self, byte_pos: usize) -> usize {
         match self.line_starts.binary_search(&byte_pos) {
             Ok(i) => i,
@@ -220,23 +217,19 @@ impl<'a> Lexer<'a> {
             let tok = self.next_token();
             let keyword_raw = self.pending_keyword_raw.take();
             if let Some(override_ty) = self.pending_return_type_override.take() {
-                // Phase 37: a plain `tokens.last_mut()` check assumed the
-                // doc comment was always the immediately-preceding token -
-                // true before this phase (a generic `#[Attr]` group was
-                // skipped entirely, never becoming a token at all), false
-                // now that one is real, individually-tokenized content:
-                // real corpus proof this isn't hypothetical, phpstorm-
-                // stubs' own `substr()` stub is `/** @return string|false
-                // */ #[Pure] #[LanguageLevelTypeAware(...)] function
-                // substr(...) {}` - `#[Pure]` sits directly between the
-                // doc comment and the special-cased attribute that
-                // actually sets `pending_return_type_override`, hiding the
-                // doc comment from a bare `tokens.last_mut()` look and
-                // silently dropping the override (leaving `substr()` at
-                // its stale pre-8.0 `string|false` return type instead of
-                // the intended modern `string`). Skipping back past any
-                // such trailing attribute group(s) first restores the
-                // original adjacency check's own intent.
+                // A plain `tokens.last_mut()` check would assume the doc
+                // comment is always the immediately-preceding token - not
+                // true once a generic `#[Attr]` group is a real,
+                // individually-tokenized token: phpstorm-stubs' own
+                // `substr()` stub is `/** @return string|false */ #[Pure]
+                // #[LanguageLevelTypeAware(...)] function substr(...) {}`
+                // - `#[Pure]` sits directly between the doc comment and
+                // the special-cased attribute that actually sets
+                // `pending_return_type_override`, hiding the doc comment
+                // from a bare `tokens.last_mut()` look and silently
+                // dropping the override. Skipping back past any such
+                // trailing attribute group(s) first restores the intended
+                // adjacency.
                 let end = skip_trailing_attribute_groups(&tokens);
                 if let Some((Token::DocComment(doc), _, _)) =
                     end.checked_sub(1).and_then(|i| tokens.get_mut(i))
@@ -259,8 +252,8 @@ impl<'a> Lexer<'a> {
                 }
             }
             if let Some((name, override_ty)) = self.pending_param_doc_override.take() {
-                // Finding B: unlike a return override (found immediately
-                // after the doc comment that owns it, via `tokens.last_mut()`
+                // Unlike a return override (found immediately after the
+                // doc comment that owns it, via `tokens.last_mut()`
                 // above), a parameter override can be many tokens past its
                 // own enclosing doc comment (other parameters, attributes,
                 // commas) - so this searches backward through everything
@@ -339,12 +332,12 @@ impl<'a> Lexer<'a> {
             return Token::Semicolon;
         }
 
-        // Phase 37: a general attribute group - `skip_whitespace_and_
-        // comments` deliberately leaves this un-consumed (see its own
-        // comment) so it reaches here as a real token instead of being
-        // skipped. The two special-cased stub attributes never reach this
-        // point at all - `skip_whitespace_and_comments` fully consumes
-        // them itself before this check ever runs.
+        // A general attribute group - `skip_whitespace_and_comments`
+        // deliberately leaves this un-consumed (see its own comment) so
+        // it reaches here as a real token instead of being skipped. The
+        // two special-cased stub attributes never reach this point at
+        // all - `skip_whitespace_and_comments` fully consumes them
+        // itself before this check ever runs.
         if self.starts_with("#[") {
             self.pos += 2;
             return Token::AttributeStart;
@@ -392,9 +385,9 @@ impl<'a> Lexer<'a> {
         if is_ident_start(c) {
             let span = self.lex_ident_span();
             if let Some(kw) = Keyword::try_from_bytes(&self.src[span.clone()]) {
-                // Phase 48 follow-up (item 6): stash the raw source
-                // spelling out of band - `Token::Keyword` itself carries
-                // only `kw`'s own canonical (always-lowercase) form.
+                // Stash the raw source spelling out of band -
+                // `Token::Keyword` itself carries only `kw`'s own
+                // canonical (always-lowercase) form.
                 self.pending_keyword_raw =
                     Some(String::from_utf8_lossy(&self.src[span]).into_owned());
                 return Token::Keyword(kw);
@@ -467,10 +460,10 @@ impl<'a> Lexer<'a> {
     /// (the two special-cased stub attributes' own argument/whole-
     /// declaration skips, and `{$...}` complex-interpolation scanning)
     /// rather than duplicating the same fix independently in each. A
-    /// general `#[Attribute(...)]` group no longer needs one of its own at
-    /// all since Phase 37 - it's real tokens now, so a string literal
-    /// inside its arguments is already just one ordinary token, immune to
-    /// this problem by construction.
+    /// general `#[Attribute(...)]` group needs no such handling: it's
+    /// real tokens now, so a string literal inside its arguments is
+    /// already just one ordinary token, immune to this problem by
+    /// construction.
     fn skip_string_literal(&mut self) {
         self.pos = skip_string_literal_bytes(self.src, self.pos);
     }
@@ -503,18 +496,17 @@ impl<'a> Lexer<'a> {
                         // this attribute exists to apply.
                         self.skip_language_level_type_aware_attribute("#[PhpVersionAware(");
                     } else if self.starts_with("#[") {
-                        // Phase 37: a real, general `#[Attribute(...)]`
-                        // group is no longer thrown away here - only the
-                        // two special-cased stub-generation attributes
-                        // above still get raw-text treatment. Breaking out
-                        // of this whitespace/comment loop (without
-                        // consuming `#[` itself) hands control back to
-                        // `next_token`, which emits a real `AttributeStart`
-                        // token for it and lets ordinary tokenization
-                        // (identifiers, `(`, literals, `,`, `]`, ...) take
-                        // over from there - real code, so no separate
-                        // string-aware bracket-depth counter is needed the
-                        // way the old raw-byte skip required: a string
+                        // A general `#[Attribute(...)]` group isn't
+                        // thrown away here - only the two special-cased
+                        // stub-generation attributes above get raw-text
+                        // treatment. Breaking out of this whitespace/
+                        // comment loop (without consuming `#[` itself)
+                        // hands control back to `next_token`, which emits
+                        // a real `AttributeStart` token for it and lets
+                        // ordinary tokenization (identifiers, `(`,
+                        // literals, `,`, `]`, ...) take over from there -
+                        // real code, so no separate string-aware
+                        // bracket-depth counter is needed: a string
                         // literal's own content becomes one real token
                         // regardless of what bracket-like bytes it
                         // contains.
@@ -690,19 +682,14 @@ impl<'a> Lexer<'a> {
         }
 
         // Dispatched by leading byte first, rather than a flat linear
-        // chain of `starts_with` prefix checks (the original shape) -
-        // every plain single-byte token (by far the most common class:
-        // `;`, `,`, `(`, `)`, `.`, ...) used to pay the full chain of
-        // failed checks before ever reaching the single-byte match below.
-        // Each byte arm keeps its own 3-char-before-2-char ordering
-        // intact wherever one prefix's checks could otherwise shadow a
-        // longer one sharing the same leading byte (e.g. `<=` is a real
-        // prefix of `<=>`, so `<=>` must still be checked first under
-        // `b'<'`) - every such relationship was verified against the
-        // original linear order before regrouping. Found and fixed via a
-        // perf-optimization investigation workflow; empirically measured
-        // (a standalone probe over this repo's own vendored corpus)
-        // at ~6-7% of `tokenize_with_spans`'s own per-file cost.
+        // chain of `starts_with` prefix checks: every plain single-byte
+        // token (by far the most common class: `;`, `,`, `(`, `)`, `.`,
+        // ...) would otherwise pay the full chain of failed checks before
+        // ever reaching the single-byte match below. Each byte arm keeps
+        // its own 3-char-before-2-char ordering intact wherever one
+        // prefix's checks could otherwise shadow a longer one sharing the
+        // same leading byte (e.g. `<=` is a real prefix of `<=>`, so
+        // `<=>` must still be checked first under `b'<'`).
         match self.peek() {
             b'<' => {
                 if self.starts_with("<=>") {
