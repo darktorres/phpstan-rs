@@ -1,5 +1,5 @@
-//! Phase 46: `regexp.pattern` - a malformed PCRE pattern literal, real
-//! PHPStan's own always-on `RegularExpressionPatternRule`
+//! `regexp.pattern` - a malformed PCRE pattern literal, real PHPStan's
+//! own always-on `RegularExpressionPatternRule`
 //! (`#[RegisteredRule(level: 0)]`). Real PHPStan doesn't reimplement PCRE
 //! grammar checking either - it validates by literally calling
 //! `Nette\Utils\Strings::match('', $pattern)` (a thin wrapper over real

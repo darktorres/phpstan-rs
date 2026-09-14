@@ -1,9 +1,8 @@
-//! Phase 67/18: a purely declarative, config-driven "restricted symbols"
-//! list - the closest buildable analog, for this project's own
-//! constraints (no NEON, no code-plugin mechanism - Phase 18, deliberately
-//! last), to real PHPStan's `RestrictedInternal*UsageExtension` family and
-//! the real, independently-popular third-party `spaze/phpstan-disallowed-
-//! calls` package (vendored transitively via `vendor/drupal`), which
+//! A purely declarative, config-driven "restricted symbols" list - the
+//! closest buildable analog, for this project's own constraints (no
+//! NEON, no code-plugin mechanism), to real PHPStan's
+//! `RestrictedInternal*UsageExtension` family and the real, independently
+//! popular third-party `spaze/phpstan-disallowed-calls` package, which
 //! implements exactly this shape: a plain parameter list banning specific
 //! functions/methods/properties/constants/classes project-wide with a
 //! custom message, zero plugin-class-writing required.
@@ -62,8 +61,8 @@ pub struct RestrictedSymbolEntry {
 /// `restricted_symbols` list - built once (`RestrictedSymbols::compile`),
 /// consulted at every real call/access site via `checker::restricted_
 /// symbol_usage`'s own fast-bail functions. Empty by default
-/// (`#[derive(Default)]`), so every ordinary corpus pays zero lookup cost
-/// beyond one `is_empty()` check per site.
+/// (`#[derive(Default)]`), so an unconfigured project pays zero lookup
+/// cost beyond one `is_empty()` check per site.
 #[derive(Debug, Default)]
 pub struct RestrictedSymbols {
     functions: FxHashMap<String, RestrictedSymbolEntry>,

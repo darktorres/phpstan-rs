@@ -1,10 +1,9 @@
 /// A single point in a source file, 1-indexed (matching editor convention).
 /// `col` counts UTF-8 characters, not raw bytes - real PHP source can and
-/// does contain multi-byte content inside actual code (not just comments;
-/// found the hard way against the real Piwigo corpus this project verifies
-/// against - string literals with em-dashes/curly quotes/accented
-/// characters), and a byte-offset column would silently overshoot the true
-/// character position on every such line.
+/// does contain multi-byte content inside actual code, not just comments
+/// (string literals with em-dashes/curly quotes/accented characters), and
+/// a byte-offset column would silently overshoot the true character
+/// position on every such line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct Position {
@@ -15,9 +14,9 @@ pub struct Position {
 /// A source range - real LSP `range`s and most compiler-style diagnostics
 /// want both a start and an end, not just a single anchor point.
 ///
-/// `Hash` (Phase 17 follow-up): `Locals`'s own declaration-provenance
-/// tracking uses a `Span` as a `HashSet` element, one entry per candidate
-/// declaration site for a variable.
+/// `Hash`: `Locals`'s own declaration-provenance tracking uses a `Span`
+/// as a `HashSet` element, one entry per candidate declaration site for
+/// a variable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub start: Position,

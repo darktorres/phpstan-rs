@@ -5,8 +5,8 @@ use crate::ast::{Stmt, StmtKind};
 use crate::registry::NameContext;
 use crate::token::Span;
 
-/// Phase 17: a symbol's own declaration site, name-keyed the same way
-/// `Registry` is, but carrying `(PathBuf, Span)` instead of type
+/// A symbol's own declaration site, name-keyed the same way `Registry`
+/// is, but carrying `(PathBuf, Span)` instead of type
 /// information - `Registry` itself has no file-path concept at all (used
 /// in many path-agnostic contexts: stubs, tests, `demo`), so this lives
 /// here, alongside `Project`'s own per-file bookkeeping, instead.
@@ -23,7 +23,7 @@ pub(crate) struct DeclLocations {
 }
 
 impl DeclLocations {
-    /// Drops every entry this exact file previously contributed - mirrors
+    /// Drops every entry this exact file contributed - mirrors
     /// `Registry::remove_declarations`'s own by-name removal, using the
     /// identical `old.functions`/`old.classes` FQN lists `update_file`
     /// already collects for that call, so the two never disagree about
@@ -50,9 +50,7 @@ impl DeclLocations {
     /// Indexes every class/function/method/property/const declaration
     /// `stmts` contains, exactly mirroring `declared_names_with_context`'s
     /// own namespace/`use`/`if`/`Block` scoping (structured after it, not
-    /// sharing code with it - see this module's own doc comment on why a
-    /// new, purpose-built walker is used throughout Phase 17 rather than
-    /// generalizing an existing one).
+    /// sharing code with it, since the two serve different consumers).
     pub(crate) fn index(&mut self, stmts: &[Stmt], ctx: &mut NameContext, path: &Path) {
         for stmt in stmts {
             match &stmt.kind {
