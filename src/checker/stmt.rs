@@ -19,25 +19,21 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        // Phase 15 item (1), `UnreachableStatementRule`: investigated,
-        // corpus-verified, reverted, and now reinstated. The original
-        // revert's root cause - a variable reassigned inside a loop kept
-        // its pre-loop-entry type for the whole single-pass body check,
-        // so a later guard on it could wrongly narrow to `Type::Never`,
-        // read here as "this statement always terminates" - is fixed by
-        // Phase 55's fixed-point loop-body convergence (`converge_loop_
-        // body`). Real PHPStan's own equivalent (`UnreachableStatementRule`,
-        // `deadCode.unreachable`, level 4) reports exactly once per
-        // maximal unreachable run, at its first statement - matched here
-        // via `reported_unreachable`, gating further reports without
-        // gating further checking. Every statement is still run through
-        // `check_stmt` regardless - real PHPStan still fully analyzes
-        // code after an `UnreachableStatementNode` for every other rule,
-        // and this project's own corpus verification confirmed why:
-        // stopping early here silently dropped real, unrelated diagnostics
-        // that happened to sit in a since-dead branch (amphp/http-client's
-        // `Http1Parser::parse`, verified against an early, since-reverted
-        // version of this change that did stop).
+        // `UnreachableStatementRule`: relies on `converge_loop_body`'s
+        // fixed-point loop-body convergence so a variable reassigned
+        // inside a loop doesn't keep its pre-loop-entry type for the
+        // whole single-pass body check, which could wrongly narrow it to
+        // `Type::Never` and read here as "this statement always
+        // terminates." Real PHPStan's own equivalent
+        // (`UnreachableStatementRule`, `deadCode.unreachable`, level 4)
+        // reports exactly once per maximal unreachable run, at its first
+        // statement - matched here via `reported_unreachable`, gating
+        // further reports without gating further checking. Every
+        // statement is still run through `check_stmt` regardless - real
+        // PHPStan still fully analyzes code after an
+        // `UnreachableStatementNode` for every other rule, and stopping
+        // early here would silently drop real, unrelated diagnostics
+        // sitting in a since-dead branch.
         let mut reported_unreachable = false;
         for (i, stmt) in stmts.iter().enumerate() {
             self.check_stmt(stmt, locals, declared_return, label);
@@ -47,9 +43,7 @@ impl<'a> Checker<'a> {
                 // A labeled statement `goto`-targeted somewhere else in
                 // this same function is a real jump target, not dead
                 // code, whatever the statement immediately before it
-                // does - see `collect_goto_targets`'s own doc comment
-                // for the real corpus false positive this guards
-                // against.
+                // does - see `collect_goto_targets`'s own doc comment.
                 && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.contains(name))
             {
                 self.report(
@@ -83,10 +77,10 @@ impl<'a> Checker<'a> {
                 self.in_bare_statement_position = true;
                 self.check_expr(e, locals, label);
                 self.check_no_discard_statement(e, locals, label);
-                // Phase 41 stage 1: NoopRule's own supported slice - see
-                // `checker::noop`'s own module doc comment.
+                // NoopRule's own supported slice - see `checker::noop`'s
+                // module doc comment.
                 self.check_noop_statement(e, label);
-                // Phase 41/82: a bare call to a now-known-pure declaration.
+                // A bare call to a now-known-pure declaration.
                 self.check_pure_call_without_effect(e, locals, label);
                 // `assert($cond)` is a real, common narrowing idiom real
                 // PHPStan explicitly documents support for - if execution
@@ -103,29 +97,25 @@ impl<'a> Checker<'a> {
                 // (`\assert(...)`) keeps its leading backslash in
                 // `ExprKind::Name`, unlike ordinary call resolution - the
                 // same gap `apply_narrowing`'s own `ExprKind::Call` arm
-                // already fixed for `is_string`/`is_array`/etc (see its
-                // own comment). Confirmed by a real corpus false positive
-                // this exact miss caused: amphp/http-client's
-                // `FollowRedirects::removeDotSegments`, whose loop opens
-                // every iteration with `\assert(\is_string($input));` -
-                // written with the fully-qualified form throughout (a
-                // common defensive-global-namespace style), so the
-                // narrowing this whole block exists for never ran at all.
+                // already fixes for `is_string`/`is_array`/etc (see its
+                // own comment), needed since a common defensive-global-
+                // namespace style writes `\assert(\is_string($input))`
+                // throughout, which would otherwise never narrow.
                 //
-                // Phase 55 follow-up: `assert($cond) && sideEffect();` (a
-                // real, common idiom - the assertion doubling as a guard
-                // clause for whatever follows) needs the identical
-                // narrowing, not just a bare `assert($cond);` alone -
-                // `bare_assert_condition`'s own doc comment has the
-                // "which chain position is actually safe" reasoning.
+                // `assert($cond) && sideEffect();` (the assertion
+                // doubling as a guard clause for whatever follows) needs
+                // the identical narrowing, not just a bare
+                // `assert($cond);` alone - `bare_assert_condition`'s own
+                // doc comment has the "which chain position is actually
+                // safe" reasoning.
                 if let Some(cond) = bare_assert_condition(e) {
                     self.apply_narrowing(cond, locals, true);
                 }
-                // Phase 27: PHPUnit's own narrowing-relevant assertions
+                // PHPUnit's own narrowing-relevant assertions
                 // (`self::assertIsString($x)`, `$this->assertNotNull($x)`)
-                // - the exact same "statement narrows unconditionally"
-                // shape as `assert($cond)` above, just per-assertion-name
-                // rather than a generic boolean condition.
+                // - the same "statement narrows unconditionally" shape as
+                // `assert($cond)` above, just per-assertion-name rather
+                // than a generic boolean condition.
                 match &e.kind {
                     ExprKind::MethodCall(_, method, args, _)
                     | ExprKind::StaticCall(_, method, args) => {
@@ -140,8 +130,8 @@ impl<'a> Checker<'a> {
                 // `FunctionSig` lookup instead of a hardcoded name table
                 // (see `FunctionSig::assert_if_true`'s own doc comment).
                 self.apply_bare_statement_assert_narrowing(e, locals);
-                // Phase 32 Finding K: a bare `$cond || neverReturningCall();`
-                // statement - PHP's classic "guard or die" idiom
+                // A bare `$cond || neverReturningCall();` statement -
+                // PHP's classic "guard or die" idiom
                 // (`$pos !== false || $this->ierror('Missing .', 400);`).
                 // `ierror(): never` is a real `never` return type; if
                 // execution reaches the statement *after* this one, the
@@ -161,11 +151,11 @@ impl<'a> Checker<'a> {
             }
             StmtKind::Return(Some(e)) => {
                 let actual = self.check_expr(e, locals, label);
-                // Phase 45 (item 11, 45A): real PHPStan pushes the actual
-                // returned value's own type onto its per-declaration
-                // "actually returned" accumulator here - never for a
-                // generator (`return $x;` inside one sets `Generator::
-                // getReturn()`, not this function's own return value).
+                // Real PHPStan pushes the actual returned value's type
+                // onto its per-declaration "actually returned"
+                // accumulator here - never for a generator (`return $x;`
+                // inside one sets `Generator::getReturn()`, not this
+                // function's own return value).
                 if !self.current_function_is_generator {
                     self.current_function_saw_explicit_return = true;
                     self.current_function_return_points.push(actual.clone());
@@ -175,26 +165,21 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(expected, c),
                         None => expected.clone(),
                     };
-                    // Phase 70.A follow-up: inside a real generator, a
-                    // `return $x;` statement's own value sets `Generator::
-                    // getReturn()` - it's checked against the declared
+                    // Inside a real generator, a `return $x;` statement's
+                    // value sets `Generator::getReturn()` - it's checked
+                    // against the declared
                     // `Generator<TKey, TValue, TSend, TReturn>`'s own
                     // TReturn, never against the whole `Generator<...>`
                     // type itself (that would always mismatch: no real
                     // `return` statement inside a generator body ever
-                    // produces an actual `Generator` object). A pre-
-                    // existing gap this project's own generator-exemption
-                    // convention already correctly applies to the bare-
-                    // `return;`/falls-off-the-end cases just below and in
-                    // `check_function` - `Return(Some(e))` was the one
-                    // case still missing it.
+                    // produces an actual `Generator` object).
                     let expected = if self.current_function_is_generator {
                         generator_template_param(&expected, self.registry, "TReturn")
                     } else {
                         expected
                     };
-                    // Phase 61: a `never`-typed function/method reaching
-                    // *any* `return` at all - value or bare - is its own
+                    // A `never`-typed function/method reaching any
+                    // `return` at all - value or bare - is its own
                     // dedicated real-PHPStan identifier/message
                     // (`return.never`, "should never return but return
                     // statement found"), not an ordinary type mismatch -
@@ -212,29 +197,20 @@ impl<'a> Checker<'a> {
                             "return.never",
                         );
                     } else if expected == Type::Void && actual != Type::Void {
-                        // Phase 61: same idea, one position over - a
-                        // `void` function returning an actual value is
+                        // A `void` function returning an actual value is
                         // real PHPStan's own dedicated `return.void`,
                         // not the generic mismatch path (`void` isn't a
                         // "wrong type" the way e.g. `string` vs `int`
                         // is - it's "no value was ever supposed to come
                         // back"). `actual != Type::Void` is a real,
-                        // necessary exception, not a defensive
-                        // afterthought: `return anotherVoidFn();`
+                        // necessary exception: `return anotherVoidFn();`
                         // delegating to another void-returning call is
                         // legal, common PHP (real PHPStan doesn't flag
                         // it either - a `void` function returning
-                        // *nothing new*, just handing back void-ness
-                        // itself, isn't "returning a value" at all).
-                        // Without this, every such delegation reported
-                        // the nonsensical "expected void, got void" -
-                        // a real corpus false positive this project's
-                        // own registry fix for conditional-function-
-                        // declaration arity tiebreaking (a top-10-bucket
-                        // scoping round) unmasked by finally resolving
-                        // `\RectorPrefix202608\trigger_deprecation(...)`
-                        // to its own real, correctly-`void`-typed
-                        // signature instead of leaving it unresolved.
+                        // nothing new, just handing back void-ness
+                        // itself, isn't "returning a value" at all) -
+                        // without it, every such delegation would report
+                        // the nonsensical "expected void, got void".
                         self.report(
                             label.to_string(),
                             format!("return type mismatch: expected void, got {actual}"),
@@ -264,24 +240,23 @@ impl<'a> Checker<'a> {
             // slip as forgetting to add a return value after an
             // early-exit guard clause).
             StmtKind::Return(None) => {
-                // Phase 45 (item 11, 45A): mirrors real PHPStan pushing
-                // `new VoidType()` for a bare `return;` - deliberately
-                // `Type::Void`, not `Type::Null` (an easy-to-get-wrong
-                // distinction: `Void` is a return-position-only marker
+                // Mirrors real PHPStan pushing `new VoidType()` for a
+                // bare `return;` - deliberately `Type::Void`, not
+                // `Type::Null` (`Void` is a return-position-only marker
                 // meaning "produced no value," while a too-wide check's
-                // own accumulated union needs to know that specifically,
-                // not conflate it with an actual `null` value).
+                // accumulated union needs to know that specifically, not
+                // conflate it with an actual `null` value).
                 if !self.current_function_is_generator {
                     self.current_function_saw_explicit_return = true;
                     self.current_function_return_points.push(Type::Void);
                 }
-                // A bare `return;` inside a generator (Finding 3) sets
+                // A bare `return;` inside a generator sets
                 // Generator::getReturn()'s own value, not this function's
                 // return value - real PHPStan never checks it against the
                 // declared Generator/Iterator/Traversable return type
-                // directly. Phase 61.B: it's still checked against the
-                // declared TReturn specifically, same as `check_function`'s
-                // own falls-off-the-end completeness check - a bare
+                // directly. It's still checked against the declared
+                // TReturn specifically, same as `check_function`'s
+                // falls-off-the-end completeness check - a bare
                 // `return;` sets `getReturn()` to `null`, a real mismatch
                 // when TReturn requires a concrete, non-nullable type.
                 let generator_treturn = self
@@ -304,10 +279,10 @@ impl<'a> Checker<'a> {
                             None => expected.clone(),
                         }
                     };
-                    // Phase 61: see the identical `return.never` special
-                    // case on `Return(Some(e))` just above - a bare
-                    // `return;` reaches this exact "never returns" claim
-                    // just as surely as one with a value does.
+                    // See the identical `return.never` special case on
+                    // `Return(Some(e))` just above - a bare `return;`
+                    // reaches this exact "never returns" claim just as
+                    // surely as one with a value does.
                     if expected == Type::Never {
                         self.report(
                             label.to_string(),
@@ -336,9 +311,9 @@ impl<'a> Checker<'a> {
                 for (i, e) in exprs.iter().enumerate() {
                     let ty = self.check_expr(e, locals, label);
                     self.check_echo_validity(&ty, i, e.span, label);
-                    // Phase 67/Phase 39 follow-up: `echo` implicitly
-                    // invokes `__toString()` on an object argument - see
-                    // `check_implicit_tostring_usage`'s own doc comment.
+                    // `echo` implicitly invokes `__toString()` on an
+                    // object argument - see
+                    // `check_implicit_tostring_usage`'s doc comment.
                     self.check_implicit_tostring_usage(&ty, e.span, label);
                 }
             }
@@ -401,10 +376,10 @@ impl<'a> Checker<'a> {
             // using it afterward isn't flagged as undefined.
             StmtKind::Global(names) => {
                 for name in names {
-                    // Phase 65: `$this` is real PHP's own implicitly-
-                    // bound reference, not a real global - "Cannot use
-                    // $this as global variable." is a real,
-                    // unconditional fatal error, confirmed directly.
+                    // `$this` is real PHP's own implicitly-bound
+                    // reference, not a real global - "Cannot use $this
+                    // as global variable." is a real, unconditional
+                    // fatal error.
                     if name == "this" {
                         self.report(
                             label.to_string(),
@@ -415,17 +390,15 @@ impl<'a> Checker<'a> {
                         );
                         continue;
                     }
-                    // Phase 17 follow-up: real, lexically-visible binding
-                    // syntax - a `global $x;` declares `$x` here, even
-                    // though this checker deliberately doesn't try to
-                    // link it back to any specific top-level assignment
-                    // (see this arm's own doc comment above) - `stmt.span`
-                    // is as precise an answer as the type side already
-                    // gives (`Mixed`, not a real inferred type either).
-                    // `or_insert`'s own "only if not already bound"
-                    // semantics carry over: `.declare` unconditionally
-                    // overwrites, so it's only called when there's
-                    // nothing here yet to overwrite.
+                    // A `global $x;` declares `$x` here, even though
+                    // this checker deliberately doesn't try to link it
+                    // back to any specific top-level assignment (see
+                    // this arm's doc comment above) - `stmt.span` is as
+                    // precise an answer as the type side already gives
+                    // (`Mixed`, not a real inferred type either).
+                    // `.declare` unconditionally overwrites, so it's
+                    // only called when there's nothing here yet to
+                    // overwrite.
                     if !locals.contains_key(name) {
                         self.probe_hit_at(stmt.span, &Type::Mixed);
                         locals.declare(name.clone(), Type::Mixed, stmt.span);
@@ -434,9 +407,8 @@ impl<'a> Checker<'a> {
             }
             StmtKind::StaticVar(vars) => {
                 for (name, default) in vars {
-                    // Phase 65: same idea as `global $this;` just above -
-                    // "Cannot use $this as static variable.", confirmed
-                    // directly.
+                    // Same idea as `global $this;` just above - "Cannot
+                    // use $this as static variable."
                     if name == "this" {
                         self.report(
                             label.to_string(),
@@ -452,9 +424,9 @@ impl<'a> Checker<'a> {
                         .map(|e| self.check_expr(e, locals, label))
                         .unwrap_or(Type::Mixed);
                     purge_stale_narrowing_for(locals, name);
-                    // Phase 17 follow-up: real declaration - no per-name
-                    // span exists on `StaticVar` (only the whole
-                    // statement's), same as `Global` just above.
+                    // Real declaration - no per-name span exists on
+                    // `StaticVar` (only the whole statement's), same as
+                    // `Global` just above.
                     self.probe_hit_at(stmt.span, &ty);
                     locals.declare(name.clone(), ty, stmt.span);
                     self.static_var_names.insert(name.clone());
@@ -462,14 +434,14 @@ impl<'a> Checker<'a> {
             }
             // `check_program`'s own top-level loop already handles a
             // top-level FunctionDecl/ClassDecl/EnumDecl by checking its
-            // body - but any of the same three declared *nested* inside a
-            // block (the extremely common `if (!function_exists('foo')) {
-            // function foo() {} }` polyfill idiom, or a class conditionally
-            // declared inside an if) used to fall into the wildcard arm
-            // below and never got its own body checked at all - it was
-            // indexed into the registry (so calls to it resolve), but
-            // silently exempt from every diagnostic, undefined-variable
-            // detection included. Mirrors check_program's handling.
+            // body - but any of the same three declared nested inside a
+            // block (the common `if (!function_exists('foo')) { function
+            // foo() {} }` polyfill idiom, or a class conditionally
+            // declared inside an if) also needs its body checked here,
+            // mirroring check_program's handling, or it would be indexed
+            // into the registry (so calls to it resolve) but silently
+            // exempt from every diagnostic, undefined-variable detection
+            // included.
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
@@ -503,20 +475,16 @@ impl<'a> Checker<'a> {
                 }
                 // A conditionally-declared trait (the common `if
                 // (version_compare(...)) { trait Foo {...} }`/`if
-                // (PHP_VERSION_ID ...) { trait Foo {...} }` shape - real
-                // corpus example, symfony/cache's own `Redis63ProxyTrait`)
-                // reaches this nested arm instead of `check_program`'s own
-                // top-level one, which already knows to dispatch a trait
-                // through `check_trait_methods` (Phase 13 Finding E) so
-                // its `$this->hostOnlyMethod()` calls are checked against
-                // a real using class, not standalone. This arm's own
-                // unconditional per-method loop below skipped that
-                // entirely, checking every trait method with `current_
-                // class` set to the *trait's own* name regardless - a
-                // real false positive (`$this->initializeLazyObject()`,
-                // provided by a sibling trait on the real host `RedisProxy`,
-                // not by `Redis63ProxyTrait` itself) invisible to a
-                // top-level-only trait but real for one declared here.
+                // (PHP_VERSION_ID ...) { trait Foo {...} }` shape)
+                // reaching this nested arm needs the same
+                // `check_trait_methods` dispatch `check_program`'s
+                // top-level walk uses, so its `$this->hostOnlyMethod()`
+                // calls are checked against a real using class, not
+                // standalone - an unconditional per-method loop here
+                // would instead check every trait method with
+                // `current_class` set to the trait's own name, wrongly
+                // flagging a method provided only by a sibling trait on
+                // the real host class.
                 if c.kind == ClassKind::Trait {
                     self.check_trait_methods(&fqn, c);
                 } else {
@@ -564,31 +532,30 @@ impl<'a> Checker<'a> {
                     self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
                 }
             }
-            // Phase 29: a bare `break;` (`None`, level 1) or an explicit
-            // `break N;` targets the Nth-innermost open loop/switch frame
-            // - `checked_sub` naturally no-ops for an out-of-range level
-            // (more levels than open loops/switches, invalid PHP anyway),
-            // matching this project's "don't guess" default. The level is
-            // already parse-time-resolved to a plain `i64`, no expression
-            // evaluation needed.
+            // A bare `break;` (`None`, level 1) or an explicit `break N;`
+            // targets the Nth-innermost open loop/switch frame -
+            // `checked_sub` naturally no-ops for an out-of-range level
+            // (more levels than open loops/switches, invalid PHP
+            // anyway). The level is already parse-time-resolved to a
+            // plain `i64`, no expression evaluation needed.
             StmtKind::Break(level) => {
                 let depth = level.unwrap_or(1).max(1) as usize;
                 if let Some(idx) = self.loop_break_states.len().checked_sub(depth) {
                     self.loop_break_states[idx].push(locals.clone());
                 }
             }
-            // Phase 55: the `continue` counterpart of `Break` just above -
-            // see `loop_continue_states`'s own doc comment on `Checker`
-            // for why this exists (feeding a `continue`-reached state
-            // into the *next* convergence pass, not just past-the-loop
-            // exit state the way `break`'s states are used).
+            // The `continue` counterpart of `Break` just above - see
+            // `loop_continue_states`'s doc comment on `Checker` for why
+            // this exists (feeding a `continue`-reached state into the
+            // next convergence pass, not just past-the-loop exit state
+            // the way `break`'s states are used).
             StmtKind::Continue(level) => {
                 let depth = level.unwrap_or(1).max(1) as usize;
                 if let Some(idx) = self.loop_continue_states.len().checked_sub(depth) {
                     self.loop_continue_states[idx].push(locals.clone());
                 }
             }
-            // Phase 37: `ConstantAttributesRule` - a top-level (or nested,
+            // `ConstantAttributesRule` - a top-level (or nested,
             // conditionally-declared) `const` statement's own `#[Attr]`
             // group(s). Covers both the top-level program walk (which
             // already falls through to this same `check_stmt` catch-all
@@ -640,22 +607,17 @@ impl<'a> Checker<'a> {
     /// a real `FunctionSig` lookup instead of a hardcoded name table (see
     /// `FunctionSig::assert_if_true`'s own doc comment).
     ///
-    /// Investigated as a "needs more work" finding from a perf-optimization
-    /// workflow: hotpath-instrumented probing (temporarily splitting this
-    /// block's three arms into their own measured functions) found every
-    /// one of them - the `infer_expr` receiver-type recompute and
-    /// `find_method_owner`'s hierarchy walk for `MethodCall`, `StaticCall`'s
-    /// own `lookup_method` walk, `Call`'s `resolve_function_candidates` +
-    /// `lookup_function` - is *entirely* wasted work on the two corpora
-    /// tested (Symfony's monorepo, Drupal core+modules): `@phpstan-assert`
-    /// appears in zero files across either corpus plus every vendored PHP
-    /// stub, so `sig.assert.is_empty()` was true on all 256K+ calls this
-    /// block made per Symfony run alone. `registry.names_with_assert_tags`
-    /// (populated once, see its own doc comment) turns that into a single
-    /// cheap set-membership check by the call's own bare name *before*
-    /// paying for any receiver-type inference or hierarchy walk - safe
-    /// because the set is a superset of "names that could possibly match"
-    /// (see that field's own doc comment for why it never under-approximates).
+    /// `@phpstan-assert` is vanishingly rare in real code, so the
+    /// `infer_expr` receiver-type recompute and `find_method_owner`'s
+    /// hierarchy walk for `MethodCall`, `StaticCall`'s own
+    /// `lookup_method` walk, and `Call`'s `resolve_function_candidates` +
+    /// `lookup_function` would be wasted work on nearly every call site.
+    /// `registry.names_with_assert_tags` (populated once, see its own
+    /// doc comment) turns that into a single cheap set-membership check
+    /// by the call's bare name before paying for any receiver-type
+    /// inference or hierarchy walk - safe because the set is a superset
+    /// of "names that could possibly match" (see that field's doc
+    /// comment for why it never under-approximates).
     fn apply_bare_statement_assert_narrowing(&mut self, e: &Expr, locals: &mut Locals) {
         match &e.kind {
             ExprKind::MethodCall(recv, method, args, _) => {
@@ -666,11 +628,6 @@ impl<'a> Checker<'a> {
                 {
                     return;
                 }
-                // Real bug found and fixed this session: this used
-                // to require the receiver's own type to be
-                // literally `Type::Object`, silently skipping a
-                // `@phpstan-assert` narrowing opportunity for a
-                // `Union`/`Intersection` receiver.
                 let recv_ty = self.infer_expr(recv, locals);
                 if let Some((_, sig)) = self.find_method_owner(&recv_ty, method)
                     && !sig.assert.is_empty()
@@ -724,21 +681,17 @@ impl<'a> Checker<'a> {
     /// gains an `is_elseif` parameter, so its ~dozens of other call sites
     /// need no change at all.
     ///
-    /// Phase 15 continuation, `IfConstantConditionRule`/
-    /// `ElseIfConstantConditionRule`: the original type-inference-trusting
-    /// design is reinstated (`inferred_constant_condition`, see its own
-    /// doc comment) now that both real reasons it was reverted are fixed
-    /// (Phase 55's convergence work; `widen_coalesce_result`'s own
-    /// general-case bug, fixed this session). A genuine `elseif` gets its
-    /// own real identifier/message (not `if.*`) and real PHPStan's own
-    /// "last condition, no trailing else" exemption for `alwaysTrue`
-    /// only, confirmed against `vendor/phpstan-src`'s own
-    /// `reportAlwaysTrueInLastCondition: false` default - a trailing
-    /// `elseif (true)` with nothing after it is a real, common "acts as
-    /// an implicit else" idiom; `alwaysFalse` is never exempted this way,
-    /// dead code is dead code regardless of position. A bare, non-elseif
-    /// `If` has no such chain-position concept at all and is never
-    /// exempted.
+    /// `IfConstantConditionRule`/`ElseIfConstantConditionRule` trust
+    /// type inference (`inferred_constant_condition`, see its own doc
+    /// comment). A genuine `elseif` gets its own real identifier/message
+    /// (not `if.*`) and real PHPStan's own "last condition, no trailing
+    /// else" exemption for `alwaysTrue` only, matching
+    /// `vendor/phpstan-src`'s `reportAlwaysTrueInLastCondition: false`
+    /// default - a trailing `elseif (true)` with nothing after it is a
+    /// common "acts as an implicit else" idiom; `alwaysFalse` is never
+    /// exempted this way, dead code is dead code regardless of position.
+    /// A bare, non-elseif `If` has no such chain-position concept at all
+    /// and is never exempted.
     #[allow(clippy::too_many_arguments)]
     fn check_if(
         &mut self,
@@ -931,20 +884,16 @@ impl<'a> Checker<'a> {
         if matches!(rhs_ty, Type::Mixed) {
             return;
         }
-        // Real corpus find: `is_assignable(&rhs_ty, declared_ty)` alone
-        // flags the single most common real reason anyone writes an
-        // inline `@var` in the first place - *refining* a wide, less-
-        // precise inferred type (Doctrine's own bare `array`-returning
-        // `getArrayResult()`, real Piwigo shape) into a narrower,
-        // perfectly compatible one (`list<array<string, mixed>>`) - a
-        // list is unconditionally still an array, not a genuine
-        // mismatch. `declared_ty` only ever needs to be *some* plausible
-        // relative of `rhs_ty` - a subtype (the refining case above) or
-        // a supertype (widening, rarer but equally legitimate) - so both
-        // directions have to fail before this is a real, catchable
-        // mistake (a typo'd type, a stale tag after a refactor), matching
-        // this function's own doc comment's "not even a supertype of it"
-        // phrasing exactly (the code just didn't implement it yet).
+        // `is_assignable(&rhs_ty, declared_ty)` alone would flag the most
+        // common real reason anyone writes an inline `@var` in the first
+        // place - refining a wide, less-precise inferred type (a bare
+        // `array`-returning call) into a narrower, perfectly compatible
+        // one (`list<array<string, mixed>>`) - a list is unconditionally
+        // still an array, not a genuine mismatch. `declared_ty` only
+        // ever needs to be some plausible relative of `rhs_ty` - a
+        // subtype (the refining case above) or a supertype (widening,
+        // rarer but equally legitimate) - so both directions have to
+        // fail before this is a real, catchable mistake.
         if !self.registry.is_assignable(&rhs_ty, declared_ty)
             && !self.registry.is_assignable(declared_ty, &rhs_ty)
         {
@@ -1013,18 +962,14 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
             },
             _ => Vec::new(),
         },
-        // Phase 60 corpus find: `StmtKind::StaticVar`'s own arm above
-        // infers purely from the declaration's default expression
-        // (`static $x = null;` types `$x` as exactly `Null`), unlike
-        // every other statement shape here, which unconditionally
-        // clobbered an already-applied `/** @var string|null */`
-        // annotation instead of merely leaving it alone - real PHPStan's
-        // own `@var` on a `static` declaration is exactly the same
-        // "trust the annotation over the initializer" override every
-        // other assignment already gets. Listed here so both existing
-        // mechanisms (the nameless-tag target inference and the
-        // post-dispatch reapplication) pick a `static` declaration up
-        // for free, with no new plumbing of their own.
+        // `StmtKind::StaticVar`'s own arm above infers purely from the
+        // declaration's default expression (`static $x = null;` types
+        // `$x` as exactly `Null`), so it needs the same "trust the
+        // annotation over the initializer" override every other
+        // assignment gets from `/** @var string|null */` - listed here
+        // so both existing mechanisms (the nameless-tag target inference
+        // and the post-dispatch reapplication) pick a `static`
+        // declaration up for free.
         StmtKind::StaticVar(vars) => vars.iter().map(|(name, _)| name.clone()).collect(),
         _ => Vec::new(),
     }
