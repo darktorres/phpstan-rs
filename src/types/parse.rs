@@ -297,17 +297,12 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
                     Some(k) => (k.trim(), true),
                     None => (key_part, false),
                 };
-                // `looks_like_shape_key` above already accepts a
-                // `'...'`/`"..."`-quoted key (a real, common shape for a
-                // key that isn't a valid bare identifier, e.g. `array{
-                // 'content-type': string}`) - the surrounding quote
-                // characters themselves were never stripped before this
-                // fix, so the field ended up keyed by the *literal*
-                // quoted text (`"'content-type'"`) instead of the real
-                // string PHP itself would use as the array key
-                // (`"content-type"`), silently breaking every real
-                // lookup against it (`literal_string_key` on `$arr
-                // ['content-type']` produces the unquoted form).
+                // `looks_like_shape_key` above accepts a
+                // `'...'`/`"..."`-quoted key (real shape: `array{
+                // 'content-type': string}`) - the surrounding quotes
+                // must be stripped here, or the field ends up keyed by
+                // the *literal* quoted text instead of the real string
+                // PHP would use as the array key.
                 let key = strip_shape_key_quotes(key);
                 if let Some(n) = canonical_int_key(key) {
                     next_index = next_index.max(n + 1);
@@ -686,19 +681,6 @@ fn parse_type_atom(s: &str) -> Type {
     ty
 }
 
-/// `bare` (backslash-stripped) drives keyword matching; `original`
-/// (backslash-preserved) is what the class-name fallback arm actually
-/// constructs its `Type::Object` from - a leading `\` means "already
-/// fully qualified from the global namespace," a real, meaningful
-/// distinction `registry::NameContext::resolve` needs to see later (its
-/// own first check is exactly `strip_prefix('\\')`) to know not to
-/// re-qualify it against the current file's namespace. A real bug this
-/// fixed: stripping the backslash *before* it ever reached `resolve`
-/// made every absolute native type hint containing a `\` (e.g.
-/// `QueryBuilder|\Doctrine\ORM\QueryBuilder`) look identical to a
-/// relative one, silently mis-qualifying it as
-/// `CurrentNamespace\Doctrine\ORM\QueryBuilder` - found via real code in
-/// this project's own verification corpus.
 /// Parses one bound of an `int<min, max>` range - real PHPStan's own
 /// `"min"`/`"max"` keywords mean unbounded on that side (`Some(None)`),
 /// a plain integer literal is a real bound (`Some(Some(n))`). A
@@ -712,6 +694,17 @@ fn parse_int_bound(s: &str) -> Option<Option<i64>> {
     }
 }
 
+/// `bare` (backslash-stripped) drives keyword matching; `original`
+/// (backslash-preserved) is what the class-name fallback arm constructs
+/// its `Type::Object` from - a leading `\` means "already fully
+/// qualified from the global namespace," which
+/// `registry::NameContext::resolve` needs to see later (its first check
+/// is exactly `strip_prefix('\\')`) to know not to re-qualify it against
+/// the current file's namespace. Stripping the backslash before it
+/// reaches `resolve` would make every absolute native type hint
+/// containing a `\` (e.g. `QueryBuilder|\Doctrine\ORM\QueryBuilder`)
+/// look identical to a relative one, mis-qualifying it as
+/// `CurrentNamespace\Doctrine\ORM\QueryBuilder`.
 fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]) -> Type {
     match bare.to_ascii_lowercase().as_str() {
         // `int<min, max>` and its named shorthands are real ranges,
