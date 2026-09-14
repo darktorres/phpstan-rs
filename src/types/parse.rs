@@ -968,12 +968,10 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 )
             }
         },
-        // `list`/`non-empty-array`/`non-empty-list` are
-        // real `Intersection([Array(_), Accessory(_)])` types, mirroring
-        // real PHPStan's own `IntersectionType([ArrayType,
-        // AccessoryArrayListType/NonEmptyArrayType])` representation -
-        // `elem_ty` computed the same "0/1/2-arg generic" way `array`
-        // itself already is above.
+        // `list`/`non-empty-array`/`non-empty-list` are real
+        // `Intersection([Array(_), Accessory(_)])` types, mirroring real
+        // PHPStan's `IntersectionType([ArrayType,
+        // AccessoryArrayListType/NonEmptyArrayType])`.
         "list" | "non-empty-array" | "non-empty-list" => {
             let elem_ty = match generic_args.len() {
                 0 => Type::Mixed,
@@ -982,17 +980,11 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             };
             // `list`/`non-empty-list` genuinely can only ever have
             // sequential int keys - a real precision win over the
-            // default `int|string`, not just arity-matching.
-            //
-            // `non-empty-array` makes no such *implicit* promise
-            // (non-emptiness alone says nothing about key type) - but an
-            // *explicit* 2-arg `non-empty-array<K, V>` still names a real
-            // `K`, exactly like plain `array<K, V>` does, and must not be
-            // thrown away here in favor of the unknown default -
-            // `key()`/`array_key_first()`/`array_key_last()`'s
-            // own new precision (this same phase) immediately surfaced
-            // it by silently losing a docblock's own `non-empty-array<
-            // string, int>` key type.
+            // default `int|string`. `non-empty-array` makes no such
+            // *implicit* promise, but an *explicit* 2-arg
+            // `non-empty-array<K, V>` still names a real `K`, exactly
+            // like plain `array<K, V>` does, and must not be thrown away
+            // in favor of the unknown default.
             let key_ty = if bare == "non-empty-array" {
                 match generic_args.len() {
                     2 => parse_type_string(generic_args[0]),
@@ -1010,11 +1002,10 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             }
             Type::Intersection(members)
         }
-        // Unlike its neighbors above, `iterable` is real PHP's own native
-        // type hint (not a PHPDoc-only pseudo-type), defined as exactly
-        // `array|Traversable` - a broader type than `array`, not a
-        // narrower refinement of it. Parsing it as bare `array` silently
-        // dropped the entire `Traversable` half, rejecting any real
+        // Unlike its neighbors above, `iterable` is real PHP's own
+        // native type hint, defined as exactly `array|Traversable` - a
+        // broader type than `array`, not a narrower refinement of it.
+        // Parsing it as bare `array` would reject any real
         // Generator/Iterator/IteratorAggregate passed to an
         // `iterable`-hinted parameter.
         "iterable" => {
@@ -1028,60 +1019,46 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 Type::Object("Traversable".to_string(), Vec::new()),
             ])
         }
-        // Deliberately not conflated - a native `Closure $fn` and a
-        // native `callable $fn` are different, if this project doesn't
-        // reflect that: `Closure` is a concrete class only a real
-        // closure object satisfies, strictly narrower than the four real
-        // shapes `callable` itself accepts (see `is_assignable`'s own
-        // `Type::Callable` arms). Representing `Closure` as a real
-        // `Object` (it's a real, already-stubbed class - no new `Type`
-        // variant needed) means `is_assignable`'s ordinary class-hierarchy
-        // check already does the right thing for it, unaffected by
-        // `callable`'s own broader acceptance rules below.
-        // Preserves `original`'s own leading `\`, same reason this whole
-        // function's own doc comment gives for the generic user-class arm
-        // below: a bare, unqualified `Closure` is genuinely ambiguous (real
-        // corpus shape: `rector/rector` consumers of `nikic/php-parser`
-        // routinely `use PhpParser\Node\Expr\Closure;`, an entirely
-        // different real class, then type-hint bare `Closure` meaning
-        // *that* one) - only `\Closure`, root-anchored, unambiguously means
-        // the real global class, and hardcoding the bare name here (losing
-        // the backslash) used to make every native `\Closure $fn` type hint
-        // in a namespaced file look identical to the ambiguous bare case,
-        // then get silently mis-qualified into nonsense like `Amp\Closure`
-        // once `NameContext::resolve` ran (a real, corpus-found bug: amphp/
-        // amp's own `Cancellation::subscribe(\Closure $callback)`). A bare,
-        // unqualified `Closure` instead falls through to the ordinary
-        // class-reference resolution below, exactly like any other class
-        // name - correctly deferring to a real `use` import when one
-        // exists, or PHP's own genuine (if easy-to-typo) "resolves relative
-        // to the current namespace" rule otherwise.
+        // `Closure` is a concrete class only a real closure object
+        // satisfies, strictly narrower than the four shapes `callable`
+        // accepts (see `is_assignable`'s `Type::Callable` arms) -
+        // represented as a real `Object` so `is_assignable`'s ordinary
+        // class-hierarchy check handles it.
+        //
+        // Preserves `original`'s leading `\`: a bare, unqualified
+        // `Closure` is genuinely ambiguous (real shape: `rector/rector`
+        // consumers of `nikic/php-parser` routinely
+        // `use PhpParser\Node\Expr\Closure;`, then type-hint bare
+        // `Closure` meaning *that* one) - only `\Closure`, root-anchored,
+        // unambiguously means the real global class. Losing the
+        // backslash here would make every native `\Closure $fn` hint in
+        // a namespaced file look identical to the ambiguous bare case
+        // and get mis-qualified once `NameContext::resolve` runs (real
+        // shape: amphp/amp's own
+        // `Cancellation::subscribe(\Closure $callback)`). A bare,
+        // unqualified `Closure` falls through to the ordinary
+        // class-reference resolution below instead, deferring to a real
+        // `use` import when one exists.
         "closure" if original.starts_with('\\') => {
             Type::Object("\\Closure".to_string(), Vec::new())
         }
         "callable" => Type::Callable(None),
         "self" => Type::SelfRef,
         "parent" => Type::ParentRef,
-        // `@return $this` is a real, PHPStan-documented PHPDoc convention -
-        // identical in meaning to `@return static` (the calling instance's
-        // own type) - not a variable reference despite the `$` sigil.
-        // Without this it fell through to the generic-user-class branch
-        // and became a literal "class" literally named "$this", then got
-        // nonsensically namespace-qualified once that existed (real
-        // example: amphp/amp's `@return $this` on several fluent methods
-        // became `Amp\$this`).
+        // `@return $this` is a real, PHPStan-documented PHPDoc
+        // convention, identical in meaning to `@return static` - not a
+        // variable reference despite the `$` sigil (real shape: amphp/amp's
+        // `@return $this` on several fluent methods).
         "static" | "$this" => Type::StaticRef,
         "object" => Type::Object("object".to_string(), Vec::new()),
         // A user-defined generic class (`Collection<User>`): each type
-        // argument is itself a full type string (could be a union, a
-        // nested generic, ...), so it's re-run through `parse_generic_arg`
-        // (call-site-variance-aware; falls straight through to
-        // `parse_type_string` - the same recursive-field pattern
-        // `try_parse_array_shape` already uses - for an ordinary
-        // argument). A bare (non-generic) reference just gets an empty
-        // arg list, indistinguishable from "erased"/unspecified generics
-        // on a class that does declare `@template` - `TemplateParam`
-        // substitution treats an unbound parameter as `Mixed` either way.
+        // argument is a full type string, re-run through
+        // `parse_generic_arg` (call-site-variance-aware; falls straight
+        // through to `parse_type_string` for an ordinary argument). A
+        // bare (non-generic) reference gets an empty arg list,
+        // indistinguishable from "erased" generics - `TemplateParam`
+        // substitution treats an unbound parameter as `Mixed` either
+        // way.
         _ => Type::Object(
             original.to_string(),
             generic_args.iter().map(|a| parse_generic_arg(a)).collect(),
@@ -1089,24 +1066,19 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
     }
 }
 
-/// Real PHPStan's own call-site variance annotation syntax on
-/// one generic type argument - `Collection<covariant Foo>`,
+/// Real PHPStan's own call-site variance annotation syntax on one
+/// generic type argument - `Collection<covariant Foo>`,
 /// `Collection<contravariant Foo>`, or `Collection<*>` ("don't check
-/// this argument at all"). Confirmed directly against `phpdoc-parser`'s
-/// own `GenericTypeNode::VARIANCE_*` constants/`__toString()` and
-/// `PhpDoc\TypeNodeResolver::resolveGenericTypeNode` in
-/// `vendor/phpstan-src` - real, current PHPStan syntax, parsed on every
-/// generic type position (`@param`/`@return`/`@var`/`@extends`/
-/// `@implements` alike), not just a hypothetical. Encoded with the same
-/// "sentinel via an existing `Type::Object` variant, guarded by a name
-/// no real PHP identifier can ever collide with" idiom `value-of<T>`
-/// already uses for its own `"$$valueof"` -
-/// `"$$covariant"`/`"$$contravariant"` each wrap the real argument
-/// type; `"$$bivariant"` (`*`) has no real argument to wrap. Consulted
-/// by `Registry::effective_slot_variance` (`registry.rs`), which lets a
-/// marker here override a class's own declared slot variance for one
-/// comparison, exactly matching `GenericObjectType::isSuperTypeOf`'s/
-/// `getReferencedTemplateTypes`'s own "call-site variance wins when
+/// this argument at all"), parsed on every generic type position
+/// (`@param`/`@return`/`@var`/`@extends`/`@implements` alike). Encoded
+/// with the same "sentinel via an existing `Type::Object` variant,
+/// guarded by an impossible name" idiom `value-of<T>` uses for
+/// `"$$valueof"` - `"$$covariant"`/`"$$contravariant"` each wrap the
+/// real argument type; `"$$bivariant"` (`*`) has no real argument to
+/// wrap. Consulted by `Registry::effective_slot_variance`, which lets a
+/// marker here override a class's declared slot variance for one
+/// comparison, matching `GenericObjectType::isSuperTypeOf`'s "call-site
+/// variance wins when
 /// present" rule.
 fn parse_generic_arg(a: &str) -> Type {
     let trimmed = a.trim();
