@@ -26,91 +26,43 @@ pub(crate) use type_resolution::{
 pub struct ParamSig {
     pub name: String,
     pub ty: Type,
-    // The native, no-docblock-merge type this parameter alone declares -
-    // the exact `ty`-vs-`ty_native` split `FunctionSig::return_type`/
-    // `return_type_native` already has, and for the identical reason
-    // (see that field's own doc comment): real PHP/PHPStan only enforce
-    // method-override Liskov-compatibility at this native level by
-    // default. `check_one_method_override`'s own param-narrowing check
-    // must compare `ty_native`, not the merged `ty` - otherwise the
-    // extremely common Rector/PHPStan-`Collector<T>` idiom of narrowing
-    // a parameter via `@param` alone while leaving a wide native hint
-    // (`refactor(Node $node)`, narrowed only via `@param
-    // SpecificNode $node`) would be wrongly flagged as an LSP violation
-    // real PHPStan doesn't, by default, check at all. Every other reader of
-    // `ty` correctly wants the merged, docblock-refined type and must
-    // keep using it unchanged.
+    // The native, no-docblock-merge type (see `return_type_native`'s
+    // doc comment for the same split on the return side).
+    // `check_one_method_override`'s param-narrowing check must compare
+    // this, not the merged `ty` - otherwise narrowing only via `@param`
+    // while leaving a wide native hint (the common
+    // Rector/PHPStan-`Collector<T>` idiom) would be wrongly flagged as
+    // an LSP violation real PHPStan doesn't check by default.
     pub ty_native: Type,
     pub variadic: bool,
     pub has_default: bool,
     pub by_ref: bool,
-    // Starts as `true` only when
-    // this parameter's own `@param` tag was present on this
-    // declaration's own docblock (i.e. `from_decl`'s own `doc_ty` was
-    // `Some`) - `false` means `ty` is really just `ty_native` (or a
-    // phpDoc-less default), making this position eligible for
-    // `Registry`'s own `flatten_phpdoc_inheritance` pass to backfill
-    // from an ancestor, mirroring real PHPStan's `ResolvedPhpDocBlock::
-    // mergeOneParentParamTags` (`array_key_exists($name, $paramTags)`).
-    // That pass also *sets* this to `true` once it successfully
-    // backfills `ty` from an ancestor - a position is then "documented"
-    // (own or inherited) for the purposes of any *further* descendant's
-    // own lookup, which is what makes multi-level transitivity resolve
-    // one level per fixed-point pass; see that pass's own doc comment
-    // for why an ancestor's own bit being `false` (nothing real to
-    // inherit, not even from a bare native hint) must gate the merge
-    // rather than the ancestor's `ty` being merely present.
+    // True when this parameter's own `@param` tag was present on this
+    // declaration's docblock; `false` marks it eligible for
+    // `Registry::flatten_phpdoc_inheritance` to backfill from an
+    // ancestor, which then sets this `true` too - what makes
+    // multi-level inheritance resolve one level per fixed-point pass.
     pub has_own_doc: bool,
-    // Whether *this declaration's own* native hint/`@param` text
-    // (whichever produced `ty`) spells out `mixed` somewhere, explicitly
-    // - computed once in `from_decl` via
-    // `checker::has_explicit_mixed_nested_somewhere`, the exact same
-    // text this parameter's own `doc_ty`/native hint locals already are.
-    // `checker::missing_typehint`'s own "was `mixed` written on purpose"
-    // rule can't just re-derive this by re-reading the checked
-    // declaration's own raw AST text at check time, because `ty` can
-    // come from a *different* declaration's docblock once
-    // `Registry::flatten_phpdoc_inheritance` backfills it. That pass
-    // copies this field alongside `ty` whenever it backfills a position,
-    // so an inherited `array<string, mixed>`/nested-`mixed` type is
-    // still correctly recognized as deliberate, not "no type given at
-    // all" (real shape: every one of Piwigo's
-    // `UrlServiceInterface`/`ExposesPageData`/... implementors and test
-    // doubles that correctly omit their own docblock in favor of the
-    // interface's).
+    // Whether this declaration's own native hint/`@param` text spells
+    // out `mixed` explicitly - needed so `checker::missing_typehint`
+    // still recognizes a backfilled (`flatten_phpdoc_inheritance`)
+    // `mixed` as deliberate, not undocumented; that pass copies this
+    // field alongside `ty`.
     pub explicit_mixed_hint: bool,
-    // Every class-name reference `ty`
-    // carries, as `(raw-as-written, resolved-FQN)` pairs - collected via
-    // `collect_class_name_case_refs` right after `mark_template_params`
-    // (so a real `@template` name is never mistaken for a stray class
-    // reference) and right before `resolve_names_in_type` destroys the
-    // pre-resolution spelling this specifically needs. Deliberately
-    // empty for a *backfilled* (`flatten_phpdoc_inheritance`) position -
-    // see that pass's own doc comment on why copying `case_refs`
-    // alongside a backfilled `ty` would be a real cross-file-context
-    // correctness hazard (the raw text was written under an *ancestor*
-    // file's own `use` imports, not this checker's own `name_ctx`).
+    // Every class-name reference `ty` carries, as (raw, resolved-FQN)
+    // pairs, collected before `resolve_names_in_type` destroys the
+    // original spelling. Empty for a backfilled position - the raw text
+    // belongs to an ancestor file's own `use` imports, not this one's
+    // `name_ctx`.
     pub case_refs: Vec<(String, String)>,
-    // `@param-closure-this Type $name`'s own resolved `Type` -
-    // what `$this` becomes inside a `Closure`/`ArrowFn` literal argument
-    // passed at this parameter's position, resolved through the same
-    // template-marking + name-resolution pipeline `@param`'s own `ty`
-    // merge already uses (see `from_decl` below). `None` when no such tag
-    // targets this parameter - the overwhelming majority. Consumed at
-    // each call-argument-checking site via `checker::calls::
-    // check_closure_literal_with_this_and_scope`, the same mechanism
-    // `Closure::bind`/`->bindTo()` already use.
+    // `@param-closure-this Type $name`'s resolved `Type` - what `$this`
+    // becomes inside a `Closure`/`ArrowFn` argument at this position.
+    // `None` when untagged.
     pub closure_this_type: Option<Type>,
-    // `@param-out Type $name`'s own resolved `Type` -
-    // the widened type this by-ref parameter's own value is guaranteed
-    // to hold once the function returns. Resolved through the identical
-    // mark-then-resolve-then-substitute pipeline `ty`/`closure_this_type`
-    // above already use. `None` when no such tag targets this parameter
-    // (every non-by-ref parameter, and the overwhelming majority of
-    // by-ref ones too) - every by-ref-parameter check below falls back
-    // to this parameter's own native/`@param` type when it's absent,
-    // matching real PHPStan's own `getOutType() ?? getType()` fallback
-    // (`ParameterOutAssignedTypeRule`/`TooWideParameterOutTypeCheck`).
+    // `@param-out Type $name`'s resolved `Type` - the widened type a
+    // by-ref parameter is guaranteed to hold on return. `None` falls
+    // back to the native/`@param` type, matching real PHPStan's
+    // `getOutType() ?? getType()`.
     pub out_ty: Option<Type>,
 }
 
@@ -118,170 +70,85 @@ pub struct ParamSig {
 pub struct FunctionSig {
     pub params: Vec<ParamSig>,
     pub return_type: Type,
-    // The return type the *native* signature alone declares, ignoring any
-    // `@return` docblock refinement - real PHP only ever enforces
-    // override-compatibility (Liskov) at this native level, and by
-    // default so does real PHPStan (`checkPhpDocMethodSignatures` is off
-    // unless a project opts in).
-    // `check_method_overrides`'s own return-type check is the only
-    // reader - every other consumer of a function's return type wants
-    // the docblock-refined `return_type` above instead.
+    // The native-only return type, ignoring `@return` -
+    // `check_method_overrides`'s return-type check is the only reader;
+    // everything else wants the docblock-refined `return_type` above.
     pub return_type_native: Type,
-    // The `ParamSig::has_own_doc`
-    // equivalent for the return position - starts `true` only when this
-    // declaration's own docblock carried an `@return` tag (`from_decl`'s
-    // own `doc_return` was `Some`), mirroring real PHPStan's
-    // `ResolvedPhpDocBlock::mergeOneParentReturnTag`'s own trigger
-    // (`$returnTag !== null`). See `ParamSig::has_own_doc`'s own doc
-    // comment for why `flatten_phpdoc_inheritance` also sets this to
-    // `true` once it backfills `return_type` from an ancestor.
+    // `ParamSig::has_own_doc`'s return-position equivalent.
     pub return_has_own_doc: bool,
-    // `ParamSig::case_refs`'s own return-
-    // position equivalent - see that field's own doc comment.
+    // `ParamSig::case_refs`'s return-position equivalent.
     pub return_case_refs: Vec<(String, String)>,
-    // The `ParamSig::explicit_mixed_hint` equivalent for the
-    // return position - see that field's own doc comment.
+    // `ParamSig::explicit_mixed_hint`'s return-position equivalent.
     pub return_explicit_mixed_hint: bool,
-    // PHP 8.5's `#[\NoDiscard]` marker attribute - `true` when
-    // this declaration carries one, meaning a bare, unused call to it
-    // (`foo();` on its own line, return value neither assigned nor
-    // otherwise consumed) is a real diagnostic
-    // (`Checker::check_no_discard_statement`), matching real PHPStan's own
-    // `NativeFunctionReflection::mustUseReturnValue`/
-    // `NativeMethodReflection`'s identical convention: case-insensitive
-    // match on the attribute's own short name (no namespace resolution,
-    // since real PHP's own `#[NoDiscard]` is always the single, global-
-    // namespace one - there's no other class this could plausibly mean).
+    // PHP 8.5's `#[\NoDiscard]` marker - `true` when a bare, unused
+    // call to this declaration should be flagged
+    // (`Checker::check_no_discard_statement`), matching real PHPStan's
+    // short-name, case-insensitive match convention.
     pub no_discard: bool,
-    // `public`/`private`/`protected` - `Visibility::Public` for
-    // every plain top-level function (PHP has no way to declare one
-    // otherwise), a method's own declared visibility otherwise. Threaded
-    // through so a call site can enforce access legality the same way
-    // `PropertySig::visibility` does for properties.
+    // `Visibility::Public` for a top-level function; a method's
+    // declared visibility otherwise.
     pub visibility: Visibility,
-    // `@internal` on this function/method's own doc comment -
-    // see `docblock::DocBlock::internal`'s own doc comment for what it
-    // means and how it's gated. A method also counts as internal when
-    // its *declaring class* does, but that half is checked separately
-    // (against `ClassInfo::is_internal`) by whichever call site already
-    // has the declaring class in hand - this field only ever reflects
-    // the member's own tag.
+    // `@internal` on this declaration's own doc comment (see
+    // `docblock::DocBlock::internal`) - a method also counts as internal
+    // via its declaring class, checked separately by the caller.
     pub is_internal: bool,
-    // `@api` on this function/method's own doc comment -
-    // real PHPStan's `ApiMethodCallRule`/`ApiInstantiationRule` check
-    // both the declaring class's own `@api` AND the member's own -
-    // `ClassInfo::is_api` only ever covered the former. `DocBlock::api`
-    // already exists and is parsed; this is a direct reuse, not new
-    // parsing.
+    // `@api` on this declaration's own doc comment - real PHPStan
+    // checks both the declaring class's and the member's own tag;
+    // `ClassInfo::is_api` only covers the former.
     pub is_api: bool,
-    // PHP 8.3's `#[\Override]` marker - `true` when
-    // this declaration carries one. Stored here (mirroring `no_discard`
-    // exactly, including its "short-name-only, no namespace resolution"
-    // matching convention) rather than checked straight off a fresh
-    // `MethodDecl`'s own AST, because a method needs this checked in the
-    // context of whichever *using class*'s ancestor chain applies - a
-    // trait's own method carrying `#[Override]` is only ever a real
-    // fatal error relative to a class that later `use`s it (the same
-    // trait method is fine when the using class has a
-    // real ancestor to satisfy it, and fatals - attributed to the
-    // *using class's* own method name, not the trait's - when it
-    // doesn't), so this needs to survive `flatten_traits`' merge the
-    // same way `no_discard` already does.
+    // PHP 8.3's `#[\Override]` marker. Stored rather than checked
+    // straight off the AST, since a trait method's `#[Override]` is
+    // only a real error relative to the *using* class's ancestor chain
+    // - must survive `flatten_traits`' merge like `no_discard`.
     pub has_override_attr: bool,
-    // `@deprecated` on this function/method's own doc comment -
-    // see `docblock::DocBlock::deprecated`'s own doc comment for what it
-    // means and how it's gated. Deliberately scoped to the function/
-    // method's own tag only, unlike `is_internal`'s "declaring class
-    // also counts" fallback - whether a class-level `@deprecated`
-    // implicitly deprecates every member too isn't something this
-    // project could confirm against real PHPStan's own source (the
-    // actual deprecation-detection logic lives in `ondrejmirtes/
-    // better-reflection`, not vendored here), so it's left unclaimed
-    // rather than guessed.
+    // `@deprecated` on this declaration's own tag only, unlike
+    // `is_internal`'s "declaring class also counts" fallback - whether a
+    // class-level `@deprecated` implicitly covers members isn't
+    // confirmed against real PHPStan's source, so left unclaimed.
     pub deprecated: Option<String>,
-    // `@throws` on this function/method's own doc comment, resolved
-    // and unioned across every tag present (`docblock::DocBlock::throws`'s
-    // own doc comment explains why it's a `Vec` there) - `None` when no
-    // `@throws` tag exists at all, distinct from a real,
-    // resolvable-but-empty case (there isn't one - a tag with no type
-    // text simply isn't recorded by `docblock::parse` in the first
-    // place).
+    // `@throws` on this declaration, resolved and unioned across every
+    // tag present. `None` when no `@throws` tag exists at all.
     pub throws: Option<Type>,
-    // `@phpstan-assert`-family tags (`docblock::DocBlock::assert_if_true`'s
-    // own doc comment has the full picture), resolved into a real `Type`
-    // plus a classified `AssertTarget` - a tag whose own target text
-    // doesn't match a real parameter of this declaration (typo'd, or a
-    // target shape this project doesn't classify at all, e.g. a method-
-    // call or array-index target) is silently dropped rather than kept
-    // half-resolved, the usual "don't guess" leniency.
+    // `@phpstan-assert`-family tags, resolved into a `Type` plus a
+    // classified `AssertTarget` - a tag whose target doesn't match a
+    // real parameter (typo'd, or unclassifiable) is dropped rather than
+    // kept half-resolved.
     pub assert_if_true: Vec<AssertInfo>,
     pub assert_if_false: Vec<AssertInfo>,
     pub assert: Vec<AssertInfo>,
-    // This declaration's own real
-    // AST body, when it has one - `None` for every synthesized signature
-    // this registry ever builds without a real, parseable declaration
-    // behind it (a built-in enum method, a native stdlib stub with no
-    // vendored source body, ...). Exists specifically so a same-class or
-    // cross-file `parent::`/`self::`/`static::`/`$this->` call can be
-    // *recursively walked into* from wherever it's actually declared -
-    // the per-file `Checker` only ever sees the one file it's currently
-    // checking, so without storing bodies here, resolving into an
-    // ancestor class declared in a different file would be impossible.
-    // `Arc`-wrapped rather than cloned per lookup: a real body can be
-    // arbitrarily large, and `FunctionSig` itself is cloned routinely
-    // (template substitution, trait flattening, override merging) by
-    // code that never touches this field at all. `Arc`, not `Rc`, because
-    // `php_stubs.rs`'s own generated-stub caches are `LazyLock<Vec<(String,
-    // FunctionSig)>>` statics, which require `Send + Sync`.
+    // This declaration's real AST body, when it has one - `None` for a
+    // synthesized signature. Lets a cross-file
+    // `parent::`/`self::`/`static::`/`$this->` call be recursively
+    // walked from wherever it's declared, since the per-file `Checker`
+    // only sees the file it's currently checking. `Arc`, not `Rc`:
+    // cloned routinely (template substitution, trait flattening,
+    // override merging), and `php_stubs.rs`'s generated-stub caches are
+    // `LazyLock` statics requiring `Send + Sync`.
     pub body: Option<Arc<Vec<Stmt>>>,
-    // `None` until `Registry::
-    // resolve_transitive_purity` classifies this declaration's own body
-    // (`registry::purity::classify_body`) - stays `None` forever for
-    // every synthesized signature with no real body (`body` is also
-    // `None`) and for one this project's classifier can never prove
-    // effect-free no matter what its dependencies turn out to be (a
-    // non-call impure point, an explicit throw, a by-ref parameter, an
-    // `@phpstan-assert` tag, or an unresolvable call). `Some(vec![])` -
-    // *not* the same as `None` - is the fixed point's own base case: no
-    // dependencies at all, unconditionally effect-free already.
+    // `None` until `Registry::resolve_transitive_purity` classifies
+    // this body; stays `None` for a bodyless signature or one the
+    // classifier can never prove effect-free. `Some(vec![])` is the
+    // fixed point's base case: no dependencies, unconditionally
+    // effect-free.
     pub purity_dependencies: Option<Vec<crate::registry::PurityDependency>>,
-    // Set by the same fixed point once every one of `purity_dependencies`
-    // is itself proven pure - `false` for everything until then,
-    // including every declaration whose own `purity_dependencies` is
-    // `None`. The one field this whole feature's own consuming
-    // diagnostic (a bare, discarded call to a now-pure declaration)
-    // actually reads.
+    // Set once every `purity_dependencies` entry is itself proven
+    // pure. The field the bare-discarded-call-to-a-pure-declaration
+    // diagnostic actually reads.
     pub is_transitively_pure: bool,
-    // `true` for every signature `php_stubs.rs` generates from
-    // vendored `phpstorm-stubs`/`phpstan-src` source - a stub file's own
-    // function/method body is *always* empty (`{}`) - real PHP builtins
-    // like `header()`/`exit()`/`class_exists()` are natively
-    // implemented, real side effects included, with nothing resembling
-    // their actual behavior expressed in PHP at all. Without this flag,
-    // `registry::purity::classify_body` would see an empty
-    // body and wrongly conclude every one of PHP's own thousands of
-    // built-in functions is provably pure (e.g. `header()` would look
-    // like dead code when its return value is discarded). `false` for
-    // every real, first-party declaration
-    // (`from_decl`'s own construction has no way to know it's *inside*
-    // a stub file at parse time - `php_stubs.rs`'s own
-    // `generate_from_source`/`generate_classes_from_source` set this
-    // `true` on their own returned signatures afterward instead, the
-    // one place that actually knows).
+    // `true` for every signature `php_stubs.rs` generates - a stub
+    // body is always empty (`{}`), so without this,
+    // `registry::purity::classify_body` would wrongly call PHP builtins
+    // like `header()` provably pure. `false` for a real, first-party
+    // declaration; `php_stubs.rs` sets this on its own generated
+    // signatures, the one place that knows.
     pub is_stub: bool,
-    // `true` for a signature with no real, textual declaration at all -
-    // a magic `@method` tag (`class_info::method_tag_sig`) or one of
-    // PHP's own built-in enum methods this project synthesizes directly
-    // (`cases()`/`from()`/`tryFrom()`). `false` for every real
-    // declaration, including one merged from two real overloads
-    // (`merge`'s own `&&` - a real declaration on *either* side of a
-    // merge makes the result real too). `Registry::required_abstract_methods`'s
-    // own "an interface's own declared methods are all required" rule
-    // must not scan an interface's `methods` map indiscriminately - it
-    // would otherwise wrongly treat a purely magic `@method` tag on an
-    // interface (real shape: Tracy's own `IBarPanel`, `@method ?string
-    // getAgentInfo()`) as something every implementor must also define a
-    // real, textual method for - `@method` only ever documents a
+    // `true` for a signature with no real textual declaration at all -
+    // a magic `@method` tag or a synthesized enum method
+    // (`cases()`/`from()`/`tryFrom()`). Needed so
+    // `Registry::required_abstract_methods` doesn't require every
+    // implementor define a real method for a purely magic `@method` tag
+    // (real shape: Tracy's own `IBarPanel`, `@method ?string
+    // getAgentInfo()`) - `@method` only ever documents a
     // magic-`__call`-backed capability, never a requirement.
     pub is_magic: bool,
 }
@@ -437,16 +304,10 @@ impl FunctionSig {
             .params
             .iter()
             .map(|p| {
-                // A promoted constructor property very commonly
-                // carries its own inline `/** @var T */` directly above
-                // it (real idiom - it doubles as that property's own
-                // docblock), rather than an `@param $name` tag on the
-                // enclosing `__construct()`'s own docblock. Only
-                // consulted when the outer method-level tag is absent -
-                // an explicit `@param` naming this exact parameter always
-                // wins, the same "more specific declaration wins" rule
-                // every other doc-source precedence in this project
-                // already follows.
+                // A promoted constructor property's own inline
+                // `/** @var T */` doubles as its docblock - only
+                // consulted when the outer method-level `@param` tag is
+                // absent.
                 let doc_ty: Option<String> = doc
                     .as_ref()
                     .and_then(|d| d.params.get(&p.name))
@@ -464,36 +325,28 @@ impl FunctionSig {
                 let ty = resolve_names_in_type(ty, ctx);
                 let ty = substitute_type_aliases(ty, class_type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
-                // Mirrors `ty` just above exactly, but with `doc_ty`
-                // forced to `None` - the same "native signature alone,
-                // no docblock refinement" split `return_type_native`
-                // already has. Still passes through `apply_implicit_
-                // nullable_default`, unlike `return_type_native` (which
-                // has no equivalent default-value-implies-nullable rule
-                // to apply) - that transformation reflects a genuinely
-                // native-level PHP fact (an untyped-`?` native hint with
-                // a `null` default is implicitly nullable), independent
-                // of any docblock merge.
+                // Mirrors `ty` with `doc_ty` forced to `None` - the
+                // native-only split `return_type_native` also has.
+                // Still passes through `apply_implicit_nullable_default`,
+                // since that's a native-level PHP fact (an untyped `?`
+                // hint with a `null` default is implicitly nullable),
+                // independent of any docblock merge.
                 let ty_native = resolve_type(None, p.type_hint.as_deref());
                 let ty_native = mark_template_params(ty_native, &template_params);
                 let ty_native = resolve_names_in_type(ty_native, ctx);
                 let ty_native = apply_implicit_nullable_default(ty_native, p.default.as_ref());
                 // A real `= value` default always wins; failing that, a
-                // `[optional]` marker on this param's own `@param` tag is
-                // trusted too (see `DocBlock::optional_params` - phpstorm-
-                // stubs models several functions, e.g. `mt_rand`/
-                // `array_keys`, only as their highest-arity overload, with
-                // trailing params marked optional in the docblock but
-                // carrying no native default at all).
+                // `[optional]` marker on the `@param` tag is trusted too
+                // (phpstorm-stubs models several functions, e.g.
+                // `mt_rand`/`array_keys`, only as their highest-arity
+                // overload, with trailing params marked optional but no
+                // native default).
                 let has_default = p.default.is_some()
                     || doc
                         .as_ref()
                         .is_some_and(|d| d.optional_params.contains(&p.name));
-                // `@param-closure-this Type $name` - resolved
-                // through the identical mark-then-resolve-then-substitute
-                // pipeline `ty` above already uses for the same reason
-                // (a generic class/function's own `@template` name, or a
-                // local `@phpstan-type` alias, can appear here too).
+                // `@param-closure-this Type $name` - same
+                // mark-then-resolve-then-substitute pipeline `ty` uses.
                 let closure_this_type = doc
                     .as_ref()
                     .and_then(|d| d.param_closure_this.get(&p.name))
@@ -503,8 +356,7 @@ impl FunctionSig {
                         let ty = resolve_names_in_type(ty, ctx);
                         substitute_type_aliases(ty, class_type_aliases)
                     });
-                // Mirrors `closure_this_type`'s own resolution
-                // pipeline exactly.
+                // Mirrors `closure_this_type`'s resolution pipeline.
                 let out_ty = doc
                     .as_ref()
                     .and_then(|d| d.param_out.get(&p.name))
@@ -776,24 +628,18 @@ impl FunctionSig {
 /// across PHP versions" by declaring the *same conceptual parameter
 /// twice*, once per era, each gated by its own
 /// `#[PhpStormStubsElementAvailable(from: X, to: Y)]` attribute (real
-/// shape: `pg_query`'s `$connection`, `fsockopen`'s `$port`,
-/// `SQLite3::open`'s `$flags`/`$encryptionKey`) - but real PHP cannot
-/// declare two parameters with the same name in one function (a fatal
-/// error), so any duplicate name reaching here is unconditionally this
-/// versioning artifact, never a legitimate shape, regardless of which
-/// attribute produced it or whether it has a default. The lexer's own
-/// `skip_stub_availability_attribute` heuristic already drops some of
-/// these (a closed-range duplicate with no default), but keeps one that
-/// does have a default - correct for a different real shape
-/// (`imagefilter`'s uniquely-named `$arg1`..`$arg4` before a
-/// differently-named variadic) but wrong when the kept duplicate's name
-/// is reused by a later parameter, producing a function with one extra
-/// position and every real argument after it binding to the wrong
-/// parameter. Collapsing here, after the lexer, needs no knowledge of
-/// that versioning idiom at all: keep each name's *last* occurrence
-/// (phpstorm-stubs always writes the legacy era first, the modern one
-/// last), at the *position* of its *first* occurrence, so later
-/// uniquely-named parameters aren't shifted.
+/// shape: `pg_query`'s `$connection`, `fsockopen`'s `$port`). Real PHP
+/// can't declare two same-named parameters (a fatal error), so any
+/// duplicate name reaching here is unconditionally this versioning
+/// artifact. The lexer's own `skip_stub_availability_attribute`
+/// heuristic already drops some of these, but not one with a default
+/// (needed for a different real shape: `imagefilter`'s uniquely-named
+/// `$arg1`..`$arg4` before a variadic) - if that kept duplicate's name
+/// is reused by a later parameter, every real argument after it would
+/// bind to the wrong parameter. Keep each name's *last* occurrence
+/// (phpstorm-stubs always writes the legacy era first), at the
+/// *position* of its *first*, so later uniquely-named parameters aren't
+/// shifted.
 fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
     let mut order: Vec<String> = Vec::new();
     let mut by_name: HashMap<String, ParamSig> = HashMap::new();
