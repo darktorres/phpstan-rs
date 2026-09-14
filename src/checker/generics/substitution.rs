@@ -3,12 +3,10 @@ use crate::registry::{AssertInfo, FunctionSig, ParamSig};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
-    /// Thin delegation to `Registry::class_template_bindings` (Phase 54
-    /// hoisted the real logic there, alongside `is_assignable`, since
-    /// neither ever needed anything but `self.registry`/`self.classes` -
-    /// kept here too since real call sites (`checker/assignment.rs`,
+    /// Thin delegation to `Registry::class_template_bindings` - kept
+    /// here too since real call sites (`checker/assignment.rs`,
     /// `checker/expr.rs`) already call it as `self.class_template_
-    /// bindings(...)`). See `Registry::class_template_bindings`'s own doc
+    /// bindings(...)`. See `Registry::class_template_bindings`'s own doc
     /// comment for the full binding/ancestor-walk semantics.
     pub(crate) fn class_template_bindings(
         &self,
@@ -30,39 +28,26 @@ impl<'a> Checker<'a> {
     /// inherited.
     ///
     /// Scoped to only `TemplateParam`s whose own `scope` field is
-    /// genuinely `owner` itself - not merely same-*named* as one of
+    /// genuinely `owner` itself - not merely same-named as one of
     /// `owner`'s declared templates. `types::substitute_template`'s own
     /// fallback for a name absent from `bindings` is `Type::Mixed`,
     /// correct for a genuinely class-level template referenced with no or
     /// fewer type arguments than it declares (e.g. a bare `Collection`
-    /// with no `<T>` at all), but a real Piwigo-corpus round found this
-    /// wiping out every method's own separate template too the moment it
-    /// was called on a non-generic class (a method's own generic
-    /// identity-style function, declared entirely on its own docblock, on
-    /// a class with zero templates of its own). That class has zero
-    /// class-level templates, so `bindings` was always empty, and this
-    /// substitution runs first (per this function's own doc comment
-    /// above), replacing the method's own bare template name with `Mixed`
-    /// before `infer_call_return_type`'s later, correct per-call-argument
-    /// pass ever got a chance to bind it for real.
-    ///
-    /// Real bug found and fixed this session: the original fix here
-    /// scoped by bare *name* (a `HashSet<String>` built from `owner`'s own
-    /// `ClassInfo::templates` name list), not by real declaration-site
-    /// identity - so a method whose own `@template` happens to share its
-    /// enclosing class's own template *name* (real, common: PHPStorm's
-    /// own `ReflectionClass`'s class-level `@template T of object` and its
-    /// `getAttributes()` method's own, entirely unrelated `@template T`)
-    /// still got eagerly captured and replaced with `Mixed` here, before
-    /// the method's own call-site binding ever ran - confirmed via a real
-    /// `(new ReflectionClass($x))->getAttributes(Foo::class)` isolation.
-    /// `TemplateParam::scope` already carries exactly the right identity
-    /// to distinguish the two (`build_template_params`'s callers pass the
-    /// declaring class's own name for a class-level template, the
-    /// declaring function/method's own name for one of its own - see that
-    /// field's own doc comment) - comparing against it directly, instead
-    /// of a same-named `HashSet`, is strictly more correct and requires no
-    /// new data.
+    /// with no `<T>` at all), but that would wipe out every method's own
+    /// separate template too the moment it's called on a non-generic
+    /// class (a method's own generic identity-style function, declared
+    /// entirely on its own docblock, on a class with zero templates of
+    /// its own): that class has zero class-level templates, so
+    /// `bindings` is always empty, and this substitution runs first (per
+    /// this function's own doc comment above), so scoping by real
+    /// declaration-site identity (`TemplateParam::scope`, not a
+    /// same-named `HashSet`) is needed to avoid replacing the method's
+    /// own bare template name with `Mixed` before
+    /// `infer_call_return_type`'s later, correct per-call-argument pass
+    /// ever gets a chance to bind it for real - e.g. `ReflectionClass`'s
+    /// class-level `@template T of object` and its `getAttributes()`
+    /// method's own, entirely unrelated `@template T` must not collide
+    /// just because they share a name.
     pub(crate) fn substitute_class_templates(
         &self,
         sig: &FunctionSig,
@@ -75,9 +60,7 @@ impl<'a> Checker<'a> {
         // a class directly declaring its own `@template`), occasionally
         // more than one (see the `else` branch below), and empty for the
         // overwhelmingly common non-generic case, the real fast path this
-        // whole structure exists to preserve (found via a perf-
-        // optimization investigation workflow, verified against this
-        // file's own real source before implementing) - `Registry::
+        // whole structure exists to preserve - `Registry::
         // class_template_bindings_rec`'s own `zip(owner.templates,
         // type_args)` is always empty when the left side is, so every
         // `substitute_scoped` call below would be a no-op walk that still
@@ -97,11 +80,10 @@ impl<'a> Checker<'a> {
                 self.class_template_bindings(class, type_args, owner),
             ));
         } else if signature_references_any_template(sig) {
-            // A real bug found via a Piwigo/real-PHPStan corpus diff:
             // `owner` (the class `lookup_method_with_owner` says
-            // *lexically* declares this signature) can itself declare no
+            // lexically declares this signature) can itself declare no
             // `@template` at all, yet the signature it declares can still
-            // reference a template scoped to one of `owner`'s *own*
+            // reference a template scoped to one of `owner`'s own
             // ancestors - not through inheriting the method unedited (the
             // case the fast path above already covers via `owner` being
             // that ancestor directly), but through `owner` itself
@@ -110,18 +92,15 @@ impl<'a> Checker<'a> {
             // interface method) while that method's own effective type -
             // via ordinary docblock-inheritance backfill from the
             // ancestor's own tag - still carries a `TemplateParam` scoped
-            // to that ancestor, not to `owner`. Confirmed live:
-            // `MessengerFactory::transport`'s own `(new
-            // DoctrineTransportFactory($registry))->createTransport(...)`
-            // - `DoctrineTransportFactory` declares no `@template` of its
-            // own, but its own `@implements TransportFactoryInterface
-            // <DoctrineTransport>` tag correctly binds
-            // `TransportFactoryInterface`'s own `@template-covariant
-            // TTransport`/`@return TTransport` to `DoctrineTransport` in
-            // real PHPStan (confirmed via `dumpType()`), lost here before
-            // this fix since `owner` ("DoctrineTransportFactory") itself
-            // has no templates, and the old fast path bailed on exactly
-            // that check alone.
+            // to that ancestor, not to `owner`. E.g. a
+            // `DoctrineTransportFactory` implementing
+            // `TransportFactoryInterface<DoctrineTransport>` declares no
+            // `@template` of its own, but its own `@implements` tag
+            // correctly binds `TransportFactoryInterface`'s own
+            // `@template-covariant TTransport`/`@return TTransport` to
+            // `DoctrineTransport` in real PHPStan - this would be lost
+            // if `owner` itself having no templates made the fast path
+            // bail on exactly that check alone.
             //
             // Each of `owner`'s own ancestors (not `class`'s - `owner`
             // itself declares no template, so its OWN `@implements`/
@@ -225,7 +204,7 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
     match ty {
         Type::TemplateParam(tp) => {
             if tp.scope.as_deref() == Some(scope) {
-                // Phase 54: mirrors `types::substitute_template`'s own
+                // Mirrors `types::substitute_template`'s own
                 // `@template T = Default` fallback - an "erased" class
                 // reference (fewer type arguments than declared,
                 // including a bare one with none at all) leaves `bindings`
@@ -243,9 +222,9 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
                 ty.clone()
             }
         }
-        // Phase 50: substitute through the key type too, not reset
+        // Substitute through the key type too, not reset
         // to "unknown" every time (matches types::substitute_template's
-        // own Array-arm fix).
+        // own Array-arm handling).
         Type::Array(key, inner) => Type::Array(
             Box::new(substitute_scoped(key, bindings, scope)),
             Box::new(substitute_scoped(inner, bindings, scope)),
@@ -271,23 +250,21 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
                 .map(|(k, t, opt)| (k.clone(), substitute_scoped(t, bindings, scope), *opt))
                 .collect(),
         ),
-        // A real, previously-missing case, found via this session's own
-        // corpus diff (`php-standard-library`'s own `ContainerType<Tk as
-        // array-key, Tv>`, whose own `Tk`/`Tv` reach a caller's return
-        // type nested inside `object{...}` by way of an *interface's*
-        // own template): `object{...}`'s own field types were never
-        // substituted here either, mirroring `types::substitute_
-        // template`'s own identical fix.
+        // `object{...}`'s own field types must be substituted too
+        // (e.g. `ContainerType<Tk as array-key, Tv>` whose own `Tk`/`Tv`
+        // reach a caller's return type nested inside `object{...}` by
+        // way of an interface's own template), mirroring
+        // `types::substitute_template`'s own identical handling.
         Type::ObjectShape(fields) => Type::ObjectShape(
             fields
                 .iter()
                 .map(|(k, t, opt)| (k.clone(), substitute_scoped(t, bindings, scope), *opt))
                 .collect(),
         ),
-        // Phase 54: mirrors `types::substitute_template`'s own identical,
-        // previously-missing fix - `Object`'s own generic argument list
-        // wasn't recursed into at all, so a class-level template used
-        // inside e.g. `Box<T>` never actually got substituted.
+        // Mirrors `types::substitute_template`'s own handling -
+        // `Object`'s own generic argument list must be recursed into, or
+        // a class-level template used inside e.g. `Box<T>` never
+        // actually gets substituted.
         Type::Object(name, args) => Type::Object(
             name.clone(),
             args.iter()
