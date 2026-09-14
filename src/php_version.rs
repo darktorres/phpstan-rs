@@ -1,32 +1,21 @@
-//! Phase 38: the target-PHP-version setting (`config.rs`'s `php_version`
-//! key / `check-project --php-version`) plus a small lookup table of the
+//! The target-PHP-version setting (`config.rs`'s `php_version` key /
+//! `check-project --php-version`) plus a small lookup table of the
 //! PHP-version-gated language features this project's rules need to check
 //! against once a version is configured.
 //!
-//! This mirrors Phase 11 Stage 5's `strict_mixed_arrays` precedent end to
-//! end: a `config.rs` field, a CLI flag, `main.rs`'s config-vs-CLI merge
-//! (CLI wins), and a `Project` setter that stores onto the shared
-//! `Registry`. Unlike `strict_mixed_arrays` (a plain `bool`), a
-//! `php_version` is unset by default (`Registry::php_version: Option<
-//! PhpVersion>`) rather than defaulting to some specific version - with no
-//! configured version, every version-gated rule listed below simply has
-//! nothing to check against yet and should stay silent (this phase adds no
-//! new diagnostics itself; it only builds the plumbing the following ones
-//! need).
+//! A `config.rs` field, a CLI flag, `main.rs`'s config-vs-CLI merge (CLI
+//! wins), and a `Project` setter that stores onto the shared `Registry`.
+//! Unlike `strict_mixed_arrays` (a plain `bool`), a `php_version` is
+//! unset by default (`Registry::php_version: Option<PhpVersion>`) rather
+//! than defaulting to some specific version - with no configured
+//! version, every version-gated rule listed below simply has nothing to
+//! check against yet and should stay silent.
 //!
-//! Real PHPStan's own equivalent is `PHPStan\Php\PhpVersion` (see
-//! `vendor/phpstan-src/src/Php/PhpVersion.php`), which every rule this
-//! phase's own roadmap entry names (`FinalConstantRule`,
-//! `NativeTypedClassConstantRule`, `ConstantAttributesRule`,
-//! `DeprecatedCastRule`, `VoidCastRule`, `BacktickRule`, `UnsetCastRule`,
-//! `ArrayUnpackingRule`, `ReadOnlyClassRule`, `ConstantsInTraitsRule`,
-//! `InvalidPromotedPropertiesRule`, `NoncapturingCatchRule`,
-//! `ThrowExpressionRule`) takes as a constructor dependency and calls a
+//! Real PHPStan's own equivalent is `PHPStan\Php\PhpVersion`, which each
+//! version-gated rule takes as a constructor dependency and calls a
 //! `supportsX()`/`deprecatesX()` method on. `PhpFeature` below is this
-//! project's stand-in: one variant per such check, each carrying the exact
-//! version threshold read directly off that file, so a future rule
-//! implementation doesn't have to go spelunking for the right PHP version
-//! number itself.
+//! project's stand-in: one variant per such check, each carrying the
+//! exact version threshold.
 
 /// A target PHP version as a (major, minor) pair, e.g. `(8, 1)` for PHP
 /// 8.1. Patch versions never affect PHPStan's own version gates (every
@@ -136,9 +125,7 @@ pub enum PhpFeature {
     /// The `FILTER_THROW_ON_FAILURE` constant/flag for `filter_var()`/
     /// `filter_input()`. `PhpVersion::hasFilterThrowOnFailureConstant`
     /// (`FilterVarRule`'s own `filterVar.nullOnFailureAndThrowOnFailure`
-    /// conflict check) - PHP 8.5, not 8.4 as an earlier ROADMAP draft
-    /// stated (confirmed against `vendor/phpstan-src/src/Php/PhpVersion.php`
-    /// and the real `filter-var-php85.php` test fixture name).
+    /// conflict check) - PHP 8.5.
     FilterThrowOnFailureConstant,
     /// A `float` array key implicitly truncating to `int` - deprecated as
     /// of this version. `PhpVersion::deprecatesImplicitlyFloatConversionToInt`
@@ -167,7 +154,7 @@ pub enum PhpFeature {
     /// supportsOverrideAttributeOnProperty`
     /// (`PropertyAttributesRule::processNode`).
     OverrideAttributeOnProperty,
-    /// Phase 48.F: native union type-hints (`int|string`) on a
+    /// Native union type-hints (`int|string`) on a
     /// parameter/return type. `PhpVersion::supportsNativeUnionTypes`
     /// (`FunctionDefinitionCheck`'s own `parameter.unionTypeNotSupported`/
     /// `return.unionTypeNotSupported`).
