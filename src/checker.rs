@@ -7,28 +7,17 @@ use crate::registry::{NameContext, Registry};
 use crate::token::Span;
 use crate::types::Type;
 
-/// A checked scope's variable-name-to-inferred-type bindings - repeated
-/// across nearly every checker method's own parameter/return type before
-/// this alias existed.
+/// A checked scope's variable-name-to-inferred-type bindings.
 ///
-/// Phase 20 Finding B: backed by `imbl::HashMap`, a persistent,
-/// structurally-shared map (a HAMT), not `std::collections::HashMap` -
-/// cloned at ~22 call sites across `checker/stmt.rs`/`checker/expr.rs`
-/// (once per branch of every `if`/`while`/ternary/`match`/closure, in
-/// every function, in every file), profiling identified this as the
-/// single biggest allocation source in the whole checker: a plain
-/// `HashMap` clone rehashes every key and deep-clones every `Type`
-/// value's own nested `String`s/`Vec`s. `imbl::HashMap::clone` is O(1) -
-/// "really only a matter of copying a pointer and increasing a reference
-/// counter" - a value only gets deep-copied lazily, on the *next*
-/// mutation of whichever clone diverges from the other. `insert`/
-/// `remove`/`entry`/`get`/`contains_key`/`iter`/`Default`/`IntoIterator`/
-/// `FromIterator`/`PartialEq` all mirror `std::collections::HashMap`'s
-/// own signatures closely enough that every existing call site needed
-/// little to no change - confirmed directly against `imbl`/`im`'s own
-/// docs before making this change, not assumed. `rustc_hash::
-/// FxBuildHasher` (Finding C) as the hasher, since `imbl::HashMap` is
-/// generic over it the same way `std::collections::HashMap` is.
+/// Backed by `imbl::HashMap` (a persistent, structurally-shared HAMT), not
+/// `std::collections::HashMap`: this is cloned once per branch of every
+/// `if`/`while`/ternary/`match`/closure across the checker, and a plain
+/// `HashMap` clone rehashes every key and deep-clones every `Type`'s nested
+/// `String`s/`Vec`s. `imbl::HashMap::clone` is O(1) (a pointer bump plus a
+/// refcount increment); a value is only deep-copied lazily, on the next
+/// mutation of whichever clone diverges. `rustc_hash::FxBuildHasher` as the
+/// hasher, since `imbl::HashMap` is generic over it the same way
+/// `std::collections::HashMap` is.
 type LocalsMap = imbl::GenericHashMap<
     String,
     Type,
@@ -36,13 +25,10 @@ type LocalsMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
-// Phase 17 follow-up: `imbl::HashSet` mirrors `imbl::HashMap`'s own O(1)-
-// clone design (Phase 20 Finding B's own doc comment above) - not load-
-// bearing here the way it is for the outer `provenance` map itself (a
-// per-variable span set is small and only ever mutated by inserting one
-// more `Span`, never iterated at scale), but consistent with the rest of
-// this module's own "persistent map/set throughout, not a plain
-// `std::collections` one partway through" convention.
+// `imbl::HashSet` mirrors `imbl::HashMap`'s O(1)-clone design (see
+// `LocalsMap`'s doc comment) - not load-bearing here (a per-variable span
+// set is small and never iterated at scale), but kept consistent with the
+// persistent-map-throughout convention the rest of this module follows.
 type ProvenanceSet =
     imbl::GenericHashSet<Span, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 type ProvenanceMap = imbl::GenericHashMap<
@@ -52,47 +38,39 @@ type ProvenanceMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
-// Phase 71 Item 4: lowercased, bare `function_exists('foo')`-guarded
-// function names currently proven guarded on this exact control-flow
-// path - `Locals`-scoped (not a `Checker` field) for the same reason
-// every other flow-sensitive fact here is: it needs to merge/narrow
-// per-branch exactly like `types`/`provenance` do, via `apply_narrowing`/
-// `merge_scopes`, not persist for a whole function body unconditionally.
+// Lowercased, bare `function_exists('foo')`-guarded function names proven
+// guarded on this exact control-flow path. `Locals`-scoped, not a `Checker`
+// field, so it merges/narrows per-branch via `apply_narrowing`/
+// `merge_scopes` like `types`/`provenance` do, rather than persisting for a
+// whole function body unconditionally.
 type GuardedFunctionSet =
     imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
 
-// ROADMAP "Known but not yet scheduled": `(receiver_var_name, member_name)`
-// pairs currently proven guarded by a `method_exists($recv, 'name')`/
-// `property_exists($recv, 'name')` true branch on this exact control-flow
-// path - mirrors `GuardedFunctionSet`'s own Locals-scoped, O(1)-clone
-// design (Phase 71 Item 4) for the identical reason: it must merge/
-// narrow per-branch via `apply_narrowing`/`merge_scopes`, not persist
-// unconditionally.
+// `(receiver_var_name, member_name)` pairs proven guarded by a
+// `method_exists($recv, 'name')`/`property_exists($recv, 'name')` true
+// branch on this exact control-flow path - same Locals-scoped, O(1)-clone
+// design as `GuardedFunctionSet`.
 type GuardedMemberSet = imbl::GenericHashSet<
     (String, String),
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
-// ROADMAP "Known but not yet scheduled" follow-up: the narrow slice of
-// real PHPStan's `ConditionalExpressionHolder` this project builds -
 // `name -> (target_key, Rc<Expr>)` for a variable whose last assignment's
 // RHS was itself a recognized narrowable condition shape (see
 // `condition_alias_shape`/`condition_alias_target` in `checker/
-// narrowing.rs`), replayed through `apply_narrowing` when `name` is
-// later checked bare (`if ($name)`) - correlating a *second* variable's
-// narrowing to `name`'s own truthiness without any new type math: the
-// stored `Expr` is the original AST node, re-run through the exact same
-// dispatch a direct `if (<rhsExpr>)` would use. `target_key` (computed
-// once at store time, mirroring `narrowing_key`'s own string form) is
-// what `Locals::declare` scans for to invalidate a stale alias whose
-// *target* was rebound, not just the alias variable itself - see that
-// function's own doc comment. `Rc`, not a deep clone, so every branch
-// fork of `Locals` stays O(1); the real (not `Rc`'s pointer identity)
-// `Expr` a given alias holds never changes after it's first stored,
-// only ever wholesale-replaced or purged, so `Rc::ptr_eq` is a correct,
-// cheap "did both branches inherit this unchanged" merge test (see
-// `merge_scopes`).
+// narrowing.rs`), replayed through `apply_narrowing` when `name` is later
+// checked bare (`if ($name)`) - correlates a *second* variable's narrowing
+// to `name`'s own truthiness without any new type math: the stored `Expr`
+// is the original AST node, re-run through the exact dispatch a direct
+// `if (<rhsExpr>)` would use. `target_key` (computed once at store time,
+// mirroring `narrowing_key`'s own string form) is what `Locals::declare`
+// scans for to invalidate a stale alias whose *target* was rebound, not
+// just the alias variable itself. `Rc`, not a deep clone, so every branch
+// fork of `Locals` stays O(1); a given alias's `Expr` never changes after
+// it's first stored, only wholesale-replaced or purged, so `Rc::ptr_eq` is
+// a correct, cheap "did both branches inherit this unchanged" merge test
+// (see `merge_scopes`).
 type ConditionAliasMap = imbl::GenericHashMap<
     String,
     (String, std::rc::Rc<Expr>),
@@ -100,55 +78,28 @@ type ConditionAliasMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
-/// A checked scope's variable-name-to-inferred-type bindings, plus (Phase
-/// 17 follow-up) an opt-in, parallel declaration-span side-channel the
-/// LSP's own local-variable-navigation feature reads through `Checker::
-/// probe_span`/`probe_var_provenance` - real reaching-definitions
-/// precision (which real assignment(s) could have produced the value a
-/// given read sees), computed by riding along the checker's own already-
-/// correct, corpus-verified flow-sensitive traversal (branch merging via
-/// `merge_scopes`, loop fixed-point convergence via `converge_loop_body`,
-/// termination-pruning via `always_terminates`) rather than a second,
-/// independent approximation. `types`/`provenance` are two separate
-/// fields, not one field carrying `(Type, ProvenanceSet)` pairs, on
-/// purpose: `Type` is this checker's own inference domain, read and
-/// pattern-matched at hundreds of call sites throughout this module - a
-/// wrapper tuple there would mean touching every one of them just to
-/// unwrap it back out, for a concern (LSP navigation) that has nothing to
-/// do with type inference itself. Kept in exact lockstep with `types`
-/// instead via `Locals`'s own small, explicit API (`insert` leaves
-/// `provenance` for that key untouched - correct for type-narrowing,
-/// which refines an existing binding's type without creating a new one;
-/// `declare` is the one exception, used only at a genuine syntactic
-/// binding site - an assignment, a parameter, a `foreach`/`catch`
-/// binding, ...; `insert_with_provenance` copies an already-known
-/// provenance set across when a value moves between two `Locals` values
-/// unchanged, e.g. `merge_scopes`'s own union).
+/// A checked scope's variable-name-to-inferred-type bindings, plus an
+/// opt-in, parallel declaration-span side-channel the LSP's local-variable-
+/// navigation feature reads through `Checker::probe_span`/
+/// `probe_var_provenance` - reaching-definitions info computed by riding
+/// along the checker's own flow-sensitive traversal (branch merging via
+/// `merge_scopes`, loop convergence via `converge_loop_body`, termination-
+/// pruning via `always_terminates`) rather than a second, independent
+/// approximation. `types`/`provenance` are separate fields, not one field
+/// carrying `(Type, ProvenanceSet)` pairs, since `Type` is pattern-matched
+/// at hundreds of call sites throughout this module and a wrapper tuple
+/// would mean unwrapping it back out everywhere for a concern (LSP
+/// navigation) unrelated to type inference. Kept in lockstep with `types`
+/// via `Locals`'s own API: `insert` leaves `provenance` untouched (correct
+/// for narrowing, which refines an existing binding without creating a new
+/// one); `declare` is the one real new-declaration primitive;
+/// `insert_with_provenance` copies an already-known provenance set across
+/// when a value moves between two `Locals` unchanged (e.g. `merge_scopes`'s
+/// union).
 ///
-/// Phase 20 Finding B: backed by `imbl::HashMap`, a persistent,
-/// structurally-shared map (a HAMT), not `std::collections::HashMap` -
-/// cloned at ~22 call sites across `checker/stmt.rs`/`checker/expr.rs`
-/// (once per branch of every `if`/`while`/ternary/`match`/closure, in
-/// every function, in every file), profiling identified this as the
-/// single biggest allocation source in the whole checker: a plain
-/// `HashMap` clone rehashes every key and deep-clones every `Type`
-/// value's own nested `String`s/`Vec`s. `imbl::HashMap::clone` is O(1) -
-/// "really only a matter of copying a pointer and increasing a reference
-/// counter" - a value only gets deep-copied lazily, on the *next*
-/// mutation of whichever clone diverges from the other. `insert`/
-/// `remove`/`entry`/`get`/`contains_key`/`iter`/`Default`/`IntoIterator`/
-/// `FromIterator`/`PartialEq` all mirror `std::collections::HashMap`'s
-/// own signatures closely enough that every existing call site needed
-/// little to no change - confirmed directly against `imbl`/`im`'s own
-/// docs before making this change, not assumed. `rustc_hash::
-/// FxBuildHasher` (Finding C) as the hasher, since `imbl::HashMap` is
-/// generic over it the same way `std::collections::HashMap` is.
-///
-/// This wrapper struct preserves that exact clone/allocation profile:
-/// `provenance` is itself an `imbl::HashMap` (same O(1)-clone property),
-/// so wrapping `types` alongside it doesn't reintroduce the deep-clone
-/// cost Finding B eliminated - cloning a `Locals` is still, structurally,
-/// two pointer bumps.
+/// `provenance`, like `types`, is backed by `imbl::HashMap` so cloning a
+/// `Locals` stays two O(1) pointer bumps rather than reintroducing a deep
+/// clone.
 #[derive(Clone, Default)]
 pub(crate) struct Locals {
     types: LocalsMap,
@@ -157,20 +108,15 @@ pub(crate) struct Locals {
     pub(crate) guarded_methods: GuardedMemberSet,
     pub(crate) guarded_properties: GuardedMemberSet,
     pub(crate) condition_aliases: ConditionAliasMap,
-    // Whether `declare`/`insert_with_provenance` actually do anything -
-    // `false` (via `Default`) for every ordinary `check-project` run,
-    // `true` only for the one throwaway, per-request `Checker` `lsp.rs`'s
-    // own variable-navigation probe builds (mirroring `Checker::probe_
-    // span`'s own "only ever `Some` during that one request" contract).
-    // Carried explicitly on `Locals` itself (not read from `Checker` at
-    // each call site) because `Locals` values are constructed in more
-    // places than `Checker` methods alone reach - most importantly, a
-    // closure/arrow-fn literal's own fresh scope (`Locals::default()` at
-    // several `checker/calls.rs`/`checker/expr.rs` call sites) needs the
-    // *enclosing* scope's own `track` value threaded through explicitly
-    // (`Locals::fresh_scope`, below) rather than silently defaulting back
-    // to `false` and losing provenance the instant a probed variable read
-    // sits inside a closure body.
+    // Whether `declare`/`insert_with_provenance` do anything - `false` by
+    // default for every ordinary check-project run, `true` only for the
+    // LSP's own per-request variable-navigation probe. Carried on `Locals`
+    // itself, not read from `Checker`, because `Locals` values are
+    // constructed in more places than `Checker` methods reach - notably a
+    // closure/arrow-fn literal's fresh scope, which needs the enclosing
+    // scope's `track` value threaded through explicitly (`fresh_scope`
+    // below) rather than defaulting to `false` and losing provenance inside
+    // a closure body.
     track: bool,
 }
 
@@ -183,47 +129,34 @@ impl Locals {
         self.types.contains_key(key)
     }
 
-    /// Plain, provenance-preserving update - leaves whatever `provenance`
-    /// already has for `key` completely untouched. Correct for the large
-    /// majority of this module's own `locals.insert(...)` call sites:
-    /// type-narrowing (an `instanceof`/null/array-shape/... check refines
-    /// an *existing* binding's type without it being a new declaration)
-    /// and a call's own by-reference type-widening effect (`sort($arr)`,
-    /// `preg_match($p, $s, $matches)`, ...) both change what's *known*
-    /// about a variable without changing *where it came from* - `$arr`'s
-    /// own real declaration is still wherever it was first assigned, not
-    /// this call site.
+    /// Provenance-preserving update, for narrowing an existing binding
+    /// (`instanceof`/null/array-shape checks) or a by-ref call's type
+    /// widening (`sort($arr)`, `preg_match(..., $matches)`) - the value's
+    /// declaration site doesn't move just because its known type changed.
     pub(crate) fn insert(&mut self, key: String, ty: Type) -> Option<Type> {
         self.types.insert(key, ty)
     }
 
-    /// The one real "this is a new declaration" primitive - used only at
-    /// a genuine syntactic binding site (an assignment's left-hand side,
-    /// a parameter, a `foreach`/`catch` binding, `static $x`, a closure's
-    /// own `use (...)` capture, `$x++`/`$x--`). Replaces `key`'s own
-    /// provenance with a fresh singleton `{span}`, discarding whatever
-    /// was tracked before - a real rebind, not a refinement, so nothing
-    /// from before it remains a live candidate. A no-op on `provenance`
-    /// itself when `track` is off, at the cost of one `bool` check.
+    /// The one real new-declaration primitive - used only at a genuine
+    /// syntactic binding site (assignment LHS, parameter, `foreach`/`catch`
+    /// binding, `static $x`, closure `use (...)`, `$x++`/`$x--`). Replaces
+    /// `key`'s provenance with a fresh singleton `{span}`, since a rebind
+    /// makes anything tracked before it a dead candidate.
     pub(crate) fn declare(&mut self, key: String, ty: Type, span: Span) -> Option<Type> {
         if self.track {
             let mut set = ProvenanceSet::default();
             set.insert(span);
             self.provenance.insert(key.clone(), set);
         }
-        // This name's own prior alias (if any) is stale the instant it's
-        // rebound - and so is any *other* alias whose stored condition
-        // targets this name (e.g. `$ok = $x !== null;` then a `foreach
-        // ($xs as $x)` rebinding `$x` before `if ($ok)` is ever reached).
         self.purge_condition_aliases_targeting(&key);
         self.types.insert(key, ty)
     }
 
     /// The store half of the condition-alias mechanism - see
-    /// `ConditionAliasMap`'s own doc comment. `target_key` is `condition`'s
-    /// own narrowing target (e.g. `$x` for `$x instanceof Foo`), computed
-    /// once by the caller (`Checker::record_condition_alias`,
-    /// `checker/narrowing.rs`) via `condition_alias_target`.
+    /// `ConditionAliasMap`'s doc comment. `target_key` is `condition`'s
+    /// narrowing target (e.g. `$x` for `$x instanceof Foo`), computed by
+    /// the caller (`Checker::record_condition_alias`) via
+    /// `condition_alias_target`.
     pub(crate) fn set_condition_alias(
         &mut self,
         name: String,
@@ -233,16 +166,12 @@ impl Locals {
         self.condition_aliases.insert(name, (target_key, condition));
     }
 
-    /// Drops `key`'s own stored alias (if any - rebinding the alias
-    /// variable itself makes whatever it used to alias stale) and every
-    /// *other* alias whose own `target_key` is `key` (rebinding an
-    /// alias's *target* makes the alias itself stale, even though the
-    /// alias variable's own name is untouched). Called from `declare` on
-    /// every rebind, unconditionally - `Checker::record_condition_alias`
-    /// runs immediately after and re-inserts a fresh alias for `key`
-    /// itself when the new RHS actually qualifies, so a real re-alias
-    /// (`$ok = $x instanceof Foo; $ok = $y instanceof Bar;`) isn't lost,
-    /// only ever a stale one.
+    /// Drops `key`'s own alias (rebinding the alias variable makes it
+    /// stale) and every other alias whose `target_key` is `key` (rebinding
+    /// an alias's *target* makes the alias stale too, even though its own
+    /// name is untouched). `Checker::record_condition_alias` re-inserts a
+    /// fresh alias for `key` right after, when the new RHS qualifies, so a
+    /// genuine re-alias isn't lost - only ever a stale one.
     fn purge_condition_aliases_targeting(&mut self, key: &str) {
         self.condition_aliases.remove(key);
         self.condition_aliases
@@ -299,31 +228,22 @@ impl Locals {
     }
 
     /// Turns declaration-span tracking on for this scope and everything
-    /// cloned from it - called exactly once, at `check_function`'s own
-    /// entry point, gated on `Checker::probe_span` being active (see
-    /// `track`'s own doc comment).
+    /// cloned from it - called once, at `check_function`'s entry point,
+    /// gated on `Checker::probe_span` being active.
     pub(crate) fn set_track(&mut self, track: bool) {
         self.track = track;
     }
 }
 
 impl PartialEq for Locals {
-    /// Deliberately compares `types` only, never `provenance` - `Checker::
-    /// converge_loop_body`'s own fixed-point convergence check (`next_
-    /// entry == pass_entry`) must keep converging purely on type
-    /// stability, exactly as it already did before this field existed.
-    /// `provenance` naturally reaches its own steady state alongside
-    /// `types` in the overwhelming majority of real code either way; on
-    /// the rare case it doesn't, whatever provenance resulted from the
-    /// pass that actually triggered convergence is used - a reasonable,
-    /// bounded approximation, never a hang (still capped at `MAX_PASSES`
-    /// regardless), and never a behavior change for `track: false`
-    /// (`provenance` stays empty on both sides throughout, so this
-    /// distinction is unobservable there). `guarded_functions`/
-    /// `guarded_methods`/`guarded_properties`/`condition_aliases` are
-    /// excluded for the identical reason - all are bookkeeping side-
-    /// channels riding along `types`'s own convergence, never inputs to
-    /// it.
+    /// Compares `types` only - `Checker::converge_loop_body`'s fixed-point
+    /// check must converge on type stability alone. `provenance`,
+    /// `guarded_functions`/`guarded_methods`/`guarded_properties`, and
+    /// `condition_aliases` are bookkeeping side-channels riding along
+    /// `types`'s convergence, never inputs to it; on the rare pass where
+    /// they haven't independently stabilized, whatever the converging pass
+    /// left is used as a bounded approximation, still capped at
+    /// `MAX_PASSES`.
     fn eq(&self, other: &Self) -> bool {
         self.types == other.types
     }
@@ -331,15 +251,11 @@ impl PartialEq for Locals {
 
 /// A generic `@template` name -> concrete `Type` substitution map (class-
 /// hierarchy template binding, function-call argument-to-template
-/// binding) - built once per call/hierarchy-walk and consumed
-/// immediately by `types::substitute_template`/`bind_template_param`,
-/// never cloned per-branch the way `Locals` is. Used to reuse `Locals`'s
-/// own type alias opportunistically (both were `HashMap<String, Type>`
-/// underneath) before Phase 20 Finding B gave `Locals` its own,
-/// persistent-map-backed identity - kept as a plain
-/// `std::collections::HashMap` here since this use case has none of
-/// `Locals`'s own "cloned once per branch" cost profile that motivated
-/// the swap.
+/// binding) - built once per call/hierarchy-walk and consumed immediately
+/// by `types::substitute_template`/`bind_template_param`, never cloned
+/// per-branch the way `Locals` is. A plain `std::collections::HashMap`,
+/// since this use case has none of the "cloned once per branch" cost
+/// profile that motivates `Locals`'s persistent-map backing.
 pub(crate) type TemplateBindings = std::collections::HashMap<String, Type>;
 
 /// Loosely mirrors real PHPStan's own rule-gating levels (0 lowest/laxest,
@@ -350,34 +266,20 @@ pub(crate) type TemplateBindings = std::collections::HashMap<String, Type>;
 /// unknown methods..., wrong number of arguments..., always undefined
 /// variables" - though this project doesn't implement PHPStan's own
 /// $this-only-vs-any-expression distinction for method/property checks,
-/// a real, documented simplification, not an oversight), 1 for Phase 59's
-/// unused-constructor-parameter/unused-closure-use checks (real PHPStan's
-/// own level exactly - `UnusedConstructorParametersRule`/
-/// `UnusedClosureUsesRule`'s own `#[RegisteredRule(level: 1)]`), 2 for
-/// undefined-property/array-shape-key (PHPDoc-derived structural checks,
-/// real PHPStan's `checkThisOnly: false`/`checkPhpDocMissingReturn`
-/// territory), 3 for return-type/property-type mismatches (real PHPStan's
-/// own `checkPhpDocMethodSignatures` level exactly), 4 for Phase 59's
-/// unused-private-const/method/property checks (again real PHPStan's own
-/// level exactly), 5 for argument-type mismatches (real PHPStan's own
-/// `checkFunctionArgumentTypes` level exactly), and 6 for this project's
-/// own generic bound/variance checks
-/// (no direct real-PHPStan equivalent - generics are baked into its core
-/// type engine, not level-gated - placed here as this project's own
-/// "advanced, opt-in" tier, alongside real PHPStan's missing-typehints
-/// level).
-///
-/// Phase 47: four fields grew to eight, mirroring what real PHPStan's own
-/// `RuleError` implementations (`Message`/`RuleErrorBuilder`'s product) can
-/// carry beyond a bare message - `identifier` is what `@phpstan-ignore
-/// <identifier>` (Phase 44, not yet implemented) will need to match
-/// against, CI output formats (Phase 16) want it for machine consumption,
-/// `tip`/`non_ignorable`/`metadata`/`fix` are the same shape real
-/// PHPStan's own JSON error format exposes. Every existing 4-field call
-/// site still compiles unchanged in spirit - `Checker::report` keeps its
-/// old positional shape, just with one more required argument
-/// (`identifier`) - while a call site that also wants a tip/fix/metadata
-/// goes through `DiagnosticBuilder` (`Checker::report_builder`) instead.
+/// a documented simplification, not an oversight), 1 for unused-
+/// constructor-parameter/unused-closure-use checks (matches real
+/// PHPStan's `UnusedConstructorParametersRule`/`UnusedClosureUsesRule`
+/// level exactly), 2 for undefined-property/array-shape-key (PHPDoc-
+/// derived structural checks, real PHPStan's `checkThisOnly: false`/
+/// `checkPhpDocMissingReturn` territory), 3 for return-type/property-type
+/// mismatches (matches real PHPStan's `checkPhpDocMethodSignatures` level),
+/// 4 for unused-private-const/method/property checks (again matching real
+/// PHPStan's own level), 5 for argument-type mismatches (matches real
+/// PHPStan's `checkFunctionArgumentTypes` level), and 6 for this project's
+/// own generic bound/variance checks (no direct real-PHPStan equivalent -
+/// generics are baked into its core type engine, not level-gated - placed
+/// here as this project's own "advanced, opt-in" tier, alongside real
+/// PHPStan's missing-typehints level).
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub location: String,
@@ -388,42 +290,24 @@ pub struct Diagnostic {
     /// diagnostic's *kind* (e.g. `"argument.type"`, `"class.notFound"`,
     /// `"return.type"`) - stable across occurrences of the same underlying
     /// problem, unlike `message`, which embeds the specific types/names
-    /// involved. Never empty in practice (every real call site names one),
-    /// but not a real PHPStan identifier list lookalike guaranteed to
-    /// match phpstan/phpstan's own strings one-for-one - chosen for
-    /// internal consistency within this project, reusing real PHPStan's
-    /// own spelling where this project's own audit was confident of it.
+    /// involved. Not guaranteed to match phpstan/phpstan's own strings
+    /// one-for-one, though it reuses real PHPStan's spelling where
+    /// confident.
     pub identifier: String,
     /// An optional one-line, human-facing hint appended below the main
-    /// message - real PHPStan's own "💡 Tip: ..." line (`RuleErrorBuilder
-    /// ::tip()`). Rare: most diagnostics are self-explanatory, so most
-    /// call sites leave this `None`.
+    /// message - real PHPStan's own "💡 Tip: ..." line.
     pub tip: Option<String>,
-    /// Mirrors real PHPStan's own `RuleErrorBuilder::nonIgnorable()`: when
-    /// `true`, this diagnostic must never be suppressible via a future
-    /// `@phpstan-ignore <identifier>` (Phase 44) - the same reason real
-    /// PHPStan reserves it for a handful of its own rules (e.g. flagging a
-    /// malformed `@phpstan-ignore` comment itself, which obviously can't
-    /// be ignored away by another one). Defaults to `false`; nothing in
-    /// this project sets it yet, since Phase 44 doesn't exist to consume
-    /// it - the field exists so that phase doesn't also need a struct
-    /// change.
+    /// Mirrors real PHPStan's `RuleErrorBuilder::nonIgnorable()`: when
+    /// `true`, this diagnostic must never be suppressible via
+    /// `@phpstan-ignore <identifier>`.
     pub non_ignorable: bool,
-    /// Free-form structured data a rule wants attached to its own
-    /// diagnostic without inventing a new `Diagnostic` field for it -
-    /// mirrors real PHPStan's own `RuleErrorBuilder::metadata()` (consumed
-    /// there by e.g. its `bleedingEdge` collectors). Empty for every
-    /// current call site; a `HashMap` (not `Vec<(String, Value)>`) since a
-    /// consumer looks up one known key, never iterates all of them.
+    /// Free-form structured data a rule wants attached without inventing a
+    /// new `Diagnostic` field - a `HashMap`, not `Vec<(String, Value)>`,
+    /// since a consumer looks up one known key rather than iterating all.
     pub metadata: HashMap<String, serde_json::Value>,
-    /// A suggested textual auto-fix, when this diagnostic's rule can
-    /// propose one - the data-model half of real PHPStan's own
-    /// `RuleErrorBuilder::fixNode()` (which hands back a *replacement AST
-    /// node*; this project has no code-generation-from-AST facility to
-    /// mirror that with, so a fix here is a literal source-text
-    /// replacement over a `Span` instead). No current call site
-    /// constructs one - a real auto-fix command (reading this field and
-    /// rewriting files) is future work, same as `non_ignorable` above.
+    /// A suggested textual auto-fix. This project has no code-generation-
+    /// from-AST facility, so a fix is a literal source-text replacement
+    /// over a `Span` rather than a replacement AST node.
     pub fix: Option<DiagnosticFix>,
 }
 
@@ -438,19 +322,15 @@ pub struct DiagnosticFix {
     pub description: String,
 }
 
-/// Fluent assembly for a [`Diagnostic`] - the Rust-idiomatic equivalent of
-/// real PHPStan's own `RuleErrorBuilder`
-/// (`RuleErrorBuilder::message(...)->identifier(...)->tip(...)->build()`).
-/// A plain diagnostic with no tip/metadata/fix still goes through this
-/// (via `Checker::report`, which is a thin wrapper around it) - one real
-/// construction path for every `Diagnostic`, not two independently
-/// maintained ones.
+/// Fluent assembly for a [`Diagnostic`], mirroring real PHPStan's own
+/// `RuleErrorBuilder`. A plain diagnostic with no tip/metadata/fix still
+/// goes through this via `Checker::report` (a thin wrapper), so there's one
+/// real construction path for every `Diagnostic`.
 ///
-/// Consumed by value (`build(self)`, each setter takes/returns `Self`),
-/// matching real PHPStan's own chain rather than `&mut self` - a
-/// `DiagnosticBuilder` is always a short-lived, single-use expression built
-/// and immediately consumed at one `self.report_builder(...)` call site,
-/// never stored or branched on mid-construction.
+/// Consumed by value (`build(self)`, each setter takes/returns `Self`): a
+/// `DiagnosticBuilder` is always a short-lived expression built and
+/// immediately consumed at one `report_builder` call site, never stored or
+/// branched on mid-construction.
 pub struct DiagnosticBuilder {
     location: String,
     message: String,
@@ -464,11 +344,10 @@ pub struct DiagnosticBuilder {
 }
 
 impl DiagnosticBuilder {
-    /// `identifier` is required up front, not a later `.identifier(...)`
-    /// call like real PHPStan's own builder allows omitting - every call
-    /// site in this project was written (or rewritten, Phase 47) knowing
-    /// its own identifier, so there's no "forgot to set it" state worth
-    /// representing.
+    /// `identifier` is required up front, unlike real PHPStan's builder
+    /// (which allows a later `.identifier(...)` call) - every call site
+    /// here already knows its identifier, so there's no "forgot to set it"
+    /// state worth representing.
     pub fn new(
         location: impl Into<String>,
         message: impl Into<String>,
@@ -550,27 +429,11 @@ impl DiagnosticBuilder {
 /// bounded gap, not a soundness issue, since no narrowing ever happens
 /// there rather than an incorrect one.
 ///
-/// Resolved limitation (Phase 9.5): undefined-method detection was
-/// initially built and then reverted after real-scale testing found it
-/// trusted *which* `ClassInfo` a bare name resolved to, and this
-/// project's registry didn't model namespaces at all - 1595 distinct
-/// class names were found to collide across one real project plus its
-/// `vendor/` (e.g. 77 unrelated declarations of `InvalidArgumentException`
-/// alone), silently overwriting a class's real method table with an
-/// unrelated one's. Fixed by making `Registry`/`Checker` resolve every
-/// class/function reference to a fully-qualified name first
-/// (`registry::NameContext`, tracking each file's `namespace`/`use`
-/// statements) before any registry key is read or written - two classes
-/// with the same short name in different namespaces now get distinct
-/// keys, the same way real PHP tells them apart. Undefined-method
-/// detection on `ExprKind::MethodCall` is safe again as of this fix.
-///
-/// Phase 9 completed since: `ExprKind::PropertyAccess` now flags undefined
-/// properties on read (`__get`-exempt; the existing write-side check
-/// stays lenient, since a write can legitimately create a real, if
-/// deprecated, dynamic property - a read never does), and
-/// `ExprKind::StaticAccess`/`StaticCall` now check constants, static
-/// properties, and static methods (`__callStatic`-exempt) the same way.
+/// Undefined-class/function/method reference checks resolve every name to
+/// a fully-qualified one first via `registry::NameContext` (tracking each
+/// file's `namespace`/`use` statements) before any registry key is read or
+/// written - two classes with the same short name in different namespaces
+/// get distinct keys, the same way real PHP tells them apart.
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) diagnostics: Vec<Diagnostic>,
@@ -579,37 +442,32 @@ pub struct Checker<'a> {
     // short name, not a fully-qualified path - without resolving it here
     // first, undefined-class/function detection would flag the
     // overwhelming majority of legitimately-imported symbols. Also must
-    // resolve to exactly the same fully-qualified names
-    // `Registry::index` keys its entries under (Phase 9.5's fix for the
-    // namespace-collision bug documented above), or the two would
-    // silently disagree with each other.
+    // resolve to exactly the same fully-qualified names `Registry::index`
+    // keys its entries under, or the two would silently disagree.
     pub(crate) name_ctx: NameContext,
     // The class whose method body is currently being checked, if any -
     // needed to resolve self/parent/static to a concrete class name.
     pub(crate) current_class: Option<String>,
     // The name of the method whose body is currently being checked, if
     // any - needed to tell whether a `readonly` property write is
-    // happening inside its own declaring class's constructor (Finding
-    // 47's pragmatic first cut: any write outside that exact spot is
-    // flagged).
+    // happening inside its own declaring class's constructor (any write
+    // outside that exact spot is flagged).
     pub(crate) current_method: Option<String>,
-    // Phase 39.2: the trait whose method bodies are currently being
-    // checked, if any - `check_trait_methods` re-checks a trait's own
-    // methods once per using host, with `current_class` set to the
-    // *host* (see that function's own doc comment), so a trait's own
-    // `@deprecated` tag is otherwise unreachable through `current_class`
-    // in the common (used) case. Set/restored around `check_trait_
-    // methods`'s own host loop, independent of `current_class`.
+    // The trait whose method bodies are currently being checked, if any -
+    // `check_trait_methods` re-checks a trait's methods once per using
+    // host, with `current_class` set to the *host*, so a trait's own
+    // `@deprecated` tag is otherwise unreachable through `current_class`.
+    // Set/restored around `check_trait_methods`'s host loop, independent
+    // of `current_class`.
     pub(crate) current_trait: Option<String>,
-    // Phase 39.2: whether the function/method/trait/class body currently
-    // being checked is itself inside a deprecated scope (its own
-    // enclosing function/method, class, or trait carries `@deprecated`) -
-    // real PHPStan's own `DeprecatedScopeHelper` suppresses every
-    // deprecated-usage diagnostic entirely from within such a scope
-    // (using one deprecated thing from another is not itself worth
-    // warning about). Computed once per function-like body in
-    // `check_function_with_ancestor_hint`, the single choke point where
-    // `current_class`/`current_method` are also set.
+    // Whether the body currently being checked is itself inside a
+    // deprecated scope (its enclosing function/method, class, or trait
+    // carries `@deprecated`) - mirrors real PHPStan's
+    // `DeprecatedScopeHelper`, which suppresses deprecated-usage
+    // diagnostics from within such a scope. Computed once per
+    // function-like body in `check_function_with_ancestor_hint`, the
+    // single choke point where `current_class`/`current_method` are also
+    // set.
     pub(crate) current_scope_deprecated: bool,
     // Set for the duration of one function/method (or the top-level script)
     // body when it calls extract()/eval() - both can define variables this
@@ -619,185 +477,140 @@ pub struct Checker<'a> {
     // are discarded if this ends up true (see check_function).
     pub(crate) saw_dynamic_var_construct: bool,
     // Set for the duration of one function/method/closure body that
-    // contains a yield/yield from anywhere (Finding 3) - a real
-    // generator, whose implicit `return null` at the end (or an explicit
-    // bare `return;`) never mismatches its declared Generator/Iterator/
-    // Traversable return type, unlike an ordinary function. Consulted by
-    // both check_function's own falls-off-the-end check and check_stmt's
-    // StmtKind::Return(None) arm, which has no direct access to the
-    // enclosing function's body to answer this itself.
+    // contains a yield/yield from anywhere - a real generator, whose
+    // implicit `return null` at the end (or an explicit bare `return;`)
+    // never mismatches its declared Generator/Iterator/Traversable return
+    // type, unlike an ordinary function. Consulted by both
+    // check_function's falls-off-the-end check and check_stmt's
+    // StmtKind::Return(None) arm, neither of which has direct access to
+    // the enclosing function's body to answer this itself.
     pub(crate) current_function_is_generator: bool,
-    // Phase 70.A: the enclosing function/method's own *docblock*-preferring
-    // declared return type (not `native_return` - only the docblock
-    // spelling can carry `Generator<TKey, TValue, TSend, TReturn>`'s own
-    // generic args), `resolve_pseudo`'d against the current class already -
-    // set/restored alongside `current_function_is_generator` at the same
-    // choke point. Consulted by `ExprKind::Yield`/`YieldFrom` (`checker/
-    // expr.rs`) to resolve `yield`'s own TSend and `yield from`'s own
-    // TReturn via `generator_template_param`, since neither expression has
-    // any other way to see the enclosing declaration from mid-body.
+    // The enclosing function/method's docblock-preferring declared return
+    // type (not `native_return` - only the docblock spelling can carry
+    // `Generator<TKey, TValue, TSend, TReturn>`'s generic args),
+    // `resolve_pseudo`'d against the current class already - set/restored
+    // alongside `current_function_is_generator` at the same choke point.
+    // Consulted by `ExprKind::Yield`/`YieldFrom` to resolve `yield`'s
+    // TSend and `yield from`'s TReturn via `generator_template_param`.
     pub(crate) current_declared_return_type: Option<Type>,
-    // Phase 42 Sub-item A: every real throw point recorded so far inside
-    // the enclosing function/method/closure body - an explicit `throw`
-    // expression's own thrown-value type (`checker/stmt/try_catch.rs`'s
-    // `check_throw`, `checker/expr.rs`'s own `ExprKind::Throw` arm), or a
-    // call's own resolved `@throws` type (`FunctionSig.throws`, or a
-    // matching `checker/throws/dynamic.rs` per-callee override tried
-    // first) - recorded at each of `ExprKind::Call`/`New`/`MethodCall`/
-    // `StaticCall`'s own already-resolved-signature choke points. `Type::
-    // Void` (a callee explicitly declared to throw nothing) contributes
-    // nothing at all, matching real PHPStan's own identical treatment.
-    // Consumed by `checker/throws/too_wide.rs`'s `TooWideFunctionThrowTypeRule`/
-    // `TooWideMethodThrowTypeRule` port - see that module's own doc
-    // comment for the full "is a declared `@throws` member actually ever
-    // thrown" comparison this feeds.
+    // Every real throw point recorded so far inside the enclosing
+    // function/method/closure body - an explicit `throw` expression's
+    // thrown-value type, or a call's resolved `@throws` type (a matching
+    // `checker/throws/dynamic.rs` per-callee override tried first) -
+    // recorded at each of `ExprKind::Call`/`New`/`MethodCall`/`StaticCall`'s
+    // resolved-signature choke points. `Type::Void` contributes nothing,
+    // matching real PHPStan. Consumed by `checker/throws/too_wide.rs`'s
+    // `TooWideFunctionThrowTypeRule`/`TooWideMethodThrowTypeRule` port.
     pub(crate) current_function_throw_points: Vec<Type>,
-    // Phase 42 Sub-item A: set `true` the moment any call inside the
-    // enclosing function/method/closure body resolves to *no signature at
-    // all* (a dynamic call, or a genuinely unresolvable one) - real PHP
-    // allows an arbitrarily-implemented callee to throw literally
-    // anything, so such a call's real throw-ness genuinely can't be
-    // bounded from here. Deliberately does NOT also fire for a resolved
-    // signature that simply has no `@throws` tag of its own - see
-    // `Checker::record_call_throw_point`'s own doc comment
-    // (`checker/throws.rs`) for why that distinction matters. Consumed by
-    // `checker/throws/too_wide.rs`'s `TooWideFunctionThrowTypeRule`/
-    // `TooWideMethodThrowTypeRule` port, which suppresses its whole
-    // comparison for a declaration this is `true` for, favoring a missed
+    // Set `true` the moment any call inside the enclosing body resolves to
+    // no signature at all (a dynamic call, or a genuinely unresolvable
+    // one) - such a callee could throw anything, so its real throw-ness
+    // can't be bounded from here. Does NOT fire for a resolved signature
+    // that simply has no `@throws` tag - see `Checker::
+    // record_call_throw_point`'s doc comment for why that distinction
+    // matters. Consumed by the same too-wide-throw rules, which suppress
+    // their comparison entirely when this is `true`, favoring a missed
     // diagnostic over a wrongly-confident one.
     pub(crate) current_function_has_unannotated_call: bool,
-    // Phase 42 bonus item: the explicit-`throw`-only subset of
-    // `current_function_throw_points`, each paired with its own `throw`
-    // expression's span - populated at the same two choke points
-    // (`check_throw`/`ExprKind::Throw`), but never by `record_call_
-    // throw_point` (a call's own `@throws`-derived contribution belongs
-    // to *that callee*, not something *this* declaration's own code
-    // wrote). Consumed by `checker/throws/missing.rs`'s "missing checked
-    // exception" family, opt-in via `Registry::check_missing_checked_
-    // exceptions` - see that module's own doc comment for why only the
-    // explicit subset is checked.
+    // The explicit-`throw`-only subset of `current_function_throw_points`,
+    // each paired with its own `throw` expression's span - never populated
+    // by a call's `@throws`-derived contribution, since that belongs to
+    // the callee, not this declaration's own code. Consumed by
+    // `checker/throws/missing.rs`'s "missing checked exception" family,
+    // opt-in via `Registry::check_missing_checked_exceptions`.
     pub(crate) current_function_explicit_throw_points: Vec<(Type, Span)>,
-    // Phase 45 (item 11): every real return point recorded so far inside
-    // the enclosing function/method/closure body - `StmtKind::
-    // Return(Some(e))`'s own actual value type, `StmtKind::Return(None)`'s
-    // implicit `Type::Void` (real PHPStan pushes `new VoidType()` for a
-    // bare `return;`, not `Null` - a real, easy-to-get-wrong distinction),
-    // and the falls-off-the-end path's own implicit `Type::Null` (only
-    // when the native return type allows it - see `check_function`'s own
-    // choke point). Never populated for a generator (`current_function_
-    // is_generator`) - a generator's own `return` sets `Generator::
-    // getReturn()`, not this function's return value, an unrelated
-    // check `stmt.rs`'s own generator-exemption already handles
-    // separately. Mirrors `current_function_throw_points`'s own wiring
-    // chain exactly - consumed by `checker::return_type::too_wide`'s
-    // `TooWideFunctionReturnTypehintRule`/`TooWideMethodReturnTypehintRule`
-    // port.
+    // Every real return point recorded so far inside the enclosing body -
+    // `StmtKind::Return(Some(e))`'s value type, `StmtKind::Return(None)`'s
+    // implicit `Type::Void` (real PHPStan pushes `VoidType`, not `Null`,
+    // for a bare `return;`), and the falls-off-the-end path's implicit
+    // `Type::Null` (only when the native return type allows it). Never
+    // populated for a generator - its `return` sets `Generator::
+    // getReturn()`, not the function's own return value. Consumed by
+    // `checker::return_type::too_wide`'s
+    // `TooWideFunctionReturnTypehintRule`/`TooWideMethodReturnTypehintRule`.
     pub(crate) current_function_return_points: Vec<Type>,
-    // Phase 45: real PHPStan's own `TooWideTypeCheck` bails via a count
-    // of *explicit* return statements, not "is the accumulated return-
-    // point vector empty" - the falls-off-the-end contribution alone can
-    // make `current_function_return_points` non-empty with zero explicit
+    // Real PHPStan's `TooWideTypeCheck` bails via a count of *explicit*
+    // return statements, not "is the accumulated return-point vector
+    // empty" - the falls-off-the-end contribution alone can make
+    // `current_function_return_points` non-empty with zero explicit
     // returns, which would otherwise spuriously flag a function whose
     // `return.missing` bug (a forgotten return) is already separately
-    // caught. Set the moment either `Return` arm above runs (value or
-    // bare), consulted instead of `.is_empty()` by `check_too_wide_
-    // return_type`.
+    // caught. Set the moment either `Return` arm runs, consulted instead
+    // of `.is_empty()` by `check_too_wide_return_type`.
     pub(crate) current_function_saw_explicit_return: bool,
-    // Phase 45: by-ref parameter direct-assignment/execution-end
-    // tracking (45B/45C/45D) - `name -> declared type` for every by-ref
-    // parameter of the enclosing function/method/closure (native type,
-    // or `@param-out` when the new tag supplies one - see `ParamSig::
-    // out_ty`'s own doc comment), set/restored at the identical choke
-    // point as `current_declared_return_type`.
+    // By-ref parameter direct-assignment/execution-end tracking -
+    // `name -> declared type` for every by-ref parameter of the enclosing
+    // function/method/closure (native type, or `@param-out` when the tag
+    // supplies one - see `ParamSig::out_ty`'s doc comment), set/restored
+    // at the same choke point as `current_declared_return_type`.
     pub(crate) current_function_by_ref_params: std::collections::HashMap<String, Type>,
-    // Phase 45 (45D): every value ever assigned to a by-ref parameter
-    // anywhere in the enclosing body (direct/compound assignment,
-    // destructuring, `foreach`-rebind) - unioned and compared against
-    // each by-ref parameter's own declared type by `check_too_wide_
-    // by_ref_param_type`'s own too-wide narrowing check, the by-ref-
-    // parameter analogue of `current_function_return_points`.
+    // Every value ever assigned to a by-ref parameter anywhere in the
+    // enclosing body (direct/compound assignment, destructuring,
+    // `foreach`-rebind) - unioned and compared against each by-ref
+    // parameter's declared type by `check_too_wide_by_ref_param_type`, the
+    // by-ref-parameter analogue of `current_function_return_points`.
     pub(crate) current_function_by_ref_assigned_types: std::collections::HashMap<String, Vec<Type>>,
     // Set for the duration of one function/method/closure body to every
-    // label name `goto`-targeted anywhere in it (`collect_goto_targets`'s
-    // own doc comment has the full real corpus false positive this
-    // exists for) - consulted by `check_block`'s own `deadCode.
-    // unreachable` check, which has no direct access to the enclosing
-    // function's body to answer "could a `goto` reach this labeled
-    // statement" itself, the same shape `current_function_is_generator`
-    // already has for its own equally function-scoped question.
+    // label name `goto`-targeted anywhere in it (see
+    // `collect_goto_targets`'s doc comment for the real corpus false
+    // positive this exists for) - consulted by `check_block`'s
+    // `deadCode.unreachable` check, which has no direct access to the
+    // enclosing function's body to answer "could a `goto` reach this
+    // labeled statement" itself.
     pub(crate) current_function_goto_targets: std::collections::HashSet<String>,
-    // Phase 71: set to `true` immediately before `check_expr` is called
-    // for a `StmtKind::Expression`'s own top-level expression (a bare
-    // `foo();`, its return value going nowhere by construction), cleared
-    // the instant `check_expr` reads it (`std::mem::take`, at the very
-    // top of its own dispatch) - so it only ever reads `true` for that
-    // exact top-level call, never for anything nested inside it
-    // (`foo(bar());`'s inner `bar()` call sees `false`, correctly, since
-    // *its* return value genuinely is consumed as an argument).
-    // `check_useless_return_value_call` is this flag's one reader: real
-    // PHPStan's own `UselessFunctionReturnValueRule` needs exactly this
-    // "is my own result being used at all" signal, the mirror image of
-    // `check_no_discard_statement`'s "is my result NOT being used"
-    // question - which already has its own dedicated call site (the
-    // literal top-level statement) to answer that from directly, unlike
-    // this one, which needs to answer it from every *other*, much more
-    // varied call site instead.
+    // Set to `true` immediately before `check_expr` is called for a
+    // `StmtKind::Expression`'s top-level expression (a bare `foo();`, its
+    // return value going nowhere by construction), cleared the instant
+    // `check_expr` reads it (`std::mem::take`, at the top of its
+    // dispatch) - so it only ever reads `true` for that exact top-level
+    // call, never for anything nested inside it (`foo(bar())`'s inner
+    // `bar()` call sees `false`, correctly, since its return value is
+    // consumed as an argument). `check_useless_return_value_call` is this
+    // flag's one reader, mirroring real PHPStan's
+    // `UselessFunctionReturnValueRule`.
     pub(crate) in_bare_statement_position: bool,
-    // Phase 15 continuation: mirrors `in_bare_statement_position`'s own
-    // exact `std::mem::take`-at-top-of-`check_expr` idiom - set to `true`
-    // immediately before `check_expr` is called for the direct `cond` of
-    // an `if`/`elseif`/`while`/`do-while`/ternary (never `for` - real
-    // PHPStan has no dedicated for-condition rule at all), cleared the
-    // instant `check_expr` reads it. Real PHPStan's own `Scope::
-    // isInFirstLevelStatement` equivalent: `BooleanAndConstantConditionRule`/
-    // `BooleanOrConstantConditionRule`'s own right-side/whole-expression-
-    // result diagnostics are skipped exactly when the `&&`/`||` itself
-    // *is* one of those direct conditions - already covered by the
-    // if/while/ternary's own check there - but never for a `&&`/`||`
-    // reached any other way (an ordinary sub-expression, a nested one
-    // several levels deep, ...), which still gets the full three-way
-    // check.
+    // Mirrors `in_bare_statement_position`'s `std::mem::take`-at-top-of-
+    // `check_expr` idiom - set to `true` immediately before `check_expr`
+    // is called for the direct `cond` of an `if`/`elseif`/`while`/
+    // `do-while`/ternary (never `for` - real PHPStan has no dedicated
+    // for-condition rule), cleared the instant `check_expr` reads it.
+    // Real PHPStan's `Scope::isInFirstLevelStatement` equivalent:
+    // `BooleanAndConstantConditionRule`/`BooleanOrConstantConditionRule`'s
+    // right-side/whole-expression diagnostics are skipped exactly when the
+    // `&&`/`||` itself *is* one of those direct conditions, but never for
+    // one reached any other way.
     pub(crate) in_condition_position: bool,
-    // Phase 15 continuation: same `std::mem::take` idiom, set (alongside
-    // `in_condition_position`) only when the direct condition about to be
-    // checked is a genuine `elseif` with no trailing `else` and nothing
-    // after it in the chain - real PHPStan's own "acts as an implicit
-    // else" exemption (`reportAlwaysTrueInLastCondition: false`'s
-    // default, confirmed in `vendor/phpstan-src/conf/config.neon`).
-    // `check_if` already applies this directly to its own `elseif.
-    // alwaysTrue`, but `BooleanNotConstantConditionRule` has the *same*
-    // exemption for a standalone `!$expr` condition (`elseif (!false)
-    // {}` with nothing after it) - `should_skip_constant_condition`
+    // Same `std::mem::take` idiom, set (alongside `in_condition_position`)
+    // only when the direct condition about to be checked is a genuine
+    // `elseif` with no trailing `else` and nothing after it in the chain -
+    // real PHPStan's "acts as an implicit else" exemption
+    // (`reportAlwaysTrueInLastCondition: false`'s default). `check_if`
+    // already applies this to its own `elseif.alwaysTrue`, but
+    // `BooleanNotConstantConditionRule` has the same exemption for a
+    // standalone `!$expr` condition - `should_skip_constant_condition`
     // deliberately excludes `!` from `check_if`'s own top-level check
     // (deferring to this dedicated one), so without this flag that
-    // deferral would silently lose the exemption `check_if` alone can't
-    // apply to a shape it never evaluates itself.
+    // deferral would silently lose the exemption.
     pub(crate) in_exempt_last_condition: bool,
-    // Finding 1: the `$this` type inside a Pest `it`/`test`/`describe`/
-    // `beforeEach`/`afterEach`/`beforeAll`/`afterAll` closure - set via
-    // `set_pest_this_type` (by `Project::check_file`, from its own
+    // The `$this` type inside a Pest `it`/`test`/`describe`/`beforeEach`/
+    // `afterEach`/`beforeAll`/`afterAll` closure - set via
+    // `set_pest_this_type` (by `Project::check_file`, from
     // `PestConfig::resolve_this_type`) before `check_program` runs, then
-    // possibly overridden by a file-local `uses(...)` call
-    // `check_program` itself finds (real Pest's own resolution order:
-    // file-local wins over directory-scoped). Defaults to `Type::Mixed`
-    // so every existing call site untouched by Finding 1 (the ~300+
-    // direct `Checker::new` calls in this project's own tests, the `demo`
-    // subcommand, ...) is completely unaffected - this field is only ever
-    // consulted inside an `is_this_binding_call`-recognized closure
-    // argument, which none of those exercise.
+    // possibly overridden by a file-local `uses(...)` call `check_program`
+    // itself finds (real Pest's resolution order: file-local wins over
+    // directory-scoped). Defaults to `Type::Mixed`, so any call site never
+    // exercising an `is_this_binding_call`-recognized closure argument is
+    // unaffected.
     pub(crate) pest_this_type: Type,
-    // Phase 22 Finding 1: dynamic property names a Pest `beforeEach(...)`
-    // closure assigns onto the shared `$this` (see `pest_config`'s own
-    // `file_local_hook_properties`/`PestConfig::resolve_hook_properties`)
-    // - set via `set_pest_hook_properties` (by `Project::check_file`, from
-    // `PestConfig::resolve_hook_properties`) before `check_program` runs,
-    // then unioned (not overridden - a property-name set has no "most
-    // specific wins" precedence the way a single class type does) with
-    // whatever file-local `beforeEach(...)` calls `check_program` itself
-    // finds. Defaults empty, so every existing call site untouched by
-    // this is completely unaffected.
+    // Dynamic property names a Pest `beforeEach(...)` closure assigns onto
+    // the shared `$this` (see `pest_config`'s
+    // `file_local_hook_properties`/`PestConfig::resolve_hook_properties`) -
+    // set via `set_pest_hook_properties` before `check_program` runs, then
+    // unioned (not overridden - a property-name set has no "most specific
+    // wins" precedence) with whatever file-local `beforeEach(...)` calls
+    // `check_program` itself finds. Defaults empty.
     pub(crate) pest_hook_properties: HashSet<String>,
-    // Phase 29: one frame per currently-open loop or switch, collecting
+    // One frame per currently-open loop or switch, collecting
     // the `locals` snapshot at every `break` reached inside it - a stack,
     // since loops/switches nest. `StmtKind::Foreach`/`While`/`For`/
     // `DoWhile` each fold every collected state into what flows past the
@@ -815,137 +628,97 @@ pub struct Checker<'a> {
     // be open, matching real PHP's "innermost loop-or-switch" rule for an
     // unqualified `break;`.
     pub(crate) loop_break_states: Vec<Vec<Locals>>,
-    // Phase 55: the `continue` counterpart of `loop_break_states` above -
-    // one frame per currently-open loop, collecting the `locals` snapshot
-    // at every `continue` reached inside it. Unlike `break`'s states
-    // (folded once, after all of a loop's convergence passes finish, into
-    // what flows *past* the loop), `continue`'s states are consumed
-    // *between* passes, inside `converge_loop_body` itself: a `continue`
-    // jumps back to the top of the loop, so whatever it reached is
-    // exactly as much a real "entry to the next iteration" as the body's
-    // own ordinary fall-through exit is. Pushed/popped once per pass
-    // (not once per loop, unlike `loop_break_states`) - each pass's own
-    // continue-reached states only ever inform *that* pass's contribution
-    // to the next entry, never a later pass's. Without this, a variable
-    // reassigned *only* on a path that ends in `continue` (a real, common
-    // shape: `if ($x === null) { ...; $x = compute(); continue; }`) never
-    // fed its new value into the next convergence pass at all - the
-    // pass-to-pass entry computation only ever saw the body's ordinary
-    // fall-through exit, which such a variable never reaches, so
-    // convergence silently converged after a single pass and kept that
-    // pass's own diagnostics, computed against the *stale* pre-loop
-    // entry - reintroducing the exact false-positive class Phase 15's
-    // `UnreachableStatementRule` was reverted over in the first place
-    // (real corpus find: sebastian/diff's `Parser::parse`).
+    // The `continue` counterpart of `loop_break_states` - one frame per
+    // currently-open loop, collecting the `locals` snapshot at every
+    // `continue` reached inside it. Unlike `break`'s states (folded once,
+    // after all of a loop's convergence passes finish, into what flows
+    // past the loop), `continue`'s states are consumed *between* passes,
+    // inside `converge_loop_body` itself: a `continue` jumps back to the
+    // top of the loop, so whatever it reached is as much a real "entry to
+    // the next iteration" as the body's own fall-through exit is. Pushed/
+    // popped once per pass, not once per loop - each pass's continue-
+    // reached states inform only that pass's contribution to the next
+    // entry. Without this, a variable reassigned only on a path that ends
+    // in `continue` never fed its new value into the next convergence
+    // pass, so convergence would silently stop after one pass against a
+    // stale pre-loop entry.
     pub(crate) loop_continue_states: Vec<Vec<Locals>>,
-    // Phase 60: how many loop bodies (`While`/`DoWhile`/`For`/`Foreach`,
-    // nesting included - a `Switch` doesn't count, it runs its body
-    // exactly once) currently enclose whatever's being checked right
-    // now. Originally motivated by this project's own single-pass loop
-    // model (superseded by Phase 55's `converge_loop_body` - a variable's
-    // tracked type at a given point can now reflect an earlier
-    // iteration's own write, within the pass budget) - kept as its own
-    // counter regardless, since `check_pointless_null_probe` and similar
-    // "is this ever true across the whole function" checks still need a
-    // simple "any loop at all, at any depth, still open right now" signal
-    // distinct from `loop_break_states`'s own stack (which also counts an
-    // enclosing `Switch` frame, not relevant to this one).
+    // How many loop bodies (`While`/`DoWhile`/`For`/`Foreach`, nesting
+    // included - a `Switch` doesn't count, it runs its body once)
+    // currently enclose whatever's being checked. `check_pointless_
+    // null_probe` and similar "is this ever true across the whole
+    // function" checks need a simple "any loop at all, at any depth,
+    // still open right now" signal, distinct from `loop_break_states`'s
+    // own stack (which also counts an enclosing `Switch` frame).
     pub(crate) loop_depth: u32,
-    // Phase 60 corpus find: every variable name seen bound via
-    // `static $x = ...;` anywhere in the file being checked - real
-    // shape: Symfony's own `HttpClient::create()`'s `static $curlVersion
-    // = null; $curlVersion ??= curl_version();`. A `static` local
-    // genuinely can carry a value left over from an *earlier call* -
-    // exactly the same "this single forward pass can't see a wider type
-    // a different execution of the same code would" unsoundness
-    // `loop_depth` already exists to guard against, just across
-    // invocations instead of iterations (confirmed against real PHPStan
-    // itself, which stays silent on this exact shape too). Accumulated
-    // across the whole file rather than reset per function/closure - a
-    // stale entry only costs a missed diagnostic on an unrelated later
-    // local that happens to share the same name, never a wrong one.
+    // Every variable name seen bound via `static $x = ...;` anywhere in
+    // the file being checked. A `static` local can carry a value left
+    // over from an earlier call - the same "this single forward pass
+    // can't see a wider type a different execution of the same code
+    // would" unsoundness `loop_depth` guards against, just across
+    // invocations instead of iterations (real PHPStan stays silent on
+    // this shape too). Accumulated across the whole file rather than
+    // reset per function/closure - a stale entry only costs a missed
+    // diagnostic on an unrelated later local sharing the same name.
     pub(crate) static_var_names: HashSet<String>,
-    // Phase 59: every class named as the resolved `$scope` of a
-    // `Closure::bind(...)`/`->bindTo(...)` call anywhere in the file being
-    // checked (`unused::scan_program_for_rebind_targets`, built once per
+    // Every class named as the resolved `$scope` of a `Closure::
+    // bind(...)`/`->bindTo(...)` call anywhere in the file being checked
+    // (`unused::scan_program_for_rebind_targets`, built once per
     // `check_program`) - a real, idiomatic way to reach a class's private
-    // members from a closure declared entirely outside that class's own
-    // body (see `checker/expr.rs`'s own Finding 49 handling), invisible to
-    // `check_unused_private_members`'s own per-class-body-only usage scan
-    // otherwise. `rebind_escape_all` is the coarser fallback for a
-    // bind/bindTo call whose scope isn't a literal `Foo::class` this
-    // project can resolve without full type inference (an omitted scope
-    // argument, or an arbitrary expression) - safer to skip every class's
-    // private-member check for the whole file than risk a false "unused"
-    // report on a member a rebound closure actually reaches.
+    // members from a closure declared outside that class's own body,
+    // invisible to `check_unused_private_members`'s per-class-body-only
+    // usage scan otherwise. `rebind_escape_all` is the coarser fallback
+    // for a bind/bindTo call whose scope isn't a literal `Foo::class` this
+    // project can resolve without full type inference - safer to skip
+    // every class's private-member check for the whole file than risk a
+    // false "unused" report on a member a rebound closure actually
+    // reaches.
     pub(crate) rebind_target_classes: HashSet<String>,
     pub(crate) rebind_escape_all: bool,
-    // Phase 17 Stage B: the LSP's own one-off "what type is this instance
-    // receiver" probe. `probe_span` is the exact `Span` of the receiver
-    // `Expr` (`lsp::navigation` already knows it precisely - the same
-    // `MethodCall`/`PropertyAccess` node its own Stage A walk already
-    // identifies) the caller wants typed; `check_expr`'s own `MethodCall`/
-    // `PropertyAccess` arms already compute the receiver's real `Type` as
-    // part of ordinary checking (`recv_ty`) - this just also stashes it
-    // in `probe_hit` when the receiver's own span matches. Matching by
-    // exact span (not "nearest enclosing") sidesteps any inner-vs-outer
-    // receiver ambiguity for a chained call (`$x->foo()->bar()`) entirely
-    // - `lsp::navigation` already resolved *which* receiver it wants
-    // before ever constructing this `Checker`, so there's nothing left
-    // for this to disambiguate. `None` (every existing call site,
-    // `check-project` included) is a complete no-op - `probe_span` never
-    // equals a real span, so the extra check at each call site is the
-    // only added cost, and it's checked only where `recv_ty` was already
-    // being computed anyway.
+    // The LSP's one-off "what type is this instance receiver" probe.
+    // `probe_span` is the exact `Span` of the receiver `Expr` the caller
+    // wants typed; `check_expr`'s `MethodCall`/`PropertyAccess` arms
+    // already compute the receiver's real `Type` as part of ordinary
+    // checking (`recv_ty`) - this just also stashes it in `probe_hit` when
+    // the receiver's span matches. Matching by exact span (not "nearest
+    // enclosing") sidesteps inner-vs-outer receiver ambiguity for a
+    // chained call (`$x->foo()->bar()`) - `lsp::navigation` already
+    // resolved which receiver it wants before constructing this `Checker`.
+    // `None` (every ordinary call site) is a complete no-op.
     //
-    // `Cell`/`RefCell` (not plain fields): Phase 17 follow-up's own
-    // declaration-site hover probe (`Checker::probe_hit_at`) needs to
-    // stash a hit from deep inside `bind_assignment_target`/
-    // `bind_simple_target`/`apply_narrowing` - all three are called from
-    // dozens of sites across the checker, several of them themselves only
-    // ever holding `&self` (e.g. `infer_expr`/`infer_binary`, whose own
-    // narrowing side effects are already expressed through `&mut Locals`,
-    // not `&mut self`). Threading `&mut self` through that whole call
-    // graph just for a one-off LSP probe would be a large, high-risk,
-    // purely-mechanical signature change rippling through the most
-    // heavily-called functions in the module. Interior mutability keeps
-    // every one of those signatures untouched: a probe field is written
-    // through a shared `&self` reference, exactly like any other "off by
-    // default, harmless no-op" side channel - the same reasoning that
-    // already justifies these fields being unconditionally cheap when no
-    // probe is active.
+    // `Cell`/`RefCell`, not plain fields: the declaration-site hover probe
+    // (`Checker::probe_hit_at`) needs to stash a hit from deep inside
+    // `bind_assignment_target`/`bind_simple_target`/`apply_narrowing`,
+    // several of which only ever hold `&self` (e.g. `infer_expr`/
+    // `infer_binary`, whose narrowing side effects go through `&mut
+    // Locals`, not `&mut self`). Threading `&mut self` through that whole
+    // call graph for a one-off LSP probe would be a large, high-risk
+    // signature change; interior mutability keeps every signature
+    // untouched.
     pub(crate) probe_span: Cell<Option<Span>>,
     pub(crate) probe_hit: RefCell<Option<Type>>,
-    // Phase 17 follow-up: the LSP's own one-off "where could this local
-    // variable read have come from" probe - the real, flow-sensitive
-    // counterpart of `lsp::navigation`'s own hand-rolled arm-merging
-    // heuristic it replaces. Checked in `check_expr`'s own `ExprKind::
-    // Variable` arm the same way `probe_hit` already is in `MethodCall`/
-    // `PropertyAccess`: when `probe_span` matches this read's own span,
-    // `locals`'s own tracked provenance for that name (see `Locals::
-    // declare`'s own doc comment) is stashed here. `None` (every existing
-    // call site, `check-project` included) is a complete no-op - see
-    // `Locals::track`'s own doc comment for why declaration tracking
-    // itself is also gated off whenever no probe is active, not just this
-    // one read.
+    // The LSP's one-off "where could this local variable read have come
+    // from" probe - the flow-sensitive counterpart of `lsp::navigation`'s
+    // hand-rolled arm-merging heuristic. Checked in `check_expr`'s
+    // `ExprKind::Variable` arm the same way `probe_hit` is in `MethodCall`/
+    // `PropertyAccess`: when `probe_span` matches this read's span,
+    // `locals`'s tracked provenance for that name is stashed here. `None`
+    // (every ordinary call site) is a complete no-op - see `Locals::track`'s
+    // doc comment for why declaration tracking itself is also gated off
+    // whenever no probe is active.
     pub(crate) probe_var_provenance: RefCell<Option<HashSet<Span>>>,
-    // A `Call(callee, ...)` node's own resolved `(primary, fallback)`
-    // name pair (`NameContext::resolve_function_candidates`'s own
-    // return), keyed by `callee`'s span - `check_expr`'s own `Call` arm
-    // and `infer_expr`'s own separate `Call` arm both independently
-    // re-derive this identical pair for the same callee whenever
-    // `infer_expr` is invoked on a call `check_expr` already resolved
-    // (e.g. a call nested as another call's own argument, re-derived via
-    // `check_args`'s own contextual-type inference) - a real, if small,
-    // redundant `String` allocation plus `NameContext` lookup on every
-    // such re-entry. `RefCell`, not a plain field, for the same reason
-    // `probe_hit`/`probe_var_provenance` already are: populated/read
-    // through a shared `&self` from deep inside both `check_expr` (`&mut
-    // self`) and `infer_expr` (`&self`) without threading a new
-    // parameter through either's entire call graph. Scoped to one
-    // `Checker` (one file), so it never outlives or leaks across files -
-    // bounded by the number of distinct resolvable `Call` nodes in that
-    // file. Found via a perf-optimization investigation workflow.
+    // A `Call(callee, ...)` node's resolved `(primary, fallback)` name
+    // pair, keyed by `callee`'s span - `check_expr`'s `Call` arm and
+    // `infer_expr`'s separate `Call` arm both independently re-derive this
+    // identical pair for the same callee whenever `infer_expr` is invoked
+    // on a call `check_expr` already resolved (e.g. a call nested as
+    // another call's argument, re-derived via `check_args`'s contextual-
+    // type inference). `RefCell`, not a plain field, for the same reason
+    // `probe_hit`/`probe_var_provenance` are: populated/read through a
+    // shared `&self` from both `check_expr` (`&mut self`) and `infer_expr`
+    // (`&self`) without threading a new parameter through either's call
+    // graph. Scoped to one `Checker` (one file), so it never leaks across
+    // files.
     call_candidate_cache: RefCell<HashMap<Span, (String, Option<String>)>>,
 }
 
@@ -1006,24 +779,20 @@ pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::{
     ITERABLE_GENERIC_CLASS_NAMES, class_kind_word, has_explicit_mixed_nested_somewhere,
 };
-pub(crate) use oop::{
-    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
-    ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER, ATTRIBUTE_TARGET_PROPERTY,
-};
-pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
-pub(crate) use type_union::union_types;
-// Only ever called by `union_types` itself in real code (`checker/expr.rs`) -
-// this crate-level re-export exists solely so this module's own test
-// suite can exercise it directly, the same reason `preg_match_matches_shape`
-// isn't re-exported either.
 pub(crate) use narrowing::{
     array_value_type_for_key, is_real_variable_key, is_unsealed_shape,
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
     narrow_type_to, narrowing_key, purge_stale_narrowing_for, resolve_concat_type,
     string_type_has_accessory,
 };
+pub(crate) use oop::{
+    ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
+    ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER, ATTRIBUTE_TARGET_PROPERTY,
+};
+pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
 #[cfg(test)]
 pub(crate) use type_union::generalize_by_key_set;
+pub(crate) use type_union::union_types;
 pub(crate) use visibility::MemberVisibilityCheck;
 
 impl<'a> Checker<'a> {
@@ -1084,11 +853,10 @@ impl<'a> Checker<'a> {
         resolved
     }
 
-    /// Sets the `$this` type Finding 1's Pest support seeds an
-    /// `it`/`test`/`describe`/`beforeEach`/`afterEach`/`beforeAll`/
-    /// `afterAll` closure argument with - a setter rather than a
-    /// `Checker::new` parameter, so the ~300+ existing call sites that
-    /// don't care about Pest at all don't need to change.
+    /// Sets the `$this` type a Pest `it`/`test`/`describe`/`beforeEach`/
+    /// `afterEach`/`beforeAll`/`afterAll` closure argument is seeded with -
+    /// a setter rather than a `Checker::new` parameter, so call sites that
+    /// don't care about Pest don't need to change.
     pub fn set_pest_this_type(&mut self, ty: Type) {
         self.pest_this_type = ty;
     }
@@ -1102,17 +870,13 @@ impl<'a> Checker<'a> {
         self.pest_hook_properties = props;
     }
 
-    /// Phase 17 follow-up: the declaration-site counterpart of the
-    /// read-site probe hook already inline in `ExprKind::Variable` - stashes
-    /// `ty` in `probe_hit` when `span` is exactly the LSP's own hover-type
-    /// probe target (`probe_span`). A one-line call at every real
-    /// local-variable binding site (every `Locals::declare` call site: the
-    /// parameter-declare loops, `foreach`/`catch`/`static`/`global` binds,
-    /// destructuring-leaf binds), so hovering a variable at its own
-    /// declaration - not just a later read of it - shows an inferred type
-    /// too. `None` (every existing call site, `check-project` included) is
-    /// a complete no-op, the same contract every other probe hook in this
-    /// module already has.
+    /// The declaration-site counterpart of the read-site probe hook inline
+    /// in `ExprKind::Variable` - stashes `ty` in `probe_hit` when `span` is
+    /// exactly the LSP's hover-type probe target (`probe_span`). Called at
+    /// every real local-variable binding site (`Locals::declare` call
+    /// sites: parameter-declare loops, `foreach`/`catch`/`static`/`global`
+    /// binds, destructuring-leaf binds), so hovering a variable at its own
+    /// declaration - not just a later read - shows an inferred type too.
     pub(crate) fn probe_hit_at(&self, span: Span, ty: &Type) {
         if self.probe_span.get() == Some(span) {
             *self.probe_hit.borrow_mut() = Some(ty.clone());
@@ -1121,11 +885,10 @@ impl<'a> Checker<'a> {
 
     /// The plain-message path every call site that needs nothing beyond
     /// `identifier` goes through - a thin wrapper over `DiagnosticBuilder`
-    /// (Phase 47) so there's still exactly one place a `Diagnostic` is
-    /// actually assembled. `identifier` is `&str` here (not
-    /// `impl Into<String>` the way `DiagnosticBuilder::new` takes it) so
-    /// every call site can keep passing a `&'static str` literal
-    /// (`"argument.type"`, ...) without an extra `.to_string()`.
+    /// so there's still one place a `Diagnostic` is assembled. `identifier`
+    /// is `&str` here, not `impl Into<String>` like `DiagnosticBuilder::new`
+    /// takes it, so call sites can pass a `&'static str` literal without an
+    /// extra `.to_string()`.
     pub(crate) fn report(
         &mut self,
         location: String,
@@ -1146,20 +909,16 @@ impl<'a> Checker<'a> {
         self.diagnostics.push(builder.build());
     }
 
-    /// Phase 67/Phase 39 follow-up: an object used somewhere real PHP
-    /// implicitly converts it to a string - an explicit `(string)` cast
-    /// (`ExprKind::Cast`), `echo`, and `print` all do this identically at
-    /// runtime, invoking the object's own `__toString()` - triggers the
-    /// exact same `@internal`/`@deprecated` restricted-usage checks an
-    /// explicit `->__toString()` call would (real PHPStan's own
-    /// `RestrictedUsageOfDeprecatedStringCastRule` and the internal-tag
-    /// equivalent, both previously left as "easy to add once needed, just
-    /// not wired" in ROADMAP.md's own Phase 67 entry - confirmed real via
-    /// `vendor/phpstan-src`'s own `PrintHandler`/`EchoRule`, which run the
-    /// identical `ImplicitToStringCallHelper` this project's checks
-    /// mirror). Same "first Object member" representative-class
-    /// extraction `ExprKind::MethodCall`'s own `recv_class` uses for a
-    /// Union/Intersection operand.
+    /// An object used somewhere real PHP implicitly converts it to a
+    /// string - an explicit `(string)` cast, `echo`, and `print` all do
+    /// this identically at runtime, invoking `__toString()` - triggers the
+    /// same `@internal`/`@deprecated` restricted-usage checks an explicit
+    /// `->__toString()` call would, mirroring real PHPStan's
+    /// `RestrictedUsageOfDeprecatedStringCastRule` and its internal-tag
+    /// equivalent (both run through `PrintHandler`/`EchoRule`'s
+    /// `ImplicitToStringCallHelper`). Uses the same "first Object member"
+    /// representative-class extraction `ExprKind::MethodCall`'s own
+    /// `recv_class` uses for a Union/Intersection operand.
     pub(crate) fn check_implicit_tostring_usage(&mut self, ty: &Type, span: Span, label: &str) {
         let class = match ty {
             Type::Object(class, _) => Some(class.clone()),
@@ -1198,76 +957,47 @@ impl<'a> Checker<'a> {
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[Stmt]) {
         // A whole-file scan (last `namespace` seen wins, same as
-        // `NameContext::build` itself does) purely for the three
-        // file-wide, position-independent questions right below - "does
-        // this file import symbol X anywhere," "what classes anywhere in
-        // it are rebind targets," "does it have a file-local Pest
-        // `uses()`" - each already scans the *entire* program regardless
-        // of where in it something appears, so there's no one "current
-        // position" for them to need in the first place. Deliberately
-        // NOT reused for `self.name_ctx` itself below - see the main
-        // per-statement loop's own comment for why that one has to be
-        // positional instead.
+        // `NameContext::build` itself does) purely for the file-wide,
+        // position-independent questions below - each already scans the
+        // entire program regardless of where something appears, so
+        // there's no one "current position" they need. Deliberately NOT
+        // reused for `self.name_ctx` below, which has to be positional
+        // instead (see that loop's own comment).
         let whole_file_ctx = NameContext::build(program);
-        // Phase 48: `ExistingNamesInUseRule`'s own function-import half -
-        // see `check_use_function_imports`'s own doc comment for why a
-        // plain, class-shaped `use Foo;` is deliberately NOT
-        // existence-checked here.
         self.check_use_function_imports(program);
         self.check_use_const_imports(program);
         self.check_use_class_imports(program);
-        // Phase 63: `UsedNamesRule`'s own case-insensitive
-        // declaration-vs-import collision check - a whole-file,
-        // position-independent scan for the identical reason as the
-        // other checks in this block.
         self.check_used_names(program);
-        // Phase 59: see `rebind_target_classes`'s own doc comment - built
-        // once per file, ahead of `check_unused_private_members`'s own
-        // per-class use below.
         let (rebind_targets, rebind_escape_all) =
             unused::scan_program_for_rebind_targets(program, &whole_file_ctx);
         self.rebind_target_classes = rebind_targets;
         self.rebind_escape_all = rebind_escape_all;
-        // Finding 1: a file-local `uses(...)` call (no `->in(...)`) wins
-        // over whatever `Project::check_file` already set via
+        // A file-local `uses(...)` call (no `->in(...)`) wins over
+        // whatever `Project::check_file` already set via
         // `set_pest_this_type` from directory-scoped Pest.php config -
-        // matches real Pest's own resolution order (file-local checked
-        // first). A file with no such call leaves `pest_this_type`
-        // exactly as `Project::check_file` set it.
+        // matches real Pest's resolution order (file-local checked
+        // first).
         if let Some(local_ty) = pest_config::file_local_this_type(program, &whole_file_ctx) {
             self.pest_this_type = local_ty;
         }
-        // Unlike `pest_this_type` just above, file-local and
-        // directory-scoped hook properties are unioned, not one
-        // overriding the other - a property-name set has no "file-local
-        // wins" precedence to apply.
+        // Unlike `pest_this_type` above, hook properties are unioned, not
+        // overridden - a property-name set has no "file-local wins"
+        // precedence to apply.
         self.pest_hook_properties
             .extend(pest_config::file_local_hook_properties(program));
 
         let mut top_locals: Locals = Locals::default();
-        // Phase 17 follow-up: mirrors `check_function_with_ancestor_
-        // hint`'s own identical wiring - a top-level-script-scope probe
-        // (`lsp::navigation::ProbeScope::TopLevel`) needs this too.
         top_locals.set_track(self.probe_span.get().is_some());
         let diagnostics_before = self.diagnostics.len();
-        // `self.name_ctx` is tracked *positionally* here, mirroring
-        // `registry::build_declarations`'s own identical walk exactly -
-        // real PHP only ever allows a `namespace`/`use` statement at the
-        // top level of a file (never nested inside a class/function/
-        // block), so a single left-to-right pass over `program`'s own
-        // top-level statements, mutating `self.name_ctx` in place when
-        // one is seen, is already enough: by the time this loop reaches
-        // a `ClassDecl`/`FunctionDecl`/`EnumDecl`, `self.name_ctx`
-        // already correctly reflects whichever `namespace` was actually
-        // active *at that declaration's own position*, not merely "the
-        // last one anywhere in the file" the old whole-file `NameContext
-        // ::build` pre-pass used to apply even to declarations under an
-        // *earlier* one - a real, corpus-found false positive
-        // (`jetbrains/phpstorm-stubs`' own `relay/Cluster.php`: `namespace
-        // Relay;` for its own `Cluster` class, then a later, empty
-        // `namespace Relay\Cluster;` for the rest of the file, wrongly
-        // resolving `Cluster`'s own self-referencing return type as
-        // `Relay\Cluster\Cluster` instead of `Relay\Cluster`).
+        // `self.name_ctx` is tracked *positionally* here: real PHP only
+        // allows a `namespace`/`use` statement at the top level of a file,
+        // so a single left-to-right pass, mutating `self.name_ctx` in
+        // place when one is seen, means that by the time this loop
+        // reaches a `ClassDecl`/`FunctionDecl`/`EnumDecl`, `self.name_ctx`
+        // reflects whichever `namespace` was active at that declaration's
+        // own position - not merely the last one anywhere in the file,
+        // which would wrongly resolve a declaration under an earlier
+        // namespace against a later one.
         self.name_ctx = NameContext::default();
         for stmt in program {
             match &stmt.kind {
@@ -1319,13 +1049,13 @@ impl<'a> Checker<'a> {
                     self.check_reserved_class_constant_name(&fqn, &c.consts);
                     self.check_typed_class_constant_values(&fqn, &c.consts);
                     self.check_class_constant_modifiers(&fqn, &c.consts);
-                    // Phase 37: the class's own attributes, plus every
-                    // property's/const's - method/param attributes are
-                    // checked per-declaration inside `check_function`
-                    // below instead, the one place that already runs for
-                    // every method regardless of how it's reached (a
-                    // direct method here, or via `check_trait_methods`'s
-                    // own per-host loop for a trait).
+                    // The class's own attributes, plus every property's/
+                    // const's - method/param attributes are checked
+                    // per-declaration inside `check_function` below
+                    // instead, the one place that runs for every method
+                    // regardless of how it's reached (a direct method
+                    // here, or via `check_trait_methods`'s per-host loop
+                    // for a trait).
                     self.check_attributes(&c.attrs, &fqn);
                     self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
                     self.check_self_attribute_class_declaration(
@@ -1354,15 +1084,14 @@ impl<'a> Checker<'a> {
                             &fqn,
                         );
                     }
-                    // Phase 58: a property/const's own missing-typehint
-                    // completeness is about where it's textually
-                    // declared, not which class(es) end up using it - so
-                    // it's checked once here, regardless of trait-ness.
-                    // `check_function` below runs once per *host* for a
-                    // trait's own methods instead (a method's own
-                    // `$this`-dependent body needs a real host to check
-                    // against; a property/const's own declared type
-                    // never does, so it has no such need).
+                    // A property/const's missing-typehint completeness is
+                    // about where it's textually declared, not which
+                    // class(es) end up using it - so it's checked once
+                    // here, regardless of trait-ness, unlike
+                    // `check_function` below, which runs once per host for
+                    // a trait's methods (a method's `$this`-dependent body
+                    // needs a real host; a property/const's declared type
+                    // never does).
                     self.check_missing_property_typehints(&fqn, &c.properties);
                     self.check_missing_class_constant_typehints(&fqn, &c.consts);
                     if c.kind == ClassKind::Trait {
@@ -1376,12 +1105,11 @@ impl<'a> Checker<'a> {
                                 !m.is_abstract && c.kind != ClassKind::Interface,
                             );
                         }
-                        // Phase 59: a class's own private consts/methods/
-                        // properties, checked once per class (not per
-                        // method the way check_function's own per-body
-                        // checks are) since "was this ever referenced"
-                        // needs every one of the class's own bodies
-                        // scanned together, not just one at a time.
+                        // A class's private consts/methods/properties,
+                        // checked once per class, not per method like
+                        // check_function's per-body checks - "was this
+                        // ever referenced" needs every one of the class's
+                        // bodies scanned together, not one at a time.
                         self.check_unused_private_members(
                             &fqn,
                             c.kind,
@@ -1443,10 +1171,10 @@ impl<'a> Checker<'a> {
                             &fqn,
                         );
                     }
-                    // Phase 58: an enum can't declare instance properties
-                    // at all (see `ast::EnumDecl`'s own doc comment), but
-                    // its own consts are exactly as real a
-                    // missing-typehint candidate as a class's.
+                    // An enum can't declare instance properties at all
+                    // (see `ast::EnumDecl`'s doc comment), but its consts
+                    // are as real a missing-typehint candidate as a
+                    // class's.
                     self.check_missing_class_constant_typehints(&fqn, &e.consts);
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
