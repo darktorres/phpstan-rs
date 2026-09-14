@@ -1,21 +1,15 @@
 use crate::types::{self, Type};
 /// A defensive cap on how many distinct members `union_types` will ever
-/// materialize into a real `Type::Union`, mirroring the `MAX_GROUP_DEPTH`/
-/// `MAX_EXPR_DEPTH` precedent (Phase 20). Collapsing to `Mixed` past this
-/// point is a stable fixed point (`union_types(Mixed, _) == Mixed` is this
-/// function's own first special case below), so a variable that blows past
-/// the cap once stays collapsed rather than being recomputed on every
-/// subsequent merge. Found necessary by a real hang, not guessed: `gdb`
-/// caught a `check-project` run spinning inside `Type::eq`, called from
-/// `union_types`, called from `merge_scopes` (`checker/control_flow.rs`,
-/// once per `if`/`else`) and from `write_index_into`'s own `Union` arm
-/// (`checker/assignment.rs`, Phase 12 Finding E). Once Finding E made
-/// `Type::Union` "stick" across reads/writes instead of immediately
-/// collapsing to `Mixed`, a real corpus function with many sequential and
-/// nested branches assigning genuinely distinct array shapes to the same
-/// variable grew that variable's own union member count combinatorially -
-/// each subsequent `contains`-based dedup scan below (and each member's own
-/// recursive `PartialEq`) growing right along with it.
+/// materialize into a real `Type::Union`. Collapsing to `Mixed` past this
+/// point is a stable fixed point (`union_types(Mixed, _) == Mixed` is
+/// this function's first special case below), so a variable that blows
+/// past the cap once stays collapsed rather than being recomputed on
+/// every subsequent merge. Needed because `Type::Union` sticks across
+/// reads/writes instead of immediately collapsing to `Mixed`: a function
+/// with many sequential and nested branches assigning distinct array
+/// shapes to the same variable can grow that variable's union member
+/// count combinatorially, and each subsequent dedup scan below (plus
+/// each member's own recursive `PartialEq`) grows right along with it.
 const MAX_UNION_MEMBERS: usize = 12;
 
 /// Union of two types for a scope-merge join point - flattens nested
@@ -50,23 +44,17 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
             }
         }
     }
-    // Phase 32 Finding L: drop a literal member whenever its own exact
-    // base type is *also* present in the same union - a ternary's two
-    // branches (`is_string($x) ? $x : ''`, `check_expr`'s own `Ternary`
-    // arm calling this) build exactly this shape,
-    // `union_types(String, StringLiteral(""))`, and keeping both was
-    // this project's actual root cause for `SectionInitializer::parse()`'s
-    // `str_replace()` subject never matching `== Type::String` again
-    // after the ternary. Snapshotting which base types are present
-    // first, rather than checking `members` from inside its own
-    // `retain` closure (which Rust's borrow checker won't allow).
-    // Phase 14: extended to `Array`/`Float` alongside the original
-    // `Int`/`String`/`Bool` - `literal_base_type` can now also produce
-    // an `Array(_)` base (an accessory-refined `list<T>`/`non-empty-
-    // array<T>`) or `Float` (a `FloatLiteral`), and this filter has to
-    // actually recognize those as "a base type present in this union"
-    // or the new absorption arms in `literal_base_type` would never
-    // find a match to absorb into.
+    // Drop a literal member whenever its exact base type is also present
+    // in the same union - a ternary's two branches
+    // (`is_string($x) ? $x : ''`) build exactly this shape,
+    // `union_types(String, StringLiteral(""))`, and keeping both would
+    // stop later code from matching `== Type::String`. Snapshotting
+    // which base types are present first, rather than checking `members`
+    // from inside its own `retain` closure (which the borrow checker
+    // won't allow). Covers `Array`/`Float` alongside `Int`/`String`/
+    // `Bool` since `literal_base_type` can also produce an `Array(_)`
+    // base (an accessory-refined `list<T>`/`non-empty-array<T>`) or
+    // `Float` (a `FloatLiteral`).
     let present_bases: Vec<Type> = members
         .iter()
         .filter(|m| {
@@ -81,63 +69,41 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         Some(base) => !present_bases.contains(&base),
         None => true,
     });
-    // Real bug found and fixed, corpus-diff-driven (Piwigo, verified
-    // against the real `phpstan/phpstan` phar via `\PHPStan\dumpType()`):
-    // a genuinely-empty `ArrayShape` (`array{}`) is a subtype of *any*
-    // `Array(key, val)` - vacuously, since an empty array satisfies "every
-    // key is `key`-typed, every value is `val`-typed" for every possible
-    // `key`/`val` - so keeping both as separate union members is exactly
+    // A genuinely-empty `ArrayShape` (`array{}`) is a subtype of *any*
+    // `Array(key, val)` - vacuously, since an empty array satisfies
+    // "every key is `key`-typed, every value is `val`-typed" for every
+    // possible `key`/`val` - so keeping both as separate union members is
     // the same kind of redundant-literal-not-absorbed-into-its-own-base
-    // shape `literal_base_type` above already fixes for `Int`/`String`/
-    // `Bool`/`Float`, just for a variant `literal_base_type` can't express
-    // (its own absorbing base depends on *which* `Array(_, _)` member is
-    // already present, not a fixed, context-free mapping). Concretely:
+    // shape `literal_base_type` above fixes for `Int`/`String`/`Bool`/
+    // `Float`, for a variant `literal_base_type` can't express (its
+    // absorbing base depends on *which* `Array(_, _)` member is already
+    // present, not a fixed mapping). Concretely:
     // `$counter = []; foreach ($keys as $k) { $counter[$k] = 1; }` merges
-    // the loop's own zero-iteration entry state (`array{}`, from
-    // `LoopZeroIterations::Possible`'s own symmetric `merge_scopes`) with
-    // the body's own accumulated `array<string, 1>` - real PHPStan's own
-    // post-loop type (confirmed via `dumpType()`) is the *unqualified*
-    // `array<string, 1>`, no `array{}` alternative surviving at all, since
-    // it's already redundant once unioned with the general map. Without
-    // this, `index_result_type`'s own separately-correct "an empty shape
-    // plus a *dynamic* key reads `null`" rule (a real, deliberate fix for
-    // a *different* bug - mid-loop auto-vivification during
-    // `++$counts[$c]`) fired on the still-surviving empty-shape member,
-    // unioning a bogus `null` into an otherwise-precise `$counter[$key]`
-    // read - the single largest false-positive source found in a
-    // real-PHPStan-vs-phpstan-rs corpus diff (33 of 70 `argument.type`/
-    // `return.type` findings in one scoped Piwigo run shared this exact
-    // signature). Deliberately scoped to an *empty* shape only - a
-    // non-empty `ArrayShape` needs real field-by-field subtype checking
-    // against the specific `Array(key, val)` co-member to be absorbed
-    // safely, a real but separate, narrower feature this fix doesn't
-    // attempt. Does not affect a whole-variable reassignment merge like
-    // `$file_path = null; foreach (...) { $file_path = $row; }` -
-    // `Type::Null` is not a subtype of `Type::String`, so `string|null`
-    // is correctly still kept apart (confirmed against real PHPStan's own
-    // `dumpType()` output for that exact shape too).
+    // the loop's zero-iteration entry state (`array{}`) with the body's
+    // accumulated `array<string, 1>`; the correct post-loop type is the
+    // unqualified `array<string, 1>`, with no `array{}` alternative
+    // surviving. Without this, `index_result_type`'s separately-correct
+    // "an empty shape plus a dynamic key reads `null`" rule fires on the
+    // still-surviving empty-shape member, unioning a bogus `null` into an
+    // otherwise-precise `$counter[$key]` read. Scoped to an *empty* shape
+    // only - a non-empty `ArrayShape` needs real field-by-field subtype
+    // checking against the specific `Array(key, val)` co-member to be
+    // absorbed safely. Does not affect a whole-variable reassignment
+    // merge like `$file_path = null; foreach (...) { $file_path = $row; }`
+    // - `Type::Null` is not a subtype of `Type::String`, so `string|null`
+    // is correctly still kept apart.
     let has_general_array = members.iter().any(|m| matches!(m, Type::Array(_, _)));
     if has_general_array {
         members.retain(|m| !matches!(m, Type::ArrayShape(fields) if fields.is_empty()));
     }
-    // Phase 68.3: two structurally different `Array(key, val)` members
-    // never merged into one on their own before this - each stayed its
-    // own separate union member instead of the single, precise
-    // `Array(key1|key2, val1|val2)` real PHPStan would infer (`array_
-    // element_type`'s own `Union` arm, and every other consumer that
-    // wants "the" element type of a plain array, silently only ever saw
-    // the *first* matching member). Real corpus false positive this
-    // fixed: `vendor/symfony/var-exporter/ProxyHelper.php`'s dynamic-key
-    // index-assignment inside a loop's `if`-branch (assigning an object,
-    // then `continue`) and its own fall-through path (assigning `false`)
-    // each built their own separate `Array(string, Foo)`/`Array(string,
-    // false)` member instead of merging into one `Array(string,
-    // Foo|false)` - confirmed via an isolated repro producing four
-    // separate, redundant `array<...>` union members instead of one.
-    // Deliberately scoped to a bare `Type::Array` only, not an
-    // accessory-refined `list<T>`/`non-empty-array<T>` (a real
-    // `Intersection`) - a mix of the two is a rarer shape not needed to
-    // fix this repro, left as a real, if narrower, residual.
+    // Two structurally different `Array(key, val)` members merge into
+    // one precise `Array(key1|key2, val1|val2)` instead of staying
+    // separate union members - `array_element_type`'s `Union` arm, and
+    // every other consumer wanting "the" element type of a plain array,
+    // would otherwise silently only see the first matching member.
+    // Scoped to a bare `Type::Array` only, not an accessory-refined
+    // `list<T>`/`non-empty-array<T>` (a real `Intersection`) - a mix of
+    // the two is left as a narrower residual.
     if members
         .iter()
         .filter(|m| matches!(m, Type::Array(_, _)))
@@ -180,19 +146,14 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
 
 /// A follow-up to the `MAX_UNION_MEMBERS` cap above: before giving up to
 /// `Mixed`, try to merge same-key-set `ArrayShape`s into one shape with
-/// unioned field types - only tried once the cap would otherwise fire,
-/// never applied to a union already under it, so a small union's
-/// behavior is completely unaffected. Two `ArrayShape`s merge only when
-/// their field-name *sets* are identical (order-independent) -
-/// deliberately not a fuzzier "mostly-the-same-shape" heuristic. This
-/// directly targets the exact failure pattern that caused the real hang
-/// `MAX_UNION_MEMBERS` itself was added to fix (many sequential/nested
-/// branches repeatedly writing the *same* known keys with different
-/// value types onto one variable), without touching the cap itself,
-/// which stays as the safety net for whatever's left ungeneralizable
-/// (e.g. a variable whose branches genuinely have *different* key sets -
-/// real, inherent branching precision, correctly left untouched here,
-/// still protected by the hard cap if it ever grows past it).
+/// unioned field types - only tried once the cap would otherwise fire, so
+/// a small union's behavior is unaffected. Two `ArrayShape`s merge only
+/// when their field-name *sets* are identical (order-independent), not a
+/// fuzzier "mostly-the-same-shape" heuristic. Targets many sequential/
+/// nested branches repeatedly writing the same known keys with different
+/// value types onto one variable; the cap itself stays as the safety net
+/// for whatever's left ungeneralizable (a variable whose branches
+/// genuinely have different key sets).
 pub(crate) fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     type ShapeFields = Vec<(String, Type, bool)>;
     let mut groups: Vec<(Vec<String>, Vec<ShapeFields>)> = Vec::new();
@@ -258,11 +219,11 @@ fn literal_base_type(t: &Type) -> Option<Type> {
         Type::True | Type::False => Some(Type::Bool),
         Type::FloatLiteral(_) => Some(Type::Float),
         Type::IntRange(_, _) => Some(Type::Int),
-        // Phase 14: scoped to intersections that actually carry an
-        // `Accessory` member, so a genuine, unrelated multi-class
-        // intersection (`Countable&Iterator`) is never affected - only
-        // this plan's own accessory-refined intersections should ever
-        // be treated as "more specific than their own base type."
+        // Scoped to intersections that carry an `Accessory` member, so a
+        // genuine, unrelated multi-class intersection
+        // (`Countable&Iterator`) is never affected - only an
+        // accessory-refined intersection is "more specific than its own
+        // base type."
         Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Accessory(_))) => {
             members
                 .iter()
