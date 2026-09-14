@@ -1,23 +1,19 @@
-//! Phase 78 (partial slice): `DateInterval`'s own ISO-8601 duration-
-//! string constructor validation. Real PHPStan validates this
+//! `DateInterval`'s own ISO-8601 duration-string constructor
+//! validation. Real PHPStan validates this
 //! (`DateIntervalConstructorThrowTypeExtension`) by constructing an
 //! actual `DateInterval` at analysis time and observing whether it
 //! throws - this project has no embedded PHP runtime to do that, so
 //! this hand-rolled grammar mirrors PHP's own two accepted spec formats
-//! instead, confirmed directly against real `php` (8.5) for every edge
-//! case cited in the comments below (mixed-designator ordering,
-//! leading/trailing whitespace, leading zeros, the alternate
-//! fixed-width ISO date-time form, and each of PHP's own real rejection
-//! cases). Deliberately scoped to a *literal* string argument only -
+//! instead. Deliberately scoped to a literal string argument only -
 //! "don't guess" for a computed one, the same restriction this project
 //! applies to every other runtime-error-detecting builtin check
 //! (`random_int`'s min/max, `define()`'s third argument).
 //!
-//! `DOMDocument`/`SimpleXMLElement`'s own XML-content validation (this
-//! phase's other original scope) remains unimplemented - a full XML
-//! well-formedness grammar is a substantially bigger undertaking than
-//! `DateInterval`'s own small, precisely-specified duration syntax, with
-//! no comparable "just verify against real php, case by case" shortcut.
+//! `DOMDocument`/`SimpleXMLElement`'s own XML-content validation
+//! remains unimplemented - a full XML well-formedness grammar is a
+//! substantially bigger undertaking than `DateInterval`'s own small,
+//! precisely-specified duration syntax, with no comparable "just verify
+//! against real php, case by case" shortcut.
 
 use crate::ast::{Arg, ExprKind, Literal};
 use crate::checker::Checker;
@@ -65,8 +61,8 @@ impl<'a> Checker<'a> {
 /// PHP accepts exactly two, wholly different spec grammars - the
 /// familiar letter-designator duration form, or a fixed-width ISO-8601
 /// extended date-time form reused as a duration. Leading/trailing
-/// whitespace is tolerated (confirmed: `" P1Y"`/`"P1Y "` both succeed);
-/// nothing else is.
+/// whitespace is tolerated (`" P1Y"`/`"P1Y "` both succeed); nothing
+/// else is.
 pub(crate) fn is_valid_date_interval_spec(spec: &str) -> bool {
     let s = spec.trim();
     is_valid_designator_form(s) || is_valid_iso_datetime_form(s)
@@ -74,13 +70,13 @@ pub(crate) fn is_valid_date_interval_spec(spec: &str) -> bool {
 
 /// `P[n]Y[n]M[n]W[n]D[T[n]H[n]M[n]S]` - every designator is optional,
 /// but present designators must appear in exactly this relative order
-/// with no repeats (confirmed: `P1Y2M3D` succeeds, `P1D2Y` and `P1Y1Y`
-/// both throw) - `consume_designator_groups`'s own "search only forward
-/// from the last matched position" shape encodes that directly. `T`'s
-/// own presence is optional, but if present, at least one time
-/// designator must follow it (confirmed: `P1DT` throws) - and if absent,
-/// the date part must have matched at least one designator itself
-/// (confirmed: bare `P`/`P1`/`PY` all throw). Case-sensitive throughout
+/// with no repeats (`P1Y2M3D` succeeds, `P1D2Y` and `P1Y1Y` both throw),
+/// matching `consume_designator_groups`'s own "search only forward from the
+/// last matched position" shape encodes that directly. `T`'s own
+/// presence is optional, but if present, at least one time designator
+/// must follow it (`P1DT` throws) - and if absent, the date part must
+/// have matched at least one designator itself (bare `P`/`P1`/`PY` all
+/// throw). Case-sensitive throughout
 /// (`strip_prefix('P')` alone already rejects a lowercase `p1y`).
 fn is_valid_designator_form(s: &str) -> bool {
     let Some(rest) = s.strip_prefix('P') else {
@@ -101,7 +97,7 @@ fn is_valid_designator_form(s: &str) -> bool {
 
 /// Consumes `<digits><letter>` groups from `s`, where each `letter` must
 /// be drawn from `designators`, strictly in that relative order (each
-/// usable at most once) - real PHP's own grammar, confirmed directly:
+/// usable at most once) - real PHP's own grammar:
 /// `P1D2Y` throws (D before Y), `P1Y1Y` throws (Y repeated), `P1W2D`/
 /// `P2M1W` succeed (W freely mixes with M/D, unlike strict ISO-8601)
 /// while `P1D2W`/`P1W2M` (W out of its own relative slot) throw.
@@ -133,8 +129,8 @@ fn consume_designator_groups(s: &str, designators: &[char]) -> Option<bool> {
 }
 
 /// `P<yyyy>-<mm>-<dd>T<hh>:<mi>:<ss>` - every digit group's width is
-/// fixed and the whole `T...` time suffix is mandatory (confirmed:
-/// `P2018-01-01`, with no time suffix, throws; `P01-02-03T04:05:06`,
+/// fixed and the whole `T...` time suffix is mandatory
+/// (`P2018-01-01`, with no time suffix, throws; `P01-02-03T04:05:06`,
 /// with a 2-digit year, throws too).
 fn is_valid_iso_datetime_form(s: &str) -> bool {
     const PATTERN: &[u8] = b"Pdddd-dd-ddTdd:dd:dd";
