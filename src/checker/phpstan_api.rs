@@ -1,5 +1,5 @@
-//! Phase 40: flags a third-party project's own references into real
-//! PHPStan's `PHPStan\*` namespace that aren't marked `@api` (or, for an
+//! Flags a third-party project's own references into real PHPStan's
+//! `PHPStan\*` namespace that aren't marked `@api` (or, for an
 //! `extends`/`implements`/trait `use`, specifically marked
 //! `@api-do-not-implement`) - PHPStan's own documented backward-
 //! compatibility promise (see `vendor/phpstan-src`'s own `CLAUDE.md`:
@@ -10,24 +10,19 @@
 //! `ApiInstanceofRule`, `ApiClassExtendsRule`, `ApiClassImplementsRule`,
 //! `ApiInterfaceExtendsRule`, `ApiTraitUseRule`, `ApiMethodCallRule`,
 //! `NodeConnectingVisitorAttributesRule` - the last two checked from the
-//! *main* `Checker` pass instead, see below) - this is the mirror-image
-//! feature to Phase 18's future extension-API surface (phpstan-rs
-//! protecting *its own* API), not that feature itself: this checks code
-//! that *consumes* real PHPStan as a Composer library.
+//! main `Checker` pass instead, see below): this checks code that
+//! consumes real PHPStan as a Composer library.
 //!
 //! Only ever called when `composer::detect_phpstan_dependency` found a
 //! real `phpstan/phpstan`/`phpstan/extension-installer` dependency in the
 //! analyzed project's own `composer.json` (`Project::check_file`) - a
 //! project with no such dependency has no backward-compatibility promise
-//! to check anything against, and (mirroring the real corpus reasoning
-//! `pest_config`'s own module doc gives for its equivalent gate) running
-//! this unconditionally would risk flagging a project's own, unrelated
-//! `PHPStan\`-namespaced code with a diagnostic that means nothing to it.
+//! to check anything against, and running this unconditionally would
+//! risk flagging a project's own, unrelated `PHPStan\`-namespaced code
+//! with a diagnostic that means nothing to it.
 //!
-//! **Namespace signal plus a vendor-path check** (built in full - a
-//! previous version of this comment declined the vendor-path half as not
-//! worth the registry plumbing; that plumbing turned out small): real
-//! PHPStan's own `ApiRuleHelper::isPhpStanCode` additionally confirms the
+//! **Namespace signal plus a vendor-path check**: real PHPStan's own
+//! `ApiRuleHelper::isPhpStanCode` additionally confirms the
 //! referenced declaration's own file lives under a `vendor/` directory,
 //! but *only* when the *calling* scope's own namespace is *also*
 //! `PHPStan\*`-prefixed - self-referential PHPStan code (PHPStan
@@ -50,7 +45,7 @@
 //! (`$scope->getType(...)`, `phpstanApi.method`) and
 //! `$node->getAttribute('parent'|'previous'|'next')`
 //! (`phpParser.nodeConnectingAttribute`) are checked separately, in the
-//! *main* `Checker` pass instead (Phase 40.C - `checker/expr.rs`'s own
+//! main `Checker` pass instead (`checker/expr.rs`'s own
 //! `MethodCall` arm, via `Checker::check_phpstan_api_method_call`/
 //! `check_node_connecting_attribute`), which already computes a method
 //! call's real receiver class via full general type inference
@@ -89,7 +84,7 @@ use crate::token::Span;
 /// itself.
 type ParamTypes = HashMap<String, String>;
 
-/// Phase 40.6: `file_path` is `None` in every existing test (`Walker::
+/// `file_path` is `None` in every existing test (`Walker::
 /// tests`'s own `diagnostics_for` has no real file on disk to point at) -
 /// only `PhpStanNamespaceIn3rdPartyPackageRule` needs it at all (it's the
 /// only one of these rules that cares which real package a file belongs
@@ -129,10 +124,9 @@ pub(crate) fn check_phpstan_api_usage(
 /// actual PHPStan API surface - excluded via a case-*sensitive* prefix
 /// match, deliberately mirroring `ApiRuleHelper`'s own `str_starts_with`
 /// exactly (no case-insensitivity exemption for either sub-namespace).
-/// Phase 40.E: `ApiInstanceofTypeRule`'s own compiled `#[InstanceofDeprecated]`
+/// `ApiInstanceofTypeRule`'s own compiled `#[InstanceofDeprecated]`
 /// table (`vendor/phpstan-src/src/Type/**/*.php`, one entry per real
-/// attribute site - confirmed by exhaustive grep, not assumed complete).
-/// Keyed by lowercase FQN (matching real PHPStan's own `strtolower()`
+/// attribute site). Keyed by lowercase FQN (matching real PHPStan's own `strtolower()`
 /// lookup-map construction); the value is the attribute's own
 /// `insteadUse` hint, `None` for the two sites that declare the attribute
 /// with no replacement suggestion at all.
@@ -252,8 +246,8 @@ const INSTANCEOF_DEPRECATED_CLASSES: &[(&str, Option<&str>)] = &[
     ),
 ];
 
-/// Phase 40.6: whether `fqn` transitively derives from, implements, or
-/// uses anything under the `PHPStan\` namespace at all -
+/// Whether `fqn` transitively derives from, implements, or uses
+/// anything under the `PHPStan\` namespace at all -
 /// `RuntimeReflectionFunctionRule`/`RuntimeReflectionInstantiationRule`/
 /// `OldPhpParser4ClassRule`'s own shared gate (real PHPStan's own
 /// `$scope->getClassReflection()->getInterfaces()` walk, matched
@@ -262,10 +256,8 @@ const INSTANCEOF_DEPRECATED_CLASSES: &[(&str, Option<&str>)] = &[
 /// walks `extends`/`implements`/`uses` transitively) rather than a
 /// narrower "interfaces only" walk of its own - a real class or trait
 /// ancestor (not just an interface) is a looser condition than what real
-/// PHPStan's `getInterfaces()` checks, a disclosed, false-positive-
-/// favoring-in-real-PHPStan's-terms (but this project's own usual false-
-/// negative-averse direction) simplification not worth new registry
-/// plumbing for.
+/// PHPStan's `getInterfaces()` checks, favoring false positives over
+/// false negatives, this project's usual leaning.
 pub(crate) fn class_implements_phpstan_interface(fqn: &str, registry: &Registry) -> bool {
     registry
         .all_ancestor_names(fqn)
@@ -310,7 +302,7 @@ pub(crate) fn is_phpstan_code(
         .is_some_and(|path| path.components().any(|c| c.as_os_str() == "vendor"))
 }
 
-/// Phase 40.6: `OldPhpParser4ClassRule`'s own hardcoded rename table -
+/// `OldPhpParser4ClassRule`'s own hardcoded rename table -
 /// `vendor/phpstan-src/src/Rules/Api/OldPhpParser4ClassRule.php`'s own
 /// `NAME_MAPPING` constant, ported verbatim (old nikic/php-parser v4
 /// class name, lowercased for the case-insensitive match real PHPStan's
@@ -355,7 +347,7 @@ const OLD_PHP_PARSER_4_CLASS_NAMES: &[(&str, &str)] = &[
     ("phpparser\\node\\stmt\\useuse", "PhpParser\\Node\\UseItem"),
 ];
 
-/// Phase 40.6: the five reflection function names
+/// The five reflection function names
 /// `RuntimeReflectionFunctionRule` flags.
 const RUNTIME_REFLECTION_FUNCTIONS: &[&str] = &[
     "is_a",
@@ -365,7 +357,7 @@ const RUNTIME_REFLECTION_FUNCTIONS: &[&str] = &[
     "class_uses",
 ];
 
-/// Phase 40.6: the thirteen reflection class names
+/// The thirteen reflection class names
 /// `RuntimeReflectionInstantiationRule` flags - `vendor/phpstan-src`'s
 /// own `NAME_MAPPING`-adjacent `in_array` list, ported verbatim (two of
 /// these, `ReflectionEnum`/`ReflectionEnumBackedCase`/`ReflectionFiber`,
@@ -401,9 +393,7 @@ fn resolved_param_class(p: &Param, ctx: &NameContext) -> Option<String> {
 }
 
 /// The shared native-hint-resolution core `resolved_param_class` (above)
-/// and `class_prop_types` (below) both need - factored out once Phase
-/// 40.1 gave a property declaration's own native hint the identical
-/// treatment a parameter's already had.
+/// and `class_prop_types` (below) both need.
 fn resolved_class_from_hint(hint: Option<&str>, ctx: &NameContext) -> Option<String> {
     let hint = hint?;
     let bare = hint.strip_prefix('?').unwrap_or(hint);
@@ -413,7 +403,7 @@ fn resolved_class_from_hint(hint: Option<&str>, ctx: &NameContext) -> Option<Str
     Some(ctx.resolve(bare))
 }
 
-/// Phase 40.1: a minimal, class-scoped sibling to `ParamTypes` - every
+/// A minimal, class-scoped sibling to `ParamTypes` - every
 /// property (ordinary, or constructor-promoted) whose own native type
 /// hint names a single, unambiguous class, keyed by bare property name
 /// (no leading `$`). Lets `check_expr`'s `MethodCall` arm recognize one
@@ -472,7 +462,7 @@ fn param_types_with(base: &ParamTypes, params: &[Param], ctx: &NameContext) -> P
 }
 
 impl<'a> Checker<'a> {
-    /// Phase 40.C: `ApiMethodCallRule`'s general receiver-type-inference
+    /// `ApiMethodCallRule`'s general receiver-type-inference
     /// half, folded into the main checker pass - `check_expr`'s own
     /// `MethodCall` arm already computes `owner`/`sig` via full general
     /// inference (`find_method_receiver`) for an unrelated purpose
@@ -517,7 +507,7 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 40.C: `NodeConnectingVisitorAttributesRule`, folded in
+    /// `NodeConnectingVisitorAttributesRule`, folded in
     /// alongside `check_phpstan_api_method_call` above for the identical
     /// reason - `check_expr`'s own `MethodCall` arm already has the real
     /// receiver class in hand. Unlike that check, gated on the *calling*
@@ -573,21 +563,21 @@ impl<'a> Checker<'a> {
 struct Walker<'a> {
     registry: &'a Registry,
     diagnostics: Vec<Diagnostic>,
-    // Phase 40.1: set once per `check_class`, from that class's own
+    // Set once per `check_class`, from that class's own
     // properties/promoted constructor params (`class_prop_types`) - PHP
     // classes never nest, so there's no enclosing class's own map to
     // save/restore the way `current_function_is_generator` and friends
     // need to in the main `Checker`. Empty outside any class (top-level
     // functions have no `$this` to look anything up through anyway).
     current_prop_types: ParamTypes,
-    // Phase 40.6: set once per `check_class`, alongside `current_prop_
+    // Set once per `check_class`, alongside `current_prop_
     // types` above, for the same reason (no nesting, no save/restore
     // needed) - `RuntimeReflectionFunctionRule`/`RuntimeReflection
     // InstantiationRule`/`OldPhpParser4ClassRule` all gate on this exact
     // condition (real PHPStan's own `$scope->isInClass()` plus "does the
     // enclosing class implement a `PHPStan\*` interface").
     current_class_implements_phpstan_interface: bool,
-    // Phase 40.D: set once per `check_class`, alongside the two fields
+    // Set once per `check_class`, alongside the two fields
     // above (no nesting, no save/restore needed - PHP classes never
     // nest) - `resolve_if_phpstan`'s own `self`/`static`/`parent`
     // pseudo-class resolution needs this; `NameContext::resolve` has no
@@ -595,7 +585,7 @@ struct Walker<'a> {
     // doc comment), and this standalone `Walker` has no other "current
     // class" state of its own the way the main `Checker` does.
     current_class_fqn: Option<String>,
-    // Phase 40.6: `PhpStanNamespaceIn3rdPartyPackageRule`'s own real file
+    // `PhpStanNamespaceIn3rdPartyPackageRule`'s own real file
     // path on disk, used only to find the nearest `composer.json` upward
     // from it. `None` in every test (no real file on disk to point at) -
     // that one rule just never fires without it.
@@ -603,7 +593,7 @@ struct Walker<'a> {
 }
 
 impl<'a> Walker<'a> {
-    /// Phase 40.D: `self`/`static`/`parent` need resolving against
+    /// `self`/`static`/`parent` need resolving against
     /// `current_class_fqn` before ever reaching `ctx.resolve` - that
     /// function has no special-casing for any of the three (confirmed by
     /// its own doc comment: "`self`/`parent`/`static`... never reach
@@ -620,13 +610,11 @@ impl<'a> Walker<'a> {
     /// Same `self`/`static`/`parent`-aware resolution as `resolve_if_
     /// phpstan`, without its own `is_phpstan_namespace` filter - needed
     /// at the `StaticCall` site, which must resolve the FQN
-    /// unconditionally (real `ApiStaticCallRule` gates on the resolved
-    /// *method's declaring class*, never on the literally-written class
-    /// name's own namespace - a real, previously-undetected false
-    /// negative: `MyNonPhpStanSubclass::inheritedPhpStanMethod()`, where
-    /// `MyNonPhpStanSubclass extends PHPStan\Foo`, never reached `report_
-    /// static_method_not_covered` at all under the old bare-`resolve_if_
-    /// phpstan`-as-pre-filter shape).
+    /// unconditionally: real `ApiStaticCallRule` gates on the resolved
+    /// method's declaring class, never on the literally-written class
+    /// name's own namespace, so `MyNonPhpStanSubclass::
+    /// inheritedPhpStanMethod()` (where `MyNonPhpStanSubclass extends
+    /// PHPStan\Foo`) must still reach `report_static_method_not_covered`.
     fn resolve_class_name(&self, name: &str, ctx: &NameContext) -> Option<String> {
         match name {
             "self" | "static" => self.current_class_fqn.clone(),
@@ -661,7 +649,7 @@ impl<'a> Walker<'a> {
         is_phpstan_code(scope_namespace, target_fqn, self.registry)
     }
 
-    /// Phase 40.E: `ApiInstanceofTypeRule`, direct port - a wholly
+    /// `ApiInstanceofTypeRule`, direct port - a wholly
     /// separate rule from `ApiInstanceofRule` above (this one fires
     /// independent of `@api` status entirely, keyed only on
     /// `INSTANCEOF_DEPRECATED_CLASSES`). Two real, narrow exemptions
@@ -762,20 +750,19 @@ impl<'a> Walker<'a> {
         });
     }
 
-    /// Phase 40.B: `ApiStaticCallRule::isCovered()`'s real resolution -
-    /// the *referenced* class's own `is_api` isn't the right question at
-    /// all (confirmed by reading `isCovered()` directly): a static call
-    /// is covered when either the method's own *declaring* class carries
-    /// `@api` (except for `__construct`, which real PHPStan explicitly
-    /// exempts from this half - a constructor is never covered by a
-    /// class-level `@api` alone) or the method's own docblock carries
-    /// `@api` directly, regardless of `__construct`. `lookup_method_with_
-    /// owner` (already exists, `registry/hierarchy.rs`) gives both the
-    /// real declaring class and its resolved `FunctionSig.is_api` in one
-    /// call - a referenced class inheriting a method from an unrelated,
-    /// non-`@api` ancestor no longer silently passes just because the
-    /// referenced class's own `is_api` (checked, before this fix, instead
-    /// of the declaring class's) happened to be true. The declaring class
+    /// `ApiStaticCallRule::isCovered()`'s real resolution -
+    /// the referenced class's own `is_api` isn't the right question at
+    /// all: a static call is covered when either the method's own
+    /// declaring class carries `@api` (except for `__construct`, which
+    /// real PHPStan explicitly exempts from this half - a constructor is
+    /// never covered by a class-level `@api` alone) or the method's own
+    /// docblock carries `@api` directly, regardless of `__construct`.
+    /// `lookup_method_with_owner` (already exists, `registry/
+    /// hierarchy.rs`) gives both the real declaring class and its
+    /// resolved `FunctionSig.is_api` in one call - a referenced class
+    /// inheriting a method from an unrelated, non-`@api` ancestor must
+    /// not silently pass just because the referenced class's own
+    /// `is_api` happens to be true. The declaring class
     /// itself must also genuinely be PHPStan-namespaced code (not just
     /// the referenced one) - the same `is_phpstan_namespace` gate every
     /// other check here already applies, re-checked against `owner`
@@ -823,7 +810,7 @@ impl<'a> Walker<'a> {
         });
     }
 
-    /// Phase 40.2/40.4: an unconditional report with no `@api` short-
+    /// An unconditional report with no `@api` short-
     /// circuit at all - real PHPStan's own `ApiInstantiationRule` (once
     /// the constructor-own-`@api` exemption has already been checked by
     /// the caller) and `ApiTraitUseRule` (no exemption of any kind) both
@@ -859,18 +846,17 @@ impl<'a> Walker<'a> {
     /// `check_do_not_implement`: real PHPStan's own `@api-do-not-implement`
     /// short-circuit is semantically interface-only ("don't implement/
     /// extend me" - `@api-do-not-implement` is meaningless for the
-    /// "extending a class" relationship real `ApiClassExtendsRule` checks,
-    /// confirmed: that rule reads only `isApi()`, never
+    /// "extending a class" relationship real `ApiClassExtendsRule` checks:
+    /// that rule reads only `isApi()`, never
     /// `isApiDoNotImplement()`). `false` for a class's own `extends`
-    /// call site (Phase 40.4); `true` everywhere else (interface
+    /// call site; `true` everywhere else (interface
     /// `extends`, `implements`, and this function's own general shape).
-    /// Phase 40 follow-up's own new `ctx` parameter (needed for the
-    /// vendor-directory `is_phpstan_code` check) pushed this past
-    /// clippy's default 7-argument threshold - every argument here is
-    /// already its own independently-meaningful piece of this one
-    /// report site's own shape, not a bag of fields crying out for a
-    /// struct (mirrors this project's own existing precedent for the
-    /// identical situation, `main/check_project.rs::run_check_project`).
+    /// `ctx` (needed for the vendor-directory `is_phpstan_code` check)
+    /// pushed this past clippy's default 7-argument threshold - every
+    /// argument here is already its own independently-meaningful piece
+    /// of this one report site's own shape, not a bag of fields crying
+    /// out for a struct (mirrors this project's own existing precedent
+    /// for the identical situation, `main/check_project.rs::run_check_project`).
     #[allow(clippy::too_many_arguments)]
     fn report_inheritance(
         &mut self,
@@ -937,10 +923,9 @@ impl<'a> Walker<'a> {
         let fqn = ctx.declared_name(&c.name);
         for parent in &c.extends {
             if let Some(pfqn) = self.resolve_if_phpstan(parent, ctx) {
-                // Phase 40.A: real `ApiClassExtendsRule`'s own narrow
+                // Real `ApiClassExtendsRule`'s own narrow
                 // carve-out - extending `PHPStan\Analyser\MutatingScope`
-                // itself is exempt (`processNode`'s own explicit early
-                // return), a `Class_`-only concept (an interface's
+                // itself is exempt, a `Class_`-only concept (an interface's
                 // `extends` list is never checked against this, and
                 // couldn't target `MutatingScope` meaningfully anyway -
                 // it isn't an interface).
@@ -948,13 +933,13 @@ impl<'a> Walker<'a> {
                     continue;
                 }
                 let action = format!("extending {pfqn}");
-                // Phase 40.A: real PHPStan splits this into two separate
-                // rules by the *declaring* node's own kind -
+                // Real PHPStan splits this into two separate
+                // rules by the declaring node's own kind -
                 // `ApiClassExtendsRule` (`phpstanApi.class`, `Class_`-only,
                 // single parent) vs `ApiInterfaceExtendsRule`
                 // (`phpstanApi.interface`, `Interface_`-only, a real
                 // multi-parent list) - `c.kind` already tells us which.
-                // Phase 40.4: `@api-do-not-implement` is semantically
+                // `@api-do-not-implement` is semantically
                 // interface-only - real `ApiClassExtendsRule` checks only
                 // `@api`, never it, for a real class's own `extends`.
                 let identifier = if c.kind == ClassKind::Class {
@@ -991,7 +976,7 @@ impl<'a> Walker<'a> {
             if let Some(ufqn) = self.resolve_if_phpstan(used, ctx)
                 && self.registry.classes.contains_key(&ufqn)
             {
-                // Phase 40.4: real `ApiTraitUseRule` flags trait use
+                // Real `ApiTraitUseRule` flags trait use
                 // unconditionally - no `@api`/`@api-do-not-implement`
                 // exemption of any kind, unlike extends/implements.
                 let action = format!("using trait {ufqn}");
@@ -1064,7 +1049,7 @@ impl<'a> Walker<'a> {
         self.current_class_fqn = None;
     }
 
-    /// Phase 40.6: `PhpStanNamespaceIn3rdPartyPackageRule`, direct port
+    /// `PhpStanNamespaceIn3rdPartyPackageRule`, direct port
     /// (`vendor/phpstan-src/src/Rules/Api/
     /// PhpStanNamespaceIn3rdPartyPackageRule.php`). Unlike the other two
     /// rules in this phase, not gated on `current_class_implements_
@@ -1100,7 +1085,7 @@ impl<'a> Walker<'a> {
         });
     }
 
-    /// Phase 40.6: `OldPhpParser4ClassRule`'s own reporting half - the
+    /// `OldPhpParser4ClassRule`'s own reporting half - the
     /// name-mapping lookup itself lives in `OLD_PHP_PARSER_4_CLASS_NAMES`.
     /// `name` is the as-written reference text (matches real PHPStan's
     /// own `$node->toString()` in the reported message).
@@ -1130,7 +1115,7 @@ impl<'a> Walker<'a> {
         });
     }
 
-    /// Phase 40.6: `RuntimeReflectionFunctionRule`'s own reporting half.
+    /// `RuntimeReflectionFunctionRule`'s own reporting half.
     fn check_runtime_reflection_function(&mut self, name: &str, span: Span, label: &str) {
         if !self.current_class_implements_phpstan_interface {
             return;
@@ -1157,8 +1142,7 @@ impl<'a> Walker<'a> {
         });
     }
 
-    /// Phase 40.6: `RuntimeReflectionInstantiationRule`'s own reporting
-    /// half.
+    /// `RuntimeReflectionInstantiationRule`'s own reporting half.
     fn check_runtime_reflection_instantiation(
         &mut self,
         name: &str,
@@ -1307,7 +1291,7 @@ impl<'a> Walker<'a> {
                     if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
                         && let Some(info) = self.registry.classes.get(&fqn)
                     {
-                        // Phase 40.2: real PHPStan's own `ApiInstantiationRule`
+                        // Real PHPStan's own `ApiInstantiationRule`
                         // flags instantiation unconditionally by default - a
                         // class-level `@api` does NOT exempt it at all. The
                         // only exemption: the class's own, non-inherited
@@ -1338,7 +1322,7 @@ impl<'a> Walker<'a> {
                 }
             }
             ExprKind::StaticCall(class_name, method, args) => {
-                // Phase 40 follow-up: resolved unconditionally, NOT
+                // Resolved unconditionally, NOT
                 // pre-filtered through `resolve_if_phpstan` - see
                 // `resolve_class_name`'s own doc comment for why.
                 // `report_static_method_not_covered` does its own
@@ -1371,9 +1355,9 @@ impl<'a> Walker<'a> {
                     );
                 }
             }
-            // Phase 40.C: `phpstanApi.method`/`phpParser.
-            // nodeConnectingAttribute` reporting for a method call moved
-            // to the main `Checker` pass (`checker/expr.rs`'s own
+            // `phpstanApi.method`/`phpParser.
+            // nodeConnectingAttribute` reporting for a method call is
+            // handled by the main `Checker` pass (`checker/expr.rs`'s own
             // `MethodCall` arm, via `Checker::check_phpstan_api_method_
             // call`/`check_node_connecting_attribute`) - general receiver-
             // type inference there now fully subsumes this walker's own
@@ -1390,25 +1374,21 @@ impl<'a> Walker<'a> {
             }
             ExprKind::Instanceof(inner, InstanceofTarget::Name(n, _)) => {
                 self.check_old_php_parser4_class(n, e.span, label);
-                // Phase 40.3: real PHPStan's own `ApiInstanceofRule` - two
+                // Real PHPStan's own `ApiInstanceofRule` - two
                 // genuinely different diagnostics depending on whether the
                 // class is `@api` at all, not one identifier reused for
                 // both. A non-`@api` class is flagged with a kind-specific
                 // identifier and the ordinary "not covered" message; an
-                // `@api` class is *still* flagged (unless it's `PHPStan\
+                // `@api` class is still flagged (unless it's `PHPStan\
                 // Type\Type` itself or an interface) with a different
                 // identifier/message warning that the instanceof
                 // assumption itself might break in a minor version. This
                 // project has no live type-narrowing pass available to
                 // this separate walker, so the "already provably true/
                 // false"/"static type already narrows" suppressions real
-                // PHPStan also applies aren't replicated here - a
-                // disclosed, safe-direction (false-positive-favoring in
-                // real PHPStan's own terms, but false-negative-favoring
-                // from this project's usual convention) narrowing until/
-                // unless this walker folds into the main `Checker` pass.
+                // PHPStan also applies aren't replicated here.
                 if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
-                    // Phase 40.E: independent of `@api` status entirely -
+                    // Independent of `@api` status entirely -
                     // see `check_instanceof_deprecated`'s own doc comment.
                     self.check_instanceof_deprecated(&fqn, e.span, label);
                 }
