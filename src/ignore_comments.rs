@@ -1,33 +1,29 @@
-//! Phase 44: `@phpstan-ignore-line`/`@phpstan-ignore-next-line` inline
-//! suppression - real PHPStan's own two "simple line marker" forms of
-//! `@phpstan-ignore` - plus (Phase 44 follow-up) the fuller bare
-//! `@phpstan-ignore <identifier list>` form, which needs real
+//! `@phpstan-ignore-line`/`@phpstan-ignore-next-line` inline suppression,
+//! two "simple line marker" forms of `@phpstan-ignore`, plus the fuller
+//! bare `@phpstan-ignore <identifier list>` form, which needs real
 //! per-identifier matching against a diagnostic's own `identifier`
 //! (`ignored_identifiers`, below).
 //!
-//! Deliberately a plain text scan over the raw source, one line at a time,
-//! rather than a lexer-level change: this project's own lexer discards
-//! every non-doc comment already (`Lexer::skip_whitespace_and_comments`),
-//! and `FileState` (`project.rs`) doesn't keep the raw source around after
-//! parsing either - both would need real, more invasive plumbing to
-//! recover comment text at diagnostic-filtering time. A one-time text scan
-//! at `load_file`/`update_file` time (while the raw source is still on
-//! hand) avoids all of that, at the cost of the one real imprecision a
-//! lexer-level scan wouldn't have: a string literal that happens to
-//! contain the literal text `@phpstan-ignore-line`/`-next-line` would also
-//! suppress that line, same as it does at the real comment site - no such
-//! case found anywhere in this project's own real Piwigo+vendor
-//! verification corpus, and real PHPStan's own scan is comment-token-based
-//! specifically to avoid this, not because it's otherwise likely.
+//! Deliberately a plain text scan over the raw source, one line at a
+//! time, rather than a lexer-level change: this project's own lexer
+//! discards every non-doc comment already
+//! (`Lexer::skip_whitespace_and_comments`), and `FileState` (`project.rs`)
+//! doesn't keep the raw source around after parsing either - both would
+//! need real, more invasive plumbing to recover comment text at
+//! diagnostic-filtering time. A one-time text scan at
+//! `load_file`/`update_file` time (while the raw source is still on
+//! hand) avoids all of that, at the cost of one imprecision a lexer-level
+//! scan wouldn't have: a string literal that happens to contain the
+//! literal text `@phpstan-ignore-line`/`-next-line` would also suppress
+//! that line.
 
 use std::collections::{HashMap, HashSet};
 
 /// Every real PHP line comment (`//`) is single-line by construction, and
-/// a `/** ... */`/`/* ... */` block comment - which *can* span multiple
+/// a `/** ... */`/`/* ... */` block comment - which can span multiple
 /// physical lines - almost always has its own `@phpstan-ignore-*` marker
-/// on its last, closing line, matching real PHPStan's own actual usage
-/// throughout its own corpus (a marker earlier in a longer, multi-line
-/// doc comment would still need the comment's own *closing* line here,
+/// on its last, closing line (a marker earlier in a longer, multi-line
+/// doc comment would still need the comment's own closing line here,
 /// which this plain per-physical-line scan naturally already gives: the
 /// marker's own line is used directly, not the comment's opening line).
 ///
@@ -53,38 +49,24 @@ pub(crate) fn ignored_lines(source: &str) -> HashSet<u32> {
 /// followed by a parenthesized, freeform, discarded comment), matched
 /// against a diagnostic's own `Diagnostic::identifier` at filtering time
 /// rather than suppressing every diagnostic on the line the way the two
-/// simple markers do. Mirrors real PHPStan's own `RichParser`
-/// (`vendor/phpstan-src/src/Parser/RichParser.php`) trailing-vs-
-/// standalone placement rule *exactly* for the single-physical-line case
-/// it actually reduces to here: a comment trailing real code on its own
-/// line (`$x = foo(); // @phpstan-ignore argument.type`) targets that
-/// same line; a comment standing alone on its own line targets the line
-/// immediately after it - real PHPStan's own rule is in fact *only* ever
-/// "immediately after," with no forward-skip over blank lines/other
-/// comments in between (confirmed directly reading `RichParser::
-/// parseString`'s own pending-token merge: a gap falls back to the
-/// comment's own line, which has nothing on it to ever match a real
-/// diagnostic against - functionally a no-op, not a skip-forward).
+/// simple markers do. Trailing-vs-standalone placement: a comment
+/// trailing real code on its own line (`$x = foo(); // @phpstan-ignore
+/// argument.type`) targets that same line; a comment standing alone on
+/// its own line targets the line immediately after it, with no
+/// forward-skip over blank lines/other comments in between.
 ///
-/// One accepted, documented deviation from real PHPStan, matching this
-/// module's own established "plain per-physical-line text scan, not a
-/// real lexer" tradeoff: a multi-line `/** ... */` doc comment is only
+/// One accepted deviation: a multi-line `/** ... */` doc comment is only
 /// handled correctly when the `@phpstan-ignore` tag itself sits on the
-/// comment's own *closing* line (literally ending in `*/`, or the last
-/// content line immediately before a bare `*/`-only line) - real
-/// PHPStan tracks the comment's own opening/closing token positions
-/// precisely; a tag on an *earlier*, non-closing line of a longer doc
-/// comment isn't recognized as standalone here (this scan has no way to
-/// see the comment's own closing line from an earlier one), the same
-/// "closing line only" simplification `ignored_lines` above already
-/// documents for the two simple markers.
+/// comment's own closing line (literally ending in `*/`, or the last
+/// content line immediately before a bare `*/`-only line) - a tag on an
+/// earlier, non-closing line of a longer doc comment isn't recognized as
+/// standalone here, since this scan has no way to see the comment's own
+/// closing line from an earlier one.
 ///
 /// A malformed identifier list (an empty entry, one containing anything
 /// outside `[a-zA-Z0-9.]`, or an unclosed `(...)` comment) drops that
 /// whole line's suppression silently rather than reporting a parse
-/// error the way real PHPStan does - the same "don't guess, don't
-/// crash" leniency `ignore_errors.rs`'s own malformed-regex handling
-/// already applies to a different, related mechanism.
+/// error.
 pub(crate) fn ignored_identifiers(source: &str) -> HashMap<u32, Vec<String>> {
     let lines: Vec<&str> = source.lines().collect();
     let mut result: HashMap<u32, Vec<String>> = HashMap::new();
@@ -143,9 +125,8 @@ pub(crate) fn ignored_identifiers(source: &str) -> HashMap<u32, Vec<String>> {
 /// Parses a comma-separated `@phpstan-ignore` identifier list (each
 /// entry optionally followed by a parenthesized comment, discarded) -
 /// `None` on any malformed entry, the whole list rejected together
-/// rather than partially trusted. Real PHPStan's own identifier syntax
-/// (`Error::PATTERN_IDENTIFIER`): `[a-zA-Z0-9](?:[a-zA-Z0-9.]*[a-zA-Z0-9])?`
-/// - alphanumeric, dot-separated segments, no leading/trailing dot.
+/// rather than partially trusted. Identifier syntax: alphanumeric,
+/// dot-separated segments, no leading/trailing dot.
 fn parse_identifier_list(text: &str) -> Option<Vec<String>> {
     // Not a plain `text.split(',')` - a parenthesized comment can
     // itself contain a comma (`@phpstan-ignore binaryOp.invalid (known,
