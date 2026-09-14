@@ -1,9 +1,8 @@
-//! Phase 67: checker-side consumption of a project's own configured
+//! Checker-side consumption of a project's own configured
 //! `restricted_symbols` list (`crate::restricted_symbols::Restricted
-//! Symbols`) - sibling of `internal_usage.rs`, reusing the identical
-//! call sites (owner/member/span/label are already resolved there for
-//! the `@internal` checks), one function per event, each opening with a
-//! fast `is_empty()` bail.
+//! Symbols`) - reuses the same call sites as `internal_usage.rs`'s
+//! `@internal` checks, one function per event, each opening with a fast
+//! `is_empty()` bail.
 
 use crate::ast::ClassKind;
 use crate::checker::Checker;
@@ -133,8 +132,7 @@ impl<'a> Checker<'a> {
 
     /// Shared by every native class-name-usage location a `Class`-kind
     /// ban covers (instantiation/`instanceof`/`catch`/`extends`/
-    /// `implements`/param-and-return-type-hints) - mirrors `internal_
-    /// usage.rs`'s own `check_internal_class_name_usage` shape.
+    /// `implements`/param-and-return-type-hints).
     pub(crate) fn check_restricted_class_name_usage(
         &mut self,
         class: &str,
